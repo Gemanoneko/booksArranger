@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 import sqlite3
 import threading
-from metadata import AUDIO, EBOOK, ScanStopped, read_metadata, propose
+import datetime
+from metadata import AUDIO, EBOOK, ScanStopped, read_metadata, propose, future_audio_tags
+import groups
 
 DEFAULT_ROOTS = {'Audiobooks': r'Z:\Audiobooks', 'Podcasts': r'Z:\Audiobooks\Podcasts', 'Ebooks': r'Y:\Books\Books'}
 
@@ -28,6 +30,9 @@ def connect(database):
       CREATE TABLE IF NOT EXISTS files(root TEXT, path TEXT, size INTEGER, modified INTEGER,
         seen INTEGER, kind TEXT, arrival INTEGER, metadata TEXT, error TEXT DEFAULT '', missing INTEGER DEFAULT 0,
         review TEXT DEFAULT '', PRIMARY KEY(root,path));
+      CREATE TABLE IF NOT EXISTS scan_outcomes(root TEXT, generation INTEGER, path TEXT,
+        directory INTEGER, outcome TEXT, error TEXT, time TEXT, details TEXT DEFAULT '',
+        PRIMARY KEY(root,generation,path));
     ''')
     connection.commit()
     return connection
@@ -48,6 +53,7 @@ class Inventory:
         self.reader = reader
         self.stop_event = threading.Event()
         self.worker = None
+        self.group_lock=threading.RLock()
         self.last_error = ''
         with connect(self.database) as connection:
             # A prior process may have died while a task was running.
@@ -60,7 +66,15 @@ class Inventory:
             row = connection.execute('SELECT * FROM jobs WHERE root=?', (root,)).fetchone()
             count = connection.execute('SELECT count(*) FROM files WHERE root=?', (root,)).fetchone()[0]
             pending = connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')", (root,)).fetchone()[0]
-        return dict(row) | {'count': count, 'pending': pending} if row else {'state': 'not scanned', 'count': count, 'pending': 0, 'checked': 0, 'reused': 0, 'errors': 0, 'current': ''}
+            unresolved = connection.execute("SELECT count(*) FROM files WHERE root=? AND error<>''",(root,)).fetchone()[0]
+            issues = connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND generation=? AND directory=1 AND outcome='error' ORDER BY path",(root,row['generation'] if row else 0)).fetchall()
+        extra={'count':count,'pending':pending,'unresolved_errors':unresolved,'scan_issues':[dict(issue) for issue in issues]}
+        return dict(row) | extra if row else {'state': 'not scanned', 'checked': 0, 'reused': 0, 'errors': 0, 'current': ''} | extra
+
+    def _outcome(self, connection, root, generation, path, directory, error='', details=''):
+        connection.execute('INSERT OR REPLACE INTO scan_outcomes VALUES(?,?,?,?,?,?,?,?)',
+            (root,generation,path,int(directory),'error' if error else 'success',error,
+             datetime.datetime.now(datetime.timezone.utc).isoformat(),details))
 
     def launch(self, label, resume=False):
         if self.worker and self.worker.is_alive():
@@ -122,7 +136,9 @@ class Inventory:
                 except (OSError, ValueError, TimeoutError, sqlite3.Error) as error:
                     connection.execute("UPDATE queue SET state='error' WHERE root=? AND generation=? AND path=?", (root,generation,path))
                     connection.execute('UPDATE jobs SET errors=errors+1, current=? WHERE root=?', (f'{path}: {error}', root))
+                    self._outcome(connection,root,generation,path,task['directory'],str(error))
                     if not task['directory']:
+                        connection.execute('UPDATE jobs SET checked=checked+1 WHERE root=?',(root,))
                         # A source changing/disappearing mid-read invalidates its old canonical review.
                         # Keep a visible catalog error even if this is its very first scan.
                         result = connection.execute("UPDATE files SET error=?,review='' WHERE root=? AND path=?", (str(error),root,path))
@@ -156,6 +172,7 @@ class Inventory:
                 if directory or entry.is_file(follow_symlinks=False):
                     connection.execute('INSERT OR IGNORE INTO queue(root,generation,path,directory) VALUES(?,?,?,?)', (root,generation,entry.path,int(directory)))
                     connection.commit()
+        self._outcome(connection,root,generation,path,True)
 
     def _file(self, connection, label, root, generation, path):
         if self.stop_event.is_set():
@@ -166,6 +183,7 @@ class Inventory:
         if unchanged:
             connection.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?', (generation,root,path))
             connection.execute('UPDATE jobs SET checked=checked+1,reused=reused+1 WHERE root=?', (root,))
+            self._outcome(connection,root,generation,path,False)
             return
         kind, arrival = self._classify(label,root,path)
         metadata, error = {}, ''
@@ -178,10 +196,13 @@ class Inventory:
             metadata = {'notes': ['Metadata read failed; source file untouched'], 'title': '', 'author': ''}
         after = os.stat(path)
         if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
-            raise OSError('File changed during read; try a fresh scan after it finishes arriving')
+            raise OSError('File changed during read; try a fresh scan after it finishes arriving; '
+                f'before size={before.st_size}, modified_ns={before.st_mtime_ns}; '
+                f'after size={after.st_size}, modified_ns={after.st_mtime_ns}')
         connection.execute('''INSERT OR REPLACE INTO files(root,path,size,modified,seen,kind,arrival,metadata,error,missing,review)
           VALUES(?,?,?,?,?,?,?,?,?,0,'')''', (root,path,before.st_size,before.st_mtime_ns,generation,kind,int(arrival),json.dumps(metadata,ensure_ascii=False),error))
         connection.execute('UPDATE jobs SET checked=checked+1,errors=errors+? WHERE root=?', (int(bool(error)),root))
+        self._outcome(connection,root,generation,path,False,error)
 
     def _classify(self,label,root,path):
         ext = Path(path).suffix.lower()
@@ -189,12 +210,13 @@ class Inventory:
         arrival = label == 'Ebooks' or (label == 'Audiobooks' and inside(path, os.path.join(root,'Unsorted')))
         return kind, arrival
 
-    def rows(self, label, limit=1000, offset=0, search=''):
+    def rows(self, label, limit=1000, offset=0, search='', status='all', page=False):
         root = self.roots[label]
         with connect(self.database) as connection:
             # Escape wildcard characters: searching a filename means literal substring.
             pattern = '%' + search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-            values = connection.execute("SELECT * FROM files WHERE root=? AND path LIKE ? ESCAPE '\\' ORDER BY path LIMIT ? OFFSET ?", (root,pattern,limit,offset)).fetchall()
+            values = connection.execute("SELECT * FROM files WHERE root=? AND path LIKE ? ESCAPE '\\' ORDER BY path", (root,pattern)).fetchall()
+            failures={item['path']:dict(item) for item in connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND outcome='error' ORDER BY generation",(root,))}
             reviewed = connection.execute("SELECT path,kind,metadata,review FROM files WHERE root=? AND kind='ebook' AND review<>'' AND missing=0", (root,)).fetchall()
             existing = {os.path.normcase(os.path.normpath(item[0])):item[0] for item in connection.execute('SELECT path FROM files WHERE root=? AND missing=0',(root,))}
         destinations = {}
@@ -216,8 +238,19 @@ class Inventory:
                     row['preview'] = {'path':row['preview']['path'],'confidence':'Collision review','reason':'Destination is shared by another catalog file; preserve all editions and resolve before future arranging'}
             if row['missing'] or row['error']:
                 row['preview'] = {'path': '', 'confidence': 'Unavailable' if row['missing'] else 'Read error', 'reason': row['error'] or 'Missing in last complete scan'}
+            row['error_time']=failures.get(row['path'],{}).get('time','')
+            row['saved_snapshot']=bool(row['error'] and row['metadata'].get('method'))
+            if row['kind'] == 'audiobook':
+                row['tag_preview'] = future_audio_tags(row['metadata'],row['review'] if not row['missing'] and not row['error'] else None)
             rows.append(row)
-        return rows
+        filters={'all':lambda row:True,'errors':lambda row:bool(row['error']),
+            'review':lambda row:row['preview']['confidence']=='Needs review',
+            'preview':lambda row:bool(row['preview']['path']) and not row['error'] and not row['missing'],
+            'missing':lambda row:bool(row['missing'])}
+        if status not in filters:raise ValueError('Unknown inventory status')
+        rows=[row for row in rows if filters[status](row)]
+        result=rows[offset:offset+limit]
+        return {'rows':result,'total':len(rows)} if page else result
 
     def save_review(self, root, path, review, size=None, modified=None):
         with connect(self.database) as connection:
@@ -226,3 +259,18 @@ class Inventory:
             result = connection.execute('UPDATE files SET review=? WHERE root=? AND path=?' + clause, arguments)
             if not result.rowcount:
                 raise ValueError('Inventory file changed or is no longer available; reload its evidence before reviewing')
+
+    def candidates(self,label,limit=100,offset=0,search='',status='all'):
+        if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
+        with self.group_lock,connect(self.database) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(self.roots[label],)).fetchone()
+            pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(self.roots[label],)).fetchone()[0]
+            return groups.page(connection,self.roots[label],limit,offset,search,status,
+                bool(current and current['state']=='completed' and not pending and not current['errors']))
+
+    def save_candidate(self,label,identity,revision,review,approve=False):
+        if label!='Audiobooks':raise ValueError('Only audiobooks have book candidates')
+        with self.group_lock,connect(self.database) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            return groups.save(connection,self.roots[label],identity,revision,review,approve)

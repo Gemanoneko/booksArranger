@@ -10,17 +10,17 @@ function make(id=''){
     insertAdjacentElement(_where,child){nodes.set(child.id,child);}};
 }
 function node(id){if(!nodes.has(id))nodes.set(id,make(id));return nodes.get(id);}
-for(const name of ['original_language','title','author','series','number','genre','topic','multi_author'])fields.set(name,{value:'',checked:false,options:[{}],append(value){this.options.push(value);}});
+for(const name of ['original_language','title','author','canonical_author','narrator','series','number','genre','topic','multi_author','anthology'])fields.set(name,{value:'',checked:false,options:[{}],append(value){this.options.push(value);}});
 node('review-form').elements={namedItem:name=>fields.get(name)};
 const clean={path:'C:/fixture/book.mp3',kind:'audiobook',size:10,modified:'2000000000000000001',error:'',missing:0,metadata:{title:'Existing',tags:{}},preview:{reason:'Needs review',path:''},review:null};
 const bad={...clean,path:'C:/fixture/bad.mp3',error:'Source metadata read failed',preview:{reason:'Source metadata read failed',path:'',confidence:'Read error'}};
 const state={version:'0.2.0',root:'C:/fixture',genres:['Horror'],active_library:null,stopping:false,
   status:{state:'completed with errors',count:2,checked:2,reused:1,pending:0,errors:1,current:'Source metadata read failed'}};
-let mode='network',resolveState=null,rejectState=null,calls=0;
+let mode='network',resolveState=null,rejectState=null,calls=0,lastInventoryRoute='',servedRows=[clean,bad];
 const response=(body,ok=true,status=200)=>({ok,status,json:async()=>body});
 const context=vm.createContext({console,clean,bad,document:{
   getElementById:id=>['connection-notice','inventory-intro'].includes(id)?nodes.get(id)||null:node(id),
-  querySelector:()=>({content:'fixture-token'}),createElement:()=>make()},
+  querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:()=>make()},
   setTimeout:()=>0,clearTimeout(){},
   fetch:async route=>{
     calls++;
@@ -33,8 +33,9 @@ const context=vm.createContext({console,clean,bad,document:{
       return response(state);
     }
     if(route.startsWith('/api/inventory')){
+      lastInventoryRoute=route;
       if(mode==='inventory-network')throw new TypeError('Failed to fetch');
-      return response({rows:[clean,bad]});
+      return response({rows:servedRows,total:servedRows.length});
     }
     throw new Error('Unexpected fixture route '+route);
   }});
@@ -53,8 +54,8 @@ const poll=()=>vm.runInContext('poll()',context);
   mode='good';await poll();
   assert.equal(notice.hidden,true);assert.equal(notice.textContent,'');
   assert.equal(node('message').textContent,'Preview metadata saved','recovery must retain action feedback');
-  assert.match(node('status').textContent,/Files cataloged 2.*Files checked 2.*Files reused 1.*Pending tasks 0.*Read errors 1/);
-  assert.equal(node('page').textContent,'Files 1–2 · 100 per page');
+  assert.match(node('status').textContent,/Files cataloged 2.*Files checked this scan 2.*Metadata reused this scan 1.*Pending tasks 0.*Read failures this scan 1.*Files with read errors 1/);
+  assert.equal(node('page').textContent,'Showing 1–2 of 2 files · All files');
   assert.match(node('inventory-intro').textContent,/Each row is a source file/,'new script must support old HTML without the new helper element');
   vm.runInContext('select(bad,true)',context);assert.match(node('notes').textContent,/Source metadata read failed/);
   vm.runInContext('select(clean,true)',context);fields.get('title').value='Unsaved canonical title';node('review-form').handlers.input();
@@ -81,7 +82,15 @@ const poll=()=>vm.runInContext('poll()',context);
   assert.match(node('message').textContent,/Preview metadata saved.*Specific authentication error/s);
   mode='good';await poll();
   assert.match(node('message').textContent,/Specific authentication error/,'healthy transport must not erase real backend feedback');
-  assert.match(node('status').textContent,/Read errors 1/);
+  assert.match(node('status').textContent,/Files with read errors 1/);
+  mode='good';node('search').value='Book query';await node('filter').handlers.change();await flush();
+  assert.match(lastInventoryRoute,/search=Book%20query/);assert.match(lastInventoryRoute,/status=/);
+  fields.get('title').value='Dirty retained draft';node('review-form').handlers.input();
+  servedRows=[];await vm.runInContext('refresh(true)',context);
+  assert.equal(fields.get('title').value,'Dirty retained draft');assert.equal(node('details').hidden,false,'Filtering a selected row out must preserve its details and draft');
+  node('search').value='Should clear';node('filter').value='errors';await node('error-shortcut').handlers.click();await flush();
+  assert.equal(node('search').value,'');assert.match(lastInventoryRoute,/status=errors/);assert.match(lastInventoryRoute,/offset=0/);
+  await node('clear-filters').handlers.click();await flush();assert.match(lastInventoryRoute,/status=all/);
   mode='network';await poll();assert.equal(notice.hidden,false,'later connection failure shows the notice again');
   await node('shutdown').handlers.click();
   assert.equal(notice.hidden,true);assert.match(node('status').textContent,/Server stopping/);

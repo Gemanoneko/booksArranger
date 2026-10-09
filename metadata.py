@@ -65,13 +65,15 @@ def read_metadata(path, kind, stop):
             tags = raw.get('format', {}).get('tags', {})
             lower = {k.lower(): v for k, v in tags.items()}
             result.update(tags=tags, probe=raw, method='embedded audio tags',
+                          artist=lower.get('artist', ''),
+                          album_artist=lower.get('album_artist') or lower.get('albumartist', ''),
                           title=lower.get('album') or lower.get('title', ''),
                           track_title=lower.get('title', ''),
                           author=lower.get('album_artist') or lower.get('artist', ''),
                           series=lower.get('series', ''),
                           number=lower.get('series-part') or lower.get('series_part', ''),
                           genre=lower.get('genre', ''), edition_language=lower.get('language', ''))
-            result['notes'].append('Embedded artist may be narrator; book/author identity unverified')
+            result['notes'].append('Source ARTIST/ALBUMARTIST are unverified role clues; neither author nor reader is inferred')
             if ext in {'.aax', '.aa'}:
                 result['notes'].append('Potentially protected format; no conversion attempted')
         finally:
@@ -130,6 +132,31 @@ def read_metadata(path, kind, stop):
         result['notes'].append('Title unavailable; filename remains an unverified clue')
     return result
 
+def future_audio_tags(metadata, review=None):
+    """Preview roles without changing a source tag or treating source artists as authors."""
+    review = review or {}
+    author = (review.get('canonical_author') or review.get('author') or '').strip()
+    narrator = (review.get('narrator') or '').strip()
+    comments = []
+    comment_fields = []
+    for key,value in metadata.get('tags',{}).items():
+        if key.lower() in {'comment','comments','\xa9cmt'}:
+            values = value if isinstance(value,list) else [value]
+            for item in values:
+                comments.append(str(item))
+                comment_fields.append({'field':key,'value':str(item)})
+    original_comments = '\n'.join(comments)
+    narrator_line = 'Narrator: ' + narrator if narrator else ''
+    output_comments = original_comments
+    appended = bool(narrator_line and narrator_line not in original_comments.splitlines())
+    if appended:
+        output_comments += ('\n' if output_comments else '') + narrator_line
+    return {'ARTIST':author, 'COMMENTS':output_comments, 'existing_comments':original_comments,
+            'comment_fields':comment_fields,'narrator':narrator,'narrator_appended':appended,
+            'artist_from_folder':bool(author and not review.get('canonical_author')),
+            'status':'Reviewed author identity' if author else 'Needs author verification',
+            'note':'Future tag preview only. Source tags and supplemental metadata remain untouched.'}
+
 def propose(path, root, kind, metadata, review=None):
     """A usable path requires human-confirmed canonical identity, never guessed translations."""
     if kind == 'podcast':
@@ -140,14 +167,19 @@ def propose(path, root, kind, metadata, review=None):
     if not review:
         return {'confidence': 'Needs review', 'path': '',
                 'reason': 'Confirm original language, canonical title and surname-first author; embedded language describes this edition'}
-    required = ['title', 'author', 'original_language']
+    anthology = kind == 'audiobook' and review.get('anthology') is True
+    required = ['title', 'original_language'] + ([] if anthology else ['author'])
     if any(not review.get(key) for key in required) or review['original_language'] not in {'Russian', 'Other'}:
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Canonical identity and original language incomplete'}
-    if review['original_language'] == 'Other' and re.search('[А-Яа-яЁё]', review['title'] + review['author']):
+    author_credit = review.get('canonical_author') or review.get('author') or ''
+    if anthology and not author_credit.strip():
+        return {'confidence':'Needs review','path':'','reason':'Confirm author credits for the collection; no author placeholder is invented'}
+    language_names = review['title'] + (author_credit if anthology else review['author'])
+    if review['original_language'] == 'Other' and re.search('[А-Яа-яЁё]', language_names):
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Non-Russian originals need English canonical title and author'}
-    title, author = safe_name(review['title']), safe_name(review['author'])
+    title, author = safe_name(review['title']), safe_name(author_credit if anthology else review['author'])
     series, number = safe_name(review['series']) if review.get('series') else '', review.get('number', '').strip()
-    if review.get('multi_author') and not series:
+    if review.get('multi_author') and not series and not anthology:
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Multi-author series routing requires a confirmed series'}
     pieces = [root]
     if kind == 'ebook':
@@ -170,7 +202,12 @@ def propose(path, root, kind, metadata, review=None):
                 pieces.append(series)
         pieces.extend([title, Path(path).name])
     else:
-        pieces.append(series if review.get('multi_author') else author)
+        if anthology:
+            pieces.append('Сборники')
+            if series:
+                pieces.append(series)
+        else:
+            pieces.append(series if review.get('multi_author') else author)
         if series and not number:
             return {'confidence': 'Needs review', 'path': '', 'reason': 'Confirm series position; do not invent a number'}
         filename = f'{series} - {safe_name(number)} - {title} - {author}.m4b' if series else f'{title} - {author}.m4b'

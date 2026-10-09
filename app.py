@@ -151,6 +151,7 @@ class App:
         self.stop_btn.configure(state='normal' if active and not self.inventory.stop_event.is_set() else 'disabled')
         self.resume_btn.configure(state='normal' if stopped and not active else 'disabled')
         self.root_text.set(f'Source: {self.inventory.roots[label]}')
+        self.table.heading('author',text='Existing author / artist clue' if label=='Audiobooks' else 'Existing author / artist')
         status = 'Stopping…' if active and self.inventory.stop_event.is_set() else state['state']
         self.status.set(f'{status} | Catalog: {state["count"]} files | Checked this scan: {state["checked"]} | Reused: {state["reused"]} | Pending tasks: {state["pending"]} | Read errors: {state["errors"]}')
         self.current.set(state.get('current') or 'Scans only read files. Review edits below are stored in the local catalog.')
@@ -194,11 +195,23 @@ class App:
                  row['preview']['reason'], f'Read method: {metadata.get("method", "unavailable")}',
                  f'Edition language (not original language): {metadata.get("edition_language", "")}',
                  f'Series clue: {metadata.get("series", "")} / position: {metadata.get("number", "")}',
-                 f'Existing genre clue: {metadata.get("genre", "")}', *metadata.get('notes', []),
-                 'Existing tags (read-only snapshot; no source rewriting):',
-                 json.dumps(metadata.get('tags', {}), ensure_ascii=False, indent=2)]
+                 f'Existing genre clue: {metadata.get("genre", "")}', *metadata.get('notes', [])]
         if row['error']:
             lines.append('Error: ' + row['error'])
+        if row['kind']=='audiobook':
+            source_artist = metadata.get('artist') or next((value for key,value in metadata.get('tags',{}).items() if key.lower()=='artist'),'')
+            tag = row['tag_preview']
+            comment_values = tag['comment_fields']
+            comments = '\n'.join(f'{item["field"]}: {item["value"]}' for item in comment_values) if len(comment_values)>1 else tag['existing_comments']
+            if tag['narrator_appended']:
+                comments += ('\n' if comments else '') + 'Narrator: ' + tag['narrator']
+            lines.extend(['Existing Artist (role unverified): ' + str(source_artist or 'Unknown'),
+                          'Future tag preview — source tags unchanged',
+                          'Artist: ' + (tag['ARTIST'] or 'Needs author review'),
+                          'Uses reviewed author folder credit.' if tag['artist_from_folder'] else '',
+                          'Reader / narrator: ' + (tag['narrator'] or 'Not reviewed'),
+                          'Comments: ' + (comments or 'No existing comments')])
+        lines.extend(['Existing tags (read-only snapshot; no source rewriting):',json.dumps(metadata.get('tags',{}),ensure_ascii=False,indent=2)])
         self.show_detail('\n'.join(lines))
 
     def review(self):
@@ -218,16 +231,51 @@ class App:
                   ('title', 'Canonical title', None), ('author', 'Author folder name (Surname Firstname)', None),
                   ('series', 'Series / cycle (blank for standalone)', None), ('number', 'Number in series', None),
                   ('genre', 'Ebook main genre', GENRES), ('topic', 'Nonfiction topic', None)]
-        for index, (name, label, choices) in enumerate(fields, 1):
-            ttk.Label(panel, text=label).grid(row=index, column=0, sticky='w', padx=4, pady=4)
+        if row['kind']=='audiobook':
+            fields[3:3]=[('canonical_author','Author for Artist tag',None),('narrator','Reader / narrator (for comments)',None)]
+        widgets = {}
+        row_index = 1
+        author_help = tk.StringVar(value='')
+        audio_help = {'canonical_author':'Enter the verified author credit, such as Stephen King. Do not enter the reader here.',
+                      'narrator':'Preserve the verified reader in comments alongside existing comments.'}
+        for name, label, choices in fields:
+            ttk.Label(panel, text=label).grid(row=row_index, column=0, sticky='w', padx=4, pady=4)
             variables[name] = tk.StringVar(value=existing.get(name, 'Unknown' if name == 'original_language' else ''))
             widget = ttk.Combobox(panel, textvariable=variables[name], values=choices, state='readonly', width=42) if choices else ttk.Entry(panel, textvariable=variables[name], width=45)
-            widget.grid(row=index, column=1, sticky='ew', padx=4, pady=4)
+            widget.grid(row=row_index, column=1, sticky='ew', padx=4, pady=4)
+            widgets[name]=widget
+            row_index+=1
+            if name=='author':
+                ttk.Label(panel,textvariable=author_help,wraplength=580).grid(row=row_index,column=0,columnspan=2,sticky='w')
+                row_index+=1
+            if name in audio_help:
+                ttk.Label(panel,text=audio_help[name],wraplength=580).grid(row=row_index,column=0,columnspan=2,sticky='w')
+                row_index+=1
         multi = tk.BooleanVar(value=existing.get('multi_author', False))
-        ttk.Checkbutton(panel, text='Series has multiple authors: place its series folder at the library root', variable=multi).grid(row=8, column=0, columnspan=2, sticky='w', pady=8)
+        anthology = tk.BooleanVar(value=existing.get('anthology',False))
+        series_help = tk.StringVar(value='')
+        def routing_controls():
+            enabled = row['kind']=='audiobook' and anthology.get()
+            widgets['author'].configure(state='disabled' if enabled else 'normal')
+            multi_control.configure(state='disabled' if enabled else 'normal')
+            author_help.set('Anthologies use the Сборники folder.' if enabled else '')
+            series_help.set('Anthology series stay inside Сборники.' if enabled else '')
+        if row['kind']=='audiobook':
+            ttk.Checkbutton(panel,text='Short-story collection by multiple authors',variable=anthology,command=routing_controls).grid(row=row_index,column=0,columnspan=2,sticky='w',pady=6)
+            row_index+=1
+            ttk.Label(panel,text='Place this audiobook in Сборники, or Сборники/Series when a series is entered.',wraplength=580).grid(row=row_index,column=0,columnspan=2,sticky='w')
+            row_index+=1
+        multi_control=ttk.Checkbutton(panel,text='Series has multiple authors: place its series folder at the library root',variable=multi)
+        multi_control.grid(row=row_index,column=0,columnspan=2,sticky='w',pady=8)
+        row_index+=1
+        ttk.Label(panel,textvariable=series_help,wraplength=580).grid(row=row_index,column=0,columnspan=2,sticky='w')
+        row_index+=1
+        routing_controls()
         def save():
             values = {key: variable.get().strip() for key, variable in variables.items()}
             values['multi_author'] = multi.get()
+            if row['kind']=='audiobook':
+                values['anthology'] = anthology.get()
             try:
                 self.inventory.save_review(row['root'], row['path'], values, row['size'], row['modified'])
             except Exception as error:
@@ -237,7 +285,7 @@ class App:
             self.refresh()
             self.selected()
             dialog.destroy()
-        ttk.Button(panel, text='Save preview metadata', command=save).grid(row=9, column=1, sticky='e', pady=8)
+        ttk.Button(panel, text='Save preview metadata', command=save).grid(row=row_index, column=1, sticky='e', pady=8)
 
     def close(self):
         self.closing = True

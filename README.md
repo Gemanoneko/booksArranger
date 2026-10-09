@@ -1,5 +1,9 @@
 # Books Arranger — inventory prototype
 
+The browser's Audiobooks view now offers **Files** and **Book candidates**. Candidates retain every audio member, related companions, source clues and proposed order; folder/Artist tags never establish an approved book identity. Save draft metadata before **Approve candidate metadata**. Metadata approval leaves membership, recording completeness and order unverified and does not merge audio. Changes to source evidence or reviewed values invalidate approval through durable candidate revisions.
+
+Status filters apply to the entire selected library before pagination. **Read errors** shows unique unresolved source errors; the shortcut clears the query so every error is reachable. Scan status separately reports checked file outcomes, metadata reused, read failures in this scan and currently unresolved files. Directory failures appear under **Scan issues**. A new discovery pass lists folders/stats files, reuses unchanged healthy metadata and reads only new, changed or previously unreadable files; Resume continues pending work.
+
 Double-click `launch.cmd`, or run `python app.py` in this folder. Requires Python 3.10+ with Tkinter. Optional `ffprobe` on PATH reads audio tags; it is already available on the development machine. No package installation is required.
 
 For the browser interface, double-click `launch-web.cmd` or run `python web_server.py`, then open **http://127.0.0.1:5210/** in the app's browser panel. The server runs locally on Windows and uses the same catalog and scanner as Tkinter. It only binds loopback and fails if assigned port 5210 is occupied; it never switches to another port. Run one interface at a time because they share an exclusive catalog lock. The visible version comes from `VERSION`.
@@ -28,4 +32,10 @@ The web equivalent uses `python web_server.py --roots-json scratch/roots.json --
 
 With Node.js available, `node tests/test_browser.js` exercises the actual frontend's unsaved-edit/source-refresh/stale-save flow without opening a window. Node is only used for that check; the application itself requires Python.
 
+Audiobook reviews have an explicit **Short-story collection by multiple authors** checkbox. Only confirmed collections use `Z:\Audiobooks\Сборники`, with a series folder inside it when present (for example `Сборники\Пять Вечеров`). The ordinary author folder and root-level multi-author series controls retain their values while temporarily disabled for an anthology. Ebooks, podcasts, single-author collections and multi-author novel series retain their existing routing. Unknown identities/classifications require review; the scanner never guesses an anthology from its tags.
+
+**Author for Artist tag** stores a verified author credit separately from the surname-first folder name. **Reader / narrator (for comments)** stores the verified reader separately. Embedded Artist/AlbumArtist remain unverified role clues and never automatically populate these fields. The future tag preview credits Artist to the saved author; older reviewed author-folder identity is an explicitly labelled fallback. It preserves the original comment values and appends the reviewed narrator once. Raw tags and source files remain untouched. These optional review JSON fields default to false/empty for older catalog records; no database migration or rescan is required.
+
+
 `node tests/test_connection.js` exercises the actual polling script through transport failure/recovery, stale-library and incomplete refresh responses, preserving review/read-error feedback and old-HTML compatibility. It also verifies explicit file/task units and intentional shutdown behavior.
+

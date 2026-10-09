@@ -16,42 +16,58 @@
       <div class="toolbar">
         <label for="library">Library</label>
         <select id="library"><option>Audiobooks</option><option>Podcasts</option><option>Ebooks</option></select>
-        <button id="start">Start scanning</button><button id="stop" disabled>Stop scanning</button><button id="resume" disabled>Resume scanning</button>
+        <button id="start" title="Check for new or changed files and retry unreadable files. Reuse saved metadata for unchanged readable files.">Start scanning</button><button id="stop" disabled>Stop scanning</button><button id="resume" title="Continue saved pending work without starting a new discovery pass." disabled>Resume scanning</button>
         <button id="shutdown" class="quiet">Stop server</button>
       </div>
+      <p>Scanning checks folders for arrivals. Unchanged readable files reuse saved metadata; new, changed and unreadable files are read.</p>
       <p id="root" class="path"></p>
       <p id="status" aria-live="polite">Connecting to the local catalog…</p>
       <p id="current" class="path"></p>
       <p id="message" role="status"></p>
       <p id="connection-notice" role="status" aria-live="polite" hidden></p>
+      <details id="scan-issues" hidden><summary>Scan issues</summary><pre id="scan-issues-text"></pre></details>
     </section>
     <section class="panel" aria-label="File inventory">
       <p id="inventory-intro">Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.</p>
       <form id="search-form" class="toolbar">
-        <label for="search">Path contains</label><input id="search" type="search" maxlength="500" placeholder="Author, folder or filename">
-        <button type="submit">Search</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><span id="page"></span>
+        <label id="view-label" for="view">View</label><select id="view" title="Show source files or possible audiobook groups."><option value="files">Files</option><option value="candidates">Book candidates</option></select>
+        <label id="search-label" for="search">Path contains</label><input id="search" type="search" maxlength="500" placeholder="Author, folder or filename">
+        <label for="filter">Status</label><select id="filter" title="Filter the saved results in this library."></select>
+        <button type="submit">Search</button><button id="clear-filters" type="button" class="quiet" title="Show all saved results and return to the first page.">Clear filters</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><button id="error-shortcut" type="button" class="quiet" title="Show all files with unresolved read errors in this library." hidden></button><span id="page" role="status" aria-live="polite"></span>
       </form>
-      <div class="table-scroll"><table><thead><tr><th>Type</th><th>Arrival</th><th>Existing title / filename clue</th><th>Existing author / artist</th><th>Preview status</th><th>Proposed destination</th></tr></thead><tbody id="inventory"></tbody></table></div>
+      <div class="table-scroll"><table><thead id="inventory-head"><tr><th>Type</th><th>Arrival</th><th>Existing title / filename clue</th><th id="author-heading">Existing author / artist clue</th><th>Preview status</th><th>Proposed destination</th></tr></thead><tbody id="inventory"></tbody></table></div>
       <p id="empty">Select a library and start scanning. Saved results remain available after restart.</p>
     </section>
     <section id="details" class="panel" hidden aria-label="Selected file details">
-      <h2>Selected file</h2><p id="source" class="path"></p><p id="reason"></p><p id="proposed" class="path"></p>
+      <h2 id="details-heading">Selected file</h2><p id="source" class="path"></p><p id="reason"></p><p id="proposed" class="path"></p>
+      <section id="read-error" hidden><h2>Read error</h2><p id="read-error-path" class="path"></p><p id="read-error-time"></p><p id="read-error-message"></p><p id="read-error-action"></p></section>
+      <section id="candidate-details" hidden><p id="candidate-evidence"></p><p id="candidate-coverage"></p><p id="candidate-facts"></p><h2 id="member-count"></h2><div class="table-scroll"><table><thead><tr><th>Proposed order</th><th>Track title / filename</th><th>Source disc / track number</th><th>Duration</th><th>Order evidence</th></tr></thead><tbody id="candidate-members"></tbody></table></div><details><summary id="companion-count" title="Inspect covers, transcripts and other companions. These files are not merged as audio."></summary><div id="candidate-companions" class="path"></div></details></section>
       <dl><dt>Read method</dt><dd id="method"></dd><dt>Edition language</dt><dd id="language"></dd><dt>Series / position clues</dt><dd id="series-clue"></dd><dt>Genre clue</dt><dd id="genre-clue"></dd></dl>
       <p>Edition language and embedded artist do not establish the work's original language or its author.</p>
-      <p id="notes"></p><details><summary>Existing tag snapshot</summary><pre id="tags"></pre></details>
+      <p id="notes"></p><details><summary id="tags-heading">Existing tag snapshot</summary><pre id="tags"></pre></details>
+      <section id="audio-preview" hidden>
+        <dl><dt>Existing Artist (role unverified)</dt><dd id="source-artist"></dd></dl>
+        <h2>Future tag preview — source tags unchanged</h2>
+        <dl><dt>Artist</dt><dd><span id="future-artist"></span><span id="artist-fallback" hidden> Uses reviewed author folder credit.</span></dd><dt>Reader / narrator</dt><dd id="future-narrator"></dd><dt>Comments</dt><dd><pre id="future-comments"></pre></dd></dl>
+      </section>
       <form id="review-form" hidden>
         <h2>Review canonical metadata</h2><p>Enter verified identities. No translated title, author or genre is invented automatically.</p>
         <div class="review-grid">
           <label>Original work language<select name="original_language"><option>Unknown</option><option>Russian</option><option>Other</option></select></label>
           <label>Canonical title<input name="title" maxlength="1000"></label>
-          <label>Author folder name (Surname Firstname)<input name="author" maxlength="1000"></label>
+          <label>Author folder name (Surname Firstname)<input name="author" maxlength="1000" aria-describedby="author-folder-help"><small id="author-folder-help" class="field-help" hidden>Anthologies use the Сборники folder.</small></label>
+          <label class="audio-only">Author for Artist tag<input name="canonical_author" maxlength="1000" title="Enter the verified author credit, such as Stephen King. Do not enter the reader here." aria-describedby="canonical-author-help"><small id="canonical-author-help" class="field-help">Enter the verified author credit, such as Stephen King. Do not enter the reader here.</small></label>
+          <label class="audio-only">Reader / narrator (for comments)<input name="narrator" maxlength="1000" title="Preserve the verified reader in comments alongside existing comments." aria-describedby="narrator-help"><small id="narrator-help" class="field-help">Preserve the verified reader in comments alongside existing comments.</small></label>
           <label>Series / cycle (blank for standalone)<input name="series" maxlength="1000"></label>
           <label>Number in series<input name="number" maxlength="1000"></label>
           <label>Ebook main genre<select name="genre"><option value="">Choose if this is an ebook</option></select></label>
           <label>Nonfiction topic<input name="topic" maxlength="1000" placeholder="Only when verified"></label>
         </div>
-        <label class="check"><input name="multi_author" type="checkbox">Multi-author series: place its series folder at the library root</label>
+        <div class="audio-only"><label class="check"><input name="anthology" type="checkbox" title="Place this audiobook in Сборники, or Сборники/Series when a series is entered." aria-describedby="anthology-help">Short-story collection by multiple authors</label><p id="anthology-help" class="field-help">Place this audiobook in Сборники, or Сборники/Series when a series is entered.</p></div>
+        <label class="check"><input name="multi_author" type="checkbox" aria-describedby="multi-author-help">Multi-author series: place its series folder at the library root</label>
+        <p id="multi-author-help" class="field-help" hidden>Anthology series stay inside Сборники.</p>
         <button type="submit">Save preview metadata</button><span id="review-note"></span>
+        <section id="candidate-approval" hidden><button id="approve-candidate" type="button" title="Confirm this candidate's reviewed title, author, language and series metadata. Source files stay unchanged." disabled>Approve candidate metadata</button><p id="approval-reason"></p><p>Metadata approval does not merge files. Merging is not available in this milestone.</p></section>
       </form>
     </section>
     <footer>Stop saves pending work. Resume continues after reopening. A slow network read may need to finish before stopping. Closing this tab leaves the local server running; Stop server ends it safely.</footer>

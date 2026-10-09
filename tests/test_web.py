@@ -10,7 +10,7 @@ import urllib.request
 
 from app import catalog_lock
 from metadata import ScanStopped
-from scanner import Inventory
+from scanner import Inventory, connect
 from web_server import BrowserServer
 
 SCRATCH = Path(__file__).resolve().parents[1] / 'scratch' / 'web-2026-10-09' / 'tests'
@@ -67,6 +67,31 @@ class BrowserTests(unittest.TestCase):
     def wait_scan(self):
         self.inventory.worker.join(5)
         self.assertFalse(self.inventory.worker.is_alive())
+
+    def test_filtered_inventory_and_candidate_review_revision_contract(self):
+        root=self.roots['Audiobooks']
+        with connect(self.database) as connection:
+            for i in range(105):
+                path=str(Path(root)/'Book'/f'{i:03}.mp3')
+                connection.execute('INSERT INTO files(root,path,size,modified,kind,metadata,error) VALUES(?,?,?,?,?,?,?)',
+                    (root,path,10,1700000000000000101,'audiobook',json.dumps({'title':'Book','author':'Reader','tags':{'album':'Book','track':str(i)}}),'unreadable' if i>=100 else ''))
+        code,page=self.json_call('/api/inventory?library=Audiobooks&status=errors')
+        self.assertEqual(code,200);self.assertEqual(page['total'],5)
+        self.assertEqual(len(page['rows']),5)
+        self.assertEqual(page['rows'][0]['modified'],'1700000000000000101')
+        code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates')
+        self.assertEqual(code,200);self.assertEqual(page['total'],1)
+        row=page['rows'][0]
+        review={'title':'Book','author':'Writer Jane','canonical_author':'Jane Writer','narrator':'Reader',
+            'original_language':'Other','series':'','number':'','genre':'','topic':'','multi_author':False,'anthology':False}
+        payload={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'review':review,'approve':False}
+        code,saved=self.json_call('/api/candidate/review',payload)
+        self.assertEqual(code,200);self.assertGreater(saved['row']['revision'],row['revision'])
+        self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400)
+        payload['revision']=saved['row']['revision'];payload['approve']=True
+        self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400,'Unreadable members block approval')
+        self.assertEqual(self.json_call('/api/inventory?library=Ebooks&view=candidates')[0],400)
+        self.assertEqual(self.json_call('/api/inventory?library=Audiobooks&status=invented')[0],400)
 
     def test_health_page_identity_and_source_files_not_served(self):
         code,data=self.json_call('/api/health',authorized=False)
@@ -156,6 +181,29 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.call('/api/shutdown',{})[0],200)
         self.thread.join(5)
         self.assertFalse(self.thread.is_alive())
+
+    def test_anthology_author_roles_are_durable_and_audiobook_only(self):
+        source=Path(self.roots['Audiobooks'])/'collection.mp3';source.write_bytes(b'fixture')
+        self.inventory.reader=lambda *args:{'title':'Source title','author':'Reader Name','artist':'Reader Name','tags':{'artist':'Reader Name','comment':'Original comment'}}
+        self.assertEqual(self.call('/api/scan/start',{'library':'Audiobooks'})[0],200)
+        self.wait_scan()
+        row=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        self.assertEqual(row['tag_preview']['ARTIST'],'')
+        review={'original_language':'Other','title':'Stories','author':'','series':'','number':'','genre':'','topic':'',
+                'multi_author':True,'anthology':True,'canonical_author':'Verified Authors','narrator':'Reader Name'}
+        body={'library':'Audiobooks','path':row['path'],'size':row['size'],'modified':row['modified'],'review':review}
+        self.assertEqual(self.call('/api/review',body)[0],200)
+        saved=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        self.assertIn('Сборники',saved['preview']['path'])
+        self.assertEqual(saved['tag_preview']['ARTIST'],'Verified Authors')
+        self.assertEqual(saved['tag_preview']['COMMENTS'],'Original comment\nNarrator: Reader Name')
+        self.assertTrue(saved['review']['anthology'])
+        self.assertEqual(self.call('/api/review',body|{'review':review|{'anthology':'true'}})[0],400)
+        ebook=Path(self.roots['Ebooks'])/'book.epub';ebook.write_bytes(b'fixture')
+        self.assertEqual(self.call('/api/scan/start',{'library':'Ebooks'})[0],200)
+        self.wait_scan()
+        item=self.json_call('/api/inventory?library=Ebooks')[1]['rows'][0]
+        self.assertEqual(self.call('/api/review',body|{'library':'Ebooks','path':item['path'],'size':item['size'],'modified':item['modified']})[0],400)
 
 if __name__=='__main__':
     unittest.main()

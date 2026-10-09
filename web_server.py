@@ -137,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path in {'/api/state','/api/inventory'}:
                 if not self.trusted(token=True):
                     return
-                allowed = {'library'} if path == '/api/state' else {'library','offset','search'}
+                allowed = {'library'} if path == '/api/state' else {'library','offset','search','status','view'}
                 if set(query)-allowed:
                     raise ValueError('Unknown query parameters')
                 library = self.library(query.get('library'))
@@ -150,13 +150,21 @@ class Handler(BaseHTTPRequestHandler):
                     search = query.get('search','')
                     if len(search)>500:
                         raise ValueError('Search is too long')
-                    rows = self.server.inventory.rows(library,100,int(offset),search)
+                    selected_status=query.get('status','all')
+                    view=query.get('view','files')
+                    if view not in {'files','candidates'}:raise ValueError('Unknown inventory view')
+                    if view=='candidates':
+                        result=self.server.inventory.candidates(library,100,int(offset),search,selected_status)
+                        self.response(200,result | {'offset':int(offset),'page_size':100})
+                        return
+                    result = self.server.inventory.rows(library,100,int(offset),search,selected_status,page=True)
+                    rows=result['rows']
                     # Probe internals are catalog evidence, not needed for rendering the browser table.
                     for row in rows:
                         row['metadata'].pop('probe',None)
                         # Nanosecond timestamps exceed JavaScript's exact integer range.
                         row['modified'] = str(row['modified'])
-                    self.response(200,{'rows':rows,'offset':int(offset),'page_size':100})
+                    self.response(200,result | {'offset':int(offset),'page_size':100})
             else:
                 self.fail(404,'No such Books Arranger route')
         except (ValueError,TypeError) as error:
@@ -205,6 +213,15 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,self.server.state(library))
                 elif path == '/api/review':
                     self.save_review(data)
+                elif path == '/api/candidate/review':
+                    if set(data)!={'library','id','revision','review','approve'}:
+                        raise ValueError('Candidate review requires its identity and observed revision')
+                    library=self.library(data['library'])
+                    if not isinstance(data['id'],str) or len(data['id'])!=36 or type(data['revision']) is not int or data['revision']<1 or type(data['approve']) is not bool:
+                        raise ValueError('Invalid candidate identity/revision/approval')
+                    review=self.review_data(data['review'])
+                    row=self.server.inventory.save_candidate(library,data['id'],data['revision'],review,data['approve'])
+                    self.response(200,{'saved':True,'row':row})
                 elif path == '/api/shutdown':
                     if data:
                         raise ValueError('Shutdown takes an empty JSON object')
@@ -227,21 +244,28 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('Invalid catalog path')
         if type(data['size']) is not int or data['size']<0 or not isinstance(data['modified'],str) or not data['modified'].isascii() or not data['modified'].isdigit() or len(data['modified'])>19 or int(data['modified'])>9223372036854775807:
             raise ValueError('Invalid source fingerprint')
-        review = data['review']
-        names = {'title','author','original_language','series','number','genre','topic','multi_author'}
-        if not isinstance(review,dict) or set(review)!=names:
-            raise ValueError('Review fields are incomplete or unknown')
-        if any(not isinstance(review[key],str) or len(review[key])>1000 for key in names-{'multi_author'}):
-            raise ValueError('Review text must be bounded strings')
-        if type(review['multi_author']) is not bool or review['original_language'] not in {'Unknown','Russian','Other'} or review['genre'] not in {'',*GENRES}:
-            raise ValueError('Invalid original language, genre or series flag')
+        review = self.review_data(data['review'])
         root = self.server.inventory.roots[library]
         with connect(self.server.inventory.database) as connection:
-            row = connection.execute('SELECT kind,error,missing FROM files WHERE root=? AND path=?',(root,data['path'])).fetchone()
-        if not row or row['kind'] not in {'audiobook','ebook'} or row['error'] or row['missing']:
+            source=connection.execute('SELECT * FROM files WHERE root=? AND path=?',(root,data['path'])).fetchone()
+        if source is None or source['kind'] not in {'audiobook','ebook'} or source['error'] or source['missing']:
             raise ValueError('Only available audiobook/ebook catalog rows can be reviewed')
+        if source['kind']!='audiobook' and (review['anthology'] or review['canonical_author'] or review['narrator']):
+            raise ValueError('Audiobook role and anthology fields do not apply to ebooks')
         self.server.inventory.save_review(root,data['path'],review,data['size'],int(data['modified']))
         self.response(200,{'saved':True,'source_changed':False})
+
+    def review_data(self,review):
+        names = {'title','author','original_language','series','number','genre','topic','multi_author'}
+        additions = {'anthology','canonical_author','narrator'}
+        if not isinstance(review,dict) or not names.issubset(review) or set(review)-names-additions:
+            raise ValueError('Review fields are incomplete or unknown')
+        review = {'anthology':False,'canonical_author':'','narrator':''} | review
+        if any(not isinstance(review[key],str) or len(review[key])>1000 for key in (names-{'multi_author'}) | {'canonical_author','narrator'}):
+            raise ValueError('Review text must be bounded strings')
+        if type(review['multi_author']) is not bool or type(review['anthology']) is not bool or review['original_language'] not in {'Unknown','Russian','Other'} or review['genre'] not in {'',*GENRES}:
+            raise ValueError('Invalid original language, genre or series flag')
+        return review
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
