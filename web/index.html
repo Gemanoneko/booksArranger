@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="books-token" content="{{REQUEST_TOKEN}}">
+  <title>Books Arranger</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div><h1>Books Arranger</h1><p>Inventory and sorting previews for your local libraries.</p></div><span id="version" class="badge">Local prototype</span></header>
+    <p class="notice">Read-only library access. Scans and review edits update the local catalog; your books, episodes and source tags stay untouched.</p>
+    <section aria-label="Library scan controls" class="panel">
+      <div class="toolbar">
+        <label for="library">Library</label>
+        <select id="library"><option>Audiobooks</option><option>Podcasts</option><option>Ebooks</option></select>
+        <button id="start">Start scanning</button><button id="stop" disabled>Stop scanning</button><button id="resume" disabled>Resume scanning</button>
+        <button id="shutdown" class="quiet">Stop server</button>
+      </div>
+      <p id="root" class="path"></p>
+      <p id="status" aria-live="polite">Connecting to the local catalog…</p>
+      <p id="current" class="path"></p>
+      <p id="message" role="status"></p>
+    </section>
+    <section class="panel" aria-label="Library inventory">
+      <form id="search-form" class="toolbar">
+        <label for="search">Path contains</label><input id="search" type="search" maxlength="500" placeholder="Author, folder or filename">
+        <button type="submit">Search</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><span id="page"></span>
+      </form>
+      <div class="table-scroll"><table><thead><tr><th>Type</th><th>Arrival</th><th>Existing title / filename clue</th><th>Existing author / artist</th><th>Preview status</th><th>Proposed destination</th></tr></thead><tbody id="inventory"></tbody></table></div>
+      <p id="empty">Select a library and start scanning. Saved results remain available after restart.</p>
+    </section>
+    <section id="details" class="panel" hidden aria-label="Selected file details">
+      <h2>Selected file</h2><p id="source" class="path"></p><p id="reason"></p><p id="proposed" class="path"></p>
+      <dl><dt>Read method</dt><dd id="method"></dd><dt>Edition language</dt><dd id="language"></dd><dt>Series / position clues</dt><dd id="series-clue"></dd><dt>Genre clue</dt><dd id="genre-clue"></dd></dl>
+      <p>Edition language and embedded artist do not establish the work's original language or its author.</p>
+      <p id="notes"></p><details><summary>Existing tag snapshot</summary><pre id="tags"></pre></details>
+      <form id="review-form" hidden>
+        <h2>Review canonical metadata</h2><p>Enter verified identities. No translated title, author or genre is invented automatically.</p>
+        <div class="review-grid">
+          <label>Original work language<select name="original_language"><option>Unknown</option><option>Russian</option><option>Other</option></select></label>
+          <label>Canonical title<input name="title" maxlength="1000"></label>
+          <label>Author folder name (Surname Firstname)<input name="author" maxlength="1000"></label>
+          <label>Series / cycle (blank for standalone)<input name="series" maxlength="1000"></label>
+          <label>Number in series<input name="number" maxlength="1000"></label>
+          <label>Ebook main genre<select name="genre"><option value="">Choose if this is an ebook</option></select></label>
+          <label>Nonfiction topic<input name="topic" maxlength="1000" placeholder="Only when verified"></label>
+        </div>
+        <label class="check"><input name="multi_author" type="checkbox">Multi-author series: place its series folder at the library root</label>
+        <button type="submit">Save preview metadata</button><span id="review-note"></span>
+      </form>
+    </section>
+    <footer>Stop saves pending work. Resume continues after reopening. A slow network read may need to finish before stopping. Closing this tab leaves the local server running; Stop server ends it safely.</footer>
+  </main>
+</body>
+</html>

@@ -20,7 +20,7 @@ Books Arranger helps Sergei inventory and arrange his audiobook, podcast and tex
 
 ## Stack and commands
 
-Python standard library: Tkinter desktop UI, SQLite catalog/checkpoint queue, pathlib/os traversal, bounded EPUB/FB2 metadata reads. Optional existing FFmpeg `ffprobe` reads embedded audio metadata. No dependencies need installing. GUI launch: `python app.py` or `launch.cmd`; checks: `python -m unittest discover -s tests -v`. No build/release installer exists for this prototype. Sully owns commits, versions and pushes.
+Python standard library: Tkinter desktop UI plus local HTTP/browser interface, SQLite catalog/checkpoint queue, pathlib/os traversal, bounded EPUB/FB2 metadata reads. Optional existing FFmpeg `ffprobe` reads embedded audio metadata. No dependencies need installing. GUI launch: `python app.py` or `launch.cmd`; browser launch: `python web_server.py` or `launch-web.cmd`, URL `http://127.0.0.1:5210/`; checks: `python -m unittest discover -s tests -v` and optionally `node tests/test_browser.js` for the frontend edit/source-refresh regression. Node is not a runtime dependency. No build/release installer exists for this prototype. Sully owns commits, versions and pushes.
 
 ## Decision log
 
@@ -31,8 +31,11 @@ Python standard library: Tkinter desktop UI, SQLite catalog/checkpoint queue, pa
 | Size + nanosecond mtime reuse | Avoid rereading every large audiobook during inventory | Conversion requires cryptographic source/output integrity checks |
 | Human-confirmed canonical preview | Original language, translations, author roles and series cannot safely be guessed from filenames or current tags | Reliable external source matching is added |
 | No library writes in milestone 1 | First establish inventory, stop/resume and a reviewable arrangement | Verified pilot conversion/move milestone is authorized |
-| No dev port | Tkinter has no server | A browser UI is chosen later |
+| Browser extension keeps the existing engine/Tk UI | User requested the same local in-app-browser experience as their separate Comics Organizer | UX polish or packaged startup is requested |
+| Strict loopback port 5210 | Unique studio assignment; no silent fallback or public bind | An explicit port reassignment is approved |
+| Per-process request token plus Host/Origin/Fetch-Site validation | Prevent unrelated pages from reading library inventory or invoking controls | Authentication requirements change |
+| Exclusive catalog owner for either interface | Avoid one process resetting another's live scan queue | Multi-client/process coordination is deliberately designed |
 
 ## Validation and limitations
 
-Fixture tests must cover restart continuation, changed/new/deleted records, no false missing files on an incomplete/offline scan, podcast exclusion, arrival detection, source bytes unchanged and confirmed routing. Windows GUI is not auto-launched during implementation. Audio metadata errors and unsupported formats require review; PDF/MOBI/AZW/DJVU metadata extraction is deferred. Existing tags are snapshots, not complete private-tag preservation promises for future processing. No hashes are used for reuse yet. Source libraries remain read-only.
+Fixture tests cover restart continuation, changed/new/deleted records, no false missing files on an incomplete/offline scan, podcast exclusion, arrival detection, source bytes unchanged and confirmed routing. Browser checks additionally cover narrow HTTP routes, cross-site rejection, payload validation, exact nanosecond fingerprints, exclusive ownership and shutdown. Windows native GUI is not auto-launched during implementation. Audio metadata errors and unsupported formats require review; PDF/MOBI/AZW/DJVU metadata extraction is deferred. Existing tags are snapshots, not complete private-tag preservation promises for future processing. No hashes are used for reuse yet. Source libraries remain read-only. The browser is a local frontend in Codex's browser panel, not a remote ChatGPT app with independent access to Windows drives.
