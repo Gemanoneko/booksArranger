@@ -10,6 +10,17 @@ import groups
 
 DEFAULT_ROOTS = {'Audiobooks': r'Z:\Audiobooks', 'Podcasts': r'Z:\Audiobooks\Podcasts', 'Ebooks': r'Y:\Books\Books'}
 
+def fresh_stat(path):
+    """Fingerprint the opened source, without reading or modifying its contents."""
+    with open(path, 'rb') as source:
+        return os.fstat(source.fileno())
+
+def _same_source(before, after):
+    if (before.st_size, before.st_mtime_ns, before.st_dev, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_dev, after.st_ino):
+        raise OSError('File changed during read; try a fresh scan after it finishes arriving; '
+            f'before size={before.st_size}, modified_ns={before.st_mtime_ns}, identity={before.st_dev}:{before.st_ino}; '
+            f'after size={after.st_size}, modified_ns={after.st_mtime_ns}, identity={after.st_dev}:{after.st_ino}')
+
 class ClosingConnection(sqlite3.Connection):
     def __exit__(self, *args):
         try:
@@ -177,10 +188,11 @@ class Inventory:
     def _file(self, connection, label, root, generation, path):
         if self.stop_event.is_set():
             raise ScanStopped()
-        before = os.stat(path)
+        before = fresh_stat(path)
         old = connection.execute('SELECT * FROM files WHERE root=? AND path=?', (root,path)).fetchone()
         unchanged = old and old['size'] == before.st_size and old['modified'] == before.st_mtime_ns and not old['error']
         if unchanged:
+            _same_source(before, fresh_stat(path))
             connection.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?', (generation,root,path))
             connection.execute('UPDATE jobs SET checked=checked+1,reused=reused+1 WHERE root=?', (root,))
             self._outcome(connection,root,generation,path,False)
@@ -194,11 +206,8 @@ class Inventory:
         except Exception as issue:
             error = str(issue)
             metadata = {'notes': ['Metadata read failed; source file untouched'], 'title': '', 'author': ''}
-        after = os.stat(path)
-        if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
-            raise OSError('File changed during read; try a fresh scan after it finishes arriving; '
-                f'before size={before.st_size}, modified_ns={before.st_mtime_ns}; '
-                f'after size={after.st_size}, modified_ns={after.st_mtime_ns}')
+        after = fresh_stat(path)
+        _same_source(before, after)
         connection.execute('''INSERT OR REPLACE INTO files(root,path,size,modified,seen,kind,arrival,metadata,error,missing,review)
           VALUES(?,?,?,?,?,?,?,?,?,0,'')''', (root,path,before.st_size,before.st_mtime_ns,generation,kind,int(arrival),json.dumps(metadata,ensure_ascii=False),error))
         connection.execute('UPDATE jobs SET checked=checked+1,errors=errors+? WHERE root=?', (int(bool(error)),root))
