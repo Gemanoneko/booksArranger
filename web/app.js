@@ -5,13 +5,38 @@ let offset = 0, search = '', selectedPath = null, selectedRow = null, reviewRow 
 let dirty = false, busy = false, polling = false, ended = false, timer = null, state = null;
 const form = $('review-form');
 const fields = ['original_language','title','author','series','number','genre','topic'];
+const connectionText='Browser connection interrupted. The scan may still be running; retrying…';
+const receivedStatus=new Map();
+let refreshSequence=0;
+let connectionNotice=$('connection-notice');
+if(!connectionNotice){
+  connectionNotice=document.createElement('p');connectionNotice.id='connection-notice';connectionNotice.hidden=true;
+  connectionNotice.setAttribute('role','status');connectionNotice.setAttribute('aria-live','polite');
+  $('message').insertAdjacentElement('afterend',connectionNotice);
+}
+let inventoryIntro=$('inventory-intro');
+if(!inventoryIntro){inventoryIntro=document.createElement('p');inventoryIntro.id='inventory-intro';$('search-form').insertAdjacentElement('beforebegin',inventoryIntro);}
+inventoryIntro.textContent='Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.';
+
+function clearConnectionNotice(){connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';}
+function refreshFailed(error){
+  if(ended)return;
+  if(error.httpStatus){
+    const prior=$('message').textContent;
+    if(!prior.includes(error.message))message(prior ? prior+'\n'+error.message : error.message);
+    return;
+  }
+  if(connectionNotice.textContent!==connectionText)connectionNotice.textContent=connectionText;
+  connectionNotice.hidden=false;
+  $('status').textContent='Last received: '+(receivedStatus.get($('library').value) || 'No status received yet.');
+}
 
 async function request(route, data) {
   const options = {headers:{'X-Books-Token':token}, credentials:'same-origin', cache:'no-store'};
   if (data !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(data); }
   const response = await fetch(route, options);
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || `Local request failed (${response.status})`);
+  if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;throw error;}
   return result;
 }
 function message(value='') { $('message').textContent=value; }
@@ -68,21 +93,23 @@ function renderRows() {
   else { selectedRow=null; reviewRow=null; selectedPath=null; $('details').hidden=true; dirty=false; }
   $('empty').hidden=rows.length>0;
   $('empty').textContent=search ? 'No saved paths match this search.' : 'No files on this page yet. Start or resume scanning to build the inventory.';
-  $('page').textContent=rows.length ? `Rows ${offset+1}–${offset+rows.length} · 100 per page` : '0 rows';
+  $('page').textContent=rows.length ? `Files ${offset+1}–${offset+rows.length} · 100 per page` : '0 files';
   $('previous').disabled=offset===0;
   $('next').disabled=rows.length<100;
 }
 async function refresh(force=false) {
-  if (ended) return;
+  if (ended) return false;
+  const sequence=++refreshSequence;
   const library=$('library').value;
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
-  if (ended || $('library').value!==library) return;
+  if (ended || sequence!==refreshSequence || $('library').value!==library) return false;
   state=current;
   $('version').textContent=`v${state.version} · local prototype`;
   $('root').textContent=`Source: ${state.root}`;
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
-  $('status').textContent=`${activity} · Catalog ${status.count} · Checked ${status.checked} · Reused ${status.reused} · Pending ${status.pending} · Errors ${status.errors}`;
+  const statusText=`${activity} · Files cataloged ${status.count} · Files checked ${status.checked} · Files reused ${status.reused} · Pending tasks ${status.pending} · Read errors ${status.errors}`;
+  receivedStatus.set(library,statusText);$('status').textContent=statusText;
   $('current').textContent=status.current || 'Choose a file to inspect existing metadata and its sorting preview.';
   if (form.elements.namedItem('genre').options.length===1) {
     for (const genre of state.genres) { const option=document.createElement('option');option.value=genre;option.textContent=genre;form.elements.namedItem('genre').append(option); }
@@ -91,16 +118,18 @@ async function refresh(force=false) {
   const key=JSON.stringify([library,offset,search,status.count,status.checked,status.state]);
   if (force || key!==lastKey) {
     const page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${offset}&search=${encodeURIComponent(search)}`);
-    if (ended || $('library').value!==library) return;
+    if (ended || sequence!==refreshSequence || $('library').value!==library) return false;
     rows=page.rows;lastKey=key;renderRows();
   }
+  return true;
 }
 async function poll() {
   if (ended) return;
   if (!polling) {
     polling=true;
-    try { await refresh(); }
-    catch(error) { if(!ended)message('Local server unavailable. Saved scan progress remains in the catalog. '+error.message); }
+    const library=$('library').value,sequence=refreshSequence+1;
+    try { if(await refresh())clearConnectionNotice(); }
+    catch(error) { if(sequence===refreshSequence && library===$('library').value)refreshFailed(error); }
     finally { polling=false; }
   }
   if (!ended) timer=setTimeout(poll,800);
@@ -124,7 +153,7 @@ form.addEventListener('submit',async event=>{
 });
 $('shutdown').addEventListener('click',async()=>{
   if(busy || ended)return;busy=true;controls();message();
-  try{await request('/api/shutdown',{});ended=true;clearTimeout(timer);$('status').textContent='Server stopping. Saved catalog and pending scans remain available on the next launch.';message('You can close this browser tab.');}
+  try{await request('/api/shutdown',{});ended=true;clearConnectionNotice();clearTimeout(timer);$('status').textContent='Server stopping. Saved catalog and pending scans remain available on the next launch.';message('You can close this browser tab.');}
   catch(error){message(error.message);}
   finally{busy=false;controls();}
 });

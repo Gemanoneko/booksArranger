@@ -23,8 +23,10 @@
       <p id="status" aria-live="polite">Connecting to the local catalog…</p>
       <p id="current" class="path"></p>
       <p id="message" role="status"></p>
+      <p id="connection-notice" role="status" aria-live="polite" hidden></p>
     </section>
-    <section class="panel" aria-label="Library inventory">
+    <section class="panel" aria-label="File inventory">
+      <p id="inventory-intro">Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.</p>
       <form id="search-form" class="toolbar">
         <label for="search">Path contains</label><input id="search" type="search" maxlength="500" placeholder="Author, folder or filename">
         <button type="submit">Search</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><span id="page"></span>
