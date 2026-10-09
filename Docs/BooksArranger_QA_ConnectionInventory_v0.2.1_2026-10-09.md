@@ -59,3 +59,9 @@ Rendered checks **7/7**:
 - No live user server/catalog file was edited, stopped or restarted; no real library source was written, moved, converted, renamed or deleted. QA makes no new live-server availability claim from these isolated checks.
 
 No unresolved Blocker/Major defect in the accepted patch. Existing unrelated prototype limitations remain unchanged. Pattern alerts: none new; previously dispositioned tooltip-polish alert remains deferred to Daily Use.
+
+## Published correspondence
+
+Published tag v0.2.1 resolves to `f7b185ce416da1aa014df929a4da95773e5437e9`. A bounded read-only guarded browser visit showed **v0.2.1**, the new file/task labels and helper, and exact served JS/CSS hashes matching the accepted pins above. The original user process **PID 3100**, instance **1171e36d693625c4667d9a276e28826c**, and **generation 1** remained active: **9431 files checked / 53 pending tasks / 1 read error** at observation. This records a source-read error counter, not a connection failure.
+
+Screenshot: `scratch/connection-qa-2026-10-09/screenshots/published-v0.2.1.png`; Jane independently viewed and accepted the displayed version/count labels. Only GET requests were issued; no user control, tab reload, server restart or scan mutation occurred. Temporary browser lease **9d0c3065fe3c** closed with **remaining 0**; the user server remained untouched. No additional checks are required for this correspondence append.
