@@ -12,6 +12,14 @@ def setup(connection):
       id TEXT PRIMARY KEY, root TEXT, scope TEXT, revision INTEGER, fingerprint TEXT,
       evidence TEXT, review TEXT DEFAULT '', approved INTEGER DEFAULT 0,
       changed INTEGER DEFAULT 0, UNIQUE(root,scope))''')
+    connection.execute('CREATE TABLE IF NOT EXISTS book_catalog_revision(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL)')
+    connection.execute('INSERT OR IGNORE INTO book_catalog_revision VALUES(1,0)')
+    connection.execute('CREATE TABLE IF NOT EXISTS book_group_sync(root TEXT PRIMARY KEY, revision INTEGER NOT NULL)')
+    for operation in ('INSERT','DELETE'):
+        connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_files_{operation.lower()} AFTER {operation} ON files BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
+    columns=('root','path','size','modified','kind','metadata','error','missing')
+    changed=' OR '.join('OLD.'+c+' IS NOT NEW.'+c for c in columns)
+    connection.execute('CREATE TRIGGER IF NOT EXISTS book_files_update AFTER UPDATE OF '+','.join(columns)+' ON files WHEN '+changed+' BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
 
 def normalized(value):
     return ' '.join(str(value or '').casefold().split())
@@ -49,6 +57,10 @@ def member(row):
 def build(rows):
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     companions=[row for row in rows if row['kind']=='companion']
+    companions_by_folder={}
+    for index,row in enumerate(companions):
+        clue={'path':row['path'],'size':row['size'],'modified':str(row['modified']),'error':row['error'],'missing':bool(row['missing'])}
+        companions_by_folder.setdefault(str(Path(row['path']).parent),[]).append((index,clue))
     batches={}
     for row in audio:
         item=member(row)
@@ -101,7 +113,7 @@ def build(rows):
         if len(series)>1:conflicts.append('Series position conflicts')
         if any(item['error'] or item['missing'] for item in members):conflicts.append('Source files unavailable or unreadable')
         folders={str(Path(item['path']).parent) for item in members}
-        related=[{'path':row['path'],'size':row['size'],'modified':str(row['modified']),'error':row['error'],'missing':bool(row['missing'])} for row in companions if str(Path(row['path']).parent) in folders]
+        related=[clue for index,clue in sorted((item for folder in folders for item in companions_by_folder.get(folder,[])),key=lambda item:item[0])]
         title=next(iter(titles)) if len(titles)==1 else Path(group['scope'].split('\x1f')[0]).name
         metadata={'title':title,'author':'; '.join(sorted(artists)),'artist':'; '.join(sorted(artists)),
           'edition_language':'; '.join(sorted(languages)), 'series':'; '.join(sorted({v[0] for v in series})),
@@ -115,6 +127,9 @@ def build(rows):
 
 def sync(connection,root):
     setup(connection)
+    revision=connection.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()[0]
+    saved=connection.execute('SELECT revision FROM book_group_sync WHERE root=?',(root,)).fetchone()
+    if saved and saved[0]==revision:return
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
     groups=build(rows)
     for scope,evidence in groups.items():
@@ -130,6 +145,7 @@ def sync(connection,root):
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
         if old['scope'] not in groups and old['approved']:
             connection.execute('UPDATE book_groups SET approved=0,changed=1,revision=revision+1 WHERE id=?',(old['id'],))
+    connection.execute('INSERT OR REPLACE INTO book_group_sync VALUES(?,?)',(root,revision))
 
 def render(row,root,coverage):
     evidence=json.loads(row['evidence'])
@@ -150,6 +166,10 @@ def render(row,root,coverage):
 
 def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False):
     sync(connection,root)
+    if status=='all' and not search:
+        total=connection.execute('SELECT count(*) FROM book_groups WHERE root=?',(root,)).fetchone()[0]
+        rows=connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
+        return {'rows':[render(row,root,coverage) for row in rows],'total':total}
     values=[render(row,root,coverage) for row in connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope',(root,))]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),

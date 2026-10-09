@@ -63,6 +63,7 @@ class CandidateReviewService:
         self.client=client or MetadataClient(); self.jobs=jobs
         self._decoded=set()
         self.lock=threading.RLock(); self.matching={}; self.workers={}
+        self.page_local=threading.local()
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL)')
 
@@ -75,6 +76,10 @@ class CandidateReviewService:
         return row
 
     def _context(self,row):
+        cached=getattr(self.page_local,'contexts',None)
+        if cached is not None:
+            saved=cached.get(row['id'])
+            return copy.deepcopy(saved['data']) if saved and saved['revision']==row['revision'] else {}
         with connect(self.inventory.database) as db:
             saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone()
         return json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
@@ -99,16 +104,19 @@ class CandidateReviewService:
             except (ValueError,OSError):return None
         return choice
 
-    def enrich(self,row):
+    def enrich(self,row,check_sources=True):
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row)
         for m,key in zip(row['members'],keys):m['member_key']=key
         order=ctx.get('track_order',keys); included=ctx.get('included',keys)
         if set(order)!=set(keys) or not set(included)<=set(keys):order=keys;included=keys;ctx={}
-        cover=self._cover(ctx)
+        if check_sources:cover=self._cover(ctx)
+        else:
+            cover=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
+            if cover and not any((self.cache/(cover['id']+suffix)).is_file() for suffix in ('.png','.jpg')):cover=None
         metadata_ok=bool(ctx.get('metadata_approved') and cover)
         track_ok=bool(ctx.get('source_coverage_confirmed') and ctx.get('order_confirmed') and ctx.get('source_hashes'))
         source_changed=False
-        if track_ok:
+        if track_ok and check_sources:
             try:
                 for m in row['members']:
                     key=member_key(m['path'])
@@ -129,12 +137,15 @@ class CandidateReviewService:
         if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b':reasons.append('Single audiobook file')
         destination=row.get('preview',{}).get('path','')
         if not destination:reasons.append(row.get('preview',{}).get('reason') or 'Confirm output destination')
-        elif os.path.exists(destination):reasons.append('An audiobook already exists at this path. Review it or choose a different reviewed destination.')
+        elif check_sources and os.path.exists(destination):reasons.append('An audiobook already exists at this path. Review it or choose a different reviewed destination.')
         durations=[m.get('duration') for m in selected]
         duration=sum(durations) if durations and all(isinstance(d,(int,float)) for d in durations) else None
         job=None
-        if self.jobs and hasattr(self.jobs,'candidate_status'):
+        job_states=getattr(self.page_local,'jobs',None)
+        if job_states is not None:job=job_states.get(row['id'])
+        elif self.jobs and hasattr(self.jobs,'candidate_status'):
             job=self.jobs.candidate_status(row['id'])
+        if not check_sources and job:reasons.append('Audiobook job already exists; inspect its current status')
         status='Ready to create' if not reasons else 'Single audiobook file' if 'Single audiobook file' in reasons else 'Source changed — review required' if row.get('changed') or source_changed else 'Needs metadata review' if not metadata_ok else 'Tracks need review'
         if job:status=job.get('state',status)
         row.update(metadata_approved=metadata_ok,matching=copy.deepcopy(self.matching.get(row['id'],ctx.get('matching',{'state':'idle','proposals':[],'error':''}))),
@@ -150,15 +161,42 @@ class CandidateReviewService:
 
     def page(self,limit=100,offset=0,search='',status='all'):
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
-        rows=[self.enrich(r) for r in self.inventory.candidates('Audiobooks',limit=1000000,search=search)['rows']]
-        filters={'all':lambda r:True,'review':lambda r:not r['metadata_approved'],'approved':lambda r:r['metadata_approved'],
-                 'errors':lambda r:any(m['error'] for m in r['members']),'changed':lambda r:r['changed'],
-                 'ready':lambda r:r['creation']['can_create'],'jobs':lambda r:r['creation']['status'] in ('queued','creating','checking','Queued','Creating'),
-                 'created':lambda r:r['creation']['status'] in ('created','Audiobook created'),
-                 'output_attention':lambda r:r['creation']['status'] in ('failed','Output needs attention')}
-        if status not in filters:raise ValueError('Unknown candidate status')
-        rows=[r for r in rows if filters[status](r)]
-        return {'rows':rows[offset:offset+limit],'total':len(rows)}
+        if status not in ('all','errors','changed','review','approved','ready','jobs','created','output_attention'):raise ValueError('Unknown candidate status')
+        direct=status in ('all','errors','changed')
+        result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
+        with connect(self.inventory.database) as db:
+            self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
+        self.page_local.jobs={}
+        if self.jobs and hasattr(self.jobs,'jobs'):
+            for job in self.jobs.jobs.status()['jobs']:
+                state={'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
+                self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason']}
+        def selected(row):
+            saved=self.page_local.contexts.get(row['id']);ctx=saved['data'] if saved and saved['revision']==row['revision'] else {}
+            choice=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
+            approved=bool(ctx.get('metadata_approved') and choice and any((self.cache/(choice['id']+suffix)).is_file() for suffix in ('.png','.jpg')))
+            job=self.page_local.jobs.get(row['id'])
+            if status=='review':return not approved
+            if status=='approved':return approved
+            if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
+            if status=='created':return bool(job and job['state']=='Audiobook created')
+            if status=='output_attention':return bool(job and job['state']=='Output needs attention')
+            if status=='ready':
+                included=ctx.get('included',[])
+                if not approved or job or not ctx.get('source_coverage_confirmed') or not ctx.get('order_confirmed') or not ctx.get('source_hashes') or not included or row.get('conflicts') or not row.get('preview',{}).get('path'):return False
+                members=[m for m in row['members'] if member_key(m['path']) in included]
+                if len(members)==1 and Path(members[0]['path']).suffix.lower()=='.m4b':return False
+                albums={str({k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}.get('album') or '').strip().casefold() for m in members}
+                return len(row['members'])==1 or len(albums)==1 and bool(next(iter(albums),''))
+            raise ValueError('Unknown candidate status')
+        try:
+            if direct:chosen=result['rows'];total=result['total']
+            else:
+                chosen=[r for r in result['rows'] if selected(r)];total=len(chosen);chosen=chosen[offset:offset+limit]
+            rows=[self.enrich(r,check_sources=False) for r in chosen]
+        finally:
+            del self.page_local.contexts;del self.page_local.jobs
+        return {'rows':rows,'total':total}
 
     def _actor(self,actor,note):
         if actor not in ('user','assistant'):raise ValueError('Unknown reviewer actor')

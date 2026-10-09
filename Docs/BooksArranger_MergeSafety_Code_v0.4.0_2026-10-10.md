@@ -98,3 +98,24 @@ The actual destination's required tiny publication/collision/ancestor/reparse ca
 **Final-4 safety floor:** CLEAR
 
 **Current open counts:** 0 Critical, 0 Major, 0 Minor. C1 and C2 are closed for the exact final-4 pins; initial Major findings remain closed by unchanged reviewed mechanisms. This clearance supports proceeding to the authorized source-preserving real-book technical pilot with separate output and device validation. It is not a full release certificate. Retain historical blocked reports and positive-control evidence; no unrelated source, library file or user process was modified by Senua.
+
+## Narrow catalog paging overlay
+
+Reviewed immutable `scratch/metadata-2026-10-09/frozen-paging-fix-1/`, 34-file manifest SHA256 `f521f150fac2f3617f01c80f574b82102561804f6870b1e69786a76d8f4a644b`. Independently verified 34/34 source hashes. Compared directly with final-4: only `groups.py`, `review_backend.py`, new `tests/test_catalog_paging.py`, and the non-runtime VERSION text differ. VERSION now reads0.4.0; no native/publication/encoder/HTTP/source-snapshot implementation changed.
+
+| Changed file | SHA256 |
+|---|---|
+| groups.py | 459b9ad48d43c13b8d89abf90dc7ee9805517fa29b01fe73a00ee03f6554dd75 |
+| review_backend.py | 98eda217d8d213a0cdc9669fcb8e57abc3f8e42d6a69a11cacc8f8641aea1183 |
+| tests/test_catalog_paging.py | 3f70f3b7dc47304b039835dfab74f4045b2618b40b47a813a59e5cee23bc0aa0 |
+| VERSION | be36d0066e8b6749a88a1c6bf1ce96482157ec618cb7f2aab162d3efae41f4d9 |
+
+List rendering now counts/pages before expensive enrichment and uses persisted catalog/context/job snapshots. `enrich(..., check_sources=False)` is used only by the page path. Its cheap Ready/approved status is a list snapshot, not permission to write or a certification that the source/destination is still current. The parameter defaults to True; explicit review, inspection and `build_manifest` retain full cover/source checks. Create/queue build the authoritative manifest again, worker start repeats `_guard`, and publication repeats source hashes/revision guards under the unchanged review boundary. A stale list response cannot replace those server checks or supply a client-authoritative path/approval/hash.
+
+Catalog reuse is bound to an additive SQLite revision: INSERT/DELETE and relevant source-row updates increment it; per-root grouping sync is reused only at the matching revision. Updates to root/path/size/mtime/kind/metadata/error/missing invalidate grouping, while scan-only bookkeeping does not rebuild unchanged groups. Changed group evidence still increments its candidate revision and invalidates approval; cached contexts must match that revision. Page context/job caches are thread-local, and the rendering/filtering region clears them in its finally block. No background worker/start/publication call uses the page's fast-check option. Global status filtering precedes slicing, so later-page errors/approvals/jobs remain selectable.
+
+Read the new scale/invalidation fixture source and traced all `enrich`, `build_manifest` and revision-guard call sites. Parent/QA reports 23 targeted checks passing and a copied real catalog of2467 candidates with zero source hash/stat calls during listing; these are separate behavioral results, not additional Senua execution. No probe, native/UI run, live catalog/server action, test write, or source write was performed during this narrow audit. No new Critical or safety-floor mechanism found; unchanged native safeguards and their exact Z: evidence retain the final-4 scope and limits.
+
+**Paging overlay safety floor:** CLEAR
+
+**Open findings in this narrow delta:** 0 Critical, 0 Major, 0 Minor. Clearance applies to this exact 34-file overlay on the reviewed final-4 core; it is not a full release review or automatic clearance for further source changes.
