@@ -93,3 +93,9 @@ No unresolved Blocker or Major core-flow defect was found in the accepted candid
 **Pattern alert PA-BOOKS-01:** new controls have no tooltip implementation in both the Tk milestone and browser milestone. **Disposition: log-and-defer to Daily Use polish**, explicitly confirmed by Jane under Prototype-phase deferrals; no added UI/code stage during this prototype. Main control labels and footer instructions were readable in tested captures. This is separate from individual core-flow bugs.
 
 User-facing library mutation, authoritative identity lookup, track-to-book grouping, audio conversion, cleanup, and Apple device testing remain later milestones. This report does not claim them complete. Native browser/account/desktop checks are neither needed nor authorized for this web workflow.
+
+## Published version correspondence — v0.2.0
+
+After Sully published source commit `a3bc50b` and tag v0.2.0, a single bounded read-only rendered visit verified the retained user service on `http://127.0.0.1:5210/`: visible badge **v0.2.0 · local prototype**, source **Z:\Audiobooks**, health **version 0.2.0 / PID 3100 / instance 1171e36d693625c4667d9a276e28826c**. Audiobooks, Podcasts and Ebooks all returned **not scanned / count 0 / active_library null**, with the confirmed default roots.
+
+Actual screenshot: `scratch/web-qa-2026-10-09/screenshots/published-v0.2.0.png`. Jane independently viewed it and accepted visible version, idle source and readable controls. The visit issued GET requests only; no scan, review, shutdown or other control was clicked. Only the temporary guarded browser lease `bcc8d07c7934` was closed, with **remaining 0**. The retained user service was left alive and idle. This correspondence check adds no runtime source change or broad retesting.
