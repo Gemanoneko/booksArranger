@@ -1,0 +1,237 @@
+"""Windows directory identity guards and same-directory no-replace publication."""
+import contextlib
+import ctypes
+from ctypes import wintypes
+import os
+import time
+import re
+import hashlib
+from pathlib import Path
+
+class BoundaryError(ValueError):pass
+
+if os.name=='nt':
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+    kernel.CreateFileW.restype=wintypes.HANDLE
+    kernel.CloseHandle.argtypes=[wintypes.HANDLE]
+    kernel.MoveFileExW.argtypes=[wintypes.LPCWSTR,wintypes.LPCWSTR,wintypes.DWORD]
+    kernel.MoveFileExW.restype=wintypes.BOOL
+    kernel.GetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_void_p]
+    kernel.GetFileInformationByHandle.restype=wintypes.BOOL
+    class FileInfo(ctypes.Structure):
+        _fields_=[('attributes',wintypes.DWORD),('creation',wintypes.FILETIME),('access',wintypes.FILETIME),('write',wintypes.FILETIME),('volume',wintypes.DWORD),('size_high',wintypes.DWORD),('size_low',wintypes.DWORD),('links',wintypes.DWORD),('index_high',wintypes.DWORD),('index_low',wintypes.DWORD)]
+
+def ordinary(path):
+    value=str(path)
+    if not os.path.isabs(value) or value.startswith(('\\\\?\\','\\\\.\\')):
+        raise BoundaryError('Only ordinary absolute filesystem paths are accepted')
+    parts=Path(value).parts
+    if any(part in {'.','..'} or ':' in part for part in parts[1:]):
+        raise BoundaryError('Traversal and alternate data streams are rejected')
+    reserved={'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}
+    if any(re.search(r'[<>"|?*\x00-\x1f]',part) or part.endswith(('.', ' ')) or part.upper().split('.')[0] in reserved for part in parts[1:]):
+        raise BoundaryError('Special/device-shaped destination or source path is rejected')
+    return Path(os.path.abspath(value))
+
+class DirectoryBoundary:
+    """Hold ancestor directory handles without write/delete sharing during publication."""
+    def __init__(self,root,parent,create=False):
+        self.root=ordinary(root);self.parent=ordinary(parent);self.create=create
+        self.handles=[];self.identities=[]
+        try:self.parent.relative_to(self.root)
+        except ValueError:raise BoundaryError('Destination is outside the configured library')
+
+    def __enter__(self):
+        if os.name!='nt':raise BoundaryError('Verified Windows no-replace publication is unavailable on this platform')
+        parts=self.parent.parts
+        current=Path(parts[0])
+        try:
+            for index in range(len(parts)):
+                if index:current=current/parts[index]
+                if not current.exists():
+                    if not self.create or not current.is_relative_to(self.root):
+                        raise BoundaryError('An inspected destination ancestor is unavailable')
+                    current.mkdir()
+                if current.is_symlink() or os.path.isjunction(current):
+                    raise BoundaryError('Destination ancestor is a symlink or junction')
+                # OPEN_REPARSE_POINT prevents transparently following a swapped reparse entry.
+                # READ_ATTRIBUTES alone does not participate in Windows sharing
+                # checks. LIST_DIRECTORY makes deny-delete sharing effective.
+                handle=kernel.CreateFileW(str(current),0x81,1,None,3,0x02000000|0x00200000,None)
+                if handle==ctypes.c_void_p(-1).value:
+                    raise BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(ctypes.get_last_error())}')
+                self.handles.append(handle)
+                info=FileInfo()
+                if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)):
+                    raise BoundaryError('Cannot inspect destination directory identity')
+                if info.attributes&0x400 or not info.attributes&0x10:
+                    raise BoundaryError('Destination ancestry contains an unexpected reparse entry or non-directory')
+                self.identities.append((str(current),info.volume,info.index_high,info.index_low))
+            return self
+        except BaseException:
+            self.__exit__(None,None,None)
+            raise
+
+    def revalidate(self):
+        for handle,identity in zip(self.handles,self.identities):
+            info=FileInfo()
+            if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes&0x400:
+                raise BoundaryError('Destination boundary changed during publication')
+            if (info.volume,info.index_high,info.index_low)!=identity[1:]:
+                raise BoundaryError('Destination directory identity drifted')
+
+    def __exit__(self,*_):
+        for handle in reversed(self.handles):kernel.CloseHandle(handle)
+        self.handles=[]
+
+def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expected_size=None):
+    temporary=ordinary(temporary);destination=ordinary(destination)
+    if temporary.parent!=destination.parent or destination.parent!=boundary.parent:
+        raise BoundaryError('Publication requires an owned same-directory temporary')
+    boundary.revalidate()
+    # Rename the verified file HANDLE, not a name which can be swapped. Deny
+    # other writers/deleters while holding our own DELETE access for the rename.
+    handle=kernel.CreateFileW(str(temporary),0x10081,1,None,3,0x00200000,None)
+    if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot protect owned destination temporary')
+    try:
+        info=FileInfo()
+        if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes&(0x400|0x10):
+            raise BoundaryError('Publication temporary is not an ordinary file')
+        size=(info.size_high<<32)|info.size_low
+        if expected_size is not None and size!=expected_size:raise BoundaryError('Publication temporary size differs from checked output')
+        kernel.ReadFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p]
+        kernel.ReadFile.restype=wintypes.BOOL
+        hash=hashlib.sha256();buffer=ctypes.create_string_buffer(1024*1024);count=wintypes.DWORD()
+        while True:
+            if not kernel.ReadFile(handle,buffer,len(buffer),ctypes.byref(count),None):raise BoundaryError('Cannot read protected publication temporary')
+            if not count.value:break
+            hash.update(buffer.raw[:count.value])
+        if expected_sha256 is not None and hash.hexdigest()!=expected_sha256:raise BoundaryError('Publication temporary bytes differ from checked output')
+        target=destination.name
+        encoded=target.encode('utf-16-le')
+        class Rename(ctypes.Structure):
+            _fields_=[('replace',wintypes.BOOLEAN),('root',wintypes.HANDLE),('length',wintypes.DWORD),('name',wintypes.WCHAR*(len(encoded)//2+1))]
+        rename=Rename();rename.replace=False;rename.root=None;rename.length=len(encoded)
+        ctypes.memmove(ctypes.addressof(rename)+Rename.name.offset,encoded,len(encoded))
+        # A simple name with NULL RootDirectory renames within the protected
+        # source file's existing parent. No absolute-path target lookup occurs.
+        nt=ctypes.WinDLL('ntdll',use_last_error=True)
+        class StatusBlock(ctypes.Structure):_fields_=[('status',ctypes.c_void_p),('information',ctypes.c_size_t)]
+        nt.NtSetInformationFile.argtypes=[wintypes.HANDLE,ctypes.POINTER(StatusBlock),ctypes.c_void_p,wintypes.ULONG,ctypes.c_int];nt.NtSetInformationFile.restype=wintypes.LONG
+        nt.RtlNtStatusToDosError.argtypes=[wintypes.LONG];nt.RtlNtStatusToDosError.restype=wintypes.ULONG
+        boundary.revalidate()
+        status=StatusBlock();result=nt.NtSetInformationFile(handle,ctypes.byref(status),ctypes.byref(rename),ctypes.sizeof(rename),10)
+        if result<0:
+            error=nt.RtlNtStatusToDosError(result)
+            if error in {80,183}:raise FileExistsError('Destination collision; existing file was preserved')
+            raise BoundaryError(f'Handle-bound no-replace publication failed: {ctypes.WinError(error)}')
+    finally:kernel.CloseHandle(handle)
+
+class ProtectedFiles:
+    """Deny write/delete access to owned immutable snapshots while media tools read them."""
+    def __init__(self,paths):self.paths=paths;self.handles=[]
+    def __enter__(self):
+        try:
+            for path in self.paths:
+                handle=kernel.CreateFileW(str(ordinary(path)),0x81,1,None,3,0x00200000,None)
+                if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot protect source snapshot from modification')
+                self.handles.append(handle)
+                info=FileInfo()
+                if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes&(0x400|0x10):
+                    raise BoundaryError('Source snapshot is not an ordinary protected file')
+            return self
+        except BaseException:self.__exit__(None,None,None);raise
+    def __exit__(self,*_):
+        for handle in reversed(self.handles):kernel.CloseHandle(handle)
+        self.handles=[]
+
+class OwnedProcessJob:
+    """Kill-on-close Windows job contains only the newly launched media process tree."""
+    def __init__(self,process):self.process=process;self.handle=None
+    def __enter__(self):
+        class Basic(ctypes.Structure):
+            _fields_=[('process_time',ctypes.c_longlong),('job_time',ctypes.c_longlong),('flags',wintypes.DWORD),('min_working',ctypes.c_size_t),('max_working',ctypes.c_size_t),('active',wintypes.DWORD),('affinity',ctypes.c_size_t),('priority',wintypes.DWORD),('scheduling',wintypes.DWORD)]
+        class IO(ctypes.Structure):
+            _fields_=[(name,ctypes.c_ulonglong) for name in ['read_ops','write_ops','other_ops','read_bytes','write_bytes','other_bytes']]
+        class Extended(ctypes.Structure):
+            _fields_=[('basic',Basic),('io',IO),('process_memory',ctypes.c_size_t),('job_memory',ctypes.c_size_t),('peak_process',ctypes.c_size_t),('peak_job',ctypes.c_size_t)]
+        kernel.CreateJobObjectW.argtypes=[ctypes.c_void_p,wintypes.LPCWSTR];kernel.CreateJobObjectW.restype=wintypes.HANDLE
+        kernel.SetInformationJobObject.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.SetInformationJobObject.restype=wintypes.BOOL
+        kernel.AssignProcessToJobObject.argtypes=[wintypes.HANDLE,wintypes.HANDLE];kernel.AssignProcessToJobObject.restype=wintypes.BOOL
+        self.handle=kernel.CreateJobObjectW(None,None)
+        if not self.handle:raise BoundaryError('Cannot create an owned media process job')
+        info=Extended();info.basic.flags=0x2000
+        if not kernel.SetInformationJobObject(self.handle,9,ctypes.byref(info),ctypes.sizeof(info)) or not kernel.AssignProcessToJobObject(self.handle,wintypes.HANDLE(int(self.process._handle))):
+            self.__exit__(None,None,None)
+            raise BoundaryError('Cannot establish owned media-process cancellation on this host')
+        if getattr(self.process,'_books_suspended',False):
+            try:resume_owned_primary(self.process.pid)
+            except BaseException:self.__exit__(None,None,None);raise
+        return self
+    def __exit__(self,*_):
+        if not self.handle:return
+        processes=[]
+        class Accounting(ctypes.Structure):
+            _fields_=[('user',ctypes.c_longlong),('system',ctypes.c_longlong),('period_user',ctypes.c_longlong),('period_system',ctypes.c_longlong),('faults',wintypes.DWORD),('total',wintypes.DWORD),('active',wintypes.DWORD),('terminated',wintypes.DWORD)]
+        kernel.QueryInformationJobObject.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD,ctypes.c_void_p];kernel.QueryInformationJobObject.restype=wintypes.BOOL
+        kernel.TerminateJobObject.argtypes=[wintypes.HANDLE,wintypes.UINT];kernel.TerminateJobObject.restype=wintypes.BOOL
+        try:
+            info=Accounting()
+            if not kernel.QueryInformationJobObject(self.handle,1,ctypes.byref(info),ctypes.sizeof(info),None):
+                raise BoundaryError('Cannot verify owned media-process tree completion')
+            if info.active:
+                class ProcessList(ctypes.Structure):
+                    _fields_=[('assigned',wintypes.DWORD),('count',wintypes.DWORD),('ids',ctypes.c_size_t*1024)]
+                listed=ProcessList()
+                if not kernel.QueryInformationJobObject(self.handle,3,ctypes.byref(listed),ctypes.sizeof(listed),None):
+                    kernel.TerminateJobObject(self.handle,1)
+                    raise BoundaryError('Cannot inspect owned cancellation process handles')
+                kernel.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];kernel.OpenProcess.restype=wintypes.HANDLE
+                kernel.IsProcessInJob.argtypes=[wintypes.HANDLE,wintypes.HANDLE,ctypes.POINTER(wintypes.BOOL)];kernel.IsProcessInJob.restype=wintypes.BOOL
+                kernel.WaitForSingleObject.argtypes=[wintypes.HANDLE,wintypes.DWORD];kernel.WaitForSingleObject.restype=wintypes.DWORD
+                for pid in list(listed.ids)[:listed.count]:
+                    process=kernel.OpenProcess(0x100000|0x1000,False,pid)
+                    if process:
+                        member=wintypes.BOOL()
+                        if kernel.IsProcessInJob(process,self.handle,ctypes.byref(member)) and member.value:processes.append(process)
+                        else:kernel.CloseHandle(process)
+                if not kernel.TerminateJobObject(self.handle,1):raise BoundaryError('Cannot cancel the owned media-process tree')
+                deadline=time.monotonic()+3
+                while info.active and time.monotonic()<deadline:
+                    time.sleep(.02)
+                    if not kernel.QueryInformationJobObject(self.handle,1,ctypes.byref(info),ctypes.sizeof(info),None):raise BoundaryError('Cannot verify media cancellation')
+                if info.active:raise BoundaryError('Owned media process tree has not finished stopping')
+                # Accounting can reach zero before process teardown releases its
+                # inherited files. Wait on exact owned handles, never a reused PID.
+                for process in processes:
+                    remaining=max(0,int((deadline-time.monotonic())*1000))
+                    if kernel.WaitForSingleObject(process,remaining)!=0:raise BoundaryError('Owned process teardown has not completed')
+        finally:
+            for process in processes:kernel.CloseHandle(process)
+            kernel.CloseHandle(self.handle);self.handle=None
+
+def resume_owned_primary(pid):
+    """Resume only the sole primary thread of our newly suspended owned process."""
+    class ThreadEntry(ctypes.Structure):
+        _fields_=[('size',wintypes.DWORD),('usage',wintypes.DWORD),('thread',wintypes.DWORD),('process',wintypes.DWORD),('base',wintypes.LONG),('delta',wintypes.LONG),('flags',wintypes.DWORD)]
+    kernel.CreateToolhelp32Snapshot.argtypes=[wintypes.DWORD,wintypes.DWORD];kernel.CreateToolhelp32Snapshot.restype=wintypes.HANDLE
+    kernel.Thread32First.argtypes=[wintypes.HANDLE,ctypes.POINTER(ThreadEntry)];kernel.Thread32Next.argtypes=kernel.Thread32First.argtypes
+    kernel.OpenThread.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];kernel.OpenThread.restype=wintypes.HANDLE
+    kernel.ResumeThread.argtypes=[wintypes.HANDLE];kernel.ResumeThread.restype=wintypes.DWORD
+    kernel.GetProcessIdOfThread.argtypes=[wintypes.HANDLE];kernel.GetProcessIdOfThread.restype=wintypes.DWORD
+    snapshot=kernel.CreateToolhelp32Snapshot(4,0)
+    if snapshot==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot inspect owned suspended primary thread')
+    ids=[]
+    try:
+        entry=ThreadEntry();entry.size=ctypes.sizeof(entry);found=kernel.Thread32First(snapshot,ctypes.byref(entry))
+        while found:
+            if entry.process==pid:ids.append(entry.thread)
+            found=kernel.Thread32Next(snapshot,ctypes.byref(entry))
+    finally:kernel.CloseHandle(snapshot)
+    if len(ids)!=1:raise BoundaryError('Owned process must have exactly one suspended primary thread')
+    thread=kernel.OpenThread(0x42,False,ids[0])
+    if not thread:raise BoundaryError('Cannot open owned suspended primary thread')
+    try:
+        if kernel.GetProcessIdOfThread(thread)!=pid or kernel.ResumeThread(thread)!=1:raise BoundaryError('Cannot safely resume owned primary thread')
+    finally:kernel.CloseHandle(thread)

@@ -1,4 +1,4 @@
-"""Loopback-only browser interface for the existing read-only inventory engine."""
+"""Loopback-only browser interface for inventory, reviewed metadata and audiobook jobs."""
 import argparse
 import json
 import os
@@ -6,6 +6,7 @@ from pathlib import Path
 import secrets
 import signal
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,7 +15,7 @@ from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 
 PORT = 5210
-MAX_BODY = 16384
+MAX_BODY = 256 * 1024
 
 def version():
     try:
@@ -26,7 +27,7 @@ class BrowserServer(ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
 
-    def __init__(self, address, inventory):
+    def __init__(self, address, inventory, merge_factory=None):
         if address[0] != '127.0.0.1':
             raise ValueError('Books Arranger only binds to IPv4 loopback')
         self.inventory = inventory
@@ -34,8 +35,38 @@ class BrowserServer(ThreadingHTTPServer):
         self.instance = secrets.token_hex(16)
         self.active_library = None
         self.control_lock = threading.Lock()
+        self.control_condition = threading.Condition(self.control_lock)
+        self.merge_admissions = 0
+        self.merge = None
         self.closing = False
         super().__init__(address, Handler)
+        try:
+            if merge_factory is None:
+                from merge_service import MergeService
+                merge_factory = MergeService
+            self.merge = merge_factory(inventory, Path(inventory.database).parent / 'merge-cache')
+        except BaseException:
+            super().server_close()
+            raise
+
+    def server_close(self):
+        if self.merge is not None:
+            self.merge.close()
+            self.merge = None
+        super().server_close()
+
+    def finish_shutdown(self):
+        with self.control_condition:
+            while self.merge_admissions:
+                self.control_condition.wait(timeout=.5)
+        self.merge.close()
+        self.shutdown()
+
+    def scan_active(self):
+        return bool(self.inventory.worker and self.inventory.worker.is_alive())
+
+    def jobs_active(self):
+        return self.merge.state().get('state') in {'Running','Pausing','running','pausing'}
 
     def server_bind(self):
         import socket
@@ -57,7 +88,7 @@ class BrowserServer(ThreadingHTTPServer):
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
-            'status': self.inventory.status(library)}
+            'status': self.inventory.status(library), 'audiobook_jobs': self.merge.state()}
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'
@@ -79,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
-        self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
         self.end_headers()
         try:
             self.wfile.write(raw)
@@ -134,6 +165,16 @@ class Handler(BaseHTTPRequestHandler):
             elif path in {'/app.js','/style.css'}:
                 content_type = 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8'
                 self.response(200,(BASE / 'web' / path[1:]).read_bytes(),content_type)
+            elif path == '/api/cover':
+                if not self.trusted(token=True): return
+                if set(query) != {'id'}: raise ValueError('Cover requires only its cached identity')
+                id = self.uuid_value(query['id'])
+                raw = self.server.merge.reviews.cover_bytes(id)
+                if len(raw)>8 * 1024 * 1024: raise ValueError('Cached cover exceeds bound')
+                if raw.startswith(b'\x89PNG\r\n\x1a\n'): content_type='image/png'
+                elif raw.startswith(b'\xff\xd8\xff'): content_type='image/jpeg'
+                else: raise ValueError('Cached cover format is unsupported')
+                self.response(200,raw,content_type)
             elif path in {'/api/state','/api/inventory'}:
                 if not self.trusted(token=True):
                     return
@@ -154,13 +195,15 @@ class Handler(BaseHTTPRequestHandler):
                     view=query.get('view','files')
                     if view not in {'files','candidates'}:raise ValueError('Unknown inventory view')
                     if view=='candidates':
-                        result=self.server.inventory.candidates(library,100,int(offset),search,selected_status)
+                        if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
+                        result=self.server.merge.reviews.page(100,int(offset),search,selected_status)
                         self.response(200,result | {'offset':int(offset),'page_size':100})
                         return
                     result = self.server.inventory.rows(library,100,int(offset),search,selected_status,page=True)
                     rows=result['rows']
                     # Probe internals are catalog evidence, not needed for rendering the browser table.
                     for row in rows:
+                        row['record_id']=self.server.merge.file_id(library,row['path'])
                         row['metadata'].pop('probe',None)
                         # Nanosecond timestamps exceed JavaScript's exact integer range.
                         row['modified'] = str(row['modified'])
@@ -176,65 +219,169 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type','').split(';')[0].strip().lower() != 'application/json':
             raise ValueError('Request body must be application/json')
         raw_length = self.headers.get('Content-Length','')
+        if len(self.headers.get_all('Content-Length',[])) != 1:
+            raise ValueError('Exactly one content length is required')
         if not raw_length.isascii() or not raw_length.isdigit() or len(raw_length)>6 or int(raw_length)>MAX_BODY:
-            raise ValueError('Request body missing or exceeds 16 KB')
+            raise ValueError('Request body missing or exceeds 256 KiB')
         if self.headers.get('Transfer-Encoding'):
             raise ValueError('Chunked requests are not accepted')
         raw = self.rfile.read(int(raw_length))
-        data = json.loads(raw.decode('utf-8'))
+        if len(raw) != int(raw_length): raise ValueError('Request body is truncated')
+        def pairs(items):
+            result={}
+            for key,value in items:
+                if key in result: raise ValueError('Repeated JSON fields are not accepted')
+                result[key]=value
+            return result
+        def invalid_constant(_value): raise ValueError('Non-finite JSON values are not accepted')
+        data = json.loads(raw.decode('utf-8'),object_pairs_hook=pairs,parse_constant=invalid_constant)
         if not isinstance(data,dict):
             raise ValueError('Request body must be a JSON object')
         return data
 
-    def do_POST(self):
-        if not self.trusted(token=True):
-            return
+    @staticmethod
+    def uuid_value(value):
         try:
-            path,query = self.query()
-            if query:
-                raise ValueError('Control requests do not accept query parameters')
-            data = self.body()
+            if not isinstance(value,str) or str(uuid.UUID(value)) != value: raise ValueError()
+        except (ValueError,TypeError,AttributeError): raise ValueError('Identity must be a canonical UUID') from None
+        return value
+
+    @staticmethod
+    def text_value(value, limit=16000, nullable=False):
+        if nullable and value is None: return None
+        if not isinstance(value,str) or len(value)>limit: raise ValueError('Text exceeds its allowed bound')
+        return value
+
+    def candidate_identity(self,data):
+        library=self.library(data.get('library'))
+        if library!='Audiobooks': raise ValueError('Audiobook operations apply only to Audiobooks')
+        id=self.uuid_value(data.get('id'))
+        revision=data.get('revision')
+        if type(revision) is not int or not 1<=revision<=9223372036854775807: raise ValueError('Invalid candidate revision')
+        return library,id,revision
+
+    @staticmethod
+    def shape(data,required,optional=()):
+        if not set(required)<=set(data) or set(data)-set(required)-set(optional): raise ValueError('Request fields are incomplete or unknown')
+
+    def merge_request(self,path,data):
+        reviews=self.server.merge.reviews
+        if path in {'/api/inspect','/api/open-folder'}:
+            self.shape(data,{'library','view','id'}, {'folder_kind','directory_id'} if path=='/api/open-folder' else ())
+            library=self.library(data['library'])
+            view=data['view']
+            if view not in {'files','candidates'}: raise ValueError('Invalid record view')
+            if view=='candidates':
+                if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
+                identity=self.uuid_value(data['id'])
+            else:
+                identity=data['id']
+                if not isinstance(identity,str) or len(identity)!=64 or any(c not in '0123456789abcdef' for c in identity): raise ValueError('Invalid catalog record identity')
+            if path=='/api/inspect':
+                self.response(200,self.server.merge.inspect(library,view,identity));return
+            kind=data.get('folder_kind','source')
+            if kind not in {'source','output'}: raise ValueError('Invalid folder kind')
+            directory_id=None if data.get('directory_id') is None else self.uuid_value(data['directory_id'])
+            self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
+        if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
+            if data: raise ValueError('Audiobook job controls require an empty object')
+            jobs=self.server.merge.jobs
+            self.response(200,jobs.pause() if path.endswith('/pause') else jobs.resume())
+            return
+        if path=='/api/audiobook/queue':
+            self.shape(data,{'library','candidates'})
+            library=self.library(data['library'])
+            if library!='Audiobooks': raise ValueError('Queue applies only to Audiobooks')
+            candidates=data['candidates']
+            if not isinstance(candidates,list) or not 1<=len(candidates)<=100: raise ValueError('Select at most one visible page of candidates')
+            ids=set()
+            for item in candidates:
+                if not isinstance(item,dict): raise ValueError('Invalid candidate selection')
+                self.shape(item,{'id','revision'})
+                self.candidate_identity({'library':library,**item})
+                if item['id'] in ids: raise ValueError('Repeated candidate selection')
+                ids.add(item['id'])
+            self.response(200,self.server.merge.queue(library,candidates));return
+        base={'library','id','revision'}
+        if path=='/api/candidate/review':
+            self.shape(data,base|{'review','approve'},{'manual_note','proposal_id','cover_id','actor','evidence'})
+        elif path=='/api/candidate/tracks':
+            self.shape(data,base|{'order','included','source_coverage_confirmed','order_confirmed','chapters'},{'actor','evidence_note'})
+        else: self.shape(data,base)
+        library,id,revision=self.candidate_identity(data)
+        if path=='/api/candidate/match':
+            self.response(202,{'matching':reviews.match(library,id,revision)});return
+        if path=='/api/candidate/covers':
+            self.response(200,{'row':reviews.covers(library,id,revision)});return
+        if path=='/api/audiobook/create':
+            self.response(202,{'job':self.server.merge.create(library,id,revision)});return
+        actor=data.get('actor','user')
+        if actor not in {'user','assistant'}: raise ValueError('Unknown review actor')
+        if path=='/api/candidate/review':
+            if type(data['approve']) is not bool: raise ValueError('Approval must be an explicit boolean')
+            kwargs={'approve':data['approve'],'manual_note':self.text_value(data.get('manual_note','')),'actor':actor}
+            for key in ('proposal_id','cover_id'):
+                kwargs[key]=None if data.get(key) is None else self.uuid_value(data[key])
+            evidence=data.get('evidence')
+            if evidence is not None and (not isinstance(evidence,list) or len(evidence)>30 or any(not isinstance(item,dict) for item in evidence)): raise ValueError('Invalid evidence records')
+            kwargs['evidence']=evidence
+            row=reviews.save(library,id,revision,self.review_data(data['review']),**kwargs)
+        else:
+            for key in ('order','included'):
+                values=data[key]
+                if not isinstance(values,list) or len(values)>10000 or any(not isinstance(value,str) or not 1<=len(value)<=128 for value in values) or len(set(values))!=len(values): raise ValueError('Invalid bounded source member list')
+            for key in ('source_coverage_confirmed','order_confirmed','chapters'):
+                if type(data[key]) is not bool: raise ValueError('Track confirmations must be explicit booleans')
+            row=reviews.tracks(library,id,revision,data['order'],data['included'],data['source_coverage_confirmed'],data['order_confirmed'],data['chapters'],actor=actor,evidence_note=self.text_value(data.get('evidence_note','')))
+        self.response(200,{'saved':True,'row':row})
+
+    def do_POST(self):
+        if not self.trusted(token=True): return
+        admitted=False
+        try:
+            path,query=self.query()
+            if query: raise ValueError('Control requests do not accept query parameters')
+            data=self.body()
+            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume'}
             with self.server.control_lock:
                 if self.server.closing:
-                    self.fail(409,'Server is shutting down')
-                    return
+                    self.fail(409,'Server is shutting down');return
                 if path in {'/api/scan/start','/api/scan/resume','/api/scan/stop'}:
-                    if set(data) != {'library'}:
-                        raise ValueError('Scan controls require only a library')
-                    library = self.library(data['library'])
+                    if set(data)!={'library'}: raise ValueError('Scan controls require only a library')
+                    library=self.library(data['library'])
                     if path.endswith('/stop'):
-                        if self.server.active_library != library or not (self.server.inventory.worker and self.server.inventory.worker.is_alive()):
-                            self.fail(409,'This library has no active scan to stop')
-                            return
+                        if self.server.active_library!=library or not self.server.scan_active():
+                            self.fail(409,'This library has no active scan to stop');return
                         self.server.inventory.stop()
                     else:
+                        if self.server.jobs_active() or self.server.merge_admissions:
+                            self.fail(409,'Pause audiobook work before starting a scan');return
                         self.server.inventory.launch(library,resume=path.endswith('/resume'))
-                        self.server.active_library = library
-                    self.response(200,self.server.state(library))
-                elif path == '/api/review':
-                    self.save_review(data)
-                elif path == '/api/candidate/review':
-                    if set(data)!={'library','id','revision','review','approve'}:
-                        raise ValueError('Candidate review requires its identity and observed revision')
-                    library=self.library(data['library'])
-                    if not isinstance(data['id'],str) or len(data['id'])!=36 or type(data['revision']) is not int or data['revision']<1 or type(data['approve']) is not bool:
-                        raise ValueError('Invalid candidate identity/revision/approval')
-                    review=self.review_data(data['review'])
-                    row=self.server.inventory.save_candidate(library,data['id'],data['revision'],review,data['approve'])
-                    self.response(200,{'saved':True,'row':row})
-                elif path == '/api/shutdown':
-                    if data:
-                        raise ValueError('Shutdown takes an empty JSON object')
-                    self.server.closing = True
-                    self.server.inventory.stop()
+                        self.server.active_library=library
+                    self.response(200,self.server.state(library));return
+                if path=='/api/shutdown':
+                    if data: raise ValueError('Shutdown takes an empty JSON object')
+                    self.server.closing=True;self.server.inventory.stop()
                     self.response(200,{'stopping':True})
-                    threading.Thread(target=self.server.shutdown,daemon=True).start()
-                else:
-                    self.fail(404,'No such Books Arranger control')
-        except (ValueError,TypeError,UnicodeError,json.JSONDecodeError) as error:
+                    threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
+                if path in merge_routes:
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume'} and self.server.scan_active():
+                        self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
+                    self.server.merge_admissions+=1;admitted=True
+                elif path!='/api/review':
+                    self.fail(404,'No such Books Arranger control');return
+            # Slow source/provider/cover operations never hold the global control lock.
+            if path in merge_routes: self.merge_request(path,data)
+            else: self.save_review(data)
+        except (ValueError,TypeError,UnicodeError,json.JSONDecodeError,RecursionError) as error:
             self.fail(400,str(error))
         except Exception:
-            self.fail(500,'Local control failed; source files remain untouched')
+            self.fail(500,'Local control failed; existing source files remain untouched')
+        finally:
+            if admitted:
+                with self.server.control_condition:
+                    self.server.merge_admissions-=1
+                    self.server.control_condition.notify_all()
 
     def save_review(self,data):
         if set(data) != {'library','path','size','modified','review'}:
@@ -288,7 +435,7 @@ def main():
         def stop(_signal=None,_frame=None):
             inventory.stop()
             server.closing = True
-            threading.Thread(target=server.shutdown,daemon=True).start()
+            threading.Thread(target=server.finish_shutdown,daemon=True).start()
         signal.signal(signal.SIGINT,stop)
         if hasattr(signal,'SIGTERM'):
             signal.signal(signal.SIGTERM,stop)

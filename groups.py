@@ -47,7 +47,7 @@ def member(row):
       'duration':duration,'order_evidence':evidence,'order_conflict':conflict}
 
 def build(rows):
-    audio=[row for row in rows if row['kind']=='audiobook']
+    audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     companions=[row for row in rows if row['kind']=='companion']
     batches={}
     for row in audio:
@@ -57,7 +57,10 @@ def build(rows):
         album=str(tags.get('album') or '').strip()
         # Disc siblings may share a candidate only when an explicit album clue agrees.
         disc_folder=re.fullmatch(r'(?:cd|disc|disk|диск)[ _.-]*(\d+)',parent.name,re.I)
-        if disc_folder and album:
+        if Path(row['path']).suffix.lower()=='.m4b':
+            scope=str(Path(row['path']))+'\x1fSingle audiobook file'
+            grouping='Existing single audiobook file; it is not a chapter merge candidate'
+        elif disc_folder and album:
             scope=str(parent.parent)+'\x1f'+normalized(album)
             if item['disc'] is None:
                 item['disc']=int(disc_folder[1]);item['source_disc']='Folder '+disc_folder[1]

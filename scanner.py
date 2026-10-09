@@ -170,6 +170,9 @@ class Inventory:
             connection.close()
 
     def _directory(self, connection, label, root, generation, path):
+        owned=set()
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
+            owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind='temporary'")}
         with os.scandir(path) as entries:
             for entry in entries:
                 if self.stop_event.is_set():
@@ -178,6 +181,8 @@ class Inventory:
                 if entry.is_symlink() or (hasattr(os.path, 'isjunction') and os.path.isjunction(entry.path)):
                     continue
                 if label == 'Audiobooks' and inside(entry.path, self.roots['Podcasts']):
+                    continue
+                if os.path.normcase(entry.path) in owned:
                     continue
                 directory = entry.is_dir(follow_symlinks=False)
                 if directory or entry.is_file(follow_symlinks=False):
@@ -201,6 +206,18 @@ class Inventory:
         metadata, error = {}, ''
         try:
             metadata = self.reader(path, kind, self.stop_event)
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
+                output=connection.execute("SELECT * FROM owned_artifacts WHERE path=? AND kind='output'",(path,)).fetchone()
+                if output:
+                    import hashlib
+                    digest=hashlib.sha256()
+                    with open(path,'rb') as stream:
+                        for block in iter(lambda:stream.read(1024*1024),b''):
+                            if self.stop_event.is_set():raise ScanStopped()
+                            digest.update(block)
+                    if before.st_size!=output['size'] or digest.hexdigest()!=output['sha256']:
+                        raise ValueError('Created audiobook changed; inspect the recorded output')
+                    metadata['arranger_output']=output['job_id']
         except ScanStopped:
             raise
         except Exception as issue:
