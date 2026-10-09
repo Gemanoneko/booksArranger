@@ -1,0 +1,43 @@
+# Books Arranger: read-only audiobook candidates
+
+Date: 2026-10-09. Next incremental milestone after connection/count and anthology/author-role work. This extends inventory review into candidate audiobook groups. It does not implement online matching, audio conversion, merging, library writes or cleanup.
+
+## Discovering candidates
+
+For Audiobooks only, add a native **View** select beside the current inventory search controls: **Files** and **Book candidates**. Preserve Files as the initial view and keep scan Start/Stop/Resume available in both views. Tooltip: **Show source files or possible audiobook groups.** No candidate view for podcasts or ebooks in this milestone.
+
+Use **Book candidates — N** as the candidate count, separate from **Files cataloged N**. Helper: **Candidates are possible books assembled from source clues. Review their metadata, included tracks and order before a future merge.** Search remains scoped to the selected view with an accurate label. Do not call a candidate a completed book or converted audiobook.
+
+Reuse the inventory table area. Candidate columns: **Title clue**, **Author / reader clues**, **Audio files**, **Review status**. Title can fall back to its source folder name, visibly described as a clue. Counts are member audio files, not chapter totals unless chapter boundaries have been verified. Companion images, text and transcripts are shown as related files in details and excluded from the audio count. Existing M4B files can be single-file candidates and must not appear to need conversion solely because they are candidates.
+
+Candidate membership is evidence, not a verified work identity. Ender's smallest discovery model proposes groups from leaf-folder boundaries plus consistent book-title/album clues and plausible order evidence; joining disc subfolders needs matching book clues. Folder, album, author or series alone must not silently establish identity or authorize a merge. Display **Needs review** until the candidate's work identity is reviewed. Show concrete reasons, such as **Author tag may name the reader**, **Series position conflicts**, **Recording may be incomplete**, **Track order is unclear**, or **Different editions or recordings may be mixed**. Do not infer a missing track merely from a numbering gap when the source does not establish that numbering is complete.
+
+## Inspecting one candidate
+
+Reuse the selected-details panel; heading **Book candidate**. Display source location(s), how files were grouped, source title/album evidence, edition/language clues, author and narrator clues, series-position clues, and detected conflicts. Embedded Artist and Album Artist remain role-unverified clues. If evidence cannot establish an edition or recording, show **Edition / recording unverified** rather than synthesizing an identity.
+
+Show **Included audio files — N** followed by an ordered table: **Proposed order**, **Track title / filename**, **Source disc / track number**, **Duration**, **Order evidence**. Unknown duration is **Unknown**. A row's filename must remain inspectable even when a track title exists. Long paths wrap in details; keep the inventory table's current scroll pattern. The order evidence identifies whether order came from embedded numbers, filenames, or a reviewed sequence. It must not suggest that alphabetic sorting verified chapter order. Mark tied, absent or conflicting positions beside the affected rows; use text, not color alone. Preserve track zero, introductions and repeated chapter titles as source evidence; one file is not automatically one chapter, and these clues do not authorize omission.
+
+Add a separate, initially collapsed **Related companion files — N** section with original paths. Disclosure tooltip: **Inspect covers, transcripts and other companions. These files are not merged as audio.** Useful companions stay preserved; nothing is deleted or included as audio. The ordered member list stays visible because it is the evidence needed for approval.
+
+## Review and approval
+
+Reuse existing canonical title, original-work language, author-folder, author-for-Artist, narrator-for-comments, series/number and anthology fields at candidate scope. Apply the confirmed anthology routing precedence. Author and reader remain separate, and existing comments are preserved in the future-tag preview. A saved file review is evidence for a candidate, not automatic approval of every other file.
+
+Separate saving draft review metadata from approval. Retain **Save preview metadata** for draft edits. Add **Approve candidate metadata**, tooltip **Confirm this candidate's reviewed title, author, language and series metadata. Source files stay unchanged.** Incomplete identity fields or unresolved identity/edition/recording conflicts disable approval with a concise adjacent reason that states the required correction. Do not substitute the reader, source Artist or a placeholder author.
+
+Metadata approval does not assert that the recording is complete or ordered correctly. Show track membership, completeness and order as separate review facts; unverified facts remain **Needs review**. The candidate status uses **Metadata approved; tracks need review** when those facts remain unresolved, never bare Approved or Ready to merge. Do not offer a merge button, disabled merge button, progress indicator or conversion setting. Persistent helper below approval: **Metadata approval does not merge files. Merging is not available in this milestone.** Future merge work must require approved metadata plus separately verified membership, recording compatibility, completeness and order.
+
+While a scan is incomplete, label candidate evidence **Based on files scanned so far**. Finishing a directory scan establishes only scanned-scope coverage, not audiobook completeness; pending tasks or read errors keep coverage uncertain. Saved scan progress is independent of grouping review. Changing membership, source identity, size/modified fingerprint, relevant source metadata or reviewed metadata invalidates the affected approval; show **Candidate changed — review required**. New, changed or missing members invalidate both metadata and any recorded order confirmation. Never carry a green approved status over a changed candidate silently. Backend data must carry a persistent candidate UUID, evidence revision and exact member path/fingerprint snapshots so the UI cannot approve a different set of tracks after polling.
+
+The minimum milestone leaves ambiguous membership/order unresolved rather than introduce a complex editor. Show the reason; an identity, edition or recording conflict prevents metadata approval, while an order-only conflict remains separately Needs review even when canonical metadata is approved. Do not imply membership or order has been solved by reviewing a title alone. Manual include/exclude, split/join and reorder controls are outside this spec; adding them requires a bounded follow-up approved by the parent workflow, with explicit labels/help before implementation.
+
+## Layout, semantics and checks
+
+Preserve current theme and form geometry. At 700 CSS pixels, stack review fields when needed and wrap status/helper text. Keep controls in normal document flow, with visible focus, native select/button interaction, and labels/tooltips available on keyboard focus. Use text status in addition to any existing color. Ensure no member-list cell, helper or approval affordance overlaps Save or scan controls; measure rectangles in isolated implementation verification.
+
+Check a numbered MP3 folder, reader-as-Artist evidence, conflicting series positions, mixed title/narrator/edition clues, unknown duration, numbering gaps, a single existing M4B, a partial scan, and candidates changed after approval. Count candidates and audio members separately and report the method. Verify unchanged Files view, podcast/ebook exclusions, restart persistence, and Stop/Resume behavior. Use an isolated fixture/candidate build; no interaction with Sergei's live scan, browser, server or library.
+
+Design basis: recognition over recall by showing grouping and order evidence; error prevention through explicit approval and conflict states; visibility of status through distinct files/candidates and independent review facts. Existing native controls and layout apply Jakob's Law. Reference: `Team/Research/UX_AppBestPractices.md` and studio new-control-tooltip/overlap rules.
+
+This document must be frozen and committed/pushed by Sully before Ender's grouping implementation brief cites it. Judy owns this spec only. No source/UI/catalog/library files changed and no disposable probes, exports or logs were created for the spec.
