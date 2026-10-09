@@ -2,11 +2,11 @@
 
 **Verdict:** GO
 
-Scope of GO: revised pinned candidate scanner logic and source-only prototype publication. Initial candidate: 19/20 checks passed; a Major stale-preview defect was found, fixed by Ender, and independently verified. Revised candidate supplied suite: 10/10 passed; affected independent regressions: 3/3 passed. Native visual/interaction/actual process-exit checks are separately pending a permitted away window; this GO does not clear a user-facing GUI handoff or packaged release.
+Scope of GO: first prototype scanner/preview handoff, including the bounded native checks appended below against committed v0.1.0. Initial candidate: 19/20 checks passed; a Major stale-preview defect was found, fixed by Ender, and independently verified. Revised candidate supplied suite: 10/10 passed; affected independent regressions: 3/3 passed. Native Start/Stop/Resume and active-scan close with the review dialog open were subsequently verified. This is not a packaged release or Apple compatibility clearance.
 
 ## Candidate and method
 
-Version: unset; initial version assignment belongs to Sully. This is a pre-commit pinned snapshot, not a release clearance. Ender explicitly froze eight files; Futaba copied them into gitignored `scratch/qa-2026-10-09/candidate` and independently matched all SHA-256 hashes before testing. No live shared-tree tests, installs, source-library writes, playback, conversion, moves, deletion, or visible windows. Prototype qa-handoff scripted gate is not applicable.
+Initial version was unset; Sully subsequently assigned v0.1.0 and published the tested runtime sources as commit `54054e9ed68bc1f8535ea12ad750e3e677a6b730`. The initial fixture pass used a pre-commit pinned snapshot. Ender explicitly froze eight files; Futaba copied them into gitignored `scratch/qa-2026-10-09/candidate` and independently matched all SHA-256 hashes before testing. No live shared-tree tests, installs, source-library writes, playback, conversion, moves, or deletion. That initial pass opened no visible windows; later native checks were separately authorized as documented below. Prototype qa-handoff scripted gate is not applicable.
 
 | Candidate file | SHA-256 |
 | --- | --- |
@@ -50,7 +50,7 @@ Initial supplied suite: `python -m unittest discover -s tests -v`, run from the 
 
 **Evidence:** deterministic failure in `test_changed_during_read_cannot_keep_stale_reviewed_preview` in the independent scratch suite. Sent immediately to Jane and Ender. No QA source-code fix performed.
 
-**Regression:** Ender's revised scanner pin `0c6a70b...` passes the exact original failed case, plus adjacent error-recovery/incremental checks. The row now clears its review, has a blank destination and Read error, and requires fresh review after a successful stable scan. Initial failed scanner pin retained: `baae9124223391db1d5af9411aae5f5739ddc0867edfdb863b7b3dfee466a8de`. Initial supplied tests pin retained: `0150f1ddba4f4136ff440417fb2677b3125d77bdaa3725dee1b37e87436553a1`. Commit mapping is pending Sully's source publication; no fix commit is invented for an uncommitted pin.
+**Regression:** Ender's revised scanner pin `0c6a70b...` passes the exact original failed case, plus adjacent error-recovery/incremental checks. The row now clears its review, has a blank destination and Read error, and requires fresh review after a successful stable scan. Initial failed scanner pin retained: `baae9124223391db1d5af9411aae5f5739ddc0867edfdb863b7b3dfee466a8de`. Initial supplied tests pin retained: `0150f1ddba4f4136ff440417fb2677b3125d77bdaa3725dee1b37e87436553a1`. The verified fix is included in published first-source commit `54054e9ed68bc1f8535ea12ad750e3e677a6b730`, v0.1.0.
 
 ### BA-QA-02 — Minor — deferred to Daily Use polish
 
@@ -71,9 +71,30 @@ Ender's separate bounded real-root pilot (reported evidence, not Futaba's indepe
 
 ## Pending checks and limits
 
-- Native visible main screen and canonical-review dialog: rendered screenshot/layout, physical click behavior, and closing from each screen followed by actual process exit. No permitted away window was supplied. Standard Tk creation loads a native root before a later withdraw; no existing supported guaranteed offscreen rendering route was found. No native window was opened to gamble on invisibility.
+- Initial native checks were pending; the authorized native pass below clears main/review captured layout, Start/Stop/Resume, and actual process exit with an active scan and review open. Native field editing/save, further display sizes/scales, and separate dialog-only close are not claimed.
 - Large illustrated FB2 metadata; full-library grouping, book/chapter order, authoritative metadata lookup, conversion, cleanup, library arranging, Apple sync/search behavior, and stronger integrity checking are later milestones.
 - Stop is cooperative; network enumeration/stat reads may have to return before it takes effect. No performance or worst-case shutdown-duration claim is made.
-- Initial version and publication are Sully's work; this report names exact source hashes until a commit exists.
+- v0.1.0 and source publication were handled by Sully. No runtime source changed for the native pass.
+
+## Authorized native pass — committed v0.1.0
+
+Jane relayed the user's response **"Yes, you can check"** to the explicit question asking whether he was away from the PC for five minutes. Authorized window: **2026-10-09 14:42:38–14:47:38 UTC**, corresponding to **17:42:38–17:47:38 Asia/Jerusalem**.
+
+Computer Use skill, its guidance and confirmation policies were read; the supported `@oai/sky` API through node_repl performed all native UI actions. Only Books Arranger windows were targeted. No other app, system setting, library source, audio playback, or desktop sleep was touched. Roots and catalog were isolated under gitignored `scratch/qa-2026-10-09/native`; 1,000 short valid silent WAV fixtures ensured enough scan work to stop/resume. The app never played those files.
+
+Native checks completed during the window:
+
+1. Main app opened with no automatic scan; visible Start/Stop/Resume controls and empty inventory.
+2. Native Start click began scanning and populated the table. Status advanced to 80 records with 920 pending and zero read errors.
+3. Native Stop click settled at **129 records / 871 pending / zero errors**. Resume became enabled and Start remained disabled.
+4. Native Resume click advanced from saved 129 to **193**, then **394** records, with zero errors; completed progress was retained.
+5. Selecting a row populated source evidence; clicking Review opened the canonical metadata dialog with language, title, author, series, number, genre, topic, and multi-author controls. Screenshot reviewed; field editing/save was not exercised natively.
+6. Clicking main-window X while scanning and with the review dialog open naturally ended owned execution session **99144**, **exit code 0**, verified at **14:47:15 UTC**. No forced kill produced this shutdown result.
+
+Evidence captures: `scratch/qa-2026-10-09/native/main.png`, `stopped.png`, `resumed.png`, and `review.png`. Jane independently viewed main/resumed/review and accepted readability and absence of apparent control overlap/clipping in these specific captures only. This is not a global layout guarantee.
+
+**Timing deviation:** a late restart was attempted to inspect persistence. It opened owned session **40914** before the deadline, but cleanup finished **14:47:55 UTC**, **17 seconds after the hard end**. After the deadline the only UI action was closing that owned window with Alt+F4; execution ended naturally with **code 0**. No acceptance credit is assigned to this late cleanup, and no further UI actions or launches were performed. The restart should not have been attempted with so little window remaining.
+
+After cleanup, a read-only query of the isolated catalog found **state stopped / checked 743 / errors 0 / 743 file records**, confirming final native progress remained durable. `reopened.png` preserves the already captured restart state; saving the existing pixels after cleanup involved no new desktop capture or input. Jane subsequently inspected that preserved image and confirmed **stopped / 743 files / 257 pending / zero errors / enabled Resume**. The exact screenshot capture timestamp was not recorded, so no finer time claim is made; no physical Resume click after reopening is claimed. The two earlier hidden Start-Process attempts returned no exposed window and no surviving owned process; direct exec session launch supplied the actual working native app. A denied CIM process query provided no evidence; native session completion supplies the actual exit proof.
 
 Pattern alerts: none.
