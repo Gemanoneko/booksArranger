@@ -56,6 +56,17 @@ class MergeHTTPTests(unittest.TestCase):
 
     def identity(self):return {'library':'Audiobooks','id':ID,'revision':1}
 
+    def test_recovery_delete_scope_token_origin_and_scan_admission(self):
+        self.merge.delete_recovery=Mock(return_value={'started':True})
+        body={'job_id':ID,'token':'a'*64,'count':2,'bytes':4096}
+        route='/api/audiobook/recovery/delete'
+        self.assertEqual(self.call(route,body,token=False)[0],403)
+        for bad in (dict(body,path='C:/foreign'),dict(body,count=True),dict(body,token='invalid')):self.assertEqual(self.call(route,bad)[0],400)
+        h=self.handler(route,body);h.headers['Origin']='https://untrusted.example';h.do_POST();self.assertEqual(h.result[0],403)
+        self.assertEqual(self.call(route,body)[0],202);self.merge.delete_recovery.assert_called_once_with(ID,'a'*64,2,4096)
+        self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        self.assertEqual(self.call(route,body)[0],409)
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)

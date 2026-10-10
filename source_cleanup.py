@@ -30,6 +30,8 @@ def setup(db):
     db.execute('CREATE TABLE IF NOT EXISTS source_cleanup(id TEXT PRIMARY KEY,job_id TEXT UNIQUE,intent TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS cleanup_members(cleanup_id TEXT,path TEXT,backup TEXT,facts TEXT,state TEXT,PRIMARY KEY(cleanup_id,path))')
     if 'restore_intent' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN restore_intent TEXT NOT NULL DEFAULT ''")
+    if 'backup_facts' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN backup_facts TEXT NOT NULL DEFAULT ''")
+    db.execute('CREATE TABLE IF NOT EXISTS recovery_completion(cleanup_id TEXT PRIMARY KEY,job_id TEXT UNIQUE,completed_at TEXT NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS source_retirements(root TEXT,path TEXT,cleanup_id TEXT,job_id TEXT,source_hash TEXT,size INTEGER,modified TEXT,state TEXT,PRIMARY KEY(root,path,cleanup_id))')
 
 def single_stream(path):
@@ -65,7 +67,9 @@ class CleanupJobs:
     def _rows(self,sql,params=()):
         with connect(self.database) as db:return [dict(r) for r in db.execute(sql,params)]
     def _set(self,id,state,reason=''):
-        with connect(self.database) as db:db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,stamp(),id))
+        with connect(self.database) as db:
+            now=stamp();db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,now,id))
+            if state=='completed':db.execute('INSERT OR IGNORE INTO recovery_completion SELECT id,job_id,? FROM source_cleanup WHERE id=?',(now,id))
     def enroll(self,job,binding,historical=False):
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
         manifest=job['manifest'];output=job['output']
@@ -129,7 +133,19 @@ class CleanupJobs:
             result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
                 'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':current_bytes,
                 'recovery_location':str(self.root/row['id']) if current_bytes else '', 'temporary_cleanup':temporary,
-                'preserved_evidence_count':evidence_count,'restore_available':bool(members) and all(Path(m['backup']).is_file() for m in members) and temporary not in ('checking','removing','completed'),'reason':reason})
+                'preserved_evidence_count':evidence_count,'restore_available':bool(members) and all(Path(m['backup']).is_file() for m in members),'reason':reason})
+        provider=getattr(self,'recovery_status',None)
+        if provider:
+            for item in result:
+                item['recovery']=provider(item['job_id']);recovery=item['recovery']
+                if recovery['state']!='unavailable':item['restore_available']=item['restore_available'] and recovery['state']=='retained'
+                item['restore_available']=item['restore_available'] and all(Path(m['path']).parent.is_dir() for m in self._rows('SELECT path FROM cleanup_members WHERE cleanup_id=?',(item['id'],)))
+                if item['state']=='completed':
+                    if recovery['state']=='retained':item['status']='Originals removed; recovery copies kept until '+recovery['expires_at']
+                    elif recovery['state']=='deleting':item['status']='Originals removed; deleting recovery copies'
+                    elif recovery['state']=='needs_attention':item['status']='Originals removed; recovery cleanup needs attention: '+recovery['reason']
+                    elif recovery['state']=='deleted':item['status']='Originals removed; recovery copies deleted'
+                item['recovery_bytes']=recovery['bytes'];item['recovery_location']=recovery['location'] if recovery['count'] else ''
         return result[0] if job_id and result else (None if job_id else result)
     def resume(self,selected=None,follow_audio=True):
         with self.lock:
@@ -209,7 +225,7 @@ class CleanupJobs:
                 backup_handle.restore_metadata(facts['modified'],facts['attributes'])
                 backup_handle.flush() # Also required for reused backup_pending copies, after timestamp updates.
                 if backup_handle.facts()['size']!=source['size'] or backup_handle.sha256()!=source['sha256']:raise BoundaryError('Recovery copy failed full byte verification; originals retained')
-                with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(id,str(path)))
+                with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified',backup_facts=? WHERE cleanup_id=? AND path=?",(packed(backup_handle.facts()),id,str(path)))
                 held.append((source,original,facts))
             # All recovery copies are durable and protected BEFORE the first dispose.
             self._set(id,'removing')

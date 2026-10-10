@@ -52,6 +52,10 @@ class MergeService:
         self.cleanup.after_drain=lambda:self.jobs.resume()
         from storage_cleanup import StorageCleanup
         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard)
+        from recovery_retention import RecoveryRetention
+        self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
+        self.cleanup.recovery_status=self.recovery_status
+        self._retention_stop=threading.Event();self._retention_wake=threading.Event();self._retention_thread=None;self._manual_recovery=None
         self.cleanup.on_completed=self._prune_completed
         self.reviews.set_jobs(self)
         for job in self.jobs.status()['jobs']:
@@ -229,7 +233,58 @@ class MergeService:
         if self.jobs._stop.is_set():
             raise InterruptedError('Temporary cleanup interrupted; remaining copies retained')
 
+    def _retention_guard(self):
+        self._no_scan()
+        if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
+
+    def _recovery_idle(self):
+        self._no_scan()
+        if self._retention_stop.is_set():raise ValueError('Recovery cleanup is closing')
+        if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for audiobook work to become idle')
+        if any(j['state'] in ('pending','running') for j in self.jobs.status()['jobs']):raise ValueError('Resolve queued audiobook work before deleting recovery copies')
+        if self.cleanup.current or self._post_current or any(c['state'] in ('waiting','checking','removing','pausing','paused') for c in self.cleanup._rows('SELECT state FROM source_cleanup')):raise ValueError('Wait for source cleanup to finish')
+
+    def recovery_status(self,job_id):
+        value=self.recovery.status(job_id)
+        try:self._recovery_idle()
+        except ValueError as error:value=value|{'eligible':False,'reason':str(error)}
+        if self._manual_recovery:value=value|{'eligible':False,'reason':'Recovery deletion is queued'}
+        return value
+
+    @operation
+    def delete_recovery(self,job_id,token,count,bytes):
+        self._recovery_idle()
+        if self._manual_recovery:raise ValueError('Recovery deletion is already queued')
+        status=self.recovery.status(job_id)
+        if not status['eligible']:raise ValueError(status['reason'] or 'No eligible recovery copies remain')
+        confirmation={'token':token,'count':count,'bytes':bytes}
+        if any(status[k]!=confirmation[k] for k in confirmation):raise ValueError('Recovery copies changed. Review the updated details and try again.')
+        self._manual_recovery=(job_id,confirmation);self._retention_wake.set()
+        return {'started':True,'job_id':job_id}
+
+    def start_retention(self,admission):
+        if self._retention_thread:return
+        def work():
+            while not self._retention_stop.is_set():
+                try:
+                    with admission():
+                        with self.operation_lock:
+                            self._recovery_idle()
+                            manual=self._manual_recovery
+                            selected=[manual[0]] if manual else self.recovery.due()
+                            for id in selected:
+                                self._recovery_idle();self._post_current=(id,'temporary')
+                                try:self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
+                                except InterruptedError:pass # Keep the durable partial purge resumable at startup.
+                                except Exception as error:self.recovery._set(id,'needs_attention',str(error)) # Preserve failed/stale sets and report their reason.
+                                finally:self._post_current=None
+                            if manual:self._manual_recovery=None
+                except ValueError:pass # Busy/closing admission defers; never purges while scanning.
+                self._retention_wake.wait(60);self._retention_wake.clear()
+        self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
+
     def _prune_completed(self,job_id):
+        self.recovery.sync()
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
         prior=next((r for r in self.storage_cleanup.status() if r['job_id']==job_id),None)
@@ -339,6 +394,10 @@ class MergeService:
         except (ValueError,OSError,KeyError):return False
 
     def close(self):
+        self._retention_stop.set();self._retention_wake.set()
+        if self._retention_thread:
+            self._retention_thread.join(30)
+            if self._retention_thread.is_alive():raise TimeoutError('Recovery cleanup is reaching its safe file checkpoint')
         self.jobs.close()
         self.cleanup.close()
 
@@ -424,7 +483,7 @@ class MergeService:
                 output=completed['output'];cover=completed['manifest']['cover']
                 cleanup=self.cleanup.status(completed['job_id']);cleanup_facts=[]
                 if cleanup:
-                    cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Temporary recovery files were removed after successful cleanup. Original tracks cannot be restored from them.' if cleanup['temporary_cleanup']=='completed' else 'Remaining temporary recovery copies can restore original tracks. Existing files are never overwritten.' if cleanup['restore_available'] else 'Temporary recovery files are unavailable; see cleanup status.')]]
+                    cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Temporary recovery files were removed after successful cleanup. Original tracks cannot be restored from them.' if cleanup.get('recovery',{}).get('state')=='deleted' else 'Remaining temporary recovery copies can restore original tracks. Existing files are never overwritten.' if cleanup['restore_available'] else 'Temporary recovery files are unavailable; see cleanup status.')]]
                 sections.append({'kind':'created','heading':'Created audiobook metadata','status':'Output checks passed; Apple Books sync not checked','path':output['final_path'],
                     'facts':self._output_facts(output['validation']['tags'])+cleanup_facts,
                     'cover':{**cover,'label':'Created audiobook cover','status':'Validated attached cover'},'raw_tags':output['validation']['tags'],'member_values':[]})

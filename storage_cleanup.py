@@ -63,8 +63,8 @@ class StorageCleanup:
         return m, out
 
     @contextlib.contextmanager
-    def protected_output(self, job_id):
-        self.guard()
+    def protected_output(self, job_id, guard=None):
+        (guard or self.guard)()
         m, out = self._job(job_id)
         root = ordinary(m['root']); final = ordinary(out['final_path'])
         if final != ordinary(m['destination']) or not final.is_relative_to(root) or final.suffix.lower() != '.m4b':
@@ -131,9 +131,9 @@ class StorageCleanup:
         with connect(self.database) as db:
             db.execute('UPDATE storage_cleanup_files SET state=?,updated=? WHERE path=?', (state, stamp(), str(path)))
 
-    def _dispose(self, prepared):
+    def _dispose(self, prepared, guard=None):
         for path, handle, ancestry in prepared:
-            self.guard(); ancestry.revalidate()
+            (guard or self.guard)(); ancestry.revalidate()
             self._file_state(path, 'removal_intended')
             handle.dispose()
             self._file_state(path, 'disposition_set')
@@ -162,7 +162,7 @@ class StorageCleanup:
                 retirement = next((r for r in retired if r['path'] == s['path']), None)
                 if not member or not retirement or member['state'] != 'removed' or retirement['state'] != 'removed' or retirement['job_id'] != job_id or retirement['source_hash'] != s['sha256'] or retirement['size'] != s['size'] or str(retirement['modified']) != str(s['modified']):
                     raise BoundaryError('Original retirement correspondence changed')
-                stack.enter_context(DirectoryBoundary(manifest['root'], Path(s['path']).parent))
+                stack.enter_context(self._folder_boundary(job_id,manifest['root'],Path(s['path']).parent))
                 try:
                     Path(s['path']).stat()
                 except FileNotFoundError:
@@ -240,7 +240,7 @@ class StorageCleanup:
                     targets.append((p, 'staging', (r['sha256'], r['size'])))
         return targets
 
-    def run(self, job_id):
+    def run(self, job_id, include_recovery=False):
         output_hash = ''
         try:
             with self.protected_output(job_id) as (manifest, output):
@@ -252,7 +252,7 @@ class StorageCleanup:
                 with contextlib.ExitStack() as stack:
                     cleanup, members = self._source_safety(stack, job_id, manifest, output)
                     targets = self._staging(stack, job_id, manifest, output)
-                    if cleanup:
+                    if cleanup and include_recovery:
                         recovery_dir=self.recovery_root/cleanup['id']
                         stack.enter_context(DirectoryBoundary(self.recovery_root.anchor,recovery_dir))
                         expected_names={Path(r['backup']).name for r in members}

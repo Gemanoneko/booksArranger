@@ -128,7 +128,7 @@ class SourceFolderTests(unittest.TestCase):
         self.assertEqual(status['state'],'unsupported');self.assertEqual(status['removed'],0);self.assertEqual(status['unsupported'],1);self.assertIn('named data streams',status['reason'])
         self.assertTrue(self.folder.exists());self.assertTrue((self.library/'Author').exists());self.assertTrue(self.library.exists());self.assertIsNone(self.receipt(self.library));self.assert_output()
         self.assertEqual(self.storage.status()[0]['state'],'completed');self.assertEqual(self.source.status(self.job_id)['state'],'completed')
-        self.assertEqual(list((self.source.root/self.cleanup_id).iterdir()),[])
+        self.assertEqual(len(list((self.source.root/self.cleanup_id).iterdir())),len(self.sources))
         self.assertEqual(self.storage.run_folders(self.job_id)['state'],'unsupported')
     def test_unknown_volume_capability_refuses_native_disposition(self):
         self.retire()

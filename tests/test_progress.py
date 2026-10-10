@@ -33,7 +33,7 @@ class CompletionTests(unittest.TestCase):
         self.row['members'][0]['modified']='2';self.assertFalse(approved_scope(self.row,self.ctx,member_key))
     def test_whole_book_waits_for_all_required_cleanup(self):
         done={'state':'completed'}
-        self.assertTrue(self.complete(done,done,None));self.assertTrue(self.complete(done,done,{'state':'needs_attention'}))
+        self.assertTrue(self.complete(dict(done,recovery={'state':'retained','expires_at':'future'}),done,None));self.assertTrue(self.complete(done,done,{'state':'needs_attention'}))
         self.assertTrue(self.complete(done,done,{'state':'checking'}))
         self.assertTrue(self.complete(done,done,done))
         self.assertTrue(self.complete(done,done,{'state':'unsupported','reason':'Named stream namespace unsupported; folder retained'}))

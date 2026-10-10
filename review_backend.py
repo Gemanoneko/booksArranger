@@ -163,6 +163,7 @@ class CandidateReviewService:
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
         policy={'enabled':bool(selected and all(Path(m['path']).suffix.lower()=='.mp3' for m in selected)),
+                'recovery_retention_hours':24,
                 'empty_source_folders':bool(selected and all(Path(m['path']).suffix.lower()=='.mp3' for m in selected)),
                 'recovery_root':str(self.jobs.cleanup.root) if self.jobs and hasattr(self.jobs,'cleanup') else ''}
         if job and not allow_existing_job:policy=job.get('cleanup_policy',{'enabled':False,'recovery_root':policy['recovery_root']})

@@ -1,4 +1,5 @@
 """Loopback-only browser interface for inventory, reviewed metadata and audiobook jobs."""
+import contextlib
 import argparse
 import json
 import os
@@ -45,9 +46,20 @@ class BrowserServer(ThreadingHTTPServer):
                 from merge_service import MergeService
                 merge_factory = MergeService
             self.merge = merge_factory(inventory, Path(inventory.database).parent / 'merge-cache')
+            if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
         except BaseException:
             super().server_close()
             raise
+
+    @contextlib.contextmanager
+    def recovery_admission(self):
+        with self.control_condition:
+            if self.closing or self.scan_active() or self.merge_admissions:raise ValueError('App is busy or closing; recovery deletion waits')
+            self.merge_admissions+=1
+        try:yield
+        finally:
+            with self.control_condition:
+                self.merge_admissions-=1;self.control_condition.notify_all()
 
     def server_close(self):
         if self.merge is not None:
@@ -287,6 +299,13 @@ class Handler(BaseHTTPRequestHandler):
             if data: raise ValueError('Audiobook job controls require an empty object')
             self.response(200,self.server.merge.pause() if path.endswith('/pause') else self.server.merge.resume())
             return
+        if path=='/api/audiobook/recovery/delete':
+            if set(data)!={'job_id','token','count','bytes'}:raise ValueError('Recovery deletion requires the displayed book and recovery scope')
+            job_id=data['job_id']
+            if not isinstance(job_id,str) or str(uuid.UUID(job_id))!=job_id:raise ValueError('Invalid audiobook identity')
+            if not isinstance(data['token'],str) or len(data['token'])!=64 or any(c not in '0123456789abcdef' for c in data['token']):raise ValueError('Invalid recovery scope token')
+            if type(data['count']) is not int or not 0<data['count']<=10000 or type(data['bytes']) is not int or not 0<=data['bytes']<=9223372036854775807:raise ValueError('Invalid recovery scope count or bytes')
+            self.response(202,self.server.merge.delete_recovery(job_id,data['token'],data['count'],data['bytes']));return
         if path in {'/api/audiobook/cleanup','/api/audiobook/restore'}:
             self.shape(data,{'job_id'})
             job_id=self.uuid_value(data['job_id'])
@@ -350,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore'}
+            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'Server is shutting down');return
@@ -373,7 +392,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':

@@ -79,5 +79,11 @@
     </section>
     <footer>Stop scanning saves pending discovery. Audiobook jobs have separate pause and resume controls. A slow network read may need to finish before stopping. Closing this tab leaves the local server running; Stop server saves pending work and stops only owned operations safely.</footer>
   </main>
+  <dialog id="recovery-dialog" aria-labelledby="recovery-dialog-title" aria-describedby="recovery-dialog-body">
+    <h2 id="recovery-dialog-title">Delete recovery copies?</h2>
+    <p id="recovery-dialog-book"></p><p id="recovery-dialog-size"></p><p id="recovery-dialog-location" class="path"></p>
+    <p id="recovery-dialog-body">This permanently deletes these backups. You will no longer be able to restore these original tracks from the app. Your finished audiobook will stay in place.</p>
+    <div class="toolbar"><button id="recovery-cancel" class="quiet" type="button" autofocus>Cancel</button><button id="recovery-confirm" class="quiet" type="button">Delete recovery copies</button></div>
+  </dialog>
 </body>
 </html>
