@@ -1,3 +1,4 @@
+from chapter_plan import prepare as prepare_chapters, names as chapter_names, available as chapters_available, default as chapters_default
 """Revision-bound candidate review. Source audio is opened read-only."""
 import copy
 import datetime
@@ -130,6 +131,7 @@ class CandidateReviewService:
         if not track_ok:reasons.append('Review the exact source files and playback order')
         reasons.extend(row.get('conflicts',[]))
         if not included:reasons.append('Include at least one source audio file')
+        prepare_chapters(row['members'])
         selected=[m for m in row['members'] if m['member_key'] in included]
         albums={str({k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
         if len(row['members'])>1 and (len(albums)!=1 or not next(iter(albums),'').strip()):reasons.append('Establish one common book source context; loose files cannot establish recording membership')
@@ -152,9 +154,10 @@ class CandidateReviewService:
                    review_context={k:ctx.get(k,False if k in ('source_coverage_confirmed','order_confirmed','chapters') else '') for k in ('manual_note','proposal_id','cover_id','metadata_actor','metadata_utc','source_coverage_confirmed','order_confirmed','track_actor','track_utc','chapters')},
                    cover_choices=ctx.get('cover_choices',[]),selected_cover=cover,track_order=order,included=included,
                    creation={'status':status,'can_create':not reasons,'reasons':list(dict.fromkeys(reasons)),'destination':destination,'format':'M4B audiobook',
-                             'duration_seconds':duration,'chapters_available':bool(track_ok and all(m.get('track_title') for m in selected)),
-                             'chapters_description':'Chapters from reviewed tracks' if ctx.get('chapters') and track_ok else 'No chapter markers',
+                             'duration_seconds':duration,'chapters_available':chapters_available(selected),'chapters_default':chapters_default(selected),
+                             'chapters_description':('Chapter markers: '+str(len(selected))+' — one per included source track') if ctx.get('chapters',chapters_default(selected)) else 'Chapter markers: none',
                              'device':'Apple Books sync not checked','recording_completeness':'Recording completeness unknown','job':job})
+        row['review_context']['chapters_choice_saved']='chapters' in ctx
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
         return row
@@ -402,7 +405,7 @@ class CandidateReviewService:
             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
             if (source_coverage_confirmed or order_confirmed) and not evidence_note.strip():raise ValueError('Record the membership and order review basis')
             titles=[m.get('track_title') for m in row['members'] if member_key(m['path']) in included]
-            if chapters and (not titles or not all(titles) or len(set(titles))!=len(titles)):raise ValueError('Chapter boundaries and distinct names require review; omit markers if uncertain')
+            if chapters and not chapters_available([m for m in row['members'] if member_key(m['path']) in included]):raise ValueError('Chapter boundaries unavailable: source durations need checking')
             hashes={}
             if source_coverage_confirmed and order_confirmed:
                 for m in row['members']:
@@ -431,4 +434,4 @@ class CandidateReviewService:
             return {'job_id':str(uuid.uuid4()),'candidate_id':id,'candidate_revision':revision,'sources':sources,'metadata':copy.deepcopy(row['review']),
                     'root':self.inventory.roots[library],'destination':row['creation']['destination'],'profile':PROFILE,'encoding_policy':freeze_policy(sources),'cover':cover,'comments':comments,
                     'evidence':{'metadata_actor':ctx['metadata_actor'],'metadata_utc':ctx['metadata_utc'],'manual_note':ctx['manual_note'],'metadata_fields':ctx.get('metadata_evidence',[]),'track_actor':ctx['track_actor'],'track_utc':ctx['track_utc'],'track_basis':ctx['track_evidence'],'recording_completeness':'unknown'},
-                    'chapters':[members[key]['track_title'] for key in row['track_order'] if key in row['included']] if ctx.get('chapters') else []}
+                    'chapters':chapter_names([members[key] for key in row['track_order'] if key in row['included']]) if ctx.get('chapters') else []}

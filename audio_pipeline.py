@@ -237,13 +237,13 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
             start=round(position*1000);position+=duration;end=round(position*1000)
             chapters.append({'start':start,'end':end,'title':str(name)})
             text+=f'[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={ffmetadata_escape(name)}\n'
-        chapter_file.write_text(text,encoding='utf-8')
+        chapter_file.write_text(text,encoding='utf-8',newline='\n')
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
     else:args+=['-map_chapters','-1']
     args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
     args+=['-f','mp4',str(output)]
-    progress('Creating audio',{'duration':sum(durations),'encoding':encoding})
+    progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
     run_owned(args,stage,stop,max(300,sum(durations)*2))
     progress('Checking output',{})
     validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
@@ -282,7 +282,7 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
         raise ValidationError('Decoded output samples do not match the reviewed source audio')
     return {'profile':manifest.get('profile',LEGACY_PROFILE),'encoding':encoding,'duration':duration,'expected_duration':expected,'duration_tolerance':tolerance,
       'sha256':digest(output,stop),'size':output.stat().st_size,'chapters':chapters,
-      'decoded_duration':actual_samples_duration,'checks':'Output checks passed','device':'Apple Books sync not checked','tags':tags}
+      'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'decoded_duration':actual_samples_duration,'checks':'Output checks passed','device':'Apple Books sync not checked','tags':tags}
 
 def publish(output,manifest,validation,stop,journal,revision_guard,review_lock=None):
     destination=ordinary(manifest['destination']);root=ordinary(manifest['root'])
