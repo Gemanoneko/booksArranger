@@ -1,4 +1,5 @@
 """Join reviewed candidates to the durable, source-preserving media queue."""
+from encoding_policy import LEGACY_PROFILE
 import contextlib
 import copy
 import json
@@ -111,7 +112,7 @@ class MergeService:
         try:
             root=ordinary(record['root']); final=ordinary(record['final_path'])
             if os.path.normcase(str(root)) != os.path.normcase(self.inventory.roots['Audiobooks']):return False
-            if final.suffix.lower()!='.m4b' or record['validation'].get('profile')!=PROFILE:return False
+            if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE}:return False
             with DirectoryBoundary(root,final.parent) as boundary, ProtectedFiles([final]):
                 if record.get('parent_identity')!=[list(i) for i in boundary.identities]:
                     # In-memory records contain tuples, persisted JSON contains lists.

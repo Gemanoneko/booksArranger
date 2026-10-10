@@ -16,7 +16,7 @@ from native_io import DirectoryBoundary, ProtectedFiles, ordinary
 from audio_pipeline import run_owned, INPUT_FORMATS
 from scanner import connect, fresh_stat, inside
 
-PROFILE='aac-160k-stereo-44100-quicktime-v1'
+from encoding_policy import PROFILE, freeze_policy
 TEXT_FIELDS=('title','author','canonical_author','original_language','series','number','genre','topic','narrator')
 MAX_COVER=8*1024*1024
 def utc(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -429,6 +429,6 @@ class CandidateReviewService:
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']
             return {'job_id':str(uuid.uuid4()),'candidate_id':id,'candidate_revision':revision,'sources':sources,'metadata':copy.deepcopy(row['review']),
-                    'root':self.inventory.roots[library],'destination':row['creation']['destination'],'profile':PROFILE,'cover':cover,'comments':comments,
+                    'root':self.inventory.roots[library],'destination':row['creation']['destination'],'profile':PROFILE,'encoding_policy':freeze_policy(sources),'cover':cover,'comments':comments,
                     'evidence':{'metadata_actor':ctx['metadata_actor'],'metadata_utc':ctx['metadata_utc'],'manual_note':ctx['manual_note'],'metadata_fields':ctx.get('metadata_evidence',[]),'track_actor':ctx['track_actor'],'track_utc':ctx['track_utc'],'track_basis':ctx['track_evidence'],'recording_completeness':'unknown'},
                     'chapters':[members[key]['track_title'] for key in row['track_order'] if key in row['included']] if ctx.get('chapters') else []}

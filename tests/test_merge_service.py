@@ -4,6 +4,7 @@ from pathlib import Path
 from scanner import Inventory,connect
 from merge_service import MergeService
 from audio_pipeline import digest
+from encoding_policy import PROFILE
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'merge-tests';AREA.mkdir(parents=True,exist_ok=True)
 PNG=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
@@ -14,8 +15,8 @@ class MergeTests(unittest.TestCase):
         self.audio=self.base/'audio';self.audio.mkdir();folder=self.audio/'Book';folder.mkdir()
         self.sources=[]
         for i in (1,2):
-            path=folder/(str(i)+'.wav')
-            subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.3','-ar','44100','-ac','1',str(path)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            path=folder/(str(i)+'.mp3')
+            subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.3','-ar','44100','-ac','1','-c:a','libmp3lame','-b:a','128k',str(path)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             self.sources.append(path)
         (folder/'cover.png').write_bytes(PNG)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
@@ -41,9 +42,17 @@ class MergeTests(unittest.TestCase):
         return self.service.jobs.status()
 
     def test_review_to_validated_file_and_restart_reuse(self):
-        row=self.ready();self.service.create('Audiobooks',row['id'],row['revision']);status=self.wait()
+        row=self.ready();manifest=self.service.reviews.build_manifest('Audiobooks',row['id'],row['revision'])
+        self.assertEqual(manifest['profile'],PROFILE)
+        self.assertEqual(manifest['encoding_policy']['selection'],'highest_verified_mp3_stream_bitrate')
+        self.assertNotIn('max_bytes',manifest['encoding_policy'])
+        self.service.create('Audiobooks',row['id'],row['revision']);status=self.wait()
         self.assertEqual(status['completed'],1,status)
         output=status['jobs'][0]['output'];self.assertTrue(Path(output['final_path']).exists())
+        self.assertEqual(output['validation']['profile'],PROFILE)
+        self.assertEqual(output['validation']['encoding']['channels'],1)
+        self.assertEqual(output['validation']['encoding']['bitrate'],128000)
+        self.assertEqual(output['validation']['encoding']['sample_rate'],44100)
         self.assertTrue(self.service._output_valid(output));self.assertEqual(output['validation']['tags']['track'],'2')
         self.assertEqual([digest(p) for p in self.sources],self.hashes)
         self.assertEqual(self.service.candidate_status(row['id'])['state'],'Audiobook created')

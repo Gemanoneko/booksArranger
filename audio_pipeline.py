@@ -3,7 +3,7 @@ import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib
 from pathlib import Path
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob
 
-PROFILE='aac-160k-stereo-44100-quicktime-v1'
+from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding
 MAX_IMAGE=8*1024*1024
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
 
@@ -122,7 +122,7 @@ def snapshot_manifest(manifest,stage,stop):
     sources=manifest['sources']
     if not sources:raise ValidationError('No reviewed source files are included')
     root=ordinary(manifest['root'])
-    copies=[];durations=[];compatibility=None
+    copies=[];durations=[];profiles=[];compatibility=None
     total_bytes=sum(item['size'] for item in sources)
     if shutil.disk_usage(stage).free<total_bytes*2+32*1024*1024:
         raise ValidationError('Insufficient private staging space for snapshots and audiobook output')
@@ -136,13 +136,17 @@ def snapshot_manifest(manifest,stage,stop):
         alias=stage/(f'source{index:05}'+source.suffix.lower())
         copy_owned(source,alias,item['sha256'],stop)
         same_source(item,stop)
-        raw=probe(alias,stage,stop)
-        duration,profile=audio_info(raw)
-        if compatibility is not None and compatibility!=profile:
-            raise ValidationError('Included files have incompatible recording/audio stream parameters')
-        compatibility=profile
-        # Decode the immutable snapshot before trusting its estimated container duration.
-        with ProtectedFiles([alias]):duration=decoded_duration(alias,stage,stop,duration)
+        # Read bitrate/profile and PCM duration from the same protected, hash-verified bytes.
+        with ProtectedFiles([alias]):
+            if digest(alias,stop)!=item['sha256']:raise ValidationError('Protected snapshot differs from reviewed source bytes')
+            raw=probe(alias,stage,stop)
+            duration,profile=audio_info(raw)
+            if manifest.get('profile')==LEGACY_PROFILE and compatibility is not None and compatibility!=profile:
+                raise ValidationError('Included files have incompatible recording/audio stream parameters')
+            compatibility=profile
+            stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
+            profiles.append((*profile,stream.get('bit_rate')))
+            duration=decoded_duration(alias,stage,stop,duration)
         durations.append(duration);copies.append(alias.name)
     cover=manifest['cover']
     cover_source=ordinary(cover['path'])
@@ -156,7 +160,7 @@ def snapshot_manifest(manifest,stage,stop):
     image_streams=[s for s in image.get('streams',[]) if s.get('codec_type')=='video']
     if len(image_streams)!=1 or image_streams[0].get('width',0)*image_streams[0].get('height',0)>16000000:
         raise ValidationError('Selected cover dimensions are invalid or too large')
-    return copies,durations,cover_copy
+    return copies,durations,cover_copy,profiles
 
 def create_private(manifest,stage_root,stop,progress=lambda *_:None):
     identity=manifest['job_id']
@@ -179,14 +183,20 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
             if stage.exists():raise BoundaryError('Existing attempt directory is not reused or overwritten')
             with DirectoryBoundary(job,stage,create=True):
                 progress('Checking sources',{})
-                copies,durations,cover=snapshot_manifest(manifest,stage,stop)
+                copies,durations,cover,profiles=snapshot_manifest(manifest,stage,stop)
                 with ProtectedFiles([stage/name for name in copies]+[cover]):
                     for name,item in zip(copies,manifest['sources']):
                         if digest(stage/name,stop)!=item['sha256']:raise ValidationError('Protected snapshot differs from reviewed source bytes')
                     if digest(cover,stop)!=manifest['cover']['sha256']:raise ValidationError('Protected cover differs from reviewed artwork')
-                    return _encode_private(manifest,stage,copies,durations,cover,stop,progress)
+                    if manifest.get('profile')==PROFILE:
+                        if manifest.get('encoding_policy')!=freeze_policy(manifest['sources']):raise ValidationError('Frozen encoding policy changed')
+                        encoding=choose_encoding(profiles)
+                    elif manifest.get('profile')==LEGACY_PROFILE:
+                        encoding={'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
+                    else:raise ValidationError('Unsupported frozen encoding profile')
+                    return _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding)
 
-def _encode_private(manifest,stage,copies,durations,cover,stop,progress):
+def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
     (stage/'inputs.txt').write_text(''.join(f"file '{name}'\n" for name in copies),encoding='utf-8')
@@ -230,21 +240,22 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress):
         chapter_file.write_text(text,encoding='utf-8')
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
     else:args+=['-map_chapters','-1']
-    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a','160k','-ar','44100','-ac','2','-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
+    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
     args+=['-f','mp4',str(output)]
-    progress('Creating audio',{'duration':sum(durations)})
+    progress('Creating audio',{'duration':sum(durations),'encoding':encoding})
     run_owned(args,stage,stop,max(300,sum(durations)*2))
     progress('Checking output',{})
-    validation=validate(output,manifest,durations,chapters,stage,stop)
+    validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
     for item in manifest['sources']:same_source(item,stop)
     if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
     return output,validation
 
-def validate(output,manifest,durations,chapters,stage,stop):
+def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     raw=probe(output,stage,stop)
     duration,profile=audio_info(raw)
-    if profile!=('aac','44100',2):raise ValidationError('Output audio profile is incorrect')
+    encoding=encoding or {'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
+    if profile!=('aac',str(encoding['sample_rate']),encoding['channels']):raise ValidationError('Output audio profile is incorrect')
     expected=sum(durations);tolerance=max(.25,len(durations)*.1)
     if abs(duration-expected)>tolerance:raise ValidationError(f'Output duration differs from reviewed sources: expected{expected:.3f}s, actual{duration:.3f}s, tolerance{tolerance:.3f}s')
     pictures=[s for s in raw.get('streams',[]) if s.get('codec_type')=='video' and s.get('disposition',{}).get('attached_pic')==1]
@@ -269,7 +280,7 @@ def validate(output,manifest,durations,chapters,stage,stop):
     actual_samples_duration=decoded_duration(output,stage,stop,expected)
     if abs(actual_samples_duration-expected)>tolerance:
         raise ValidationError('Decoded output samples do not match the reviewed source audio')
-    return {'profile':PROFILE,'duration':duration,'expected_duration':expected,'duration_tolerance':tolerance,
+    return {'profile':manifest.get('profile',LEGACY_PROFILE),'encoding':encoding,'duration':duration,'expected_duration':expected,'duration_tolerance':tolerance,
       'sha256':digest(output,stop),'size':output.stat().st_size,'chapters':chapters,
       'decoded_duration':actual_samples_duration,'checks':'Output checks passed','device':'Apple Books sync not checked','tags':tags}
 
