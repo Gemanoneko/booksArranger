@@ -57,3 +57,17 @@ Futaba measures actual rectangles for automatic controls, discovery controls, st
 Design basis: NN/g visibility/error prevention and recovery; Hick's Law through one normal-flow action; Jakob's Law/native controls; Fitts's Law/nearby adequately sized controls; WCAG 2.2 AA. See Team/Research/UX_AppBestPractices.md and ProcessRules copy/tooltip/hit-area rules.
 
 Doc-only handoff. No live browser, scan, conversion, deletion, probes, code or Git operations performed. Own verified disposable output: none. Sully must commit/push this exact spec before Ender cites/implements it; Ender must report contradictions rather than ship misleading states. Ender feasibility receipt, 2026-10-10: bounded persisted automatic pass; one discovery pass per explicit Start (resume saved stopped scan first), serial research/approval/queueing; Stop prevents further enrollment and requests existing converter/source-cleanup pause, allowing bounded in-flight fetch/hash/file checkpoint to finish; queued jobs persist, finished outputs remain; restart pauses and waits for explicit Start. This receipt defines the shipped wording above.
+
+## Public-source cooldown wording clarification — 2026-10-10
+
+This narrow clarification supersedes the earlier example **Waiting for [source]; retry at [local time]** and any **Next retry** inspector label for the current automatic public-source controller. No unattended source-retry scheduler exists. The controller saves waiting candidate IDs, lets other eligible research, queued audiobook jobs and cleanup drain, then acknowledges **Paused**. Explicit **Start automatic processing** resumes saved research after its backend cooldown. Confident per-book approval and queue admission remain automatic; no manual review step is required.
+
+Approved exact copy:
+
+- Candidate/inspector cooldown line: **Retry available after [time]; Start to continue**. Use the authoritative backend cooldown time, formatted in local date/time with timezone. This is availability, not a scheduled action.
+- If the inspector retains a separate fact label, replace **Next retry** with **Retry available after** and show that same authoritative time. Put **Start to continue** beside/below it; do not show a duplicate full cooldown sentence.
+- Acknowledged automatic **Paused** source-wait reason: **Waiting for public sources; Start retries saved work after cooldown**.
+
+Keep actual Running/research/conversion/cleanup state while other work drains; an unavailable source alone does not prematurely present the whole pass as Paused or Completed. Waiting candidates remain distinct from confidence-held candidates and stay outside approval/queue counts until their complete checks pass. Missing cooldown telemetry must not invent a time: use **Waiting for public sources; retry time unavailable** and the actual backend Start eligibility. Do not promise automatic retries when the cooldown passes.
+
+No new control, layout, behavior or retention policy. Consumer checks are limited to automatic status/wait-reason rendering, candidate/inspector cooldown text and any copy reproducing **Next retry** or **retry at** for this controller. Sully must commit/push this clarification before Ender implements or cites it. Doc-only; no probes or disposable output.
