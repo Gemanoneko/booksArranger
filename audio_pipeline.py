@@ -4,6 +4,7 @@ from pathlib import Path
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob
 
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding
+from quicktime_chapters import normalize
 MAX_IMAGE=8*1024*1024
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
 
@@ -245,8 +246,14 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
     args+=['-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
     run_owned(args,stage,stop,max(300,sum(durations)*2))
+    chapter_format=None
+    if chapters:
+        compatible=stage/'compatible.m4b'
+        chapter_format=normalize(output,compatible,stop)
+        output=compatible
     progress('Checking output',{})
     validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
+    if chapter_format:validation['chapter_format']=chapter_format
     for item in manifest['sources']:same_source(item,stop)
     if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
     return output,validation

@@ -1,6 +1,6 @@
 import json
 import threading
-import subprocess,shutil
+import subprocess,shutil,uuid
 from pathlib import Path
 from test_merge_service import MergeTests
 from audio_pipeline import digest
@@ -24,9 +24,19 @@ class Repair(MergeTests):
         result=restore(parent,boundary,self.base/'repair',threading.Event(),lambda:True)
         self.assertEqual(len(result['validation']['chapters']),2)
         self.assertEqual(digest(parent['output']['final_path']),original)
-        self.assertTrue(Path(result['output']).name.endswith(' - Chapters.m4b'))
+        self.assertTrue(Path(result['output']).name.endswith(' - Chapters v2.m4b'))
         self.assertEqual(json.loads(Path(result['journal']).read_text().splitlines()[0])['state'],'intent')
         self.assertTrue(recover(result['journal'],self.base/'repair',threading.Event(),lambda:True)['recovered_from_owned_intent'])
+        # The prior v0.4.2 suffix remains recognizable only through its owned intent.
+        old_output=Path(parent['output']['final_path']).with_name(Path(parent['output']['final_path']).stem+' - Chapters.m4b')
+        shutil.copy2(result['output'],old_output)
+        old_id=str(uuid.uuid4());old_dir=self.base/'repair'/old_id;old_dir.mkdir()
+        events=[json.loads(line) for line in Path(result['journal']).read_text(encoding='utf-8').splitlines()]
+        for event in events:
+            event['job_id']=old_id
+            if 'destination' in event['data']:event['data']['destination']=str(old_output)
+        old_journal=old_dir/'corrected-artifact.jsonl';old_journal.write_text(''.join(json.dumps(e)+'\n' for e in events),encoding='utf-8')
+        self.assertEqual(recover(old_journal,self.base/'repair',threading.Event(),lambda:True)['output'],str(old_output))
         with self.assertRaises(FileExistsError):restore(parent,boundary,self.base/'repair',threading.Event(),lambda:True)
         self.assertEqual([digest(p) for p in self.sources],self.hashes)
 

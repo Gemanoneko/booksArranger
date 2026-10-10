@@ -12,6 +12,7 @@ import uuid
 from audio_pipeline import (ValidationError, Paused, copy_owned, digest, probe,
     run_owned, ffmetadata_escape, publish, same_source)
 from native_io import DirectoryBoundary, ProtectedFiles, OwnedProcessJob, ordinary
+from quicktime_chapters import normalize
 
 def streaming_receipt(arguments,stage,stop,lines=False):
     """Aggregate owned stdout without retaining unbounded packet or PCM output."""
@@ -75,7 +76,7 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
     manifest=parent['manifest'];record=parent['output']['validation'];source=ordinary(parent['output']['final_path'])
     if parent.get('state')!='completed' or source!=ordinary(manifest['destination']):raise ValidationError('A verified completed parent audiobook is required')
     if source.suffix.lower()!='.m4b':raise ValidationError('Chapter repair requires the validated M4B parent')
-    destination=source.with_name(source.stem+' - Chapters.m4b')
+    destination=source.with_name(source.stem+' - Chapters v2.m4b')
     sources=manifest['sources'];rows=boundaries['tracks']
     if len(rows)!=len(sources) or not sources:raise ValidationError('Exact boundary proof must cover all reviewed sources')
     durations=[];position=0;chapters=[]
@@ -120,7 +121,10 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
                     run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-n','-threads','2',
                         '-protocol_whitelist','file','-f','mov','-i',str(alias),'-f','ffmetadata','-i',str(chapter_file),
                         '-map','0:a:0','-map','0:v:0','-map_metadata','0','-map_chapters','1','-c','copy',
-                        '-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl',str(output)],stage,stop,600)
+                        '-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl','-f','mp4',str(output)],stage,stop,600)
+                compatible=stage/'compatible.m4b'
+                chapter_format=normalize(output,compatible,stop)
+                output=compatible
                 with ProtectedFiles([output]):
                     after=probe(output,stage,stop);after_presentation=presentation(output,stage,stop)
                     if before_presentation!=after_presentation:raise ValidationError('Audio payload, delay, timestamps or decoded presentation changed during chapter restoration')
@@ -136,7 +140,7 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
                         cover_receipts.append(streaming_receipt([shutil.which('ffmpeg'),'-v','error','-nostdin','-protocol_whitelist','file','-f','mov','-i',str(path),'-map','0:v:0','-c','copy','-f','image2pipe','pipe:1'],stage,stop))
                     if cover_receipts[0]['sha256']!=cover_receipts[1]['sha256'] or cover_receipts[1]['sha256']!=manifest['cover']['sha256']:raise ValidationError('Parent cover bytes changed')
                     validation={'sha256':digest(output,stop),'size':output.stat().st_size,'chapters':chapters,'source_durations':durations,
-                        'presentation':after_presentation,'cover_sha256':cover_receipts[1]['sha256'],'profile':manifest['profile'],
+                        'presentation':after_presentation,'chapter_format':chapter_format,'cover_sha256':cover_receipts[1]['sha256'],'profile':manifest['profile'],
                         'checks':'Audio copied without re-encoding; presentation and chapter checks passed','device':'Corrected chapter navigation not checked on iPhone'}
                     journal('validated',validation)
                 repaired=dict(manifest,job_id=job_id,destination=str(destination),chapters=[c['title'] for c in chapters])
@@ -160,7 +164,8 @@ def recover(journal_path,owned_root,stop,review_guard):
         publishing=[e for e in events if e['state'] in ('publishing','completed')]
         if not publishing:raise ValidationError('No durable publication intent exists; no output was adopted')
         data=intent['data'];destination=ordinary(data['destination']);source=ordinary(data['parent_output'])
-        if destination!=source.with_name(source.stem+' - Chapters.m4b'):raise ValidationError('Recovery destination differs from the parent-derived path')
+        allowed={source.with_name(source.stem+suffix) for suffix in (' - Chapters.m4b',' - Chapters v2.m4b')}
+        if destination not in allowed:raise ValidationError('Recovery destination differs from the parent-derived path')
         validation=publishing[-1]['data']['validation']
         if publishing[-1]['data']['destination']!=str(destination):raise ValidationError('Publication intent differs from the corrected destination')
         if not review_guard():raise ValidationError('Recovery source/review evidence changed')
