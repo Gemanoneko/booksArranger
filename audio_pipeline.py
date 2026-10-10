@@ -39,12 +39,41 @@ def copy_owned(source,destination,expected,stop):
         outgoing.flush();os.fsync(outgoing.fileno())
     if value.hexdigest()!=expected:raise ValidationError('Copied bytes do not match the approved source/output hash')
 
+
+_ARTIFACTS=threading.local()
+@contextlib.contextmanager
+def generated_artifacts(stage):
+    previous=getattr(_ARTIFACTS,'current',None)
+    receipts={};_ARTIFACTS.current=(Path(stage),receipts)
+    try:yield receipts
+    finally:_ARTIFACTS.current=previous
+
+def remember_generated(path,sha256,size):
+    current=getattr(_ARTIFACTS,'current',None)
+    if current and Path(path).parent==current[0]:
+        current[1][Path(path).name]={'sha256':sha256,'size':size}
+
+def producer_bytes(stream,path):
+    # Read the generator's CREATE_NEW descriptor, never reopen a possibly replaced name.
+    stream.flush();os.fsync(stream.fileno());before=os.fstat(stream.fileno());stream.seek(0);raw=stream.read()
+    after=os.fstat(stream.fileno());named=Path(path).stat()
+    key=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns)
+    if key(before)!=key(after) or key(after)!=key(named):raise ValidationError('Generated artifact identity changed')
+    remember_generated(path,hashlib.sha256(raw).hexdigest(),len(raw))
+    return raw
+
+def write_generated(path,text):
+    raw=text.encode('utf-8')
+    with open(path,'xb') as stream:
+        stream.write(raw);stream.flush();os.fsync(stream.fileno())
+        remember_generated(path,hashlib.sha256(raw).hexdigest(),len(raw))
+
 def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024):
     """Only the owned FFmpeg/FFprobe child is canceled; diagnostic output is bounded."""
     directory=Path(directory)
     token=uuid.uuid4().hex
     stdout=directory/(token+'.stdout');stderr=directory/(token+'.stderr')
-    with open(stdout,'xb') as out,open(stderr,'xb') as err:
+    with open(stdout,'x+b') as out,open(stderr,'x+b') as err:
         process=subprocess.Popen(arguments,stdin=subprocess.DEVNULL,stdout=out,stderr=err,
             shell=False,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0)|4)
         process._books_suspended=True
@@ -62,7 +91,7 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024):
                 process.terminate()
                 try:process.wait(timeout=3)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
-    raw=stdout.read_bytes();error=stderr.read_bytes()
+        raw=producer_bytes(out,stdout);error=producer_bytes(err,stderr)
     if len(raw)>max_output or len(error)>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
     if process.returncode:raise ValidationError(error.decode('utf-8','replace')[-2000:] or 'Media operation failed')
     return raw
@@ -88,7 +117,7 @@ def decoded_duration(path,stage,stop,estimated):
     """Count decoded PCM frames; MP3 TLEN/bitrate estimates are not completeness facts."""
     stderr=Path(stage)/(uuid.uuid4().hex+'.decode-stderr')
     state={'bytes':0,'error':None}
-    with open(stderr,'xb') as errors:
+    with open(stderr,'x+b') as errors:
         args=[shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
           '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0','-ar','44100','-ac','2','-c:a','pcm_s16le','-f','s16le','pipe:1']
         process=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=errors,shell=False,
@@ -112,8 +141,9 @@ def decoded_duration(path,stage,stop,estimated):
             thread.join(3)
             process.stdout.close()
         if thread.is_alive():raise ValidationError('Owned decoder output has not finished draining')
+        error_raw=producer_bytes(errors,stderr)
     if state['error'] or process.returncode or state['bytes']%4:
-        raise ValidationError('Full audio decode failed: '+stderr.read_text(encoding='utf-8',errors='replace')[-1000:])
+        raise ValidationError('Full audio decode failed: '+error_raw.decode('utf-8','replace')[-1000:])
     if not state['bytes']:raise ValidationError('Audio decoder produced no samples')
     return state['bytes']/4/44100
 
@@ -183,7 +213,7 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     json.dump({'job_id':identity,'manifest':frozen},stream,ensure_ascii=False)
                     stream.flush();os.fsync(stream.fileno())
             if stage.exists():raise BoundaryError('Existing attempt directory is not reused or overwritten')
-            with DirectoryBoundary(job,stage,create=True):
+            with DirectoryBoundary(job,stage,create=True),generated_artifacts(stage) as generated:
                 progress('Checking sources',{})
                 copies,durations,cover,profiles=snapshot_manifest(manifest,stage,stop)
                 with ProtectedFiles([stage/name for name in copies]+[cover]):
@@ -196,12 +226,14 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     elif manifest.get('profile')==LEGACY_PROFILE:
                         encoding={'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
                     else:raise ValidationError('Unsupported frozen encoding profile')
-                    return _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding)
+                    output,validation=_encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding)
+                    validation['staging_artifacts']={'attempt_id':attempt,'files':generated}
+                    return output,validation
 
 def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
-    (stage/'inputs.txt').write_text(''.join(f"file '{name}'\n" for name in copies),encoding='utf-8')
+    write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
     review=manifest['metadata'];comments=manifest.get('comments','')
     if review.get('series'):
         comments+=('\n' if comments else '')+f"Series: {review['series']}\nSeries number: {review.get('number','')}"
@@ -239,7 +271,7 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
             start=round(position*1000);position+=duration;end=round(position*1000)
             chapters.append({'start':start,'end':end,'title':str(name)})
             text+=f'[CHAPTER]\nTIMEBASE=1/1000\nSTART={start}\nEND={end}\ntitle={ffmetadata_escape(name)}\n'
-        chapter_file.write_text(text,encoding='utf-8',newline='\n')
+        write_generated(chapter_file,text)
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
     else:args+=['-map_chapters','-1']
     args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
@@ -255,7 +287,11 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
         output=compatible
     progress('Checking output',{})
     validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
-    if chapter_format:validation['chapter_format']=chapter_format
+    if chapter_format:
+        validation['chapter_format']=chapter_format
+        remember_generated(stage/'checked.m4b',chapter_format['input_sha256'],chapter_format['old_file_size'])
+        remember_generated(output,validation['sha256'],validation['size'])
+    else:remember_generated(output,validation['sha256'],validation['size'])
     for item in manifest['sources']:same_source(item,stop)
     if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
     return output,validation
@@ -283,6 +319,7 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     picture=Path(stage)/(uuid.uuid4().hex+('.png' if pictures[0].get('codec_name')=='png' else '.jpg'))
     run_owned([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-protocol_whitelist','file','-i',str(output),'-map','0:v:0','-c:v','copy','-frames:v','1',str(picture)],stage,stop,30)
     if digest(picture,stop)!=manifest['cover']['sha256']:raise ValidationError('Attached cover bytes differ from the reviewed artwork')
+    remember_generated(picture,manifest['cover']['sha256'],picture.stat().st_size)
     actual=raw.get('chapters',[])
     if len(actual)!=len(chapters):raise ValidationError('Output chapter count does not match the reviewed optional plan')
     for item,wanted in zip(actual,chapters):

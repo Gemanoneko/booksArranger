@@ -149,7 +149,7 @@ class CandidateReviewService:
         elif self.jobs and hasattr(self.jobs,'candidate_status'):
             job=self.jobs.candidate_status(row['id'])
         if job and not allow_existing_job:reasons.append('Audiobook job already exists; inspect its current status')
-        if row.get('retired_source_count'):reasons.append('Original sources intentionally removed; use the created audiobook or guarded recovery')
+        if row.get('retired_source_count'):reasons.append('Original sources intentionally removed; use the created audiobook')
         status='Ready to create' if not reasons else 'Single audiobook file' if 'Single audiobook file' in reasons else 'Source changed — review required' if row.get('changed') or source_changed else 'Needs metadata review' if not metadata_ok else 'Tracks need review'
         if job:status=job.get('state',status)
         row.update(metadata_approved=metadata_ok,matching=copy.deepcopy(self.matching.get(row['id'],ctx.get('matching',{'state':'idle','proposals':[],'error':''}))),

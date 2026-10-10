@@ -1,6 +1,7 @@
 """Persistent, snapshot-backed retirement of exact selected audiobook sources.
 
-No pathname deletion, background historical enrollment, or recovery-cache purge.
+No pathname deletion or background historical enrollment. Completed copies can
+be discarded by the separate hash-bound storage cleanup after durable success.
 Audio success is separate from cleanup state. Constructors never start work.
 """
 import contextlib
@@ -9,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +18,11 @@ from datetime import datetime, timezone
 from scanner import connect
 from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, ordinary, publish_no_replace
 
+
+def regular_evidence(path):
+    try:facts=Path(path).lstat()
+    except OSError:return False
+    return stat.S_ISREG(facts.st_mode) and not getattr(facts,'st_file_attributes',0)&0x400
 
 def stamp():return datetime.now(timezone.utc).isoformat()
 def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
@@ -50,7 +57,7 @@ class CleanupJobs:
     def __init__(self,database,recovery_root,guard,review_boundary):
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
         self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
-        self.after_drain=None
+        self.after_drain=None;self.on_completed=None
         with DirectoryBoundary(self.root.anchor,self.root,create=True) as boundary:self.root_identity=boundary.identities
         with connect(self.database) as db:
             setup(db)
@@ -99,12 +106,30 @@ class CleanupJobs:
             intent=json.loads(row['intent']);members=self._rows('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))
             removed=[m for m in members if m['state']=='removed'];total=len(intent['manifest']['sources'])
             state='pausing' if self.current==row['id'] and self.stop.is_set() else row['state']
-            texts={'waiting':'Waiting for output checks','checking':'Checking recovery copies','removing':f'Removing originals: {len(removed)} of {total}',
-                'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':'Originals removed; recovery copies retained',
-                'needs_attention':'Source cleanup needs attention: '+row['reason']}
+            storage={}
+            with connect(self.database) as db:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='storage_cleanup_jobs'").fetchone():
+                    stored=db.execute('SELECT * FROM storage_cleanup_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+                    if stored:storage=dict(stored)
+            evidence_count=0
+            with connect(self.database) as db:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='storage_cleanup_preserved'").fetchone():
+                    evidence_count=sum(regular_evidence(r['path']) for r in db.execute('SELECT path FROM storage_cleanup_preserved WHERE job_id=?',(row['job_id'],)))
+            temporary=storage.get('state','pending')
+            success='Originals removed; verified temporary recovery and working copies removed' if temporary=='completed' else 'Originals removed; removing temporary files' if temporary in ('checking','removing') else 'Originals removed; temporary file cleanup pending'
+            reason=row['reason'] or storage.get('reason','')
+            if temporary=='needs_attention':success='Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'
+            current_bytes=0
+            for member in members:
+                try:current_bytes+=Path(member['backup']).stat().st_size
+                except FileNotFoundError:pass
+            texts={'waiting':'Waiting for output checks','checking':'Checking temporary recovery copies','removing':f'Removing originals: {len(removed)} of {total}',
+                'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':success,
+                'needs_attention':'Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'}
             result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
-                'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':sum(json.loads(m['facts'])['size'] for m in members if m['state']!='backup_pending' and Path(m['backup']).exists()),
-                'recovery_location':str(self.root/row['id']),'reason':row['reason']})
+                'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':current_bytes,
+                'recovery_location':str(self.root/row['id']) if current_bytes else '', 'temporary_cleanup':temporary,
+                'preserved_evidence_count':evidence_count,'restore_available':bool(members) and all(Path(m['backup']).is_file() for m in members) and temporary not in ('checking','removing','completed'),'reason':reason})
         return result[0] if job_id and result else (None if job_id else result)
     def resume(self,selected=None,follow_audio=True):
         with self.lock:
@@ -122,7 +147,9 @@ class CleanupJobs:
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
             self.current=row['id']
-            try:self.run(row['id'])
+            try:
+                self.run(row['id'])
+                if self.on_completed and self.status(row['job_id'])['state']=='completed':self.on_completed(row['job_id'])
             except Exception as error:self._set(row['id'],'needs_attention',str(error) or type(error).__name__)
             finally:self.current=None
         if follow_audio and not self.stop.is_set() and self.after_drain:self.after_drain()
@@ -210,6 +237,9 @@ class CleanupJobs:
         db.execute('INSERT OR REPLACE INTO source_retirements VALUES(?,?,?,?,?,?,?,?)',(intent['manifest']['root'],source['path'],intent['id'],intent['job_id'],source['sha256'],source['size'],source['modified'],'removed'))
         db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(intent['manifest']['root'],source['path']))
     def restore(self,id):
+        receipt=next((r for r in self.status() if r['id']==id),None)
+        if receipt and not receipt['restore_available']:
+            raise BoundaryError('Temporary recovery files are unavailable after successful cleanup; original tracks cannot be restored from them')
         """Technical opaque-ID restore; preserve any current destination collision."""
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Pause cleanup before restoring originals')

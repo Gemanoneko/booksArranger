@@ -105,19 +105,19 @@ def normalize(source,destination,stop,sort_title=None,normalize_chapters=True):
             delta=len(measured)-len(original);receipt['tracks']=0;receipt['sort_atoms']=0
             changed=transform(original,delta,receipt=receipt,sort_title=sort_title,normalize_chapters=normalize_chapters)
             if len(changed)!=len(measured):raise ChapterFormatError('Metadata relocation size differs')
-            media=hashlib.sha256()
+            media=hashlib.sha256();input_hash=hashlib.sha256()
             with destination.open('xb') as outgoing:
                 for kind,at,length in top:
                     incoming.seek(at)
-                    if kind==b'moov':outgoing.write(changed);continue
+                    if kind==b'moov':input_hash.update(original);outgoing.write(changed);continue
                     remaining=length
                     while remaining:
                         if stop.is_set():raise InterruptedError('Chapter normalization stopped; originals remain unchanged')
                         block=incoming.read(min(1024*1024,remaining))
                         if not block:raise ChapterFormatError('Media copy ended early')
-                        outgoing.write(block)
+                        input_hash.update(block);outgoing.write(block)
                         if kind==b'mdat':media.update(block)
                         remaining-=len(block)
                 outgoing.flush();os.fsync(outgoing.fileno())
-            receipt.update(metadata_growth=delta,media_atom_sha256=media.hexdigest(),output_size=destination.stat().st_size)
+            receipt.update(input_sha256=input_hash.hexdigest(),metadata_growth=delta,media_atom_sha256=media.hexdigest(),output_size=destination.stat().st_size)
             return receipt

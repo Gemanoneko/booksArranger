@@ -44,6 +44,9 @@ class MergeService:
         self.cleanup.stop=self.jobs._stop
         self.jobs.after_completed=self._after_completed
         self.cleanup.after_drain=lambda:self.jobs.resume()
+        from storage_cleanup import StorageCleanup
+        self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard)
+        self.cleanup.on_completed=self._prune_completed
         self.reviews.set_jobs(self)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
@@ -75,6 +78,9 @@ class MergeService:
             value['state']='Pausing' if (active or alive) and self.cleanup.stop.is_set() else 'Running' if active or alive else 'Paused'
             value['queued']+=len(pending)
         value['failed']+=sum(c['state']=='needs_attention' for c in cleanups)
+        storage_errors=[r for r in self.storage_cleanup.status() if r['state']=='needs_attention']
+        value['failed']+=len(storage_errors)
+        if storage_errors and value['state']=='Completed':value['state']='Needs attention'
         return {key: value[key] for key in ('state','queued','completed','failed')} | {
             'current_title': current['manifest']['metadata'].get('title','') if current else '',
             'stage': active['status'] if active else value['current_stage'] or '', 'cleanup_active':bool(active or pending)}
@@ -87,6 +93,9 @@ class MergeService:
         self._no_scan()
         if self.jobs._thread and self.jobs._thread.is_alive():return self.state()
         if self.cleanup.thread and self.cleanup.thread.is_alive():return self.state()
+        self.jobs._stop.clear()
+        for job in self.jobs.status()['jobs']:
+            if job['state']=='completed':self._prune_completed(job['job_id'])
         pending=self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
         historical=[c['id'] for c in pending if json.loads(c['intent']).get('historical')]
         if historical:self.cleanup.resume(historical,follow_audio=False)
@@ -150,19 +159,33 @@ class MergeService:
         if not receipt:raise ValueError('No recovery enrollment exists for this audiobook')
         self.cleanup.restore(receipt['id']);return self.cleanup.status(job_id)
 
+    def _storage_guard(self):
+        self._no_scan()
+        if self.jobs._stop.is_set():
+            raise InterruptedError('Temporary cleanup interrupted; remaining copies retained')
+
+    def _prune_completed(self,job_id):
+        receipt=self.cleanup.status(job_id)
+        if receipt and receipt['state']!='completed':return
+        prior=next((r for r in self.storage_cleanup.status() if r['job_id']==job_id),None)
+        if prior and prior['state']=='completed':return
+        try:self.storage_cleanup.run(job_id)
+        except Exception:
+            # Durable audio success remains independent; failure is shown in state().
+            pass
+
     def _after_completed(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
-        if not row['manifest'].get('cleanup_policy',{}).get('enabled'):return
-        try:
-            enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
-            self.cleanup.run(id)
-        except Exception as error:
-            if 'id' in locals():self.cleanup._set(id,'needs_attention',str(error))
-            else:
-                # Enrollment failure is visible without inventing removal facts.
-                self._enrollment_attention(row,error)
-        finally:self.cleanup.current=None
+        if row['manifest'].get('cleanup_policy',{}).get('enabled'):
+            try:
+                enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
+                self.cleanup.run(id)
+            except Exception as error:
+                if 'id' in locals():self.cleanup._set(id,'needs_attention',str(error))
+                else:self._enrollment_attention(row,error)
+            finally:self.cleanup.current=None
+        self._prune_completed(job_id)
 
     def candidate_status(self, identity):
         jobs = [j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id'] == identity]
@@ -329,7 +352,7 @@ class MergeService:
                 output=completed['output'];cover=completed['manifest']['cover']
                 cleanup=self.cleanup.status(completed['job_id']);cleanup_facts=[]
                 if cleanup:
-                    cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Recovery copies can restore the original tracks. Existing files are never overwritten.')]]
+                    cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Temporary recovery files were removed after successful cleanup. Original tracks cannot be restored from them.' if cleanup['temporary_cleanup']=='completed' else 'Remaining temporary recovery copies can restore original tracks. Existing files are never overwritten.' if cleanup['restore_available'] else 'Temporary recovery files are unavailable; see cleanup status.')]]
                 sections.append({'kind':'created','heading':'Created audiobook metadata','status':'Output checks passed; Apple Books sync not checked','path':output['final_path'],
                     'facts':self._output_facts(output['validation']['tags'])+cleanup_facts,
                     'cover':{**cover,'label':'Created audiobook cover','status':'Validated attached cover'},'raw_tags':output['validation']['tags'],'member_values':[]})
