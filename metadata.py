@@ -132,6 +132,16 @@ def read_metadata(path, kind, stop):
         result['notes'].append('Title unavailable; filename remains an unverified clue')
     return result
 
+def audiobook_sort_title(review):
+    """Ignore only the leading English word The; keep the displayed title intact."""
+    title = review.get('title') or ''
+    if review.get('original_language') == 'Other':
+        match = re.match(r'^The\s+(\S.*)$', title, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return title
+
+
 def future_audio_tags(metadata, review=None):
     """Preview roles without changing a source tag or treating source artists as authors."""
     review = review or {}
@@ -151,7 +161,7 @@ def future_audio_tags(metadata, review=None):
     appended = bool(narrator_line and narrator_line not in original_comments.splitlines())
     if appended:
         output_comments += ('\n' if output_comments else '') + narrator_line
-    return {'ARTIST':author, 'COMMENTS':output_comments, 'existing_comments':original_comments,
+    return {'ARTIST':author, 'COMMENTS':output_comments, 'SORTTITLE':audiobook_sort_title(review), 'existing_comments':original_comments,
             'comment_fields':comment_fields,'narrator':narrator,'narrator_appended':appended,
             'artist_from_folder':bool(author and not review.get('canonical_author')),
             'status':'Reviewed author identity' if author else 'Needs author verification',

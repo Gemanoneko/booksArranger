@@ -5,6 +5,7 @@ from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinar
 
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding
 from quicktime_chapters import normalize
+from metadata import audiobook_sort_title
 MAX_IMAGE=8*1024*1024
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
 
@@ -247,9 +248,10 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
     run_owned(args,stage,stop,max(300,sum(durations)*2))
     chapter_format=None
-    if chapters:
+    sort_title=audiobook_sort_title(review)
+    if chapters or sort_title!=review['title']:
         compatible=stage/'compatible.m4b'
-        chapter_format=normalize(output,compatible,stop)
+        chapter_format=normalize(output,compatible,stop,sort_title=sort_title if sort_title!=review['title'] else None,normalize_chapters=bool(chapters))
         output=compatible
     progress('Checking output',{})
     validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
@@ -271,6 +273,8 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     tags={k.lower():str(v) for k,v in raw.get('format',{}).get('tags',{}).items()}
     review=manifest['metadata']
     expected_tags=[('title',review['title']),('artist',review['canonical_author']),('album_artist',review['canonical_author']),('media_type','2')]
+    sort_title=audiobook_sort_title(review)
+    if sort_title!=review['title']:expected_tags.append(('sort_name',sort_title))
     if review.get('series'):
         expected_tags += [('grouping',review['series']),('album',' - '.join([review['series'],review.get('number',''),review['title']]))]
         if str(review.get('number','')).isdigit() and 0<int(review['number'])<65536:expected_tags.append(('track',str(int(review['number']))))

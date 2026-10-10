@@ -44,14 +44,21 @@ def handler(trak):
                 if child==b'hdlr':return value[16:20]
     return None
 
-def transform(data,delta=None,chapter=False,receipt=None,depth=0):
+def transform(data,delta=None,chapter=False,receipt=None,depth=0,sort_title=None,normalize_chapters=True):
     if depth>16:raise ChapterFormatError('Movie metadata nesting exceeds its bound')
     output=[]
     for kind,value in boxes(data):
         payload=value[8:]
-        if kind==b'trak':value=box(kind,transform(payload,delta,handler(value)==b'text',receipt,depth+1))
-        elif kind in CONTAINERS:value=box(kind,transform(payload,delta,chapter,receipt,depth+1))
-        elif kind==b'stsd' and chapter:
+        if kind==b'trak':value=box(kind,transform(payload,delta,handler(value)==b'text',receipt,depth+1,sort_title,normalize_chapters))
+        elif kind in CONTAINERS or (kind==b'udta' and sort_title is not None):value=box(kind,transform(payload,delta,chapter,receipt,depth+1,sort_title,normalize_chapters))
+        elif kind==b'meta' and sort_title is not None:
+            if payload[:4]!=b'\0'*4:raise ChapterFormatError('Unsupported metadata full-box flags')
+            value=box(kind,payload[:4]+transform(payload[4:],delta,chapter,receipt,depth+1,sort_title,normalize_chapters))
+        elif kind==b'ilst' and sort_title is not None:
+            entries=boxes(payload)
+            value=box(kind,b''.join(v for k,v in entries if k!=b'sonm')+box(b'sonm',box(b'data',b'\0\0\0\1'+b'\0'*4+sort_title.encode('utf-8'))))
+            receipt['sort_atoms']=receipt.get('sort_atoms',0)+1
+        elif kind==b'stsd' and chapter and normalize_chapters:
             if len(payload)<8 or payload[:8]!=b'\0\0\0\0\0\0\0\1':raise ChapterFormatError('Chapter track must have one sample description')
             entries=boxes(payload[8:])
             if len(entries)!=1 or entries[0][0]!=b'text':raise ChapterFormatError('Chapter sample type is unsupported')
@@ -73,7 +80,7 @@ def transform(data,delta=None,chapter=False,receipt=None,depth=0):
         output.append(value)
     return b''.join(output)
 
-def normalize(source,destination,stop):
+def normalize(source,destination,stop,sort_title=None,normalize_chapters=True):
     source=ordinary(source);destination=ordinary(destination)
     if source.parent!=destination.parent or source==destination:raise ChapterFormatError('Normalization requires a distinct owned same-directory output')
     with DirectoryBoundary(source.parent,source.parent),ProtectedFiles([source]):
@@ -91,10 +98,12 @@ def normalize(source,destination,stop):
             if moov[2]>MAX_MOOV:raise ChapterFormatError('Movie metadata exceeds the normalization bound')
             incoming.seek(moov[1]);original=incoming.read(moov[2])
             receipt={'tracks':0,'chunk_offsets':0,'old_mdat_start':mdat[1]+8,'old_file_size':size}
-            measured=transform(original,receipt=receipt)
-            if receipt['tracks']!=1:raise ChapterFormatError('Exactly one chapter text track is required')
-            delta=len(measured)-len(original);receipt['tracks']=0
-            changed=transform(original,delta,receipt=receipt)
+            if sort_title is not None and (not isinstance(sort_title,str) or not sort_title or len(sort_title.encode('utf-8'))>8000):raise ChapterFormatError('Sort title must be bounded nonempty UTF-8 text')
+            measured=transform(original,receipt=receipt,sort_title=sort_title,normalize_chapters=normalize_chapters)
+            if normalize_chapters and receipt['tracks']!=1:raise ChapterFormatError('Exactly one chapter text track is required')
+            if sort_title is not None and receipt.get('sort_atoms')!=1:raise ChapterFormatError('Exactly one Apple metadata list is required')
+            delta=len(measured)-len(original);receipt['tracks']=0;receipt['sort_atoms']=0
+            changed=transform(original,delta,receipt=receipt,sort_title=sort_title,normalize_chapters=normalize_chapters)
             if len(changed)!=len(measured):raise ChapterFormatError('Metadata relocation size differs')
             media=hashlib.sha256()
             with destination.open('xb') as outgoing:
