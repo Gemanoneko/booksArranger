@@ -34,6 +34,10 @@ class MergeHTTPTests(unittest.TestCase):
         self.merge.inspect=Mock(return_value={'inspector':{'id':ID,'sections':[]}})
         self.merge.open_folder=Mock(return_value={'opened':True})
         self.merge.file_id=Mock(return_value='a'*64)
+        self.merge.pause=self.jobs.pause;self.merge.resume=self.jobs.resume
+        self.merge.enroll_cleanup=Mock(return_value={'cleanup_id':ID})
+        self.merge.start_historical_cleanup=Mock(return_value={'cleanup_id':ID})
+        self.merge.restore_cleanup=Mock(return_value={'state':'needs_attention'})
 
     def tearDown(self): self.temp.cleanup()
 
@@ -68,6 +72,17 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual(self.reviews.tracks.call_args.args[3:5],(['one','two'],['two']))
         self.assertEqual(self.call('/api/audiobook/create',self.identity())[0],202)
         self.assertEqual(self.call('/api/audiobook/queue',{'library':'Audiobooks','candidates':[{'id':ID,'revision':1}]})[0],200)
+
+    def test_cleanup_restore_only_opaque_job_and_current_origin_token(self):
+        for route in ('/api/audiobook/cleanup','/api/audiobook/restore'):
+            self.assertEqual(self.call(route,{'job_id':ID},token=False)[0],403)
+            for body in ({'job_id':'../x'},{'job_id':ID,'path':'Z:/other'},{}):self.assertEqual(self.call(route,body)[0],400)
+            h=self.handler(route,{'job_id':ID});h.headers['Origin']='https://untrusted.example';h.do_POST();self.assertEqual(h.result[0],403)
+        self.assertEqual(self.call('/api/audiobook/cleanup',{'job_id':ID})[0],202)
+        self.merge.start_historical_cleanup.assert_called_once_with(ID)
+        self.jobs.resume.assert_not_called()
+        self.assertEqual(self.call('/api/audiobook/restore',{'job_id':ID})[0],200)
+        self.merge.restore_cleanup.assert_called_once_with(ID)
 
     def test_unknown_fields_invalid_ids_types_duplicates_and_bounds(self):
         for update in ({'id':'../escape'},{'revision':True},{'revision':0},{'library':'Podcasts'},{'command':'ffmpeg'}):

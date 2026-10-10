@@ -54,7 +54,11 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(output['validation']['encoding']['bitrate'],128000)
         self.assertEqual(output['validation']['encoding']['sample_rate'],44100)
         self.assertTrue(self.service._output_valid(output));self.assertEqual(output['validation']['tags']['track'],'2')
-        self.assertEqual([digest(p) for p in self.sources],self.hashes)
+        cleanup=self.service.cleanup.status(status['jobs'][0]['job_id'])
+        self.assertEqual(cleanup['state'],'completed',cleanup)
+        self.assertEqual(cleanup['removed'],len(self.sources))
+        self.assertTrue(all(not p.exists() for p in self.sources))
+        self.assertEqual([digest(Path(cleanup['recovery_location'])/(f'{i:05d}.mp3')) for i in range(len(self.sources))],self.hashes)
         self.assertEqual(self.service.candidate_status(row['id'])['state'],'Audiobook created')
         self.service.close();self.service=MergeService(self.inv,self.base/'cache')
         self.assertEqual(self.service.jobs.status()['completed'],1)
@@ -63,6 +67,9 @@ class MergeTests(unittest.TestCase):
             created=db.execute('SELECT metadata FROM files WHERE path=?',(output['final_path'],)).fetchone()
         self.assertIn('arranger_output',json.loads(created[0]))
         self.assertEqual(self.service.reviews.page()['total'],1)
+        inspected=self.service.inspect('Audiobooks','candidates',row['id'])['inspector']
+        self.assertIn('Recovery location',[f['label'] for f in inspected['sections'][-1]['facts']])
+        self.assertFalse(self.service.reviews.page()['rows'][0]['creation']['can_create'])
 
     def test_changed_review_blocks_frozen_job(self):
         row=self.ready();manifest=self.service.reviews.build_manifest('Audiobooks',row['id'],row['revision'])

@@ -285,8 +285,16 @@ class Handler(BaseHTTPRequestHandler):
             self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
         if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
             if data: raise ValueError('Audiobook job controls require an empty object')
-            jobs=self.server.merge.jobs
-            self.response(200,jobs.pause() if path.endswith('/pause') else jobs.resume())
+            self.response(200,self.server.merge.pause() if path.endswith('/pause') else self.server.merge.resume())
+            return
+        if path in {'/api/audiobook/cleanup','/api/audiobook/restore'}:
+            self.shape(data,{'job_id'})
+            job_id=self.uuid_value(data['job_id'])
+            if path.endswith('/cleanup'):
+                result=self.server.merge.start_historical_cleanup(job_id)
+                self.response(202,result)
+            else:
+                self.response(200,self.server.merge.restore_cleanup(job_id))
             return
         if path=='/api/audiobook/queue':
             self.shape(data,{'library','candidates'})
@@ -342,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume'}
+            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'Server is shutting down');return
@@ -365,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':
@@ -376,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError,TypeError,UnicodeError,json.JSONDecodeError,RecursionError) as error:
             self.fail(400,str(error))
         except Exception:
-            self.fail(500,'Local control failed; existing source files remain untouched')
+            self.fail(500,'Local control failed; inspect saved job and source cleanup status')
         finally:
             if admitted:
                 with self.server.control_condition:

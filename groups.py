@@ -20,6 +20,27 @@ def setup(connection):
     columns=('root','path','size','modified','kind','metadata','error','missing')
     changed=' OR '.join('OLD.'+c+' IS NOT NEW.'+c for c in columns)
     connection.execute('CREATE TRIGGER IF NOT EXISTS book_files_update AFTER UPDATE OF '+','.join(columns)+' ON files WHEN '+changed+' BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_retirements'").fetchone():
+        for operation in ('INSERT','UPDATE','DELETE'):
+            connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_retirements_{operation.lower()} AFTER {operation} ON source_retirements BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
+
+def retired_sources(connection,root):
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_retirements'").fetchone():return {}
+    rows=connection.execute("""SELECT r.* FROM source_retirements r JOIN files f ON f.root=r.root AND f.path=r.path
+        WHERE r.root=? AND r.state='removed' AND r.size=f.size AND r.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0
+        ORDER BY r.cleanup_id""",(root,)).fetchall()
+    return {r['path']:dict(r) for r in rows}
+
+def _preserve_retired_evidence(old,evidence,retired):
+    """Keep the completed group's ordered provenance when active members did not change."""
+    previous=json.loads(old['evidence'])
+    prior={m['path']:m for m in previous['members']}
+    current={m['path']:m for m in evidence['members']}
+    if not (set(prior)&set(retired)) or set(prior)!=set(current):return evidence
+    if any(prior[path]!=current[path] for path in prior if path not in retired):return evidence
+    # Retirement is an external durable fact. Do not bake it into group fingerprint,
+    # replace the original member list, or invalidate an already completed revision.
+    return previous
 
 def normalized(value):
     return ' '.join(str(value or '').casefold().split())
@@ -131,10 +152,12 @@ def sync(connection,root):
     saved=connection.execute('SELECT revision FROM book_group_sync WHERE root=?',(root,)).fetchone()
     if saved and saved[0]==revision:return
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
+    retired=retired_sources(connection,root)
     groups=build(rows)
     for scope,evidence in groups.items():
-        fingerprint=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
+        if old:evidence=_preserve_retired_evidence(old,evidence,retired)
+        fingerprint=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
         if old is None:
             connection.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
                 (str(uuid.uuid4()),root,scope,1,fingerprint,json.dumps(evidence,ensure_ascii=False)))
@@ -143,11 +166,13 @@ def sync(connection,root):
                 (fingerprint,json.dumps(evidence,ensure_ascii=False),old['id']))
     # A formerly indexed group no longer present retains evidence but cannot stay approved.
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
-        if old['scope'] not in groups and old['approved']:
+        former=json.loads(old['evidence'])['members']
+        all_retired=bool(former) and all(m['path'] in retired for m in former)
+        if old['scope'] not in groups and old['approved'] and not all_retired:
             connection.execute('UPDATE book_groups SET approved=0,changed=1,revision=revision+1 WHERE id=?',(old['id'],))
     connection.execute('INSERT OR REPLACE INTO book_group_sync VALUES(?,?)',(root,revision))
 
-def render(row,root,coverage):
+def render(row,root,coverage,retired=None):
     evidence=json.loads(row['evidence'])
     review=json.loads(row['review']) if row['review'] else None
     first=evidence['members'][0]
@@ -158,19 +183,28 @@ def render(row,root,coverage):
     status='Metadata approved; tracks need review' if approved else 'Candidate changed — review required' if row['changed'] else 'Needs review'
     if reasons:approved=False
     for item in evidence['members']:item['metadata'].pop('probe',None)
+    retired=retired or {}
+    for item in evidence['members']:
+        item['intentionally_retired']=item['path'] in retired
+        if item['intentionally_retired']:
+            item['retirement']={key:retired[item['path']][key] for key in ('cleanup_id','job_id','source_hash','state')}
+    retired_count=sum(m['intentionally_retired'] for m in evidence['members'])
     return evidence | {'id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
       'review':review,'metadata_approved':approved,'status':status,'changed':bool(row['changed']),
       'preview':preview,'tag_preview':future_audio_tags(evidence['metadata'],review),
-      'approval_reason':'; '.join(reasons),'can_approve':not reasons,
+      'approval_reason':'; '.join(reasons),'can_approve':not reasons and not retired_count,
+      'retired_source_count':retired_count,'all_sources_retired':retired_count==len(evidence['members']),
+      'active_members':[m for m in evidence['members'] if not m['intentionally_retired']],
       'coverage':'Scanned scope complete; recording completeness unverified' if coverage else 'Based on files scanned so far'}
 
 def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False):
     sync(connection,root)
+    retired=retired_sources(connection,root)
     if status=='all' and not search:
         total=connection.execute('SELECT count(*) FROM book_groups WHERE root=?',(root,)).fetchone()[0]
         rows=connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
-        return {'rows':[render(row,root,coverage) for row in rows],'total':total}
-    values=[render(row,root,coverage) for row in connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope',(root,))]
+        return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
+    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope',(root,))]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),
       'changed':lambda row:row['changed']}
@@ -187,7 +221,7 @@ def save(connection,root,identity,revision,review,approve=False):
       (json.dumps(review,ensure_ascii=False),int(changed),identity))
     fresh=connection.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone()
     if approve:
-        proposed=render(fresh,root,False)
+        proposed=render(fresh,root,False,retired_sources(connection,root))
         if not proposed['can_approve']:raise ValueError(proposed['approval_reason'])
         connection.execute('UPDATE book_groups SET approved=1 WHERE id=?',(identity,))
-    return render(connection.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone(),root,False)
+    return render(connection.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone(),root,False,retired_sources(connection,root))

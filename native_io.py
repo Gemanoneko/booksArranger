@@ -85,7 +85,7 @@ class DirectoryBoundary:
         for handle in reversed(self.handles):kernel.CloseHandle(handle)
         self.handles=[]
 
-def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expected_size=None):
+def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expected_size=None,before_rename=None):
     temporary=ordinary(temporary);destination=ordinary(destination)
     if temporary.parent!=destination.parent or destination.parent!=boundary.parent:
         raise BoundaryError('Publication requires an owned same-directory temporary')
@@ -121,6 +121,7 @@ def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expec
         nt.NtSetInformationFile.argtypes=[wintypes.HANDLE,ctypes.POINTER(StatusBlock),ctypes.c_void_p,wintypes.ULONG,ctypes.c_int];nt.NtSetInformationFile.restype=wintypes.LONG
         nt.RtlNtStatusToDosError.argtypes=[wintypes.LONG];nt.RtlNtStatusToDosError.restype=wintypes.ULONG
         boundary.revalidate()
+        if before_rename:before_rename({'identity':[info.volume,info.index_high,info.index_low],'sha256':hash.hexdigest(),'size':size})
         status=StatusBlock();result=nt.NtSetInformationFile(handle,ctypes.byref(status),ctypes.byref(rename),ctypes.sizeof(rename),10)
         if result<0:
             error=nt.RtlNtStatusToDosError(result)
@@ -145,6 +146,77 @@ class ProtectedFiles:
     def __exit__(self,*_):
         for handle in reversed(self.handles):kernel.CloseHandle(handle)
         self.handles=[]
+
+class VerifiedFile:
+    """Read/hash/dispose one exact ordinary identity; never delete a pathname.
+
+    DELETE access is acquired only by a caller that holds the source ancestry.
+    Denying both WRITE and DELETE prevents replacement until close. Hashing uses
+    this same native handle so no higher-level reopening weakens the identity.
+    """
+    def __init__(self,path,delete=False,writable=False):
+        self.path=ordinary(path);self.delete=delete;self.writable=writable;self.handle=None
+    def __enter__(self):
+        if os.name!='nt':raise BoundaryError('Verified file disposition requires Windows')
+        self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0)|(0x40000000 if self.writable else 0),1,None,3,0x00200000,None)
+        if self.handle==ctypes.c_void_p(-1).value:
+            self.handle=None;raise BoundaryError(f'Cannot protect exact file: {ctypes.WinError(ctypes.get_last_error())}')
+        try:
+            info=FileInfo()
+            if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(info)) or info.attributes&(0x400|0x10):
+                raise BoundaryError('Expected an ordinary non-reparse file')
+            self.info=info
+            return self
+        except BaseException:self.__exit__(None,None,None);raise
+    def facts(self):
+        i=self.info
+        ticks=(i.write.dwHighDateTime<<32)|i.write.dwLowDateTime
+        class FileId(ctypes.Structure):_fields_=[('volume',ctypes.c_ulonglong),('id',ctypes.c_ubyte*16)]
+        kernel.GetFileInformationByHandleEx.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.GetFileInformationByHandleEx.restype=wintypes.BOOL
+        extended=FileId();available=kernel.GetFileInformationByHandleEx(self.handle,18,ctypes.byref(extended),ctypes.sizeof(extended))
+        error=ctypes.get_last_error() if not available else 0
+        if not available and error not in (1,50,87):raise BoundaryError('Cannot verify protected file identity')
+        if not i.volume or not (i.index_high or i.index_low) or available and (not extended.volume or not any(extended.id)):
+            raise BoundaryError('Protected file identity is zero or ambiguous')
+        return {'size':(i.size_high<<32)|i.size_low,'modified':(ticks-116444736000000000)*100,
+            'dev':extended.volume if available else i.volume,'ino':int.from_bytes(bytes(extended.id),'little') if available else (i.index_high<<32)|i.index_low,
+            'identity_method':'FileIdInfo128' if available else 'BY_HANDLE_FILE_INFORMATION64','identity_api_error':error,
+            'identity':[i.volume,i.index_high,i.index_low],'links':i.links,'attributes':i.attributes}
+    def chunks(self):
+        kernel.SetFilePointerEx.argtypes=[wintypes.HANDLE,ctypes.c_longlong,ctypes.c_void_p,wintypes.DWORD]
+        kernel.SetFilePointerEx.restype=wintypes.BOOL
+        kernel.ReadFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p]
+        kernel.ReadFile.restype=wintypes.BOOL
+        if not kernel.SetFilePointerEx(self.handle,0,None,0):raise BoundaryError('Cannot rewind protected file')
+        buffer=ctypes.create_string_buffer(1024*1024);count=wintypes.DWORD()
+        while True:
+            if not kernel.ReadFile(self.handle,buffer,len(buffer),ctypes.byref(count),None):raise BoundaryError('Protected file read failed')
+            if not count.value:break
+            yield buffer.raw[:count.value]
+    def sha256(self):
+        value=hashlib.sha256()
+        for block in self.chunks():value.update(block)
+        return value.hexdigest()
+    def flush(self):
+        if not self.writable:raise BoundaryError('Recovery durability requires its owned write-capable handle')
+        kernel.FlushFileBuffers.argtypes=[wintypes.HANDLE];kernel.FlushFileBuffers.restype=wintypes.BOOL
+        if not kernel.FlushFileBuffers(self.handle):raise BoundaryError('Recovery storage cannot satisfy the required durable flush')
+    def restore_metadata(self,modified,attributes):
+        if not self.writable or attributes&~0xA0:raise BoundaryError('Unsupported recoverable source attributes')
+        class Basic(ctypes.Structure):_fields_=[('creation',ctypes.c_longlong),('access',ctypes.c_longlong),('write',ctypes.c_longlong),('change',ctypes.c_longlong),('attributes',wintypes.DWORD)]
+        value=Basic();value.write=int(modified)//100+116444736000000000;value.attributes=attributes or 0x80
+        kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.SetFileInformationByHandle.restype=wintypes.BOOL
+        if not kernel.SetFileInformationByHandle(self.handle,0,ctypes.byref(value),ctypes.sizeof(value)):raise BoundaryError('Cannot preserve recovery timestamps/attributes')
+        if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):raise BoundaryError('Cannot verify restored filesystem metadata')
+    def dispose(self):
+        if not self.delete:raise BoundaryError('File was not opened for exact-handle removal')
+        kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+        kernel.SetFileInformationByHandle.restype=wintypes.BOOL
+        value=wintypes.BOOL(True)
+        if not kernel.SetFileInformationByHandle(self.handle,4,ctypes.byref(value),ctypes.sizeof(value)):
+            raise BoundaryError(f'Exact-handle removal is unsupported or denied: {ctypes.WinError(ctypes.get_last_error())}')
+    def __exit__(self,*_):
+        if self.handle is not None:kernel.CloseHandle(self.handle);self.handle=None
 
 class OwnedProcessJob:
     """Kill-on-close Windows job contains only the newly launched media process tree."""

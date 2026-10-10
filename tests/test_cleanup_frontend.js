@@ -1,0 +1,26 @@
+'use strict';
+// Exercise actual app.js using the existing DOM/transport fixture. No native IO.
+const fs=require('node:fs'),path=require('node:path'),Module=require('node:module');
+const filename=path.join(__dirname,'test_metadata_frontend.js');
+let harness=fs.readFileSync(filename,'utf8');
+const anchor='context.evidenceRow=';
+const cases=String.raw`
+assert.match(get('output-summary').textContent,/Source cleanup: originals retained/);
+assert.match(get('output-policy-notice').textContent,/source files stay in place/);
+context.enrolled={...row,creation:{...row.creation,cleanup_policy:{enabled:true,recovery_root:'C:/fixture/source-recovery'}}};
+run('select(enrolled,true)');assert.equal(get('output-policy-notice').textContent,'Creates one audiobook, checks it, then removes the included originals. Recovery copies are kept.');assert.match(get('output-summary').textContent,/Source cleanup: remove after output checks/);assert.equal(get('output-summary').textContent.includes('Recovery storage: C:/fixture/source-recovery'),true);assert.match(get('create-audiobook').title,/keep recovery copies/);
+fields.get('title').value='Unsaved review';get('review-form').handlers.input();
+context.paused={...context.enrolled,creation:{...context.enrolled.creation,status:'Audiobook created'},cleanup:{state:'paused',status:'Source cleanup paused: 1 of 2 removed',removed:1,total:2,remaining:1,bytes_removed:1024,recovery_bytes:2048,recovery_location:'C:/fixture/source-recovery/confirmed'}};
+run('select(paused,false)');assert.equal(fields.get('title').value,'Unsaved review');assert.equal(run('reviewRow.revision'),row.revision);assert.match(get('output-summary').textContent,/Audiobook output: Audiobook created/);assert.match(get('output-summary').textContent,/Source cleanup paused: 1 of 2 removed/);assert.match(get('output-summary').textContent,/Removed from Z: 1,024 bytes/);assert.match(get('output-summary').textContent,/Recovery storage on C: 2,048 bytes/);assert.equal(get('output-summary').textContent.includes('Originals retained'),false);
+context.failed={...context.paused,cleanup:{...context.paused.cleanup,state:'needs attention',status:'Source cleanup needs attention: Output changed.',reason:'Output changed.'}};run('select(failed,false)');assert.match(get('output-summary').textContent,/Audiobook output: Audiobook created/);assert.match(get('output-summary').textContent,/1 of 2 removed/);assert.match(get('output-summary').textContent,/Output changed/);assert.equal(fields.get('title').value,'Unsaved review');
+context.finished={...context.paused,cleanup:{...context.paused.cleanup,state:'completed',status:'Originals removed; recovery copies retained',removed:2,remaining:0,bytes_removed:2048}};run('select(finished,true)');assert.match(get('output-summary').textContent,/Originals removed; recovery copies retained/);assert.match(get('output-summary').textContent,/Originals remaining: 0/);
+run('state={status:{state:"completed"},audiobook_jobs:{state:"Pausing",cleanup_active:true,queued:1,completed:1,failed:0,current_title:"Reviewed book",stage:"Pausing source cleanup"}};renderJobs();controls()');assert.match(get('jobs-status').textContent,/Pausing/);assert.equal(get('resume-jobs').disabled,true);assert.equal(get('pause-jobs').title,'Pause audiobook work. Source cleanup finishes the current file before stopping.');assert.match(get('jobs-help').textContent,/Resume continues its saved progress/);
+run('state.audiobook_jobs.state="Paused";renderJobs();controls()');assert.equal(get('resume-jobs').disabled,false);assert.match(get('resume-jobs').title,/without recreating the audiobook/);
+run('state.audiobook_jobs.cleanup_active=false;renderJobs()');assert.match(get('jobs-help').textContent,/An interrupted conversion restarts/);assert.equal(get('pause-jobs').title.includes('cleanup'),false);
+context.historical={...row,creation:{...row.creation,status:'Audiobook created',job:{id:'old-output'},cleanup_policy:{enabled:false}}};run('select(historical,true)');assert.match(get('output-summary').textContent,/Source cleanup: originals retained/);assert.equal(get('output-summary').textContent.includes('remove after output checks'),false);assert.match(get('create-audiobook').title,/Keep the source files/);
+console.log('PASS cleanup policy, historical retention, authoritative partial pause/failure/completion, output success, verified counters and stage-specific job controls');run('select(row,true)');
+`;
+if(!harness.includes(anchor))throw Error('Existing frontend fixture anchor changed');
+harness=harness.replace(anchor,cases+anchor);
+const fixture=new Module(filename,module);fixture.filename=filename;
+fixture.paths=Module._nodeModulePaths(__dirname);fixture._compile(harness,filename);

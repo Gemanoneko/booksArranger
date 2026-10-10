@@ -1,0 +1,249 @@
+"""Persistent, snapshot-backed retirement of exact selected audiobook sources.
+
+No pathname deletion, background historical enrollment, or recovery-cache purge.
+Audio success is separate from cleanup state. Constructors never start work.
+"""
+import contextlib
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import threading
+import uuid
+from datetime import datetime, timezone
+
+from scanner import connect
+from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, ordinary, publish_no_replace
+
+
+def stamp():return datetime.now(timezone.utc).isoformat()
+def packed(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+def setup(db):
+    db.execute('CREATE TABLE IF NOT EXISTS source_cleanup(id TEXT PRIMARY KEY,job_id TEXT UNIQUE,intent TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS cleanup_members(cleanup_id TEXT,path TEXT,backup TEXT,facts TEXT,state TEXT,PRIMARY KEY(cleanup_id,path))')
+    if 'restore_intent' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN restore_intent TEXT NOT NULL DEFAULT ''")
+    db.execute('CREATE TABLE IF NOT EXISTS source_retirements(root TEXT,path TEXT,cleanup_id TEXT,job_id TEXT,source_hash TEXT,size INTEGER,modified TEXT,state TEXT,PRIMARY KEY(root,path,cleanup_id))')
+
+def single_stream(path):
+    """Reject ADS rather than silently discard filesystem data in recovery."""
+    import ctypes
+    from ctypes import wintypes
+    from native_io import kernel
+    class Stream(ctypes.Structure):_fields_=[('size',ctypes.c_longlong),('name',wintypes.WCHAR*296)]
+    kernel.FindFirstStreamW.argtypes=[wintypes.LPCWSTR,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    kernel.FindFirstStreamW.restype=wintypes.HANDLE
+    kernel.FindNextStreamW.argtypes=[wintypes.HANDLE,ctypes.c_void_p];kernel.FindNextStreamW.restype=wintypes.BOOL
+    kernel.FindClose.argtypes=[wintypes.HANDLE]
+    info=Stream();h=kernel.FindFirstStreamW(str(path),0,ctypes.byref(info),0)
+    if h==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot verify source filesystem streams; originals retained')
+    try:
+        while True:
+            if info.name!='::$DATA':raise BoundaryError('Additional filesystem streams require review; original retained')
+            if not kernel.FindNextStreamW(h,ctypes.byref(info)):
+                if ctypes.get_last_error()!=38:raise BoundaryError('Cannot finish source stream verification')
+                break
+    finally:kernel.FindClose(h)
+
+
+class CleanupJobs:
+    def __init__(self,database,recovery_root,guard,review_boundary):
+        self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
+        self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
+        self.after_drain=None
+        with DirectoryBoundary(self.root.anchor,self.root,create=True) as boundary:self.root_identity=boundary.identities
+        with connect(self.database) as db:
+            setup(db)
+            db.execute("UPDATE source_cleanup SET state='paused' WHERE state IN ('checking','removing','pausing')")
+    def _rows(self,sql,params=()):
+        with connect(self.database) as db:return [dict(r) for r in db.execute(sql,params)]
+    def _set(self,id,state,reason=''):
+        with connect(self.database) as db:db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,stamp(),id))
+    def enroll(self,job,binding,historical=False):
+        if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
+        manifest=job['manifest'];output=job['output']
+        if output['validation'].get('passed') is not True or not manifest['sources']:raise ValueError('Complete output validation is required')
+        self._validation_contract(manifest,output)
+        root=ordinary(manifest['root']);paths=[]
+        for source in manifest['sources']:
+            path=ordinary(source['path'])
+            if not path.is_relative_to(root) or path.suffix.lower()!='.mp3' or 'podcasts' in [p.casefold() for p in path.relative_to(root).parts]:
+                raise ValueError('Only selected MP3 audiobook originals are eligible')
+            if str(path).casefold() in paths:raise ValueError('Duplicate selected source path')
+            paths.append(str(path).casefold())
+        id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
+        with connect(self.database) as db:
+            setup(db)
+            prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
+            if prior:return prior[0]
+            if self.guard(db,intent) is not True:raise ValueError('Completed book review/source selection changed')
+            db.execute('INSERT INTO source_cleanup VALUES(?,?,?,?,?,?,?)',(id,job['job_id'],packed(intent),'waiting','',stamp(),stamp()))
+        return id
+    @staticmethod
+    def _validation_contract(manifest,output):
+        v=output['validation'];meta=manifest.get('metadata',{});tags=v.get('tags',{})
+        if v.get('checks')!='Output checks passed' or v.get('profile')!=manifest.get('profile') or v.get('sha256')!=output['sha256'] or v.get('size')!=output['size']:
+            raise ValueError('The complete published output validation record is required')
+        if str(tags.get('media_type'))!='2' or tags.get('title')!=meta.get('title') or tags.get('artist')!=meta.get('canonical_author'):
+            raise ValueError('Validated audiobook kind, title and author do not match the reviewed book')
+        frames=v.get('source_pcm_frames',[]);rate=v.get('source_pcm_rate')
+        if len(frames)!=len(manifest['sources']) or not isinstance(rate,int) or rate<=0 or any(not isinstance(n,int) or n<=0 for n in frames):
+            raise ValueError('Exact selected-source decoded-audio validation is required')
+        if abs(float(v.get('decoded_duration',-1))-sum(frames)/rate)>float(v.get('duration_tolerance',0)):
+            raise ValueError('Decoded output does not match the selected source audio')
+        if [c.get('title') for c in v.get('chapters',[])]!=manifest.get('chapters',[]):raise ValueError('Validated chapter choice does not match this completed book')
+    def status(self,job_id=None):
+        rows=self._rows('SELECT * FROM source_cleanup'+(' WHERE job_id=?' if job_id else '')+' ORDER BY created', (job_id,) if job_id else ())
+        result=[]
+        for row in rows:
+            intent=json.loads(row['intent']);members=self._rows('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))
+            removed=[m for m in members if m['state']=='removed'];total=len(intent['manifest']['sources'])
+            state='pausing' if self.current==row['id'] and self.stop.is_set() else row['state']
+            texts={'waiting':'Waiting for output checks','checking':'Checking recovery copies','removing':f'Removing originals: {len(removed)} of {total}',
+                'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':'Originals removed; recovery copies retained',
+                'needs_attention':'Source cleanup needs attention: '+row['reason']}
+            result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
+                'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':sum(json.loads(m['facts'])['size'] for m in members if m['state']!='backup_pending' and Path(m['backup']).exists()),
+                'recovery_location':str(self.root/row['id']),'reason':row['reason']})
+        return result[0] if job_id and result else (None if job_id else result)
+    def resume(self,selected=None,follow_audio=True):
+        with self.lock:
+            if self.closed:raise ValueError('Cleanup worker is closing')
+            if self.thread and self.thread.is_alive():return
+            self.stop.clear();self.thread=threading.Thread(target=self._work,args=(selected,follow_audio),name='books-source-cleanup',daemon=False);self.thread.start()
+    def pause(self):self.stop.set()
+    def close(self):
+        self.closed=True;self.stop.set()
+        if self.thread:
+            self.thread.join(30)
+            if self.thread.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
+    def _work(self,selected=None,follow_audio=True):
+        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') ORDER BY created"):
+            if selected is not None and row['id'] not in selected:continue
+            if self.stop.is_set():break
+            self.current=row['id']
+            try:self.run(row['id'])
+            except Exception as error:self._set(row['id'],'needs_attention',str(error) or type(error).__name__)
+            finally:self.current=None
+        if follow_audio and not self.stop.is_set() and self.after_drain:self.after_drain()
+    @staticmethod
+    def _match(handle,source,stored=None,approved=None):
+        facts=handle.facts()
+        if facts['size']!=source['size'] or facts['modified']!=int(source['modified']) or facts['links']!=1 or facts['attributes']&~0xA0:
+            raise BoundaryError('Source size, timestamp, attributes or alias layout changed/unsupported')
+        if stored and any(facts.get(k)!=stored.get(k) for k in ('identity','identity_method','dev','ino')):raise BoundaryError('Original source file identity changed or its identity representation drifted')
+        if approved and (facts['dev'],facts['ino'])!=(approved.get('dev'),approved.get('ino')):raise BoundaryError('Reviewed original file identity changed or cannot be verified')
+        if handle.sha256()!=source['sha256']:raise BoundaryError('Original bytes differ from reviewed sources')
+        return facts
+    def run(self,id):
+        row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
+        root=ordinary(manifest['root']);final=ordinary(out['final_path']);recovery=self.root/id
+        if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Validated output is outside the source library')
+        with contextlib.ExitStack() as stack:
+            rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
+            if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
+            if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
+            ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(VerifiedFile(final))
+            if ob.identities!=[tuple(v) for v in out['parent_identity']] or output.facts()['size']!=out['size'] or output.sha256()!=out['sha256']:
+                raise BoundaryError('Validated output is changed or unavailable; originals retained')
+            cover=ordinary(manifest['cover']['path']);stack.enter_context(DirectoryBoundary(cover.anchor,cover.parent));art=stack.enter_context(VerifiedFile(cover))
+            if art.sha256()!=manifest['cover']['sha256']:raise BoundaryError('Reviewed cover bytes changed')
+            with connect(self.database) as db:
+                if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
+            self._set(id,'checking');held=[]
+            required=sum(s['size'] for s in manifest['sources'])
+            if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
+            for index,source in enumerate(manifest['sources']):
+                path=ordinary(source['path']);backup=recovery/(f'{index:05d}.mp3')
+                prior=self._rows('SELECT * FROM cleanup_members WHERE cleanup_id=? AND path=?',(id,str(path)))
+                member=prior[0] if prior else None
+                if member and member['backup']!=str(backup):raise BoundaryError('Recovery correspondence changed')
+                if member and member['state'] in ('removed','disposition_set'):
+                    recovery_handle=stack.enter_context(VerifiedFile(backup,writable=True));recovery_handle.flush()
+                    if recovery_handle.facts()['size']!=source['size'] or recovery_handle.sha256()!=source['sha256']:raise BoundaryError('Recovery bytes changed')
+                    if path.exists():raise BoundaryError('An existing replacement at a retired original path was preserved')
+                    if member['state']=='disposition_set':self._retire(intent,source,member)
+                    continue
+                if member and member['state']=='removal_intended' and not path.exists():
+                    raise BoundaryError('Interrupted removal has unknown outcome; verified recovery can restore this original before another cleanup attempt')
+                stack.enter_context(DirectoryBoundary(root,path.parent));original=stack.enter_context(VerifiedFile(path,delete=True))
+                key=str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(str(path)))))
+                approved=intent['binding'].get('context',{}).get('source_hashes',{}).get(key)
+                facts=self._match(original,source,json.loads(member['facts']) if member else None,approved);single_stream(path)
+                if not member:
+                    if backup.exists():raise BoundaryError('Unknown recovery collision; originals retained')
+                    with connect(self.database) as db:
+                        db.execute('INSERT INTO cleanup_members(cleanup_id,path,backup,facts,state) VALUES(?,?,?,?,?)',(id,str(path),str(backup),packed(facts),'backup_pending'))
+                        db.execute('INSERT OR IGNORE INTO owned_artifacts VALUES(?,?,?,?,?)',(str(backup),intent['job_id'],'recovery',source['sha256'],source['size']))
+                    with open(backup,'xb') as dest:
+                        for block in original.chunks():dest.write(block)
+                        dest.flush();os.fsync(dest.fileno())
+                backup_handle=stack.enter_context(VerifiedFile(backup,writable=True))
+                backup_handle.restore_metadata(facts['modified'],facts['attributes'])
+                backup_handle.flush() # Also required for reused backup_pending copies, after timestamp updates.
+                if backup_handle.facts()['size']!=source['size'] or backup_handle.sha256()!=source['sha256']:raise BoundaryError('Recovery copy failed full byte verification; originals retained')
+                with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified' WHERE cleanup_id=? AND path=?",(id,str(path)))
+                held.append((source,original,facts))
+            # All recovery copies are durable and protected BEFORE the first dispose.
+            self._set(id,'removing')
+            for source,original,facts in held:
+                if self.stop.is_set():self._set(id,'paused');return
+                rb.revalidate();ob.revalidate()
+                with self.review_boundary(),connect(self.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    if not self.guard(db,intent):raise BoundaryError('Completed source review changed before removal')
+                    db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(id,source['path']))
+                    db.commit() # Intent must survive a crash before native disposition.
+                    db.execute('BEGIN IMMEDIATE')
+                    if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
+                    original.dispose()
+                    db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
+                    db.commit()
+                    original.__exit__(None,None,None)
+                    if Path(source['path']).exists():raise BoundaryError('Disposition did not remove the verified name; no weaker deletion attempted')
+                    db.execute('BEGIN IMMEDIATE');self._retire(intent,source,{'facts':packed(facts)},db);db.commit()
+            self._set(id,'completed')
+    def _retire(self,intent,source,member,db=None):
+        if db is None:
+            with connect(self.database) as connection:return self._retire(intent,source,member,connection)
+        db.execute("UPDATE cleanup_members SET state='removed' WHERE cleanup_id=? AND path=?",(intent['id'],source['path']))
+        db.execute('INSERT OR REPLACE INTO source_retirements VALUES(?,?,?,?,?,?,?,?)',(intent['manifest']['root'],source['path'],intent['id'],intent['job_id'],source['sha256'],source['size'],source['modified'],'removed'))
+        db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(intent['manifest']['root'],source['path']))
+    def restore(self,id):
+        """Technical opaque-ID restore; preserve any current destination collision."""
+        with self.lock:
+            if self.thread and self.thread.is_alive():raise ValueError('Pause cleanup before restoring originals')
+            row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))
+            if not row:raise ValueError('Unknown recovery identity')
+            intent=json.loads(row[0]['intent']);root=ordinary(intent['manifest']['root'])
+            for member in self._rows("SELECT * FROM cleanup_members WHERE cleanup_id=? AND state IN ('removed','removal_intended','disposition_set','restore_intended')",(id,)):
+                source=next(s for s in intent['manifest']['sources'] if s['path']==member['path']);path=ordinary(source['path']);backup=ordinary(member['backup'])
+                if backup.parent!=self.root/id or not path.is_relative_to(root):raise BoundaryError('Recovery mapping is outside its owned boundary')
+                with DirectoryBoundary(self.root.anchor,backup.parent) as rb,VerifiedFile(backup) as held,DirectoryBoundary(root,path.parent) as boundary:
+                    if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
+                    if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery ancestor identity drifted before restoration')
+                    if held.facts()['size']!=source['size'] or held.sha256()!=source['sha256']:raise BoundaryError('Recovery copy changed')
+                    if path.exists():
+                        saved=json.loads(member['restore_intent']) if member['restore_intent'] else None
+                        if not saved:raise FileExistsError('Restore collision; existing file preserved')
+                        with VerifiedFile(path) as restored:
+                            if restored.facts()['identity']!=saved['identity'] or restored.sha256()!=source['sha256'] or restored.facts()['modified']!=int(source['modified']):raise FileExistsError('Restore collision; unrelated replacement preserved')
+                        self._restored(id,str(path));continue
+                    temp=path.parent/('.books-restore-'+str(uuid.uuid4())+'.partial')
+                    with connect(self.database) as db:db.execute('INSERT INTO owned_artifacts VALUES(?,?,?,?,?)',(str(temp),intent['job_id'],'temporary',source['sha256'],source['size']))
+                    with open(temp,'xb') as dest:
+                        for block in held.chunks():dest.write(block)
+                        dest.flush();os.fsync(dest.fileno())
+                    facts=json.loads(member['facts'])
+                    with VerifiedFile(temp,writable=True) as temporary:
+                        temporary.restore_metadata(facts['modified'],facts['attributes']);temporary.flush()
+                    def intent_before_rename(native):
+                        native.update(temporary=str(temp),destination=str(path))
+                        with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='restore_intended',restore_intent=? WHERE cleanup_id=? AND path=?",(packed(native),id,str(path)))
+                    publish_no_replace(temp,path,boundary,source['sha256'],source['size'],intent_before_rename)
+                    self._restored(id,str(path))
+            self._set(id,'needs_attention','Originals restored; recovery copies retained. Cleanup is not automatically repeated.')
+    def _restored(self,id,path):
+        with connect(self.database) as db:
+            db.execute("UPDATE cleanup_members SET state='restored' WHERE cleanup_id=? AND path=?",(id,path))
+            db.execute("UPDATE source_retirements SET state='restored' WHERE cleanup_id=? AND path=?",(id,path))

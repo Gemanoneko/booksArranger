@@ -105,7 +105,7 @@ class CandidateReviewService:
             except (ValueError,OSError):return None
         return choice
 
-    def enrich(self,row,check_sources=True):
+    def enrich(self,row,check_sources=True,allow_existing_job=False):
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row)
         for m,key in zip(row['members'],keys):m['member_key']=key
         order=ctx.get('track_order',keys); included=ctx.get('included',keys)
@@ -120,6 +120,7 @@ class CandidateReviewService:
         if track_ok and check_sources:
             try:
                 for m in row['members']:
+                    if m.get('intentionally_retired'):continue
                     key=member_key(m['path'])
                     if key not in included:continue
                     saved=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
@@ -147,7 +148,8 @@ class CandidateReviewService:
         if job_states is not None:job=job_states.get(row['id'])
         elif self.jobs and hasattr(self.jobs,'candidate_status'):
             job=self.jobs.candidate_status(row['id'])
-        if not check_sources and job:reasons.append('Audiobook job already exists; inspect its current status')
+        if job and not allow_existing_job:reasons.append('Audiobook job already exists; inspect its current status')
+        if row.get('retired_source_count'):reasons.append('Original sources intentionally removed; use the created audiobook or guarded recovery')
         status='Ready to create' if not reasons else 'Single audiobook file' if 'Single audiobook file' in reasons else 'Source changed — review required' if row.get('changed') or source_changed else 'Needs metadata review' if not metadata_ok else 'Tracks need review'
         if job:status=job.get('state',status)
         row.update(metadata_approved=metadata_ok,matching=copy.deepcopy(self.matching.get(row['id'],ctx.get('matching',{'state':'idle','proposals':[],'error':''}))),
@@ -160,6 +162,11 @@ class CandidateReviewService:
         row['review_context']['chapters_choice_saved']='chapters' in ctx
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
+        policy={'enabled':bool(selected and all(Path(m['path']).suffix.lower()=='.mp3' for m in selected)),
+                'recovery_root':str(self.jobs.cleanup.root) if self.jobs and hasattr(self.jobs,'cleanup') else ''}
+        if job and not allow_existing_job:policy=job.get('cleanup_policy',{'enabled':False,'recovery_root':policy['recovery_root']})
+        row['creation']['cleanup_policy']=policy
+        row['cleanup']=job.get('cleanup') if job else None
         return row
 
     def page(self,limit=100,offset=0,search='',status='all'):
@@ -174,6 +181,8 @@ class CandidateReviewService:
             for job in self.jobs.jobs.status()['jobs']:
                 state={'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason']}
+                self.page_local.jobs[job['manifest']['candidate_id']]['cleanup_policy']=job['manifest'].get('cleanup_policy',{'enabled':False})
+                if hasattr(self.jobs,'cleanup'):self.page_local.jobs[job['manifest']['candidate_id']]['cleanup']=self.jobs.cleanup.status(job['job_id'])
         def selected(row):
             saved=self.page_local.contexts.get(row['id']);ctx=saved['data'] if saved and saved['revision']==row['revision'] else {}
             choice=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
@@ -419,9 +428,9 @@ class CandidateReviewService:
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
             return self._write(row,ctx)
 
-    def build_manifest(self,library,id,revision):
+    def build_manifest(self,library,id,revision,allow_existing_job=False):
         with self.lock:
-            row=self.enrich(self._row(library,id,revision));ctx=self._context(row)
+            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job);ctx=self._context(row)
             if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
             members={m['member_key']:m for m in row['members']};sources=[]
             for key in row['track_order']:
@@ -433,5 +442,6 @@ class CandidateReviewService:
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']
             return {'job_id':str(uuid.uuid4()),'candidate_id':id,'candidate_revision':revision,'sources':sources,'metadata':copy.deepcopy(row['review']),
                     'root':self.inventory.roots[library],'destination':row['creation']['destination'],'profile':PROFILE,'encoding_policy':freeze_policy(sources),'cover':cover,'comments':comments,
+                    'cleanup_policy':row['creation']['cleanup_policy'],
                     'evidence':{'metadata_actor':ctx['metadata_actor'],'metadata_utc':ctx['metadata_utc'],'manual_note':ctx['manual_note'],'metadata_fields':ctx.get('metadata_evidence',[]),'track_actor':ctx['track_actor'],'track_utc':ctx['track_utc'],'track_basis':ctx['track_evidence'],'recording_completeness':'unknown'},
                     'chapters':chapter_names([members[key] for key in row['track_order'] if key in row['included']]) if ctx.get('chapters') else []}

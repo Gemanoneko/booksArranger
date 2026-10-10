@@ -9,6 +9,7 @@ import threading
 import hashlib
 import uuid
 import subprocess
+import functools
 
 from audio_jobs import AudioJobs
 from audio_pipeline import create_private, publish, digest, fingerprint, Paused, PROFILE
@@ -16,11 +17,22 @@ from native_io import DirectoryBoundary, ProtectedFiles, ordinary
 from review_backend import CandidateReviewService
 from scanner import connect
 from metadata import propose
+from source_cleanup import CleanupJobs, packed
+from review_backend import member_key
+
+INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
+
+def operation(method):
+    @functools.wraps(method)
+    def locked(self,*args,**kwargs):
+        with self.operation_lock:return method(self,*args,**kwargs)
+    return locked
 
 
 class MergeService:
     def __init__(self, inventory, cache_dir):
         self.inventory = inventory
+        self.operation_lock=threading.RLock()
         self.cache_dir = ordinary(cache_dir)
         with DirectoryBoundary(self.cache_dir.anchor,self.cache_dir,create=True):pass
         self.stage_root = self.cache_dir / 'audio-staging'
@@ -28,9 +40,26 @@ class MergeService:
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid)
+        self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary)
+        self.cleanup.stop=self.jobs._stop
+        self.jobs.after_completed=self._after_completed
+        self.cleanup.after_drain=lambda:self.jobs.resume()
         self.reviews.set_jobs(self)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
+            if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
+                # A crash after durable audio success but before enrollment does
+                # not turn its explicit frozen policy into a historical sweep.
+                self._enroll_completed_without_start(job)
+
+    def _enroll_completed_without_start(self,job):
+        try:self.enroll_cleanup(job['job_id'])
+        except (ValueError,OSError) as error:self._enrollment_attention(job,error)
+
+    def _enrollment_attention(self,job,error):
+        with connect(self.inventory.database) as db:
+            id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':job['manifest'],'output':job['output'],'binding':{},'actor':'assistant'}
+            db.execute('INSERT OR IGNORE INTO source_cleanup VALUES(?,?,?,?,?,?,?)',(id,job['job_id'],packed(intent),'needs_attention',str(error),'',''))
 
     def _register(self,path,job,kind,hash='',size=0):
         with connect(self.inventory.database) as db:
@@ -39,25 +68,119 @@ class MergeService:
     def state(self):
         value = self.jobs.status()
         current = next((j for j in value['jobs'] if j['job_id'] == value['current_job_id']), None)
+        cleanups=self.cleanup.status();pending=[c for c in cleanups if c['state'] in ('waiting','checking','removing','pausing','paused')]
+        active=next((c for c in pending if c['id']==self.cleanup.current),None)
+        if pending and not current:
+            alive=bool(self.cleanup.thread and self.cleanup.thread.is_alive())
+            value['state']='Pausing' if (active or alive) and self.cleanup.stop.is_set() else 'Running' if active or alive else 'Paused'
+            value['queued']+=len(pending)
+        value['failed']+=sum(c['state']=='needs_attention' for c in cleanups)
         return {key: value[key] for key in ('state','queued','completed','failed')} | {
             'current_title': current['manifest']['metadata'].get('title','') if current else '',
-            'stage': value['current_stage'] or ''}
+            'stage': active['status'] if active else value['current_stage'] or '', 'cleanup_active':bool(active or pending)}
+
+    def pause(self):
+        self.cleanup.pause();self.jobs.pause();return self.state()
+
+    @operation
+    def resume(self):
+        self._no_scan()
+        if self.jobs._thread and self.jobs._thread.is_alive():return self.state()
+        if self.cleanup.thread and self.cleanup.thread.is_alive():return self.state()
+        pending=self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
+        historical=[c['id'] for c in pending if json.loads(c['intent']).get('historical')]
+        if historical:self.cleanup.resume(historical,follow_audio=False)
+        elif pending:self.cleanup.resume()
+        else:self.jobs.resume()
+        return self.state()
+
+    def _cleanup_binding(self,db,manifest):
+        row=db.execute('SELECT revision,review FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
+        context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
+        if not row or not context or row['revision']!=manifest['candidate_revision'] or context['revision']!=row['revision']:
+            raise ValueError('Completed candidate revision changed')
+        ctx=json.loads(context['data']);review=json.loads(row['review'])
+        if review!=manifest['metadata'] or not all(ctx.get(k) for k in ('metadata_approved','source_coverage_confirmed','order_confirmed')):
+            raise ValueError('Completed source/metadata approval changed')
+        keys=[member_key(s['path']) for s in manifest['sources']]
+        if [k for k in ctx.get('track_order',[]) if k in ctx.get('included',[])]!=keys or set(ctx.get('included',[]))!=set(keys) or ctx.get('cover_id')!=manifest['cover']['id']:
+            raise ValueError('Completed source order or cover changed')
+        for source,key in zip(manifest['sources'],keys):
+            saved=ctx.get('source_hashes',{}).get(key,{})
+            if any(str(saved.get(k))!=str(source[k]) for k in ('sha256','size','modified')):raise ValueError('Approved source fingerprint changed')
+        if bool(ctx.get('chapters'))!=bool(manifest['chapters']):raise ValueError('Completed chapter choice changed')
+        return {'context':ctx,'review':review,'revision':row['revision']}
+
+    def _cleanup_guard(self,db,intent):
+        try:
+            self._no_scan();manifest=intent['manifest']
+            row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(intent['job_id'],)).fetchone()
+            if not row or row['state']!='completed' or packed(json.loads(row['manifest']))!=packed(manifest) or packed(json.loads(row['output']))!=packed(intent['output']):return False
+            return self._cleanup_binding(db,manifest)==intent['binding']
+        except (ValueError,KeyError,TypeError):return False
+
+    @operation
+    def enroll_cleanup(self,job_id,historical=False):
+        if historical and job_id not in INITIAL_CLEANUP_JOBS:raise ValueError('Historical cleanup is limited to the two verified batch books')
+        if historical and self.jobs._thread and self.jobs._thread.is_alive():raise ValueError('Pause audiobook work before enrolling historical cleanup')
+        with self._review_boundary(),connect(self.inventory.database) as db:
+            self._no_scan();row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not row:raise ValueError('Unknown completed audiobook identity')
+            job=dict(row);job['manifest']=json.loads(job['manifest']);job['output']=json.loads(job['output']) if job['output'] else None
+            if not historical and not job['manifest'].get('cleanup_policy',{}).get('enabled'):raise ValueError('Original removal was not enrolled for this job')
+            binding=self._cleanup_binding(db,job['manifest'])
+        id=self.cleanup.enroll(job,binding,historical=historical)
+        return {'cleanup_id':id,'status':self.cleanup.status(job_id)}
+
+    @operation
+    def start_historical_cleanup(self,job_id):
+        self._no_scan()
+        if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for existing audiobook work to become idle')
+        if any(j['state'] in ('pending','running') for j in self.jobs.status()['jobs']):raise ValueError('Unrelated queued audiobook work must be resolved before finite cleanup')
+        if any(c['job_id']!=job_id and c['state'] in ('waiting','checking','removing','pausing','paused') for c in self.cleanup.status()):raise ValueError('Unrelated pending source cleanup must be resolved first')
+        result=self.enroll_cleanup(job_id,historical=True)
+        self.cleanup.resume([result['cleanup_id']],follow_audio=False)
+        return result
+
+    @operation
+    def restore_cleanup(self,job_id):
+        self._no_scan()
+        if self.jobs._thread and self.jobs._thread.is_alive():raise ValueError('Pause audiobook work before restoring original tracks')
+        receipt=self.cleanup.status(job_id)
+        if not receipt:raise ValueError('No recovery enrollment exists for this audiobook')
+        self.cleanup.restore(receipt['id']);return self.cleanup.status(job_id)
+
+    def _after_completed(self,job_id):
+        # Durable audio success already exists. Cleanup failure must not reset it.
+        row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
+        if not row['manifest'].get('cleanup_policy',{}).get('enabled'):return
+        try:
+            enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
+            self.cleanup.run(id)
+        except Exception as error:
+            if 'id' in locals():self.cleanup._set(id,'needs_attention',str(error))
+            else:
+                # Enrollment failure is visible without inventing removal facts.
+                self._enrollment_attention(row,error)
+        finally:self.cleanup.current=None
 
     def candidate_status(self, identity):
         jobs = [j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id'] == identity]
         if not jobs: return None
         job = jobs[-1]
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
-        return {'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason']}
+        return {'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
 
+    @operation
     def create(self, library, identity, revision):
         with self.reviews.lock, self.inventory.group_lock:
             self._no_scan()
             manifest = self.reviews.build_manifest(library, identity, revision)
             job = self.jobs.enqueue(manifest)
-        self.jobs.resume()
+        self.resume()
         return {'job_id':job,'queued':True}
 
+    @operation
     def queue(self, library, candidates):
         queued=[]; excluded=[]
         with self.reviews.lock, self.inventory.group_lock:
@@ -68,7 +191,7 @@ class MergeService:
                     queued.append(self.jobs.enqueue(manifest))
                 except (ValueError,OSError) as error:
                     excluded.append({'id':item['id'],'reason':str(error)})
-        if queued:self.jobs.resume()
+        if queued:self.resume()
         return {'queued':queued,'excluded':excluded}
 
     def _no_scan(self):
@@ -84,7 +207,7 @@ class MergeService:
     def _guard(self, manifest):
         try:
             self._no_scan()
-            current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'])
+            current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True)
             def frozen(value):return {k:v for k,v in value.items() if k not in ('job_id','attempt_id')}
             return frozen(current)==frozen(manifest)
         except (ValueError,OSError,KeyError):return False
@@ -122,6 +245,7 @@ class MergeService:
 
     def close(self):
         self.jobs.close()
+        self.cleanup.close()
 
     @staticmethod
     def file_id(library,path):
@@ -203,8 +327,11 @@ class MergeService:
             completed=self._completed_output(identity)
             if completed:
                 output=completed['output'];cover=completed['manifest']['cover']
+                cleanup=self.cleanup.status(completed['job_id']);cleanup_facts=[]
+                if cleanup:
+                    cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Recovery copies can restore the original tracks. Existing files are never overwritten.')]]
                 sections.append({'kind':'created','heading':'Created audiobook metadata','status':'Output checks passed; Apple Books sync not checked','path':output['final_path'],
-                    'facts':self._output_facts(output['validation']['tags']),
+                    'facts':self._output_facts(output['validation']['tags'])+cleanup_facts,
                     'cover':{**cover,'label':'Created audiobook cover','status':'Validated attached cover'},'raw_tags':output['validation']['tags'],'member_values':[]})
         return {'inspector':{'id':identity,'view':view,'heading':'Metadata and cover','sections':sections,'source_directories':directories,
             'source_directory_count':len(directories),'output_folder_available':bool(completed)}}

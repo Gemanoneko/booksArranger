@@ -21,6 +21,19 @@ def _same_source(before, after):
             f'before size={before.st_size}, modified_ns={before.st_mtime_ns}, identity={before.st_dev}:{before.st_ino}; '
             f'after size={after.st_size}, modified_ns={after.st_mtime_ns}, identity={after.st_dev}:{after.st_ino}')
 
+def _has_retirements(connection):
+    return bool(connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_retirements'").fetchone())
+
+def _retired_source(connection, root, path):
+    if not _has_retirements(connection):return False
+    return bool(connection.execute("""SELECT 1 FROM source_retirements r JOIN files f ON f.root=r.root AND f.path=r.path
+        WHERE r.root=? AND r.path=? AND r.state='removed' AND r.size=f.size AND f.error='' AND f.missing=0
+          AND r.modified=CAST(f.modified AS TEXT) LIMIT 1""",(root,path)).fetchone())
+
+def _supersede_retirement(connection,root,path):
+    if _has_retirements(connection):
+        connection.execute("UPDATE source_retirements SET state='superseded' WHERE root=? AND path=? AND state='removed'",(root,path))
+
 class ClosingConnection(sqlite3.Connection):
     def __exit__(self, *args):
         try:
@@ -126,7 +139,13 @@ class Inventory:
                 if not task:
                     errors = connection.execute('SELECT errors FROM jobs WHERE root=?', (root,)).fetchone()[0]
                     if not errors:
-                        connection.execute('UPDATE files SET missing=(seen<>?) WHERE root=?', (generation,root))
+                        if _has_retirements(connection):
+                            connection.execute("""UPDATE files SET missing=(seen<>? AND NOT EXISTS(
+                                SELECT 1 FROM source_retirements r WHERE r.root=files.root AND r.path=files.path
+                                AND r.state='removed' AND r.size=files.size AND r.modified=CAST(files.modified AS TEXT)))
+                                WHERE root=?""",(generation,root))
+                        else:
+                            connection.execute('UPDATE files SET missing=(seen<>?) WHERE root=?', (generation,root))
                     connection.execute('UPDATE jobs SET state=?, current=? WHERE root=?', ('completed with errors' if errors else 'completed','',root))
                     connection.commit()
                     return
@@ -172,7 +191,7 @@ class Inventory:
     def _directory(self, connection, label, root, generation, path):
         owned=set()
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
-            owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind='temporary'")}
+            owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind IN ('temporary','recovery')")}
         with os.scandir(path) as entries:
             for entry in entries:
                 if self.stop_event.is_set():
@@ -193,9 +212,24 @@ class Inventory:
     def _file(self, connection, label, root, generation, path):
         if self.stop_event.is_set():
             raise ScanStopped()
-        before = fresh_stat(path)
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
+            if connection.execute("SELECT 1 FROM owned_artifacts WHERE path=? AND kind IN ('temporary','recovery')",(path,)).fetchone():
+                self._outcome(connection,root,generation,path,False,details='Exact owned recovery/temporary asset excluded from discovery')
+                return
+        retired = _retired_source(connection,root,path)
+        try:
+            before = fresh_stat(path)
+        except FileNotFoundError:
+            if not retired:raise
+            # A saved queue may precede cleanup. Absence plus exact retirement provenance
+            # is an intentional historical source, not a read failure. Existing names
+            # always continue through the normal read path below.
+            connection.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(root,path))
+            connection.execute('UPDATE jobs SET checked=checked+1 WHERE root=?',(root,))
+            self._outcome(connection,root,generation,path,False,details='Source intentionally retired; recovery provenance retained')
+            return
         old = connection.execute('SELECT * FROM files WHERE root=? AND path=?', (root,path)).fetchone()
-        unchanged = old and old['size'] == before.st_size and old['modified'] == before.st_mtime_ns and not old['error']
+        unchanged = old and old['size'] == before.st_size and old['modified'] == before.st_mtime_ns and not old['error'] and not retired
         if unchanged:
             _same_source(before, fresh_stat(path))
             connection.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?', (generation,root,path))
@@ -229,6 +263,7 @@ class Inventory:
           VALUES(?,?,?,?,?,?,?,?,?,0,'')''', (root,path,before.st_size,before.st_mtime_ns,generation,kind,int(arrival),json.dumps(metadata,ensure_ascii=False),error))
         connection.execute('UPDATE jobs SET checked=checked+1,errors=errors+? WHERE root=?', (int(bool(error)),root))
         self._outcome(connection,root,generation,path,False,error)
+        if not error:_supersede_retirement(connection,root,path)
 
     def _classify(self,label,root,path):
         ext = Path(path).suffix.lower()

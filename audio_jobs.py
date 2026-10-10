@@ -33,6 +33,7 @@ class AudioJobs:
         self._stop = threading.Event()
         self._thread = None
         self._closed = False
+        self.after_completed = None
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
         self._recover()
@@ -226,6 +227,8 @@ class AudioJobs:
                     self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
                 else:
                     self._update(job_id, state="needs attention", reason=str(exc) or type(exc).__name__)
+            if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
+                self.after_completed(job_id)
 
 
 class _Connection:
