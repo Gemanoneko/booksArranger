@@ -1,0 +1,23 @@
+# Books Arranger v0.4.2 — actual chapter artifact QA
+
+**Verdict: GO for the corrected artifact.** iPhone chapter navigation remains device-untested.
+
+New file:
+
+`Z:\Audiobooks\Rollins James\Sigma Force - 9 - The Eye of God - Rollins James - Chapters.m4b`
+
+- Size **1,300,067,873 bytes**; independently streamed SHA256 **1f76429d768928146f65aba1d736a8f80aaf4b7cfa188b220d591d2a66437ab0**.
+- Original M4B independently rehashed unchanged: **1,300,066,162 bytes**, SHA256 **59f1527a05f1115f36e80473d0b94127612cd3ca6ad1b1e293f2aa0d68d61ff7**. Repair adds **1,711 bytes** and preserves the original path/artifact.
+- Independent ffprobe finds **40 chapters**, titles **Track 01–Track 40**, matching exact approved source order. Each boundary recomputed from integer decoded PCM frames at 44,100 Hz and checked within 1 ms. First **0–57,574 ms**; last **62,704,614–64,133,172 ms**; exact selected-source total **64,133.172244897956 s**. These are source-track navigation labels, not invented literary chapter titles.
+- AAC stereo at 44,100 Hz; actual codec/extradata/timebase/start/duration equal the original and saved helper receipt. `media_type=2` retains audiobook kind. Core tags match the original: The Eye of God, James Rollins, Sigma Force/9, preserved original comments and Narrator: Андрей Леонов.
+- Exactly one attached picture; independently extracted encoded picture SHA256 **6994191f25cab4a7c2f9d223783ed4bf5b285edd4bfa77aaccb5e276c3fc3a9b**, identical to the selected original cover.
+
+Helper full-presentation validation, read from the pinned helper's durable receipt, compared before/after AAC payload, extradata, packet timestamps/delay/side data and full decoded PCM. Packet diagnostic **2,761,987 lines**, SHA256 **3f58dad0fdbc672f8ecd5fc4e35ee170064f575bc443bfa1f4fc46969b4e70c7**. Full decoded PCM **11,313,094,656 bytes / 2,828,273,664 stereo frames**, SHA256 **2c2097d0ee57693ef4d73b248f8dcd5e591619930a681dfbe8fe3a177b7243de**. QA inspected that receipt and independently checked actual output stream fields; it did not repeat the long full decode or packet traversal.
+
+Repair UUID **19245329-9baa-4564-bcb2-713bd13deb1a**, parent job **9e04e700-ecf8-4807-8195-01a7a1d73bd6**. Owned durable journal `data/chapter-repairs/19245329-9baa-4564-bcb2-713bd13deb1a/corrected-artifact.jsonl` ends completed and associates the parent, exact boundary proof and separate output. Journal SHA256 **5c699aa78b61b66c706f949277729d0bb6c3d0e2b4731cee7c97bdf22a6a812c**. Exact boundary file SHA256 **535fc85f08405a90c3305a5d9923831e8593c16344156232f9e7af7dc8e79db1**. Current source opened-handle size/exact timestamps match all 40 approved snapshot entries; their stored hashes agree with boundary and journal evidence. No redundant full source hash pass was performed by QA.
+
+Ender's final preservation receipt `scratch/chapter-preservation-2026-10-10/final-originals-proof.json`, independently pinned SHA256 **ea04252d22595002facffdfbd62f045312dfc3a480f76f009aea3a417d482dc1**, reports streamed hashes, sizes and exact timestamps unchanged for all 40 originals. Original M4B hash/size are unchanged, independently confirmed by QA above. Original job manifest, journal, output and substantive fields remain unchanged. The parent row's updated timestamp was refreshed during service startup at 09:48:22 UTC, before repair intent at 09:50:05; this is recorded separately rather than claiming byte-identical SQL rows.
+
+Tested helper corresponds to accepted 44-file frozen-3 manifest **cd17f89a0dbc5b6c0b04d59c2f95c666e5013f654292d560baa4fd178aa4f828**, chapter_repair.py **baf3eb7d2625e7b87b5e15b557b198d31c7240fcad5b3e997e03a4875134f7bb**, authoritative support runner **cd6cb6156bdaf19e29633379f705a763b1370ad2f17a63c7e6504e548816f0fa**; published v0.4.2 source b8a7e5f5937483dfa5264e024944f5742caec2fb. Earlier QA verifies collision refusal and authoritative final review lock; this actual artifact check adds real-file evidence rather than a new workflow pass.
+
+Independent evidence `scratch/chapter-qa-2026-10-10/corrected-artifact-evidence.json`, SHA256 **97ed4feed2a08bba10b69a5bced610a8a8e5ea5460cf050b92a02e2e6f9e66b7**. Owned command session **5452 exited code 0**; all probe/media children and read handles closed. No disposable media file was written, no browser/native window was launched, and no service/database/library/pilot edit, playback or device test occurred. Only compact QA evidence/report were written. Source-track navigation is structurally validated; actual iTunes/Apple Books import, sync and iPhone navigation remain untested. External published recording completeness remains unknown.
