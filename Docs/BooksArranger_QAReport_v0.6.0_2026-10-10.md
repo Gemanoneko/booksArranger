@@ -117,3 +117,32 @@ Focused results:
 The advisory wording Minor is resolved on v3: status now says verified temporary recovery and working copies removed and separately displays any unverified legacy evidence retained. No open Blocker, Major or Minor in the bounded QA scope. Pattern alerts: none.
 
 No production action or UI session was used. Private v3 executable copy, temporary diff inputs and completed probe scripts were removed after recording results. Small identity receipts, check logs and historical/final observed-result evidence are preserved. Clearance remains snapshot-specific and does not certify a changed artifact.
+
+## Exact existing-copy caller — independent final rehearsal
+
+Final caller verdict: GO for the exact pins and finite scope below. This records independent default/no-disposition QA only; production deletion has not occurred in QA. No full source suite was repeated.
+
+Accepted runtime commit: 79eb2e7f5ab34b637166eb15eb504560dd273754; live VERSION 0.6.0. All 20 live root-Python/web executable files match candidate-v3 byte-for-byte. Earlier candidate VERSION 0.5.0 describes historical prerelease snapshots only.
+
+| Exact binding | SHA256 |
+| --- | --- |
+| Caller execute_verified_copies.py | 2d187a4338a9b8589a72f27dac4501198a947af2f5ab2d3b7f8f12f057e28fab |
+| Cleared owned runner run_owned_cleanup.py | 1aeef5503db89461dd6075fcbc578fb7222564fa0ed086cddeff1130556f6834 |
+| Candidate-v3 complete 99-file source digest | a83f0ad64bc67b4c26d655f3fc02bfa737678c9bee8720d919417668af4d3f8f |
+| Manual contract-v3 | 7a087010a570204d12b69e7a8e6a8e45b60cc73d421de52bb0b4607aa41663b1 |
+| Final Senua existing-caller/runner review | f1649ef061b2e0e268f1d57cb387b08362a19fedeeb2943e8f46deb84aad6590 |
+| Finite legacy contract | 75dfebae93844db9179391ded2fca1f6c1349f46d554d0be2656b6ba081df5aa |
+| Nine-record evidence index | 00e7ac9eff9623bc9da2bec5b7db7b24fb691ad9950b76ea667ec9697dd0a895 |
+| Independent receiver rehearsal receipt | 2ef347babcd72a31b36b87cc1bba7d550a7063947ac72297ed1736b7a93209e2 |
+
+Actual invocation: C:/Python314/python.exe with the absolute run_owned_cleanup.py path and no arguments. The runner pins the caller, Python and reviewed native ownership helper, assigns the newly suspended caller to a private kill-on-close Windows job before resuming it, enforces the total 600000ms deadline and bounded task-local streams, and confirms exact child/descendant closure. No execute flag was supplied.
+
+Before and after the run, all 99 candidate files, four runtimes and nine indexed proof records match their pinned sizes/hashes. Caller/runner pins remain unchanged. Sender rehearsal receipt matched its pinned SHA256 3816b6dd660b1507d4e3e4496d8e5f4aeddc7225994c5cdcc84b456b73f9532f. Jane explicitly authorized preserving the two named sender scratch outputs while the exact caller reused its fixed default output names. Their absolute ancestors/paths were checked for links and realpath drift; sender receipt and 450560-byte private rehearsal database were restored with exact original hashes after the pass. The receiver's disposable database was removed; its independent receipt remains in the QA scratch.
+
+Observed result: execute=false, no_disposition_called=true, 95 verified file rows totaling 4,727,806,769 bytes, removed_bytes=0, elapsed 48.147 seconds, no stderr and OWNED CALLER EXIT CONFIRMED. All 95 paths still exist with expected sizes. Their exact path/job/kind/sha256/size rows independently match the producer rehearsal; all file receipt states remain verified. Completed storage-job status here is simulated rehearsal state in the private catalog, not evidence of actual removal. The caller held and fully hashed the four published outputs and verified the corrected final's exact chapters before preparing any copy.
+
+Counts were measured from actual receipt rows and summed recorded sizes; current preserved-evidence file bytes were measured with filesystem stat. The preserved-evidence table contains 156 files totaling 289,326 bytes. This counts the table's diagnostics only; it is not a claim that all retained ownership/journal/proof artifacts total 289,326 bytes. The broader sender-provided retained-evidence estimate 546,709 bytes was not substituted for the independently measured table total. All preserved evidence remains intact.
+
+The finite plan admits only Eye of God, MirrorMask and Snapshot's three explicit jobs and the repair's single checked.m4b. No conversion, broader sweep, production catalog write, real disposition, desktop/UI session or other project was invoked. Production execution still requires the reviewed caller's exclusive catalog lock and owner-stopped Books service; this rehearsal does not waive those exact-caller conditions.
+
+Open Blocker/Major/Minor: none for this bounded caller rehearsal. Pattern alerts: none. Receiver evidence: scratch/retention-qa-2026-10-10/finite-caller-plan-verified-qa.json, caller-qa-receipt.json, caller-rehearsal-run.json, caller-qa-pins.json and sender-evidence-restoration.json.
