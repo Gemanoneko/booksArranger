@@ -1,0 +1,23 @@
+# Books Arranger v0.4.3 — actual Chapters v2 artifact
+
+**Verdict: scoped GO for structural/preservation checks; actual iTunes import UNKNOWN.** This does not certify the silent import rejection as fixed.
+
+Artifact: `Z:\Audiobooks\Rollins James\Sigma Force - 9 - The Eye of God - Rollins James - Chapters v2.m4b`
+
+- Independently streamed SHA256 **c856bfd8e146964c1e820346af7ced7b139c2020d5c2f024547f203d594a201c**; size **1,300,067,899 bytes**. Opened-handle size, exact timestamp and identity remained stable while hashing.
+- Actual top atoms **ftyp/moov/free/mdat**, MP4 major brand **isom**. Independently parsed the actual moov: exactly one chapter-text sample description, **65 bytes**, Pascal font-length byte at offset **59**, value **5**, font **Arial**, expected reserved fields. The prior 59-byte layout is absent.
+- Independent ffprobe verifies **40** markers, **Track 01–Track 40**, each start/end within 1 ms of the exact saved PCM-derived plan; last end **64,133,172 ms**. They provide source-track navigation, without invented literary names.
+- AAC stereo **44,100 Hz**, same actual extradata/timebase/start/duration as the preserved presentation receipt. Retained audiobook `media_type=2`; all original core tags agree, including The Eye of God / James Rollins / Sigma Force 9, original comments and Narrator: Андрей Леонов.
+- One attached picture. Independently extracted encoded cover bytes SHA256 **6994191f25cab4a7c2f9d223783ed4bf5b285edd4bfa77aaccb5e276c3fc3a9b**, matching the selected original.
+
+The exact helper's completed receipt compares original/corrected AAC payload, extradata, delay/skip data, packet timestamps and full decoded PCM. QA inspected this receipt and matched actual stream fields without repeating the full decode. Packet receipt **2,761,987 lines**, SHA256 **3f58dad0fdbc672f8ecd5fc4e35ee170064f575bc443bfa1f4fc46969b4e70c7**; PCM **11,313,094,656 bytes**, SHA256 **2c2097d0ee57693ef4d73b248f8dcd5e591619930a681dfbe8fe3a177b7243de**. These are the same presentation hashes as the original artifact.
+
+Ender's final preservation receipt `scratch/itunes-chapters-2026-10-10/final-originals-proof.json`, independently pinned SHA256 **921e8a7cbf9e20a10b75928fe2ffa1f21658737c7386544181157052a387a64d**, reports full streamed hashes unchanged for all 40 originals and both existing M4Bs, with exact MP3 size/ns retained. Original chapterless M4B: SHA256 **59f1527a05f1115f36e80473d0b94127612cd3ca6ad1b1e293f2aa0d68d61ff7**, **1,300,066,162 bytes**. Earlier chapter copy: SHA256 **1f76429d768928146f65aba1d736a8f80aaf4b7cfa188b220d591d2a66437ab0**, **1,300,067,873 bytes**. The new file is separate and adds **1,737 bytes** versus the chapterless original; neither previous output was overwritten. QA did not redundantly rehash all originals after that completed producer pass.
+
+Repair UUID **fc9c5525-5110-451c-bbe3-040f0e9950cb**, parent job **9e04e700-ecf8-4807-8195-01a7a1d73bd6**. Its owned journal `data/chapter-repairs/fc9c5525-5110-451c-bbe3-040f0e9950cb/corrected-artifact.jsonl` ends completed and binds the separate destination to its parent. SHA256 **b06dade4b5bf520f6b862113a12e7759ad74248279ea753e8556df2de1b5dc55**. Relevant tested pins: quicktime_chapters.py **fc43e381e8a228b22790c65969e5e9073f30f91bed97d37130e8726e9472f72d**, chapter_repair.py **1a34feda4b9cd103901073edfc6f8cee7cc8700423189f8c325a29057659b1b8**, full 46-file manifest **a3b67b63ef4cfb459243b6beafcce43b3359982eca12cf52091692364be7ef4c**. Prior fixture QA covers malformed/overflow/collision/recovery behavior; no repeated suite here.
+
+Independent artifact evidence `scratch/itunes-chapters-qa-2026-10-10/artifact-evidence.json`, SHA256 **3b361ad019a8bdb8e7aac11a8c3fbb44c3cb72fbad58be0d06dd2218bb930a85**. Owned artifact session **45843 exited code 0**; all media children/read handles closed and no disposable media files were written.
+
+Separate minimal rendered live proof shows **v0.4.3 · local prototype**, PID **65116**, instance **bd690f3bc67b2eeff7654f7737c0641e**. GET-only, zero non-GET requests, no controls. Capture `scratch/itunes-chapters-qa-2026-10-10/published-v0.4.3.png`; compact proof `published-v0.4.3-proof.json`. Guarded lease **2a277fb55f61** closed with **remaining 0**, command exited code 0. Frozen prior reports were untouched.
+
+No native iTunes/library/UI interaction, playback, live merge/scan/repair, media modification or Git action was performed by QA. iTunes **12.13.11.1** acceptance and iPhone chapter navigation remain untested. Structural validity and preserved AAC/PCM alone cannot establish import success; that needs an actual import result on the affected app. External published recording completeness remains unknown.
