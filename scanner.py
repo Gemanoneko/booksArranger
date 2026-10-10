@@ -330,6 +330,17 @@ class Inventory:
             return groups.page(connection,self.roots[label],limit,offset,search,status,
                 bool(current and current['state']=='completed' and not pending and not current['errors']))
 
+    def candidate(self,label,identity):
+        if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
+        root=self.roots[label]
+        with self.group_lock,connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
+            row=db.execute('SELECT * FROM book_groups WHERE root=? AND id=? AND superseded=0',(root,identity)).fetchone()
+            if row is None:raise ValueError('Candidate no longer current')
+            current=db.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
+            pending=db.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
+            return groups.render(row,root,bool(current and current['state']=='completed' and not pending and not current['errors']),groups.retired_sources(db,root))
+
     def save_candidate(self,label,identity,revision,review,approve=False):
         if label!='Audiobooks':raise ValueError('Only audiobooks have book candidates')
         with self.group_lock,connect(self.database) as connection:

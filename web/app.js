@@ -4,8 +4,10 @@ const token = document.querySelector('meta[name="books-token"]').content;
 let offset = 0, search = '', selectedPath = null, selectedRow = null, reviewRow = null, rows = [], lastKey = null;
 let dirty = false, busy = false, polling = false, ended = false, timer = null, state = null;
 let view='files',totalRows=0,selectedLibrary=null;
+let automaticRequest=null,automaticResultKey=null,automaticInspectorKey=null;
+let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'all'};
-const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['all','All candidates'],['review','Needs review'],['approved','Metadata approved'],['errors','Source read errors'],['changed','Candidate changed']]};
+const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['all','All candidates'],['review','Needs review'],['approved','Metadata approved'],['errors','Source read errors'],['changed','Candidate changed'],['held','Held']]};
 const form = $('review-form');
 const fields = ['original_language','title','author','canonical_author','narrator','series','number','genre','topic'];
 let proposalId=null,coverId=null,trackDraft=null,trackDirty=false,coverSequence=0,mergeRenderKey=null,proposalRenderKey=null,memberRenderKey=null,coverRenderKey=null;
@@ -31,13 +33,15 @@ function viewControls(){
   if(!audio)view='files';
   $('view').value=view;
   $('filter').replaceChildren();
-  for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;$('filter').append(option);}
+  for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(value==='held')option.title='Show books that automatic processing could not safely approve.';$('filter').append(option);}
   $('filter').value=filters[view];
+  $('filter').title=filters[view]==='held'?'Show books that automatic processing could not safely approve.':'Filter the saved results in this library.';
+  for(const id of ['automatic-controls','automatic-help','automatic-policy','automatic-status-block'])$(id).hidden=!audio;
   $('search-label').textContent=view==='files'?'Path contains':'Candidate contains';
-  inventoryIntro.textContent=view==='files'?'Each row is a source file, including chapter tracks and companion files. Switch to Book candidates to review audiobook groups.':'Candidates are possible books assembled from source clues. Review metadata, intended source files and playback order before creating an audiobook.';
+  inventoryIntro.textContent=view==='files'?'Each row is a source file, including chapter tracks and companion files. Switch to Book candidates to review audiobook groups.':'Automatic processing researches book candidates and converts confident matches. Held books stay out of the queue; manual review is optional.';
   $('batch-controls').hidden=!audio || view!=='candidates';
 }
-const connectionText='Browser connection interrupted. The scan may still be running; retrying…';
+const connectionText='Connection interrupted; automatic processing may still be running. Retrying…';
 const receivedStatus=new Map();
 let refreshSequence=0;
 let connectionNotice=$('connection-notice');
@@ -50,22 +54,23 @@ let inventoryIntro=$('inventory-intro');
 if(!inventoryIntro){inventoryIntro=document.createElement('p');inventoryIntro.id='inventory-intro';$('search-form').insertAdjacentElement('beforebegin',inventoryIntro);}
 inventoryIntro.textContent='Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.';
 
-function clearConnectionNotice(){recoveryDisconnected=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();}
+function clearConnectionNotice(){recoveryDisconnected=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();renderAutomatic();renderJobs();controls();}
 function refreshFailed(error){
   if(ended)return;
   if(error.httpStatus){
     const prior=$('message').textContent;
     if(!prior.includes(error.message))message(prior ? prior+'\n'+error.message : error.message);
-    return;
   }
   recoveryDisconnected=true;closeRecoveryDialog();updateRecovery();
   if(connectionNotice.textContent!==connectionText)connectionNotice.textContent=connectionText;
   connectionNotice.hidden=false;
   $('status').textContent='Last received: '+(receivedStatus.get($('library').value) || 'No status received yet.');
+  renderAutomatic();renderJobs();controls();
 }
 
 async function request(route, data) {
   const options = {headers:{'X-Books-Token':token}, credentials:'same-origin', cache:'no-store'};
+  if (data !== undefined && recoveryDisconnected)throw Error('Connection interrupted. Wait for the local server to reconnect.');
   if (data !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(data); }
   const response = await fetch(route, options);
   const result = await response.json();
@@ -76,21 +81,24 @@ function message(value='') { $('message').textContent=value; }
 function controls() {
   updateRecovery();
   const active = state?.active_library;
-  const stopped = ['stopped','offline','failed'].includes(state?.status.state);
-  $('start').disabled = busy || ended || !!active || stopped || !state;
-  $('resume').disabled = busy || ended || !!active || !stopped;
-  $('stop').disabled = busy || ended || !active || state?.stopping;
-  $('shutdown').disabled = busy || ended;
-  $('approve-candidate').disabled=busy || ended || dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve;
+  const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
+  $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
+  $('stop-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_stop!==true;
+  const stopped = ['stopped','offline','failed'].includes(state?.status?.state);
+  $('start').disabled = busy || ended || recoveryDisconnected || !!active || stopped || !state || automaticOwnsScanner;
+  $('resume').disabled = busy || ended || recoveryDisconnected || !!active || !stopped || automaticOwnsScanner;
+  $('stop').disabled = busy || ended || recoveryDisconnected || !active || state?.stopping || automaticOwnsScanner;
+  $('shutdown').disabled = busy || ended || recoveryDisconnected;
+  $('approve-candidate').disabled=busy || ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve;
   if(selectedRow?.kind==='candidate')$('approval-reason').textContent=dirty ? 'Save the draft metadata before approving it.' : selectedRow.approval_reason || '';
   $('approval-reason').hidden=!$('approval-reason').textContent;
-  if($('create-audiobook'))$('create-audiobook').disabled=busy || ended || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
-  for(const id of ['source-coverage','playback-order'])if($(id))$(id).disabled=busy || ended;
-  if($('add-chapters'))$('add-chapters').disabled=busy || ended || !selectedRow?.creation?.chapters_available;
-  for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || selectedRow?.kind!=='candidate';
-  if($('queue-books'))$('queue-books').disabled=busy || ended || !rows.some(readyForQueue);
-  if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || !['Running','running'].includes(state?.audiobook_jobs?.state);
-  if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || !state?.audiobook_jobs?.queued || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  if($('create-audiobook'))$('create-audiobook').disabled=busy || ended || recoveryDisconnected || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
+  for(const id of ['source-coverage','playback-order'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected;
+  if($('add-chapters'))$('add-chapters').disabled=busy || ended || recoveryDisconnected || !selectedRow?.creation?.chapters_available;
+  for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
+  if($('queue-books'))$('queue-books').disabled=busy || ended || recoveryDisconnected || !rows.some(readyForQueue);
+  if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
+  if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !state?.audiobook_jobs?.queued || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
 }
 async function action(route, data) {
   if (busy || ended) return;
@@ -100,7 +108,9 @@ async function action(route, data) {
   finally { busy=false; controls(); }
 }
 function select(row, reset) {
-  if(selectedPath!==row.path){closeRecoveryDialog(false);recoveryPanel=null;inspectorIdentity=null;++inspectSequence;$('metadata-inspector').hidden=true;for(const url of inspectorObjects)URL.revokeObjectURL(url);inspectorObjects.length=0;}
+  const changing=selectedPath!==row.path;
+  if(reset && (changing || dirty || trackDirty)){discardManualDraft();if(changing)$('manual-review').open=row.kind!=='candidate';}
+  if(changing){automaticResultKey=null;automaticInspectorKey=null;closeRecoveryDialog(false);recoveryPanel=null;inspectorIdentity=null;++inspectSequence;$('metadata-inspector').hidden=true;for(const url of inspectorObjects)URL.revokeObjectURL(url);inspectorObjects.length=0;}
   selectedPath=row.path; selectedRow=row;
   updateRecovery();
   selectedLibrary=row.library || $('library').value;
@@ -143,7 +153,7 @@ function select(row, reset) {
     $('future-comments').textContent=text || 'No existing comments';
   }
   form.hidden=!['audiobook','ebook','candidate'].includes(row.kind) || !!row.error || !!row.missing;
-  if (reset || !dirty) {
+  if (reset || (!dirty && !form.contains?.(document.activeElement))) {
     for (const field of fields) form.elements.namedItem(field).value=row.review?.[field] || (field==='original_language' ? 'Unknown' : '');
     form.elements.namedItem('multi_author').checked=!!row.review?.multi_author;
     form.elements.namedItem('anthology').checked=!!row.review?.anthology;
@@ -153,10 +163,14 @@ function select(row, reset) {
   }
   routingControls();
   renderMergeCandidate(row,reset);
+  renderAutomaticResult(row);
+  if(candidate)ensureCandidateInspector(row);
   controls();
   for (const element of $('inventory').children) element.setAttribute('aria-selected',String(element.dataset.path===row.path));
 }
-function renderRows() {
+function renderRows(force=false) {
+  const focused=document.activeElement;
+  if(!force && focused && $('inventory').contains?.(focused)){const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const body=$('inventory'); body.replaceChildren();
   $('inventory-head').replaceChildren();const heading=document.createElement('tr');
   for(const label of view==='candidates'?['Select','Title clue','Author / reader clues','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;heading.append(th);}$('inventory-head').append(heading);
@@ -164,15 +178,15 @@ function renderRows() {
     const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
     if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
-    const values=row.kind==='candidate'?[row.title_clue,row.artists.join('; ') || 'Unknown',row.members.length,row.status]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',row.error ? `Read error · ${row.error.split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
+    const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',row.error ? `Read error · ${row.error.split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
     for (const value of values) { const td=document.createElement('td'); td.textContent=value; tr.append(td); }
     const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title=row.kind==='candidate'?"Open this book's source folder in File Explorer.":"Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
     actions.append(buttons);tr.append(actions);
-    tr.addEventListener('click',()=>select(row,true));
-    tr.addEventListener('keydown',event=>{if(event.key==='Enter' || event.key===' '){event.preventDefault();select(row,true);}});
+    tr.addEventListener('click',()=>select(row,selectedPath!==row.path));
+    tr.addEventListener('keydown',event=>{if(event.key==='Enter' || event.key===' '){event.preventDefault();select(row,selectedPath!==row.path);}});
     body.append(tr);
   }
   const selected=rows.find(row=>row.path===selectedPath);
@@ -194,12 +208,12 @@ async function refresh(force=false) {
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
   if (ended || sequence!==refreshSequence || $('library').value!==library) return false;
   state=current;
-  renderJobs();
+  renderJobs();renderAutomatic();renewManualDraft();
   $('version').textContent=`v${state.version} · local prototype`;
   $('root').textContent=`Source: ${state.root}`;
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
-  const statusText=`${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
+  const statusText=`Discovery: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
   receivedStatus.set(library,statusText);$('status').textContent=statusText;
   $('error-shortcut').hidden=!(status.unresolved_errors ?? status.errors);$('error-shortcut').textContent=`Read errors · ${status.unresolved_errors ?? status.errors}`;
   $('scan-issues').hidden=!status.scan_issues?.length;$('scan-issues-text').textContent=(status.scan_issues || []).map(issue=>`${issue.path}\n${issue.error}\n${issue.time}`).join('\n\n');
@@ -212,7 +226,7 @@ async function refresh(force=false) {
   if (force || view==='candidates' || key!==lastKey) {
     const page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${offset}&search=${encodeURIComponent(search)}&view=${view}&status=${filters[view]}`);
     if (ended || sequence!==refreshSequence || $('library').value!==library) return false;
-    rows=page.rows.map(row=>view==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;renderRows();
+    rows=page.rows.map(row=>view==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;renderRows(force);
   }
   return true;
 }
@@ -238,15 +252,15 @@ $('error-shortcut').addEventListener('click',()=>{search='';$('search').value=''
 $('search-form').addEventListener('submit',event=>{event.preventDefault();search=$('search').value;offset=0;refresh(true).catch(error=>message(error.message));});
 $('previous').addEventListener('click',()=>{offset=Math.max(0,offset-100);refresh(true).catch(error=>message(error.message));});
 $('next').addEventListener('click',()=>{offset+=100;refresh(true).catch(error=>message(error.message));});
-form.addEventListener('input',()=>{if(!dirty)reviewRow=selectedRow;dirty=true;routingControls();controls();$('review-note').textContent='Unsaved local review.';});
+form.addEventListener('input',()=>{if(!dirty)reviewRow=selectedRow;dirty=true;manualMetadataTouched=true;syncManualDraft();routingControls();controls();$('review-note').textContent='Unsaved local review.';});
 form.addEventListener('submit',async event=>{
-  event.preventDefault();if(!selectedRow || busy || ended)return;
+  event.preventDefault();if(!selectedRow || busy || ended || recoveryDisconnected)return;
   const row=reviewRow || selectedRow;const review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
   review.multi_author=form.elements.namedItem('multi_author').checked;
   review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && form.elements.namedItem('anthology').checked;
   if(!['audiobook','candidate'].includes(selectedRow.kind)){review.canonical_author='';review.narrator='';}
   busy=true;controls();message();
-  try {if(row.kind==='candidate'){const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext()});dirty=false;if(trackDraft?.id===row.id && trackDraft.revision===row.revision)trackDraft.revision=result.row.revision;select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);}else await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});dirty=false;await refresh(true);message('Preview metadata saved. Source files unchanged.');}
+  try {if(row.kind==='candidate'){const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext()});dirty=false;if(trackDraft?.id===row.id && trackDraft.revision===row.revision)trackDraft.revision=result.row.revision;select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);}else await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});dirty=false;manualMetadataTouched=false;syncManualDraft();await refresh(true);message('Preview metadata saved. Source files unchanged.');}
   catch(error){message(error.message);}
   finally{busy=false;controls();}
 });
@@ -283,7 +297,7 @@ function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
-  text('jobs-status',[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · '));
+  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · '));
   const p=jobs.progress,active=Boolean(jobs.current_title&&p),bar=$('jobs-progress');
   $('book-progress').hidden=!active;$('jobs-idle').hidden=active;
   if(active){
@@ -313,19 +327,19 @@ function renderJobs(){
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Empty source folders retained: safe automatic removal is unavailable on this drive.':''));
 }
 async function candidateRequest(route,extra={}){if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){message(error.message);}finally{busy=false;controls();}}
-function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output'])$(id).hidden=!candidate;if(!candidate)return;
+function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
   const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,dirty,trackDirty,coverId]);
-  if(!reset && renderKey===mergeRenderKey)return;mergeRenderKey=renderKey;
-  // Keep the three review sections in normal Metadata -> Sources -> Output flow.
-  $('details').insertBefore($('candidate-details'),$('track-review'));
+  if(!reset && renderKey===mergeRenderKey)return;mergeRenderKey=$('manual-review').contains?.(document.activeElement)?null:renderKey;
+  // Keep metadata and track editing inside the optional manual disclosure.
+  if($('candidate-details').parentElement!==$('manual-review') || $('candidate-details').nextElementSibling!==$('track-review'))$('manual-review').insertBefore($('candidate-details'),$('track-review'));
   const context=row.review_context || {},creation=row.creation || {},matching=row.matching || {};
-  if(reset || !dirty){$('manual-evidence').value=context.manual_note || '';proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
-  if(reset || !trackDirty){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
+  if(reset || (!dirty && !$('manual-review').contains?.(document.activeElement))){$('manual-evidence').value=context.manual_note || '';proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
+  if(reset || (!trackDirty && !$('track-review').contains?.(document.activeElement) && !$('candidate-details').contains?.(document.activeElement))){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
   const actor=actorValue=>actorValue==='assistant'?'Assistant review':actorValue==='user'?'User review':'Needs review';
   $('candidate-facts').textContent=`Metadata: ${actor(context.metadata_actor)} · ${context.source_coverage_confirmed?'Source files reviewed: '+actor(context.track_actor):'Source files need review'} · Playback order: ${context.order_confirmed?actor(context.track_actor):'Needs review'} · Recording completeness unknown`;
   $('accepted-evidence').textContent=JSON.stringify({proposal_id:context.proposal_id,metadata_reviewer:context.metadata_actor,metadata_date:context.metadata_utc,track_reviewer:context.track_actor,track_date:context.track_utc,metadata_evidence:context.metadata_evidence || [],track_evidence:context.track_evidence || '',manual_note:context.manual_note || ''},null,2);
   $('matching-status').textContent=matching.error || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
-  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.setAttribute('aria-describedby','lookup-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
+  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey && !$('metadata-proposals').contains?.(document.activeElement)){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.setAttribute('aria-describedby','lookup-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
   renderMembers(row);renderCovers(row);
   $('chapters-control').hidden=!creation.chapters_available;$('add-chapters').disabled=!creation.chapters_available || busy;$('chapters-help').textContent=creation.chapters_available?"Preserves source track names when available. Unnamed tracks use Track 01, Track 02, and so on. These markers may differ from the book's written chapters.":creation.chapters_description || 'Chapter boundaries unavailable.';
   $('output-status').textContent=creation.status || 'Needs metadata review';$('output-path').textContent=creation.destination || 'No reviewed destination yet.';
@@ -338,14 +352,14 @@ function cleanupFacts(row){const creation=row.creation || {},policy=creation.cle
 function chapterSummary(row){if(row.creation?.job)return row.creation.chapters_description || 'Chapter markers: see saved job plan';return $('add-chapters').checked && row.creation?.chapters_available?`Chapter markers: ${trackDraft.included.length} — one per included source track`:'Chapter markers: none';}
 function updateChapterSummary(){if(!trackDraft || selectedRow?.kind!=='candidate')return;$('output-summary').textContent=$('output-summary').textContent.replace(/^Chapter markers:.*$/m,chapterSummary(selectedRow));}
 function plannedChapter(member,key){if(!$('add-chapters').checked)return 'Chapter markers disabled';if(!trackDraft.included.includes(key))return 'Excluded from output — no chapter marker';if(member.chapter_name_source==='source' && member.chapter_name)return 'Source chapter name: '+member.chapter_name;const position=trackDraft.order.filter(id=>trackDraft.included.includes(id)).indexOf(key)+1;const number=Number.isInteger(member.chapter_number) && member.chapter_number>=0?member.chapter_number:position;return 'Generated chapter label: Track '+String(number).padStart(Math.max(2,String(trackDraft.included.length).length),'0');}
-function renderMembers(row){const focused=document.activeElement?.dataset?.memberFocus;const memberKey=JSON.stringify([row.id,row.members,trackDraft.order,trackDraft.included,$('add-chapters').checked]);if(memberKey===memberRenderKey)return;memberRenderKey=memberKey;$('candidate-members').replaceChildren();const map=new Map(row.members.map(member=>[member.member_key || member.path,member])),order=trackDraft.order;const header=$('candidate-members').parentElement.querySelector('thead tr');header.replaceChildren();for(const label of ['Include','Proposed order','Track title / filename','Source disc / track number','Duration','Order evidence'])header.append(node('th',label));for(let index=0;index<order.length;index++){const key=order[index],member=map.get(key);if(!member)continue;const tr=node('tr'),inc=node('input');inc.type='checkbox';inc.dataset.memberFocus=key+':include';inc.checked=trackDraft.included.includes(key);inc.title='Include this source file in the output audiobook. Excluded files stay untouched.';inc.setAttribute('aria-label','Include '+member.path);inc.setAttribute('aria-describedby','track-save-help');inc.disabled=ended;inc.addEventListener('change',()=>{if(busy || ended){inc.checked=trackDraft.included.includes(key);return;}trackDraft.included=inc.checked?[...trackDraft.included,key]:trackDraft.included.filter(item=>item!==key);tracksChanged();renderMembers(row);});const label=node('label','','check');label.append(inc,node('span',inc.checked?'Included':'Excluded from output'));const include=node('td');include.append(label);tr.append(include);const movement=node('td');movement.append(node('p',String(index+1)));const buttons=node('div','','member-actions');for(const [delta,text] of [[-1,'Move up'],[1,'Move down']]){const button=node('button',text,'quiet');button.type='button';button.dataset.memberFocus=key+':'+delta;button.title=`${text}: ${member.path}`;button.setAttribute('aria-label',`${text}: ${member.path}`);button.setAttribute('aria-describedby','order-help');button.disabled=ended || index+delta<0 || index+delta>=order.length;button.addEventListener('click',()=>{if(busy || ended)return;[order[index],order[index+delta]]=[order[index+delta],order[index]];tracksChanged();renderMembers(row);});buttons.append(button);}movement.append(buttons);tr.append(movement);for(const value of [`${member.track_title || ''}\n${member.path}\n${plannedChapter(member,key)}`,`${member.source_disc || 'Unknown'} / ${member.source_track || 'Unknown'}`,typeof member.duration==='number'?`${member.duration.toFixed(2)} s`:'Unknown',member.order_evidence || 'Unknown'])tr.append(node('td',value));$('candidate-members').append(tr);}if(focused){const target=[...$('candidate-members').querySelectorAll('[data-member-focus]')].find(element=>element.dataset.memberFocus===focused && !element.disabled);target?.focus({preventScroll:true});}const included=row.members.filter(member=>trackDraft.included.includes(member.member_key || member.path)),known=included.every(member=>typeof member.duration==='number');$('member-count').textContent=`Included audio files — ${included.length} · ${known?included.reduce((sum,member)=>sum+member.duration,0).toFixed(2)+' s':'Total duration incomplete'}`;}
-function tracksChanged(){trackDirty=true;updateChapterSummary();$('source-coverage').checked=false;$('playback-order').checked=false;controls();$('output-reasons').textContent='Save the changed source selection and playback order. Review confirmations were reset.';}
-async function renderCovers(row){const coverKey=JSON.stringify([row.id,row.cover_choices,coverId]);if(coverKey===coverRenderKey)return;coverRenderKey=coverKey;const seq=++coverSequence;for(const url of coverObjects)URL.revokeObjectURL(url);coverObjects.length=0;$('selected-cover').replaceChildren();$('cover-choices').replaceChildren();for(const cover of row.cover_choices || []){const panel=node('section','','cover-choice');panel.append(node('p',`${cover.source_label || 'Artwork'} · ${cover.evidence_kind || 'Local artwork — edition unverified'}`));if(cover.source_url)panel.append(sourceLink(cover.source_url,`Cover source: ${cover.source_label || 'Artwork'}`));const image=node('img');image.alt=`Cover: ${row.review?.title || row.title_clue}`;image.hidden=true;panel.append(image);const imageState=node('p','Loading cover…');panel.append(imageState);const use=node('button','Use this cover','quiet');use.type='button';use.title='Select this image as the single cover in the output audiobook.';use.setAttribute('aria-describedby','cover-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;coverId=cover.id;dirty=true;$('review-note').textContent='Cover selection is an unsaved draft.';renderCovers(row);controls();});panel.append(use);(cover.id===coverId?$('selected-cover'):$('cover-choices')).append(panel);if(!cover.thumbnail_url){imageState.textContent='Cover image unavailable';continue;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Invalid local thumbnail route');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover image unavailable');const blob=await response.blob();if(seq!==coverSequence)return;const object=URL.createObjectURL(blob);coverObjects.push(object);image.src=object;image.hidden=false;imageState.textContent='';}catch(error){if(seq===coverSequence)imageState.textContent=error.message || 'Cover image unavailable';}}if(!coverId)$('selected-cover').append(node('p','Choose one usable cover before approving output metadata.'));}
+function renderMembers(row,force=false){if(!force && $('candidate-members').contains?.(document.activeElement))return;const focused=document.activeElement?.dataset?.memberFocus;const memberKey=JSON.stringify([row.id,row.members,trackDraft.order,trackDraft.included,$('add-chapters').checked]);if(memberKey===memberRenderKey)return;memberRenderKey=memberKey;$('candidate-members').replaceChildren();const map=new Map(row.members.map(member=>[member.member_key || member.path,member])),order=trackDraft.order;const header=$('candidate-members').parentElement.querySelector('thead tr');header.replaceChildren();for(const label of ['Include','Proposed order','Track title / filename','Source disc / track number','Duration','Order evidence'])header.append(node('th',label));for(let index=0;index<order.length;index++){const key=order[index],member=map.get(key);if(!member)continue;const tr=node('tr'),inc=node('input');inc.type='checkbox';inc.dataset.memberFocus=key+':include';inc.checked=trackDraft.included.includes(key);inc.title='Include this source file in the output audiobook. Excluded files stay untouched.';inc.setAttribute('aria-label','Include '+member.path);inc.setAttribute('aria-describedby','track-save-help');inc.disabled=ended;inc.addEventListener('change',()=>{if(busy || ended){inc.checked=trackDraft.included.includes(key);return;}trackDraft.included=inc.checked?[...trackDraft.included,key]:trackDraft.included.filter(item=>item!==key);tracksChanged();renderMembers(row,true);});const label=node('label','','check');label.append(inc,node('span',inc.checked?'Included':'Excluded from output'));const include=node('td');include.append(label);tr.append(include);const movement=node('td');movement.append(node('p',String(index+1)));const buttons=node('div','','member-actions');for(const [delta,text] of [[-1,'Move up'],[1,'Move down']]){const button=node('button',text,'quiet');button.type='button';button.dataset.memberFocus=key+':'+delta;button.title=`${text}: ${member.path}`;button.setAttribute('aria-label',`${text}: ${member.path}`);button.setAttribute('aria-describedby','order-help');button.disabled=ended || index+delta<0 || index+delta>=order.length;button.addEventListener('click',()=>{if(busy || ended)return;[order[index],order[index+delta]]=[order[index+delta],order[index]];tracksChanged();renderMembers(row,true);});buttons.append(button);}movement.append(buttons);tr.append(movement);for(const value of [`${member.track_title || ''}\n${member.path}\n${plannedChapter(member,key)}`,`${member.source_disc || 'Unknown'} / ${member.source_track || 'Unknown'}`,typeof member.duration==='number'?`${member.duration.toFixed(2)} s`:'Unknown',member.order_evidence || 'Unknown'])tr.append(node('td',value));$('candidate-members').append(tr);}if(focused){const target=[...$('candidate-members').querySelectorAll('[data-member-focus]')].find(element=>element.dataset.memberFocus===focused && !element.disabled);target?.focus({preventScroll:true});}const included=row.members.filter(member=>trackDraft.included.includes(member.member_key || member.path)),known=included.every(member=>typeof member.duration==='number');$('member-count').textContent=`Included audio files — ${included.length} · ${known?included.reduce((sum,member)=>sum+member.duration,0).toFixed(2)+' s':'Total duration incomplete'}`;}
+function tracksChanged(){trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();$('source-coverage').checked=false;$('playback-order').checked=false;controls();$('output-reasons').textContent='Save the changed source selection and playback order. Review confirmations were reset.';}
+async function renderCovers(row){const coverKey=JSON.stringify([row.id,row.cover_choices,coverId]);if(coverKey===coverRenderKey || $('selected-cover').contains?.(document.activeElement) || $('cover-choices').contains?.(document.activeElement))return;coverRenderKey=coverKey;const seq=++coverSequence;for(const url of coverObjects)URL.revokeObjectURL(url);coverObjects.length=0;$('selected-cover').replaceChildren();$('cover-choices').replaceChildren();for(const cover of row.cover_choices || []){const panel=node('section','','cover-choice');panel.append(node('p',`${cover.source_label || 'Artwork'} · ${cover.evidence_kind || 'Local artwork — edition unverified'}`));if(cover.source_url)panel.append(sourceLink(cover.source_url,`Cover source: ${cover.source_label || 'Artwork'}`));const image=node('img');image.alt=`Cover: ${row.review?.title || row.title_clue}`;image.hidden=true;panel.append(image);const imageState=node('p','Loading cover…');panel.append(imageState);const use=node('button','Use this cover','quiet');use.type='button';use.title='Select this image as the single cover in the output audiobook.';use.setAttribute('aria-describedby','cover-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;coverId=cover.id;dirty=true;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Cover selection is an unsaved draft.';renderCovers(row);controls();});panel.append(use);(cover.id===coverId?$('selected-cover'):$('cover-choices')).append(panel);if(!cover.thumbnail_url){imageState.textContent='Cover image unavailable';continue;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Invalid local thumbnail route');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover image unavailable');const blob=await response.blob();if(seq!==coverSequence)return;const object=URL.createObjectURL(blob);coverObjects.push(object);image.src=object;image.hidden=false;imageState.textContent='';}catch(error){if(seq===coverSequence)imageState.textContent=error.message || 'Cover image unavailable';}}if(!coverId)$('selected-cover').append(node('p','Choose one usable cover before approving output metadata.'));}
 $('select-page').addEventListener('change',()=>{for(const row of rows.filter(item=>item.kind==='candidate')){if($('select-page').checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);}renderRows();});
 $('find-metadata').addEventListener('click',()=>candidateRequest('/api/candidate/match'));
 $('find-covers').addEventListener('click',()=>candidateRequest('/api/candidate/covers'));
-$('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:$('manual-evidence').value});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');}});
-for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
+$('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:$('manual-evidence').value});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;syncManualDraft();renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');}});
+for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
 $('create-audiobook').addEventListener('click',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');});
 $('queue-books').addEventListener('click',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}});
 $('pause-jobs').addEventListener('click',()=>action('/api/audiobook/pause',{}));$('resume-jobs').addEventListener('click',()=>action('/api/audiobook/resume',{}));
@@ -363,4 +377,118 @@ $('recovery-cancel').addEventListener('click',()=>closeRecoveryDialog());
 $('recovery-confirm').addEventListener('click',deleteRecoveryCopies);
 $('recovery-dialog').addEventListener('cancel',event=>{event.preventDefault();closeRecoveryDialog();});
 $('recovery-dialog').addEventListener('keydown',event=>{if(!recoveryConfirmation)return;if(event.key==='Escape'){event.preventDefault();closeRecoveryDialog();}else if(event.key==='Tab'){event.preventDefault();const first=$('recovery-cancel'),last=$('recovery-confirm');(document.activeElement===first?last:first).focus();}});
+
+const automaticStates=new Set(['Idle','Running','Stopping','Paused','Completed','Needs attention']);
+function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
+function automaticPhase(value){return {discovery:'discovery',research:'metadata research',conversion:'audiobook jobs',paused:'saving pending work',completed:'finishing the pass'}[value] || 'pending work';}
+function renderAutomatic(){
+  const automatic=state?.automatic_processing,known=automaticStates.has(automatic?.state),stale=recoveryDisconnected || ended?'Last confirmed — ':'';
+  setText('automatic-status',stale+'Automatic processing: '+(known?automatic.state:'status unavailable'));
+  setText('automatic-request',automaticRequest==='start'?'Starting automatic processing…':automaticRequest==='stop'?'Requesting automatic stop…':'');
+  $('start-automatic').title=automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.';
+  let detail='';
+  if(automatic?.state==='Stopping')detail='Stopping automatic processing — '+(automatic.reason || automaticPhase(automatic.phase));
+  else if(automatic?.state==='Paused')detail=automatic.restart_paused?'Paused after server restart — start to continue saved work':(automatic.reason || 'Paused — pending work saved');
+  else if(automatic?.state==='Completed'){
+    const converted=verifiedCount(state?.audiobook_jobs?.converted_total),approved=verifiedCount(state?.audiobook_jobs?.approved_total),held=verifiedCount(automatic.research?.held);
+    detail=converted!==null && approved!==null && approved>=converted && held!==null?'Automatic pass complete — '+converted+' converted · '+held+' held':'Automatic pass complete — result counts unavailable';
+  }else if(automatic?.reason)detail=automatic.reason;
+  setText('automatic-detail',detail);$('automatic-detail').hidden=!detail;
+  const research=automatic?.research,counts=research && ['researching','waiting','held'].every(key=>verifiedCount(research[key])!==null);
+  setText('research-status',stale+(counts?'Metadata research: '+research.researching+' researching · '+research.waiting+' waiting · '+research.held+' held':'Research status unavailable'));
+  const current=automatic?.current;
+  const currentText=current && current.title && research?.researching>0?'Current research: '+current.title+' — '+[current.source,current.stage].filter(Boolean).join(' / ')+(research.researching>1?' and '+(research.researching-1)+' more':''):'';
+  setText('research-current',currentText);$('research-current').hidden=!currentText;
+}
+async function automaticAction(kind){
+  controls();const button=$(kind==='start'?'start-automatic':'stop-automatic');
+  if(button.disabled || automaticRequest!==null || $('library').value!=='Audiobooks')return;
+  automaticRequest=kind;busy=true;renderAutomatic();controls();message();
+  try{
+    const result=await request('/api/automatic/'+kind,{});
+    const acknowledged=result.automatic_processing || result.state?.automatic_processing;
+    if(acknowledged && state){state={...state,automatic_processing:acknowledged};renderAutomatic();}
+    lastKey=null;if(await refresh(true))clearConnectionNotice();
+  }catch(error){message(error.message);if(!error.httpStatus)refreshFailed(error);}
+  finally{automaticRequest=null;busy=false;renderAutomatic();controls();}
+}
+$('start-automatic').addEventListener('click',()=>automaticAction('start'));
+$('stop-automatic').addEventListener('click',()=>automaticAction('stop'));
+function recordedApproval(row){
+  if(row.metadata_approved!==true)return '';
+  const approval=row.review_context?.automatic_approval;
+  if(approval && typeof approval==='object' && !Array.isArray(approval) && typeof approval.matcher_version==='string' && typeof approval.work_id==='string')return 'Approved automatically';
+  if(row.review_context?.metadata_actor==='user')return 'Approved manually';
+  return '';
+}
+function candidateTitle(row){return recordedApproval(row) && row.review?.title?'Canonical title: '+row.review.title:'Title clue: '+(row.title_clue || 'Unknown');}
+function candidateStatus(row){
+  const creation=row.creation?.status || '',status=row.status || '';
+  if(/queued|creating|converting|encoding|checking|publishing|created|completed|converted|paused|pausing|failed|attention/i.test(creation))return creation;
+  if(/queued|creating|converting|converted|paused|pausing|failed|attention/i.test(status))return status;
+  const automatic=row.automatic;
+  if(automatic?.state==='Held')return 'Held'+(automatic.reasons?.length?' — '+automatic.reasons[0]:'');
+  return automatic?.state || status || 'Automatic result unavailable';
+}
+function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
+function renderAutomaticResult(row){
+  $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
+  const key=JSON.stringify([row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status]);
+  if(key===automaticResultKey)return;
+  if($('automatic-result').contains?.(document.activeElement))return;
+  automaticResultKey=key;const automatic=row.automatic;
+  setText('automatic-result-status',candidateStatus(row));
+  $('automatic-reasons').replaceChildren();for(const reason of automatic?.reasons || [])$('automatic-reasons').append(node('li',reason));$('automatic-reasons').hidden=!automatic?.reasons?.length;
+  $('automatic-result-help').hidden=automatic?.state!=='Held';
+  setText('automatic-attempt',automatic?.attempted_utc?'Last attempt: '+recoveryDate(automatic.attempted_utc):'No automatic research attempt recorded.');
+  const retry=retryDate(automatic?.retry_at);setText('automatic-retry',retry?'Retry available after '+retry+'; Start to continue':'');$('automatic-retry').hidden=!retry;
+  const facts=$('automatic-facts');facts.replaceChildren();const approval=recordedApproval(row),review=row.review || {},context=row.review_context || {};
+  const values=approval?{Approval:approval,'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Output destination':row.creation?.destination || 'Destination unavailable'}:{'Title clue':row.title_clue || 'Unknown','Output destination':row.creation?.destination || 'No verified destination yet'};
+  for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
+  const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
+  $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',members.get(key).path));
+  const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
+  const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',manual_note:context.manual_note || ''};
+  $('automatic-accepted-evidence').textContent=JSON.stringify(accepted,null,2);$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.manual_note;
+}
+async function ensureCandidateInspector(row){
+  const identity=recordIdentity(row),key=JSON.stringify([identity,row.revision,row.creation?.status,row.cleanup]);
+  if(recoveryDisconnected || automaticInspectorKey===key || $('metadata-inspector').contains?.(document.activeElement))return;
+  automaticInspectorKey=key;inspectorIdentity=identity;const sequence=++inspectSequence;$('metadata-inspector').hidden=false;
+  setText('inspect-status','Reading metadata and artwork…');
+  try{const result=await request('/api/inspect',identity);if(sequence!==inspectSequence || selectedPath!==row.path || ended)return;if($('metadata-inspector').contains?.(document.activeElement)){automaticInspectorKey=null;setText('inspect-status','');return;}renderInspector(result.inspector,row,sequence);setText('inspect-status',result.inspector?'':'Metadata inspection unavailable');}
+  catch(error){if(sequence===inspectSequence){automaticInspectorKey=null;setText('inspect-status',error.message);}}
+}
+function draftStatus(){
+  const value=draftLeaseFailure?'Manual draft protection unavailable: '+draftLeaseFailure:manualDraftLease?.active?(manualDraftLease.confirmed?'Manual draft retained; automatic processing holds this candidate.':'Saving manual draft protection…'):'';
+  setText('draft-protection-status',value);$('draft-protection-status').hidden=!value;controls();
+}
+function sendDraftLease(scope){
+  scope.lastSent=Date.now();scope.confirmed=false;draftStatus();
+  draftLeaseQueue=draftLeaseQueue.catch(()=>{}).then(async()=>{
+    try{await request('/api/automatic/draft',{id:scope.id,revision:scope.revision,active:scope.active});if(manualDraftLease===scope){scope.confirmed=true;draftLeaseFailure='';if(!scope.active)manualDraftLease=null;}}
+    catch(error){if(manualDraftLease===scope){scope.confirmed=false;draftLeaseFailure=error.message || 'The local server could not retain this draft.';}}
+    finally{draftStatus();}
+  });
+}
+function syncManualDraft(){
+  const active=selectedRow?.kind==='candidate' && ((manualMetadataTouched && dirty) || (manualTrackTouched && trackDirty));
+  const row=dirty?(reviewRow || selectedRow):selectedRow;
+  const revision=manualTrackTouched && trackDirty?trackDraft?.revision:row?.revision;
+  if(manualDraftLease?.id===row?.id && manualDraftLease?.revision===revision && manualDraftLease?.active===active)return;
+  const previous=manualDraftLease;draftLeaseFailure='';
+  if(active){
+    if(previous?.active && previous.id!==row.id)sendDraftLease({...previous,active:false});
+    manualDraftLease={id:row.id,revision,active:true,confirmed:false};
+  }else manualDraftLease=previous?{...previous,revision:selectedRow?.id===previous.id?selectedRow.revision:previous.revision,active:false,confirmed:false}:null;
+  if(manualDraftLease)sendDraftLease(manualDraftLease);else draftStatus();
+}
+function discardManualDraft(){
+  manualMetadataTouched=false;manualTrackTouched=false;
+  if(manualDraftLease?.active){manualDraftLease={...manualDraftLease,revision:selectedRow?.id===manualDraftLease.id?selectedRow.revision:manualDraftLease.revision,active:false,confirmed:false};sendDraftLease(manualDraftLease);}
+  draftStatus();
+}
+function renewManualDraft(){if(!recoveryDisconnected && manualDraftLease && Date.now()-manualDraftLease.lastSent>=45000){if(!manualDraftLease.active && selectedRow?.id===manualDraftLease.id)manualDraftLease.revision=selectedRow.revision;sendDraftLease(manualDraftLease);}}
+
+controls();
 viewControls();poll();

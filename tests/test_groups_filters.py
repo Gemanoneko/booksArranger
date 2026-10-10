@@ -43,13 +43,14 @@ class GroupFilterTests(unittest.TestCase):
         self.catalog('audio/Book/Disc 3/1.mp3',{'album':'Other Book','track':'1'})
         self.assertEqual(inventory.candidates('Audiobooks')['total'],2)
 
-    def test_mixed_works_or_recordings_block_metadata_approval(self):
+    def test_mixed_works_or_recordings_split_before_any_approval(self):
         inventory=Inventory(self.database,self.roots,self.reader)
         self.catalog('audio/Mixed/1.mp3',{'album':'One','artist':'Reader One'})
         self.catalog('audio/Mixed/2.mp3',{'album':'Two','artist':'Reader Two'})
-        row=inventory.candidates('Audiobooks')['rows'][0]
-        with self.assertRaisesRegex(ValueError,'Different'):
-            inventory.save_candidate('Audiobooks',row['id'],row['revision'],REVIEW,True)
+        rows=inventory.candidates('Audiobooks')['rows']
+        self.assertEqual(len(rows),2)
+        self.assertEqual(sorted(len(row['members']) for row in rows),[1,1])
+        self.assertTrue(all(not row['metadata_approved'] for row in rows))
 
     def test_order_only_ambiguity_is_separate_from_metadata_approval(self):
         inventory=Inventory(self.database,self.roots,self.reader)

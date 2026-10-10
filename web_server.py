@@ -100,7 +100,8 @@ class BrowserServer(ThreadingHTTPServer):
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
-            'status': self.inventory.status(library), 'audiobook_jobs': self.merge.state()}
+            'status': self.inventory.status(library), 'audiobook_jobs': self.merge.state(),
+            'automatic_processing': self.merge.automatic.status() if hasattr(self.merge,'automatic') else None}
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'
@@ -277,6 +278,17 @@ class Handler(BaseHTTPRequestHandler):
         if not set(required)<=set(data) or set(data)-set(required)-set(optional): raise ValueError('Request fields are incomplete or unknown')
 
     def merge_request(self,path,data):
+        if path in {'/api/automatic/start','/api/automatic/stop','/api/automatic/draft'}:
+            automatic=self.server.merge.automatic
+            if path.endswith('/draft'):
+                self.shape(data,{'id','revision','active'})
+                identity=self.uuid_value(data['id']);revision=data['revision']
+                if type(revision) is not int or revision<1:raise ValueError('Invalid candidate revision')
+                self.response(200,automatic.draft(identity,revision,data['active']));return
+            if data:raise ValueError('Automatic controls require an empty object; scope is Audiobooks')
+            if path.endswith('/start'):self.server.active_library='Audiobooks';value=automatic.start()
+            else:value=automatic.stop()
+            self.response(202,{'automatic_processing':value});return
         reviews=self.server.merge.reviews
         if path in {'/api/inspect','/api/open-folder'}:
             self.shape(data,{'library','view','id'}, {'folder_kind','directory_id'} if path=='/api/open-folder' else ())
@@ -297,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
         if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
             if data: raise ValueError('Audiobook job controls require an empty object')
-            self.response(200,self.server.merge.pause() if path.endswith('/pause') else self.server.merge.resume())
+            self.response(200,(self.server.merge.automatic.stop() if hasattr(self.server.merge,'automatic') and self.server.merge.automatic.status()['state'] in ('Running','Stopping') else self.server.merge.pause()) if path.endswith('/pause') else self.server.merge.resume())
             return
         if path=='/api/audiobook/recovery/delete':
             if set(data)!={'job_id','token','count','bytes'}:raise ValueError('Recovery deletion requires the displayed book and recovery scope')
@@ -369,13 +381,15 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'Server is shutting down');return
                 if path in {'/api/scan/start','/api/scan/resume','/api/scan/stop'}:
                     if set(data)!={'library'}: raise ValueError('Scan controls require only a library')
                     library=self.library(data['library'])
+                    if hasattr(self.server.merge,'automatic') and self.server.merge.automatic.status()['state'] in ('Running','Stopping'):
+                        self.fail(409,'Automatic processing owns discovery; use Stop automatic processing');return
                     if path.endswith('/stop'):
                         if self.server.active_library!=library or not self.server.scan_active():
                             self.fail(409,'This library has no active scan to stop');return
@@ -392,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
+                    if path in {'/api/automatic/start','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':

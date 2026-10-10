@@ -28,12 +28,15 @@ def digest(path):
         for block in iter(lambda:source.read(1024*1024),b''):result.update(block)
     return result.hexdigest()
 def identity(stat): return (stat.st_size,stat.st_mtime_ns,stat.st_dev,stat.st_ino)
-def source_hash(path,expected):
+def source_hash(path,expected,stop=None):
+    if stop and stop.is_set():raise InterruptedError('Automatic source hashing paused')
     result=hashlib.sha256()
     with open(path,'rb') as source:
         before=os.fstat(source.fileno())
         if identity(before)!=identity(expected):raise ValueError('Source changed — review required')
-        for block in iter(lambda:source.read(1024*1024),b''):result.update(block)
+        for block in iter(lambda:source.read(1024*1024),b''):
+            if stop and stop.is_set():raise InterruptedError('Automatic source hashing paused')
+            result.update(block)
         if identity(before)!=identity(os.fstat(source.fileno())):raise ValueError('Source changed — review required')
     if identity(before)!=identity(fresh_stat(path)):raise ValueError('Source changed — review required')
     return result.hexdigest()
@@ -72,7 +75,7 @@ class CandidateReviewService:
 
     def _row(self,library,id,revision=None):
         if library!='Audiobooks':raise ValueError('Only Audiobooks have candidate review')
-        row=next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
+        row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
         if row is None or (revision is not None and row['revision']!=revision):raise ValueError('Candidate changed; reload evidence before reviewing')
         return row
 
@@ -105,7 +108,7 @@ class CandidateReviewService:
             except (ValueError,OSError):return None
         return choice
 
-    def enrich(self,row,check_sources=True,allow_existing_job=False):
+    def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False):
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row)
         for m,key in zip(row['members'],keys):m['member_key']=key
         order=ctx.get('track_order',keys); included=ctx.get('included',keys)
@@ -114,7 +117,7 @@ class CandidateReviewService:
         else:
             cover=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
             if cover and not any((self.cache/(cover['id']+suffix)).is_file() for suffix in ('.png','.jpg')):cover=None
-        metadata_ok=bool(ctx.get('metadata_approved') and cover)
+        metadata_ok=bool(ctx.get('metadata_approved') and cover and (not ctx.get('automatic_pending') or allow_automatic_pending))
         track_ok=bool(ctx.get('source_coverage_confirmed') and ctx.get('order_confirmed') and ctx.get('source_hashes'))
         source_changed=False
         if track_ok and check_sources:
@@ -159,6 +162,11 @@ class CandidateReviewService:
                              'duration_seconds':duration,'chapters_available':chapters_available(selected),'chapters_default':chapters_default(selected),
                              'chapters_description':('Chapter markers: '+str(len(selected))+' — one per included source track') if ctx.get('chapters',chapters_default(selected)) else 'Chapter markers: none',
                              'device':'Apple Books sync not checked','recording_completeness':'Recording completeness unknown','job':job})
+        automatic=self.jobs.automatic.candidate(row) if self.jobs and hasattr(self.jobs,'automatic') else None
+        row['automatic']=automatic
+        row['review_context']['automatic_approval']=copy.deepcopy(ctx.get('automatic_approval'))
+        if automatic and not job and automatic['state'] in ('Researching','Waiting for source','Held','Approved automatically','Queued'):
+            row['status']=automatic['state']+(' — '+automatic['reasons'][0] if automatic['state']=='Held' and automatic['reasons'] else '')
         row['review_context']['chapters_choice_saved']='chapters' in ctx
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
@@ -173,7 +181,7 @@ class CandidateReviewService:
 
     def page(self,limit=100,offset=0,search='',status='all'):
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
-        if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention'):raise ValueError('Unknown candidate status')
+        if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held'):raise ValueError('Unknown candidate status')
         direct=status in ('all','errors','changed')
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
         with connect(self.inventory.database) as db:
@@ -189,8 +197,11 @@ class CandidateReviewService:
         def selected(row):
             saved=self.page_local.contexts.get(row['id']);ctx=saved['data'] if saved and saved['revision']==row['revision'] else {}
             choice=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
-            approved=bool(ctx.get('metadata_approved') and choice and any((self.cache/(choice['id']+suffix)).is_file() for suffix in ('.png','.jpg')))
+            approved=bool(not ctx.get('automatic_pending') and ctx.get('metadata_approved') and choice and any((self.cache/(choice['id']+suffix)).is_file() for suffix in ('.png','.jpg')))
             job=self.page_local.jobs.get(row['id'])
+            if status=='held':
+                auto=self.jobs.automatic.candidate(row) if self.jobs and hasattr(self.jobs,'automatic') else None
+                return bool(auto and auto['state']=='Held')
             if status=='review':return not approved
             if status=='approved':return approved
             if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
@@ -219,11 +230,15 @@ class CandidateReviewService:
         if not isinstance(note,str) or len(note)>16000:raise ValueError('Evidence note exceeds bound')
         if actor=='assistant' and len(note.strip())<20:raise ValueError('Assistant review requires concrete supporting evidence')
 
-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None):
+    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None):
         with self.lock:
             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
             review=copy.deepcopy(review)
+            ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
+            if automatic_pending is not None:
+                if actor!='assistant' or not approve or not isinstance(automatic_pending,dict) or set(automatic_pending)!={'matcher_version','work_id'} or not all(isinstance(v,str) and v for v in automatic_pending.values()):raise ValueError('Invalid private automatic approval checkpoint')
+                ctx['automatic_pending']=copy.deepcopy(automatic_pending)
             if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology'}:raise ValueError('Unknown canonical metadata field')
             for field in TEXT_FIELDS:
                 value=review.setdefault(field,'')
@@ -258,7 +273,7 @@ class CandidateReviewService:
             if proposal_id is not None and not any(p['id']==proposal_id for p in self.matching.get(id,ctx.get('matching',{})).get('proposals',[])):raise ValueError('Unknown metadata proposal')
             changed=review!=row.get('review') or manual_note!=ctx.get('manual_note') or trial['cover_id']!=ctx.get('cover_id') or records!=ctx.get('metadata_evidence',[])
             fresh=self.inventory.save_candidate(library,id,revision,review,False)
-            ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve))
+            ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
             if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
             return self._write(fresh,ctx)
 
@@ -284,8 +299,10 @@ class CandidateReviewService:
             worker=threading.Thread(target=lookup,daemon=True);self.workers[id]=worker;worker.start()
             return copy.deepcopy(self.matching[id])
 
-    def covers(self,library,id,revision):
+    def covers(self,library,id,revision,all_embedded=False,stop=None):
         with self.lock:
+            stop=stop or threading.Event()
+            if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
             row=self._row(library,id,revision);ctx=self._context(row);choices=[]
             def add(data,label):
                 if len(data)>MAX_COVER:raise ValueError('Cover exceeds8 MB')
@@ -299,10 +316,11 @@ class CandidateReviewService:
                         if digest(destination)!=hash:raise ValueError('Cached artwork differs from selected source bytes')
                         decoder=shutil.which('ffmpeg')
                         if decoder and hash not in self._decoded:
-                            run_owned([decoder,'-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f','image2','-i',str(destination),'-frames:v','1','-f','null','-'],self.cache,threading.Event(),10,1024)
+                            run_owned([decoder,'-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f','image2','-i',str(destination),'-frames:v','1','-f','null','-'],self.cache,stop,10,1024)
                             self._decoded.add(hash)
                 if not any(c['id']==cover_id for c in choices):choices.append({'id':cover_id,'source_label':label,'source_url':'','evidence_kind':'Local artwork — edition unverified','thumbnail_url':'/api/cover?id='+cover_id,'sha256':hash})
             for companion in row.get('companions',[])[:50]:
+                if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
                 path=Path(companion['path'])
                 if path.suffix.lower() not in ('.jpg','.jpeg','.png') or companion.get('error') or companion.get('missing'):continue
                 try:
@@ -311,12 +329,14 @@ class CandidateReviewService:
                     with open(path,'rb') as source:data=source.read(MAX_COVER+1)
                     if identity(before)!=identity(fresh_stat(path)):continue
                     add(data,path.name)
+                except InterruptedError:raise
                 except (OSError,ValueError,subprocess.TimeoutExpired):continue
             # Embedded artwork is extracted only when an attached picture is catalogued.
             ffmpeg=shutil.which('ffmpeg')
             if ffmpeg:
                 with connect(self.inventory.database) as db:
-                    for m in row['members'][:30]:
+                    for m in (row['members'] if all_embedded else row['members'][:30]):
+                        if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
                         raw=db.execute('SELECT metadata FROM files WHERE root=? AND path=?',(self.inventory.roots[library],m['path'])).fetchone()
                         streams=json.loads(raw[0]).get('probe',{}).get('streams',[]) if raw else []
                         attached=next((s for s in streams if s.get('disposition',{}).get('attached_pic')==1),None)
@@ -324,10 +344,11 @@ class CandidateReviewService:
                         try:
                             before=fresh_stat(m['path'])
                             with DirectoryBoundary(self.cache.anchor,self.cache):
-                                data=run_owned([ffmpeg,'-v','error','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(m['path']).suffix.lower()],'-i',m['path'],'-map','0:'+str(attached['index']),'-frames:v','1','-vf','scale=1200:1200:force_original_aspect_ratio=decrease','-f','image2pipe','-c:v','png','pipe:1'],self.cache,threading.Event(),15,MAX_COVER)
+                                data=run_owned([ffmpeg,'-v','error','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(m['path']).suffix.lower()],'-i',m['path'],'-map','0:'+str(attached['index']),'-frames:v','1','-vf','scale=1200:1200:force_original_aspect_ratio=decrease','-f','image2pipe','-c:v','png','pipe:1'],self.cache,stop,15,MAX_COVER)
                             if identity(before)==identity(fresh_stat(m['path'])):add(data,'Embedded artwork: '+m['filename'])
+                        except InterruptedError:raise
                         except (OSError,ValueError,TimeoutError,subprocess.TimeoutExpired):pass
-                        break
+                        if not all_embedded:break
             changed=choices!=ctx.get('cover_choices',[])
             if changed:ctx['cover_choices']=choices
             if ctx.get('cover_id') and not any(c['id']==ctx['cover_id'] for c in choices):ctx.update(metadata_approved=False,source_hashes={})
@@ -411,9 +432,10 @@ class CandidateReviewService:
                 if digest(cached)!=hash:raise ValueError('Cached source cover bytes changed')
         return {'id':id,'thumbnail_url':'/api/cover?id='+id,'label':'Embedded/source cover — edition unverified','status':'Source cover','sha256':hash}
 
-    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note=''):
+    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None):
         with self.lock:
             row=self._row(library,id,revision);ctx=self._context(row);keys=self._keys(row);self._actor(actor,evidence_note)
+            if actor=='user':ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if not isinstance(order,list) or len(order)!=len(keys) or set(order)!=set(keys) or not isinstance(included,list) or len(set(included))!=len(included) or not set(included)<=set(keys):raise ValueError('Review the exact known member list and order')
             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
             if (source_coverage_confirmed or order_confirmed) and not evidence_note.strip():raise ValueError('Record the membership and order review basis')
@@ -426,21 +448,21 @@ class CandidateReviewService:
                     if key not in included:continue
                     before=fresh_stat(m['path'])
                     if before.st_size!=m['size'] or before.st_mtime_ns!=int(m['modified']):raise ValueError('Source changed — review required')
-                    hash=source_hash(m['path'],before);after=fresh_stat(m['path'])
+                    hash=source_hash(m['path'],before,stop) if stop is not None else source_hash(m['path'],before);after=fresh_stat(m['path'])
                     if identity(before)!=identity(after):raise ValueError('Source changed — review required')
                     hashes[key]={'sha256':hash,'size':before.st_size,'modified':str(before.st_mtime_ns),'dev':before.st_dev,'ino':before.st_ino}
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
             return self._write(row,ctx)
 
-    def build_manifest(self,library,id,revision,allow_existing_job=False):
+    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None):
         with self.lock:
-            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job);ctx=self._context(row)
+            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending);ctx=self._context(row)
             if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
             members={m['member_key']:m for m in row['members']};sources=[]
             for key in row['track_order']:
                 if key not in row['included']:continue
                 m=members[key];stored=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
-                if identity(stat)!=(stored['size'],int(stored['modified']),stored['dev'],stored['ino']) or source_hash(m['path'],stat)!=stored['sha256']:raise ValueError('Source changed — review required')
+                if identity(stat)!=(stored['size'],int(stored['modified']),stored['dev'],stored['ino']) or (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
                 sources.append({'path':m['path'],'size':stored['size'],'modified':stored['modified'],'sha256':stored['sha256'],'fingerprint':{'size':stored['size'],'modified':stored['modified']},'metadata':m['metadata']})
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']

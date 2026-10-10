@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 def approved_scope(row,ctx,key_for):
+    if ctx.get('automatic_pending'):return False
     if row.get('changed') or not all(ctx.get(k) for k in ('metadata_approved','source_coverage_confirmed','order_confirmed')):
         return False
     if row.get('conflicts') or not row.get('review') or not row.get('preview',{}).get('path'):return False

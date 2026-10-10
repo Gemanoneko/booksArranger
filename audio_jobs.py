@@ -89,7 +89,7 @@ class AudioJobs:
             elif state == "running":
                 self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
 
-    def enqueue(self, manifest):
+    def enqueue(self, manifest, *, approval_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
         frozen = json.loads(json.dumps(manifest, ensure_ascii=False, allow_nan=False))
         if not isinstance(frozen, dict):
@@ -123,6 +123,7 @@ class AudioJobs:
                     frozen["job_id"] = existing[0]["job_id"]
                     digest = existing[0]["manifest_hash"]
             if existing:
+                if approval_context is not None:raise ValueError("Automatic candidate already has a bound job")
                 if existing[0]["manifest_hash"] != digest:
                     raise ValueError("Job UUID already binds a different manifest")
                 if existing[0]["state"] == "completed":
@@ -133,6 +134,18 @@ class AudioJobs:
                 return frozen["job_id"]
             timestamp = _now()
             with self._db() as db:
+                if approval_context is not None:
+                    # Only the private automatic caller provides this exact checked context.
+                    id,revision,expected,approved=approval_context
+                    if id!=frozen['candidate_id'] or revision!=frozen['candidate_revision']:raise ValueError('Automatic context identity changed')
+                    if not expected.get('automatic_pending') or not expected.get('metadata_approved'):raise ValueError('Automatic approval checkpoint missing')
+                    delta=dict(expected);delta.pop('automatic_pending',None);delta['automatic_approval']=approved.get('automatic_approval')
+                    if delta!=approved or not isinstance(delta['automatic_approval'],dict):raise ValueError('Unexpected automatic approval mutation')
+                    db.execute('BEGIN IMMEDIATE')
+                    group=db.execute('SELECT revision FROM book_groups WHERE id=?',(id,)).fetchone()
+                    context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
+                    if not group or not context or group[0]!=revision or context[0]!=revision or json.loads(context[1])!=expected:raise ValueError('Automatic approval checkpoint changed')
+                    db.execute('UPDATE candidate_context SET data=? WHERE id=? AND revision=?',(json.dumps(approved,ensure_ascii=False,allow_nan=False),id,revision))
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
             return frozen["job_id"]
 

@@ -1,0 +1,18 @@
+[
+  {
+    "work_id": "fantlab:668099",
+    "urls": [
+      "https://ast.ru/book/samaya-strashnaya-kniga-zona-uzhasa-828515/"
+    ],
+    "basis": "Discovery citation from committed Makoto public-source research; content is fetched and independently credited, never preapproved."
+  },
+  {
+    "work_id": "fantlab:176045",
+    "urls": [
+      "https://magazines.gorky.media/inostran/2012/2/yaponskaya-literatura-na-straniczah-il-2.html",
+      "https://www.kodansha.co.jp/book/products/0000211254",
+      "https://www.oupjapan.co.jp/en/products/detail/13295?language=en"
+    ],
+    "basis": "Discovery citations only. A contained story, published translation and recording remain separate identities; absence of a fetched translation bridge holds canonical English title."
+  }
+]

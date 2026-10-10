@@ -6,12 +6,19 @@ import re
 import uuid
 import math
 from metadata import propose, future_audio_tags
+from source_identity import partition, clues, VERSION as GROUP_VERSION
 
 def setup(connection):
     connection.execute('''CREATE TABLE IF NOT EXISTS book_groups(
       id TEXT PRIMARY KEY, root TEXT, scope TEXT, revision INTEGER, fingerprint TEXT,
       evidence TEXT, review TEXT DEFAULT '', approved INTEGER DEFAULT 0,
       changed INTEGER DEFAULT 0, UNIQUE(root,scope))''')
+    if 'superseded' not in {r[1] for r in connection.execute('PRAGMA table_info(book_groups)')}:connection.execute('ALTER TABLE book_groups ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0')
+    connection.execute('CREATE TABLE IF NOT EXISTS book_group_algorithm(id INTEGER PRIMARY KEY,version TEXT)')
+    prior=connection.execute('SELECT version FROM book_group_algorithm WHERE id=1').fetchone()
+    if not prior or prior[0]!=GROUP_VERSION:
+        connection.execute('DELETE FROM book_group_sync') if connection.execute("SELECT 1 FROM sqlite_master WHERE name='book_group_sync'").fetchone() else None
+        connection.execute('INSERT OR REPLACE INTO book_group_algorithm VALUES(1,?)',(GROUP_VERSION,))
     connection.execute('CREATE TABLE IF NOT EXISTS book_catalog_revision(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL)')
     connection.execute('INSERT OR IGNORE INTO book_catalog_revision VALUES(1,0)')
     connection.execute('CREATE TABLE IF NOT EXISTS book_group_sync(root TEXT PRIMARY KEY, revision INTEGER NOT NULL)')
@@ -75,7 +82,7 @@ def member(row):
       'disc':disc,'track':track if track is not None else filename_number,
       'duration':duration,'order_evidence':evidence,'order_conflict':conflict}
 
-def build(rows):
+def _legacy_build(rows):
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     companions=[row for row in rows if row['kind']=='companion']
     companions_by_folder={}
@@ -146,6 +153,50 @@ def build(rows):
           order_unverified=True,membership_unverified=True,completeness_unverified=True)
     return batches
 
+def build(rows,protected=None):
+    protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
+    for row in rows:
+        if row['kind']!='audiobook' or json.loads(row['metadata']).get('arranger_output'):continue
+        scope=assigned.get(row['path']) or partition(member(row))
+        buckets.setdefault(scope,[]).append(row)
+    output={};companions=[r for r in rows if r['kind']=='companion']
+    for scope,items in buckets.items():
+        legacy=_legacy_build(items+companions)
+        if scope in protected:
+            old=protected[scope]
+            if len(legacy)!=1:
+                # A reviewed source set retains all its members; no first-subgroup selection.
+                merged=[m for value in legacy.values() for m in value['members']]
+                prior={m['path']:{k:v for k,v in m.items() if k!='order'} for m in old['members']}
+                current={m['path']:{k:v for k,v in m.items() if k!='order'} for m in merged}
+                if current==prior:output[scope]=old
+                else:
+                    found=dict(old);found['members']=sorted(merged,key=lambda m:(m.get('disc') or 0,m.get('track') is None,m.get('track') or 0,m['path']))
+                    for order,item in enumerate(found['members'],1):item['order']=order
+                    found['source_partition_uncertain']=True;found['conflicts']=list(old.get('conflicts',[]))+['Recording grouping needs stronger evidence']
+                    output[scope]=found
+                continue
+            found=next(iter(legacy.values()));found['scope']=scope;found['grouping']=old['grouping']
+            if found['members']==old['members'] and found['companions']==old['companions']:output[scope]=old
+            else:
+                if 'local_clues' in old:found['local_clues']=[{'path':m['path'],'clues':clues(m)} for m in found['members']]
+                output[scope]=found
+        else:
+            # Punctuation-normalized identity can span differently tagged disc folders.
+            # Keep every discovered subgroup visible and held; do not silently omit any.
+            for legacy_scope,group in legacy.items():
+                selected_scope=scope if len(legacy)==1 else scope+'\x1fProvisional subgroup '+legacy_scope
+                group['scope']=selected_scope
+                group['grouping']='Per-file embedded/filename identity partition; recording remains unverified'
+                group['local_clues']=[{'path':m['path'],'clues':clues(m)} for m in group['members']]
+                if len(legacy)>1:
+                    group['source_partition_uncertain']=True;group['conflicts'].append('Recording grouping needs stronger evidence')
+                if len(group['members'])==1 and not group['title_evidence']:
+                    from source_identity import filename_identity
+                    group['title_clue']=filename_identity(group['members'][0]['filename'])['title']
+                output[selected_scope]=group
+    return output
+
 def sync(connection,root):
     setup(connection)
     revision=connection.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()[0]
@@ -153,10 +204,18 @@ def sync(connection,root):
     if saved and saved[0]==revision:return
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
     retired=retired_sources(connection,root)
-    groups=build(rows)
+    protected={}
+    jobs=set()
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE name='audio_jobs'").fetchone():
+        jobs={json.loads(r[0])['candidate_id'] for r in connection.execute('SELECT manifest FROM audio_jobs')}
+    for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
+        if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
+    groups=build(rows,protected)
     for scope,evidence in groups.items():
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
-        if old:evidence=_preserve_retired_evidence(old,evidence,retired)
+        if old:
+            evidence=_preserve_retired_evidence(old,evidence,retired)
+            connection.execute('UPDATE book_groups SET superseded=0 WHERE id=?',(old['id'],))
         fingerprint=hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
         if old is None:
             connection.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
@@ -168,6 +227,8 @@ def sync(connection,root):
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
         former=json.loads(old['evidence'])['members']
         all_retired=bool(former) and all(m['path'] in retired for m in former)
+        if old['scope'] not in groups and old['scope'] not in protected:
+            connection.execute('UPDATE book_groups SET superseded=1,approved=0 WHERE id=?',(old['id'],))
         if old['scope'] not in groups and old['approved'] and not all_retired:
             connection.execute('UPDATE book_groups SET approved=0,changed=1,revision=revision+1 WHERE id=?',(old['id'],))
     connection.execute('INSERT OR REPLACE INTO book_group_sync VALUES(?,?)',(root,revision))
@@ -201,10 +262,10 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
     sync(connection,root)
     retired=retired_sources(connection,root)
     if status=='all' and not search:
-        total=connection.execute('SELECT count(*) FROM book_groups WHERE root=?',(root,)).fetchone()[0]
-        rows=connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
+        total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0',(root,)).fetchone()[0]
+        rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))
         return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
-    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? ORDER BY scope',(root,))]
+    values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,))]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
       'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),
       'changed':lambda row:row['changed']}

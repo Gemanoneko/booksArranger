@@ -56,6 +56,20 @@ class MergeHTTPTests(unittest.TestCase):
 
     def identity(self):return {'library':'Audiobooks','id':ID,'revision':1}
 
+    def test_automatic_controls_draft_token_shape_and_scanner_owner(self):
+        automatic=SimpleNamespace(status=Mock(return_value={'state':'Idle'}),start=Mock(return_value={'state':'Running'}),stop=Mock(return_value={'state':'Stopping'}),draft=Mock(return_value={'protected':True}))
+        self.merge.automatic=automatic
+        for route in ('/api/automatic/start','/api/automatic/stop'):
+            self.assertEqual(self.call(route,{},token=False)[0],403)
+            self.assertEqual(self.call(route,{'library':'Ebooks'})[0],400)
+        self.assertEqual(self.call('/api/automatic/start',{})[0],202);automatic.start.assert_called_once_with()
+        body={'id':ID,'revision':1,'active':True}
+        self.assertEqual(self.call('/api/automatic/draft',body)[0],200);automatic.draft.assert_called_once_with(ID,1,True)
+        for update in ({'revision':True},{'id':'../escape'},{'path':'Z:/anything'}):self.assertEqual(self.call('/api/automatic/draft',body|update)[0],400)
+        automatic.status.return_value={'state':'Running'}
+        self.assertEqual(self.call('/api/scan/start',{'library':'Audiobooks'})[0],409);self.inventory.launch.assert_not_called()
+        self.assertEqual(self.call('/api/audiobook/pause',{})[0],200);automatic.stop.assert_called_once_with()
+
     def test_recovery_delete_scope_token_origin_and_scan_admission(self):
         self.merge.delete_recovery=Mock(return_value={'started':True})
         body={'job_id':ID,'token':'a'*64,'count':2,'bytes':4096}
