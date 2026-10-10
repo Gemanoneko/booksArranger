@@ -13,7 +13,7 @@ const selectedBooks=new Map(),coverObjects=[];
 let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 const pendingFolders=new Set(),folderMessages=new Map();
-filterOptions.candidates.push(['ready','Ready to create'],['jobs','Queued / creating'],['created','Audiobook created'],['output_attention','Output needs attention']);
+filterOptions.candidates.push(['ready','Ready to create'],['jobs','Queued / creating'],['created','Audiobook created'],['converted','Converted'],['output_attention','Output needs attention']);
 
 function routingControls() {
   const audio=['audiobook','candidate'].includes(selectedRow?.kind);
@@ -274,7 +274,39 @@ function sourceLink(url,label){const link=node('a',label);try{const parsed=new U
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
 function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));$('batch-count').textContent=`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
-function renderJobs(){const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;$('jobs-status').textContent=[jobs.state,jobs.current_title,jobs.stage,`${jobs.completed || 0} completed`,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · ');const cleanup=jobs.cleanup_active===true;$('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';$('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';$('jobs-help').textContent=cleanup?'Pausing source cleanup finishes the current file. Resume continues its saved progress. Scanning has separate stop and resume controls. An interrupted conversion restarts; completed outputs stay in place.':'An interrupted conversion restarts; completed outputs stay in place. Scanning has separate stop and resume controls.';}
+function renderJobs(){
+  const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
+  const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
+  const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
+  text('jobs-status',[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · '));
+  const p=jobs.progress,active=Boolean(jobs.current_title&&p),bar=$('jobs-progress');
+  $('book-progress').hidden=!active;$('jobs-idle').hidden=active;
+  if(active){
+    text('jobs-book','Current book: '+jobs.current_title);
+    const labels={'checking sources':'Checking source files',creating:'Converting audiobook',encoding:'Converting audiobook',checking:'Verifying audiobook',copying:'Verifying audiobook',publishing:'Verifying audiobook',originals:'Removing originals',temporary:'Removing temporary recovery and working files',folders:'Removing empty source folders'};
+    let label=labels[p.phase] || 'Checking source files',measure='',value=null;
+    const measured=Number.isFinite(p.completed)&&Number.isFinite(p.total)&&p.total>0&&p.completed>=0&&p.completed<=p.total;
+    if(p.phase==='encoding'&&measured){
+      if(p.completed===p.total)label='Finalizing conversion';
+      else {value=p.completed/p.total*100;measure=' — '+Math.floor(value)+'%';}
+    }else if(p.phase==='originals'&&measured){
+      value=p.completed/p.total*100;measure=' — '+p.completed+' of '+p.total;
+      if(p.completed===p.total){label='Removing temporary recovery and working files';measure='';value=null;}
+    }
+    if(jobs.state==='Pausing')label='Pausing — '+label;
+    else if(jobs.state==='Paused')label='Paused — '+label;
+    else if(jobs.state==='Needs attention')label='Needs attention — '+(p.reason || label);
+    text('jobs-phase-label',label);text('jobs-measure',measure);
+    if(value===null)bar.removeAttribute('value');else bar.value=value;
+    bar.setAttribute('aria-valuetext',label+measure);
+    bar.classList.toggle('progress-stopped',jobs.state==='Paused'||jobs.state==='Needs attention');
+  }else {bar.removeAttribute('value');bar.removeAttribute('aria-valuetext');}
+  const cleanup=jobs.cleanup_active===true;
+  $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
+  $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
+  const help=cleanup?'Pausing source cleanup finishes the current file. Resume continues its saved progress. Scanning has separate stop and resume controls. An interrupted conversion restarts; completed outputs stay in place.':'An interrupted conversion restarts; completed outputs stay in place. Scanning has separate stop and resume controls.';
+  text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Empty source folders retained: safe automatic removal is unavailable on this drive.':''));
+}
 async function candidateRequest(route,extra={}){if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){message(error.message);}finally{busy=false;controls();}}
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output'])$(id).hidden=!candidate;if(!candidate)return;
   const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,dirty,trackDirty,coverId]);

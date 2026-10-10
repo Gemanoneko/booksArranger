@@ -10,7 +10,7 @@ import re
 import uuid
 from pathlib import Path
 from scanner import connect
-from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, ordinary
+from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
 
 TERMINAL = {'removed', 'absent_after_intent'}
@@ -25,6 +25,8 @@ class StorageCleanup:
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_jobs(job_id TEXT PRIMARY KEY, output_hash TEXT, state TEXT, reason TEXT, updated TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_authorizations(path TEXT PRIMARY KEY,job_id TEXT,output_hash TEXT,sha256 TEXT,size INTEGER,proof_hash TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_preserved(path TEXT PRIMARY KEY,job_id TEXT,reason TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_directories(job_id TEXT,path TEXT,identity TEXT,ancestry TEXT,state TEXT,reason TEXT,updated TEXT,PRIMARY KEY(job_id,path))')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_files(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER, facts TEXT, state TEXT, updated TEXT)')
 
     def _set(self, job_id, output_hash, state, reason=''):
@@ -274,6 +276,186 @@ class StorageCleanup:
         except Exception as error:
             self._set(job_id, output_hash, 'needs_attention', str(error))
             raise
+
+
+    def folder_status(self, job_id=None):
+        with connect(self.database) as db:
+            rows=[dict(r) for r in db.execute('SELECT * FROM source_folder_cleanup_jobs'+(' WHERE job_id=?' if job_id else '')+' ORDER BY job_id',(job_id,) if job_id else ())]
+            for row in rows:
+                states=[r[0] for r in db.execute('SELECT state FROM source_folder_cleanup_directories WHERE job_id=?',(row['job_id'],))]
+                row.update(total=len(states),removed=states.count('removed'),absent_after_intent=states.count('absent_after_intent'),retained=states.count('retained_nonempty'),unsupported=states.count('retained_unsupported'))
+        return (rows[0] if rows else None) if job_id else rows
+
+    def _folder_set(self, job_id, output_hash, state, reason=''):
+        with connect(self.database) as db:
+            db.execute('INSERT OR REPLACE INTO source_folder_cleanup_jobs VALUES(?,?,?,?,?)',(job_id,output_hash,state,reason,stamp()))
+
+    def _folder_known(self, job_id, path):
+        with connect(self.database) as db:
+            row=db.execute('SELECT * FROM source_folder_cleanup_directories WHERE job_id=? AND path=?',(job_id,str(path))).fetchone()
+        return dict(row) if row else None
+
+    def _folder_state(self, job_id, path, state, reason=''):
+        with connect(self.database) as db:
+            db.execute('UPDATE source_folder_cleanup_directories SET state=?,reason=?,updated=? WHERE job_id=? AND path=?',(state,reason,stamp(),job_id,str(path)))
+
+    def _folder_obligations(self, job_id, manifest, output):
+        """Require the existing exact retirement and completed copy-purge proofs."""
+        current_m,current_out=self._job(job_id)
+        if current_m!=manifest or current_out!=output:raise BoundaryError('Completed folder-cleanup provenance changed')
+        with connect(self.database) as db:
+            row=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+            storage=db.execute('SELECT * FROM storage_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not row or row['state']!='completed':raise BoundaryError('Source retirement must complete before folder cleanup')
+            intent=json.loads(row['intent'])
+            if intent['manifest']!=manifest or intent['output']!=output or intent['job_id']!=job_id or intent['id']!=row['id']:
+                raise BoundaryError('Completed source-retirement intent changed')
+            if not storage or storage['state']!='completed' or storage['output_hash']!=output['sha256']:
+                raise BoundaryError('Verified temporary-copy cleanup must complete before folder cleanup')
+            members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(row['id'],))]
+            retired=[dict(r) for r in db.execute('SELECT * FROM source_retirements WHERE cleanup_id=?',(row['id'],))]
+        if len(members)!=len(manifest['sources']) or len(retired)!=len(manifest['sources']):
+            raise BoundaryError('Exact source-retirement proof is incomplete')
+        for source in manifest['sources']:
+            member=next((r for r in members if r['path']==source['path']),None)
+            retirement=next((r for r in retired if r['path']==source['path']),None)
+            if not member or not retirement or member['state']!='removed' or retirement['state']!='removed' or retirement['root']!=manifest['root'] or retirement['job_id']!=job_id or retirement['source_hash']!=source['sha256'] or retirement['size']!=source['size'] or str(retirement['modified'])!=str(source['modified']):
+                raise BoundaryError('Original retirement correspondence changed')
+        return row
+
+    @staticmethod
+    def _folder_candidates(manifest):
+        root=ordinary(manifest['root']);candidates=set()
+        for source in manifest['sources']:
+            path=ordinary(source['path'])
+            if not path.is_relative_to(root) or path==root or path.suffix.lower()!='.mp3':
+                raise BoundaryError('Retired source is outside its approved MP3 library')
+            parent=path.parent
+            while parent!=root:
+                if not parent.is_relative_to(root):raise BoundaryError('Source-folder ancestry escaped the library')
+                candidates.add(parent);parent=parent.parent
+        return sorted(candidates,key=lambda p:(-len(p.parts),str(p).casefold()))
+
+    @contextlib.contextmanager
+    def _folder_boundary(self, job_id, root, parent, expected=None):
+        """Protect surviving ancestors; missing ones need our own durable intent."""
+        root=ordinary(root);parent=ordinary(parent)
+        if not parent.is_relative_to(root):raise BoundaryError('Source-folder ancestor is outside the library')
+        current=parent;missing=[]
+        while True:
+            try:current.lstat();break
+            except FileNotFoundError:
+                if current==root:raise BoundaryError('The source-library root is unavailable') from None
+                known=self._folder_known(job_id,current)
+                if not known or known['state'] not in TERMINAL|{'removal_intended','disposition_set'}:
+                    raise BoundaryError('Source-folder ancestor is missing without verified removal intent') from None
+                missing.append((current,known));current=current.parent
+        with DirectoryBoundary(root,current) as boundary:
+            if expected is not None and [list(i) for i in boundary.identities]!=expected[:len(boundary.identities)]:
+                raise BoundaryError('Source-folder ancestor identity changed')
+            for path,known in missing:
+                chain=json.loads(known['ancestry'])
+                if chain[:len(boundary.identities)]!=[list(i) for i in boundary.identities]:
+                    raise BoundaryError('Removed source-folder ancestry changed')
+                if expected is not None and chain!=expected[:len(chain)]:
+                    raise BoundaryError('Removed source-folder proof differs from the candidate ancestry')
+            inspected=current
+            while inspected.is_relative_to(root):
+                try:(inspected/'.git').lstat()
+                except FileNotFoundError:pass
+                else:raise BoundaryError('Nested Git source data preserved')
+                if inspected==root:break
+                inspected=inspected.parent
+            yield boundary
+
+    def _folder_sources_absent(self, job_id, manifest):
+        root=ordinary(manifest['root'])
+        for source in manifest['sources']:
+            path=ordinary(source['path']);known=self._folder_known(job_id,path.parent)
+            expected=json.loads(known['ancestry']) if known else None
+            with self._folder_boundary(job_id,root,path.parent,expected):
+                try:path.lstat()
+                except FileNotFoundError:pass
+                else:raise BoundaryError('A replacement original was preserved; source-folder cleanup stopped')
+
+    def _capture_folder(self, job_id, root, path):
+        known=self._folder_known(job_id,path);expected=json.loads(known['ancestry']) if known else None
+        with self._folder_boundary(job_id,root,path.parent,expected) as boundary:
+            try:
+                with VerifiedDirectory(path) as target:
+                    facts=target.facts();ancestry=[list(i) for i in boundary.identities]+[[str(path),*facts['identity']]]
+                    if known:
+                        if known['state'] in TERMINAL:raise BoundaryError('A replacement at a removed source-folder path was preserved')
+                        if json.loads(known['identity'])!=facts or expected!=ancestry:
+                            raise BoundaryError('Source-folder native identity changed; replacement preserved')
+                    else:
+                        with connect(self.database) as db:
+                            db.execute('INSERT INTO source_folder_cleanup_directories VALUES(?,?,?,?,?,?,?)',(job_id,str(path),packed(facts),packed(ancestry),'verified','',stamp()))
+            except FileNotFoundError:
+                if not known or known['state'] not in TERMINAL|{'removal_intended','disposition_set'}:
+                    raise BoundaryError('Source folder is missing without verified removal intent') from None
+                if known['state'] not in TERMINAL:
+                    self._folder_state(job_id,path,'removed' if known['state']=='disposition_set' else 'absent_after_intent','Reconciled absence from durable exact-directory intent')
+                return None
+        return self._folder_known(job_id,path)
+
+    def _remove_folder(self, job_id, manifest, output, path):
+        known=self._capture_folder(job_id,ordinary(manifest['root']),path)
+        if known is None:return
+        # The validated output keeps any candidate containing it nonempty. Its
+        # held ancestor handle also intentionally denies DELETE on that target.
+        contains_output=ordinary(output['final_path']).is_relative_to(path)
+        with self._folder_boundary(job_id,manifest['root'],path.parent,json.loads(known['ancestry'])) as boundary, VerifiedDirectory(path,delete=not contains_output) as target:
+            if target.facts()!=json.loads(known['identity']):raise BoundaryError('Source-folder native identity changed before disposition')
+            if not target.empty():
+                self._folder_state(job_id,path,'retained_nonempty','Folder contains entries or filesystem streams; retained')
+                return
+            if contains_output:raise BoundaryError('Protected published output ancestry unexpectedly became empty')
+            try:target.require_empty_disposition()
+            except DirectoryDispositionUnsupported as error:
+                self._folder_state(job_id,path,'retained_unsupported',str(error));return
+            self.guard();boundary.revalidate();self._folder_obligations(job_id,manifest,output)
+            self._folder_state(job_id,path,'removal_intended')
+            try:target.dispose_empty()
+            except DirectoryNotEmptyError as error:
+                self._folder_state(job_id,path,'retained_nonempty',str(error));return
+            except DirectoryDispositionUnsupported as error:
+                self._folder_state(job_id,path,'retained_unsupported',str(error));return
+            self._folder_state(job_id,path,'disposition_set')
+            target.__exit__(None,None,None)
+            try:path.lstat()
+            except FileNotFoundError:self._folder_state(job_id,path,'removed')
+            else:raise BoundaryError('Exact empty-directory disposition did not remove its name')
+
+    def run_folders(self, job_id, progress=None):
+        """Check only completed enrolled source parents; never enroll originals."""
+        with connect(self.database) as db:
+            enrolled=db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+        if not enrolled:return None
+        terminal=self.folder_status(job_id)
+        if terminal and terminal['state'] in ('completed','unsupported'):return terminal
+        output_hash=''
+        try:
+            with self.protected_output(job_id) as (manifest,output):
+                output_hash=output['sha256'];self._folder_obligations(job_id,manifest,output)
+                candidates=self._folder_candidates(manifest)
+                with connect(self.database) as db:
+                    prior={ordinary(r[0]) for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=?',(job_id,))}
+                if not prior.issubset(set(candidates)):raise BoundaryError('Source-folder receipt escaped approved source provenance')
+                self._folder_set(job_id,output_hash,'checking')
+                if progress:progress('folders')
+                self._folder_sources_absent(job_id,manifest)
+                # Capture every initial identity before the first disposition.
+                for path in candidates:self.guard();self._capture_folder(job_id,ordinary(manifest['root']),path)
+                self._folder_set(job_id,output_hash,'removing')
+                for path in candidates:self.guard();self._remove_folder(job_id,manifest,output,path)
+                self._folder_obligations(job_id,manifest,output);self._folder_sources_absent(job_id,manifest)
+                with connect(self.database) as db:
+                    reasons=[r[0] for r in db.execute("SELECT DISTINCT reason FROM source_folder_cleanup_directories WHERE job_id=? AND state='retained_unsupported'",(job_id,))]
+                self._folder_set(job_id,output_hash,'unsupported' if reasons else 'completed','; '.join(reasons))
+            return self.folder_status(job_id)
+        except Exception as error:
+            self._folder_set(job_id,output_hash,'needs_attention',str(error));raise
 
     def discard_repair_copy(self, job_id, path, sha256, size):
         """Explicit one-off caller: validate its retained repair journal before calling.

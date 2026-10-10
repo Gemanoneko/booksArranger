@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 import uuid
@@ -34,6 +35,7 @@ class AudioJobs:
         self._thread = None
         self._closed = False
         self.after_completed = None
+        self._progress = {}
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
         self._recover()
@@ -176,7 +178,7 @@ class AudioJobs:
             elif row["state"] == "running": current = row
         running = bool(self._thread and self._thread.is_alive())
         state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if counts["queued"] else "Needs attention" if counts["failed"] else "Completed"
-        return {"state": state, **counts, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None} for row in rows]}
+        return {"state": state, **counts, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
     def _work(self):
         while not self._stop.is_set():
@@ -187,11 +189,22 @@ class AudioJobs:
             manifest = json.loads(row["manifest"])
             attempt = str(uuid.uuid4())
             journal = {"attempt_id": attempt, "history": []}
+            with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources"}
             self._update(job_id, state="running", stage="checking sources", attempt_id=attempt, journal=json.dumps(journal), reason="")
             def checkpoint(stage, details=None):
                 if stage == "checking_sources": stage = "checking sources"
                 if stage not in STAGES:
                     raise ValueError("Unsupported job stage: " + str(stage))
+                if isinstance(details,dict) and 'progress' in details:
+                    measured=details['progress']
+                    if stage!='creating' or not isinstance(measured,dict) or measured.get('phase')!='encoding':
+                        raise ValueError('Unsupported progress measurement')
+                    done,total=measured.get('completed'),measured.get('total')
+                    if type(done) not in (int,float) or type(total) not in (int,float) or not math.isfinite(done) or not math.isfinite(total) or total<=0 or not 0<=done<=total:
+                        raise ValueError('Invalid progress denominator')
+                    with self._lock:self._progress[job_id]={'attempt_id':attempt,**measured}
+                    return
+                with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage}
                 entry = {"stage": stage, "at": _now(), "details": details}
                 if stage == "publishing":
                     if self._stop.is_set(): raise InterruptedError("Paused before publication")

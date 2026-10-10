@@ -19,6 +19,8 @@ from scanner import connect
 from metadata import propose
 from source_cleanup import CleanupJobs, packed
 from review_backend import member_key
+from conversion_progress import approved_scope,completed_book,phase_progress
+import groups
 
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
 
@@ -33,6 +35,10 @@ class MergeService:
     def __init__(self, inventory, cache_dir):
         self.inventory = inventory
         self.operation_lock=threading.RLock()
+        self._progress_lock=threading.RLock()
+        self._approved_cache=None
+        self._post_current=None
+        self._validated_outputs={}
         self.cache_dir = ordinary(cache_dir)
         with DirectoryBoundary(self.cache_dir.anchor,self.cache_dir,create=True):pass
         self.stage_root = self.cache_dir / 'audio-staging'
@@ -68,22 +74,81 @@ class MergeService:
         with connect(self.inventory.database) as db:
             db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',(path,job,kind,hash,size))
 
+    def progress_books(self,jobs=None,cleanups=None,storage=None,folders=None):
+        """Catalog transitions invalidate eligibility; polls never decode or hash media."""
+        jobs=jobs if jobs is not None else self.jobs.status()['jobs']
+        cleanups=cleanups if cleanups is not None else self.cleanup.status()
+        storage=storage if storage is not None else self.storage_cleanup.status()
+        folders=folders if folders is not None else self.storage_cleanup.folder_status()
+        with self._progress_lock,connect(self.inventory.database) as db:
+            # Group sync uses the existing indexed catalog revision guard, not a library scan.
+            groups.sync(db,self.inventory.roots['Audiobooks'])
+            rows=[dict(r) for r in db.execute("SELECT g.*,c.revision AS context_revision,c.data AS context_data FROM book_groups g JOIN candidate_context c ON c.id=g.id WHERE g.root=? AND json_extract(c.data,'$.metadata_approved')=1",(self.inventory.roots['Audiobooks'],))]
+            signature=[(r['id'],r['revision'],r['fingerprint'],r['review'],r['context_revision'],r['context_data'],r['changed']) for r in rows]
+            if self._approved_cache is None or self._approved_cache[0]!=signature:
+                retired=groups.retired_sources(db,self.inventory.roots['Audiobooks']);approved={}
+                for r in rows:
+                    if r['context_revision']!=r['revision']:continue
+                    row=groups.render(r,r['root'],True,retired);ctx=json.loads(r['context_data'])
+                    if approved_scope(row,ctx,member_key):approved[row['id']]=(row,ctx)
+                self._approved_cache=(signature,approved)
+            approved={}
+            for id,(row,ctx) in self._approved_cache[1].items():
+                if any((self.reviews.cache/(ctx['cover_id']+suffix)).is_file() for suffix in ('.png','.jpg')):approved[id]=(row,ctx)
+            source_by={r['job_id']:r for r in cleanups};storage_by={r['job_id']:r for r in storage};folder_by={r['job_id']:r for r in folders}
+            converted=set()
+            for job in jobs:
+                id=job['manifest']['candidate_id']
+                if id not in approved:continue
+                row,ctx=approved[id];record=job.get('output') or {};current=False
+                try:
+                    stat=Path(record['final_path']).stat()
+                    current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
+                except (OSError,KeyError):pass
+                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,PROFILE):converted.add(id)
+            return {'approved':len(approved),'converted':len(converted),'converted_ids':converted}
+
     def state(self):
-        value = self.jobs.status()
-        current = next((j for j in value['jobs'] if j['job_id'] == value['current_job_id']), None)
-        cleanups=self.cleanup.status();pending=[c for c in cleanups if c['state'] in ('waiting','checking','removing','pausing','paused')]
+        value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
+        current=next((j for j in value['jobs'] if j['job_id']==value['current_job_id']),None)
+        pending=[c for c in cleanups if c['state'] in ('waiting','checking','removing','pausing','paused')]
         active=next((c for c in pending if c['id']==self.cleanup.current),None)
-        if pending and not current:
+        if not active and pending and not value['current_job_id']:active=pending[0]
+        post=self._post_current
+        if not current and (active or post):
+            id=active['job_id'] if active else post[0]
+            current=next((j for j in value['jobs'] if j['job_id']==id),None)
+        if pending and not value['current_job_id']:
             alive=bool(self.cleanup.thread and self.cleanup.thread.is_alive())
-            value['state']='Pausing' if (active or alive) and self.cleanup.stop.is_set() else 'Running' if active or alive else 'Paused'
+            value['state']='Pausing' if (self.cleanup.current or alive) and self.cleanup.stop.is_set() else 'Running' if self.cleanup.current or alive else 'Paused'
             value['queued']+=len(pending)
-        value['failed']+=sum(c['state']=='needs_attention' for c in cleanups)
-        storage_errors=[r for r in self.storage_cleanup.status() if r['state']=='needs_attention']
-        value['failed']+=len(storage_errors)
-        if storage_errors and value['state']=='Completed':value['state']='Needs attention'
-        return {key: value[key] for key in ('state','queued','completed','failed')} | {
-            'current_title': current['manifest']['metadata'].get('title','') if current else '',
-            'stage': active['status'] if active else value['current_stage'] or '', 'cleanup_active':bool(active or pending)}
+        errors=[c for c in cleanups if c['state']=='needs_attention']+[r for r in storage if r['state']=='needs_attention']
+        folder_notes=[r['reason'] for r in folders if r['state'] in ('needs_attention','unsupported') and r.get('reason')]
+        value['failed']+=len(errors)
+        if errors and value['state']=='Completed':value['state']='Needs attention'
+        progress=None
+        if active:
+            progress={'phase':'originals','completed':active.get('removed',0),'total':active.get('total',0)} if active['state'] in ('removing','pausing','paused') else {'phase':'checking sources'}
+        elif post:progress={'phase':post[1]}
+        elif current:progress=phase_progress(current['stage'],current.get('progress'))
+        elif errors:
+            error=errors[0];current=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
+            phase='originals' if error in cleanups else 'folders' if error in folders else 'temporary'
+            progress={'phase':phase,'reason':error['reason']}
+            if phase=='originals':progress.update(completed=error['removed'],total=error['total'])
+        elif value['state'] in ('Paused','Needs attention'):
+            waiting=next((j for j in reversed(value['jobs']) if j['state'] in ('pending','needs attention') and j.get('progress')),None)
+            if waiting:current=waiting;progress=phase_progress(waiting['stage'],waiting['progress'])
+        if current and (current.get('reason') or errors):
+            progress=progress or {'phase':current['stage']}
+            progress['reason']=current.get('reason') or next((e['reason'] for e in errors if e['job_id']==current['job_id']),'')
+        totals=self.progress_books(value['jobs'],cleanups,storage,folders)
+        return {key:value[key] for key in ('state','queued','completed','failed')} | {
+            'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
+            'current_title':current['manifest']['metadata'].get('title','') if current else '',
+            'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
+            'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
+            'cleanup_active':bool(active or pending or post)}
 
     def pause(self):
         self.cleanup.pause();self.jobs.pause();return self.state()
@@ -168,11 +233,14 @@ class MergeService:
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
         prior=next((r for r in self.storage_cleanup.status() if r['job_id']==job_id),None)
-        if prior and prior['state']=='completed':return
-        try:self.storage_cleanup.run(job_id)
+        self._post_current=(job_id,'temporary')
+        try:
+            if not prior or prior['state']!='completed':self.storage_cleanup.run(job_id)
+            self.storage_cleanup.run_folders(job_id,progress=lambda phase:setattr(self,'_post_current',(job_id,phase)))
         except Exception:
-            # Durable audio success remains independent; failure is shown in state().
+            # Durable audio success remains independent; cleanup errors stay visible.
             pass
+        finally:self._post_current=None
 
     def _after_completed(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
@@ -263,7 +331,11 @@ class MergeService:
                 if record.get('parent_identity')!=[list(i) for i in boundary.identities]:
                     # In-memory records contain tuples, persisted JSON contains lists.
                     if record.get('parent_identity')!=boundary.identities:return False
-                return fingerprint(final)['size']==record['size'] and digest(final)==record['sha256']
+                valid=fingerprint(final)['size']==record['size'] and digest(final)==record['sha256']
+                if valid:
+                    stat=final.stat()
+                    self._validated_outputs[record['job_id']]=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)
+                return valid
         except (ValueError,OSError,KeyError):return False
 
     def close(self):

@@ -163,6 +163,7 @@ class CandidateReviewService:
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
         policy={'enabled':bool(selected and all(Path(m['path']).suffix.lower()=='.mp3' for m in selected)),
+                'empty_source_folders':bool(selected and all(Path(m['path']).suffix.lower()=='.mp3' for m in selected)),
                 'recovery_root':str(self.jobs.cleanup.root) if self.jobs and hasattr(self.jobs,'cleanup') else ''}
         if job and not allow_existing_job:policy=job.get('cleanup_policy',{'enabled':False,'recovery_root':policy['recovery_root']})
         row['creation']['cleanup_policy']=policy
@@ -171,7 +172,7 @@ class CandidateReviewService:
 
     def page(self,limit=100,offset=0,search='',status='all'):
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
-        if status not in ('all','errors','changed','review','approved','ready','jobs','created','output_attention'):raise ValueError('Unknown candidate status')
+        if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention'):raise ValueError('Unknown candidate status')
         direct=status in ('all','errors','changed')
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
         with connect(self.inventory.database) as db:
@@ -183,6 +184,7 @@ class CandidateReviewService:
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason']}
                 self.page_local.jobs[job['manifest']['candidate_id']]['cleanup_policy']=job['manifest'].get('cleanup_policy',{'enabled':False})
                 if hasattr(self.jobs,'cleanup'):self.page_local.jobs[job['manifest']['candidate_id']]['cleanup']=self.jobs.cleanup.status(job['job_id'])
+        converted=self.jobs.progress_books()['converted_ids'] if status=='converted' and self.jobs and hasattr(self.jobs,'progress_books') else set()
         def selected(row):
             saved=self.page_local.contexts.get(row['id']);ctx=saved['data'] if saved and saved['revision']==row['revision'] else {}
             choice=next((c for c in ctx.get('cover_choices',[]) if c['id']==ctx.get('cover_id')),None)
@@ -191,6 +193,7 @@ class CandidateReviewService:
             if status=='review':return not approved
             if status=='approved':return approved
             if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
+            if status=='converted':return row['id'] in converted
             if status=='created':return bool(job and job['state']=='Audiobook created')
             if status=='output_attention':return bool(job and job['state']=='Output needs attention')
             if status=='ready':

@@ -218,6 +218,94 @@ class VerifiedFile:
     def __exit__(self,*_):
         if self.handle is not None:kernel.CloseHandle(self.handle);self.handle=None
 
+class DirectoryNotEmptyError(BoundaryError):pass
+class DirectoryDispositionUnsupported(BoundaryError):pass
+
+class VerifiedDirectory(VerifiedFile):
+    """Protect one ordinary directory; disposition never removes contents.
+
+    The caller holds ancestors only through the target's parent. A separate
+    ancestor handle on the target would conflict with its own DELETE access.
+    Windows FileDispositionInfo checks emptiness atomically and refuses new
+    children after delete-pending, without a recursive/pathname fallback.
+    """
+    def __enter__(self):
+        if os.name!='nt':raise BoundaryError('Verified empty-directory disposition requires Windows')
+        self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0),1,None,3,0x02000000|0x00200000,None)
+        if self.handle==ctypes.c_void_p(-1).value:
+            error=ctypes.get_last_error();self.handle=None
+            if error in (2,3):raise FileNotFoundError(str(self.path))
+            raise BoundaryError(f'Cannot protect exact directory: {ctypes.WinError(error)}')
+        try:
+            info=FileInfo()
+            if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(info)) or info.attributes&0x400 or not info.attributes&0x10:
+                raise BoundaryError('Expected an ordinary non-reparse directory')
+            self.info=info
+            return self
+        except BaseException:self.__exit__(None,None,None);raise
+    def facts(self):
+        facts=super().facts();i=self.info
+        return {k:facts[k] for k in ('identity','identity_method','identity_api_error','dev','ino')}|{'created':(i.creation.dwHighDateTime<<32)|i.creation.dwLowDateTime}
+    def empty(self):
+        # All names, including hidden entries and .git, are substantive. The
+        # target identity cannot be renamed/replaced while this handle is held.
+        with os.scandir(self.path) as entries:
+            if next(entries,None) is not None:return False
+        class Stream(ctypes.Structure):_fields_=[('size',ctypes.c_longlong),('name',wintypes.WCHAR*296)]
+        kernel.FindFirstStreamW.argtypes=[wintypes.LPCWSTR,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.FindFirstStreamW.restype=wintypes.HANDLE
+        kernel.FindNextStreamW.argtypes=[wintypes.HANDLE,ctypes.c_void_p];kernel.FindNextStreamW.restype=wintypes.BOOL
+        kernel.FindClose.argtypes=[wintypes.HANDLE]
+        stream=Stream();h=kernel.FindFirstStreamW(str(self.path),0,ctypes.byref(stream),0)
+        if h==ctypes.c_void_p(-1).value:
+            if ctypes.get_last_error()==38:return True # A streamless directory.
+            raise BoundaryError('Cannot verify empty-directory filesystem streams')
+        try:
+            while True:
+                if stream.name!='::$DATA' or stream.size:return False
+                if not kernel.FindNextStreamW(h,ctypes.byref(stream)):
+                    if ctypes.get_last_error()!=38:raise BoundaryError('Cannot finish directory-stream verification')
+                    return True
+        finally:kernel.FindClose(h)
+    def require_empty_disposition(self):
+        """Only an unambiguous local, streamless exact-handle volume can remove.
+
+        Named streams have their own sharing namespace. Directory DELETE
+        sharing and enumeration cannot exclude an arriving ADS on NTFS. The
+        native disposition itself must therefore refuse such a capability.
+        No mapped/path-volume fallback or extra scan establishes atomic safety.
+        """
+        if self.handle is None:raise DirectoryDispositionUnsupported('Empty source folder retained: exact directory handle is unavailable')
+        try:
+            api=kernel.GetVolumeInformationByHandleW
+            api.argtypes=[wintypes.HANDLE,wintypes.LPWSTR,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.POINTER(wintypes.DWORD),ctypes.POINTER(wintypes.DWORD),wintypes.LPWSTR,wintypes.DWORD];api.restype=wintypes.BOOL
+            serial=wintypes.DWORD();maximum=wintypes.DWORD();flags=wintypes.DWORD();filesystem=ctypes.create_unicode_buffer(261)
+            if not api(self.handle,None,0,ctypes.byref(serial),ctypes.byref(maximum),ctypes.byref(flags),filesystem,len(filesystem)):
+                raise DirectoryDispositionUnsupported(f'Empty source folder retained: exact-handle filesystem capability is unavailable (Windows error {ctypes.get_last_error()})')
+            if not serial.value or serial.value!=self.info.volume or not filesystem.value or not maximum.value:
+                raise DirectoryDispositionUnsupported('Empty source folder retained: filesystem capability or volume identity is ambiguous')
+            if flags.value&0x40000:
+                raise DirectoryDispositionUnsupported(f'Empty source folder retained: {filesystem.value} supports named data streams; arriving directory stream data cannot be protected atomically')
+            final=kernel.GetFinalPathNameByHandleW
+            final.argtypes=[wintypes.HANDLE,wintypes.LPWSTR,wintypes.DWORD,wintypes.DWORD];final.restype=wintypes.DWORD
+            location=ctypes.create_unicode_buffer(32768);length=final(self.handle,location,len(location),1) # VOLUME_NAME_GUID, no mapped-name fallback.
+            if not length or length>=len(location) or not location.value.startswith('\\\\?\\Volume{'):
+                raise DirectoryDispositionUnsupported('Empty source folder retained: a local exact-handle volume provider cannot be established')
+            if len(location.value)<49 or location.value[47]!='}' or ord(location.value[48])!=92 or not re.fullmatch(r'[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}',location.value[11:47]) or location.value[11:47].replace('-','')=='0'*32:
+                raise DirectoryDispositionUnsupported('Empty source folder retained: exact-handle volume provider identity is ambiguous')
+            return {'filesystem':filesystem.value,'volume_serial':serial.value,'flags':flags.value,'local_volume_path':location.value}
+        except AttributeError as error:
+            raise DirectoryDispositionUnsupported('Empty source folder retained: exact-handle filesystem capability API is unavailable') from error
+    def dispose_empty(self):
+        self.require_empty_disposition() # Safety floor even when called outside StorageCleanup.
+        if not self.delete:raise BoundaryError('Directory was not opened for exact-handle removal')
+        if not self.empty():raise DirectoryNotEmptyError('Nonempty source folder retained')
+        kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.SetFileInformationByHandle.restype=wintypes.BOOL
+        value=wintypes.BOOL(True)
+        if not kernel.SetFileInformationByHandle(self.handle,4,ctypes.byref(value),ctypes.sizeof(value)):
+            error=ctypes.get_last_error()
+            if error==145:raise DirectoryNotEmptyError('A new source-folder entry was retained')
+            raise BoundaryError(f'Exact empty-directory disposition is unsupported or denied: {ctypes.WinError(error)}')
+
 class OwnedProcessJob:
     """Kill-on-close Windows job contains only the newly launched media process tree."""
     def __init__(self,process):self.process=process;self.handle=None

@@ -68,29 +68,55 @@ def write_generated(path,text):
         stream.write(raw);stream.flush();os.fsync(stream.fileno())
         remember_generated(path,hashlib.sha256(raw).hexdigest(),len(raw))
 
-def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024):
-    """Only the owned FFmpeg/FFprobe child is canceled; diagnostic output is bounded."""
-    directory=Path(directory)
-    token=uuid.uuid4().hex
+class EncodingProgress:
+    """Bounded FFmpeg machine telemetry; measurements describe encoding only."""
+    def __init__(self,total,callback):
+        self.total=total if isinstance(total,(int,float)) and math.isfinite(total) and total>0 else None
+        self.callback=callback;self.pending=b'';self.last=0.0
+    def feed(self,raw):
+        self.pending=(self.pending+raw)[-65536:]
+        lines=self.pending.split(b'\n');self.pending=lines.pop()
+        for line in lines:
+            if not line.startswith(b'out_time_us=') or self.total is None:continue
+            try:seconds=int(line.split(b'=',1)[1])/1000000
+            except (ValueError,OverflowError):continue
+            if seconds<0:continue
+            seconds=min(self.total,max(self.last,seconds));self.last=seconds
+            self.callback({'phase':'encoding','completed':seconds,'total':self.total})
+
+def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telemetry=None):
+    """Owned child cancellation; bounded diagnostics and transient encoding pipe."""
+    directory=Path(directory);token=uuid.uuid4().hex
     stdout=directory/(token+'.stdout');stderr=directory/(token+'.stderr')
     with open(stdout,'x+b') as out,open(stderr,'x+b') as err:
-        process=subprocess.Popen(arguments,stdin=subprocess.DEVNULL,stdout=out,stderr=err,
+        process=subprocess.Popen(arguments,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE if telemetry else out,stderr=err,
             shell=False,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0)|4)
         process._books_suspended=True
-        started=time.monotonic()
+        started=time.monotonic();drain=None;failure=[]
+        def consume():
+            try:
+                while block:=process.stdout.read1(65536):telemetry.feed(block)
+            except Exception as error:failure.append(error)
         try:
             with OwnedProcessJob(process):
+                if telemetry:
+                    drain=threading.Thread(target=consume,name='BooksArrangerEncodingProgress',daemon=True);drain.start()
                 while process.poll() is None:
                     if stop.is_set():raise Paused('Audiobook operation paused; interrupted book restarts')
                     if time.monotonic()-started>deadline:raise TimeoutError('Owned media operation exceeded its deadline')
-                    if stdout.stat().st_size>max_output or stderr.stat().st_size>1024*1024:
-                        raise ValidationError('Media diagnostic output exceeded its limit')
+                    if stdout.stat().st_size>max_output or stderr.stat().st_size>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
+                    if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
                     time.sleep(.1)
         finally:
             if process.poll() is None:
                 process.terminate()
                 try:process.wait(timeout=3)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
+            if drain:
+                drain.join(3)
+                process.stdout.close()
+                if drain.is_alive():raise ValidationError('Owned encoding progress has not finished draining')
+        if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
         raw=producer_bytes(out,stdout);error=producer_bytes(err,stderr)
     if len(raw)>max_output or len(error)>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
     if process.returncode:raise ValidationError(error.decode('utf-8','replace')[-2000:] or 'Media operation failed')
@@ -276,9 +302,9 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
     else:args+=['-map_chapters','-1']
     args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
-    args+=['-f','mp4',str(output)]
+    args+=['-progress','pipe:1','-stats_period','1','-nostats','-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
-    run_owned(args,stage,stop,max(300,sum(durations)*2))
+    run_owned(args,stage,stop,max(300,sum(durations)*2),telemetry=EncodingProgress(sum(durations),lambda value:progress('Creating audio',{'progress':value})))
     chapter_format=None
     sort_title=audiobook_sort_title(review)
     if chapters or sort_title!=review['title']:

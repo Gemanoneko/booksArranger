@@ -41,6 +41,30 @@ class MergeTests(unittest.TestCase):
             time.sleep(.05)
         return self.service.jobs.status()
 
+    def test_approved_totals_and_converted_filter_share_cleanup_success(self):
+        row=self.ready();initial=self.service.state()
+        self.assertEqual(initial['approved_total'],1);self.assertEqual(initial['converted_total'],0)
+        self.assertEqual(self.service.reviews.page(status='converted')['total'],0)
+        self.service.create('Audiobooks',row['id'],row['revision']);status=self.wait();job=status['jobs'][0]
+        final=self.service.state();self.assertEqual(final['converted_total'],1,final)
+        self.assertEqual(final['approved_total'],1);filtered=self.service.reviews.page(status='converted')
+        self.assertEqual(filtered['total'],1);self.assertEqual(filtered['rows'][0]['id'],row['id'])
+        self.assertEqual(self.service.reviews.page(status='converted',search='not-present')['total'],0)
+        self.assertEqual(self.service.reviews.page(status='converted',offset=1)['rows'],[])
+        # A duplicate durable job record cannot inflate a unique candidate count.
+        with patch.object(self.service.jobs,'status',return_value={**status,'jobs':[job,job]}):
+            self.assertEqual(self.service.state()['converted_total'],1)
+        with patch('merge_service.digest',side_effect=AssertionError('Progress polls must not hash media')):
+            self.assertEqual(self.service.state()['converted_total'],1)
+            self.assertEqual(self.service.reviews.page(status='converted')['total'],1)
+        real=self.service.storage_cleanup.status()
+        with patch.object(self.service.storage_cleanup,'status',return_value=[{**r,'state':'needs_attention','reason':'fixture cleanup blocked'} for r in real]):
+            self.assertEqual(self.service.state()['converted_total'],0)
+            self.assertEqual(self.service.reviews.page(status='created')['total'],1)
+            self.assertEqual(self.service.reviews.page(status='converted')['total'],0)
+        with connect(self.inv.database) as db:db.execute('UPDATE candidate_context SET revision=revision-1 WHERE id=?',(row['id'],))
+        self.assertEqual(self.service.state()['approved_total'],0);self.assertEqual(self.service.reviews.page(status='converted')['total'],0)
+
     def test_review_to_validated_file_and_restart_reuse(self):
         row=self.ready();manifest=self.service.reviews.build_manifest('Audiobooks',row['id'],row['revision'])
         self.assertEqual(manifest['profile'],PROFILE)
