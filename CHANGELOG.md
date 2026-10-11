@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.11.2] - 2026-10-11
+
+### Changed
+
+- Rename the candidate filter label to “Converted by this app” to clarify its scope. The internal filter value and completion predicate are unchanged.
+
 ## [v0.11.1] - 2026-10-11
 
 ### Fixed

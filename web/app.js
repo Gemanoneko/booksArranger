@@ -16,7 +16,7 @@ let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 let recoveryPanel=null,recoveryConfirmation=null,recoverySubmitting=false,recoveryDisconnected=false;
 const pendingFolders=new Set(),folderMessages=new Map();
-filterOptions.candidates.push(['ready','Ready to create'],['jobs','Queued / creating'],['created','Audiobook created'],['converted','Converted'],['output_attention','Output needs attention']);
+filterOptions.candidates.push(['ready','Ready to create'],['jobs','Queued / creating'],['created','Audiobook created'],['converted','Converted by this app'],['output_attention','Output needs attention']);
 
 function routingControls() {
   const audio=['audiobook','candidate'].includes(selectedRow?.kind);
