@@ -7,14 +7,69 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app import catalog_lock
 from metadata import ScanStopped
 from scanner import Inventory, connect
-from web_server import BrowserServer
+from web_server import BrowserServer, Handler
 
 SCRATCH = Path(__file__).resolve().parents[1] / 'scratch' / 'web-2026-10-09' / 'tests'
 SCRATCH.mkdir(parents=True,exist_ok=True)
+
+class ResponseWriteTests(unittest.TestCase):
+    def handler(self):
+        handler=Handler.__new__(Handler)
+        handler.close_connection=False
+        handler.send_response=Mock()
+        handler.send_header=Mock()
+        handler.end_headers=Mock()
+        handler.wfile=Mock()
+        handler.trusted=Mock(return_value=True)
+        handler.query=Mock(return_value=('/api/health',{}))
+        handler.server=SimpleNamespace(health=lambda:{'application':'Books Arranger'})
+        return handler
+
+    def test_disconnected_headers_do_not_trigger_second_error_reply(self):
+        handler=self.handler()
+        handler.end_headers.side_effect=ConnectionAbortedError(10053,'Fixture disconnected client')
+        handler.do_GET()
+        handler.send_response.assert_called_once_with(200)
+        handler.end_headers.assert_called_once()
+        handler.wfile.write.assert_not_called()
+        self.assertTrue(handler.close_connection)
+
+    def test_disconnected_body_closes_only_that_request(self):
+        for exception in (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
+            with self.subTest(exception=exception.__name__):
+                handler=self.handler()
+                handler.wfile.write.side_effect=exception('Fixture disconnected client')
+                handler.do_GET()
+                handler.send_response.assert_called_once_with(200)
+                handler.wfile.write.assert_called_once()
+                self.assertTrue(handler.close_connection)
+
+    def test_connected_backend_failure_keeps_existing_error_response(self):
+        handler=self.handler()
+        handler.query.return_value=('/api/state',{'library':'Audiobooks'})
+        handler.library=Mock(return_value='Audiobooks')
+        handler.server.state=Mock(side_effect=RuntimeError('Fixture backend failure'))
+        handler.do_GET()
+        handler.send_response.assert_called_once_with(500)
+        body=json.loads(handler.wfile.write.call_args.args[0])
+        self.assertEqual(body,{'error':'Local catalog request failed; source files remain untouched'})
+        self.assertFalse(handler.close_connection)
+
+    def test_unexpected_io_error_is_not_silenced_as_disconnect(self):
+        handler=self.handler()
+        failure=OSError(5,'Fixture unexpected I/O error')
+        handler.end_headers.side_effect=failure
+        with self.assertRaises(OSError) as caught:
+            handler.response(200,{'ok':True})
+        self.assertIs(caught.exception,failure)
+        handler.wfile.write.assert_not_called()
+        self.assertFalse(handler.close_connection)
 
 class BrowserTests(unittest.TestCase):
     def setUp(self):
@@ -30,7 +85,10 @@ class BrowserTests(unittest.TestCase):
                 raise ScanStopped()
             return {'title':'Existing title','author':'Existing artist','tags':{'description':'Сведения <script>test</script>'}}
         self.inventory = Inventory(self.database,self.roots,reader)
-        self.server = BrowserServer(('127.0.0.1',0),self.inventory)
+        # These HTTP fixtures do not exercise retention. Its startup admission
+        # must not race a request that deliberately expects an idle server.
+        with patch('merge_service.MergeService.start_retention'):
+            self.server = BrowserServer(('127.0.0.1',0),self.inventory)
         self.thread = threading.Thread(target=self.server.serve_forever,kwargs={'poll_interval':.02},daemon=True)
         self.thread.start()
         self.url = f'http://127.0.0.1:{self.server.server_port}'

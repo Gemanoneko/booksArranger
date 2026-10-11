@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.9.2] - 2026-10-11
+
+### Fixed
+
+- Closed, reset or aborted browser connections during response headers or body now end only that request, without a second response through the disconnected socket. Connected backend failures and unrelated I/O errors retain their existing behavior.
+- This handles the observed disconnect symptom; WinError 10053 alone does not establish why the connection closed. Automatic-processing, conversion and recovery safeguards remain unchanged.
+
 ## [v0.9.1] - 2026-10-11
 
 ### Fixed
