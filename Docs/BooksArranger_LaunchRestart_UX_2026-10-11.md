@@ -33,3 +33,41 @@ A failed startup/restart must not leave the page saying Running or leave an inde
 ## Handoff
 
 Ender checks normal launcher, verified-owner discovery/readiness/version, safe shutdown/restart, native startup messages, existing browser connection/automatic status and README launch instructions. Test with isolated state through approved tooling; user runtime/library actions are outside this doc. No visible console/browser automation or probes were used to produce this spec; owned disposables: none. Sully commits/pushes this file before implementation citation. Technical startup/restart route proof remains Ender's prerequisite; this doc freezes naming/copy only and grants no unsupported restart mechanism.
+
+## Normal Start-menu restart action — 2026-10-11
+
+This addendum supersedes the deferred-control paragraph above. Ender's supported minimal route uses ordinary user-launched windowless Pythonw processes: the launcher itself runs the web service, without a separate daemon/supervisor child. The restart process must prove its own eligibility and the exact existing owner before requesting shutdown; it waits for the exact old owner to exit and the port/catalog lease to be available, then becomes the replacement. A failed preflight leaves the existing app in place. No tool-host launch bypass, web Restart endpoint/button, new panel, Desktop shortcut, administrator action or file-association change.
+
+### Entry names and normal flow
+
+Use the per-user Start-menu folder **Books Arranger** with two searchable entries:
+
+- **Books Arranger** — opens the normal launch-web.pyw route. Shortcut help: **Open Books Arranger or show its running app.** Reuse a verified healthy owner without changing processing state; otherwise establish readiness before showing the existing browser UI.
+- **Restart Books Arranger** — opens restart-web.pyw. Shortcut help: **Restart Books Arranger when it is idle. Saved automatic work stays paused.** This is the actual app restart action, not an instruction to close a console.
+
+README normal instructions: **Open Books Arranger from the Start menu. To restart it, stop or pause active work in the app, then choose Restart Books Arranger.** Keep launch-web.pyw as the direct-file alternative. Existing **Stop server** remains a complete stop, and existing browser processing controls retain their meanings. No extra web Restart button or confirmation dialog is required.
+
+An ordinary restart must finish with the acknowledged existing Paused state and its **Start automatic processing** action; it does not automatically resume scanning, research, conversion or cleanup. Existing browser message, once replacement readiness/current-owner polling is verified: **Books Arranger restarted. Automatic processing is paused.** If no saved automatic pass exists, use **Books Arranger restarted.** and actual Idle state rather than inventing a paused pass. Keep the separate explicit current-update resume contract above: one guarded Start after loaded version/protected state verification, with actual Running/waiting acknowledged before claiming continuation.
+
+### Eligibility and failure feedback
+
+Restart requires an authenticated exact owner, an eligible ordinary replacement process, and no active scan, metadata research, encoder, source cleanup or recovery operation. Reject before shutdown when any prerequisite fails. Never use an unverified process/address as a replacement target. Ender owns detection and race guards; the native message reports the actual failing activity without changing it.
+
+Use existing small native **Books Arranger** failure messages with **OK**, plus the applicable action:
+
+- Scan active: **Books Arranger is scanning. Stop scanning in the app, then choose Restart Books Arranger.**
+- Automatic metadata research active: **Books Arranger is researching metadata. Stop automatic processing in the app, then choose Restart Books Arranger.**
+- Audiobook conversion/source cleanup active: **Books Arranger is processing an audiobook. Pause audiobook jobs in the app, then choose Restart Books Arranger.** If automatic processing is also active, use **Stop automatic processing and pause audiobook jobs in the app, then choose Restart Books Arranger.** as the action sentence.
+- Recovery operation active: **Books Arranger is working with recovery copies. Wait for it to finish, then choose Restart Books Arranger.** Do not suggest cancelling permanent deletion or interrupting its checkpoint.
+- Replacement process ineligible: **Books Arranger cannot restart from this session. Use Restart Books Arranger in the Start menu.** Do not expose native Job/process details in the main message or offer a bypass.
+- Owner verification fails: retain **Books Arranger could not verify the app to restart. The restart was cancelled.**
+- Verified old app has not exited: **Books Arranger is still stopping. Wait for shutdown to finish, then open Books Arranger.** No second restart/duplicate-owner instruction.
+- Old owner ended but replacement startup failed: **Books Arranger stopped, but could not restart: [plain-language cause]. Open Books Arranger to retry.** Show retry only after the failed replacement is closed and a fresh launch is safe; otherwise use the authoritative remaining ownership/operation reason.
+
+If Restart has no existing owner, use the startup behavior only if Ender's route explicitly supports it; otherwise say **Books Arranger is not running. Open Books Arranger to start it.** Do not display restart success without a verified replacement. No generic busy message that hides the action, silent failure, guessed cause or indefinite Connecting status.
+
+Restart opens the normal browser UI only when ready. Do not close existing browser tabs or overwrite their unsaved manual edits. The new page/current-owner connection must obtain its own valid session context; an old page cannot label stale old-owner state as replacement success. Repeated Open/Restart actions must remain duplicate-safe.
+
+### Bounded handoff
+
+Ender checks the two Start-menu shortcut targets/labels/help, normal launcher and restart process eligibility, exact-owner preflight/shutdown/lease/readiness, native busy/failure messages, loaded version/current-owner browser status and README instructions. Verify idle restart, each rejected active phase, repeated launch/restart, old-owner exit timeout, failed replacement startup, no-owner path and ordinary Paused versus the one explicitly authorized update continuation. Use isolated approved tooling; do not launch the user's live app as part of this spec. Sully commits/pushes this exact addendum before implementation/installation citation. Docs only; no runtime/library/provider/Comics/code/Git actions or probes; owned disposables: none.
