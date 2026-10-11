@@ -107,4 +107,18 @@ class AutomaticMediaTests(unittest.TestCase):
         with patch('review_backend.run_owned',last),self.assertRaises(InterruptedError):self.service.reviews.covers('Audiobooks',row['id'],row['revision'],all_embedded=True,stop=stop)
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
 
+
+    def test_unexpected_research_error_displays_nonactive_status_without_media_changes(self):
+        from types import SimpleNamespace
+        import hashlib
+        before={str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in self.sources}
+        auto=self.service.automatic
+        auto.research=SimpleNamespace(client=self.client,lookup=lambda *_:(_ for _ in ()).throw(RuntimeError('PRIVATE_UNEXPECTED_ERROR')))
+        auto.start();auto.thread.join(5);self.assertFalse(auto.thread.is_alive())
+        self.assertEqual(auto.status()['state'],'Needs attention');self.assertEqual(auto.status()['research']['researching'],0)
+        row=self.service.reviews.page()['rows'][0]
+        self.assertEqual(row['status'],'Needs attention — metadata research failed');self.assertFalse(row['metadata_approved']);self.assertFalse(row['creation']['can_create'])
+        self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertEqual(self.service.state()['approved_total'],0)
+        self.assertEqual(before,{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in self.sources})
+
 if __name__=='__main__':unittest.main()

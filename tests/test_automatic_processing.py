@@ -247,6 +247,72 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(len(held),1);self.assertEqual(held[0]['state'],'Held')
         self.assertEqual(held[0]['reasons'],['Public research input or evidence exceeds supported limits']);self.assertEqual(calls,[])
 
+
+    def test_unexpected_research_failure_is_durable_private_and_never_approves(self):
+        secret='PRIVATE_TOKEN_ABC';path='Z:\\Audiobooks\\private-source-name.mp3'
+        def lookup(*_):raise RuntimeError('api_key='+secret+' https://ast.ru/private?token='+secret+' '+path+' '+'x'*20000)
+        auto,merge,inv=self.fake_merge(lookup);auto.start();status=self.wait_auto(auto)
+        run=auto._run_row();pending=json.loads(run['checkpoint'])['pending'];candidate=inv.candidate('Audiobooks',pending[0])
+        self.assertEqual(status['state'],'Needs attention');self.assertEqual(status['research']['researching'],0);self.assertIsNone(status['current'])
+        self.assertEqual(auto.candidate(candidate)['state'],'Needs attention');self.assertEqual(auto.candidate(candidate)['reasons'][0],'Metadata research failed')
+        error=status['failure'];self.assertTrue(status['failure_durable']);self.assertEqual(error['exception_class'],'RuntimeError')
+        self.assertEqual((error['run_id'],error['phase'],error['candidate_id']),(run['id'],'research',candidate['id']))
+        packed=json.dumps(error);self.assertLessEqual(len(packed.encode()),8192);self.assertLessEqual(len(error['stack']),8)
+        for value in (secret,path,'https://ast.ru','private-source-name'):self.assertNotIn(value,packed)
+        self.assertTrue(error['message_truncated']);self.assertTrue(error['stack']);self.assertNotIn('source',error['stack'][-1])
+        self.assertIn('Source files for this book were preserved.',status['reason']);merge.approve_automatic.assert_not_called();merge.resume.assert_not_called()
+        with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],1)
+        second=AutomaticProcessing(merge,auto.research);self.controllers.append(second)
+        self.assertIsNone(second.thread);self.assertEqual(second.status()['failure'],error);self.assertEqual(second.status()['state'],'Needs attention')
+        self.assertEqual(json.loads(second._run_row()['checkpoint'])['pending'],pending);merge.approve_automatic.assert_not_called()
+        second.research.lookup=lambda *_:{'reasons':['Book identity uncertain'],'sources':[]}
+        with patch.object(inv,'launch') as discovery:
+            second.start();retried=self.wait_auto(second);discovery.assert_not_called()
+        self.assertEqual(second._run_row()['id'],run['id']);self.assertEqual(retried['state'],'Completed');self.assertEqual(retried['research']['held'],1)
+        merge.approve_automatic.assert_not_called()
+
+    def test_historical_missing_failure_detail_is_not_invented_or_left_researching(self):
+        auto,merge,inv=self.fake_merge(lambda *_:(_ for _ in ()).throw(RuntimeError('lost historical message')))
+        auto.start();self.wait_auto(auto);run=auto._run_row();candidate_id=json.loads(run['checkpoint'])['pending'][0]
+        with connect(self.db) as db:
+            db.execute('DELETE FROM automatic_errors');db.execute("UPDATE automatic_candidates SET state='Researching',result='{}' WHERE id=?",(candidate_id,))
+        restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
+        state=restarted.status();candidate=inv.candidate('Audiobooks',candidate_id);record=restarted.candidate(candidate)
+        self.assertIsNone(restarted.thread);self.assertIsNone(state['failure']);self.assertFalse(state['failure_durable'])
+        self.assertEqual(state['research']['researching'],0);self.assertEqual(record['state'],'Needs attention')
+        self.assertIn('Failure details were not recorded.',record['reasons']);self.assertIn('retry this book',state['retry_help'])
+        merge.approve_automatic.assert_not_called();merge.resume.assert_not_called()
+
+    def test_interruption_is_saved_pause_without_an_app_failure_record(self):
+        auto,merge,inv=self.fake_merge(lambda *_:(_ for _ in ()).throw(InterruptedError()))
+        auto.start();state=self.wait_auto(auto);self.assertEqual(state['state'],'Paused');self.assertIsNone(state['failure'])
+        self.assertEqual(state['research']['researching'],0);self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1)
+        with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],0)
+        restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
+        self.assertIsNone(restarted.thread);self.assertEqual(restarted.status()['state'],'Paused');merge.approve_automatic.assert_not_called()
+
+    def test_failure_checkpoint_refusal_blocks_retry_without_claiming_durability(self):
+        import sqlite3
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5)
+        candidate=inv.candidates('Audiobooks')['rows'][0];run_id=str(uuid.uuid4());now='2026-10-11T00:00:00+00:00'
+        with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[candidate['id']],'done':[]}),'',now,now))
+        auto._record(candidate,'Researching')
+        with patch('automatic_processing.connect',side_effect=sqlite3.OperationalError('PRIVATE_DATABASE_PATH')):
+            auto._failure(run_id,RuntimeError('PRIVATE_ERROR'), 'research',candidate['id'],candidate,True)
+        state=auto.status();self.assertEqual(state['state'],'Needs attention');self.assertFalse(state['failure_durable']);self.assertFalse(state['can_start'])
+        self.assertEqual(state['research']['researching'],0);self.assertEqual(auto.candidate(candidate)['state'],'Needs attention')
+        self.assertEqual(state['reason'],'Retry progress could not be saved; Start is unavailable.');self.assertEqual(state['retry_help'],'')
+        self.assertNotIn('PRIVATE_',json.dumps(state['failure']))
+        with self.assertRaisesRegex(ValueError,'checkpoint could not be saved'):auto.start()
+        merge.approve_automatic.assert_not_called();merge.resume.assert_not_called()
+
+    def test_structural_type_error_diagnostic_keeps_safe_message_and_code_location(self):
+        from automatic_processing import failure_diagnostic
+        try:None.get('PRIVATE_FIELD')
+        except AttributeError as error:record=failure_diagnostic(error,str(uuid.uuid4()),'research',str(uuid.uuid4()))
+        self.assertEqual(record['exception_class'],'AttributeError');self.assertEqual(record['message'],"'NoneType' object has no attribute 'get'")
+        self.assertNotIn('PRIVATE_FIELD',json.dumps(record));self.assertTrue(record['stack'])
+
     def fake_merge(self,lookup=None):
         audio=self.base/'audio';audio.mkdir(exist_ok=True);path=audio/'John Writer – A Book.mp3';path.write_bytes(b'fixture only')
         inv=Inventory(self.db,{'Audiobooks':str(audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')},lambda p,k,s:json.loads(row(p,'A Book')['metadata']))

@@ -2,7 +2,11 @@
 Construction/reconnect/restart never starts inventory, approval or conversion.
 """
 import datetime as dt
+import hashlib
 import json
+from pathlib import Path
+import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -13,16 +17,67 @@ from source_identity import VERSION,source_gate
 
 def stamp():return dt.datetime.now(dt.timezone.utc).isoformat()
 
+ERROR_LIMIT = 8192
+RESEARCH_FAILURE = 'Metadata research failed'
+MISSING_FAILURE_DETAILS = 'Failure details were not recorded.'
+RETRY_HELP = 'Start automatic processing to retry this book and continue saved work.'
+
+def failure_diagnostic(error,run_id,phase,candidate_id):
+    """Keep code locations, never raw traceback lines, paths or arbitrary error text."""
+    name=re.sub(r'[^A-Za-z0-9_]','_',type(error).__name__)[:80]
+    raw=error.args[0] if error.args and isinstance(error.args[0],str) else ''
+    message='Exception message redacted; inspect the recorded code location'
+    # These structural built-in messages contain types/operations, not source values.
+    structural=r"'(?:NoneType|dict|list|tuple|str|int|float|bool)' object (?:is not iterable|is not subscriptable|has no attribute '(?:get|items|values|keys|append|extend|split|strip)')"
+    if type(error) in (TypeError,AttributeError) and re.fullmatch(structural,raw):message=raw
+    elif isinstance(error,sqlite3.Error):
+        code=getattr(error,'sqlite_errorname','')
+        if isinstance(code,str) and re.fullmatch(r'SQLITE_[A-Z0-9_]{1,60}',code):message='Database error '+code
+        else:message='Database operation failed; exception text redacted'
+    elif isinstance(error,OSError) and type(error.errno) is int:message='Operating system error '+str(error.errno)
+    frames=[];tb=error.__traceback__;base=Path(__file__).resolve().parent
+    while tb is not None:
+        code=tb.tb_frame.f_code
+        try:
+            file=Path(code.co_filename).resolve().relative_to(base).as_posix()
+            if not re.fullmatch(r'[A-Za-z0-9_./-]{1,160}\.py',file):file='<external>'
+        except (OSError,ValueError):file='<external>'
+        frames.append({'file':file,'line':tb.tb_lineno,'function':re.sub(r'[^A-Za-z0-9_<>]','_',code.co_name)[:80]})
+        frames=frames[-8:];tb=tb.tb_next
+    result={'id':str(uuid.uuid4()),'run_id':run_id,'phase':phase,'candidate_id':candidate_id,'created_utc':stamp(),
+            'exception_class':name,'message':message,'message_prefix_sha256':hashlib.sha256(raw[:4096].encode('utf-8',errors='replace')).hexdigest(),
+            'message_truncated':len(raw)>4096,'stack':frames}
+    if len(json.dumps(result,ensure_ascii=False).encode('utf-8'))>ERROR_LIMIT:raise ValueError('Failure diagnostic exceeds its bound')
+    return result
+
+def candidate_job_exists(db,identity):
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return False
+    return bool(db.execute("SELECT 1 FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? LIMIT 1",(identity,)).fetchone())
+
+def research_retry(run):
+    if not run or run['state']!='Needs attention' or run['phase']!='research':return False
+    try:
+        pending=json.loads(run['checkpoint']).get('pending')
+        return isinstance(pending,list) and bool(pending) and all(isinstance(value,str) and str(uuid.UUID(value))==value for value in pending)
+    except (ValueError,TypeError,AttributeError):return False
+
 class AutomaticProcessing:
     def __init__(self,merge,research=None):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
-        self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.current=None;self.closed=False
+        self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.current=None;self.closed=False;self.volatile_failure=None
         with connect(self.database) as db:
             __import__('groups').setup(db)
             db.execute('CREATE TABLE IF NOT EXISTS automatic_runs(id TEXT PRIMARY KEY,state TEXT,phase TEXT,checkpoint TEXT,reason TEXT,created TEXT,updated TEXT,restart_paused INTEGER DEFAULT 0)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_manual_drafts(id TEXT PRIMARY KEY,revision INTEGER,expires REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
+            db.execute('CREATE TABLE IF NOT EXISTS automatic_errors(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,created TEXT NOT NULL,diagnostic TEXT NOT NULL)')
+            prior=db.execute('SELECT * FROM automatic_runs ORDER BY created DESC LIMIT 1').fetchone()
+            if prior and research_retry(dict(prior)):
+                failed=json.loads(prior['checkpoint'])['pending'][0]
+                failure_reason='Automatic processing error' if candidate_job_exists(db,failed) else RESEARCH_FAILURE
+                db.execute("UPDATE automatic_candidates SET state='Needs attention',result=?,retry_at=NULL WHERE id=? AND state='Researching'",
+                    (json.dumps({'reasons':[failure_reason,MISSING_FAILURE_DETAILS],'failure_run_id':prior['id']}),failed))
             db.execute("UPDATE automatic_runs SET state='Paused',reason='Paused after server restart — start to continue saved work',restart_paused=1 WHERE state IN ('Running','Stopping')")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
     def _run_row(self):
@@ -38,6 +93,8 @@ class AutomaticProcessing:
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
         result=json.loads(r['result'])
+        if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
+            r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'attempted_utc':r['attempted'],'retry_at':r['retry_at']}
     def status(self):
         run=self._run_row();counts={'researching':0,'waiting':0,'held':0}
@@ -46,18 +103,26 @@ class AutomaticProcessing:
                 if r['state']=='Researching':counts['researching']+=r['n']
                 elif r['state']=='Waiting for source':counts['waiting']+=r['n']
                 elif r['state']=='Held':counts['held']+=r['n']
-        state=run['state'] if run else 'Idle';active=state in ('Running','Stopping')
-        return {'state':state,'phase':run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':run['reason'] if run else '',
-                'restart_paused':bool(run and run['restart_paused']),'can_start':not self.closed and not active,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None}
+        state=run['state'] if run else 'Idle'
+        with connect(self.database) as db:
+            failure=db.execute('SELECT diagnostic FROM automatic_errors WHERE run_id=? ORDER BY created DESC LIMIT 1',(run['id'] if run else '',)).fetchone()
+        diagnostic=json.loads(failure['diagnostic']) if failure else None
+        if self.volatile_failure:
+            state='Needs attention';diagnostic=self.volatile_failure['diagnostic'];counts['researching']=0
+        active=state in ('Running','Stopping')
+        return {'state':state,'phase':run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
+                'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
+                'can_start':not self.closed and not active and not self.volatile_failure,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None}
     def start(self):
         with self.lock:
             if self.closed:raise ValueError('Automatic processing is closed')
+            if self.volatile_failure:raise ValueError('Failure checkpoint could not be saved; automatic processing remains stopped')
             if self.thread and self.thread.is_alive():return self.status()
             self.merge._no_scan()
             jobs=self.merge.state()
             if jobs['state'] in ('Running','Pausing'):raise ValueError('Pause existing audiobook work before automatic discovery')
             run=self._run_row()
-            if not run or run['state'] in ('Completed','Needs attention'):
+            if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
                 id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
                 with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
             else:self._update(run['id'],state='Running',reason='',restart_paused=0)
@@ -99,7 +164,30 @@ class AutomaticProcessing:
     def _manual_draft(self,row):
         ctx=self.merge.reviews._context(row)
         return bool(row.get('review') and not (ctx.get('automatic_approval') or ctx.get('automatic_pending'))) or bool(ctx.get('manual_draft_active'))
+    def _failure(self,id,error,phase,identity,row,research_failed):
+        diagnostic=failure_diagnostic(error,id,phase,identity)
+        reason='Automatic pass could not continue; saved source and job evidence preserved'
+        title=re.sub(r'[\x00-\x1f\x7f]',' ',str(row.get('title_clue','')))[:120] if row else ''
+        result={'reasons':[RESEARCH_FAILURE if research_failed else 'Automatic processing error','Failure details: '+diagnostic['exception_class']+': '+diagnostic['message']],'failure_run_id':id,'failure_id':diagnostic['id']}
+        self.current=None
+        self.volatile_failure={'diagnostic':diagnostic,'reason':reason,'candidate_result':result}
+        try:
+            with connect(self.database) as db:
+                if research_failed and row and not candidate_job_exists(db,row['id']):
+                    reason='An app error stopped automatic processing while researching '+title+'. Source files for this book were preserved.'
+                db.execute('INSERT INTO automatic_errors VALUES(?,?,?,?)',(diagnostic['id'],id,diagnostic['created_utc'],json.dumps(diagnostic)))
+                if row:
+                    db.execute("UPDATE automatic_candidates SET state='Needs attention',result=?,retry_at=NULL WHERE id=? AND revision=? AND fingerprint=? AND state='Researching'",
+                        (json.dumps(result),row['id'],row['revision'],row['fingerprint']))
+                db.execute("UPDATE automatic_runs SET state='Needs attention',reason=?,updated=? WHERE id=?",(reason,stamp(),id))
+            self.volatile_failure=None
+        except (OSError,sqlite3.Error) as persistence_error:
+            # No durable success claim and no retry when the checkpoint itself failed.
+            diagnostic['persistence_error_class']=type(persistence_error).__name__[:80]
+            self.volatile_failure['reason']='Retry progress could not be saved; Start is unavailable.'
+
     def _work(self,id):
+        row=None;identity=None;phase='unknown';research_failed=False;checkpoint={}
         try:
             run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase']
             if phase=='discovery':
@@ -116,7 +204,7 @@ class AutomaticProcessing:
                     raise ValueError('Discovery incomplete or has read errors; saved progress preserved')
                 candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
                 checkpoint={'pending':[r['id'] for r in candidates],'done':[]}
-                self._update(id,phase='research',checkpoint=json.dumps(checkpoint))
+                self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
                 if self.merge.state().get('queued'):self.merge.resume()
@@ -140,10 +228,12 @@ class AutomaticProcessing:
                     self._record(row,'Held',{'reasons':['Manual draft retained']});checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                 self._record(row,'Researching');self._progress(row['title_clue'],'Public sources','Researching work identity')
                 try:
+                    research_failed=True
                     result=self.research.lookup(row,self.inventory.roots['Audiobooks'],self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
                 except ValueError:
                     # Unsupported input or malformed public evidence holds only this candidate.
                     result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
+                research_failed=False
                 if self.stop_event.is_set():raise InterruptedError()
                 if result.get('reasons'):
                     wait=result.get('wait');state='Waiting for source' if wait else 'Held'
@@ -166,7 +256,7 @@ class AutomaticProcessing:
                         except ValueError:fresh=row
                         result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,time.time()+7*86400)
                 checkpoint['pending'].pop(0);checkpoint.setdefault('done',[]).append(identity);self._update(id,checkpoint=json.dumps(checkpoint))
-            self.current=None;self._update(id,phase='conversion')
+            row=None;identity=None;phase='conversion';self.current=None;self._update(id,phase='conversion')
             while not self._idle_jobs():
                 if self.stop_event.wait(.2):raise InterruptedError()
                 if self.merge.state()['state']=='Paused':raise InterruptedError()
@@ -185,5 +275,5 @@ class AutomaticProcessing:
             while self.merge.state()['state']=='Pausing':time.sleep(.2)
             with connect(self.database) as db:db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
             self._update(id,state='Paused',reason='Paused — pending work saved')
-        except Exception:
-            self.current=None;self._update(id,state='Needs attention',reason='Automatic pass could not continue; saved source and job evidence preserved')
+        except Exception as error:
+            self._failure(id,error,phase,identity,row,research_failed)

@@ -165,8 +165,8 @@ class CandidateReviewService:
         automatic=self.jobs.automatic.candidate(row) if self.jobs and hasattr(self.jobs,'automatic') else None
         row['automatic']=automatic
         row['review_context']['automatic_approval']=copy.deepcopy(ctx.get('automatic_approval'))
-        if automatic and not job and automatic['state'] in ('Researching','Waiting for source','Held','Approved automatically','Queued'):
-            row['status']=automatic['state']+(' — '+automatic['reasons'][0] if automatic['state']=='Held' and automatic['reasons'] else '')
+        if automatic and not job and automatic['state'] in ('Researching','Waiting for source','Held','Needs attention','Approved automatically','Queued'):
+            row['status']=automatic['state']+(' — '+automatic['reasons'][0].lower() if automatic['state']=='Needs attention' and automatic['reasons'] else ' — '+automatic['reasons'][0] if automatic['state']=='Held' and automatic['reasons'] else '')
         row['review_context']['chapters_choice_saved']='chapters' in ctx
         row['review_context']['metadata_evidence']=copy.deepcopy(ctx.get('metadata_evidence',[]))
         row['review_context']['track_evidence']=ctx.get('track_evidence','')
