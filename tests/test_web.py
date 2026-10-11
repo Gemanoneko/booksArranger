@@ -1,4 +1,6 @@
+import contextlib
 import hashlib
+import sys
 import json
 from pathlib import Path
 import tempfile
@@ -232,6 +234,23 @@ class BrowserTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             BrowserServer(('0.0.0.0',0),self.inventory)
 
+    def test_health_reports_loaded_version_after_file_version_changes(self):
+        loaded=self.server.health()['version']
+        with patch('web_server.version',return_value='99.0.0'):
+            self.assertEqual(self.json_call('/api/health')[1]['version'],loaded)
+
+    def test_restart_guard_rejects_wrong_instance_busy_admission_and_active_research(self):
+        self.assertEqual(self.call('/api/shutdown',{'restart_instance':'wrong'})[0],400)
+        self.assertFalse(self.server.closing)
+        with self.server.control_lock:self.server.merge_admissions=1
+        self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance})[0],409)
+        with self.server.control_lock:self.server.merge_admissions=0
+        with patch.object(self.server,'state',return_value={'automatic_processing':{'state':'Running'}}):
+            self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance})[0],409)
+        self.assertFalse(self.server.closing)
+        self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance},authorized=False)[0],403)
+        self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance})[0],200)
+
     def test_shutdown_is_protected_and_controlled(self):
         self.assertEqual(self.call('/api/shutdown',{},authorized=False)[0],403)
         self.assertTrue(self.thread.is_alive())
@@ -262,6 +281,33 @@ class BrowserTests(unittest.TestCase):
         self.wait_scan()
         item=self.json_call('/api/inventory?library=Ebooks')[1]['rows'][0]
         self.assertEqual(self.call('/api/review',body|{'library':'Ebooks','path':item['path'],'size':item['size'],'modified':item['modified']})[0],400)
+
+
+class WindowlessMainTests(unittest.TestCase):
+    def test_readiness_runs_before_serving_with_no_standard_streams(self):
+        import web_server
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as temp:
+            database=Path(temp)/'inventory.sqlite3';events=[]
+            inventory=Mock();inventory.worker=None
+            server=Mock();server.loaded_version='fixture';server.health.return_value={'version':'fixture'}
+            server.serve_forever.side_effect=lambda **_kwargs:events.append('serving')
+            def ready(_server):
+                self.assertTrue((database.parent/'web-instance.json').exists())
+                events.append('ready')
+            with patch.object(web_server,'catalog_lock',return_value=contextlib.nullcontext()),patch.object(web_server,'Inventory',return_value=inventory),patch.object(web_server,'BrowserServer',return_value=server),patch.object(web_server.signal,'signal'),patch.object(sys,'stdout',None),patch.object(sys,'stderr',None):
+                web_server.main(['--database',str(database)],ready=ready)
+            self.assertEqual(events,['ready','serving'])
+            self.assertFalse((database.parent/'web-instance.json').exists())
+            server.server_close.assert_called_once()
+
+    def test_receipt_write_failure_closes_constructed_server_without_readiness(self):
+        import web_server
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as temp:
+            database=Path(temp)/'inventory.sqlite3';inventory=Mock();inventory.worker=None
+            server=Mock();server.health.return_value={'version':'fixture'};ready=Mock()
+            with patch.object(web_server,'catalog_lock',return_value=contextlib.nullcontext()),patch.object(web_server,'Inventory',return_value=inventory),patch.object(web_server,'BrowserServer',return_value=server),patch.object(web_server,'owned_instance_record',side_effect=OSError('Fixture record-write failure')):
+                with self.assertRaises(OSError):web_server.main(['--database',str(database)],ready=ready)
+            server.server_close.assert_called_once();ready.assert_not_called();server.serve_forever.assert_not_called()
 
 if __name__=='__main__':
     unittest.main()

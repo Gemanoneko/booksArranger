@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import signal
+import sys
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,10 +35,13 @@ class BrowserServer(ThreadingHTTPServer):
         self.inventory = inventory
         self.token = secrets.token_urlsafe(32)
         self.instance = secrets.token_hex(16)
+        self.loaded_version = version()
+        self.restart_context = False
         self.active_library = None
         self.control_lock = threading.Lock()
         self.control_condition = threading.Condition(self.control_lock)
         self.merge_admissions = 0
+        self.recovery_operations = 0
         self.merge = None
         self.closing = False
         super().__init__(address, Handler)
@@ -56,10 +60,11 @@ class BrowserServer(ThreadingHTTPServer):
         with self.control_condition:
             if self.closing or self.scan_active() or self.merge_admissions:raise ValueError('App is busy or closing; recovery deletion waits')
             self.merge_admissions+=1
+            self.recovery_operations+=1
         try:yield
         finally:
             with self.control_condition:
-                self.merge_admissions-=1;self.control_condition.notify_all()
+                self.merge_admissions-=1;self.recovery_operations-=1;self.control_condition.notify_all()
 
     def server_close(self):
         if self.merge is not None:
@@ -91,8 +96,8 @@ class BrowserServer(ThreadingHTTPServer):
         return {f'http://127.0.0.1:{self.server_port}', f'http://localhost:{self.server_port}'}
 
     def health(self):
-        return {'application': 'Books Arranger', 'version': version(), 'instance': self.instance,
-                'pid': os.getpid(), 'port': self.server_port, 'closing': self.closing}
+        return {'application': 'Books Arranger', 'version': self.loaded_version, 'instance': self.instance,
+                'pid': os.getpid(), 'port': self.server_port, 'closing': self.closing, 'restart_context': self.restart_context, 'recovery_active':bool(self.recovery_operations)}
 
     def state(self, library):
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
@@ -401,7 +406,15 @@ class Handler(BaseHTTPRequestHandler):
                         self.server.active_library=library
                     self.response(200,self.server.state(library));return
                 if path=='/api/shutdown':
-                    if data: raise ValueError('Shutdown takes an empty JSON object')
+                    if data:
+                        if set(data)!={'restart_instance'} or data['restart_instance']!=self.server.instance:
+                            raise ValueError('Restart requires the current owned app instance')
+                        if self.server.merge_admissions:
+                            self.fail(409,'Books Arranger is working with recovery copies. Wait for it to finish, then choose Restart Books Arranger.' if self.server.recovery_operations else 'Books Arranger could not verify the app to restart. The restart was cancelled.');return
+                        from app_launcher import verify_idle
+                        try:verify_idle(self.server.state('Audiobooks'))
+                        except RuntimeError as error:
+                            self.fail(409,str(error));return
                     self.server.closing=True;self.server.inventory.stop()
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
@@ -455,11 +468,64 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('Invalid original language, genre or series flag')
         return review
 
-def main():
+def read_instance_record(path):
+    """Read exact ordinary ownership bytes, compatible with the live write-denying owner."""
+    import ctypes
+    from native_io import ordinary, VerifiedFile, FileInfo, kernel
+    held=VerifiedFile(ordinary(path))
+    # Request READ only; permit the already-existing service's WRITE access.
+    held.handle=kernel.CreateFileW(str(held.path),0x81,3,None,3,0x00200000,None)
+    if held.handle==ctypes.c_void_p(-1).value:
+        held.handle=None;raise RuntimeError('The app ownership record could not be read safely')
+    try:
+        held.info=FileInfo()
+        if not kernel.GetFileInformationByHandle(held.handle,ctypes.byref(held.info)) or held.info.attributes&(0x400|0x10):raise RuntimeError('The app ownership record is not an ordinary file')
+        before=held.facts()
+        if before['links']!=1 or before['size']>4096:raise RuntimeError('The app ownership record is not a bounded unique file')
+        raw=b''.join(held.chunks())
+        if not kernel.GetFileInformationByHandle(held.handle,ctypes.byref(held.info)) or held.facts()!=before:raise RuntimeError('The app ownership record changed during reading')
+        return raw
+    finally:held.__exit__(None,None,None)
+
+@contextlib.contextmanager
+def owned_instance_record(path, health):
+    """Protect a new record from birth; preserve substitutions at retirement."""
+    import ctypes
+    from ctypes import wintypes
+    from native_io import ordinary, VerifiedFile, FileInfo, kernel
+    from source_cleanup import single_stream
+    path=ordinary(path);held=VerifiedFile(path,writable=True)
+    # CREATE_NEW refuses all existing entries; deny outside WRITE/DELETE from birth.
+    held.handle=kernel.CreateFileW(str(path),0xC0000081,1,None,1,0x00200000,None)
+    if held.handle==ctypes.c_void_p(-1).value:
+        held.handle=None;raise RuntimeError('Books Arranger ownership record already exists or could not be created safely')
+    try:
+        held.info=FileInfo()
+        if not kernel.GetFileInformationByHandle(held.handle,ctypes.byref(held.info)) or held.info.attributes&(0x400|0x10) or held.info.links!=1:raise RuntimeError('Books Arranger ownership record is not an ordinary unique file')
+        raw=json.dumps(health,ensure_ascii=False).encode('utf-8')
+        if len(raw)>4096:raise RuntimeError('Books Arranger ownership record is too large')
+        kernel.WriteFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p];kernel.WriteFile.restype=wintypes.BOOL
+        buffer=ctypes.create_string_buffer(raw);count=wintypes.DWORD()
+        if not kernel.WriteFile(held.handle,buffer,len(raw),ctypes.byref(count),None) or count.value!=len(raw):raise RuntimeError('Books Arranger ownership record could not be saved')
+        held.flush()
+        yield
+    finally:
+        # These are proven producer bytes: born CREATE_NEW and continuously write/delete-denied.
+        try:
+            if not kernel.GetFileInformationByHandle(held.handle,ctypes.byref(held.info)):raise RuntimeError('The owned instance identity could not be checked')
+            produced=held.facts();produced_hash=held.sha256()
+        finally:held.__exit__(None,None,None)
+        with VerifiedFile(path,delete=True) as current:
+            now=current.facts()
+            if any(now[key]!=produced[key] for key in ('dev','ino','identity_method')) or now['links']!=1 or now['size']!=produced['size'] or current.sha256()!=produced_hash:raise RuntimeError('Changed ownership record retained for recovery')
+            single_stream(path)
+            current.dispose()
+
+def main(argv=None, *, ready=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',default=str(BASE / 'data' / 'inventory.sqlite3'))
     parser.add_argument('--roots-json',help='Optional local fixture roots; not exposed through HTTP')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     roots = DEFAULT_ROOTS
     if args.roots_json:
         roots = json.loads(Path(args.roots_json).read_text(encoding='utf-8'))
@@ -472,24 +538,23 @@ def main():
         except OSError as error:
             raise RuntimeError(f'Books Arranger cannot bind its assigned port {PORT}; stop the existing owner first. No fallback port is used.') from error
         instance_file = Path(args.database).parent / 'web-instance.json'
-        instance_file.write_text(json.dumps(server.health() | {'url':f'http://127.0.0.1:{PORT}/'}),encoding='utf-8')
-        def stop(_signal=None,_frame=None):
-            inventory.stop()
-            server.closing = True
-            threading.Thread(target=server.finish_shutdown,daemon=True).start()
-        signal.signal(signal.SIGINT,stop)
-        if hasattr(signal,'SIGTERM'):
-            signal.signal(signal.SIGTERM,stop)
-        print(f'Books Arranger {version()} — http://127.0.0.1:{PORT}/ — PID {os.getpid()}',flush=True)
         try:
-            server.serve_forever(poll_interval=.2)
+            from native_io import DirectoryBoundary
+            with DirectoryBoundary(instance_file.anchor,instance_file.parent),owned_instance_record(instance_file,server.health() | {'url':f'http://127.0.0.1:{PORT}/'}):
+                def stop(_signal=None,_frame=None):
+                    inventory.stop()
+                    server.closing = True
+                    threading.Thread(target=server.finish_shutdown,daemon=True).start()
+                signal.signal(signal.SIGINT,stop)
+                if hasattr(signal,'SIGTERM'):signal.signal(signal.SIGTERM,stop)
+                if sys.stdout is not None:
+                    print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{PORT}/ — PID {os.getpid()}',flush=True)
+                if ready is not None:ready(server)
+                server.serve_forever(poll_interval=.2)
         finally:
             inventory.stop()
-            if inventory.worker and inventory.worker.is_alive():
-                inventory.worker.join(timeout=20)
+            if inventory.worker and inventory.worker.is_alive():inventory.worker.join(timeout=20)
             server.server_close()
-            if instance_file.exists():
-                instance_file.unlink()
 
 if __name__ == '__main__':
     main()

@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.11.0] - 2026-10-11
+
+### Added
+
+- Windowless Pythonw launch and guarded idle restart entrypoints, plus a bounded installer for the current user’s Books Arranger and Restart Books Arranger Start-menu entries. Installation does not launch the app.
+- Verified-owner reuse and cause-specific native startup feedback. Restart refuses active work or unverified ownership; ordinary launch/restart leaves saved automatic work paused until Start.
+
+### Fixed
+
+- Health reports the loaded server version, and the server supports absent Pythonw standard streams. Existing metadata, retry, conversion and recovery safeguards remain unchanged.
+
 ## [v0.10.0] - 2026-10-11
 
 ### Added

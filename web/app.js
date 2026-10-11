@@ -201,6 +201,15 @@ function renderRows(force=false) {
   $('next').disabled=offset+rows.length>=totalRows;
   batchCounts();
 }
+let restartNoticeSeen=null;
+function acknowledgeRestart(current){
+  if(current.restart_context!==true || current.application!=='Books Arranger' || current.port!==5210 || !Number.isSafeInteger(current.pid) || current.pid<=0 || !/^[a-f0-9]{32}$/.test(current.instance || '') || current.instance===restartNoticeSeen)return;
+  restartNoticeSeen=current.instance;
+  const automatic=current.automatic_processing;
+  if(automatic?.state==='Paused')message('Books Arranger restarted. Automatic processing is paused.');
+  else if(automatic?.state==='Idle' && !automatic.run_id)message('Books Arranger restarted.');
+}
+
 async function refresh(force=false) {
   if (ended) return false;
   const sequence=++refreshSequence;
@@ -228,6 +237,7 @@ async function refresh(force=false) {
     if (ended || sequence!==refreshSequence || $('library').value!==library) return false;
     rows=page.rows.map(row=>view==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;renderRows(force);
   }
+  acknowledgeRestart(current);
   return true;
 }
 async function poll() {
