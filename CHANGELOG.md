@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.11.3] - 2026-10-11
+
+### Changed
+
+- Open the browser in Book candidates by default instead of Files. Switching views and their filters remain unchanged.
+
 ## [v0.11.2] - 2026-10-11
 
 ### Changed

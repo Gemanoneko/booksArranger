@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const token = document.querySelector('meta[name="books-token"]').content;
 let offset = 0, search = '', selectedPath = null, selectedRow = null, reviewRow = null, rows = [], lastKey = null;
 let dirty = false, busy = false, polling = false, ended = false, timer = null, state = null;
-let view='files',totalRows=0,selectedLibrary=null;
+let view='candidates',totalRows=0,selectedLibrary=null;
 let automaticRequest=null,automaticResultKey=null,automaticInspectorKey=null;
 let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'all'};
