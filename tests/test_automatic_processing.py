@@ -1,12 +1,12 @@
 """Private automatic public pilot fixtures; never read or write real libraries."""
-import copy,json,threading,time,tempfile,unittest,uuid
+import copy,json,threading,time,tempfile,unittest,uuid,urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
 import groups
 from scanner import Inventory,connect
 from source_identity import source_gate,clues,filename_identity
-from public_research import PublicClient,PublicResearch,ResearchWait,allowed_url,parse_page,credited_pair,strict_json
+from public_research import PublicClient,PublicResearch,ResearchWait,allowed_url,parse_page,credited_pair,strict_json,APP_LIMIT_REASON,LEGACY_APP_LIMIT_REASON,SOURCE_PAUSE_REASON
 from automatic_processing import AutomaticProcessing
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'automatic-processing-2026-10-10'/'test-fixtures';AREA.mkdir(parents=True,exist_ok=True)
@@ -108,6 +108,75 @@ class AutoTests(unittest.TestCase):
         other=PublicClient(self.base/'errors.sqlite',fetch=lambda *_:(_ for _ in ()).throw(OSError('secret=TOKEN')))
         with self.assertRaises(ResearchWait) as caught:other.read(url)
         self.assertNotIn('TOKEN',str(caught.exception));self.assertGreater(caught.exception.retry_at,time.time())
+    def test_host_request_limit_preserves_cache_other_hosts_and_oldest_expiry(self):
+        import base64,hashlib
+        now=[100000];calls=[];client=PublicClient(self.db,fetch=lambda url,*_:(calls.append(url) or b'fixture'),clock=lambda:now[0])
+        cached='https://ast.ru/book/cached';raw=b'known cached evidence'
+        with connect(self.db) as db:
+            db.executemany('INSERT INTO public_research_requests VALUES(?,?)',[('ast.ru',now[0]-3590+i) for i in range(100)])
+            db.execute('INSERT INTO public_research_cache VALUES(?,?,?,?)',(cached,base64.b64encode(raw).decode(),hashlib.sha256(raw).hexdigest(),now[0]))
+        budget={'remaining':3}
+        with self.assertRaises(ResearchWait) as caught:client.read('https://ast.ru/book/new',budget=budget)
+        wait=caught.exception;self.assertEqual((wait.kind,wait.scope,wait.retry_at),('app_limit','host',100010));self.assertEqual(budget['remaining'],3)
+        self.assertEqual(client.read(cached,budget={'remaining':0}),raw)
+        self.assertEqual(client.read('https://api.fantlab.ru/work/fixture',budget=budget),b'fixture');self.assertEqual(budget['remaining'],2)
+        now[0]=100010;self.assertEqual(client.read('https://ast.ru/book/new',budget=budget),b'fixture');self.assertEqual(budget['remaining'],1)
+        self.assertEqual(len(calls),2)
+    def test_host_request_reservation_is_atomic_across_clients(self):
+        now=100000;calls=[];barrier=threading.Barrier(2);results=[]
+        clients=[PublicClient(self.db,fetch=lambda url,*_:(calls.append(url) or b'fixture'),clock=lambda:now) for _ in range(2)]
+        with connect(self.db) as db:db.executemany('INSERT INTO public_research_requests VALUES(?,?)',[('ast.ru',now-100)]*99)
+        def request(index):
+            barrier.wait()
+            try:clients[index].read('https://ast.ru/book/'+str(index));results.append('fetched')
+            except ResearchWait as wait:results.append(wait.kind)
+        children=[threading.Thread(target=request,args=(i,)) for i in range(2)]
+        for child in children:child.start()
+        for child in children:child.join(3);self.assertFalse(child.is_alive())
+        self.assertCountEqual(results,['fetched','app_limit']);self.assertEqual(len(calls),1)
+        with connect(self.db) as db:self.assertEqual(db.execute("SELECT count(*) FROM public_research_requests WHERE host='ast.ru'").fetchone()[0],100)
+    def test_source_http_pause_honors_retry_after_without_exposing_error(self):
+        from email.utils import format_datetime
+        import datetime as dt
+        for index,(code,header,duration) in enumerate(((429,'7200',7200),(403,format_datetime(dt.datetime.fromtimestamp(108000,dt.timezone.utc),usegmt=True),8000),(429,'invalid',3600),(503,'7200',7200),(500,'invalid',300))):
+            def fetch(*_):raise urllib.error.HTTPError('https://ast.ru/private?token=PRIVATE',code,'PRIVATE',{'Retry-After':header},None)
+            client=PublicClient(self.base/('pause'+str(index)+'.sqlite3'),fetch=fetch,clock=lambda:100000)
+            with self.assertRaises(ResearchWait) as caught:client.read('https://ast.ru/book/fixture')
+            wait=caught.exception;self.assertEqual(wait.retry_at,100000+duration);self.assertNotIn('PRIVATE',str(wait))
+            self.assertEqual(wait.kind,'source_pause' if code in (403,429,503) else 'source_unavailable')
+            # An explicit website pause survives local-budget migration and later reads.
+            with self.assertRaises(ResearchWait) as again:client.read('https://ast.ru/book/another')
+            self.assertEqual(again.exception.retry_at,wait.retry_at);self.assertEqual(again.exception.kind,wait.kind)
+    def test_later_inflight_failure_cannot_shorten_a_shared_source_pause(self):
+        first_entered=threading.Event();second_entered=threading.Event();first_finished=threading.Event();results=[]
+        def first_fetch(*_):
+            first_entered.set()
+            if not second_entered.wait(3):raise AssertionError('Second owned request did not enter')
+            raise urllib.error.HTTPError('https://ast.ru/book/first',429,'Unavailable',{'Retry-After':'7200'},None)
+        def second_fetch(*_):
+            second_entered.set()
+            if not first_finished.wait(3):raise AssertionError('First owned pause did not finish')
+            raise urllib.error.HTTPError('https://ast.ru/book/second',500,'Unavailable',{},None)
+        clients=[PublicClient(self.db,fetch=first_fetch,clock=lambda:100000),PublicClient(self.db,fetch=second_fetch,clock=lambda:100000)]
+        def request(index):
+            try:clients[index].read('https://ast.ru/book/'+str(index))
+            except ResearchWait as wait:results.append((index,wait.retry_at,wait.kind,wait.reason))
+            finally:
+                if index==0:first_finished.set()
+        children=[threading.Thread(target=request,args=(i,)) for i in range(2)];children[0].start();self.assertTrue(first_entered.wait(3));children[1].start()
+        for child in children:child.join(5);self.assertFalse(child.is_alive())
+        self.assertCountEqual(results,[(0,107200,'source_pause',SOURCE_PAUSE_REASON),(1,107200,'source_pause',SOURCE_PAUSE_REASON)])
+        with connect(self.db) as db:
+            limit=db.execute("SELECT next_at,reason FROM public_research_limits WHERE host='ast.ru'").fetchone();self.assertEqual((limit['next_at'],limit['reason']),(107200,SOURCE_PAUSE_REASON))
+    def test_only_known_legacy_app_limit_is_recalculated_and_actual_pause_preserved(self):
+        client=PublicClient(self.db,fetch=lambda *_:b'fixture',clock=lambda:100000)
+        legacy={'source':'ast.ru','reason':LEGACY_APP_LIMIT_REASON,'retry_at':180000}
+        with connect(self.db) as db:db.executemany('INSERT INTO public_research_requests VALUES(?,?)',[('ast.ru',96410+i) for i in range(100)])
+        revised=client.retry_wait(legacy);self.assertEqual(revised['retry_at'],100010);self.assertEqual(revised['kind'],'app_limit')
+        for untouched in ({'source':'ast.ru','reason':'Public source unavailable; no bypass attempted','retry_at':180000}, {'source':'ast.ru','reason':'Public research request bound reached','retry_at':180000,'kind':'app_limit','scope':'candidate'}, {'source':'unknown','reason':LEGACY_APP_LIMIT_REASON,'retry_at':180000}):
+            self.assertEqual(client.retry_wait(untouched),untouched)
+        with connect(self.db) as db:db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',('ast.ru',108000,SOURCE_PAUSE_REASON))
+        revised=client.retry_wait(legacy);self.assertEqual((revised['kind'],revised['retry_at'],revised['reason']),('source_pause',108000,SOURCE_PAUSE_REASON))
     def test_short_title_explicit_credit_and_narrative_boundaries(self):
         self.assertIsNotNone(credited_pair(parse_page(b'<p>Stephen King. It</p>'),['It'],['Stephen King']))
         self.assertIsNone(credited_pair(parse_page(b'<p>Stephen King visited another publisher.</p>'),['It'],['Stephen King']))
@@ -170,16 +239,71 @@ class AutoTests(unittest.TestCase):
         self.assertIsNotNone(credited_pair(parse_page(b'<p>Author: John Writer. A Book</p>'),['A Book'],['John Writer']))
         client,_=self.client(page=b'<p>A Book - John Writer, translator. Author: Other Writer.</p>')
         self.assertIn('Author and work not independently verified',PublicResearch(client).lookup(self.candidate(),str(self.base))['reasons'])
-    def test_waiting_source_keeps_saved_pending_and_explicit_start_retries(self):
-        calls=[]
+    def test_waiting_source_retries_automatically_at_earliest_opportunity(self):
+        calls=[];now=[100000];observed=[]
         def lookup(*_):
             calls.append(1)
-            return {'reasons':['Book identity uncertain'],'sources':[],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+300}} if len(calls)==1 else {'reasons':['Book identity uncertain'],'sources':[]}
-        auto,merge,inv=self.fake_merge(lookup);auto.start();state=self.wait_auto(auto)
-        self.assertEqual(state['state'],'Paused');self.assertEqual(state['research']['waiting'],1)
-        saved=json.loads(auto._run_row()['checkpoint']);self.assertEqual(len(saved['pending']),1)
-        with connect(self.db) as db:db.execute("UPDATE automatic_candidates SET retry_at=0 WHERE state='Waiting for source'")
-        auto.start();state=self.wait_auto(auto);self.assertEqual(state['state'],'Completed');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
+            return {'reasons':['Book identity uncertain'],'sources':[],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+5}} if len(calls)==1 else {'reasons':['Book identity uncertain'],'sources':[]}
+        auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0];original=auto.stop_event.wait
+        def advance(delay):
+            if delay>=1:
+                observed.append(auto.status());self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1);now[0]+=delay;return False
+            return original(delay)
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+        self.assertEqual(state['state'],'Completed');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
+        self.assertEqual(len(observed),1);waiting=observed[0]
+        self.assertEqual((waiting['state'],waiting['phase'],waiting['next_retry_at']),('Running','waiting',100005));self.assertTrue(waiting['automatic_retry_enabled']);self.assertFalse(waiting['can_start']);self.assertTrue(waiting['can_stop']);self.assertIsNone(waiting['current'])
+        self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['next_retry_at']);merge.approve_automatic.assert_not_called()
+        self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['done']),1)
+    def test_waiting_uses_earliest_candidate_and_does_not_revisit_later_source_early(self):
+        now=[100000];attempts={};wakes=[]
+        def lookup(current,*_):
+            title=current['title_clue'];attempts[title]=attempts.get(title,0)+1
+            return {'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+(5 if title=='A Book' else 20)}} if attempts[title]==1 else {'reasons':['Uncertain']}
+        auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0]
+        (self.base/'audio'/'John Writer – B Book.mp3').write_bytes(b'private second fixture');inv.reader=lambda p,k,s:json.loads(row(p,filename_identity(p)['title'])['metadata'])
+        original=auto.stop_event.wait
+        def advance(delay):
+            if delay>=1:wakes.append(auto.status()['next_retry_at']);now[0]+=delay;return False
+            return original(delay)
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+        self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()
+    def test_stop_during_armed_wait_preserves_pending_and_restart_stays_paused(self):
+        auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
+        auto.start();deadline=time.monotonic()+3
+        while not auto.status()['automatic_retry_enabled'] and auto.thread.is_alive() and time.monotonic()<deadline:time.sleep(.01)
+        self.assertTrue(auto.status()['automatic_retry_enabled']);begin=time.monotonic();auto.stop();state=self.wait_auto(auto)
+        self.assertLess(time.monotonic()-begin,1);self.assertEqual(state['state'],'Paused');self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['next_retry_at'])
+        pending=json.loads(auto._run_row()['checkpoint'])['pending'];self.assertEqual(len(pending),1)
+        restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
+        self.assertIsNone(restarted.thread);self.assertEqual(restarted.status()['state'],'Paused');self.assertFalse(restarted.status()['automatic_retry_enabled']);self.assertEqual(json.loads(restarted._run_row()['checkpoint'])['pending'],pending)
+        merge.approve_automatic.assert_not_called()
+    def test_required_working_cleanup_drains_before_retry_is_armed(self):
+        now=[100000];visits=[];cleanup=[False];drained=[]
+        def lookup(*_):
+            visits.append(1);cleanup[0]=len(visits)==1
+            return {'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+5}} if len(visits)==1 else {'reasons':['Uncertain']}
+        auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0];original_state=merge.state;merge.state=lambda:original_state()|{'cleanup_active':cleanup[0]};original_wait=auto.stop_event.wait
+        def advance(delay):
+            if cleanup[0]:
+                self.assertFalse(auto.status()['automatic_retry_enabled']);self.assertIsNone(auto.status()['current']);drained.append(True);cleanup[0]=False;return False
+            if delay>=1:self.assertTrue(auto.status()['automatic_retry_enabled']);now[0]+=delay;return False
+            return original_wait(delay)
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+        self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()
+    def test_restart_of_waiting_running_checkpoint_does_not_arm_retry(self):
+        auto,merge,inv=self.fake_merge();run_id=str(uuid.uuid4());now='2026-10-11T00:00:00Z'
+        with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[str(uuid.uuid4())],'done':[]}),'Waiting for metadata sources',now,now))
+        restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted);state=restarted.status()
+        self.assertEqual(state['state'],'Paused');self.assertTrue(state['restart_paused']);self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(restarted.thread);merge.approve_automatic.assert_not_called()
+    def test_legacy_wait_migration_retains_all_evidence_and_does_not_approve(self):
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(3);candidate=inv.candidates('Audiobooks')['rows'][0]
+        client=PublicClient(self.db,fetch=lambda *_:b'fixture',clock=lambda:100000);auto.research.client=client
+        result={'sources':[{'sha256':'fixture unique proof'}],'work':WORK,'reasons':['Uncertain'],'wait':{'source':'ast.ru','reason':LEGACY_APP_LIMIT_REASON,'retry_at':180000}}
+        auto._record(candidate,'Waiting for source',result,180000);record=auto._refresh_wait(candidate,auto.candidate(candidate))
+        self.assertEqual(record['retry_at'],100000);self.assertEqual(record['wait']['kind'],'app_limit')
+        with connect(self.db) as db:stored=json.loads(db.execute('SELECT result FROM automatic_candidates').fetchone()[0])
+        self.assertEqual(stored['sources'],result['sources']);self.assertEqual(stored['work'],WORK);self.assertEqual(stored['reasons'],result['reasons']);merge.approve_automatic.assert_not_called()
     def test_automatic_drain_waits_required_working_cleanup(self):
         auto,merge,inv=self.fake_merge();original=merge.state;merge.state=lambda:original()|{'cleanup_active':True}
         self.assertFalse(auto._idle_jobs());merge.state=lambda:original()|{'cleanup_active':False};self.assertTrue(auto._idle_jobs())
@@ -218,14 +342,20 @@ class AutoTests(unittest.TestCase):
         auto,merge,inv=self.fake_merge(lambda row,*_:{'reasons':[],'work':WORK,'review':{},'sources':[]})
         second=self.base/'audio'/'John Writer – B Book.mp3';second.write_bytes(b'private second book fixture')
         inv.reader=lambda p,k,s:json.loads(row(p,filename_identity(p)['title'])['metadata'])
-        calls=[]
+        calls=[];now=[100000];auto.clock=lambda:now[0];observed=[];original=auto.stop_event.wait
         def admit(current,*_):
             calls.append(current['id'])
-            if len(calls)==1:raise ResearchWait('Public cover fixture','Unavailable',time.time()+300)
+            if len(calls)==1:raise ResearchWait('Public cover fixture','Unavailable',now[0]+5)
             return current,'private-second-job'
-        merge.approve_automatic.side_effect=admit;auto.start();state=self.wait_auto(auto)
-        self.assertEqual(len(calls),2);self.assertEqual(state['state'],'Paused');self.assertEqual(state['research']['waiting'],1);self.assertEqual(state['research']['researching'],0)
-        self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1)
+        def advance(delay):
+            if delay>=1:
+                observed.append((list(calls),auto.status()));now[0]+=delay;return False
+            return original(delay)
+        merge.approve_automatic.side_effect=admit
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+        self.assertEqual(len(calls),3);self.assertEqual(state['state'],'Completed');self.assertEqual(state['research']['waiting'],0)
+        self.assertEqual(len(observed[0][0]),2);self.assertEqual(observed[0][1]['research']['waiting'],1);self.assertEqual(observed[0][1]['research']['researching'],0)
+        self.assertEqual(calls[0],calls[2]);self.assertNotEqual(calls[1],calls[2])
 
     def test_long_unicode_public_query_holds_one_candidate_and_continues(self):
         auto,merge,inv=self.fake_merge();audio=self.base/'audio'
@@ -319,7 +449,7 @@ class AutoTests(unittest.TestCase):
         state={'state':'Completed','queued':0};reviews=SimpleNamespace(_context=lambda row:{},_row=lambda lib,id,revision=None:inv.candidate(lib,id))
         merge=SimpleNamespace(inventory=inv,reviews=reviews,_no_scan=lambda:None,state=lambda:dict(state),pause=lambda:state.update(state='Paused'),resume=Mock(),candidate_status=lambda id:None)
         merge.approve_automatic=Mock(side_effect=lambda row,result,stop,client:(row,'fixture-job'))
-        research=SimpleNamespace(client=Mock(),lookup=lookup or (lambda *args:{'reasons':['Book identity uncertain'],'sources':[]}))
+        research=SimpleNamespace(client=SimpleNamespace(retry_wait=lambda wait:dict(wait)),lookup=lookup or (lambda *args:{'reasons':['Book identity uncertain'],'sources':[]}))
         auto=AutomaticProcessing(merge,research);merge.automatic=auto;self.controllers.append(auto)
         return auto,merge,inv
     def wait_auto(self,auto):

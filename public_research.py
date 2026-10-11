@@ -3,6 +3,7 @@ No paid connector, arbitrary host, model confidence or model-invented field is u
 """
 import base64
 import datetime as dt
+from email.utils import parsedate_to_datetime
 import hashlib
 from html.parser import HTMLParser
 import http.client
@@ -22,12 +23,17 @@ from scanner import connect
 from source_identity import clues,filename_identity,norm,source_gate,text,VERSION
 
 MAX_BYTES=2*1024*1024
+APP_HOST_REQUESTS=100
+APP_HOST_WINDOW=3600
+APP_LIMIT_REASON='Books public research hourly host request bound reached'
+LEGACY_APP_LIMIT_REASON='Books public research daily request bound reached'
+SOURCE_PAUSE_REASON='Public source requested a pause; no bypass attempted'
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 HOSTS=PRIMARY_HOSTS|{'html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
 
 class ResearchWait(Exception):
-    def __init__(self,source,reason,retry_at):
-        self.source=source;self.reason=reason;self.retry_at=retry_at
+    def __init__(self,source,reason,retry_at,kind='source_unavailable',scope=None):
+        self.source=source;self.reason=reason;self.retry_at=retry_at;self.kind=kind;self.scope=scope
         super().__init__(reason)
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -213,9 +219,27 @@ class PublicClient:
         with connect(database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS public_research_cache(url TEXT PRIMARY KEY,raw TEXT,sha256 TEXT,fetched REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS public_research_requests(host TEXT,at REAL)')
+            db.execute('CREATE INDEX IF NOT EXISTS public_research_requests_host_at ON public_research_requests(host,at)')
             db.execute('CREATE TABLE IF NOT EXISTS public_research_limits(host TEXT PRIMARY KEY,next_at REAL,reason TEXT)')
             db.execute('DELETE FROM public_research_cache WHERE fetched<=?',(self.clock()-7*86400,))
             db.execute('DELETE FROM public_research_requests WHERE at<?',(self.clock()-7*86400,))
+    def _host_ready(self,db,host,now):
+        reservations=db.execute('SELECT at FROM public_research_requests WHERE host=? AND at>? ORDER BY at',(host,now-APP_HOST_WINDOW)).fetchall()
+        # If old/in-flight reservations exceed the bound, enough must expire first.
+        return reservations[len(reservations)-APP_HOST_REQUESTS]['at']+APP_HOST_WINDOW if len(reservations)>=APP_HOST_REQUESTS else now
+    def retry_wait(self,wait):
+        """Recalculate only our known local host bound, never an external pause."""
+        value=dict(wait or {});host=value.get('source')
+        local=value.get('reason')==LEGACY_APP_LIMIT_REASON or (value.get('reason')==APP_LIMIT_REASON and value.get('kind')=='app_limit' and value.get('scope')=='host')
+        if not local or host not in HOSTS:return value
+        now=self.clock()
+        with connect(self.database) as db:
+            limit=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
+            host_ready=self._host_ready(db,host,now);retry=max(host_ready,limit['next_at'] if limit else now)
+        if limit and limit['reason'] and limit['next_at']>now and limit['next_at']>=host_ready:
+            value.update(retry_at=retry,kind='source_pause' if limit['reason']==SOURCE_PAUSE_REASON else 'source_unavailable',scope='host',reason=limit['reason'])
+        else:value.update(retry_at=retry,kind='app_limit',scope='host',reason=APP_LIMIT_REASON)
+        return value
     def read(self,url,stop=None,budget=None):
         url=allowed_url(url);host=urllib.parse.urlsplit(url).hostname
         if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
@@ -229,20 +253,20 @@ class PublicClient:
                     if len(raw)<=MAX_BYTES and hashlib.sha256(raw).hexdigest()==cached['sha256']:return raw
                     raise ValueError('Cached evidence changed')
                 if budget is not None:
-                    if budget['remaining']<=0:raise ResearchWait(host,'Public research request bound reached',now+86400)
-                    budget['remaining']-=1
+                    if budget['remaining']<=0:raise ResearchWait(host,'Public research request bound reached',now+86400,'app_limit','candidate')
                 # Complete cache housekeeping before reserving the request atomically.
                 db.commit()
                 # Reservation is atomic across Books request threads; Comics budgets are untouched.
                 db.execute('BEGIN IMMEDIATE')
                 wait=db.execute('SELECT * FROM public_research_limits WHERE host=?',(host,)).fetchone()
                 delay=max(0,(wait['next_at'] if wait else 0)-now)
-                if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay)
-                count=db.execute('SELECT count(*) FROM public_research_requests WHERE at>?',(now-86400,)).fetchone()[0]
-                if count>=100:raise ResearchWait(host,'Books public research daily request bound reached',now+86400)
+                if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason']==SOURCE_PAUSE_REASON else 'source_unavailable','host')
+                ready=self._host_ready(db,host,now)
+                if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
                 db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
                 db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+(3 if host=='html.duckduckgo.com' else 1.1),''))
                 db.execute('DELETE FROM public_research_requests WHERE at<?',(now-7*86400,))
+                if budget is not None:budget['remaining']-=1
             if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
             try:
                 raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
@@ -250,9 +274,27 @@ class PublicClient:
                 if any(marker in raw[:MAX_BYTES].lower() for marker in (b'anomaly.js',b'bots use duckduckgo',b'verify you are human',b'cf-chl-',b'challenge-platform')):raise ValueError()
             except InterruptedError:raise
             except Exception as error:
-                delay=3600 if isinstance(error,urllib.error.HTTPError) and error.code in (403,429) else 300
-                with connect(self.database) as db:db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,self.clock()+delay,'Public source unavailable; no bypass attempted'))
-                raise ResearchWait(host,'Public source unavailable; no bypass attempted',self.clock()+delay) from None
+                now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
+                retry=now+(3600 if paused else 300)
+                if http_error and error.headers:
+                    after=error.headers.get('Retry-After','')
+                    if not isinstance(after,str):after=''
+                    try:
+                        if re.fullmatch(r'\d{1,12}',after.strip()):requested=now+int(after)
+                        else:
+                            date=parsedate_to_datetime(after)
+                            requested=date.timestamp() if date.tzinfo else date.replace(tzinfo=dt.timezone.utc).timestamp()
+                        retry=max(retry,requested);paused=paused or requested>now
+                    except (ValueError,TypeError,OverflowError):pass
+                reason=SOURCE_PAUSE_REASON if paused else 'Public source unavailable; no bypass attempted'
+                with connect(self.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    existing=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
+                    if existing and existing['next_at']>=retry:
+                        retry=existing['next_at']
+                        if existing['reason']:reason=existing['reason']
+                    db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
+                raise ResearchWait(host,reason,retry,'source_pause' if reason==SOURCE_PAUSE_REASON else 'source_unavailable','host') from None
             with connect(self.database) as db:
                 db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,base64.b64encode(raw).decode('ascii'),hashlib.sha256(raw).hexdigest(),self.clock()))
                 db.execute('DELETE FROM public_research_cache WHERE url IN (SELECT url FROM public_research_cache ORDER BY fetched DESC LIMIT -1 OFFSET 100)')
@@ -463,7 +505,7 @@ def _page_record(url,raw,pair):return {'url':url,'kind':'publisher_or_journal','
 def _wait(waits):
     if not waits:return None
     wait=min(waits,key=lambda w:w.retry_at)
-    return {'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at}
+    return {'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
 
 
 def _latin_credit(value):

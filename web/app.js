@@ -392,6 +392,9 @@ function renderAutomatic(){
   else if(automatic?.state==='Completed'){
     const converted=verifiedCount(state?.audiobook_jobs?.converted_total),approved=verifiedCount(state?.audiobook_jobs?.approved_total),held=verifiedCount(automatic.research?.held);
     detail=converted!==null && approved!==null && approved>=converted && held!==null?'Automatic pass complete — '+converted+' converted · '+held+' held':'Automatic pass complete — result counts unavailable';
+  }else if(automatic?.state==='Running' && automatic.phase==='waiting' && automatic.automatic_retry_enabled===true){
+    detail='Waiting for metadata sources; saved research retries automatically.';
+    const retry=retryDate(automatic.next_retry_at);detail+=retry?' Next automatic retry check: '+retry:' Automatic retry time unavailable';
   }else if(automatic?.reason)detail=automatic.reason;
   setText('automatic-detail',detail);$('automatic-detail').hidden=!detail;
   const research=automatic?.research,counts=research && ['researching','waiting','held'].every(key=>verifiedCount(research[key])!==null);
@@ -433,7 +436,7 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status]);
   if(key===automaticResultKey)return;
   if($('automatic-result').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
@@ -441,7 +444,11 @@ function renderAutomaticResult(row){
   $('automatic-reasons').replaceChildren();for(const reason of automatic?.reasons || [])$('automatic-reasons').append(node('li',reason));$('automatic-reasons').hidden=!automatic?.reasons?.length;
   $('automatic-result-help').hidden=automatic?.state!=='Held';
   setText('automatic-attempt',automatic?.attempted_utc?'Last attempt: '+recoveryDate(automatic.attempted_utc):'No automatic research attempt recorded.');
-  const retry=retryDate(automatic?.retry_at);setText('automatic-retry',retry?'Retry available after '+retry+'; Start to continue':'');$('automatic-retry').hidden=!retry;
+  const run=state?.automatic_processing,automaticContinuation=run?.state==='Running' && typeof run.automatic_retry_enabled==='boolean';
+  const retry=retryDate(automatic?.retry_at);setText('automatic-retry',retry?'Retry available after '+retry+(automaticContinuation?'':'; Start to continue'):'');$('automatic-retry').hidden=!retry;
+  const wait=automatic?.wait,source=typeof wait?.source==='string'?wait.source:'';
+  const waitText=wait?{app_limit:source?'App request limit reached for '+source:'App metadata request limit reached',source_pause:source?source+' requested a pause':'Metadata source requested a pause',source_unavailable:source?source+' unavailable':'Metadata source unavailable'}[wait.kind]:'';
+  if(waitText){$('automatic-reasons').append(node('li',waitText));$('automatic-reasons').hidden=false;}
   const facts=$('automatic-facts');facts.replaceChildren();const approval=recordedApproval(row),review=row.review || {},context=row.review_context || {};
   const values=approval?{Approval:approval,'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Output destination':row.creation?.destination || 'Destination unavailable'}:{'Title clue':row.title_clue || 'Unknown','Output destination':row.creation?.destination || 'No verified destination yet'};
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));

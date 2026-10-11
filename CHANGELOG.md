@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.10.0] - 2026-10-11
+
+### Added
+
+- Active automatic runs retry eligible saved metadata research after interruptible waits, with the earliest retry check and distinct wait reasons shown in the browser. Explicit Stop and server restart keep work paused until Start.
+
+### Changed
+
+- Replace the app-imposed 100-request daily limit with 100 uncached requests per rolling hour per allowlisted host. Genuine source pauses and Retry-After remain respected; blocked hosts and cache hits do not spend the candidate request budget.
+- Preserve confidence/admission gates, bounded public transport and evidence storage, existing conversions and 24-hour recovery retention. No new provider or paid connector is added.
+
 ## [v0.9.2] - 2026-10-11
 
 ### Fixed
