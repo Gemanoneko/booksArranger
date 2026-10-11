@@ -71,3 +71,17 @@ Approved exact copy:
 Keep actual Running/research/conversion/cleanup state while other work drains; an unavailable source alone does not prematurely present the whole pass as Paused or Completed. Waiting candidates remain distinct from confidence-held candidates and stay outside approval/queue counts until their complete checks pass. Missing cooldown telemetry must not invent a time: use **Waiting for public sources; retry time unavailable** and the actual backend Start eligibility. Do not promise automatic retries when the cooldown passes.
 
 No new control, layout, behavior or retention policy. Consumer checks are limited to automatic status/wait-reason rendering, candidate/inspector cooldown text and any copy reproducing **Next retry** or **retry at** for this controller. Sully must commit/push this clarification before Ender implements or cites it. Doc-only; no probes or disposable output.
+
+## Interrupted metadata research copy — 2026-10-11
+
+Scope: existing automatic **Needs attention** state, run reason, candidate status and readable details only. An unexpected program exception is distinct from an uncertain match, cover issue or public-source cooldown. Do not present a failed, inactive candidate as **Researching**, approve it, blame the user, or invent a historical exception cause. Existing verified completion, held-match and cooldown copy remain unchanged.
+
+Approved wording for an acknowledged program failure:
+
+- Run reason: **An app error stopped automatic processing while researching [book]. Source files for this book were preserved.** Bind [book] to the affected persisted candidate title/clue; preserve its labelled clue semantics. The preservation sentence applies to this research candidate only and requires backend confirmation; it does not describe other books' conversion/cleanup state.
+- Candidate status: **Needs attention — metadata research failed**. Research/current-book counters and active labels must reflect the nonactive checkpoint.
+- Separate action help, only when Start safely retries that candidate and continues its saved pass: **Start automatic processing to retry this book and continue saved work.** If Start only continues other work, use **Start automatic processing to continue saved work.** If neither action is available, omit these promises and show the actual existing disabled-action reason. No new action/control or mandatory manual review.
+
+If the existing details surface can display bounded sanitized diagnostics, label the readable value **Failure details**. Show only the recorded factual error, rendered as text; no raw traceback, credential/session data or invented cause. An absent historical diagnostic may read **Failure details were not recorded.** Do not turn a normal uncertain-match replay into evidence for what caused the earlier failure. A diagnostic is supplementary: the main reason names the failure and affected book without exposing internal filenames, roles or code references.
+
+Use the existing polite status/error presentation and focus behavior; no new panel, layout or state category. Check the literal copy consumers in run reason, candidate/inspector status and existing details rendering. Safe retry help requires an authoritative eligible checkpoint; page reconnect alone never retries. Doc-only repair, no library/runtime/code/Git changes or probes; owned disposable output: none. Sully commits/pushes this clarification before implementation citation.
