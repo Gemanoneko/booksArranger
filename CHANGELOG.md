@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.11.1] - 2026-10-11
+
+### Fixed
+
+- Remove the blanket Windows Job-membership rejection that blocked normal Start-menu launch and restart. Exact-owner, idle, exclusive port/catalog, completed-record and readiness guards remain intact. No Job manipulation or tool-host launch bypass is introduced.
+- Correct the startup admission documentation. Targeted producer and independent receiver launcher checks pass; actual normal-user launch/restart acceptance remains pending.
+
 ## [v0.11.0] - 2026-10-11
 
 ### Added

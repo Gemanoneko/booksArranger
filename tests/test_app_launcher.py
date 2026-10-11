@@ -18,23 +18,6 @@ import web_server
 SCRATCH=Path(__file__).resolve().parents[1]/'scratch'/'app-launch-tests'
 SCRATCH.mkdir(parents=True,exist_ok=True)
 
-class MembershipTests(unittest.TestCase):
-    def process(self, result, member):
-        process=launcher.WindowsProcess.__new__(launcher.WindowsProcess)
-        process.handle=123
-        def query(_handle,_job,out):
-            ctypes.cast(out,ctypes.POINTER(wintypes.BOOL)).contents.value=member
-            return result
-        process.kernel=SimpleNamespace(IsProcessInJob=Mock(side_effect=query))
-        return process
-    def test_query_failure_never_means_outside_job(self):
-        with self.assertRaises(launcher.LaunchError):
-            self.process(0,0).outside_job()
-    def test_successful_member_query_refuses_without_launch(self):
-        with self.assertRaises(launcher.LaunchError):
-            self.process(1,1).outside_job()
-        self.assertTrue(self.process(1,0).outside_job())
-
 class LifecycleTests(unittest.TestCase):
     def setUp(self):
         self.stack=contextlib.ExitStack();self.addCleanup(self.stack.close)
@@ -62,10 +45,20 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(launcher.run(),'reused')
         self.browser.assert_called_once_with(launcher.URL)
         self.requests.assert_not_called();self.main.assert_not_called();self.records.assert_not_called()
-    def test_membership_refusal_never_touches_existing_owner(self):
-        self.current.outside_job.side_effect=launcher.LaunchError('member')
-        with self.assertRaises(launcher.LaunchError):launcher.run(restart=True)
-        self.existing.assert_not_called();self.requests.assert_not_called();self.main.assert_not_called()
+    def test_job_membership_does_not_block_guarded_normal_start(self):
+        self.current.outside_job.side_effect=launcher.LaunchError('Successful query: ordinary user app is in a Job')
+        self.assertEqual(launcher.run(),'stopped')
+        self.main.assert_called_once();self.port.assert_called_once()
+        self.assertEqual(self.records.call_count,3)
+        self.browser.assert_called_once_with(launcher.URL)
+        self.requests.assert_not_called();self.current.outside_job.assert_not_called()
+    def test_job_query_failure_does_not_block_verified_healthy_reuse(self):
+        self.current.outside_job.side_effect=launcher.LaunchError('An irrelevant Job query failed')
+        self.existing.side_effect=[contextlib.nullcontext((self.owner,{'instance':'a'*32}))]
+        self.assertEqual(launcher.run(),'reused')
+        self.browser.assert_called_once_with(launcher.URL)
+        self.requests.assert_not_called();self.main.assert_not_called();self.records.assert_not_called()
+        self.current.outside_job.assert_not_called()
     def test_mismatched_owner_leaves_it_untouched(self):
         self.existing.side_effect=launcher.LaunchError('identity changed')
         with self.assertRaises(launcher.LaunchError):launcher.run(restart=True)

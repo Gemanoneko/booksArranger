@@ -35,7 +35,6 @@ class WindowsProcess:
             ('GetProcessId', [wintypes.HANDLE], wintypes.DWORD),
             ('OpenProcess', [wintypes.DWORD,wintypes.BOOL,wintypes.DWORD], wintypes.HANDLE),
             ('CloseHandle', [wintypes.HANDLE], wintypes.BOOL),
-            ('IsProcessInJob', [wintypes.HANDLE,wintypes.HANDLE,ctypes.POINTER(wintypes.BOOL)], wintypes.BOOL),
             ('QueryFullProcessImageNameW', [wintypes.HANDLE,wintypes.DWORD,wintypes.LPWSTR,ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
             ('WaitForSingleObject', [wintypes.HANDLE,wintypes.DWORD], wintypes.DWORD),
         ):
@@ -54,13 +53,6 @@ class WindowsProcess:
         self.handle=None
     def __enter__(self): return self
     def __exit__(self,*_): self.close()
-    def outside_job(self):
-        member=wintypes.BOOL(-1);ctypes.set_last_error(0)
-        result=self.kernel.IsProcessInJob(self.handle,None,ctypes.byref(member))
-        error=ctypes.get_last_error()
-        if not result: raise LaunchError('Books Arranger cannot restart from this session. Use Restart Books Arranger in the Start menu.')
-        if member.value: raise LaunchError('Books Arranger cannot restart from this session. Use Restart Books Arranger in the Start menu.')
-        return True
     def alive(self):
         result=self.kernel.WaitForSingleObject(self.handle,0)
         if result not in (0,258): raise LaunchError('Windows could not check whether the app is still running.')
@@ -192,7 +184,6 @@ def run(restart=False, *, show=True):
     from scanner import DEFAULT_ROOTS
     from app import catalog_lock
     import web_server
-    with WindowsProcess() as current:current.outside_job()
     if Path(sys.executable).name.lower()!='pythonw.exe':raise LaunchError('Open Books Arranger from its Start menu entry to run without a console.')
     from native_io import DirectoryBoundary
     with contextlib.ExitStack() as startup:
