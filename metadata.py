@@ -167,7 +167,7 @@ def future_audio_tags(metadata, review=None):
             'status':'Reviewed author identity' if author else 'Needs author verification',
             'note':'Future tag preview only. Source tags and supplemental metadata remain untouched.'}
 
-def propose(path, root, kind, metadata, review=None):
+def propose(path, root, kind, metadata, review=None, automatic_facts=None):
     """A usable path requires human-confirmed canonical identity, never guessed translations."""
     if kind == 'podcast':
         return {'confidence': 'Preserve', 'path': path,
@@ -177,20 +177,23 @@ def propose(path, root, kind, metadata, review=None):
     if not review:
         return {'confidence': 'Needs review', 'path': '',
                 'reason': 'Confirm original language, canonical title and surname-first author; embedded language describes this edition'}
+    standing=bool(kind=='audiobook' and isinstance(automatic_facts,dict) and automatic_facts.get('policy_version')=='standing-17-v1')
     anthology = kind == 'audiobook' and review.get('anthology') is True
     required = ['title', 'original_language'] + ([] if anthology else ['author'])
-    if any(not review.get(key) for key in required) or review['original_language'] not in {'Russian', 'Other'}:
+    if any(not review.get(key) for key in required) or review['original_language'] not in ({'Russian','Other','Unknown'} if standing else {'Russian','Other'}):
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Canonical identity and original language incomplete'}
     author_credit = review.get('canonical_author') or review.get('author') or ''
     if anthology and not author_credit.strip():
         return {'confidence':'Needs review','path':'','reason':'Confirm author credits for the collection; no author placeholder is invented'}
     language_names = review['title'] + (author_credit if anthology else review['author'])
-    if review['original_language'] == 'Other' and re.search('[А-Яа-яЁё]', language_names):
+    if not standing and review['original_language'] == 'Other' and re.search('[А-Яа-яЁё]', language_names):
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Non-Russian originals need English canonical title and author'}
     title, author = safe_name(review['title']), safe_name(author_credit if anthology else review['author'])
     series, number = safe_name(review['series']) if review.get('series') else '', review.get('number', '').strip()
     if review.get('multi_author') and not series and not anthology:
         return {'confidence': 'Needs review', 'path': '', 'reason': 'Multi-author series routing requires a confirmed series'}
+    if kind=='audiobook' and len(os.path.join(root,author,title+'.m4b'))>240:
+        return {'confidence':'Needs review','path':'','reason':'Verified metadata exceeds the supported Windows output path length'}
     pieces = [root]
     if kind == 'ebook':
         if review.get('genre') not in GENRES:
@@ -221,6 +224,11 @@ def propose(path, root, kind, metadata, review=None):
         if series and not number:
             return {'confidence': 'Needs review', 'path': '', 'reason': 'Confirm series position; do not invent a number'}
         filename = f'{series} - {safe_name(number)} - {title} - {author}.m4b' if series else f'{title} - {author}.m4b'
+        if standing and automatic_facts.get('destination_suffix'):
+            suffix=safe_name(automatic_facts['destination_suffix'])
+            filename=filename[:-4]+' - '+suffix+'.m4b'
+        if len(os.path.join(*pieces,filename))>240:
+            return {'confidence':'Needs review','path':'','reason':'Verified output path exceeds supported Windows length'}
         pieces.append(filename)
     note = 'Reviewed path preview only; no source changes'
     if kind == 'audiobook':

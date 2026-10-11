@@ -204,6 +204,9 @@ class StorageCleanup:
             for path in attempt.iterdir():
                 name = path.name
                 known = name in expected or name in {'cover.jpg', 'cover.png', 'checked.m4b', 'compatible.m4b', 'inputs.txt', 'chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)', name)
+                from encoding_policy import AUTOMATIC_PROFILE
+                normalized=manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name) and recorded.get('attempt_id')==attempt.name and name in recorded.get('files',{})
+                known=bool(known or normalized)
                 if not known:
                     raise BoundaryError('Unknown staging content preserved: ' + name)
                 if name.endswith(('.jpg', '.png')):
@@ -328,8 +331,10 @@ class StorageCleanup:
         root=ordinary(manifest['root']);candidates=set()
         for source in manifest['sources']:
             path=ordinary(source['path'])
-            if not path.is_relative_to(root) or path==root or path.suffix.lower()!='.mp3':
-                raise BoundaryError('Retired source is outside its approved MP3 library')
+            from encoding_policy import AUTOMATIC_PROFILE
+            formats={'.mp3','.m4a','.m4b','.aac','.flac','.ogg','.opus','.wav','.wma'} if manifest.get('profile')==AUTOMATIC_PROFILE else {'.mp3'}
+            if not path.is_relative_to(root) or path==root or path.suffix.lower() not in formats:
+                raise BoundaryError('Retired source is outside its approved audiobook library')
             parent=path.parent
             while parent!=root:
                 if not parent.is_relative_to(root):raise BoundaryError('Source-folder ancestry escaped the library')

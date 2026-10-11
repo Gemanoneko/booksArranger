@@ -1,5 +1,5 @@
 """Join reviewed candidates to the durable, source-preserving media queue."""
-from encoding_policy import LEGACY_PROFILE
+from encoding_policy import LEGACY_PROFILE, AUTOMATIC_PROFILE
 import contextlib
 import copy
 import json
@@ -96,6 +96,10 @@ class MergeService:
                 for r in rows:
                     if r['context_revision']!=r['revision']:continue
                     row=groups.render(r,r['root'],True,retired);ctx=json.loads(r['context_data'])
+                    if ctx.get('metadata_facts'):
+                        from standing_metadata import validate_policy
+                        validate_policy(row,row['review'],ctx['metadata_facts'])
+                        row['preview']=propose(row['members'][0]['path'],r['root'],'audiobook',row['metadata'],row['review'],automatic_facts=ctx['metadata_facts'])
                     if approved_scope(row,ctx,member_key):approved[row['id']]=(row,ctx)
                 self._approved_cache=(signature,approved)
             approved={}
@@ -111,7 +115,7 @@ class MergeService:
                     stat=Path(record['final_path']).stat()
                     current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
                 except (OSError,KeyError):pass
-                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,PROFILE):converted.add(id)
+                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE}):converted.add(id)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted}
 
     def state(self):
@@ -326,13 +330,17 @@ class MergeService:
         from public_research import allowed_url
         from review_backend import image_kind,source_hash,identity
         from audio_pipeline import generated_artifacts,run_owned,probe
-        from encoding_policy import choose_encoding
+        from encoding_policy import choose_encoding,choose_automatic_encoding
+        standing=bool(result.get('metadata_facts'))
+        if standing:
+            from standing_metadata import validate_policy
+            validate_policy(row,result['review'],result['metadata_facts'])
         from native_io import VerifiedFile
         from source_cleanup import single_stream
         import shutil
         if stop.is_set():raise InterruptedError()
         if result.get('reasons') or not result.get('work') or not result.get('review'):raise ValueError('Book identity uncertain')
-        primary=[s for s in result.get('sources',[]) if s.get('kind')=='publisher_or_journal' and s.get('verified_identity')]
+        primary=[s for s in result.get('sources',[]) if s.get('kind') in ('publisher_or_journal','recording_credit','collection_manifest') and s.get('verified_identity')]
         if not primary:raise ValueError('Author and work not independently verified')
         with self.reviews.lock,self.inventory.group_lock:
             current=self.reviews._row('Audiobooks',row['id'],row['revision']);ctx=self.reviews._context(current)
@@ -360,36 +368,59 @@ class MergeService:
                             if observed!=catalog:raise ValueError('Source embedded identity or order evidence changed')
                             streams=[s for s in raw_profile.get('streams',[]) if s.get('codec_type')=='audio']
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
-                            stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate')))
-                        try:choose_encoding(profiles)
+                            stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
+                        try:
+                            if standing:choose_automatic_encoding(profiles,single_m4b=len(paths)==1 and Path(paths[0]).suffix.lower()=='.m4b')
+                            else:choose_encoding(profiles)
                         except (ValueError,TypeError):raise ValueError('Audio format needs an encoding decision') from None
                         fresh=self.reviews.covers('Audiobooks',current['id'],current['revision'],all_embedded=True,stop=stop)
                         if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
                         covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
-                        if len(covers)!=1:raise ValueError('Cover not verified')
-                        remote=result['work'].get('cover_url') or ''
-                        try:allowed_url(remote)
-                        except ValueError:raise ValueError('Cover not verified') from None
-                        raw=client.read(remote,stop,{'remaining':1});kind=image_kind(raw);hash=hashlib.sha256(raw).hexdigest()
-                        remote_id=str(uuid.uuid5(uuid.NAMESPACE_URL,current['id']+'public-cover:'+hash));path=self.reviews.cache/(remote_id+'.'+kind)
-                        with DirectoryBoundary(self.reviews.cache.anchor,self.reviews.cache):
-                            if not path.exists():
-                                with open(path,'xb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
-                            with ProtectedFiles([path]):
-                                if digest(path,stop)!=hash:raise ValueError('Cover evidence bytes changed')
-                                ffmpeg=shutil.which('ffmpeg')
-                                if not ffmpeg:raise ValueError('Cover decoder unavailable')
-                                def pixels(image):
-                                    return run_owned([ffmpeg,'-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f','image2','-i',str(image),'-vf','scale=1200:1200:force_original_aspect_ratio=decrease,scale=96:144:force_original_aspect_ratio=decrease,pad=96:144:(ow-iw)/2:(oh-ih)/2','-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'],self.reviews.cache,stop,15,96*144*3)
-                                local_path=self.reviews.cover_file(covers[0]['id'])
-                                with ProtectedFiles([local_path]):
-                                    first=pixels(local_path);second=pixels(path)
-                                    if len(first)!=96*144*3 or len(set(first))<8 or first!=second:raise ValueError('Cover not verified')
-                        result['sources'].append({'url':remote,'kind':'matching_cover','sha256':hash,'retrieved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'verified_identity':True})
+                        if standing:
+                            if covers:
+                                selected_cover=covers[0];result['metadata_facts']['cover']={'kind':'embedded'}
+                            else:
+                                from neutral_cover import neutral_cover
+                                neutral=neutral_cover(result['review']['title'],authors=result['metadata_facts']['authors'])
+                                raw=neutral['bytes'];kind=image_kind(raw);hash=hashlib.sha256(raw).hexdigest()
+                                cover_id=str(uuid.uuid5(uuid.NAMESPACE_URL,current['id']+'neutral:'+hash));path=self.reviews.cache/(cover_id+'.'+kind)
+                                with DirectoryBoundary(self.reviews.cache.anchor,self.reviews.cache):
+                                    if not path.exists():
+                                        with open(path,'xb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
+                                    with ProtectedFiles([path]):
+                                        if digest(path,stop)!=hash:raise ValueError('Neutral artwork cache changed')
+                                selected_cover={'id':cover_id,'source_label':'Neutral cover','source_url':'','evidence_kind':'Generated neutral label; no edition identity claimed','thumbnail_url':'/api/cover?id='+cover_id,'sha256':hash}
+                                context=self.reviews._context(fresh);context['cover_choices']=fresh['cover_choices']+[selected_cover]
+                                fresh=self.reviews._write(fresh,context,bump=False)
+                                result['metadata_facts']['cover']={'kind':'neutral'}
+                            self._recording_review(current,result,stop)
+                        else:
+                            covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
+                            if len(covers)!=1:raise ValueError('Cover not verified')
+                            remote=result['work'].get('cover_url') or ''
+                            try:allowed_url(remote)
+                            except ValueError:raise ValueError('Cover not verified') from None
+                            raw=client.read(remote,stop,{'remaining':1});kind=image_kind(raw);hash=hashlib.sha256(raw).hexdigest()
+                            remote_id=str(uuid.uuid5(uuid.NAMESPACE_URL,current['id']+'public-cover:'+hash));path=self.reviews.cache/(remote_id+'.'+kind)
+                            with DirectoryBoundary(self.reviews.cache.anchor,self.reviews.cache):
+                                if not path.exists():
+                                    with open(path,'xb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
+                                with ProtectedFiles([path]):
+                                    if digest(path,stop)!=hash:raise ValueError('Cover evidence bytes changed')
+                                    ffmpeg=shutil.which('ffmpeg')
+                                    if not ffmpeg:raise ValueError('Cover decoder unavailable')
+                                    def pixels(image):
+                                        return run_owned([ffmpeg,'-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f','image2','-i',str(image),'-vf','scale=1200:1200:force_original_aspect_ratio=decrease,scale=96:144:force_original_aspect_ratio=decrease,pad=96:144:(ow-iw)/2:(oh-ih)/2','-frames:v','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'],self.reviews.cache,stop,15,96*144*3)
+                                    local_path=self.reviews.cover_file(covers[0]['id'])
+                                    with ProtectedFiles([local_path]):
+                                        first=pixels(local_path);second=pixels(path)
+                                        if len(first)!=96*144*3 or len(set(first))<8 or first!=second:raise ValueError('Cover not verified')
+                            result['sources'].append({'url':remote,'kind':'matching_cover','sha256':hash,'retrieved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'verified_identity':True})
+                            selected_cover=covers[0]
                         if stop.is_set() or self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
-                        note='Automatically accepted fetched public work evidence and independent publisher/journal credit; exact embedded cover pixels match catalog artwork. Source scope remains the observed recording; external recording completeness unknown.'
-                        fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=covers[0]['id'],actor='assistant',evidence=result['evidence'],automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']})
-                        context=self.reviews._context(fresh);context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
+                        note=('Automatically accepted verified work identity and associated author credit under the approved standing rules; source-derived output names, omitted unknown facts and usable embedded/neutral artwork retain honest provenance. All observed sources remain the recording scope.' if standing else 'Automatically accepted fetched public work evidence and independent publisher/journal credit; exact embedded cover pixels match catalog artwork. Source scope remains the observed recording; external recording completeness unknown.')
+                        fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor='assistant',evidence=result['evidence'],automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'))
+                        context=self.reviews._context(fresh);context['duplicate_review']=copy.deepcopy(result.get('duplicate_review'));context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
                         fresh=self.reviews._write(fresh,context,bump=False)
                         keys=[m['member_key'] for m in fresh['members']]
                         if stop.is_set():raise InterruptedError()
@@ -424,6 +455,60 @@ class MergeService:
         if stop.is_set():raise InterruptedError()
         self.resume()
         return fresh,job
+
+    def retry_automatic_job(self,job_id,now):
+        self._no_scan()
+        result=self.jobs.retry_failed(job_id,now)
+        if result.get('requeued'):self.resume()
+        return result
+
+    def _recording_review(self,row,result,stop):
+        """Full source-byte comparisons only; freshly validate any completed counterpart."""
+        from recording_classification import classify_recording
+        from audio_pipeline import source_chapters
+        def chapter_hash(value):return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        facts=result['metadata_facts'];review=result['review']
+        tracks=[]
+        for member in row['members']:
+            if stop.is_set():raise InterruptedError()
+            chapters=source_chapters(member['path'],self.reviews.cache,stop,member['duration']) if Path(member['path']).suffix.lower()=='.m4b' else []
+            tracks.append({'source_sha256':digest(member['path'],stop),'size_bytes':member['size'],'chapter_sha256':chapter_hash(chapters)})
+        def entry(identity,work_ids,meta,policy,source_tracks,complete=True):
+            recording=policy.get('recording_language') or {}
+            return {'id':identity,'identity_verified':True,'work_ids':work_ids,'collection_kind':(policy.get('collection') or {}).get('kind','single'),
+                'series_volume':meta.get('number') or None,'narrator':{'value':meta.get('narrator',''),'verified':bool(meta.get('narrator'))},
+                'recording_language':{'value':recording.get('value'),'verified':recording.get('basis') in ('embedded','recording_credit')},
+                'edition':{'value':'','verified':False},'manifest':{'complete':complete,'observed_count':len(source_tracks),'tracks':source_tracks}}
+        candidate=entry(row['id'],facts['work_ids'],review,facts,tracks);existing=[];related=[]
+        for job in self.jobs.status()['jobs']:
+            manifest=job['manifest'];other_id=manifest['candidate_id']
+            if other_id==row['id']:continue
+            try:other=self.reviews._row('Audiobooks',other_id);context=self.reviews._context(other)
+            except ValueError:continue
+            policy=context.get('metadata_facts') or {};approval=context.get('automatic_approval') or {}
+            work_ids=policy.get('work_ids') or ([approval['work_id']] if approval.get('work_id') else [])
+            if sorted(work_ids)!=sorted(facts['work_ids']):continue
+            source_tracks=[]
+            for source in manifest['sources']:
+                chapters=manifest.get('source_chapters',[]) if len(manifest['sources'])==1 and Path(source['path']).suffix.lower()=='.m4b' else []
+                source_tracks.append({'source_sha256':source['sha256'],'size_bytes':source['size'],'chapter_sha256':chapter_hash(chapters)})
+            record=entry(job['job_id'],work_ids,manifest['metadata'],policy,source_tracks)
+            output=job.get('output') or {}
+            record.update(approved=bool(context.get('metadata_approved') and not context.get('automatic_pending')),
+                completed_verified=job['state']=='completed' and output.get('validation',{}).get('passed') is True,
+                current_output_valid=bool(job['state']=='completed' and self._output_valid(output)))
+            existing.append(record);related.append({'candidate_id':other_id,'title':manifest['metadata'].get('title',''),'narrator':manifest['metadata'].get('narrator',''),'edition':'','language':policy.get('recording_language',{}).get('value')})
+        decision=classify_recording(candidate,existing);marker=decision.get('duplicate_review')
+        if marker:
+            marker['related']=related;result['duplicate_review']=marker
+            context=self.reviews._context(row);context['duplicate_review']=copy.deepcopy(marker)
+            self.reviews._write(row,context,bump=False)
+        if decision['hold']:raise ValueError('Possible duplicate recording — original sources preserved')
+        if decision.get('reuse_job_id'):
+            # Proven existing publication may be skipped; do not manufacture a new
+            # completed candidate/job or remove this duplicate's original bytes.
+            raise ValueError('Identical verified recording already arranged — duplicate sources preserved')
+        if decision['classification']=='related_distinct':facts['destination_suffix']=decision['destination_suffix']
 
     @operation
     def create(self, library, identity, revision):
@@ -489,7 +574,7 @@ class MergeService:
         try:
             root=ordinary(record['root']); final=ordinary(record['final_path'])
             if os.path.normcase(str(root)) != os.path.normcase(self.inventory.roots['Audiobooks']):return False
-            if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE}:return False
+            if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE,AUTOMATIC_PROFILE}:return False
             with DirectoryBoundary(root,final.parent) as boundary, ProtectedFiles([final]):
                 if record.get('parent_identity')!=[list(i) for i in boundary.identities]:
                     # In-memory records contain tuples, persisted JSON contains lists.
@@ -569,13 +654,13 @@ class MergeService:
         return [{'label':label,'value':tags.get(key,'')} for key,label in labels.items() if tags.get(key,'')]+[{'label':'Format','value':'M4B audiobook'}]
 
     def inspect(self,library,view,identity):
-        directories=self._source_directories(library,view,identity);sections=[];completed=None
+        directories=self._source_directories(library,view,identity);sections=[];completed=None;ready=False
         if view=='files':
             source=self._file_record(library,identity);sections.append(self._source_section(source))
             review=json.loads(source['review']) if source['review'] else None
             if review:sections.append({'kind':'draft','heading':'Sorting preview metadata','status':'Preview — source tags unchanged','facts':self._review_facts(review),'cover':{'status':'No selected cover'},'raw_tags':review})
         else:
-            row=self.reviews.enrich(self.reviews._row(library,identity));metadata=row['metadata']
+            row=self.reviews.enrich(self.reviews._row(library,identity));metadata=row['metadata'];ready=row['audiobook_ready']
             values=[]
             for member in row['members']:
                 for field,value in member['metadata'].get('tags',{}).items():values.append({'path':member['path'],'field':field,'value':value})
@@ -597,7 +682,7 @@ class MergeService:
                     'facts':self._output_facts(output['validation']['tags'])+cleanup_facts,
                     'cover':{**cover,'label':'Created audiobook cover','status':'Validated attached cover'},'raw_tags':output['validation']['tags'],'member_values':[]})
         return {'inspector':{'id':identity,'view':view,'heading':'Metadata and cover','sections':sections,'source_directories':directories,
-            'source_directory_count':len(directories),'output_folder_available':bool(completed)}}
+            'source_directory_count':len(directories),'output_folder_available':bool(completed),'audiobook_ready':ready}}
 
     def open_folder(self,library,view,identity,folder_kind='source',directory_id=None):
         root=self.inventory.roots[library]

@@ -55,21 +55,37 @@ def partition(member):
 def source_gate(row,work):
     """Observed-source scope only; does not claim commercial recording completeness."""
     members=row['members'];reasons=[]
+    standing=work.get('policy_version')=='standing-17-v1'
+    formats={'.mp3','.m4a','.m4b','.aac','.flac','.ogg','.opus','.wav','.wma'} if standing else {'.mp3'}
     if not members or len(members)>500:return ['Source membership uncertain']
     if row.get('source_partition_uncertain'):reasons.append('Source membership uncertain')
     if any(m.get('missing') or m.get('error') for m in members):reasons.append('Source files unavailable or unreadable')
-    if any(Path(m['path']).suffix.lower()!='.mp3' for m in members):reasons.append('Audio format needs an encoding decision')
+    if any(Path(m['path']).suffix.lower() not in formats for m in members):reasons.append('Audio format needs an encoding decision')
+    if work.get('collection'):
+        from collection_identity import bind_collection
+        try:
+            collection,_=bind_collection(row,work['titles'][0],work['collection_records'],{int(k):v for k,v in work['collection_work_facts'].items()})
+            if collection!=work['collection']:reasons.append('Collection source/component binding changed')
+        except (KeyError,TypeError,ValueError) as error:reasons.append(str(error))
+        return list(dict.fromkeys(reasons))
     aliases={norm(v) for v in work.get('titles',[]) if norm(v)}
     author_aliases={norm(v) for v in work.get('author_aliases',[]) if norm(v)}
+    def source_author(value):
+        return author_matches(value,author_aliases) or bool(standing and work.get('full_author_verified') and norm(value) in {norm(v) for v in work.get('source_surnames',[])})
+    common_folder=len({str(Path(m['path']).parent) for m in members})==1
+    folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
+    folder_context=bool(common_folder and title_matches(folder_title,aliases,work.get('author_aliases',[])))
     for m in members:
         tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
         album=norm(tags.get('album'))
         named=filename_identity(m['filename'])
         if album and not title_matches(album,aliases,work.get('author_aliases',[])):reasons.append('Sources disagree on the title or author')
-        if named.get('author') and (norm(named['title']) not in aliases or not author_matches(named['author'],author_aliases)):
+        if named.get('author') and (norm(named['title']) not in aliases or not source_author(named['author'])):
             reasons.append('Sources disagree on the title or author')
         # A source recording needs its own title evidence in addition to a filename clue.
         source_title=album or norm(tags.get('title')) if len(members)==1 else album
+        if standing and not source_title:
+            source_title=norm(named['title']) if len(members)==1 else norm(folder_title) if folder_context else ''
         if not source_title or not title_matches(source_title,aliases,work.get('author_aliases',[])):reasons.append('Source membership uncertain')
         if m.get('order_conflict'):reasons.append('Playback order uncertain')
         if len(members)==1:
@@ -77,14 +93,25 @@ def source_gate(row,work):
             if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
             disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())
             if disc_total and int(disc_total[1])>1:reasons.append('Source membership uncertain')
-        if tags.get('author') and not author_matches(tags['author'],author_aliases):reasons.append('Sources disagree on the title or author')
+        if tags.get('author') and not source_author(tags['author']):reasons.append('Sources disagree on the title or author')
+        series=work.get('verified_series') or {}
         for key in ('series','series-part','series_part'):
-            if tags.get(key):reasons.append('Series position uncertain')
+            value=text(tags.get(key))
+            if not value:continue
+            if not standing:reasons.append('Series position uncertain')
+            elif series.get('name') and series.get('number'):
+                expected=series['name'] if key=='series' else series['number']
+                if norm(value)!=norm(expected):reasons.append('Source series or position conflicts with verified work')
     if len(members)>1:
         tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in members]
         albums={norm(t.get('album')) for t in tags};artists={norm(t.get('artist')) for t in tags}
-        if len(albums)!=1 or not next(iter(albums),'') or len(artists)>1:reasons.append('Mixed recordings in this group')
-        positions=[(m.get('disc') or 1,m.get('track')) for m in members]
+        if (len(albums)!=1 or not next(iter(albums),'')) and not (standing and folder_context) or len(artists)>1:reasons.append('Mixed recordings in this group')
+        filename_positions=[]
+        for m in members:
+            match=re.match(r'^(\d{1,4})[ _.-]+',m['filename'])
+            filename_positions.append(int(match[1]) if match else None)
+        use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions))
+        positions=[(m.get('disc') or 1,m.get('track') if m.get('track') is not None else filename_positions[i] if use_filenames else None) for i,m in enumerate(members)]
         if any(p[1] is None for p in positions) or len(set(positions))!=len(positions):reasons.append('Playback order uncertain')
         # No natural filename sort can certify a gap-free recording.
         for disc in {p[0] for p in positions}:
@@ -96,7 +123,7 @@ def source_gate(row,work):
             total_discs=re.fullmatch(r'\d+/(\d+)',str(t.get('disc') or t.get('discnumber') or '').strip())
             if total_discs and int(total_discs[1])!=len(discs):reasons.append('Source membership uncertain')
         # Embedded track numbers must establish order, filename numbering alone remains a clue.
-        if any(not re.fullmatch(r'\d+(?:/\d+)?',str(t.get('track') or t.get('tracknumber') or '').strip()) for t in tags):reasons.append('Playback order uncertain')
+        if not use_filenames and any(not re.fullmatch(r'\d+(?:/\d+)?',str(t.get('track') or t.get('tracknumber') or '').strip()) for t in tags):reasons.append('Playback order uncertain')
         totals=[]
         for t,m in zip(tags,members):
             match=re.fullmatch(r'\d+/(\d+)',str(t.get('track') or t.get('tracknumber') or '').strip())

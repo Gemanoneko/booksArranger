@@ -265,6 +265,119 @@ class Inventory:
         self._outcome(connection,root,generation,path,False,error)
         if not error:_supersede_retirement(connection,root,path)
 
+    def refresh_candidate_sources(self,label,identity,revision,stop=None,*,force=False,max_members=500,max_bytes=4*1024*1024*1024,deadline_seconds=120):
+        """Freshen one unprotected candidate's observed sources without a scan.
+
+        No discovery, grouping, review reset, counter/outcome changes or source
+        writes. The caller retrieves the new group revision and researches again.
+        """
+        import contextlib,hashlib,time
+        from native_io import DirectoryBoundary,VerifiedFile,BoundaryError,ordinary
+        old_revision=revision;old_fingerprint='';paths=[]
+        def result(state,reason='',code='',receipts=None,changed=None):
+            return {'state':state,'reason':reason,'hold_code':code,'old_revision':old_revision,
+                    'old_fingerprint':old_fingerprint,'observed_paths':paths,
+                    'source_receipts':receipts or [],'refreshed_paths':changed or []}
+        if label!='Audiobooks' or label not in self.roots:return result('held','Only audiobook candidates support source refresh','unsupported_library')
+        if type(revision) is not int or revision<1 or type(force) is not bool:
+            return result('held','Candidate refresh arguments are invalid','invalid_request')
+        if type(max_members) is not int or not 1<=max_members<=500 or type(max_bytes) is not int or not 1<=max_bytes<=4*1024*1024*1024:
+            return result('held','Candidate refresh bounds are invalid','invalid_request')
+        if isinstance(deadline_seconds,bool) or not isinstance(deadline_seconds,(int,float)) or not 0<deadline_seconds<=120:
+            return result('held','Candidate refresh deadline is invalid','invalid_request')
+        deadline=time.monotonic()+deadline_seconds
+        class BoundedStop:
+            def is_set(inner):return bool(stop is not None and stop.is_set()) or time.monotonic()>=deadline
+        bounded=BoundedStop()
+        def check():
+            if bounded.is_set():raise ScanStopped()
+        def table(db,name):return bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(name,)).fetchone())
+        def snapshot(db):
+            if not table(db,'book_groups'):raise ValueError('Candidate inventory is unavailable')
+            group=db.execute('SELECT * FROM book_groups WHERE root=? AND id=? AND superseded=0',(root,identity)).fetchone()
+            if not group or group['revision']!=revision:raise ValueError('Candidate changed before source refresh')
+            evidence=json.loads(group['evidence']);members=evidence.get('members',[])
+            member_paths=[member['path'] for member in members]
+            if not members or len(members)>max_members or len(set(member_paths))!=len(member_paths):raise ValueError('Candidate member count is empty, duplicated or exceeds the refresh bound')
+            if group['approved']:raise ValueError('Approved candidate source evidence is preserved')
+            data={}
+            if table(db,'automatic_manual_drafts') and db.execute(
+                'SELECT 1 FROM automatic_manual_drafts WHERE id=? AND revision=? AND expires>?',
+                (identity,revision,time.time())).fetchone():
+                raise ValueError('Active browser editing lease is preserved; source refresh waits')
+            if table(db,'candidate_context'):
+                context=db.execute('SELECT * FROM candidate_context WHERE id=?',(identity,)).fetchone()
+                if context:
+                    data=json.loads(context['data'])
+                    if data.get('metadata_approved') or data.get('automatic_pending') or data.get('manual_draft_active') or data.get('manual_note') or data.get('metadata_actor')=='user' or data.get('track_actor')=='user':
+                        raise ValueError('Approved metadata or manual editing evidence is preserved')
+            else:context=None
+            automatic_unapproved=bool(context and context['revision']==revision and data.get('automatic_approval'))
+            if group['review'] and not automatic_unapproved:raise ValueError('Manual or unclassified candidate review is preserved')
+            marks=','.join('?' for _ in member_paths)
+            arguments=(root,*member_paths)
+            protected=db.execute(f"""SELECT 1 FROM book_groups g,json_each(g.evidence,'$.members') m
+                WHERE g.root=? AND g.id<>? AND (g.approved<>0 OR g.review<>'')
+                  AND json_extract(m.value,'$.path') IN ({marks}) LIMIT 1""",(root,identity,*member_paths)).fetchone()
+            if protected:raise ValueError('Member belongs to another approved or reviewed candidate')
+            if table(db,'audio_jobs'):
+                job=db.execute(f"""SELECT 1 FROM audio_jobs j WHERE json_extract(j.manifest,'$.candidate_id')=?
+                  OR EXISTS(SELECT 1 FROM json_each(j.manifest,'$.sources') s WHERE json_extract(s.value,'$.path') IN ({marks})) LIMIT 1""",(identity,*member_paths)).fetchone()
+                if job:raise ValueError('Candidate or source has a durable conversion job; immutable job evidence is preserved')
+            if table(db,'source_retirements') and db.execute(f'SELECT 1 FROM source_retirements WHERE root=? AND path IN ({marks}) LIMIT 1',arguments).fetchone():
+                raise ValueError('Source retirement provenance is preserved')
+            if table(db,'owned_artifacts') and db.execute(f'SELECT 1 FROM owned_artifacts WHERE path IN ({marks}) LIMIT 1',member_paths).fetchone():
+                raise ValueError('App-owned output or recovery evidence is preserved')
+            job=db.execute('SELECT * FROM jobs WHERE root=?',(root,)).fetchone()
+            if job and job['state']=='scanning' or self.worker and self.worker.is_alive():raise ValueError('A library scan is active; source refresh waits')
+            rows=[db.execute('SELECT * FROM files WHERE root=? AND path=?',(root,path)).fetchone() for path in member_paths]
+            if any(row is None for row in rows):raise ValueError('Observed source is missing from the inventory')
+            return dict(group),[dict(row) for row in rows],dict(job) if job else None,dict(context) if context else None
+        root=self.roots[label]
+        try:
+            with self.group_lock,contextlib.ExitStack() as guards:
+                check()
+                with connect(self.database) as db:initial=snapshot(db)
+                group,rows,job,context=initial;old_fingerprint=group['fingerprint'];paths=[row['path'] for row in rows]
+                root_path=ordinary(root);updates=[];receipts=[];hashed_bytes=0
+                for row in rows:
+                    check();path=ordinary(row['path'])
+                    if not inside(path,root_path) or row['kind']!='audiobook' or inside(path,self.roots.get('Podcasts',str(root_path/'Podcasts'))):
+                        raise BoundaryError('Source refresh must stay within exact observed audiobook members')
+                    guards.enter_context(DirectoryBoundary(root_path,path.parent))
+                    held=guards.enter_context(VerifiedFile(path));facts=held.facts();before=fresh_stat(path)
+                    if facts['links']!=1:raise BoundaryError('Source refresh refuses a linked or ambiguous file')
+                    changed=force or row['size']!=facts['size'] or row['modified']!=facts['modified'] or bool(row['error']) or bool(row['missing'])
+                    receipt={'path':str(path),'size':facts['size'],'modified':str(facts['modified']),
+                             'identity':{'dev':facts['dev'],'ino':facts['ino']},'sha256':None}
+                    if changed:
+                        if hashed_bytes+facts['size']>max_bytes:return result('held','Changed source bytes exceed the bounded refresh budget','budget_exceeded')
+                        metadata=self.reader(str(path),row['kind'],bounded);check()
+                        if not isinstance(metadata,dict):raise ValueError('Source metadata reader returned invalid evidence')
+                        digest=hashlib.sha256()
+                        for block in held.chunks():check();digest.update(block);hashed_bytes+=len(block)
+                        _same_source(before,fresh_stat(path))
+                        if len(json.dumps(metadata,ensure_ascii=False).encode('utf-8'))>4*1024*1024:
+                            return result('held','Source metadata exceeds the bounded refresh budget','budget_exceeded')
+                        receipt['sha256']=digest.hexdigest()
+                        metadata=dict(metadata)
+                        metadata['source_refresh']={'sha256':receipt['sha256'],'size':facts['size'],'modified':str(facts['modified']),
+                                                    'identity':receipt['identity']}
+                        updates.append((row,metadata,facts))
+                    receipts.append(receipt)
+                check()
+                with connect(self.database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    if snapshot(db)!=initial:return result('held','Catalog or protected state changed during source refresh','catalog_changed')
+                    for row,metadata,facts in updates:
+                        db.execute("UPDATE files SET size=?,modified=?,metadata=?,error='',missing=0 WHERE root=? AND path=?",
+                            (facts['size'],facts['modified'],json.dumps(metadata,ensure_ascii=False),root,row['path']))
+                return result('refreshed' if updates else 'unchanged',receipts=receipts,changed=[row['path'] for row,_,_ in updates])
+        except ScanStopped:
+            return result('held','Source refresh cancelled' if stop is not None and stop.is_set() else 'Source refresh reached its time budget','cancelled' if stop is not None and stop.is_set() else 'budget_exceeded')
+        except (OSError,BoundaryError) as issue:return result('held',str(issue),'source_unavailable')
+        except (ValueError,KeyError,TypeError,sqlite3.Error) as issue:return result('held',str(issue),'protected_or_changed')
+
     def _classify(self,label,root,path):
         ext = Path(path).suffix.lower()
         kind = 'podcast' if label == 'Podcasts' and ext in AUDIO else 'audiobook' if label == 'Audiobooks' and ext in AUDIO else 'ebook' if label == 'Ebooks' and ext in EBOOK else 'companion'

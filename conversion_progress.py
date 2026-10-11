@@ -11,10 +11,10 @@ def approved_scope(row,ctx,key_for):
     included=ctx.get('included',[]);order=ctx.get('track_order',[])
     if not included or len(set(included))!=len(included) or set(order)!=set(keys) or len(order)!=len(keys) or not set(included)<=set(keys):return False
     selected=[m for m,k in zip(members,keys) if k in included]
-    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b':return False
+    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not ctx.get('metadata_facts'):return False
     if any(m.get('error') or m.get('missing') for m in members):return False
     albums={str({k.casefold():v for k,v in m.get('metadata',{}).get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
-    if len(members)>1 and (len(albums)!=1 or not next(iter(albums),'').strip()):return False
+    if len(members)>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not ctx.get('metadata_facts'):return False
     for m in selected:
         saved=ctx.get('source_hashes',{}).get(key_for(m['path']),{})
         value=saved.get('sha256','')
@@ -36,7 +36,7 @@ def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,mod
         if any(str(saved.get(k))!=str(s.get(k)) for k in ('sha256','size','modified')):return False
     policy=manifest.get('cleanup_policy',{})
     if (policy.get('enabled') or source) and (not source or source.get('state')!='completed'):return False
-    if (manifest.get('profile')==modern_profile or storage) and (not storage or storage.get('state')!='completed'):return False
+    if (manifest.get('profile') in ({modern_profile} if isinstance(modern_profile,str) else set(modern_profile)) or storage) and (not storage or storage.get('state')!='completed'):return False
     # Empty-folder housekeeping is separate from verified audiobook/file cleanup.
     return True
 

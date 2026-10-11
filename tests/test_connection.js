@@ -44,6 +44,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const poll=()=>vm.runInContext('poll()',context);
 (async()=>{
   await flush();
+  vm.runInContext("view='files';viewControls()",context);
   const notice=node('connection-notice');
   assert.equal(notice.hidden,false);
   assert.equal(notice.textContent,'Connection interrupted; automatic processing may still be running. Retrying…');

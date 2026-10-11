@@ -78,8 +78,10 @@ class CleanupJobs:
         root=ordinary(manifest['root']);paths=[]
         for source in manifest['sources']:
             path=ordinary(source['path'])
-            if not path.is_relative_to(root) or path.suffix.lower()!='.mp3' or 'podcasts' in [p.casefold() for p in path.relative_to(root).parts]:
-                raise ValueError('Only selected MP3 audiobook originals are eligible')
+            from encoding_policy import AUTOMATIC_PROFILE
+            formats={'.mp3','.m4a','.m4b','.aac','.flac','.ogg','.opus','.wav','.wma'} if manifest.get('profile')==AUTOMATIC_PROFILE else {'.mp3'}
+            if not path.is_relative_to(root) or path.suffix.lower() not in formats or 'podcasts' in [p.casefold() for p in path.relative_to(root).parts]:
+                raise ValueError('Only selected verified audiobook originals are eligible')
             if str(path).casefold() in paths:raise ValueError('Duplicate selected source path')
             paths.append(str(path).casefold())
         id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
@@ -102,7 +104,8 @@ class CleanupJobs:
             raise ValueError('Exact selected-source decoded-audio validation is required')
         if abs(float(v.get('decoded_duration',-1))-sum(frames)/rate)>float(v.get('duration_tolerance',0)):
             raise ValueError('Decoded output does not match the selected source audio')
-        if [c.get('title') for c in v.get('chapters',[])]!=manifest.get('chapters',[]):raise ValueError('Validated chapter choice does not match this completed book')
+        expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
+        if [c.get('title') for c in v.get('chapters',[])]!=expected_chapters:raise ValueError('Validated chapter choice does not match this completed book')
     def status(self,job_id=None):
         rows=self._rows('SELECT * FROM source_cleanup'+(' WHERE job_id=?' if job_id else '')+' ORDER BY created', (job_id,) if job_id else ())
         result=[]
@@ -197,7 +200,7 @@ class CleanupJobs:
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
             for index,source in enumerate(manifest['sources']):
-                path=ordinary(source['path']);backup=recovery/(f'{index:05d}.mp3')
+                path=ordinary(source['path']);backup=recovery/(f'{index:05d}'+path.suffix.lower())
                 prior=self._rows('SELECT * FROM cleanup_members WHERE cleanup_id=? AND path=?',(id,str(path)))
                 member=prior[0] if prior else None
                 if member and member['backup']!=str(backup):raise BoundaryError('Recovery correspondence changed')

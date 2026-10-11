@@ -29,7 +29,11 @@ APP_LIMIT_REASON='Books public research hourly host request bound reached'
 LEGACY_APP_LIMIT_REASON='Books public research daily request bound reached'
 SOURCE_PAUSE_REASON='Public source requested a pause; no bypass attempted'
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
-HOSTS=PRIMARY_HOSTS|{'html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
+RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
+CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS
+HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
+
+RESEARCH_VERSION='standing-17-v1'
 
 class ResearchWait(Exception):
     def __init__(self,source,reason,retry_at,kind='source_unavailable',scope=None):
@@ -45,6 +49,7 @@ def allowed_url(url):
         p=urllib.parse.urlsplit(url)
         if p.scheme!='https' or p.hostname not in HOSTS or p.username or p.password or p.port not in (None,443) or p.fragment:raise ValueError()
     except ValueError:raise ValueError('Unsupported public evidence URL') from None
+    if p.hostname=='t.me' and not p.path.startswith('/s/'):raise ValueError('Only public creator post pages are admitted')
     return url
 
 DNS_CODE="import json,socket,sys; print(json.dumps(socket.getaddrinfo(sys.argv[1],443,type=socket.SOCK_STREAM)))"
@@ -325,7 +330,7 @@ class PublicClient:
                 value=link.get('url') if isinstance(link,dict) else None
                 try:allowed_url(value)
                 except ValueError:continue
-                if urllib.parse.urlsplit(value).hostname in PRIMARY_HOSTS and value not in leads:leads.append(value)
+                if urllib.parse.urlsplit(value).hostname in CREDIT_HOSTS and value not in leads:leads.append(value)
         return {'sources':sources,'leads':leads[:3]}
     def discover(self,query,stop,budget):
         if not isinstance(query,str) or not query.strip() or len(query)>500:raise ValueError('Invalid research query')
@@ -336,11 +341,119 @@ class PublicClient:
             if redirect:link=redirect[0]
             try:allowed_url(link)
             except ValueError:continue
-            if urllib.parse.urlsplit(link).hostname in PRIMARY_HOSTS and link not in result:result.append(link)
+            if urllib.parse.urlsplit(link).hostname in CREDIT_HOSTS and link not in result:result.append(link)
         return result[:3]
 
 class PublicResearch:
     def __init__(self,client,leads=None):self.client=client;self.leads=source_leads() if leads is None else leads
+    def _independent_catalog(self,candidates,stop,budget,waits,progress,result):
+        """Try independent work entities even when FantLab has exhausted its own budget."""
+        from public_work_identity import ids,names,wikidata_work,openlibrary_matches,EvidenceConflict
+        title,author=candidates[0] if candidates else ('','')
+        if not title or not author:return None
+        evidence=[];matches=[]
+        def fetched(url):
+            value=self.client.json(url,stop,budget);record=self.client.receipt(url);evidence.append(record);result['sources'].append(record|{'kind':'catalog_work','verified_identity':False});return value
+        def entities(ids):
+            if not ids or len(ids)>20 or any(not re.fullmatch(r'Q[1-9][0-9]{0,11}',id) for id in ids):raise ValueError('Invalid work entities')
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(ids),'props':'labels|aliases|claims','languages':'en|ru|ja','format':'json'})
+            value=fetched(url)
+            records=value.get('entities') if isinstance(value,dict) else None
+            if not isinstance(records,dict):raise ValueError('Malformed Wikidata work evidence')
+            found={}
+            for id in ids:
+                entity=records.get(id,{})
+                if not isinstance(entity,dict) or entity.get('id')!=id or any(not isinstance(entity.get(k,{}),dict) for k in ('labels','aliases','claims')):continue
+                found[id]=entity
+            return found
+        progress('Wikidata','Checking independent work and original language')
+        try:
+            language='ru' if re.search('[А-Яа-яЁё]',title) else 'en'
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':title,'language':language,'uselang':language,'type':'item','limit':5,'format':'json'})
+            data=fetched(url);search=data.get('search') if isinstance(data,dict) else None
+            if not isinstance(search,list):raise ValueError('Malformed Wikidata search evidence')
+            ids_found=list(dict.fromkeys(r['id'] for r in search[:5] if isinstance(r,dict) and re.fullmatch(r'Q[1-9][0-9]{0,11}',str(r.get('id','')))))
+            works=entities(ids_found) if ids_found else {}
+            exact=[work for work in works.values() if norm(title) in {norm(v) for v in names(work)}]
+            links=list(dict.fromkeys(id for work in exact for property in ('P50','P407','P31','P179') for id in ids(work,property)))
+            related=entities(links) if links else {}
+            for work in exact:
+                match=wikidata_work(work,related,title,author,norm,_credit_matches)
+                if match:matches.append(match)
+        except ResearchWait as wait:waits.append(wait)
+        except EvidenceConflict as error:result['reasons'].append(str(error));return None
+        except (ValueError,TypeError):pass
+        if len(matches)>1:
+            result['reasons'].append('Independent catalogs disagree on the work identity');return None
+        selected=matches[0] if matches else None
+        # Open Library edition languages are deliberately not used as original-work language.
+        progress('Open Library','Checking independent work and author records')
+        try:
+            titles=selected['work_name_alts'] if selected else [title]
+            authors=selected['author_aliases'] if selected else [author]
+            query=selected['work_name_orig'] if selected else title
+            query_author=selected['authors'][0]['name_orig'] if selected else author
+            url='https://openlibrary.org/search.json?'+urllib.parse.urlencode({'title':query,'author':query_author,'limit':5,'fields':'key,title,author_name,author_key,cover_i'})
+            records=openlibrary_matches(fetched(url),titles,authors,norm,_credit_matches)
+            if len(records)>1:
+                result['reasons'].append('Independent catalog work identity is ambiguous');return None
+            if records:
+                record=records[0];work=fetched('https://openlibrary.org'+record['key']+'.json')
+                if not isinstance(work,dict) or work.get('key')!=record['key'] or norm(work.get('title')) not in {norm(v) for v in titles}:raise EvidenceConflict('Open Library work identity changed')
+                credits=work.get('authors',[])
+                if not isinstance(credits,list) or len(credits)!=1 or not isinstance(credits[0],dict) or credits[0].get('role','author') not in ('author',None):raise EvidenceConflict('Open Library author relationship is ambiguous')
+                key=credits[0].get('author',{}).get('key') if isinstance(credits[0],dict) and isinstance(credits[0].get('author'),dict) else None
+                if not isinstance(key,str) or not re.fullmatch('/authors/OL[1-9][0-9]{0,11}A',key):raise ValueError('Open Library author relationship unverified')
+                person=fetched('https://openlibrary.org'+key+'.json')
+                if not isinstance(person,dict) or person.get('key')!=key or not any(_credit_matches(person.get('name',''),name) for name in authors):raise EvidenceConflict('Independent catalog author contradiction')
+                if not selected:
+                    selected={'provider':'openlibrary','work_id':record['key'],'work_name':work['title'],'work_name_orig':work['title'],'work_name_alts':[work['title']],
+                        'lang_code':'','image':'','work_type_name':'book','authors':[{'type':'autor','name':person['name'],'name_orig':person['name']}],
+                        'parents':{'cycles':None,'digest':{}},'work_root_saga':[],'translations':[],
+                        'source_url':'https://openlibrary.org'+record['key'],'standalone_confirmed':False}
+                cover=record.get('cover_i')
+                if type(cover) is int and 0<cover<10**12:selected['image']='https://covers.openlibrary.org/b/id/'+str(cover)+'-L.jpg'
+        except ResearchWait as wait:waits.append(wait)
+        except EvidenceConflict as error:result['reasons'].append(str(error));return None
+        except (ValueError,TypeError):pass
+        return selected
+
+    def _collection_lookup(self,row,data,source_url,stop,budget,result):
+        """Bounded fetched table adapter: every constituent and local source must agree."""
+        from collection_identity import Contents,parse_contents,bind_collection
+        from standing_metadata import build_policy
+        title=text(data.get('work_name') or data.get('work_name_orig'))
+        work_url='https://fantlab.ru/work'+str(data['work_id'])
+        raw=self.client.read(work_url,stop,budget);links=Contents();links.feed(raw.decode('utf8','replace'))
+        pages=[work_url]+list(dict.fromkeys('https://fantlab.ru'+a['href'] if a['href'].startswith('/') else a['href'] for a in links.links if re.fullmatch(r'(?:https://fantlab.ru)?/edition[1-9][0-9]{0,9}',a['href'])))[:2]
+        errors=[]
+        for url in pages:
+            raw=self.client.read(url,stop,budget)
+            try:records,_=parse_contents(raw,title)
+            except ValueError as error:errors.append(str(error));continue
+            works={}
+            for record in records:
+                if stop.is_set():raise InterruptedError()
+                endpoint='https://api.fantlab.ru/work/'+str(record['work_id'])+'/extended'
+                value=self.client.json(endpoint,stop,budget)
+                if not isinstance(value,dict):raise ValueError('Collection component evidence malformed')
+                # Keep only the fields consumed by binding; full response remains deduplicated cache evidence.
+                works[record['work_id']]={k:value.get(k) for k in ('work_id','work_name','work_name_orig','work_name_alts','authors','lang_code')}
+                result['sources'].append(self.client.receipt(endpoint)|{'kind':'component_work','verified_identity':True,'work_id':'fantlab:'+str(record['work_id'])})
+            try:collection,authors=bind_collection(row,title,records,works)
+            except ValueError as error:errors.append(str(error));continue
+            work={'id':'fantlab:'+str(data['work_id']),'titles':[title],'original_title':title,'author_aliases':authors,'original_language':'','work_type':'fan_assembly','policy_version':'standing-17-v1',
+                'collection':collection,'collection_records':records,'collection_work_facts':works,'cover_url':''}
+            review,facts,reasons=build_policy(row,work,title,authors,collection=collection)
+            facts['work_ids']=[c['work_id'] for c in collection['components']]
+            result.update(work=work,review=review,metadata_facts=facts,reasons=reasons)
+            result['sources'].append(self.client.receipt(url)|{'kind':'collection_manifest','verified_identity':True,'collection_title':title,'component_count':len(records)})
+            for field,value in {'title':title,'authors':'; '.join(authors)}.items():
+                result['evidence'].append({'field':field,'cited_value':value,'source_url':url,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger positive component identity','basis':'Fetched self-made/network collection contents, independently fetched constituent author/work relations and exact local track title/order/source binding. No official Russian publication asserted.'})
+            return result
+        result['reasons']=list(dict.fromkeys(errors or ['Collection components and source order need positive evidence']))
+        return result
+
     def lookup(self,row,root,stop=None,progress=lambda *_:None):
         stop=stop or threading.Event();budget={'remaining':12};all_clues=[c for m in row['members'] for c in clues(m,root)]
         candidates=[]
@@ -355,8 +468,11 @@ class PublicResearch:
                 if str(folder)==str(__import__('pathlib').Path(root)):continue
                 parsed=filename_identity(folder.name)
                 if parsed.get('author') and (parsed['title'],parsed['author']) not in candidates:candidates.append((parsed['title'],parsed['author']))
-        result={'matcher_version':VERSION,'local_clues':all_clues,'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
+        result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':all_clues,'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         if len(candidates)>3:return result|{'reasons':['Mixed recordings in this group']}
+        attempt=row.get('_research_attempt',0)
+        if type(attempt) is not int or not 0<=attempt<=100000:raise ValueError('Invalid research history')
+        if candidates and attempt:candidates=candidates[attempt%len(candidates):]+candidates[:attempt%len(candidates)]
         works={};waits=[]
         strong_authors={norm(c['value']) for c in all_clues if c['field']=='author' and c['kind'] in ('filename','embedded')}
         for title,author in candidates[:3]:
@@ -375,7 +491,6 @@ class PublicResearch:
                     aliases=[record.get('name'),record.get('rusname'),record.get('altname')]
                     names=[record.get('all_autor_name'),record.get('all_autor_rusname')]
                     if norm(title) not in {norm(a) for a in aliases if a}:continue
-                    if author and norm(author) in strong_authors and not any(_credit_matches(author,n) for n in names if n):continue
                     id=record['work_id']
                     if not 0<id<10**10:continue
                     work_url='https://api.fantlab.ru/work/'+str(id)+'/extended'
@@ -383,6 +498,9 @@ class PublicResearch:
                     if isinstance(work,dict) and work.get('work_id')==id:works[id]=work
             except ResearchWait as wait:waits.append(wait)
             except (ValueError,TypeError,json.JSONDecodeError):pass
+        if not works:
+            alternate=self._independent_catalog(candidates,stop,budget,waits,progress,result)
+            if alternate:works[alternate['provider']+':'+str(alternate['work_id'])]=alternate
         if len(works)!=1:
             # Still fetch primary pages even if the structured catalog is unavailable.
             for title,author in candidates[:1]:
@@ -403,19 +521,25 @@ class PublicResearch:
                         result['sources'].append(_page_record(url,raw,pair))
                 except ResearchWait as wait:waits.append(wait)
             reason='Sources disagree on the title or author' if len(works)>1 else 'Book identity uncertain'
-            return result|{'reasons':[reason],'wait':_wait(waits)}
-        data=next(iter(works.values()));id=data['work_id'];source_url='https://fantlab.ru/work'+str(id)
+            return result|{'reasons':list(dict.fromkeys(result['reasons']+[reason])),'wait':_wait(waits)}
+        data=next(iter(works.values()));id=data['work_id'];provider=data.get('provider','fantlab');source_url=data.get('source_url') or 'https://fantlab.ru/work'+str(id)
         if not isinstance(data.get('authors'),list) or not isinstance(data.get('work_name_alts',[]),list) or not isinstance(data.get('parents',{}),dict):return result|{'reasons':['Book identity uncertain — malformed public evidence']}
+        if any(marker in text(data.get('work_type_name')).casefold() for marker in ('antholog','collection','сборник')):
+            try:return self._collection_lookup(row,data,source_url,stop,budget,result)
+            except ResearchWait as wait:
+                return result|{'reasons':['Collection component source unavailable'],'wait':_wait(waits+[wait])}
+            except (ValueError,TypeError) as error:
+                return result|{'reasons':[str(error)[:300] or 'Collection component evidence uncertain'],'wait':_wait(waits)}
         authors=[a for a in data.get('authors',[]) if isinstance(a,dict) and a.get('type')=='autor']
         titles=[data.get('work_name'),data.get('work_name_orig')]+data.get('work_name_alts',[])
         names=[a.get('name') for a in authors]+[a.get('name_orig') for a in authors]
         latin_names=[_latin_credit(a.get('name_orig')) for a in authors]
         names=author_variants(names+latin_names)
-        work={'id':'fantlab:'+str(id),'titles':[text(v) for v in titles if v],'author_aliases':[text(v) for v in names if v],
+        work={'id':provider+':'+str(id),'titles':[text(v) for v in titles if v],'author_aliases':[text(v) for v in names if v],
               'cover_url':text(data.get('image')),'original_language':{'jp':'ja'}.get(text(data.get('lang_code')),text(data.get('lang_code'))),'work_type':text(data.get('work_type_name')),
               'contained_story':bool(data.get('parents',{}).get('digest')),'recording_completeness':'unknown'}
         result['work']=work
-        result['sources'].append(self.client.receipt('https://api.fantlab.ru/work/'+str(id)+'/extended')|{'url':source_url,'api_url':'https://api.fantlab.ru/work/'+str(id)+'/extended','kind':'catalog_work','work_id':work['id']})
+        if provider=='fantlab':result['sources'].append(self.client.receipt('https://api.fantlab.ru/work/'+str(id)+'/extended')|{'url':source_url,'api_url':'https://api.fantlab.ru/work/'+str(id)+'/extended','kind':'catalog_work','work_id':work['id']})
         primary=[]
         for title,author in candidates[:1]:
             progress('Public publisher/journal pages','Fetching independent author/work credits')
@@ -425,10 +549,10 @@ class PublicResearch:
                     if lead.get('work_id')==work['id']:
                         for url in lead.get('urls',[]):
                             allowed_url(url)
-                            if urllib.parse.urlsplit(url).hostname in PRIMARY_HOSTS and url not in leads:leads.append(url)
+                            if urllib.parse.urlsplit(url).hostname in CREDIT_HOSTS and url not in leads:leads.append(url)
                 catalog_author=(authors[0].get('name') if re.search('[А-Яа-яЁё]',title) else _latin_credit(authors[0].get('name_orig'))) if len(authors)==1 else author
                 try:
-                    for url in self.client.discover('"'+title+'" '+(catalog_author or author),stop,budget):
+                    for url in self.client.discover(('"'+title+'" '+(catalog_author or author)) if attempt%3==0 else ('"'+title+'" '+(catalog_author or author)+' translation Russian name') if attempt%3==1 else ('"'+title+'" '+(catalog_author or author)+' audiobook translation credits'),stop,budget):
                         if url not in leads:leads.append(url)
                 except ResearchWait as wait:waits.append(wait)
                 # Wikipedia pages/cross-language labels remain discovery only; fetch referenced primary pages.
@@ -443,54 +567,96 @@ class PublicResearch:
                     except (ValueError,TypeError):pass
                 for url in leads[:4]:
                     raw=self.client.read(url,stop,budget);page=parse_page(raw);pair=credited_pair(page,work['titles'],work['author_aliases'])
+                    if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS:
+                        from standing_metadata import russian_source_title
+                        alias=russian_source_title(row)
+                        bridge=recording_alias(page,alias,work) if alias else None
+                        if bridge:
+                            work['titles'].append(alias);pair=bridge
+                            work['recording_alias']={'title':alias,'source_url':url,'basis':bridge['excerpt']}
+
                     result['sources'].append(_page_record(url,raw,pair))
                     if pair:primary.append(pair|{'url':url})
             except ResearchWait as wait:waits.append(wait)
-        reasons=[]
+        reasons=list(result['reasons'])
         if not primary:reasons.append('Author and work not independently verified')
+        primary_fact_sources={}
+        if provider!='fantlab':
+            from public_work_identity import primary_fields
+            details=[(pair,primary_fields(pair,phrase)) for pair in primary]
+            languages={facts['language'] for _,facts in details if facts['language']}
+            if len(languages)>1 or languages and work['original_language'] and work['original_language'] not in languages:
+                reasons.append('Original work language evidence conflicts')
+            elif not work['original_language'] and len(languages)==1:
+                work['original_language']=next(iter(languages));primary_fact_sources['original_language']=next(pair['url'] for pair,facts in details if facts['language'])
+            standalone=[pair for pair,facts in details if facts['standalone']]
+            if standalone and data.get('known_series'):
+                reasons.append('Series and standalone evidence conflicts')
+            elif standalone and data.get('parents',{}).get('cycles') is None:
+                data['parents']['cycles']=[];primary_fact_sources['standalone']=standalone[0]['url']
         language=work['original_language']
-        if not re.fullmatch(r'[a-z]{2,3}',language):reasons.append('Original work language unverified')
-        if len(authors)!=1:reasons.append('Multiple-author routing needs stronger evidence')
-        # Collection membership is not a fiction cycle. Explicit nonempty cycles need position evidence.
-        parents=data.get('parents');cycles=parents.get('cycles') if isinstance(parents,dict) else None
-        if cycles is None or cycles or any(isinstance(r,dict) and r.get('work_id') for r in data.get('work_root_saga',[])):reasons.append('Series position uncertain')
+        if language and not re.fullmatch(r'[a-z]{2,3}',language):reasons.append('Original work language evidence invalid')
+        # A known conflict is held; absent language/series facts are honest unknowns.
         canonical_title=text(data.get('work_name') if language=='ru' else data.get('work_name_orig'))
-        canonical_author=text(authors[0].get('name') if language=='ru' else _latin_credit(authors[0].get('name_orig'))) if len(authors)==1 else ''
-        # For non-English originals the native title is not guessed into English. Fetch an explicit published translation.
+        author_names=[text(a.get('name') if language=='ru' else _latin_credit(a.get('name_orig')) or a.get('name_orig') or a.get('name')) for a in authors]
+        if not author_names or any(not n for n in author_names):reasons.append('Author identity unverified')
+        canonical_author='; '.join(author_names)
+        english_verified=False;english_title_source=None
         if language not in ('ru','en'):
             english=[]
             for tr in data.get('translations',[]):
-                if tr.get('lang_code')=='en':
+                if isinstance(tr,dict) and tr.get('lang_code')=='en':
                     for translation in tr.get('translations',[]):
-                        english.extend(text(t.get('title')) for t in translation.get('titles',[]) if t.get('title'))
+                        english.extend(text(t.get('title')) for t in translation.get('titles',[]) if isinstance(t,dict) and t.get('title'))
             english=list(dict.fromkeys(english))
             if len(english)==1:
                 progress('English publisher pages','Checking published English title')
                 try:
                     for url in self.client.discover('"'+english[0]+'" '+canonical_author,stop,budget):
-                        raw=self.client.read(url,stop,budget);pair=credited_pair(parse_page(raw),english,[canonical_author])
+                        raw=self.client.read(url,stop,budget);pair=credited_pair(parse_page(raw),english,work['author_aliases'])
                         result['sources'].append(_page_record(url,raw,pair))
-                        if pair:canonical_title=english[0];primary.append(pair|{'url':url})
+                        if pair and urllib.parse.urlsplit(url).hostname in PRIMARY_HOSTS:
+                            english_verified=True;canonical_title=english[0];primary.append(pair|{'url':url})
+                            english_title_source=url;primary_fact_sources['authors']=url
                 except ResearchWait as wait:waits.append(wait)
-                if canonical_title!=english[0]:reasons.append('Published English title unverified')
-            else:reasons.append('Published English title unverified')
-        if not canonical_title or not canonical_author or language!='ru' and (re.search('[А-Яа-яЁё]',canonical_title+canonical_author) or re.search('[\u3040-\u30ff\u3400-\u9fff]',canonical_title+canonical_author)):reasons.append('Canonical title or author unverified')
+        work['original_title']=text(data.get('work_name_orig') or data.get('work_name'))
+        work['full_author_verified']=bool(primary and author_names)
+        work['source_surnames']=[name.split()[-1] for name in author_names if len(name.split())==2]
+        work['policy_version']='standing-17-v1'
+        if not canonical_title or not canonical_author:reasons.append('Canonical title or author unverified')
+        if any(marker in work['work_type'].casefold() for marker in ('antholog','collection')):
+            reasons.append('Collection components and source order need positive evidence')
+        from standing_metadata import build_policy
+        series=data.get('verified_series') or {}
+        work['verified_series']=series
+        review,facts,policy_reasons=build_policy(row,work,canonical_title,author_names,english_verified=english_verified,series=series.get('name',''),number=series.get('number',''))
+        reasons.extend(policy_reasons)
+        # Source-derived names are not asserted to be published translations.
+        # Only fetched catalog aliases or an explicit translation bridge enter identity aliases.
         reasons.extend(source_gate(row,work))
-        for c in all_clues:
-            if c['kind']=='embedded' and c['field']=='series' and c['value']:reasons.append('Series position uncertain')
-        if any(marker in work['work_type'].casefold() for marker in ('antholog','collection')):reasons.append('Anthology author credits need stronger evidence')
-        review={'title':canonical_title,'canonical_author':canonical_author,'author':_folder_author(canonical_author) if language not in ('ja','zh','ko') else '',
-                'original_language':'Russian' if language=='ru' else 'Other','series':'','number':'','genre':'','topic':'','narrator':'','multi_author':False,'anthology':False}
-        narrators={c['value'] for c in all_clues if c['kind']=='embedded' and c['field'] in ('narrator','reader')}
-        if len(narrators)==1:review['narrator']=next(iter(narrators))
-        if len(narrators)>1:reasons.append('Mixed recordings in this group')
-        if not review['author']:reasons.append('Author folder identity uncertain')
-        result['review']=review
-        basis='Fetched catalog work/translation fields corroborated by adjacent publisher/journal author and title credit. Edition/recording dates are not original-work dates. Observed recording completeness remains unknown.'
-        values={'title':canonical_title,'authors':canonical_author,'original_language':language,'standalone':True}
-        for field,value in values.items():result['evidence'].append({'field':field,'cited_value':value,'source_url':source_url,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':basis})
+        result['review']=review;result['metadata_facts']=facts
+        basis='Fetched original-work/author relationship corroborated by associated author/title credit. Recording aliases and source-derived output labels do not assert an official Russian edition.'
+        values={'title':work['original_title'],'authors':canonical_author}
+        if language:values['original_language']=language
+        if review['series']:
+            values.update(series=review['series'],number=review['number'])
+            primary_fact_sources.update(series=series['source_url'],number=series['source_url'])
+        for field,value in values.items():
+            result['evidence'].append({'field':field,'cited_value':value,'source_url':primary_fact_sources.get(field,source_url),'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':basis})
+        if english_verified:
+            result['evidence'].append({'field':'title','cited_value':canonical_title,'source_url':english_title_source,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':'Published English title and author matched in the fetched associated publisher credit; separate from the original-work title.'})
         result['reasons']=list(dict.fromkeys(reasons));result['wait']=_wait(waits)
         return result
+
+def recording_alias(page,source_title,work):
+    """A fetched unofficial translation credit can bridge a source alias, not invent an edition."""
+    pair=credited_pair(page,[source_title],work.get('author_aliases',[]))
+    if not pair:return None
+    block=pair['excerpt'].casefold().replace('ё','е')
+    for original in work.get('titles',[]):
+        if norm(original)==norm(source_title):continue
+        if re.search(r'(?:original title|original work|название оригинала|оригинальное название|перевод (?:рассказа|романа|произведения))\s*[:–—-]?\s*[«"“]?'+phrase(original),block):return pair
+    return None
 
 def _folder_author(value):
     parts=value.split()
@@ -501,7 +667,7 @@ def _credit_matches(a,b):
     at=[norm(t) for t in re.split(r'[\s,;]+',str(a)) if norm(t)];bt=[norm(t) for t in re.split(r'[\s,;]+',str(b)) if norm(t)]
     return len(at)>=2 and all(len(t)>1 for t in at) and sorted(at)==sorted(bt)
 def _stamp():return dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
-def _page_record(url,raw,pair):return {'url':url,'kind':'publisher_or_journal','sha256':hashlib.sha256(raw).hexdigest(),'retrieved_utc':_stamp(),'credit':pair,'verified_identity':bool(pair)}
+def _page_record(url,raw,pair):return {'url':url,'kind':'recording_credit' if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS else 'publisher_or_journal','sha256':hashlib.sha256(raw).hexdigest(),'retrieved_utc':_stamp(),'credit':pair,'verified_identity':bool(pair)}
 def _wait(waits):
     if not waits:return None
     wait=min(waits,key=lambda w:w.retry_at)

@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from scanner import connect
-from public_research import PublicClient,PublicResearch,ResearchWait
+from public_research import PublicClient,PublicResearch,ResearchWait,RESEARCH_VERSION
 from source_identity import VERSION,source_gate
 
 
@@ -88,16 +88,35 @@ class AutomaticProcessing:
         fields['updated']=stamp()
         with connect(self.database) as db:db.execute('UPDATE automatic_runs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?',(*fields.values(),id))
     def _record(self,row,state,result=None,retry_at=None):
-        with connect(self.database) as db:db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(result or {},ensure_ascii=False),retry_at,stamp(),VERSION))
+        result=dict(result or {},research_version=RESEARCH_VERSION)
+        with connect(self.database) as db:
+            old=db.execute('SELECT revision,fingerprint,state,result FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
+            prior=json.loads(old['result']) if old else {}
+            attempt=prior.get('research_attempt',0)
+            history=prior.get('research_history',[])
+            if old and (old['revision']!=row['revision'] or old['fingerprint']!=row['fingerprint']):
+                history=history+[{'attempt':attempt,'at':stamp(),'state':old['state'],'revision':old['revision'],'fingerprint':old['fingerprint'],
+                    'reasons':prior.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in prior.get('sources',[])[:20]]}]
+            if old and old['fingerprint']==row['fingerprint'] and 'source_refresh' not in result and prior.get('source_refresh'):
+                result['source_refresh']=prior['source_refresh']
+            if state in ('Held','Waiting for source','Queued'):
+                attempt+=1
+                history=history+[{'attempt':attempt,'at':stamp(),'state':state,'reasons':result.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in result.get('sources',[])[:20]]}]
+            result['research_attempt']=attempt;result['research_history']=history[-20:]
+            db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(result,ensure_ascii=False),retry_at,stamp(),VERSION))
     def candidate(self,row):
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at']}
+        return {'state':r['state'],'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review')}
     def _refresh_wait(self,row,previous):
+        if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
         if not previous or previous['state']!='Waiting for source' or not previous.get('wait'):return previous
+        if previous.get('research_version')!=RESEARCH_VERSION:
+            # New independent hosts get one opportunity; the old host ledger stays intact.
+            return dict(previous,retry_at=None)
         revised=self.research.client.retry_wait(previous['wait'])
         if revised==previous['wait']:return previous
         with connect(self.database) as db:
@@ -176,6 +195,37 @@ class AutomaticProcessing:
     def _manual_draft(self,row):
         ctx=self.merge.reviews._context(row)
         return bool(row.get('review') and not (ctx.get('automatic_approval') or ctx.get('automatic_pending'))) or bool(ctx.get('manual_draft_active'))
+    def _refresh_observed_sources(self,row,previous):
+        """Only stale/unreadable, unprotected observed members are refreshed."""
+        stale={'Source files changed','Source embedded identity or order evidence changed','Source changed — review required','Source files unavailable or unreadable'}
+        needs=any(m.get('error') or m.get('missing') for m in row['members']) or bool(stale.intersection((previous or {}).get('reasons',[])))
+        if not needs:return None
+        adapter=getattr(self.inventory,'refresh_candidate_sources',None)
+        if adapter is None:return {'state':'held','reason':'Observed source inventory refresh is unavailable'}
+        receipt=adapter('Audiobooks',row['id'],row['revision'],stop=self.stop_event,force=True)
+        if self.stop_event.is_set():raise InterruptedError()
+        if receipt.get('state') not in ('held','unchanged','refreshed'):raise ValueError('Unsupported source refresh result')
+        if receipt['state']=='held':return receipt
+        old_paths=sorted(m['path'] for m in row['members'])
+        if receipt.get('old_revision')!=row['revision'] or receipt.get('old_fingerprint')!=row['fingerprint'] or sorted(receipt.get('observed_paths',[]))!=old_paths:
+            raise ValueError('Observed source refresh identity changed')
+        try:fresh=self.merge.reviews._row('Audiobooks',row['id'])
+        except ValueError:
+            # Refresh can expose proven independent groups. Consider only the exact
+            # refreshed observed paths; do not expand discovery or inherit approval.
+            with connect(self.database) as db:
+                marks=','.join('?' for _ in old_paths)
+                groups=db.execute(f"SELECT DISTINCT g.* FROM book_groups g,json_each(g.evidence,'$.members') m WHERE g.root=? AND g.superseded=0 AND json_extract(m.value,'$.path') IN ({marks})",(self.inventory.roots['Audiobooks'],*old_paths)).fetchall()
+            covered=[];replacements=[]
+            for group in groups:
+                members=json.loads(group['evidence'])['members'];paths=[m['path'] for m in members]
+                if group['approved'] or group['review'] or any(p not in old_paths for p in paths):return {'state':'held','reason':'Refreshed source membership requires separate protected evidence'}
+                covered.extend(paths);replacements.append(group['id'])
+            if sorted(covered)!=old_paths or len(set(covered))!=len(covered):return {'state':'held','reason':'Refreshed source membership is incomplete or overlapping'}
+            return receipt|{'replacement_ids':replacements}
+        if sorted(m['path'] for m in fresh['members'])!=old_paths:return {'state':'held','reason':'Refreshed source membership changed'}
+        return receipt|{'row':fresh}
+
     def _failure(self,id,error,phase,identity,row,research_failed):
         diagnostic=failure_diagnostic(error,id,phase,identity)
         reason='Automatic pass could not continue; saved source and job evidence preserved'
@@ -234,7 +284,7 @@ class AutomaticProcessing:
                         if self.merge.state()['state']=='Paused':raise InterruptedError()
                     checkpoint['pending']=list(dict.fromkeys(deferred));deferred.clear()
                     with connect(self.database) as db:
-                        times={r['id']:r['retry_at'] for r in db.execute("SELECT id,retry_at FROM automatic_candidates WHERE state='Waiting for source'")}
+                        times={r['id']:r['retry_at'] for r in db.execute("SELECT id,retry_at FROM automatic_candidates WHERE state IN ('Waiting for source','Held')")}
                     next_at=min(times.get(candidate) or self.clock() for candidate in checkpoint['pending'])
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint),reason='Waiting for metadata sources; saved research retries automatically.')
                     self.next_retry_at=next_at
@@ -250,20 +300,40 @@ class AutomaticProcessing:
                     checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                 job=self.merge.candidate_status(identity)
                 if job:
+                    if job.get('state')=='Output needs attention':
+                        decision=self.merge.retry_automatic_job(job['job_id'],self.clock())
+                        if decision.get('retryable'):
+                            self._record(row,'Held',{'reasons':['Saved audiobook I/O failure; prior attempt preserved'],'job_retry':decision},decision['retry_at']);deferred.append(identity)
+                    elif job.get('state')=='Audiobook created':self._record(row,'Queued',{'reasons':[]})
                     checkpoint['pending'].pop(0)
                     if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                     self._update(id,checkpoint=json.dumps(checkpoint));continue
                 previous=self._refresh_wait(row,self.candidate(row))
                 if previous and previous['state'] in ('Held','Waiting for source') and previous.get('retry_at') and previous['retry_at']>self.clock():
                     # Deferred source opportunities stay owned by this authorized worker.
-                    if previous['state']=='Waiting for source':deferred.append(identity)
+                    deferred.append(identity)
                     checkpoint['pending'].pop(0);continue
                 if self.manual_draft(row):
-                    self._record(row,'Held',{'reasons':['Manual draft retained']});checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                    self._record(row,'Held',{'reasons':['Manual draft retained']},self.clock()+300);deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                refreshed=self._refresh_observed_sources(row,previous)
+                if refreshed:
+                    compact={k:v for k,v in refreshed.items() if k not in ('row','replacement_ids')}
+                    compact['at_utc']=stamp()
+                    if refreshed['state']=='held':
+                        self._record(row,'Held',{'reasons':[refreshed.get('reason') or 'Observed sources remain unavailable'],'source_refresh':compact},self.clock()+900)
+                        deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                    if 'replacement_ids' in refreshed:
+                        self._record(row,'Held',{'reasons':['Refreshed observed sources split into independent candidates'],'source_refresh':compact},self.clock()+900)
+                        checkpoint['pending'].extend(candidate for candidate in refreshed['replacement_ids'] if candidate not in checkpoint['pending'])
+                        checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                    row=refreshed['row']
+                    self._record(row,'Pending',{'reasons':[],'source_refresh':compact})
+                    previous=self.candidate(row)
                 self._update(id,checkpoint=json.dumps(checkpoint))
                 self._record(row,'Researching');self._progress(row['title_clue'],'Public sources','Researching work identity')
                 try:
                     research_failed=True
+                    row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
                     result=self.research.lookup(row,self.inventory.roots['Audiobooks'],self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
                 except ValueError:
                     # Unsupported input or malformed public evidence holds only this candidate.
@@ -272,8 +342,8 @@ class AutomaticProcessing:
                 if self.stop_event.is_set():raise InterruptedError()
                 if result.get('reasons'):
                     wait=result.get('wait');state='Waiting for source' if wait else 'Held'
-                    self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+7*86400)
-                    if wait:deferred.append(identity)
+                    self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)))
+                    deferred.append(identity)
                 else:
                     try:
                         fresh,job_id=self.merge.approve_automatic(row,result,self.stop_event,self.research.client)
@@ -289,7 +359,7 @@ class AutomaticProcessing:
                         if self.stop_event.is_set():raise InterruptedError()
                         try:fresh=self.merge.reviews._row('Audiobooks',identity)
                         except ValueError:fresh=row
-                        result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+7*86400)
+                        result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
                 checkpoint['pending'].pop(0)
                 if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                 self._update(id,checkpoint=json.dumps(checkpoint))

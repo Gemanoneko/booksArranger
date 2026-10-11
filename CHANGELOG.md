@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.12.0] - 2026-10-12
+
+### Added
+
+- Independent public work/author evidence and approved standing metadata rules, including verified fan compilation contents, recording identity and source-bound duplicate review. Uncertain identity remains held.
+- Guarded existing-M4B arrangement and supported media normalization, with native source holds, validated publication, ordered chapter evidence and exact working-file cleanup.
+
+### Changed
+
+- Default Book candidates to Audiobook Ready, hide intermediate stage filters, and refresh filters immediately while preserving manual drafts and stale-response protection.
+- Continue eligible research across deferred sources with durable uncertainty backoff and guarded prepublication I/O retries. Manual Stop and restart remain Paused; confidence, source verification and 24-hour recovery retention remain enforced.
+- Publish this coherent source release separately from the pending canonical application. Publication alone does not update the running server or its dependent browser assets.
+
 ## [v0.11.3] - 2026-10-11
 
 ### Changed

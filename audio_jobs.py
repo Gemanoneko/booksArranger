@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import time
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -149,6 +150,27 @@ class AudioJobs:
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
             return frozen["job_id"]
 
+    def retry_failed(self,job_id,now=None):
+        """Retry only a classified pre-publication I/O failure on its exact frozen manifest."""
+        now=time.time() if now is None else now
+        with self._lock:
+            if self._closed:raise RuntimeError('Queue is closed')
+            row=next(iter(self._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
+            if not row or row['state']!='needs attention':return {'retryable':False,'reason':'No failed job'}
+            journal=json.loads(row['journal']);failure=journal.get('failure',{})
+            if row.get('output') or journal.get('publication_intent') or failure.get('retryable') is not True:
+                return {'retryable':False,'reason':'Published or unclassified failure retained for evidence'}
+            retry_at=float(failure['at'])+3600
+            if now<retry_at:return {'retryable':True,'retry_at':retry_at,'requeued':False}
+            if self._thread and self._thread.is_alive():return {'retryable':True,'retry_at':now+300,'requeued':False}
+            manifest=json.loads(row['manifest'])
+            if self.revision_guard(copy.deepcopy(manifest)) is not True:return {'retryable':False,'reason':'Frozen source/review changed; failed job preserved'}
+            with self._db() as db:
+                db.execute('CREATE TABLE IF NOT EXISTS audio_failure_history(job_id TEXT,attempt_id TEXT,record TEXT,at REAL,PRIMARY KEY(job_id,attempt_id))')
+                db.execute('INSERT OR IGNORE INTO audio_failure_history VALUES(?,?,?,?)',(job_id,row['attempt_id'],row['journal'],now))
+            self._update(job_id,state='pending',stage='queued',reason='Retrying verified pre-publication I/O failure; prior attempt retained')
+            return {'retryable':True,'retry_at':now+3600,'requeued':True}
+
     def resume(self):
         with self._lock:
             if self._closed:
@@ -252,7 +274,8 @@ class AudioJobs:
                 elif isinstance(exc, InterruptedError) and self._stop.is_set():
                     self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
                 else:
-                    self._update(job_id, state="needs attention", reason=str(exc) or type(exc).__name__)
+                    journal['failure']={'exception_class':type(exc).__name__,'at':time.time(),'retryable':isinstance(exc,(OSError,TimeoutError)) and not isinstance(exc,InterruptedError),'stage':row['stage']}
+                    self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
             if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
                 self.after_completed(job_id)
 

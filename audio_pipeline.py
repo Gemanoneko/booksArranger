@@ -1,9 +1,9 @@
 """Owned immutable-source M4B staging and strict validation; no source rewrites."""
 import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib
 from pathlib import Path
-from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob
+from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
 
-from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding
+from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding, AUTOMATIC_PROFILE, freeze_automatic_policy, choose_automatic_encoding
 from quicktime_chapters import normalize
 from metadata import audiobook_sort_title
 MAX_IMAGE=8*1024*1024
@@ -179,6 +179,8 @@ def ffmetadata_escape(value):
 def snapshot_manifest(manifest,stage,stop):
     sources=manifest['sources']
     if not sources:raise ValidationError('No reviewed source files are included')
+    if manifest.get('profile')==AUTOMATIC_PROFILE and any(Path(item['path']).suffix.lower()=='.m4b' for item in sources) and len(sources)!=1:
+        raise ValidationError('Existing M4B files must be arranged individually to preserve every source chapter plan')
     root=ordinary(manifest['root'])
     copies=[];durations=[];profiles=[];compatibility=None
     total_bytes=sum(item['size'] for item in sources)
@@ -188,7 +190,7 @@ def snapshot_manifest(manifest,stage,stop):
         source=ordinary(item['path'])
         try:source.relative_to(root)
         except ValueError:raise ValidationError('Source is outside the configured audiobook library')
-        if source.suffix.lower() not in {'.mp3','.m4a','.aac','.flac','.ogg','.opus','.wav','.wma'}:
+        if source.suffix.lower() not in {'.mp3','.m4a','.m4b','.aac','.flac','.ogg','.opus','.wav','.wma'}:
             raise ValidationError('This source format is not supported by the merge path')
         same_source(item,stop)
         alias=stage/(f'source{index:05}'+source.suffix.lower())
@@ -203,7 +205,7 @@ def snapshot_manifest(manifest,stage,stop):
                 raise ValidationError('Included files have incompatible recording/audio stream parameters')
             compatibility=profile
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
-            profiles.append((*profile,stream.get('bit_rate')))
+            profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
             duration=decoded_duration(alias,stage,stop,duration)
         durations.append(duration);copies.append(alias.name)
     cover=manifest['cover']
@@ -218,6 +220,8 @@ def snapshot_manifest(manifest,stage,stop):
     image_streams=[s for s in image.get('streams',[]) if s.get('codec_type')=='video']
     if len(image_streams)!=1 or image_streams[0].get('width',0)*image_streams[0].get('height',0)>16000000:
         raise ValidationError('Selected cover dimensions are invalid or too large')
+    if manifest.get('profile')==AUTOMATIC_PROFILE:
+        run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-protocol_whitelist','file','-f','image2','-i',str(cover_copy),'-map','0:v:0','-frames:v','1','-f','null','-'],stage,stop,30)
     return copies,durations,cover_copy,profiles
 
 def create_private(manifest,stage_root,stop,progress=lambda *_:None):
@@ -249,6 +253,9 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     if manifest.get('profile')==PROFILE:
                         if manifest.get('encoding_policy')!=freeze_policy(manifest['sources']):raise ValidationError('Frozen encoding policy changed')
                         encoding=choose_encoding(profiles)
+                    elif manifest.get('profile')==AUTOMATIC_PROFILE:
+                        if manifest.get('encoding_policy')!=freeze_automatic_policy(manifest['sources']):raise ValidationError('Frozen automatic encoding policy changed')
+                        encoding=choose_automatic_encoding(profiles,single_m4b=len(copies)==1 and Path(copies[0]).suffix.lower()=='.m4b')
                     elif manifest.get('profile')==LEGACY_PROFILE:
                         encoding={'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
                     else:raise ValidationError('Unsupported frozen encoding profile')
@@ -256,7 +263,136 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     validation['staging_artifacts']={'attempt_id':attempt,'files':generated}
                     return output,validation
 
+
+def normalize_sources(stage,copies,encoding,stop,durations):
+    # Normalize each fully decoded source before concatenation; concat cannot safely
+    # infer changing sample rates or channel counts from compressed packet headers.
+    required=math.ceil(sum(durations)*encoding['sample_rate']*encoding['channels']*8)+32*1024*1024
+    if shutil.disk_usage(stage).free<required:raise ValidationError('Insufficient staging space for complete lossless normalization')
+    result=[];receipts={}
+    for index,(name,duration) in enumerate(zip(copies,durations)):
+        output=stage/(f'normalized{index:05}.wav')
+        run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',
+          '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
+          '-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-c:a','pcm_f64le','-rf64','always','-f','wav',str(output)],stage,stop,max(300,duration*2))
+        decoded=decoded_duration(output,stage,stop,duration)
+        if abs(decoded-duration)>.1:raise ValidationError('Normalized source duration differs from its complete original')
+        with VerifiedFile(output) as held:
+            facts=held.facts();expected=held.sha256()
+            if facts['links']!=1:raise ValidationError('Normalized source snapshot has unexpected links')
+            receipts[output.name]={'facts':facts,'sha256':expected}
+            remember_generated(output,expected,facts['size'])
+        result.append(output.name)
+    return result,receipts
+
+
+def source_chapters(path,stage,stop,duration):
+    result=[];previous=0
+    for chapter in probe(path,stage,stop).get('chapters',[]):
+        try:
+            start=float(chapter['start_time']);end=float(chapter['end_time'])
+        except (ValueError,TypeError,KeyError):raise ValidationError('Existing M4B chapter boundaries cannot be verified')
+        if not all(math.isfinite(value) for value in (start,end)) or start<0 or end<=start or start<previous-.05 or end>duration+.25:
+            raise ValidationError('Existing M4B chapters overlap or exceed complete source audio')
+        title=chapter.get('tags',{}).get('title','')
+        if not isinstance(title,str):raise ValidationError('Existing M4B chapter title is invalid')
+        result.append({'start':round(start*1000),'end':round(end*1000),'title':title});previous=end
+    return result
+
+
+def audio_packet_hash(path,stage,stop,duration):
+    raw=run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-protocol_whitelist','file',
+      '-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0','-c:a','copy','-f','hash','-hash','sha256','pipe:1'],stage,stop,max(300,duration*2),max_output=4096)
+    value=raw.decode('ascii').strip()
+    if not value.startswith('SHA256=') or len(value)!=71 or any(c not in '0123456789abcdef' for c in value[7:]):
+        raise ValidationError('Compressed audio integrity proof is invalid')
+    return value[7:]
+
+
+class PacketTimingHash:
+    """Bounded streaming proof of relative packet timing, order and durations."""
+    def __init__(self):
+        self.pending=b'';self.hash=hashlib.sha256();self.count=0;self.origin=None
+    def feed(self,raw):
+        parts=(self.pending+raw).split(b'\n');self.pending=parts.pop()
+        if len(self.pending)>4096:raise ValidationError('M4B packet timing line exceeds its bound')
+        for line in parts:
+            if not line:continue
+            values=dict(part.split(b'=',1) for part in line.split(b'|') if b'=' in part)
+            try:pts=int(values[b'pts']);dts=int(values[b'dts']);duration=int(values[b'duration'])
+            except (KeyError,ValueError):raise ValidationError('M4B packet timing cannot be verified')
+            if duration<=0:raise ValidationError('M4B packet duration is invalid')
+            try:
+                skip=int(values.get(b'skip_samples',b'0'));discard=int(values.get(b'discard_padding',b'0'))
+            except ValueError:raise ValidationError('M4B decoder trim semantics cannot be verified')
+            if skip<0 or discard<0:raise ValidationError('M4B decoder trim semantics are invalid')
+            if self.origin is None:self.origin=pts
+            self.hash.update(f'{pts-self.origin},{dts-self.origin},{duration},{skip},{discard}\n'.encode('ascii'));self.count+=1
+    def result(self):
+        if self.pending or not self.count:raise ValidationError('M4B packet timing proof is incomplete')
+        return {'sha256':self.hash.hexdigest(),'packet_count':self.count}
+
+
+def copied_audio_evidence(path,stage,stop,duration):
+    executable=shutil.which('ffprobe')
+    raw=run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
+      '-select_streams','a:0','-show_streams','-show_format','-show_data_hash','sha256','-of','json',str(path)],stage,stop,30)
+    data=json.loads(raw);streams=data.get('streams',[])
+    if len(streams)!=1:raise ValidationError('M4B decoder configuration is ambiguous')
+    stream=streams[0]
+    keys=('codec_name','profile','sample_rate','channels','channel_layout','time_base','extradata_hash')
+    config={key:stream.get(key) for key in keys}
+    if not config['extradata_hash'] or not config['time_base']:raise ValidationError('M4B decoder configuration evidence is missing')
+    try:
+        rate=int(stream['sample_rate']);timebase=stream['time_base'].split('/')
+        if timebase!=['1',str(rate)]:raise ValueError('noncanonical timebase')
+        start=int(stream['start_pts']);end=start+int(stream['duration_ts'])
+        movie_start=round(float(data['format']['start_time'])*rate)
+        movie_end=round(float(data['format']['duration'])*rate)
+    except (ValueError,TypeError,KeyError,OverflowError):raise ValidationError('M4B presentation bounds cannot be verified')
+    if start!=0 or movie_start!=0 or end<=0 or abs(movie_end-end)>1:
+        raise ValidationError('M4B leading gaps or edit presentation require a verified preservation plan')
+    presentation={'audio_start_sample':start,'audio_end_sample':end,'movie_start_sample':movie_start,'movie_end_sample':movie_end}
+    timing=PacketTimingHash()
+    run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
+      '-select_streams','a:0','-show_packets','-show_entries','packet=pts,dts,duration:packet_side_data=side_data_type,skip_samples,discard_padding','-of','compact=p=0:nk=0',str(path)],
+      stage,stop,max(300,duration*2),telemetry=timing)
+    return {'decoder_configuration':config,'relative_packet_timing':timing.result(),'presentation':presentation}
+
+
+class NativePcmHash:
+    """Stream all decoded channels to a bounded digest, never a persistent PCM file."""
+    def __init__(self,channels):
+        self.frame_bytes=channels*8;self.bytes=0;self.hash=hashlib.sha256()
+    def feed(self,raw):self.bytes+=len(raw);self.hash.update(raw)
+    def result(self):
+        if not self.bytes or self.bytes%self.frame_bytes:raise ValidationError('Native M4B decoded frame proof is incomplete')
+        return {'sha256':self.hash.hexdigest(),'sample_count':self.bytes//self.frame_bytes,'bytes':self.bytes,'sample_format':'pcm_f64le'}
+
+
+def native_pcm_evidence(path,stage,stop,duration,encoding):
+    proof=NativePcmHash(encoding['channels'])
+    # No resampling or channel selection: hash the decoder's complete native-rate,
+    # all-channel output, including the effect of codec priming/discard/edit trims.
+    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+      '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0',
+      '-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),telemetry=proof)
+    return proof.result()|{'sample_rate':encoding['sample_rate'],'channels':encoding['channels'],'channel_layout':encoding.get('channel_layout')}
+
 def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
+    original_copies=list(copies)
+    with contextlib.ExitStack() as guards:
+        if encoding.get('mode')=='normalize':
+            copies,receipts=normalize_sources(stage,copies,encoding,stop,durations)
+            for name in copies:
+                held=guards.enter_context(VerifiedFile(stage/name))
+                if held.facts()!=receipts[name]['facts'] or held.sha256()!=receipts[name]['sha256']:
+                    raise ValidationError('Normalized snapshot differs from its complete-source receipt')
+        # Leases remain open until the final media consumer and verification finish.
+        return _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies)
+
+
+def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies):
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
     write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
@@ -288,9 +424,19 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
             tags['track']=str(int(review['number']))
     output=stage/'checked.m4b'
     args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1','-protocol_whitelist','file',
-      '-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf','-f','concat','-safe','1','-i',str(stage/'inputs.txt'),'-f','image2','-i',str(cover)]
+      '-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
+      *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')]),'-f','image2','-i',str(cover)]
     chapters=[]
-    if manifest.get('chapters'):
+    preserved=source_chapters(stage/original_copies[0],stage,stop,sum(durations)) if encoding.get('mode')=='copy' else []
+    if encoding.get('mode')=='copy' and manifest.get('source_chapters')!=preserved:
+        raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
+    if preserved:
+        chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n';chapters=preserved
+        for chapter in chapters:
+            text+=f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={chapter['start']}\nEND={chapter['end']}\ntitle={ffmetadata_escape(chapter['title'])}\n"
+        write_generated(chapter_file,text)
+        args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
+    elif manifest.get('chapters') and encoding.get('mode')!='copy':
         if len(manifest['chapters'])!=len(copies):raise ValidationError('Chapter plan must match the reviewed source boundaries')
         chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n';position=0
         for name,duration in zip(manifest['chapters'],durations):
@@ -300,7 +446,7 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
         write_generated(chapter_file,text)
         args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
     else:args+=['-map_chapters','-1']
-    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1','-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2','-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
+    args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1',*(['-c:a','copy'] if encoding.get('mode')=='copy' else ['-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2']),'-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
     args+=['-progress','pipe:1','-stats_period','1','-nostats','-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
@@ -311,22 +457,43 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
         compatible=stage/'compatible.m4b'
         chapter_format=normalize(output,compatible,stop,sort_title=sort_title if sort_title!=review['title'] else None,normalize_chapters=bool(chapters))
         output=compatible
-    progress('Checking output',{})
-    validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
-    if chapter_format:
-        validation['chapter_format']=chapter_format
-        remember_generated(stage/'checked.m4b',chapter_format['input_sha256'],chapter_format['old_file_size'])
-        remember_generated(output,validation['sha256'],validation['size'])
-    else:remember_generated(output,validation['sha256'],validation['size'])
-    for item in manifest['sources']:same_source(item,stop)
-    if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
-    return output,validation
+    with VerifiedFile(output) as held_output:
+        progress('Checking output',{})
+        validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
+        if encoding.get('mode')=='copy':
+            source_hash=audio_packet_hash(stage/original_copies[0],stage,stop,sum(durations))
+            output_hash=audio_packet_hash(output,stage,stop,sum(durations))
+            if source_hash!=output_hash:raise ValidationError('Remux changed the complete compressed audio payload')
+            source_evidence=copied_audio_evidence(stage/original_copies[0],stage,stop,sum(durations))
+            output_evidence=copied_audio_evidence(output,stage,stop,sum(durations))
+            if source_evidence!=output_evidence:raise ValidationError('Remux changed the decoder configuration or relative audio packet timing')
+            source_pcm=native_pcm_evidence(stage/original_copies[0],stage,stop,sum(durations),encoding)
+            output_pcm=native_pcm_evidence(output,stage,stop,sum(durations),encoding)
+            if source_pcm!=output_pcm:raise ValidationError('Remux changed full native decoded audio samples or decoder trim effects')
+            validation['native_pcm_evidence']=output_pcm
+            validation['copied_audio_evidence']=output_evidence
+            validation['audio_packet_sha256']=output_hash
+            validation['preserved_source_chapters']=chapters
+        if chapter_format:
+            validation['chapter_format']=chapter_format
+            remember_generated(stage/'checked.m4b',chapter_format['input_sha256'],chapter_format['old_file_size'])
+            remember_generated(output,validation['sha256'],validation['size'])
+        else:remember_generated(output,validation['sha256'],validation['size'])
+        for item in manifest['sources']:same_source(item,stop)
+        if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:raise ValidationError('Selected cover changed — review required')
+        if held_output.sha256()!=validation['sha256'] or held_output.facts()['size']!=validation['size']:
+            raise ValidationError('Final output differs from its leased verification artifact')
+        return output,validation
+
 
 def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     raw=probe(output,stage,stop)
     duration,profile=audio_info(raw)
     encoding=encoding or {'bitrate':160000,'channels':2,'sample_rate':44100,'selection':'legacy fixed profile'}
-    if profile!=('aac',str(encoding['sample_rate']),encoding['channels']):raise ValidationError('Output audio profile is incorrect')
+    if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):raise ValidationError('Output audio profile is incorrect')
+    if encoding.get('mode')=='copy' and encoding.get('channel_layout'):
+        actual_audio=next(stream for stream in raw['streams'] if stream.get('codec_type')=='audio')
+        if actual_audio.get('channel_layout')!=encoding['channel_layout']:raise ValidationError('Copied M4B channel layout changed')
     expected=sum(durations);tolerance=max(.25,len(durations)*.1)
     if abs(duration-expected)>tolerance:raise ValidationError(f'Output duration differs from reviewed sources: expected{expected:.3f}s, actual{duration:.3f}s, tolerance{tolerance:.3f}s')
     pictures=[s for s in raw.get('streams',[]) if s.get('codec_type')=='video' and s.get('disposition',{}).get('attached_pic')==1]

@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 from scanner import Inventory,connect
 from review_backend import CandidateReviewService
 
@@ -125,6 +127,27 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(manifest['chapters'],['Chapter 2','Chapter 1'])
         self.assertEqual(self.service.page(limit=1,offset=1,status='ready')['total'],1)
         self.assertEqual(self.service.page(limit=1,offset=1,status='ready')['rows'],[])
+
+    def test_completion_flag_uses_exact_single_authority_snapshot(self):
+        row=self.ready();identity=row['id']
+        other=Path(self.roots['Audiobooks'])/'Another';other.mkdir()
+        (other/'01.mp3').write_bytes(b'another private recording')
+        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        job={'job_id':'fixture','state':'completed','stage':'published','reason':'','manifest':{'candidate_id':identity,'cleanup_policy':{'enabled':True}}}
+        authority=Mock(return_value={'converted_ids':{identity}})
+        self.service.jobs=SimpleNamespace(progress_books=authority,
+            jobs=SimpleNamespace(status=lambda:{'jobs':[job]}),cleanup=SimpleNamespace(status=lambda _id:None,root=self.base/'recovery'),
+            candidate_status=lambda id:{'state':'Audiobook created'} if id==identity else None)
+        page=self.service.page()
+        self.assertEqual(len(page['rows']),2)
+        self.assertEqual({r['id']:r['audiobook_ready'] for r in page['rows']},{r['id']:r['id']==identity for r in page['rows']})
+        authority.assert_called_once_with()
+        self.assertTrue(self.service.enrich(self.service._row('Audiobooks',identity))['audiobook_ready'])
+        authority.return_value={'converted_ids':set()}
+        self.sources[0].write_bytes(b'changed source after authority snapshot')
+        fresh=self.service.enrich(self.service._row('Audiobooks',identity))
+        self.assertFalse(fresh['audiobook_ready'])
+        self.assertIn('Source changed',fresh['creation']['reasons'][0])
 
 
 if __name__=='__main__':unittest.main()

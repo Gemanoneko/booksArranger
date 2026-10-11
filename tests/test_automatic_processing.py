@@ -29,7 +29,7 @@ class AutoTests(unittest.TestCase):
         for auto in self.controllers:auto.close()
         self.temp.cleanup()
     def candidate(self,title='A Book',author='John Writer'):
-        return next(iter(groups.build([row(self.base/(author+' – '+title+'.mp3'),title,author)]) .values()))
+        return next(iter(groups.build([row(self.base/(author+' – '+title+'.mp3'),title,author)]) .values()))|{'fingerprint':'private-fixture-fingerprint'}
     def client(self,work=None,page=b'<p>John Writer. A Book</p>'):
         work=work or fixture_payload();calls=[]
         def fetch(url,*_):
@@ -85,7 +85,7 @@ class AutoTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT superseded FROM book_groups WHERE id=?',(id,)).fetchone()[0],1);self.assertEqual(db.execute('SELECT count(*) FROM files').fetchone()[0],2)
     def test_public_match_needs_fetched_independent_credit_and_original_language(self):
         client,calls=self.client();result=PublicResearch(client).lookup(self.candidate(),str(self.base))
-        self.assertEqual(result['reasons'],[],result);self.assertEqual(result['review']['title'],'A Book');self.assertEqual(result['review']['author'],'Writer John')
+        self.assertEqual(result['reasons'],[],result);self.assertEqual(result['review']['title'],'A Book');self.assertEqual(result['review']['author'],'John Writer')
         self.assertTrue(any('ast.ru' in u for u in calls));self.assertTrue(any(s.get('verified_identity') for s in result['sources']))
         self.assertEqual(result['review']['narrator'],'');self.assertFalse(result['review']['anthology'])
     def test_search_snippet_and_distant_page_cooccurrence_are_not_evidence(self):
@@ -96,7 +96,7 @@ class AutoTests(unittest.TestCase):
     def test_language_and_series_unknown_held_and_anthology_not_fiction_cycle(self):
         payload=fixture_payload();payload['lang_code']='';payload['parents']['cycles']=[{'id':8}]
         client,_=self.client(payload);result=PublicResearch(client).lookup(self.candidate(),str(self.base))
-        self.assertIn('Original work language unverified',result['reasons']);self.assertIn('Series position uncertain',result['reasons'])
+        self.assertEqual(result['review']['original_language'],'Unknown');self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown');self.assertNotIn('standalone',{e['field'] for e in result['evidence']})
         payload=fixture_payload();payload['parents']['digest']=[{'name':'Collection'}]
         with connect(self.db) as db:db.execute('DELETE FROM public_research_cache')
         # Contained story is modeled separately and never retitled to its collection.
@@ -246,11 +246,16 @@ class AutoTests(unittest.TestCase):
             return {'reasons':['Book identity uncertain'],'sources':[],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+5}} if len(calls)==1 else {'reasons':['Book identity uncertain'],'sources':[]}
         auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0];original=auto.stop_event.wait
         def advance(delay):
+            state=auto.status()
+            if delay>=1 and len(calls)>=2:
+                # The first source opportunity was consumed; stop at the later uncertainty backoff.
+                self.assertEqual(state['phase'],'waiting');self.assertEqual(state['research']['held'],1)
+                auto.stop_event.set();return True
             if delay>=1:
                 observed.append(auto.status());self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1);now[0]+=delay;return False
             return original(delay)
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
-        self.assertEqual(state['state'],'Completed');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
+        self.assertEqual(state['state'],'Paused');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
         self.assertEqual(len(observed),1);waiting=observed[0]
         self.assertEqual((waiting['state'],waiting['phase'],waiting['next_retry_at']),('Running','waiting',100005));self.assertTrue(waiting['automatic_retry_enabled']);self.assertFalse(waiting['can_start']);self.assertTrue(waiting['can_stop']);self.assertIsNone(waiting['current'])
         self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['next_retry_at']);merge.approve_automatic.assert_not_called()
@@ -264,10 +269,14 @@ class AutoTests(unittest.TestCase):
         (self.base/'audio'/'John Writer – B Book.mp3').write_bytes(b'private second fixture');inv.reader=lambda p,k,s:json.loads(row(p,filename_identity(p)['title'])['metadata'])
         original=auto.stop_event.wait
         def advance(delay):
+            if auto.stop_event.is_set():return True
+            state=auto.status()
+            if delay>=1 and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:
+                auto.stop_event.set();return True
             if delay>=1:wakes.append(auto.status()['next_retry_at']);now[0]+=delay;return False
             return original(delay)
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
-        self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()
+        self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
     def test_stop_during_armed_wait_preserves_pending_and_restart_stays_paused(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
         auto.start();deadline=time.monotonic()+3
@@ -285,12 +294,15 @@ class AutoTests(unittest.TestCase):
             return {'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+5}} if len(visits)==1 else {'reasons':['Uncertain']}
         auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0];original_state=merge.state;merge.state=lambda:original_state()|{'cleanup_active':cleanup[0]};original_wait=auto.stop_event.wait
         def advance(delay):
+            state=auto.status()
+            if delay>=1 and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:
+                auto.stop_event.set();return True
             if cleanup[0]:
                 self.assertFalse(auto.status()['automatic_retry_enabled']);self.assertIsNone(auto.status()['current']);drained.append(True);cleanup[0]=False;return False
             if delay>=1:self.assertTrue(auto.status()['automatic_retry_enabled']);now[0]+=delay;return False
             return original_wait(delay)
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
-        self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()
+        self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
     def test_restart_of_waiting_running_checkpoint_does_not_arm_retry(self):
         auto,merge,inv=self.fake_merge();run_id=str(uuid.uuid4());now='2026-10-11T00:00:00Z'
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[str(uuid.uuid4())],'done':[]}),'Waiting for metadata sources',now,now))
@@ -304,6 +316,20 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(record['retry_at'],100000);self.assertEqual(record['wait']['kind'],'app_limit')
         with connect(self.db) as db:stored=json.loads(db.execute('SELECT result FROM automatic_candidates').fetchone()[0])
         self.assertEqual(stored['sources'],result['sources']);self.assertEqual(stored['work'],WORK);self.assertEqual(stored['reasons'],result['reasons']);merge.approve_automatic.assert_not_called()
+    def test_new_identity_sources_reconsider_old_wait_once_without_erasing_host_pause(self):
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(3);candidate=inv.candidates('Audiobooks')['rows'][0]
+        result={'reasons':['Book identity uncertain'],'wait':{'source':'api.fantlab.ru','kind':'app_limit','reason':APP_LIMIT_REASON,'retry_at':180000}}
+        auto._record(candidate,'Waiting for source',result,180000)
+        with connect(self.db) as db:
+            db.execute("UPDATE automatic_candidates SET result=?",(json.dumps(result),))
+            db.execute("CREATE TABLE IF NOT EXISTS public_research_limits(host TEXT PRIMARY KEY,next_at REAL,reason TEXT)")
+            db.execute("INSERT INTO public_research_limits VALUES(?,?,?)",('api.fantlab.ru',180000,SOURCE_PAUSE_REASON))
+        old=auto.candidate(candidate);reconsidered=auto._refresh_wait(candidate,old)
+        self.assertIsNone(reconsidered['retry_at']);merge.approve_automatic.assert_not_called()
+        auto._record(candidate,'Waiting for source',result,180000)
+        current=auto._refresh_wait(candidate,auto.candidate(candidate));self.assertEqual(current['retry_at'],180000)
+        with connect(self.db) as db:self.assertEqual(db.execute("SELECT next_at FROM public_research_limits WHERE host='api.fantlab.ru'").fetchone()[0],180000)
+
     def test_automatic_drain_waits_required_working_cleanup(self):
         auto,merge,inv=self.fake_merge();original=merge.state;merge.state=lambda:original()|{'cleanup_active':True}
         self.assertFalse(auto._idle_jobs());merge.state=lambda:original()|{'cleanup_active':False};self.assertTrue(auto._idle_jobs())
@@ -348,6 +374,9 @@ class AutoTests(unittest.TestCase):
             if len(calls)==1:raise ResearchWait('Public cover fixture','Unavailable',now[0]+5)
             return current,'private-second-job'
         def advance(delay):
+            state=auto.status()
+            if delay>=1 and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:
+                auto.stop_event.set();return True
             if delay>=1:
                 observed.append((list(calls),auto.status()));now[0]+=delay;return False
             return original(delay)
@@ -371,7 +400,7 @@ class AutoTests(unittest.TestCase):
         auto.research.client=client
         auto.research.lookup=lambda current,root,stop,progress:research.lookup(current,root,stop,progress) if current['members'][0]['metadata']['tags']['album']==long_title else {'reasons':[],'work':WORK,'review':{},'sources':[]}
         auto.start();state=self.wait_auto(auto)
-        self.assertEqual(state['state'],'Completed');self.assertEqual(state['research']['held'],1)
+        self.assertEqual(state['state'],'Paused');self.assertEqual(state['research']['held'],1)
         merge.approve_automatic.assert_called_once();self.assertEqual(merge.approve_automatic.call_args.args[0]['members'][0]['metadata']['tags']['album'],'B Book')
         held=[auto.candidate(current) for current in inv.candidates('Audiobooks')['rows'] if current['members'][0]['metadata']['tags']['album']==long_title]
         self.assertEqual(len(held),1);self.assertEqual(held[0]['state'],'Held')
@@ -398,7 +427,7 @@ class AutoTests(unittest.TestCase):
         second.research.lookup=lambda *_:{'reasons':['Book identity uncertain'],'sources':[]}
         with patch.object(inv,'launch') as discovery:
             second.start();retried=self.wait_auto(second);discovery.assert_not_called()
-        self.assertEqual(second._run_row()['id'],run['id']);self.assertEqual(retried['state'],'Completed');self.assertEqual(retried['research']['held'],1)
+        self.assertEqual(second._run_row()['id'],run['id']);self.assertEqual(retried['state'],'Paused');self.assertEqual(retried['research']['held'],1)
         merge.approve_automatic.assert_not_called()
 
     def test_historical_missing_failure_detail_is_not_invented_or_left_researching(self):
@@ -453,12 +482,19 @@ class AutoTests(unittest.TestCase):
         auto=AutomaticProcessing(merge,research);merge.automatic=auto;self.controllers.append(auto)
         return auto,merge,inv
     def wait_auto(self,auto):
-        auto.thread.join(5);self.assertFalse(auto.thread.is_alive());return auto.status()
+        deadline=time.monotonic()+5
+        while auto.thread.is_alive() and time.monotonic()<deadline:
+            state=auto.status()
+            if state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:auto.stop()
+            auto.thread.join(.01)
+        self.assertFalse(auto.thread.is_alive());return auto.status()
     def test_construction_and_inventory_only_never_approve(self):
         auto,merge,inv=self.fake_merge();self.assertEqual(auto.status()['state'],'Idle');merge.approve_automatic.assert_not_called();inv.launch('Audiobooks');inv.worker.join(5);merge.approve_automatic.assert_not_called();auto.close()
-    def test_uncertain_work_held_and_pass_completes(self):
+    def test_uncertain_work_is_revisited_until_user_stop(self):
         auto,merge,inv=self.fake_merge();auto.start();status=self.wait_auto(auto)
-        self.assertEqual(status['state'],'Completed');self.assertEqual(status['research']['held'],1);merge.approve_automatic.assert_not_called();auto.close()
+        self.assertEqual(status['state'],'Paused');self.assertEqual(status['research']['held'],1);merge.approve_automatic.assert_not_called()
+        checkpoint=json.loads(auto._run_row()['checkpoint']);self.assertEqual(len(checkpoint['pending']),1)
+        saved=auto.candidate(inv.candidates('Audiobooks')['rows'][0]);self.assertEqual(saved['research_attempt'],1);self.assertGreater(saved['retry_at'],time.time());self.assertEqual(saved['research_history'][0]['state'],'Held');auto.close()
     def test_full_confident_decision_reaches_private_admission(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':[],'work':WORK,'review':{},'sources':[]});auto.start();self.wait_auto(auto);merge.approve_automatic.assert_called_once();auto.close()
     def test_stop_saves_pending_and_restart_never_starts_it(self):
@@ -470,5 +506,51 @@ class AutoTests(unittest.TestCase):
         auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5);candidate=inv.candidates('Audiobooks')['rows'][0]
         auto.draft(candidate['id'],candidate['revision'],True);self.assertTrue(auto.manual_draft(candidate));auto.start();self.wait_auto(auto)
         self.assertEqual(auto.candidate(inv.candidate('Audiobooks',candidate['id']))['reasons'],['Manual draft retained']);merge.approve_automatic.assert_not_called();auto.close()
+
+    def test_repaired_observed_source_is_refreshed_then_researched_at_new_revision(self):
+        lookup=Mock(return_value={'reasons':[],'sources':[]})
+        auto,merge,inv=self.fake_merge(lookup);inv.launch('Audiobooks');inv.worker.join(5)
+        original=inv.candidates('Audiobooks')['rows'][0];path=Path(original['members'][0]['path'])
+        auto._record(original,'Held',{'reasons':['Source files changed'],'sources':[{'url':'https://ast.ru/book/old','sha256':'a'*64,'kind':'publisher_or_journal'}]},time.time()-1)
+        run_id=str(uuid.uuid4())
+        with connect(self.db) as db:
+            db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Paused','research',json.dumps({'pending':[original['id']],'done':[]}), '', '2026-10-11T00:00:00Z','2026-10-11T00:00:00Z'))
+            scan_before=dict(db.execute('SELECT * FROM jobs WHERE root=?',(inv.roots['Audiobooks'],)).fetchone())
+        path.write_bytes(b'repaired complete observed source')
+        with patch.object(inv,'refresh_candidate_sources',wraps=inv.refresh_candidate_sources) as refresh:
+            auto.start();state=self.wait_auto(auto)
+        self.assertEqual(state['state'],'Completed');refresh.assert_called_once()
+        self.assertTrue(refresh.call_args.kwargs['force']);lookup.assert_called_once();merge.approve_automatic.assert_called_once()
+        current=merge.approve_automatic.call_args.args[0]
+        self.assertGreater(current['revision'],original['revision']);self.assertNotEqual(current['fingerprint'],original['fingerprint'])
+        saved=auto.candidate(current)
+        self.assertEqual(saved['state'],'Queued')
+        archived=next(entry for entry in saved['research_history'] if entry.get('fingerprint')==original['fingerprint'])
+        self.assertEqual(archived['revision'],original['revision']);self.assertEqual(archived['sources'][0]['sha256'],'a'*64)
+        with connect(self.db) as db:
+            stored=json.loads(db.execute('SELECT result FROM automatic_candidates WHERE id=?',(current['id'],)).fetchone()[0])
+            self.assertEqual(stored['source_refresh']['old_fingerprint'],original['fingerprint'])
+            self.assertEqual(dict(db.execute('SELECT * FROM jobs WHERE root=?',(inv.roots['Audiobooks'],)).fetchone()),scan_before)
+        self.assertTrue(path.exists())
+    def test_source_refresh_hold_does_not_query_or_approve_and_keeps_checkpoint(self):
+        lookup=Mock(return_value={'reasons':[]});auto,merge,inv=self.fake_merge(lookup)
+        inv.launch('Audiobooks');inv.worker.join(5);original=inv.candidates('Audiobooks')['rows'][0]
+        auto._record(original,'Held',{'reasons':['Source files changed']},time.time()-1)
+        with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[original['id']],'done':[]}), '', '2026-10-11T00:00:00Z','2026-10-11T00:00:00Z'))
+        with patch.object(inv,'refresh_candidate_sources',return_value={'state':'held','reason':'Observed source remains unreadable'}) as refresh:
+            auto.start();state=self.wait_auto(auto)
+        refresh.assert_called_once();lookup.assert_not_called();merge.approve_automatic.assert_not_called()
+        self.assertEqual(state['state'],'Paused');self.assertEqual(auto.candidate(original)['reasons'],['Observed source remains unreadable'])
+        checkpoint=json.loads(auto._run_row()['checkpoint']);self.assertIn(original['id'],checkpoint['pending']+checkpoint.get('deferred',[]))
+        self.assertTrue(Path(original['members'][0]['path']).exists())
+    def test_manual_draft_prevents_stale_source_refresh_before_any_read(self):
+        lookup=Mock(return_value={'reasons':[]});auto,merge,inv=self.fake_merge(lookup)
+        inv.launch('Audiobooks');inv.worker.join(5);original=inv.candidates('Audiobooks')['rows'][0]
+        auto._record(original,'Held',{'reasons':['Source files changed']},time.time()-1);auto.draft(original['id'],original['revision'],True)
+        with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[original['id']],'done':[]}), '', '2026-10-11T00:00:00Z','2026-10-11T00:00:00Z'))
+        with patch.object(inv,'refresh_candidate_sources',wraps=inv.refresh_candidate_sources) as refresh:
+            auto.start();state=self.wait_auto(auto)
+        refresh.assert_not_called();lookup.assert_not_called();merge.approve_automatic.assert_not_called()
+        self.assertEqual(auto.candidate(original)['reasons'],['Manual draft retained']);self.assertEqual(state['state'],'Paused')
 
 if __name__=='__main__':unittest.main()

@@ -52,13 +52,30 @@ class AutomaticMediaTests(unittest.TestCase):
         self.assertTrue(self.service.reviews._context(fresh)['automatic_approval']);self.assertFalse(self.service.reviews._context(fresh).get('automatic_pending'))
         self.assertTrue(self.service._output_valid(job['output']))
         self.assertFalse(any(p.suffix in ('.stdout','.stderr') for p in self.service.reviews.cache.iterdir()))
-    def test_wrong_remote_cover_and_stop_do_not_approve_or_queue(self):
+    def test_independent_catalog_to_actual_verified_publication_and_ready_without_manual_step(self):
+        from test_public_work_identity import FallbackFixture,cap_fantlab
+        fixture=FallbackFixture(self.cover);client=PublicClient(self.inv.database,fetch=fixture.fetch);cap_fantlab(self.inv.database,time.time())
+        row=self.service.reviews.page()['rows'][0];result=PublicResearch(client,leads=[]).lookup(row,str(self.audio))
+        self.assertEqual(result['reasons'],[],result);self.assertEqual(result['work']['id'],'wikidata:Q100')
+        fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),client);self.wait()
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
+        self.assertTrue(job['output']['validation']['passed']);self.assertTrue(Path(job['output']['final_path']).is_file())
+        self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        ready=self.service.reviews.page(status='converted');self.assertEqual(ready['total'],1);self.assertTrue(ready['rows'][0]['audiobook_ready'])
+        self.assertTrue(self.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
+        self.assertTrue(all(not source.exists() for source in self.sources));self.assertEqual(self.service.state()['converted_total'],1)
+
+    def test_custom_source_cover_is_allowed_and_stop_preserves_sources(self):
         row,result=self.result();result['work']['cover_url']='https://evil.example/cover.jpg'
-        with self.assertRaisesRegex(ValueError,'Cover not verified'):self.service.approve_automatic(row,result,threading.Event(),self.client)
-        self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertEqual(self.service.state()['approved_total'],0);self.assertTrue(all(p.exists() for p in self.sources))
         stop=threading.Event();stop.set()
         with self.assertRaises(InterruptedError):self.service.approve_automatic(row,result,stop,self.client)
-        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertEqual(self.service.state()['approved_total'],0);self.assertTrue(all(p.exists() for p in self.sources))
+        with patch.object(self.client,'read',wraps=self.client.read) as remote:
+            fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
+            remote.assert_not_called()
+        self.assertEqual(result['metadata_facts']['cover']['kind'],'embedded')
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
+        self.assertEqual(self.service.reviews.page(status='converted')['total'],1)
 
     def test_destination_collision_does_not_leave_approval_or_queue(self):
         row,result=self.result();proposal=propose(row['members'][0]['path'],str(self.audio),'audiobook',row['members'][0]['metadata'],result['review'])

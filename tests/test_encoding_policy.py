@@ -66,9 +66,9 @@ class ActualMediaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=AREA) as name:
             root=Path(name);m=self.build(root,1,44100,128000,legacy=True);output,v=create_private(m,root/'stage',threading.Event())
             self.assertEqual(v['profile'],LEGACY_PROFILE);self.assertEqual(v['encoding']['channels'],2)
-            record={'root':str(root),'final_path':str(output),'size':v['size'],'sha256':v['sha256'],'validation':v}
+            record={'job_id':m['job_id'],'root':str(root),'final_path':str(output),'size':v['size'],'sha256':v['sha256'],'validation':v}
             with DirectoryBoundary(root,output.parent) as boundary:record['parent_identity']=boundary.identities
-            fake=type('OldService',(),{'inventory':type('Inv',(),{'roots':{'Audiobooks':str(root)}})()})()
+            fake=type('OldService',(),{'inventory':type('Inv',(),{'roots':{'Audiobooks':str(root)}})(),'_validated_outputs':{}})()
             self.assertTrue(MergeService._output_valid(fake,record))
 
 if __name__=='__main__':unittest.main()
