@@ -19,6 +19,16 @@ if os.name=='nt':
     kernel.MoveFileExW.restype=wintypes.BOOL
     kernel.GetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_void_p]
     kernel.GetFileInformationByHandle.restype=wintypes.BOOL
+    # One ABI identity per DLL binding: research and audio launches can overlap.
+    # Per-call Structure classes would race on shared ctypes function argtypes.
+    class ThreadEntry(ctypes.Structure):
+        _fields_=[('size',wintypes.DWORD),('usage',wintypes.DWORD),('thread',wintypes.DWORD),('process',wintypes.DWORD),('base',wintypes.LONG),('delta',wintypes.LONG),('flags',wintypes.DWORD)]
+    kernel.CreateToolhelp32Snapshot.argtypes=[wintypes.DWORD,wintypes.DWORD];kernel.CreateToolhelp32Snapshot.restype=wintypes.HANDLE
+    kernel.Thread32First.argtypes=[wintypes.HANDLE,ctypes.POINTER(ThreadEntry)];kernel.Thread32First.restype=wintypes.BOOL
+    kernel.Thread32Next.argtypes=[wintypes.HANDLE,ctypes.POINTER(ThreadEntry)];kernel.Thread32Next.restype=wintypes.BOOL
+    kernel.OpenThread.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];kernel.OpenThread.restype=wintypes.HANDLE
+    kernel.ResumeThread.argtypes=[wintypes.HANDLE];kernel.ResumeThread.restype=wintypes.DWORD
+    kernel.GetProcessIdOfThread.argtypes=[wintypes.HANDLE];kernel.GetProcessIdOfThread.restype=wintypes.DWORD
     class FileInfo(ctypes.Structure):
         _fields_=[('attributes',wintypes.DWORD),('creation',wintypes.FILETIME),('access',wintypes.FILETIME),('write',wintypes.FILETIME),('volume',wintypes.DWORD),('size_high',wintypes.DWORD),('size_low',wintypes.DWORD),('links',wintypes.DWORD),('index_high',wintypes.DWORD),('index_low',wintypes.DWORD)]
 
@@ -373,13 +383,6 @@ class OwnedProcessJob:
 
 def resume_owned_primary(pid):
     """Resume only the sole primary thread of our newly suspended owned process."""
-    class ThreadEntry(ctypes.Structure):
-        _fields_=[('size',wintypes.DWORD),('usage',wintypes.DWORD),('thread',wintypes.DWORD),('process',wintypes.DWORD),('base',wintypes.LONG),('delta',wintypes.LONG),('flags',wintypes.DWORD)]
-    kernel.CreateToolhelp32Snapshot.argtypes=[wintypes.DWORD,wintypes.DWORD];kernel.CreateToolhelp32Snapshot.restype=wintypes.HANDLE
-    kernel.Thread32First.argtypes=[wintypes.HANDLE,ctypes.POINTER(ThreadEntry)];kernel.Thread32Next.argtypes=kernel.Thread32First.argtypes
-    kernel.OpenThread.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];kernel.OpenThread.restype=wintypes.HANDLE
-    kernel.ResumeThread.argtypes=[wintypes.HANDLE];kernel.ResumeThread.restype=wintypes.DWORD
-    kernel.GetProcessIdOfThread.argtypes=[wintypes.HANDLE];kernel.GetProcessIdOfThread.restype=wintypes.DWORD
     snapshot=kernel.CreateToolhelp32Snapshot(4,0)
     if snapshot==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot inspect owned suspended primary thread')
     ids=[]

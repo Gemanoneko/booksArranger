@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.12.2] - 2026-10-12
+
+### Fixed
+
+- Bind one module-level Windows ThreadEntry ctypes structure and thread enumeration signatures so concurrent owned-process launches cannot replace each other's pointer type.
+- Preserve exact suspended-process ownership, one-thread identity, resume-count and handle-closure checks; no retry loop or ownership bypass is added.
+
+### Changed
+
+- Retain existing failed-job evidence; the separate guarded recovery proposal and Google/Yandex browser prototype are excluded from this release. UI, media verification and 24-hour recovery are unchanged.
+
+
 ## [v0.12.1] - 2026-10-12
 
 ### Fixed
