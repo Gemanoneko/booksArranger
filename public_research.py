@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from scanner import connect
+from sqlite_retry import transaction
 from source_identity import clues,filename_identity,norm,source_gate,text,VERSION
 
 MAX_BYTES=2*1024*1024
@@ -300,9 +301,10 @@ class PublicClient:
                         if existing['reason']:reason=existing['reason']
                     db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
                 raise ResearchWait(host,reason,retry,'source_pause' if reason==SOURCE_PAUSE_REASON else 'source_unavailable','host') from None
-            with connect(self.database) as db:
+            def cache_fetched(db):
                 db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,base64.b64encode(raw).decode('ascii'),hashlib.sha256(raw).hexdigest(),self.clock()))
                 db.execute('DELETE FROM public_research_cache WHERE url IN (SELECT url FROM public_research_cache ORDER BY fetched DESC LIMIT -1 OFFSET 100)')
+            transaction(self.database,cache_fetched,stop)
             return raw
     def json(self,url,stop,budget):return strict_json(self.read(url,stop,budget))
     def receipt(self,url):

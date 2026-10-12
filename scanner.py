@@ -41,12 +41,13 @@ class ClosingConnection(sqlite3.Connection):
         finally:
             self.close()
 
-def connect(database):
-    connection = sqlite3.connect(database, timeout=10, factory=ClosingConnection)
+def connect(database, timeout=10):
+    connection = sqlite3.connect(database, timeout=timeout, factory=ClosingConnection)
     connection.row_factory = sqlite3.Row
-    connection.execute('PRAGMA journal_mode=WAL')
-    connection.execute('PRAGMA busy_timeout=10000')
-    connection.executescript('''
+    try:
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute('PRAGMA busy_timeout='+str(int(timeout*1000)))
+        connection.executescript('''
       CREATE TABLE IF NOT EXISTS jobs(root TEXT PRIMARY KEY, label TEXT, generation INTEGER,
         state TEXT, checked INTEGER DEFAULT 0, reused INTEGER DEFAULT 0, errors INTEGER DEFAULT 0, current TEXT DEFAULT '');
       CREATE TABLE IF NOT EXISTS queue(root TEXT, generation INTEGER, path TEXT, directory INTEGER,
@@ -58,7 +59,10 @@ def connect(database):
         directory INTEGER, outcome TEXT, error TEXT, time TEXT, details TEXT DEFAULT '',
         PRIMARY KEY(root,generation,path));
     ''')
-    connection.commit()
+        connection.commit()
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 def inside(path, root):

@@ -1,0 +1,32 @@
+# Books Arranger throughput diagnosis — 2026-10-12
+
+Ender read-only check: at10:08:28 Israel time, v0.12.0 PID53708/instance71d58343cdb17863c2232eb1f5eaebf6 and automatic run96cbe916-3b2b-4858-b386-89d493cb4f24 remained Running/research. No new controller failure was observed; displayed error ece3d07c-9653-4d53-a583-5f2e84ed1c16 is the historical21:11UTC previous-day SQLite failure. Four completed records still match their protected digest exactly. No new queue admission or conversion exists: audio_jobs contains only four completed jobs. The bottleneck is acquiring sufficient independent identity/source evidence before conversion, not encoder speed.
+
+Evidence: `scratch/live-update-2026-10-12/throughput-catalog.json`, collected2026-10-12T07:08:28.709626Z; earlier protected observation at07:05:11.697909Z. SQL uses a read-only URI/query_only and joins automatic candidates to non-superseded Audiobook groups by exact id/revision/fingerprint. Aggregate capture is observational rather than an app-wide transaction; a candidate can advance while API and SQL reads occur.
+
+## Current counts and historical distinction
+
+2431 current candidate groups:2392 Waiting for source,35 Held,4 without current automatic-candidate rows. Separately, four immutable completed audio_jobs are validated and retained. The checkpoint's historical done count2431 means research bookkeeping, not Audiobook Ready.
+
+549 distinct current candidate rows have a last-attempt timestamp since06:56UTC:548 Waiting and1 Held. All have standing-17-v1 research results. Recent reason counts overlap:497 Book identity uncertain,28 author/work not independently verified,23 sources disagree on title/author,14 source membership uncertain;1 collection page identity unverified. Every one of the548 recent waiting rows stores a DuckDuckGo-unavailable wait. This demonstrates newly written results rather than merely reporting old persisted wait labels. It does not mean548 HTTP requests or548 complete independent research operations: cached responses and immediate cooldown refusals count as candidate visits.
+
+The remaining1844 waiting/34 held records are legacy results. Historical108 encoding-decision,94 series-position,32 mixed-recording and1 cover-verification reasons must not be described as newly diagnosed v0.12 media failures. No recent candidate in this sample reached automatic approval/queue admission.
+
+Earlier checkpoints advanced by163 saved visits over425.184357seconds (06:58:06.513552→07:05:11.697909UTC), about23 saved candidate visits/minute. This includes revisits/cooldown checks and is not a rate of distinct books researched to completion, requests sent, or books converted.
+
+## Why useful research is currently limited
+
+- The app's own rolling-hour request reservations are full on both api.fantlab.ru and openlibrary.org:100 each. This is a Books Arranger limit, not evidence of provider quotas. Earliest existing reservation expiry is approximately10:57:14 and10:57:17 Israel time respectively; one opportunity becomes eligible then, not the whole quota at once.
+- Persisted genuine source-requested pauses are active until approximately11:00:50 for ru.wikipedia.org,11:01:37 for www.wikidata.org and11:01:44 for en.wikipedia.org. Source code uses this marker for actual403/429 and/or respected Retry-After; retained limits do not identify the exact HTTP status, so none is invented here.
+- html.duckduckgo.com is unavailable and has a five-minute retry/cooldown, currently until approximately10:12:23. Its only three last-hour reservations contrast with548 recent waiting candidates: most stored unavailable outcomes do not each represent a new network request. This read-only diagnosis does not establish whether its transport/challenge/response failure is an app defect or an external availability problem.
+- Public lookup tries bounded catalog identity and fetched associated credits. When no unique verified work is obtained, it retains Book identity uncertain; snippets or a guessed title cannot substitute. Both useful catalogs are locally capped and other fallback sources are paused/unavailable, so quickly moving through candidates mainly writes Waiting outcomes.
+
+## Grounded improvement priorities
+
+1. Finish the independently reviewed/tested SQLITE_BUSY fix. It addresses known run stoppage and checkpoint durability; it does not itself supply missing identity evidence or increase conversion yield. The candidate patch is not in the current live v0.12.0.
+2. Diagnose DuckDuckGo's exact safe failure classification using bounded existing diagnostics/cache evidence before changing its adapter. Fix a demonstrated app parsing/transport defect if present; retain challenges,403/429 and Retry-After restrictions. Do not promise provider availability or bypass it.
+3. Improve useful retry scheduling and evidence reuse. Current `_wait` saves the earliest wait from a list, explaining why all recent outcomes highlight DuckDuckGo although FantLab/Open Library and Wikipedia also block useful paths. Retain per-source eligibility and choose the earliest actually useful independent evidence route, avoiding repeated no-progress visits when required routes remain closed. Reuse pinned work/author identities and compact field-associated fetched evidence before repeating title search, while revalidating changed source revisions and contradictions. The raw cache is capped at100 URLs across sources; evaluate eviction/repeated-fetch pressure before enlarging storage or changing policy.
+4. Review whether the existing app-owned100/hour/host bound is appropriate for this library workload. Raising it is a separate policy/implementation decision, not authorized by this diagnosis and not a way to bypass actual vendor pauses. Better request selection/reuse should precede blind quota increases.
+5. Optional local Open Library index could reduce remote lookup demand using the existing Y:/Open Library dumps, but import/indexing needs explicit approval and a bounded design. Dumps remain untouched. Coverage of Russian/unofficial translation bridges, associated credits and recording provenance is not established; offline catalog lookup would not replace those required proofs.
+
+All standing confidence/source/media/native publication gates and24-hour recovery remain unchanged. No Start/Stop, live catalog/config/source/interface/Git mutation, extra app launch, original deletion, Comics change or dump import was performed for this diagnosis.

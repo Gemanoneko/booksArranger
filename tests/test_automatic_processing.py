@@ -456,7 +456,7 @@ class AutoTests(unittest.TestCase):
         candidate=inv.candidates('Audiobooks')['rows'][0];run_id=str(uuid.uuid4());now='2026-10-11T00:00:00+00:00'
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[candidate['id']],'done':[]}),'',now,now))
         auto._record(candidate,'Researching')
-        with patch('automatic_processing.connect',side_effect=sqlite3.OperationalError('PRIVATE_DATABASE_PATH')):
+        with patch('sqlite_retry.connect',side_effect=sqlite3.OperationalError('PRIVATE_DATABASE_PATH')):
             auto._failure(run_id,RuntimeError('PRIVATE_ERROR'), 'research',candidate['id'],candidate,True)
         state=auto.status();self.assertEqual(state['state'],'Needs attention');self.assertFalse(state['failure_durable']);self.assertFalse(state['can_start'])
         self.assertEqual(state['research']['researching'],0);self.assertEqual(auto.candidate(candidate)['state'],'Needs attention')

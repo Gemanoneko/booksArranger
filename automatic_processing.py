@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from scanner import connect
+from sqlite_retry import transaction
 from public_research import PublicClient,PublicResearch,ResearchWait,RESEARCH_VERSION
 from source_identity import VERSION,source_gate
 
@@ -86,7 +87,14 @@ class AutomaticProcessing:
         return dict(r) if r else None
     def _update(self,id,**fields):
         fields['updated']=stamp()
-        with connect(self.database) as db:db.execute('UPDATE automatic_runs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?',(*fields.values(),id))
+        # Retry this idempotent checkpoint transaction only. Never replay the
+        # enclosing research/admission/publication operation after a database error.
+        worker=threading.current_thread() is self.thread
+        cancel=worker and fields.get('state')!='Paused'
+        # A worker can finish Paused after Stop reads Running. Never overwrite
+        # that committed checkpoint using the caller's stale state snapshot.
+        predicate=" AND state='Running'" if fields.get('state')=='Stopping' else ''
+        transaction(self.database,lambda db:db.execute('UPDATE automatic_runs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?'+predicate,(*fields.values(),id)),self.stop_event if cancel else None)
     def _record(self,row,state,result=None,retry_at=None):
         result=dict(result or {},research_version=RESEARCH_VERSION)
         with connect(self.database) as db:
@@ -104,6 +112,13 @@ class AutomaticProcessing:
                 history=history+[{'attempt':attempt,'at':stamp(),'state':state,'reasons':result.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in result.get('sources',[])[:20]]}]
             result['research_attempt']=attempt;result['research_history']=history[-20:]
             db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(result,ensure_ascii=False),retry_at,stamp(),VERSION))
+    def _paused_checkpoint(self,id,checkpoint):
+        encoded=json.dumps(checkpoint);updated=stamp()
+        def persist(db):
+            db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
+            db.execute("UPDATE automatic_runs SET state='Paused',checkpoint=?,reason='Paused — pending work saved',updated=? WHERE id=?",(encoded,updated,id))
+        # Stop is already set: finish this atomic save, never restart processing.
+        transaction(self.database,persist)
     def candidate(self,row):
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
@@ -235,7 +250,8 @@ class AutomaticProcessing:
         self.next_retry_at=None
         self.volatile_failure={'diagnostic':diagnostic,'reason':reason,'candidate_result':result}
         try:
-            with connect(self.database) as db:
+            def persist(db):
+                nonlocal reason
                 if research_failed and row and not candidate_job_exists(db,row['id']):
                     reason='An app error stopped automatic processing while researching '+title+'. Source files for this book were preserved.'
                 db.execute('INSERT INTO automatic_errors VALUES(?,?,?,?)',(diagnostic['id'],id,diagnostic['created_utc'],json.dumps(diagnostic)))
@@ -243,6 +259,7 @@ class AutomaticProcessing:
                     db.execute("UPDATE automatic_candidates SET state='Needs attention',result=?,retry_at=NULL WHERE id=? AND revision=? AND fingerprint=? AND state='Researching'",
                         (json.dumps(result),row['id'],row['revision'],row['fingerprint']))
                 db.execute("UPDATE automatic_runs SET state='Needs attention',reason=?,updated=? WHERE id=?",(reason,stamp(),id))
+            transaction(self.database,persist)
             self.volatile_failure=None
         except (OSError,sqlite3.Error) as persistence_error:
             # No durable success claim and no retry when the checkpoint itself failed.
@@ -377,7 +394,7 @@ class AutomaticProcessing:
             self.inventory.stop();self.merge.pause()
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)
             while self.merge.state()['state']=='Pausing':time.sleep(.2)
-            with connect(self.database) as db:db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
-            self._update(id,state='Paused',checkpoint=json.dumps(checkpoint),reason='Paused — pending work saved')
+            try:self._paused_checkpoint(id,checkpoint)
+            except (OSError,sqlite3.Error) as error:self._failure(id,error,'pause',identity,row,False)
         except Exception as error:
             self._failure(id,error,phase,identity,row,research_failed)

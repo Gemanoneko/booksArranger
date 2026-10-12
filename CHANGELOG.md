@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.12.1] - 2026-10-12
+
+### Fixed
+
+- Retry native SQLite BUSY within bounded replay-safe checkpoint, fetched-cache, failure-diagnostic and atomic Paused saves; roll back and close each failed transaction without repeating requests, approvals or media operations.
+- Preserve a committed Paused checkpoint when a stale Stop snapshot arrives, and close a connection if its initialization fails.
+- Persistent contention at unchanged Stop-entry and other database boundaries may still fail closed. This patch does not guarantee uninterrupted processing; verification-before-deletion and 24-hour recovery remain unchanged.
+
+### Changed
+
+- Publish the reviewed patch separately from live application. The running v0.12.0 app remains unchanged until a later coordinated normal Windows restart.
+
+
 ## [v0.12.0] - 2026-10-12
 
 ### Added

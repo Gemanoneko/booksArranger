@@ -1,6 +1,6 @@
 # Books Arranger live update handoff — 2026-10-12
 
-Ender: supported old-owner shutdown completed; app is offline. Exact release application belongs to Sully and was authorized by root after shutdown proof. No replacement process was launched from the tool host.
+Ender: released v0.12.0 is applied and verified running after Sergei's normal Windows launch. The saved automatic run was resumed once through the supported Start control after all owner/source/checkpoint/completed-record guards passed. No replacement process was launched from the tool host.
 
 Live recheck found v0.11.1 Pythonw PID50896, instance81ee5d1c8e1e90c20798f923a029ac6b. Automatic run96cbe916-3b2b-4858-b386-89d493cb4f24 had already stopped with a nondurable SQLITE_BUSY diagnostic; Start and Stop availability were false. No scan, conversion, job queue or source cleanup was active. Four completed books remained authoritative. No newly completed book was observed.
 
@@ -16,4 +16,12 @@ Root authorized supported Stop and guarded shutdown. The current-instance token 
 
 Sully applied the reconciled release after shutdown. Canonical main advanced to released b569cc1e556726043671f9b329a2f3cb0cf49ea7; VERSION is 0.12.0 and the index/tree exactly match the release. Eight baseline paths were applied (VERSION, CHANGELOG, four interface tests and web/app.js plus web/index.html); all 84 remaining reviewed physical input pins were retained. Exact original path/index snapshots and before/after evidence are preserved under scratch/live-update-2026-10-12/release-application-recovery. The normal Start-menu Books Arranger and Restart Books Arranger links still target the canonical Pythonw scripts with -I -B. No replacement owner has yet been verified.
 
-Next: Sergei uses Windows Start menu **Books Arranger** normally. Ender verifies exact new Pythonw owner, loaded v0.12.0, inactive Paused saved run, matching checkpoint and four completed records before one separately authorized supported automatic Start. SQLITE_BUSY root cause/recovery work remains a separate agent-owned fix; v0.12.0 does not promise uninterrupted processing.
+## Normal launch and guarded resume verification
+
+Sergei confirmed opening **Books Arranger** through the normal Windows entry. Exact owner verification found loaded v0.12.0 Pythonw PID53708, instance71d58343cdb17863c2232eb1f5eaebf6; old PID50896 was absent. The saved run96cbe916-3b2b-4858-b386-89d493cb4f24 was inactive Paused/research, restart_paused=true, can_start=true. Its exact checkpoint and four complete validation/metadata/candidate/context records matched the shutdown proof. All81 non-document/non-dot tracked source/interface/test/runtime-path files matched released b569cc1e556726043671f9b329a2f3cb0cf49ea7 after CRLF normalization; actual physical SHA256 pins are retained in `scratch/live-update-2026-10-12/new-owner-proof.json`.
+
+One guarded supported Start was issued and accepted; repeat Start is refused by the task receipt. Proofs: `start-issued.json`, `start-reply.json` in the same scratch folder. No automatic controller code was modified, and the isolated SQLITE_BUSY candidate patch is not applied to the running app.
+
+Bounded observations at2026-10-12T06:57:35.678161Z and06:58:06.513552Z (09:57:35–09:58:06 Israel time;30.835391seconds apart) confirmed the same new owner and Running/research saved run. Research moved from Flashback to another candidate; one candidate remained actively researching. Durable checkpoint progressed from2391 pending/2 deferred to2386 pending/7 deferred, with2431 historical done retained. Waiting changed2392→2391 and Held34→35. These are saved research visits, not conversions. Four completed records remained exactly unchanged;0 new conversions were observed. Full timestamped snapshots are retained as `observation-065735.json` and `observation-065806.json`.
+
+The returned failure id ece3d07c-9653-4d53-a583-5f2e84ed1c16 is the unchanged historical durable SQLITE_BUSY event from2026-10-11T21:11:48.760915Z. No new failure was observed in this bounded interval. The separate later nondurable failure evidence remains preserved from before shutdown. SQLITE_BUSY diagnosis/recovery remains owned by the separate Ender/Senua/Futaba workflow; v0.12.0 does not promise uninterrupted processing. No further Start was issued and no other app was inspected or changed.
