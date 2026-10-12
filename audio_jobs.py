@@ -26,11 +26,14 @@ class AudioJobs:
     a database transaction. Queue construction never starts pending work.
     """
 
-    def __init__(self, database, runner, revision_guard, output_validator):
+    def __init__(self, database, runner, revision_guard, output_validator, historical_retirement=None):
         self.database = str(database)
         self.runner = runner
         self.revision_guard = revision_guard
         self.output_validator = output_validator
+        self.historical_retirement=historical_retirement
+        self.pending_postprocessing=None
+        self.postprocessing=None
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
@@ -78,19 +81,22 @@ class AudioJobs:
         for row in self._rows():
             state = row["state"]
             if state == "completed" or (state == "running" and row["stage"] == "publishing"):
+                if state=='completed' and self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:
+                    continue # Exact authorized former-output retirement; preserve immutable history.
                 journal = json.loads(row["journal"])
                 record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
                 try:
                     self._check_output(record)
                     if record["job_id"] != row["job_id"]:
                         raise ValueError("Output job identity mismatch")
-                    self._update(row["job_id"], state="completed", stage="completed", output=json.dumps(record), reason="")
+                    if state!='completed' or json.loads(row['output'] or '{}')!=record:
+                        self._update(row["job_id"], state="completed", stage="completed", output=json.dumps(record), reason="")
                 except Exception as exc:
                     self._update(row["job_id"], state="needs attention", reason=str(exc) or type(exc).__name__)
             elif state == "running":
                 self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
 
-    def enqueue(self, manifest, *, approval_context=None):
+    def enqueue(self, manifest, *, approval_context=None,replacement_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
         frozen = json.loads(json.dumps(manifest, ensure_ascii=False, allow_nan=False))
         if not isinstance(frozen, dict):
@@ -124,6 +130,7 @@ class AudioJobs:
                     frozen["job_id"] = existing[0]["job_id"]
                     digest = existing[0]["manifest_hash"]
             if existing:
+                if replacement_context is not None:raise ValueError('Replacement UUID is already bound; inspect its relation instead')
                 if approval_context is not None:raise ValueError("Automatic candidate already has a bound job")
                 if existing[0]["manifest_hash"] != digest:
                     raise ValueError("Job UUID already binds a different manifest")
@@ -135,6 +142,11 @@ class AudioJobs:
                 return frozen["job_id"]
             timestamp = _now()
             with self._db() as db:
+                if replacement_context is not None:
+                    if approval_context is not None:raise ValueError('Replacement and automatic approval cannot be combined')
+                    store,binding=replacement_context
+                    db.execute('BEGIN IMMEDIATE')
+                    store.admission(db,frozen,binding)
                 if approval_context is not None:
                     # Only the private automatic caller provides this exact checked context.
                     id,revision,expected,approved=approval_context
@@ -178,6 +190,7 @@ class AudioJobs:
             if self._thread and self._thread.is_alive():
                 return self.status()
             for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed'"):
+                if self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:continue
                 try:
                     self._check_output(json.loads(row["output"]))
                 except Exception as exc:
@@ -216,6 +229,13 @@ class AudioJobs:
         return {"state": state, **counts, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
     def _work(self):
+        # Resume only explicitly paused durable postprocessing; never loop unclassified failures.
+        if self.pending_postprocessing and self.postprocessing:
+            for job_id in self.pending_postprocessing():
+                if self._stop.is_set():return
+                try:self.postprocessing(job_id)
+                except InterruptedError:return
+                except Exception:pass # The postprocessor retains original/secondary failure evidence.
         while not self._stop.is_set():
             pending = self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
             if not pending: return
@@ -277,7 +297,9 @@ class AudioJobs:
                     journal['failure']={'exception_class':type(exc).__name__,'at':time.time(),'retryable':isinstance(exc,(OSError,TimeoutError)) and not isinstance(exc,InterruptedError),'stage':row['stage']}
                     self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
             if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
-                self.after_completed(job_id)
+                try:self.after_completed(job_id)
+                except InterruptedError:return
+                except Exception:pass # Durable postprocessing diagnostics preserve the completed audio row.
 
 
 class _Connection:

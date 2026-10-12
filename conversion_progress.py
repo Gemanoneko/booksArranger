@@ -22,12 +22,15 @@ def approved_scope(row,ctx,key_for):
         if any(str(saved.get(k))!=str(m.get(k)) for k in ('size','modified')):return False
     return bool(ctx.get('cover_id') and any(c.get('id')==ctx['cover_id'] for c in ctx.get('cover_choices',[])))
 
-def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile):
+def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile,replacement=None):
     if not output_current or job.get('state')!='completed':return False
     manifest=job['manifest'];record=job.get('output') or {}
     if manifest.get('candidate_id')!=row['id'] or manifest.get('candidate_revision')!=row['revision'] or manifest.get('metadata')!=row.get('review'):return False
     if record.get('validation',{}).get('passed') is not True or record.get('job_id')!=job['job_id']:return False
-    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']):return False
+    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']):
+        if not replacement or replacement.get('state') not in {'published','retiring','completed'} or replacement.get('replacement_job_id')!=job['job_id'] or replacement.get('candidate_id')!=row['id'] or replacement.get('candidate_revision')!=row['revision'] or manifest.get('replacement_id')!=replacement.get('id') or manifest.get('replacement_parent_job_id')!=replacement.get('parent_job_id') or replacement.get('parent_job_id')==job['job_id']:return False
+        import json
+        if record!=json.loads(replacement.get('current_output_json') or '{}'):return False
     sources=manifest.get('sources',[]);included=ctx.get('included',[])
     if [key_for(s['path']) for s in sources]!=[k for k in ctx.get('track_order',[]) if k in included]:return False
     if ctx.get('cover_id')!=manifest.get('cover',{}).get('id'):return False

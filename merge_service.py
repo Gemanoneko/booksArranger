@@ -13,13 +13,16 @@ import functools
 
 from audio_jobs import AudioJobs
 from audio_pipeline import create_private, publish, digest, fingerprint, Paused, PROFILE
-from native_io import DirectoryBoundary, ProtectedFiles, ordinary
+from native_io import DirectoryBoundary, ProtectedFiles, VerifiedFile, ordinary
 from review_backend import CandidateReviewService
 from scanner import connect
 from metadata import propose
 from source_cleanup import CleanupJobs, packed
 from review_backend import member_key
 from conversion_progress import approved_scope,completed_book,phase_progress
+from replacement_jobs import Replacements,digest as record_digest,now as replacement_now
+from replacement_retirement import ReplacementRetirement
+from current_audiobook import CurrentAudiobooks
 import groups
 
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
@@ -45,7 +48,13 @@ class MergeService:
         self.reviews = CandidateReviewService(inventory, self.cache_dir / 'covers')
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
-        self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid)
+        self.replacements=Replacements(inventory.database)
+        self.publications=CurrentAudiobooks(inventory.roots['Audiobooks'],self.cache_dir.parent/'chapter-repairs',self.replacements)
+        self.retirement=ReplacementRetirement(self.replacements,self.cache_dir.parent/'replacement-recovery',inventory.roots['Audiobooks'],threading.Event(),self._replacement_guard,self.publications.protect_former)
+        self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
+        self.retirement.stop=self.jobs._stop
+        self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
+        self.jobs.postprocessing=self._finish_replacement
         self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary)
         self.cleanup.stop=self.jobs._stop
         self.jobs.after_completed=self._after_completed
@@ -107,7 +116,9 @@ class MergeService:
                 if any((self.reviews.cache/(ctx['cover_id']+suffix)).is_file() for suffix in ('.png','.jpg')):approved[id]=(row,ctx)
             source_by={r['job_id']:r for r in cleanups};storage_by={r['job_id']:r for r in storage};folder_by={r['job_id']:r for r in folders}
             converted=set()
-            for job in jobs:
+            representatives=[self.replacements.representative(jobs,id)[0] for id in approved] if hasattr(self,'replacements') else jobs
+            for job in representatives:
+                if not job:continue
                 id=job['manifest']['candidate_id']
                 if id not in approved:continue
                 row,ctx=approved[id];record=job.get('output') or {};current=False
@@ -115,11 +126,18 @@ class MergeService:
                     stat=Path(record['final_path']).stat()
                     current=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)==self._validated_outputs.get(job['job_id'])
                 except (OSError,KeyError):pass
-                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE}):converted.add(id)
+                relation=self.replacements.get(new_job=job['job_id']) if hasattr(self,'replacements') else None
+                binding=relation if relation and relation['state'] in {'published','retiring','completed'} and self.replacements.structural_guard(relation) else None
+                if relation and relation['state'] in {'published','retiring','completed'} and binding is None:continue
+                if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding):converted.add(id)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted}
 
     def state(self):
         value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
+        raw_jobs=value['jobs']
+        if hasattr(self,'replacements'):
+            visible,completed=self.replacements.projected(value['jobs'],value['current_job_id'])
+            value['jobs']=visible;value['completed']=completed
         current=next((j for j in value['jobs'] if j['job_id']==value['current_job_id']),None)
         pending=[c for c in cleanups if c['state'] in ('waiting','checking','removing','pausing','paused')]
         active=next((c for c in pending if c['id']==self.cleanup.current),None)
@@ -133,6 +151,10 @@ class MergeService:
             value['state']='Pausing' if (self.cleanup.current or alive) and self.cleanup.stop.is_set() else 'Running' if self.cleanup.current or alive else 'Paused'
             value['queued']+=len(pending)
         errors=[c for c in cleanups if c['state']=='needs_attention']+[r for r in storage if r['state']=='needs_attention']
+        if hasattr(self,'replacements'):
+            for relation in self.replacements.rows():
+                failure=json.loads(relation['failure_json'] or '{}')
+                if failure and failure.get('type')!='InterruptedError':errors.append({'job_id':relation['replacement_job_id'],'state':'needs_attention','reason':failure.get('message','Replacement postprocessing needs attention'),'replacement':True})
         folder_notes=[r['reason'] for r in folders if r['state'] in ('needs_attention','unsupported') and r.get('reason')]
         value['failed']+=len(errors)
         if errors and value['state']=='Completed':value['state']='Needs attention'
@@ -143,7 +165,7 @@ class MergeService:
         elif current:progress=phase_progress(current['stage'],current.get('progress'))
         elif errors:
             error=errors[0];current=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
-            phase='originals' if error in cleanups else 'folders' if error in folders else 'temporary'
+            phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
             progress={'phase':phase,'reason':error['reason']}
             if phase=='originals':progress.update(completed=error['removed'],total=error['total'])
         elif value['state'] in ('Paused','Needs attention'):
@@ -152,13 +174,13 @@ class MergeService:
         if current and (current.get('reason') or errors):
             progress=progress or {'phase':current['stage']}
             progress['reason']=current.get('reason') or next((e['reason'] for e in errors if e['job_id']==current['job_id']),'')
-        totals=self.progress_books(value['jobs'],cleanups,storage,folders)
+        totals=self.progress_books(raw_jobs,cleanups,storage,folders)
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
-            'cleanup_active':bool(active or pending or post)}
+            'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False}
 
     def pause(self):
         self.cleanup.pause();self.jobs.pause();return self.state()
@@ -290,6 +312,11 @@ class MergeService:
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
 
     def _prune_completed(self,job_id):
+        if hasattr(self,'replacements'):
+            relation=self.replacements.get(parent=job_id)
+            if relation and relation['state'] in {'retiring','completed'}:
+                with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
+                if self.retirement.historical_retired(parent):return
         self.recovery.sync()
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
@@ -315,6 +342,90 @@ class MergeService:
                 else:self._enrollment_attention(row,error)
             finally:self.cleanup.current=None
         self._prune_completed(job_id)
+        if hasattr(self,'replacements') and self.replacements.get(new_job=job_id):self._finish_replacement(job_id)
+
+    def _replacement_guard(self,relation,historical=False):
+        return self.replacements.structural_guard(relation,historical=historical,queued=True)
+
+    def _pending_replacement_postprocessing(self):
+        pending=[]
+        with connect(self.inventory.database) as db:
+            for relation in self.replacements.rows():
+                failure=json.loads(relation['failure_json'] or '{}')
+                if failure and failure.get('type')!='InterruptedError':continue
+                row=self.replacements.raw_job(db,relation['replacement_job_id'])
+                if row['state']=='completed' and relation['state'] in {'queued','published','retiring'}:pending.append(row['job_id'])
+        return pending
+
+    def _finish_replacement(self,job_id):
+        relation=self.replacements.get(new_job=job_id)
+        if not relation or relation['state']=='completed':return
+        try:
+            self._post_current=(job_id,'verifying replacement')
+            self._prune_completed(job_id)
+            if self.jobs._stop.is_set():raise InterruptedError('Replacement postprocessing paused')
+            if relation['state']=='queued':
+                with connect(self.inventory.database) as db:
+                    row=self.replacements.raw_job(db,job_id)
+                    stored=db.execute('SELECT * FROM storage_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
+                    if not stored or stored['state']!='completed':raise ValueError('Replacement staging cleanup must finish before current publication')
+                    storage=dict(stored)
+                output=json.loads(row['output'])
+                with DirectoryBoundary(output['root'],ordinary(output['final_path']).parent),VerifiedFile(output['final_path']):
+                    if not self._output_valid(output):raise ValueError('New replacement output changed')
+                    relation=self.replacements.publish(relation,row,output,storage,True)
+            self._post_current=(job_id,'retiring former outputs')
+            self.retirement.run(relation)
+        except Exception as error:
+            fresh=self.replacements.get(new_job=job_id)
+            if fresh and not fresh['failure_json']:
+                try:self.replacements.failure(fresh,error,'replacement postprocessing')
+                except Exception:pass # The original exception remains authoritative to the caller.
+            raise
+        finally:self._post_current=None
+
+    @operation
+    def replace_audiobook(self,library,identity,revision,parent_job_id):
+        """Exact approved Eye of God replacement; no arbitrary output or source paths."""
+        if library!='Audiobooks' or parent_job_id!='9e04e700-ecf8-4807-8195-01a7a1d73bd6':raise ValueError('No approved replacement for this book')
+        from replacement_media import prepare_replacement
+        plan_path=Path(__file__).with_name('replacement_eye_plan.json')
+        data=plan_path.read_bytes()
+        if hashlib.sha256(data).hexdigest()!='db493dbbfa691e1fe6b875a3edacb8ebd318d487c80c9fa4de66639afa35d20f':raise ValueError('Approved replacement media plan changed')
+        plan=json.loads(data)
+        with self.reviews.lock,self.inventory.group_lock:
+            self._no_scan()
+            existing=self.replacements.get(candidate=identity)
+            if existing:
+                if existing['parent_job_id']!=parent_job_id or existing['candidate_revision']!=revision:raise ValueError('Replacement identity differs')
+                return {'job_id':existing['replacement_job_id'],'replacement_id':existing['id'],'state':existing['state'],'already_enrolled':True}
+            with connect(self.inventory.database) as db:
+                raw=self.replacements.raw_job(db,parent_job_id)
+                parent={'job_id':parent_job_id,'state':raw['state'],'manifest':json.loads(raw['manifest']),'output':json.loads(raw['output'] or '{}')}
+                group=dict(db.execute('SELECT * FROM book_groups WHERE id=?',(identity,)).fetchone() or {})
+                context=dict(db.execute('SELECT * FROM candidate_context WHERE id=?',(identity,)).fetchone() or {})
+            if parent['manifest']['candidate_id']!=identity or parent['manifest']['candidate_revision']!=revision or group.get('revision')!=revision or context.get('revision')!=revision:raise ValueError('Replacement candidate revision changed')
+            new_id=str(uuid.uuid4());publication_id=str(uuid.uuid4());manifest=prepare_replacement(parent,new_id,plan);manifest['replacement_id']=publication_id
+            root=ordinary(manifest['root']);destination=ordinary(manifest['destination'])
+            with DirectoryBoundary(root,destination.parent):
+                if destination.exists():raise ValueError('Distinct final audiobook already exists; nothing will be overwritten')
+            repairs=self.publications._repairs(parent)
+            if len(repairs)!=2 or len([r for r in repairs if r['corrected']])!=1:raise ValueError('Both approved chapter-repair receipts are required')
+            paths=[{'record':parent['output'],'id':parent_job_id,'journal':None}]+repairs
+            old=[]
+            for publication in paths:
+                record=publication['record'];path=ordinary(record['final_path'])
+                with DirectoryBoundary(root,path.parent) as boundary,VerifiedFile(path) as file:
+                    if file.facts()['links']!=1 or file.facts()['size']!=record['size']:raise ValueError('Former audiobook identity changed')
+                    old.append({'path':str(path),'size':record['size'],'sha256':record['sha256'],'facts':file.facts(),'ancestry':boundary.identities,'publication_id':publication['id'],'journal_sha256':publication.get('journal_sha256')})
+            corrected=next(r for r in repairs if r['corrected'])
+            previous={'id':corrected['id'],'path':corrected['record']['final_path'],'sha256':corrected['record']['sha256'],'journal_sha256':corrected['journal_sha256']}
+            approval={'group_row':group,'context_row':context,'destination':manifest['destination'],'profile':manifest['profile'],'sources':manifest['sources'],
+                      'old_outputs':old,'parent_output':parent['output']['final_path'],'source_policy':'KEEP_ALL_40_ORIGINALS','media_plan_sha256':hashlib.sha256(data).hexdigest(),'replacement_manifest':copy.deepcopy(manifest)}
+            binding={'id':publication_id,'parent_row':raw,'previous_publication':previous,'approval':approval,'timestamp':replacement_now()}
+            job=self.jobs.enqueue(manifest,replacement_context=(self.replacements,binding))
+        self.resume()
+        return {'job_id':job,'replacement_id':publication_id,'queued':True}
 
     def candidate_status(self, identity):
         jobs = [j for j in self.jobs.status()['jobs'] if j['manifest']['candidate_id'] == identity]
@@ -322,6 +433,11 @@ class MergeService:
         job = jobs[-1]
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
         return {'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+
+    def current_audiobook(self,identity):
+        if not hasattr(self,'publications'):return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}
+        value=self.publications.describe(self.jobs.status()['jobs'],identity)
+        return {key:copy.deepcopy(value[key]) for key in ('state','reason','path','identity','publication_id','kind','tags_state') if key in value}
 
     @operation
     def approve_automatic(self,row,result,stop,client):
@@ -546,6 +662,12 @@ class MergeService:
     def _guard(self, manifest):
         try:
             self._no_scan()
+            if manifest.get('replacement_id'):
+                relation=self.replacements.get(new_job=manifest['job_id'])
+                if not relation or relation['id']!=manifest['replacement_id'] or relation['state']!='queued':return False
+                with connect(self.inventory.database) as db:raw=self.replacements.raw_job(db,manifest['job_id'])
+                frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
+                return json.loads(raw['manifest'])==frozen and self._replacement_guard(relation)
             current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True)
             def frozen(value):return {k:v for k,v in value.items() if k not in ('job_id','attempt_id')}
             return frozen(current)==frozen(manifest)
@@ -554,6 +676,9 @@ class MergeService:
     def _run(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
         output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info))
+        if manifest.get('replacement_id'):
+            from replacement_media import verify_replacement
+            validation=verify_replacement(manifest,validation,output,output.parent,stop)
         record={}
         def journal(stage, details):
             if stage=='completed':return
@@ -593,6 +718,7 @@ class MergeService:
             self._retention_thread.join(30)
             if self._retention_thread.is_alive():raise TimeoutError('Recovery cleanup is reaching its safe file checkpoint')
         self.jobs.close()
+        if hasattr(self,'publications'):self.publications.close()
         self.cleanup.close()
 
     @staticmethod
@@ -672,17 +798,23 @@ class MergeService:
                 'status':'Source tags unchanged','facts':self._review_facts(row['review']),
                 'cover':({**selected,'label':selected['source_label'],'status':'Selected cover — edition unverified'} if selected else {'status':'No selected cover'}),
                 'raw_tags':row['review'] or {},'member_values':[]})
-            completed=self._completed_output(identity)
-            if completed:
-                output=completed['output'];cover=completed['manifest']['cover']
+            current=self.publications.describe(self.jobs.status()['jobs'],identity)
+            completed=self.replacements.representative(self.jobs.status()['jobs'],identity)[0]
+            if current['state']=='verified':
+                output=current['record'];cover=current['cover']
                 cleanup=self.cleanup.status(completed['job_id']);cleanup_facts=[]
                 if cleanup:
                     cleanup_facts=[{'label':label,'value':value} for label,value in [('Source cleanup',cleanup['status']),('Originals removed',cleanup['removed']),('Originals remaining',cleanup['remaining']),('Removed from Z: (bytes)',cleanup['bytes_removed']),('Recovery copies (bytes)',cleanup['recovery_bytes']),('Recovery location',cleanup['recovery_location']),('Recovery','Temporary recovery files were removed after successful cleanup. Original tracks cannot be restored from them.' if cleanup.get('recovery',{}).get('state')=='deleted' else 'Remaining temporary recovery copies can restore original tracks. Existing files are never overwritten.' if cleanup['restore_available'] else 'Temporary recovery files are unavailable; see cleanup status.')]]
-                sections.append({'kind':'created','heading':'Created audiobook metadata','status':'Output checks passed; Apple Books sync not checked','path':output['final_path'],
-                    'facts':self._output_facts(output['validation']['tags'])+cleanup_facts,
-                    'cover':{**cover,'label':'Created audiobook cover','status':'Validated attached cover'},'raw_tags':output['validation']['tags'],'member_values':[]})
+                saved=current.get('tags_state')=='saved_preserved';tags=current.get('saved_tags',{}) if saved else current['tags']
+                sections.append({'kind':'created','heading':'Saved chapter-update metadata' if saved else 'Current audiobook metadata',
+                    'status':'Verified chapter update; saved preserved tags, fresh tag reading unavailable' if saved else 'Output checks passed; Apple Books sync not checked','path':output['final_path'],
+                    'facts':self._output_facts(tags)+cleanup_facts,
+                    'cover':{**cover,'label':'Current audiobook cover','status':'Validated attached cover'},'raw_tags':tags,'member_values':[]})
+            elif current['state'] in {'verifying','unavailable'}:
+                sections.append({'kind':'snapshot','heading':'Current audiobook unavailable','status':current['reason'],'facts':[],'raw_tags':{},'member_values':[]})
         return {'inspector':{'id':identity,'view':view,'heading':'Metadata and cover','sections':sections,'source_directories':directories,
-            'source_directory_count':len(directories),'output_folder_available':bool(completed),'audiobook_ready':ready}}
+            'source_directory_count':len(directories),'output_folder_available':bool(view=='candidates' and current['state']=='verified'),'audiobook_ready':ready,
+            'current_audiobook':self.current_audiobook(identity) if view=='candidates' else None}}
 
     def open_folder(self,library,view,identity,folder_kind='source',directory_id=None):
         root=self.inventory.roots[library]
@@ -697,9 +829,14 @@ class MergeService:
                 directory=item['path']
         elif folder_kind=='output' and view=='candidates':
             self.reviews._row(library,identity)
-            output=self._completed_output(identity)
-            if not output:raise ValueError('No validated created output folder is available')
-            directory=str(Path(output['output']['final_path']).parent)
+            jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
+            if current['state']!='verified':raise ValueError(current.get('reason','Current audiobook unavailable'))
+            publication=self.publications.publication(jobs,identity)
+            with self.publications.protected(publication) as (_,key):
+                if key!=current['identity']:raise ValueError('Current audiobook changed before folder opening')
+                directory=str(Path(current['path']).parent)
+                self.dispatch_folder(directory)
+                return {'opened':True,'directory':directory}
         else:raise ValueError('Unknown folder target')
         with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
         return {'opened':True}

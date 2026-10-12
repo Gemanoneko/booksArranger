@@ -295,6 +295,11 @@ class Handler(BaseHTTPRequestHandler):
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
         reviews=self.server.merge.reviews
+        if path=='/api/audiobook/replace':
+            self.shape(data,{'library','id','revision','parent_job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            parent=self.uuid_value(data['parent_job_id'])
+            self.response(202,self.server.merge.replace_audiobook(library,id,revision,parent));return
         if path in {'/api/inspect','/api/open-folder'}:
             self.shape(data,{'library','view','id'}, {'folder_kind','directory_id'} if path=='/api/open-folder' else ())
             library=self.library(data['library'])
@@ -386,7 +391,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'Server is shutting down');return

@@ -272,7 +272,7 @@ class AutomaticProcessing:
             run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase']
             if phase=='discovery':
                 # Existing queued jobs finish before a scan; never scan while encoding/cleanup runs.
-                if self.merge.state().get('queued'):
+                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):
                     self.merge.resume()
                     while not self._idle_jobs():
                         if self.stop_event.wait(.2):raise InterruptedError()
@@ -287,7 +287,7 @@ class AutomaticProcessing:
                 self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
-                if self.merge.state().get('queued'):self.merge.resume()
+                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self.merge.resume()
             checkpoint['pending']=list(dict.fromkeys(checkpoint.get('pending',[])+checkpoint.get('deferred',[])))
             checkpoint['done']=list(dict.fromkeys(checkpoint.get('done',[])))
             checkpoint['deferred']=[];deferred=checkpoint['deferred']

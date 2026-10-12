@@ -98,6 +98,9 @@ class MergeTests(unittest.TestCase):
             created=db.execute('SELECT metadata FROM files WHERE path=?',(output['final_path'],)).fetchone()
         self.assertIn('arranger_output',json.loads(created[0]))
         self.assertEqual(self.service.reviews.page()['total'],1)
+        deadline=time.monotonic()+5
+        while self.service.current_audiobook(row['id'])['state']=='verifying' and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(self.service.current_audiobook(row['id'])['state'],'verified')
         inspected=self.service.inspect('Audiobooks','candidates',row['id'])['inspector']
         self.assertIn('Recovery location',[f['label'] for f in inspected['sections'][-1]['facts']])
         self.assertFalse(self.service.reviews.page()['rows'][0]['creation']['can_create'])

@@ -119,7 +119,7 @@ function select(row, reset) {
   $('details-heading').textContent=inspectorIdentity?.id===recordIdentity(row).id?(candidate?'Book metadata':'File metadata'):(candidate?'Book candidate':'Selected file');
   $('source').textContent=candidate?row.scope:row.path;
   $('reason').textContent=row.preview.reason;
-  $('proposed').textContent=row.preview.path || 'No destination proposed until canonical metadata is reviewed.';
+  $('proposed').textContent=(candidate?'Reviewed destination preview: ':'')+(row.preview.path || 'No destination proposed until canonical metadata is reviewed.');
   $('method').textContent=row.metadata.method || 'Unavailable';
   $('language').textContent=row.metadata.edition_language || 'Unknown';
   $('series-clue').textContent=`${row.metadata.series || 'Unknown'} / ${row.metadata.number || 'Unknown'}`;
@@ -298,6 +298,7 @@ function folderState(row,button,status,kind='source',directory=null){const key=f
 async function openFolder(row,button,status,folderKind='source',directoryId=null){const key=folderKey(row,folderKind,directoryId);if(ended || button.disabled || pendingFolders.has(key))return;pendingFolders.add(key);folderMessages.delete(key);folderState(row,button,status,folderKind,directoryId);try{const payload={...recordIdentity(row),folder_kind:folderKind};if(directoryId)payload.directory_id=directoryId;await request('/api/open-folder',payload);folderMessages.delete(key);}catch(error){folderMessages.set(key,error.message || 'Folder unavailable. Connect the library drive and try again.');}finally{pendingFolders.delete(key);folderState(row,button,status,folderKind,directoryId);}}
 async function viewMetadata(row,showFolders=false){if(ended)return;const same=selectedPath===row.path;select(row,!same);const identity=recordIdentity(row),sequence=++inspectSequence;inspectorIdentity=identity;$('metadata-inspector').hidden=false;$('details-heading').textContent=row.kind==='candidate'?'Book metadata':'File metadata';$('details-heading').scrollIntoView?.({block:'start',behavior:'auto'});$('details-heading').focus?.({preventScroll:true});$('inspect-status').textContent='Reading metadata and artwork…';try{const result=await request('/api/inspect',identity);if(sequence!==inspectSequence || selectedPath!==row.path || ended)return;if(!result.inspector || !Array.isArray(result.inspector.sections))throw Error('Metadata inspection unavailable');renderInspector(result.inspector,row,sequence);if(showFolders)$('source-folders').open=true;$('inspect-status').textContent='';}catch(error){if(sequence===inspectSequence)$('inspect-status').textContent=error.message;}}
 function inspectedCandidateStatus(section,inspector,row){
+  if(section.kind==='created' || section.kind==='snapshot')return section.status || '';
   // The inspection is newer evidence than the selected inventory row.
   if(/error|failed|attention|changed/i.test(section.status || ''))return section.status;
   return candidateStatus({...row,...(typeof inspector.audiobook_ready==='boolean'?{audiobook_ready:inspector.audiobook_ready}:{}),...(Object.hasOwn(inspector,'duplicate_review')?{duplicate_review:inspector.duplicate_review}:{})});
@@ -499,7 +500,7 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
   if($('automatic-result').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
@@ -513,7 +514,8 @@ function renderAutomaticResult(row){
   const waitText=wait?{app_limit:source?'App request limit reached for '+source:'App metadata request limit reached',source_pause:source?source+' requested a pause':'Metadata source requested a pause',source_unavailable:source?source+' unavailable':'Metadata source unavailable'}[wait.kind]:'';
   if(waitText){$('automatic-reasons').append(node('li',waitText));$('automatic-reasons').hidden=false;}
   const facts=$('automatic-facts');facts.replaceChildren();const approval=recordedApproval(row),review=row.review || {},context=row.review_context || {};
-  const values=approval?{'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Output destination':row.creation?.destination || 'Destination unavailable'}:{'Title clue':row.title_clue || 'Unknown','Output destination':row.creation?.destination || 'No verified destination yet'};
+  const current=row.current_audiobook,actual=current?.state==='verified'?current.path:current?.state==='none' || !current?'No verified audiobook created yet':'Current audiobook unavailable'+(current.reason?' — '+current.reason:'');
+  const values=approval?{'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Reviewed destination':row.creation?.destination || 'Destination unavailable','Current audiobook':actual}:{'Title clue':row.title_clue || 'Unknown','Reviewed destination':row.creation?.destination || 'No verified destination yet','Current audiobook':actual};
   Object.assign(values,provenanceFacts(row),recordingFacts(row));if(row.metadata_facts?.series_state==='omitted_unknown')delete values['Series position'];
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
@@ -523,7 +525,7 @@ function renderAutomaticResult(row){
   $('automatic-accepted-evidence').textContent=JSON.stringify(accepted,null,2);$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.manual_note && !accepted.metadata_provenance && !accepted.recording_review;
 }
 async function ensureCandidateInspector(row){
-  const identity=recordIdentity(row),key=JSON.stringify([identity,row.revision,row.creation?.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review]);
+  const identity=recordIdentity(row),key=JSON.stringify([identity,row.revision,row.creation?.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(recoveryDisconnected || automaticInspectorKey===key || $('metadata-inspector').contains?.(document.activeElement))return;
   automaticInspectorKey=key;inspectorIdentity=identity;const sequence=++inspectSequence;$('metadata-inspector').hidden=false;
   setText('inspect-status','Reading metadata and artwork…');

@@ -1,0 +1,479 @@
+{
+  "status": "DESIGN_ONLY_NOT_EXECUTION_AUTHORITY",
+  "parent_job_id": "9e04e700-ecf8-4807-8195-01a7a1d73bd6",
+  "source_count": 40,
+  "source_bytes": 1032870187,
+  "source_policy": "KEEP_ALL_40_ORIGINALS",
+  "encoding": {
+    "profile": "aac-source-matched-quicktime-v3",
+    "codec": "aac",
+    "bitrate": 128000,
+    "channels": 1,
+    "sample_rate": 44100
+  },
+  "pcm_rate": 44100,
+  "total_source_pcm_frames": 2828272896,
+  "total_decoded_source_seconds": 64133.172244897956,
+  "chapter_readback_tolerance_ms": 1,
+  "output_decoded_padding_tolerance_seconds": 0.25,
+  "chapter_text_entry_size": 65,
+  "tracks": [
+    {
+      "order": 1,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\01_Glaz Boga.mp3",
+      "size": 1146322,
+      "sha256": "daf1e68e8713022472e1ee966bd0573d5cb79beb73c220fd4f1d0375479adf94",
+      "pcm_rate": 44100,
+      "pcm_frames": 2539008,
+      "title": "Track 01",
+      "start_ms": 0,
+      "end_ms": 57574
+    },
+    {
+      "order": 2,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\02_Glaz Boga.mp3",
+      "size": 2788469,
+      "sha256": "d8d28396c72d8df928bbce99ab87c91cd209c642afa9e358ead135dfdf9f9198",
+      "pcm_rate": 44100,
+      "pcm_frames": 7075584,
+      "title": "Track 02",
+      "start_ms": 57574,
+      "end_ms": 218018
+    },
+    {
+      "order": 3,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\03_Glaz Boga.mp3",
+      "size": 3221315,
+      "sha256": "2b9c2a64729593225b44ad9318a299012fb578f4c8fc8a68c1d8855db9f2b5a5",
+      "pcm_rate": 44100,
+      "pcm_frames": 8271360,
+      "title": "Track 03",
+      "start_ms": 218018,
+      "end_ms": 405577
+    },
+    {
+      "order": 4,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\04_Glaz Boga.mp3",
+      "size": 16846791,
+      "sha256": "1ceb1654981affae499c491c31d064c707aac43da6a91c7f7ab5cbc8bba88e85",
+      "pcm_rate": 44100,
+      "pcm_frames": 45912960,
+      "title": "Track 04",
+      "start_ms": 405577,
+      "end_ms": 1446687
+    },
+    {
+      "order": 5,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\05_Glaz Boga.mp3",
+      "size": 18470589,
+      "sha256": "31a4ce34df51a5e5ec6d2fe8a1efd9098a159d1abacf0515d98acab1233153d2",
+      "pcm_rate": 44100,
+      "pcm_frames": 50398848,
+      "title": "Track 05",
+      "start_ms": 1446687,
+      "end_ms": 2589518
+    },
+    {
+      "order": 6,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\06_Glaz Boga.mp3",
+      "size": 20053938,
+      "sha256": "e9d0da0d6088acd17ad6271ad1dcd856cee6363ebb5e73974d8840299bcb83cc",
+      "pcm_rate": 44100,
+      "pcm_frames": 54772992,
+      "title": "Track 06",
+      "start_ms": 2589518,
+      "end_ms": 3831536
+    },
+    {
+      "order": 7,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\07_Glaz Boga.mp3",
+      "size": 47137254,
+      "sha256": "2edb347a13da5f9b889b691b6ad878e8266bd595d73e2c9e0b5b2aae8c07a122",
+      "pcm_rate": 44100,
+      "pcm_frames": 129593088,
+      "title": "Track 07",
+      "start_ms": 3831536,
+      "end_ms": 6770155
+    },
+    {
+      "order": 8,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\08_Glaz Boga.mp3",
+      "size": 45341652,
+      "sha256": "34e06b7ac37ff4bfddbb176c746f13ac5bdc4d340753ebb6e75ebe92257c57fb",
+      "pcm_rate": 44100,
+      "pcm_frames": 124632576,
+      "title": "Track 08",
+      "start_ms": 6770155,
+      "end_ms": 9596291
+    },
+    {
+      "order": 9,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\09_Glaz Boga.mp3",
+      "size": 33731121,
+      "sha256": "b2edf1fdd55787f1b17549683a3ffbd53aa3504bcd3013fb05d4aa11c2e34862",
+      "pcm_rate": 44100,
+      "pcm_frames": 92557440,
+      "title": "Track 09",
+      "start_ms": 9596291,
+      "end_ms": 11695099
+    },
+    {
+      "order": 10,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\10_Glaz Boga.mp3",
+      "size": 30928466,
+      "sha256": "3efd19f686f8755357fd486cf7f496010a40f0e2bf96d4e9f91062c5d5bf01f6",
+      "pcm_rate": 44100,
+      "pcm_frames": 84814848,
+      "title": "Track 10",
+      "start_ms": 11695099,
+      "end_ms": 13618338
+    },
+    {
+      "order": 11,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\11_Glaz Boga.mp3",
+      "size": 52283870,
+      "sha256": "a3c3eb4b40f4f472f51e790c167b8bde00bf2138d811151a1aab1a98c8c599ab",
+      "pcm_rate": 44100,
+      "pcm_frames": 143811072,
+      "title": "Track 11",
+      "start_ms": 13618338,
+      "end_ms": 16879360
+    },
+    {
+      "order": 12,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\12_Glaz Boga.mp3",
+      "size": 41838020,
+      "sha256": "9da35029e3899810ec1e3865d14a46bd6541fb2d3120c9b4ce05519cefebcbdd",
+      "pcm_rate": 44100,
+      "pcm_frames": 114953472,
+      "title": "Track 12",
+      "start_ms": 16879360,
+      "end_ms": 19486015
+    },
+    {
+      "order": 13,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\13_Glaz Boga.mp3",
+      "size": 12227683,
+      "sha256": "9231ba0058b00847c31692b9c811332b328269df31fbb978596c279dd552c054",
+      "pcm_rate": 44100,
+      "pcm_frames": 33152256,
+      "title": "Track 13",
+      "start_ms": 19486015,
+      "end_ms": 20237767
+    },
+    {
+      "order": 14,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\14_Glaz Boga.mp3",
+      "size": 43604432,
+      "sha256": "77f7d40ca5636bee3a0e4397468cca7e8215d0951fd4a907a2ef896a954fe94b",
+      "pcm_rate": 44100,
+      "pcm_frames": 119833344,
+      "title": "Track 14",
+      "start_ms": 20237767,
+      "end_ms": 22955076
+    },
+    {
+      "order": 15,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\15_Glaz Boga.mp3",
+      "size": 45509288,
+      "sha256": "889fae710d280055c663701d2c0f480d8d2cc946dada4de3cbb3afef83f7f31f",
+      "pcm_rate": 44100,
+      "pcm_frames": 125095680,
+      "title": "Track 15",
+      "start_ms": 22955076,
+      "end_ms": 25791713
+    },
+    {
+      "order": 16,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\16_Glaz Boga.mp3",
+      "size": 32978855,
+      "sha256": "58e4a097be8d4e55532bed5cf476967b236a1bcd334ffe0f8fcb6eeac2ba7efd",
+      "pcm_rate": 44100,
+      "pcm_frames": 90479232,
+      "title": "Track 16",
+      "start_ms": 25791713,
+      "end_ms": 27843396
+    },
+    {
+      "order": 17,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\17_Glaz Boga.mp3",
+      "size": 34129358,
+      "sha256": "db3873a23826743e5e9585a2ce6092a162cf0097e0ddd620bf67c2b1d66215b4",
+      "pcm_rate": 44100,
+      "pcm_frames": 93657600,
+      "title": "Track 17",
+      "start_ms": 27843396,
+      "end_ms": 29967151
+    },
+    {
+      "order": 18,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\18_Glaz Boga.mp3",
+      "size": 5355106,
+      "sha256": "da736f4ef193d62e25771a7b51ca56a572bafaabd2411ac6e2eef01dbe0ad1d2",
+      "pcm_rate": 44100,
+      "pcm_frames": 14166144,
+      "title": "Track 18",
+      "start_ms": 29967151,
+      "end_ms": 30288379
+    },
+    {
+      "order": 19,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\19_Glaz Boga.mp3",
+      "size": 19729931,
+      "sha256": "20d35ac708169a5944094be9cab33fd40ec9468a15bead78b8010c12560c0f1e",
+      "pcm_rate": 44100,
+      "pcm_frames": 53877888,
+      "title": "Track 19",
+      "start_ms": 30288379,
+      "end_ms": 31510100
+    },
+    {
+      "order": 20,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\20_Glaz Boga.mp3",
+      "size": 33484259,
+      "sha256": "d360d21bb5afa63dacd436169d9d1ad7e0bcffb05a5696a7f23376797aaf55fd",
+      "pcm_rate": 44100,
+      "pcm_frames": 91875456,
+      "title": "Track 20",
+      "start_ms": 31510100,
+      "end_ms": 33593443
+    },
+    {
+      "order": 21,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\21_Glaz Boga.mp3",
+      "size": 21095189,
+      "sha256": "b68ee7b389625a5d3841540907b565921b40ef397aa7739ade4a3db92645b2af",
+      "pcm_rate": 44100,
+      "pcm_frames": 57649536,
+      "title": "Track 21",
+      "start_ms": 33593443,
+      "end_ms": 34900689
+    },
+    {
+      "order": 22,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\22_Glaz Boga.mp3",
+      "size": 35179781,
+      "sha256": "a500967c6fb825713c0564cb08eda753412d82bac2d13f7aea40a62cb20d84b3",
+      "pcm_rate": 44100,
+      "pcm_frames": 96559488,
+      "title": "Track 22",
+      "start_ms": 34900689,
+      "end_ms": 37090247
+    },
+    {
+      "order": 23,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\23_Glaz Boga.mp3",
+      "size": 33171926,
+      "sha256": "ffdbe76b13aa2b68d10f00c74fe0d386a10d29c642fec9552191d84748f403a9",
+      "pcm_rate": 44100,
+      "pcm_frames": 91012608,
+      "title": "Track 23",
+      "start_ms": 37090247,
+      "end_ms": 39154024
+    },
+    {
+      "order": 24,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\24_Glaz Boga.mp3",
+      "size": 38786831,
+      "sha256": "28ec26010b3895f02a4917a32e44f9708e03336adf89e2b91aea54ed75589595",
+      "pcm_rate": 44100,
+      "pcm_frames": 106524288,
+      "title": "Track 24",
+      "start_ms": 39154024,
+      "end_ms": 41569541
+    },
+    {
+      "order": 25,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\25_Glaz Boga.mp3",
+      "size": 23632217,
+      "sha256": "d8b9ddf3ef2e9e68ff7e00ced80b2b680a18b9f4efc784b6c9a41236cabbdb5c",
+      "pcm_rate": 44100,
+      "pcm_frames": 64658304,
+      "title": "Track 25",
+      "start_ms": 41569541,
+      "end_ms": 43035716
+    },
+    {
+      "order": 26,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\26_Glaz Boga.mp3",
+      "size": 29635349,
+      "sha256": "d0eec60a1ea42cacd086d1d4e4493e49adf9bf00014ca1741949447d0d084e26",
+      "pcm_rate": 44100,
+      "pcm_frames": 81242496,
+      "title": "Track 26",
+      "start_ms": 43035716,
+      "end_ms": 44877949
+    },
+    {
+      "order": 27,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\27_Glaz Boga.mp3",
+      "size": 22828241,
+      "sha256": "5cc950e5d952519bb1ce45507ac2022bc95dd64c9dca17ee17f4631a3bf83cbc",
+      "pcm_rate": 44100,
+      "pcm_frames": 62437248,
+      "title": "Track 27",
+      "start_ms": 44877949,
+      "end_ms": 46293760
+    },
+    {
+      "order": 28,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\28_Glaz Boga.mp3",
+      "size": 37430330,
+      "sha256": "61771bea9fa78fdf509584fa118375425f4cfba4246b710812f8eab18a79de18",
+      "pcm_rate": 44100,
+      "pcm_frames": 102776832,
+      "title": "Track 28",
+      "start_ms": 46293760,
+      "end_ms": 48624300
+    },
+    {
+      "order": 29,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\29_Glaz Boga.mp3",
+      "size": 18150335,
+      "sha256": "ae4aa611ae676b346bcb2e875ff206bc039ccc93aaac348795de158b796ad860",
+      "pcm_rate": 44100,
+      "pcm_frames": 49514112,
+      "title": "Track 29",
+      "start_ms": 48624300,
+      "end_ms": 49747069
+    },
+    {
+      "order": 30,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\30_Glaz Boga.mp3",
+      "size": 24931589,
+      "sha256": "6a937cd881538f5ab0b240eb9d97607cb74110c8c758f85426b28eca57ff4010",
+      "pcm_rate": 44100,
+      "pcm_frames": 68247936,
+      "title": "Track 30",
+      "start_ms": 49747069,
+      "end_ms": 51294642
+    },
+    {
+      "order": 31,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\31_Glaz Boga.mp3",
+      "size": 18320471,
+      "sha256": "2d32030c86f9c014f6ad73c12546ed4c711d48fc3e06781ef12cd484cbe46fa1",
+      "pcm_rate": 44100,
+      "pcm_frames": 49984128,
+      "title": "Track 31",
+      "start_ms": 51294642,
+      "end_ms": 52428069
+    },
+    {
+      "order": 32,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\32_Glaz Boga.mp3",
+      "size": 27324752,
+      "sha256": "7cd0b186f838980cc77fd7ec8eade4edb89708873f766b899c81b7fc7aaf4bb8",
+      "pcm_rate": 44100,
+      "pcm_frames": 74859264,
+      "title": "Track 32",
+      "start_ms": 52428069,
+      "end_ms": 54125558
+    },
+    {
+      "order": 33,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\33_Glaz Boga.mp3",
+      "size": 32695295,
+      "sha256": "e7f9d007f8fd5663ed0f9d4db56e0ce9ad2d01e351e39497216c80d2f33d919f",
+      "pcm_rate": 44100,
+      "pcm_frames": 89695872,
+      "title": "Track 33",
+      "start_ms": 54125558,
+      "end_ms": 56159478
+    },
+    {
+      "order": 34,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\34_Glaz Boga.mp3",
+      "size": 9156478,
+      "sha256": "fa471620bc80902bae24065b560bd3c75bfa03b84085cd46451c024dba65989b",
+      "pcm_rate": 44100,
+      "pcm_frames": 24667776,
+      "title": "Track 34",
+      "start_ms": 56159478,
+      "end_ms": 56718838
+    },
+    {
+      "order": 35,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\35_Glaz Boga.mp3",
+      "size": 19263308,
+      "sha256": "731da215c720b9d0bee4fadd936e6b87b810c6bb065d1b7f1115b33986c4e313",
+      "pcm_rate": 44100,
+      "pcm_frames": 52588800,
+      "title": "Track 35",
+      "start_ms": 56718838,
+      "end_ms": 57911327
+    },
+    {
+      "order": 36,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\36_Glaz Boga.mp3",
+      "size": 26194265,
+      "sha256": "7719daa2c8de240de1dc7e68de10cc28649a627f16c3c59319e886fe0f7e4cc6",
+      "pcm_rate": 44100,
+      "pcm_frames": 71736192,
+      "title": "Track 36",
+      "start_ms": 57911327,
+      "end_ms": 59537998
+    },
+    {
+      "order": 37,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\37_Glaz Boga.mp3",
+      "size": 24265223,
+      "sha256": "d52d29f11bb3c7d2536393a5dcb36c61bb1d4baea8ca9cb1d889c755b16010d5",
+      "pcm_rate": 44100,
+      "pcm_frames": 66407040,
+      "title": "Track 37",
+      "start_ms": 59537998,
+      "end_ms": 61043827
+    },
+    {
+      "order": 38,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\38_Glaz Boga.mp3",
+      "size": 9699412,
+      "sha256": "ff496a51ffe705c4589de6cb7cc43379fac9a57d8ac0030246cf8fe6c7bb84c6",
+      "pcm_rate": 44100,
+      "pcm_frames": 26167680,
+      "title": "Track 38",
+      "start_ms": 61043827,
+      "end_ms": 61637198
+    },
+    {
+      "order": 39,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\39_Glaz Boga.mp3",
+      "size": 17266712,
+      "sha256": "492c18adb7b39b02739cbb4e6f2f5c7f78ff217e72f8c1623b2d38930e371bea",
+      "pcm_rate": 44100,
+      "pcm_frames": 47073024,
+      "title": "Track 39",
+      "start_ms": 61637198,
+      "end_ms": 62704614
+    },
+    {
+      "order": 40,
+      "path": "Z:\\Audiobooks\\James Rollins\\Sigmа Force\\13. The Eye of God\\40_Glaz Boga.mp3",
+      "size": 23035764,
+      "sha256": "3181a90433d34c396723d544d67f3d66bebed25972dccc0915c3e96984e7cb3c",
+      "pcm_rate": 44100,
+      "pcm_frames": 62999424,
+      "title": "Track 40",
+      "start_ms": 62704614,
+      "end_ms": 64133172
+    }
+  ],
+  "input_proofs": [
+    {
+      "role": "parent",
+      "path": "WIP/Books Arranger/scratch/metadata-2026-10-09/pilot-review-2026-10-10/completed-proof.json",
+      "sha256": "856dc2f28b70aac9384dda68cec422ce457a9d346c9aa2727aab2758fabd30e4"
+    },
+    {
+      "role": "boundary",
+      "path": "WIP/Books Arranger/scratch/itunes-chapters-2026-10-10/exact-boundaries.json",
+      "sha256": "535fc85f08405a90c3305a5d9923831e8593c16344156232f9e7af7dc8e79db1"
+    },
+    {
+      "role": "journal",
+      "path": "WIP/Books Arranger/data/chapter-repairs/fc9c5525-5110-451c-bbe3-040f0e9950cb/corrected-artifact.jsonl",
+      "sha256": "b06dade4b5bf520f6b862113a12e7759ad74248279ea753e8556df2de1b5dc55"
+    }
+  ]
+}

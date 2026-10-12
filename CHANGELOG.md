@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.13.0] - 2026-10-12
+
+### Added
+
+- Durable, idempotent admission and publication of the authorized Eye of God replacement, using its protected original tracks, source-matched 128 kbps mono settings and one distinct Final output. Originals remain protected; lossy re-encoding is not claimed lossless.
+- Verified current-publication relations and app-owned retirement of only the three authorized older conversions after new-output publication, registration and required cleanup, with verified 24-hour recovery and retained historical records.
+
+### Changed
+
+- Resolve current audiobook metadata, tags, artwork, folder action and Ready eligibility through the same verified publication; preserve reviewed destination previews and explicit unavailable states.
+- Refresh changed publication facts while preserving inspector focus and manual drafts. Completed-book counts remain distinct by candidate during replacement.
+- Publish source separately from its guarded application and actual replacement admission. No old conversion is retired merely by release or source update; unrelated audiobooks and the Google/Yandex prototype remain untouched.
+
+
 ## [v0.12.3] - 2026-10-12
 
 ### Fixed

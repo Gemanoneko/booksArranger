@@ -94,7 +94,7 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   }
   fixture(candidate({audiobook_ready:false,automatic:{state:'Held',reasons:['Manual draft retained']},duplicate_review:{state:'possible',blocking:true,related_ids:[]}}));assert.equal(run('candidateStatus(fixture)'),'Held — Manual draft retained');
   fixture(candidate({automatic:null,audiobook_ready:true,duplicate_review:{state:'related_distinct',blocking:false,related_ids:[]}}));run("rows=[fixture];totalRows=1;renderRows(true)");assert.match(textTree(get('inventory')),/Audiobook Ready.*Recording review — distinct recording verified/);
-  assert.equal(run("inspectedCandidateStatus({kind:'created',status:'Audiobook created'}, {audiobook_ready:false,duplicate_review:{state:'possible',blocking:true}}, fixture)"),'Held — Possible duplicate recording');
+  assert.equal(run("inspectedCandidateStatus({kind:'created',status:'Audiobook created'}, {audiobook_ready:false,duplicate_review:{state:'possible',blocking:true}}, fixture)"),'Audiobook created');
   get('filter').value='recording_review';await get('filter').handlers.change();assert.match(calls.at(-1).route,/status=recording_review/);await run('refresh()');assert.equal(get('filter').value,'recording_review');
   run("filters.candidates='converted';rows=[];totalRows=0");
   // Empty later pages do not claim the entire ready collection is empty.
@@ -131,5 +131,22 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   get('library').value='Audiobooks';await get('library').handlers.change();get('view').value='candidates';await get('view').handlers.change();assert.equal(run('filters.candidates'),'all');
   assert.equal(calls.filter(call=>call.options.body && /automatic\/start|audiobook\/queue/.test(call.route)).length,1);
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');assert.match(html,/<details id="manual-review">/);assert.doesNotMatch(html,/<button[^>]*>Search<\/button>/);assert.ok(html.indexOf('id="automatic-result"')<html.indexOf('id="manual-review"'));assert.ok(html.indexOf('id="create-audiobook"')<html.indexOf('id="audiobook-output"'));assert.match(html,/Recovery copies expire 24 hours after source cleanup completes, while the app is running/);assert.match(html,/Closing this tab leaves the local server running/);assert.match(css,/#automatic-controls button[^}]*min-height:32px/);
+  // Current publication changes refresh the same selection; reviewed destination remains separate.
+  get('library').value='Audiobooks';document.activeElement=null;
+  fixture(candidate({automatic:null,creation:{destination:'Reviewed base.m4b'},current_audiobook:{state:'verified',path:'Final.m4b',identity:'publication-one'}}));
+  run('automaticResultKey=null;renderAutomaticResult(fixture)');
+  assert.match(textTree(get('automatic-facts')),/Reviewed destination.*Reviewed base.m4b.*Current audiobook.*Final.m4b/);
+  run('selectedPath=fixture.path;automaticInspectorKey=null');const firstReads=calls.filter(call=>call.route==='/api/inspect').length;
+  await run('ensureCandidateInspector(fixture)');assert.equal(calls.filter(call=>call.route==='/api/inspect').length,firstReads+1);
+  fixture({...context.fixture,current_audiobook:{state:'verified',path:'Final newer.m4b',identity:'publication-two'}});
+  run('dirty=true;trackDirty=true');get('review-form').elements.namedItem('title').value='Keep my draft';
+  get('metadata-inspector').append(get('focused-metadata'));get('focused-metadata').focus();
+  await run('ensureCandidateInspector(fixture)');assert.equal(calls.filter(call=>call.route==='/api/inspect').length,firstReads+1);
+  assert.equal(document.activeElement,get('focused-metadata'));assert.equal(get('review-form').elements.namedItem('title').value,'Keep my draft');
+  document.activeElement=null;await run('ensureCandidateInspector(fixture)');assert.equal(calls.filter(call=>call.route==='/api/inspect').length,firstReads+2);
+  assert.equal(run('dirty'),true);assert.equal(run('trackDirty'),true);assert.equal(get('review-form').elements.namedItem('title').value,'Keep my draft');
+  fixture({...context.fixture,current_audiobook:{state:'unavailable',reason:'Recorded output changed',identity:'publication-refused'}});
+  run('automaticResultKey=null;renderAutomaticResult(fixture)');assert.match(textTree(get('automatic-facts')),/Current audiobook unavailable.*Recorded output changed/);
+  assert.doesNotMatch(textTree(get('automatic-facts')),/Final newer.m4b/);
   console.log('PASS automatic lifecycle acknowledgements, controls, disconnects, holds/evidence, draft leases, Held paging and focused poll preservation');
 })().catch(error=>{console.error(error);process.exitCode=1;});
