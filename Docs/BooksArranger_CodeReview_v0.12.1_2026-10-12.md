@@ -4,9 +4,9 @@
 
 Reviewer: Senua. Date: 2026-10-12. Release: v0.12.1.
 
-Commit range baseline: `b569cc1e556726043671f9b329a2f3cb0cf49ea7` (released v0.12.0). Reviewed endpoint: exact uncommitted candidate manifest `8c8381b1b687d769f6cc93b1c620d653d1c7d6278bad94420cb2ecf7e63dce52`, source digest `493ed60cba9883497a624a46742125dcf9a772c4491862ac9ca34b1093a9c020`. A release commit does not yet exist; Sully must record its resulting SHA and attest these exact six source/test bytes before publication. This report certifies the baseline-to-pinned-candidate source delta, not an invented future commit hash.
+Commit range: `b569cc1e556726043671f9b329a2f3cb0cf49ea7..0b0101d1b6e631ec2df81cb31da9a9e00a5433bb`. Baseline is released v0.12.0; endpoint is Sully's committed v0.12.1 candidate, tree `09deb6e70a6c3ca5873d5b80e0234396d2c8c60b`. Documentation base `be29dc1a00bf17def33e8962ec6a524eeed5aa8f` is an ancestor of that endpoint. Exact reviewed candidate manifest `8c8381b1b687d769f6cc93b1c620d653d1c7d6278bad94420cb2ecf7e63dce52`, source digest `493ed60cba9883497a624a46742125dcf9a772c4491862ac9ca34b1093a9c020` maps to the committed product/test blobs. Senua independently verified all six Git-normalized blob identities against the pinned candidate, actual tree, changed path list, VERSION 0.12.1 and bounded CHANGELOG delta before publication.
 
-Files changed: 6, +255 / -12. Manual Python/web application, no Electron changes. UI unchanged; no UI design delta. Scope excludes live databases/library, live launch/owner changes, Comics/Comix and Open Library datasets.
+Files changed in the certified commit range: 13, +574 / -13 (including VERSION, CHANGELOG and five authorized documentation files). Product/test delta: 6, +255 / -12. Manual Python/web application, no Electron changes. UI unchanged; no UI design delta. Scope excludes live databases/library, live launch/owner changes, Comics/Comix and Open Library datasets.
 
 ## Summary
 
@@ -48,7 +48,7 @@ Pass with stated limits. Standing rules remain unchanged. The original live lock
 
 ### 9. Build & Release Hygiene
 
-Pass for pinned candidate and finite proof. Production application, version bump/commit/tag publication and resulting commit SHA belong to Sully; they remain subsequent procedural work. Candidate native containment/runtime/source hashes are held and reverified by the approved finite route. No interface change needs fresh interface assertions.
+Pass for committed candidate and finite proof. VERSION 0.12.1 and CHANGELOG accurately describe the bounded fix and remaining contention limits. Source and test blobs match the reviewed/tested pins after Git line-ending normalization; no seventh product file or interface change appears. Tag/publication and eventual live application remain Sully's procedural work. Candidate native containment/runtime/source hashes were held and reverified by the approved finite route. No interface change needs fresh interface assertions.
 
 ## Exact changed source pins
 
@@ -91,4 +91,4 @@ Total Critical: 0. Total Major: 1 (existing persistent Stop-entry contention lim
 
 **Verdict:** RELEASE CLEAR
 
-Clearance applies only to the exact six candidate source/test files above against released b569cc1e556726043671f9b329a2f3cb0cf49ea7. Sully must map these to the actual release commit and version before publishing. No new live owner or resume is certified here; those still require normal Windows user launch and protected-state verification.
+Clearance certifies `b569cc1e556726043671f9b329a2f3cb0cf49ea7..0b0101d1b6e631ec2df81cb31da9a9e00a5433bb`, with the exact six tested source/test files above and committed v0.12.1 metadata. Sully may carry this reconciled report through a report-only follow-up commit; any additional product/test changes invalidate the endpoint mapping. No new live owner or resume is certified here; those still require normal Windows user launch and protected-state verification.
