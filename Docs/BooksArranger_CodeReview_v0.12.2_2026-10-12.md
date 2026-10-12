@@ -4,9 +4,9 @@
 
 Reviewer: Senua. Date: 2026-10-12. Target release: v0.12.2.
 
-Commit-range baseline: `a45566237eeeb8b79a15a16f7a046dcdab14ec3c` (documentation child of physical stable v0.12.1 `a36d3fe`). Reviewed endpoint is the exact uncommitted native candidate manifest `77c5145ac68837ca65d91a26174dce8e4fbf3bab4e64e124bf70fe36853241e2`, source digest `83cb44b8b5f079358cc6e70815c044015c00f3a74a11b1a1327ab9de5603d4fa`. Actual release commit does not yet exist; Sully must supply the committed endpoint for reconciliation before tag/publication.
+Commit range: `a45566237eeeb8b79a15a16f7a046dcdab14ec3c..3762d2650c078245f55c68cf65111cecdc027a3a`, committed endpoint tree `d9fc82cdba0b116e267f1618671b59593fce7558`. Baseline is the documentation child of physical stable v0.12.1 `a36d3fe`. Senua independently verified both committed product/test blobs against the Git-normalized tested candidate, the seven changed paths, VERSION 0.12.2 and the bounded accurate CHANGELOG delta. Exact tested native candidate manifest `77c5145ac68837ca65d91a26174dce8e4fbf3bab4e64e124bf70fe36853241e2`, source digest `83cb44b8b5f079358cc6e70815c044015c00f3a74a11b1a1327ab9de5603d4fa` maps to this commit.
 
-Scope: native_io.py and tests/test_native_thread_check.py only; 2 files, +108 / -7. Python/native Windows utility, no Electron/browser/UI changes. Failed-job recovery helper, existing failed-job state, actual library actions and browser prototype are explicitly excluded from this clearance.
+Product/test scope: native_io.py and tests/test_native_thread_check.py only; 2 files, +108 / -7. Committed range: 7 files, +314 / -8, including VERSION, CHANGELOG and three core reports. Python/native Windows utility, no Electron/browser/UI changes. Failed-job recovery helper, existing failed-job state, actual library actions and browser prototype are explicitly excluded from this clearance.
 
 ## Summary
 
@@ -48,7 +48,7 @@ Pass with scope limits. Evidence identifies this exact native argument mismatch;
 
 ### 9. Build & Release Hygiene
 
-Pass for exact source candidate and finite proof. Actual version bump/commit/tag and final commit mapping remain Sully's subsequent procedural work. Input/manifest/runtime pins match before/after finite execution. No unrelated broad regression suite was rerun.
+Pass for exact committed source and finite proof. VERSION 0.12.2/CHANGELOG describe only the reviewed ABI correction and explicitly exclude recovery/browser work. Committed native_io.py blob `c572d9edac7dd64176fbe093eeafd22721e5d332` and test blob `f1722be695167cd8b47b88e09787a6b0152ada9d` match the tested candidate after Git line-ending normalization. Input/manifest/runtime pins match before/after finite execution. No unrelated broad regression suite was rerun. Tag/publication and actual application remain Sully/root-controlled subsequent procedural work.
 
 ## Exact source and finite-route pins
 
@@ -89,4 +89,4 @@ Total Critical: 0. Total Major: 0. Total Minor: 0. Safety floor intact.
 
 **Verdict:** RELEASE CLEAR
 
-This clears the exact two-file ABI candidate against baseline a45566237eeeb8b79a15a16f7a046dcdab14ec3c. Sully must map the source/test blobs and v0.12.2 metadata to the actual release commit before publication. It does not reclassify or retry the existing failed job, authorize a one-off recovery helper, alter source protection or certify live application/new loaded owner. Those are separate guarded work.
+This certifies `a45566237eeeb8b79a15a16f7a046dcdab14ec3c..3762d2650c078245f55c68cf65111cecdc027a3a` with the exact two tested source/test files and committed v0.12.2 metadata. Sully may carry this reconciled report through a report-only follow-up commit; any additional product/test changes invalidate this mapping. Root's final tag/main-publication authorization remains separate. Clearance does not reclassify or retry the existing failed job, authorize a one-off recovery helper, alter source protection or certify live application/new loaded owner. Those are separate guarded work.
