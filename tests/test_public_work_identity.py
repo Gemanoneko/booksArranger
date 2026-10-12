@@ -8,6 +8,7 @@ from source_identity import norm
 from public_research import _credit_matches
 from test_automatic_processing import row
 import groups
+from unittest.mock import patch
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'public-work-identity-2026-10-11'
 AREA.mkdir(parents=True,exist_ok=True)
@@ -62,6 +63,8 @@ def cap_fantlab(database,now):
 class FallbackTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);self.now=[100000.0]
+        # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
+        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
         self.fixture=FallbackFixture();self.client=PublicClient(self.base/'catalog.sqlite3',fetch=self.fixture.fetch,clock=lambda:self.now[0]);cap_fantlab(self.client.database,self.now[0])
         class ClockStop:
             def is_set(_self):return False

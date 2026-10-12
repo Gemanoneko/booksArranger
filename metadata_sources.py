@@ -78,6 +78,12 @@ def public_source_url(value):
 def manual_evidence(field, cited_value, source_url, retrieved_utc, reviewer_actor,
                     reviewer_identity, basis):
     """Return validated evidence only; this does not approve a field or fetch its URL."""
+    record = _checked_evidence(field, cited_value, retrieved_utc, reviewer_actor, reviewer_identity, basis)
+    record.update(source_url=public_source_url(source_url), verification='manual review', needs_review=True)
+    return {k: record[k] for k in ('field', 'cited_value', 'source_url', 'retrieved_utc', 'reviewer_actor', 'reviewer_identity', 'basis', 'verification', 'needs_review')}
+
+
+def _checked_evidence(field, cited_value, retrieved_utc, reviewer_actor, reviewer_identity, basis):
     if field not in FIELDS or reviewer_actor not in ('user', 'assistant'):
         raise ValueError('Unknown evidence field or reviewer actor')
     if not isinstance(cited_value, (str, list, bool)) or (isinstance(cited_value, str) and (not cited_value.strip() or len(cited_value) > 2000)):
@@ -93,10 +99,17 @@ def manual_evidence(field, cited_value, source_url, retrieved_utc, reviewer_acto
             raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise ValueError('Retrieval date must be UTC ISO 8601') from None
-    return {'field': field, 'cited_value': list(cited_value) if isinstance(cited_value, list) else cited_value, 'source_url': public_source_url(source_url),
+    return {'field': field, 'cited_value': list(cited_value) if isinstance(cited_value, list) else cited_value,
             'retrieved_utc': stamp.isoformat().replace('+00:00', 'Z'),
             'reviewer_actor': reviewer_actor, 'reviewer_identity': reviewer_identity.strip(),
-            'basis': basis.strip(), 'verification': 'manual review', 'needs_review': True}
+            'basis': basis.strip(), 'needs_review': True}
+
+
+def local_evidence(field, cited_value, retrieved_utc, reviewer_actor, reviewer_identity, basis):
+    """Validated citation of the user's own agreeing tags/file/folder names (no URL)."""
+    record = _checked_evidence(field, cited_value, retrieved_utc, reviewer_actor, reviewer_identity, basis)
+    record.update(source_url='', source_kind='local_files', verification='local agreement')
+    return record
 
 
 class MetadataClient:

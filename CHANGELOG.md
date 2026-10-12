@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.14.0] - 2026-10-13
+
+### Added
+
+- Local-agreement identity (Sergei decision 2026-10-12): when embedded tags and the file and folder names agree on title and author, that is the book's identity and no Internet confirmation is needed. Names match across scripts and word order ("Rollins James" = "Джеймс Роллинс"); every decision records which local fields agreed and how, and is re-checked against the current files before admission.
+- Gap-only search: the Internet is asked only for fields missing locally (original title and language, series position, full author name), from the source that can answer them: FantLab, Wikidata, Open Library, Google Books (no key) and iTunes Search. A catalog answer is used only when it matches the locally agreed title and author.
+
+### Changed
+
+- Local conflicts still hold a book for the existing research path: different titles or authors between tags and names, two different people in author/artist tags (unless an author folder names exactly one), and a file sitting beside other files with the same title (one part of a split book).
+- Optional missing fields never block a book; a book waits for them only while the converter is busy, at most three queue drains.
+- Retry timing waits for the sources a book actually needs instead of the first source that reopens.
+- Host pacing follows published vendor limits (Open Library, iTunes, Google Books); other hosts unchanged. Requests identify the app with the public repository URL. A DuckDuckGo human check is respected as a one-hour pause. The research cache keeps up to 5,000 responses / 64 MB.
+- Every waiting or held book gets one fresh pass under the new rule. Media verification, publication, source retirement and 24-hour recovery are unchanged.
+
 ## [v0.13.1] - 2026-10-12
 
 ### Fixed

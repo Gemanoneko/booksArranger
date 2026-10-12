@@ -70,23 +70,31 @@ def source_gate(row,work):
         return list(dict.fromkeys(reasons))
     aliases={norm(v) for v in work.get('titles',[]) if norm(v)}
     author_aliases={norm(v) for v in work.get('author_aliases',[]) if norm(v)}
+    local=work.get('identity_basis')=='local_agreement'
+    def same_title(raw):
+        # Local agreement already compared these names segment by segment (brackets,
+        # "Series 03. Title", "Title - 01" chapter names); other paths keep exact matching.
+        if title_matches(raw,aliases,work.get('author_aliases',[])):return True
+        if not local:return False
+        from local_identity import title_segments_match
+        return title_segments_match(raw,work.get('titles',[]))
     def source_author(value):
         return author_matches(value,author_aliases) or bool(standing and work.get('full_author_verified') and norm(value) in {norm(v) for v in work.get('source_surnames',[])})
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
-    folder_context=bool(common_folder and title_matches(folder_title,aliases,work.get('author_aliases',[])))
+    folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))
     for m in members:
         tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
         album=norm(tags.get('album'))
         named=filename_identity(m['filename'])
-        if album and not title_matches(album,aliases,work.get('author_aliases',[])):reasons.append('Sources disagree on the title or author')
-        if named.get('author') and (norm(named['title']) not in aliases or not source_author(named['author'])):
+        if album and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
+        if named.get('author') and (not (same_title(named['title']) if local else norm(named['title']) in aliases) or not source_author(named['author'])):
             reasons.append('Sources disagree on the title or author')
         # A source recording needs its own title evidence in addition to a filename clue.
         source_title=album or norm(tags.get('title')) if len(members)==1 else album
         if standing and not source_title:
             source_title=norm(named['title']) if len(members)==1 else norm(folder_title) if folder_context else ''
-        if not source_title or not title_matches(source_title,aliases,work.get('author_aliases',[])):reasons.append('Source membership uncertain')
+        if not source_title or not (title_matches(source_title,aliases,work.get('author_aliases',[])) or local and source_title in {norm(v) for v in (tags.get('album'),tags.get('title'),named.get('title'),Path(m['path']).parent.name) if v and same_title(v)}):reasons.append('Source membership uncertain')
         if m.get('order_conflict'):reasons.append('Playback order uncertain')
         if len(members)==1:
             denominator=re.fullmatch(r'\d+/(\d+)',str(tags.get('track') or tags.get('tracknumber') or '').strip())

@@ -12,7 +12,7 @@ import subprocess
 import threading
 import uuid
 from metadata import propose, future_audio_tags
-from metadata_sources import MetadataClient, SourceUnavailable, manual_evidence
+from metadata_sources import MetadataClient, SourceUnavailable, manual_evidence, local_evidence
 from native_io import DirectoryBoundary, ProtectedFiles, ordinary
 from audio_pipeline import run_owned, INPUT_FORMATS
 from scanner import connect, fresh_stat, inside
@@ -271,9 +271,13 @@ class CandidateReviewService:
             records=[]
             if evidence is not None:
                 if not isinstance(evidence,list) or len(evidence)>30:raise ValueError('Invalid per-field evidence')
+                # Local-file citations exist only for the private local-agreement admission.
+                local=bool(automatic_facts is not None and automatic_facts.get('identity_basis')=='local_agreement')
                 for record in evidence:
                     if not isinstance(record,dict):raise ValueError('Invalid evidence record')
-                    records.append(manual_evidence(**{k:record[k] for k in ('field','cited_value','source_url','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
+                    if local and record.get('source_url')=='':
+                        records.append(local_evidence(**{k:record[k] for k in ('field','cited_value','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
+                    else:records.append(manual_evidence(**{k:record[k] for k in ('field','cited_value','source_url','retrieved_utc','reviewer_actor','reviewer_identity','basis')}))
                 if any(e['reviewer_actor']!=actor for e in records):raise ValueError('Evidence actor must match actual reviewer')
             if actor=='assistant' and approve:
                 needed=({'title','authors'}|({'original_language'} if automatic_facts['original_language']['value'] else set())|({'series','number'} if review.get('series') else set())) if automatic_facts else {'title','authors','original_language'}|({'series','number'} if review.get('series') else {'standalone'})

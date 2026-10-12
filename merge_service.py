@@ -4,6 +4,7 @@ import contextlib
 import copy
 import json
 import os
+import sqlite3
 from pathlib import Path
 import threading
 import hashlib
@@ -456,13 +457,23 @@ class MergeService:
         import shutil
         if stop.is_set():raise InterruptedError()
         if result.get('reasons') or not result.get('work') or not result.get('review'):raise ValueError('Book identity uncertain')
-        primary=[s for s in result.get('sources',[]) if s.get('kind') in ('publisher_or_journal','recording_credit','collection_manifest') and s.get('verified_identity')]
+        # Local agreement (Sergei decision 2026-10-12) replaces the fetched credit only for
+        # identity; it is re-derived from the current sources below. Media, publication,
+        # retirement and recovery checks are unchanged.
+        local=bool(standing and result['metadata_facts'].get('identity_basis')=='local_agreement')
+        if local:primary=[s for s in result.get('sources',[]) if s.get('kind')=='local_agreement' and s.get('verified_identity')]
+        else:primary=[s for s in result.get('sources',[]) if s.get('kind') in ('publisher_or_journal','recording_credit','collection_manifest') and s.get('verified_identity')]
         if not primary:raise ValueError('Author and work not independently verified')
         with self.reviews.lock,self.inventory.group_lock:
             current=self.reviews._row('Audiobooks',row['id'],row['revision']);ctx=self.reviews._context(current)
             if current['fingerprint']!=row['fingerprint']:raise ValueError('Source files changed')
             if self.automatic.manual_draft(current):raise ValueError('Manual draft retained')
             if self.candidate_status(row['id']):raise ValueError('Audiobook job already exists')
+            if local:
+                from local_identity import revalidate,folder_siblings
+                try:siblings=folder_siblings(self.inventory.database,current)
+                except sqlite3.Error:raise ValueError("Folder contents could not be checked; local identity held") from None
+                revalidate(current,self.inventory.roots['Audiobooks'],result['metadata_facts']['local_agreement'],siblings)
             reasons=source_gate(current,result['work'])
             if reasons:raise ValueError('; '.join(reasons))
             paths=[m['path'] for m in current['members']]
@@ -534,7 +545,8 @@ class MergeService:
                             result['sources'].append({'url':remote,'kind':'matching_cover','sha256':hash,'retrieved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'verified_identity':True})
                             selected_cover=covers[0]
                         if stop.is_set() or self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
-                        note=('Automatically accepted verified work identity and associated author credit under the approved standing rules; source-derived output names, omitted unknown facts and usable embedded/neutral artwork retain honest provenance. All observed sources remain the recording scope.' if standing else 'Automatically accepted fetched public work evidence and independent publisher/journal credit; exact embedded cover pixels match catalog artwork. Source scope remains the observed recording; external recording completeness unknown.')
+                        note=('Automatically accepted local-agreement identity (Sergei decision 2026-10-12): embedded tags and file/folder names agree on title and author; only missing fields were searched, unknown optional facts are omitted. All observed sources remain the recording scope.' if local else
+                            'Automatically accepted verified work identity and associated author credit under the approved standing rules; source-derived output names, omitted unknown facts and usable embedded/neutral artwork retain honest provenance. All observed sources remain the recording scope.' if standing else 'Automatically accepted fetched public work evidence and independent publisher/journal credit; exact embedded cover pixels match catalog artwork. Source scope remains the observed recording; external recording completeness unknown.')
                         fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor='assistant',evidence=result['evidence'],automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'))
                         context=self.reviews._context(fresh);context['duplicate_review']=copy.deepcopy(result.get('duplicate_review'));context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
                         fresh=self.reviews._write(fresh,context,bump=False)

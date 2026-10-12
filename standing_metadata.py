@@ -38,7 +38,7 @@ def recording_language(row):
     # A recording's Russian source label is provenance, not original-work language.
     return {'value':'ru' if russian_source_title(row) else None,'basis':'source_label'},[]
 
-def build_policy(row,work,preferred_title,authors,english_verified=False,series='',number='',collection=None):
+def build_policy(row,work,preferred_title,authors,english_verified=False,series='',number='',collection=None,local=None):
     language=work.get('original_language') or None
     if language and not re.fullmatch('[a-z]{2,3}',language):raise ValueError('Invalid verified original language')
     names=[text(v) for v in authors if text(v)]
@@ -48,6 +48,9 @@ def build_policy(row,work,preferred_title,authors,english_verified=False,series=
         title=text(preferred_title);basis='published_english'
     elif language in ('ru','en'):
         title=text(preferred_title);basis='verified_original'
+    elif local:
+        # Locally agreed title, cleaned of bracketed narrator/year notes; never a guessed translation.
+        title=text(preferred_title);basis='local_agreement'
     elif source_title:
         title=source_title;basis='source_russian'
         if norm(source_title) not in {norm(v) for v in work.get('titles',[])}:reasons.append('Russian recording alias needs a verified original-work bridge')
@@ -70,6 +73,7 @@ def build_policy(row,work,preferred_title,authors,english_verified=False,series=
         'original_language':{'value':language,'status':'verified' if language else 'unknown'},'recording_language':record_language,
         'title_basis':basis,'author_folder_basis':'verified_full_name',
         'series_state':'verified' if series else 'omitted_unknown','collection':copy.deepcopy(collection),'cover':{'kind':'absent'}}
+    if local:facts.update(identity_basis='local_agreement',local_agreement=copy.deepcopy(local))
     validate_policy(row,review,facts)
     return review,facts,reasons
 
@@ -83,7 +87,13 @@ def validate_policy(row,review,facts):
     if origin.get('status')!=('verified' if language else 'unknown') or language and not re.fullmatch('[a-z]{2,3}',language):raise ValueError('Original language provenance invalid')
     if review.get('original_language')!=('Russian' if language=='ru' else 'Other' if language else 'Unknown'):raise ValueError('Original and recording languages confused')
     basis=facts.get('title_basis')
-    if basis not in ('published_english','verified_original','source_russian'):raise ValueError('Invalid title provenance')
+    if basis not in ('published_english','verified_original','source_russian','local_agreement'):raise ValueError('Invalid title provenance')
+    identity=facts.get('identity_basis')
+    if identity not in (None,'local_agreement'):raise ValueError('Invalid identity provenance')
+    if identity=='local_agreement':
+        agreed=facts.get('local_agreement')
+        if not isinstance(agreed,dict) or agreed.get('version')!='local-agree-v1' or any(agreed.get(k,{}).get('state') not in ('green','yellow') for k in ('title','author')):raise ValueError('Local identity agreement record invalid')
+    elif basis=='local_agreement':raise ValueError('Local title provenance without local identity')
     if basis=='source_russian' and review.get('title')!=russian_source_title(row):raise ValueError('Russian source title changed or ambiguous')
     if facts.get('series_state')=='omitted_unknown' and (review.get('series') or review.get('number')):raise ValueError('Unknown series must be omitted')
     if facts.get('series_state')=='verified' and (not review.get('series') or not review.get('number')):raise ValueError('Verified series position required')

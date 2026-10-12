@@ -25,6 +25,8 @@ def fixture_payload(language='en',cycles=None):
 class AutoTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.db=self.base/'catalog.sqlite3';self.controllers=[]
+        # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
+        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
     def tearDown(self):
         for auto in self.controllers:auto.close()
         self.temp.cleanup()

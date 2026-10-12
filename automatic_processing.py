@@ -22,6 +22,11 @@ ERROR_LIMIT = 8192
 RESEARCH_FAILURE = 'Metadata research failed'
 MISSING_FAILURE_DETAILS = 'Failure details were not recorded.'
 RETRY_HELP = 'Start automatic processing to retry this book and continue saved work.'
+# A locally identified book whose optional gap sources are cooling down waits only while
+# the converter already has work, and at most this many queue drains; then it proceeds
+# without the optional fields (Sergei decision 2026-10-12: gaps never block a book).
+GAP_DEFER_LIMIT = 3
+GAP_DEFER_REASON = 'Optional metadata sources cooling down; converter busy, book admitted when it is free'
 
 def failure_diagnostic(error,run_id,phase,candidate_id):
     """Keep code locations, never raw traceback lines, paths or arbitrary error text."""
@@ -125,7 +130,7 @@ class AutomaticProcessing:
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review')}
+        return {'state':r['state'],'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
     def _refresh_wait(self,row,previous):
         if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
         if not previous or previous['state']!='Waiting for source' or not previous.get('wait'):return previous
@@ -357,7 +362,13 @@ class AutomaticProcessing:
                     result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
                 research_failed=False
                 if self.stop_event.is_set():raise InterruptedError()
-                if result.get('reasons'):
+                deferrals=(previous or {}).get('gap_deferrals',0)
+                if not result.get('reasons') and result.get('gap_wait') and deferrals<GAP_DEFER_LIMIT and not self._idle_jobs():
+                    # The converter has work, so waiting for an optional field costs no throughput.
+                    # Eligible again on the next pass, which starts only once the queue drains.
+                    self._record(row,'Waiting for source',dict(result,reasons=[GAP_DEFER_REASON],wait=None,gap_deferrals=deferrals+1),self.clock())
+                    deferred.append(identity)
+                elif result.get('reasons'):
                     wait=result.get('wait');state='Waiting for source' if wait else 'Held'
                     self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)))
                     deferred.append(identity)

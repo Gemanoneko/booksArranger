@@ -26,15 +26,41 @@ from source_identity import clues,filename_identity,norm,source_gate,text,VERSIO
 MAX_BYTES=2*1024*1024
 APP_HOST_REQUESTS=100
 APP_HOST_WINDOW=3600
+# App-owned per-host pacing: (requests per rolling hour, minimum spacing in seconds).
+# Raised only where the vendor publishes a limit; every other host keeps the default.
+#  openlibrary.org: openlibrary.org/developers/api publishes 1 request/second for
+#    requests without a contact e-mail (3/s with one). We send no e-mail, so we stay
+#    under 1/s: 1.1 s spacing and at most 1800/hour.
+#  itunes.apple.com: Apple's iTunes Search API page publishes "approximately 20 calls
+#    per minute (subject to change)": 3.5 s spacing (about 17/min), at most 900/hour.
+#  www.googleapis.com (Books): no published anonymous number; Google's documented
+#    courtesy quota is about 1,000/day, so 40/hour keeps under it.
+#  api.fantlab.ru, Wikimedia and DuckDuckGo publish no numeric limit: unchanged 100/hour.
+HOST_POLICY={'openlibrary.org':(1800,1.1),'itunes.apple.com':(900,3.5),'www.googleapis.com':(40,1.1),'html.duckduckgo.com':(APP_HOST_REQUESTS,3)}
+def host_policy(host):return HOST_POLICY.get(host,(APP_HOST_REQUESTS,1.1))
+# Identify the app with a public contact, as Open Library and Wikimedia ask; no e-mail is sent.
+USER_AGENT='BooksArranger/automatic-public-research (+https://github.com/Gemanoneko/booksArranger)'
+CACHE_ENTRIES=5000
+CACHE_BYTES=64*1024*1024
+CHALLENGE_PAUSE=3600
 APP_LIMIT_REASON='Books public research hourly host request bound reached'
 LEGACY_APP_LIMIT_REASON='Books public research daily request bound reached'
 SOURCE_PAUSE_REASON='Public source requested a pause; no bypass attempted'
+CHALLENGE_REASON='Public source presented a human check; no bypass attempted'
+PAUSE_REASONS=(SOURCE_PAUSE_REASON,CHALLENGE_REASON)
+CHALLENGE_MARKERS=(b'anomaly.js',b'bots use duckduckgo',b'verify you are human',b'cf-chl-',b'challenge-platform')
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
 CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS
-HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
+HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com'}
+# Research stages: a candidate can progress only when every stage it needs has an open source.
+STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.googleapis.com','itunes.apple.com'},
+    'discovery':{'html.duckduckgo.com','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'},'credit':CREDIT_HOSTS|{'fantlab.ru'}}
 
-RESEARCH_VERSION='standing-17-v1'
+# 18: local agreement identity and gap-only search; older results get one fresh pass.
+RESEARCH_VERSION='standing-18-v1'
+
+class ChallengeDetected(ValueError):pass
 
 class ResearchWait(Exception):
     def __init__(self,source,reason,retry_at,kind='source_unavailable',scope=None):
@@ -116,7 +142,7 @@ def transport(url,timeout,max_bytes,stop=None):
     connection=PinnedHTTPS(p.hostname,443,timeout=max(.001,deadline-time.monotonic()),context=ssl.create_default_context())
     response=None
     try:
-        connection.request('GET',urllib.parse.urlunsplit(('', '',p.path or '/',p.query,'')),headers={'User-Agent':'BooksArranger/automatic-public-research','Accept':'application/json,text/html;q=0.9,image/jpeg;q=0.8','Connection':'close'})
+        connection.request('GET',urllib.parse.urlunsplit(('', '',p.path or '/',p.query,'')),headers={'User-Agent':USER_AGENT,'Accept':'application/json,text/html;q=0.9,image/jpeg;q=0.8','Connection':'close'})
         remaining=deadline-time.monotonic()
         if remaining<=0:raise TimeoutError('Public request deadline reached')
         connection.sock.settimeout(remaining)
@@ -231,8 +257,9 @@ class PublicClient:
             db.execute('DELETE FROM public_research_requests WHERE at<?',(self.clock()-7*86400,))
     def _host_ready(self,db,host,now):
         reservations=db.execute('SELECT at FROM public_research_requests WHERE host=? AND at>? ORDER BY at',(host,now-APP_HOST_WINDOW)).fetchall()
+        bound=host_policy(host)[0]
         # If old/in-flight reservations exceed the bound, enough must expire first.
-        return reservations[len(reservations)-APP_HOST_REQUESTS]['at']+APP_HOST_WINDOW if len(reservations)>=APP_HOST_REQUESTS else now
+        return reservations[len(reservations)-bound]['at']+APP_HOST_WINDOW if len(reservations)>=bound else now
     def retry_wait(self,wait):
         """Recalculate only our known local host bound, never an external pause."""
         value=dict(wait or {});host=value.get('source')
@@ -243,7 +270,7 @@ class PublicClient:
             limit=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
             host_ready=self._host_ready(db,host,now);retry=max(host_ready,limit['next_at'] if limit else now)
         if limit and limit['reason'] and limit['next_at']>now and limit['next_at']>=host_ready:
-            value.update(retry_at=retry,kind='source_pause' if limit['reason']==SOURCE_PAUSE_REASON else 'source_unavailable',scope='host',reason=limit['reason'])
+            value.update(retry_at=retry,kind='source_pause' if limit['reason'] in PAUSE_REASONS else 'source_unavailable',scope='host',reason=limit['reason'])
         else:value.update(retry_at=retry,kind='app_limit',scope='host',reason=APP_LIMIT_REASON)
         return value
     def read(self,url,stop=None,budget=None):
@@ -256,7 +283,9 @@ class PublicClient:
                 cached=db.execute('SELECT * FROM public_research_cache WHERE url=? AND fetched>?',(url,now-7*86400)).fetchone()
                 if cached:
                     raw=base64.b64decode(cached['raw'],validate=True)
-                    if len(raw)<=MAX_BYTES and hashlib.sha256(raw).hexdigest()==cached['sha256']:return raw
+                    if len(raw)<=MAX_BYTES and hashlib.sha256(raw).hexdigest()==cached['sha256']:
+                        if budget is not None:budget.setdefault('answered',set()).add(host)
+                        return raw
                     raise ValueError('Cached evidence changed')
                 if budget is not None:
                     if budget['remaining']<=0:raise ResearchWait(host,'Public research request bound reached',now+86400,'app_limit','candidate')
@@ -266,22 +295,25 @@ class PublicClient:
                 db.execute('BEGIN IMMEDIATE')
                 wait=db.execute('SELECT * FROM public_research_limits WHERE host=?',(host,)).fetchone()
                 delay=max(0,(wait['next_at'] if wait else 0)-now)
-                if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason']==SOURCE_PAUSE_REASON else 'source_unavailable','host')
+                if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
                 ready=self._host_ready(db,host,now)
                 if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
                 db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
-                db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+(3 if host=='html.duckduckgo.com' else 1.1),''))
+                db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+host_policy(host)[1],''))
                 db.execute('DELETE FROM public_research_requests WHERE at<?',(now-7*86400,))
                 if budget is not None:budget['remaining']-=1
             if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
             try:
                 raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
                 if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
-                if any(marker in raw[:MAX_BYTES].lower() for marker in (b'anomaly.js',b'bots use duckduckgo',b'verify you are human',b'cf-chl-',b'challenge-platform')):raise ValueError()
+                if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
             except InterruptedError:raise
             except Exception as error:
                 now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
-                retry=now+(3600 if paused else 300)
+                # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
+                # page: a human check. Respect it like a pause instead of retrying in 5 min.
+                challenge=isinstance(error,ChallengeDetected) or (http_error and error.code==202 and host=='html.duckduckgo.com')
+                retry=now+(CHALLENGE_PAUSE if challenge else 3600 if paused else 300)
                 if http_error and error.headers:
                     after=error.headers.get('Retry-After','')
                     if not isinstance(after,str):after=''
@@ -292,7 +324,7 @@ class PublicClient:
                             requested=date.timestamp() if date.tzinfo else date.replace(tzinfo=dt.timezone.utc).timestamp()
                         retry=max(retry,requested);paused=paused or requested>now
                     except (ValueError,TypeError,OverflowError):pass
-                reason=SOURCE_PAUSE_REASON if paused else 'Public source unavailable; no bypass attempted'
+                reason=CHALLENGE_REASON if challenge else SOURCE_PAUSE_REASON if paused else 'Public source unavailable; no bypass attempted'
                 with connect(self.database) as db:
                     db.execute('BEGIN IMMEDIATE')
                     existing=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
@@ -300,11 +332,16 @@ class PublicClient:
                         retry=existing['next_at']
                         if existing['reason']:reason=existing['reason']
                     db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
-                raise ResearchWait(host,reason,retry,'source_pause' if reason==SOURCE_PAUSE_REASON else 'source_unavailable','host') from None
+                raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
             def cache_fetched(db):
                 db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,base64.b64encode(raw).decode('ascii'),hashlib.sha256(raw).hexdigest(),self.clock()))
-                db.execute('DELETE FROM public_research_cache WHERE url IN (SELECT url FROM public_research_cache ORDER BY fetched DESC LIMIT -1 OFFSET 100)')
+                # Keep the newest responses within both an entry and a byte bound, so
+                # revisits reuse evidence instead of refetching it (was 100 entries).
+                db.execute('''DELETE FROM public_research_cache WHERE url IN (SELECT url FROM (SELECT url,
+                    SUM(length(raw)) OVER (ORDER BY fetched DESC,url) AS total,ROW_NUMBER() OVER (ORDER BY fetched DESC,url) AS n
+                    FROM public_research_cache) WHERE total>? OR n>?)''',(CACHE_BYTES,CACHE_ENTRIES))
             transaction(self.database,cache_fetched,stop)
+            if budget is not None:budget.setdefault('answered',set()).add(host)
             return raw
     def json(self,url,stop,budget):return strict_json(self.read(url,stop,budget))
     def receipt(self,url):
@@ -347,6 +384,9 @@ class PublicClient:
         return result[:3]
 
 class PublicResearch:
+    # Sergei decision 2026-10-12. Tests of the Internet research path switch this off
+    # explicitly so they keep exercising that path with locally agreeing fixtures.
+    local_agreement=True
     def __init__(self,client,leads=None):self.client=client;self.leads=source_leads() if leads is None else leads
     def _independent_catalog(self,candidates,stop,budget,waits,progress,result):
         """Try independent work entities even when FantLab has exhausted its own budget."""
@@ -471,6 +511,12 @@ class PublicResearch:
                 parsed=filename_identity(folder.name)
                 if parsed.get('author') and (parsed['title'],parsed['author']) not in candidates:candidates.append((parsed['title'],parsed['author']))
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':all_clues,'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
+        # Sergei decision 2026-10-12: tags, file name and folder that agree are the identity.
+        # Only missing optional fields are searched; a local conflict keeps the research path.
+        import local_identity
+        local=local_identity.agreement(row,root,self._siblings(row))
+        result['local_agreement']=local_identity.summary(local)
+        if local['accepted'] and self.local_agreement:return self._local_lookup(row,local,stop,budget,progress,result)
         if len(candidates)>3:return result|{'reasons':['Mixed recordings in this group']}
         attempt=row.get('_research_attempt',0)
         if type(attempt) is not int or not 0<=attempt<=100000:raise ValueError('Invalid research history')
@@ -523,15 +569,15 @@ class PublicResearch:
                         result['sources'].append(_page_record(url,raw,pair))
                 except ResearchWait as wait:waits.append(wait)
             reason='Sources disagree on the title or author' if len(works)>1 else 'Book identity uncertain'
-            return result|{'reasons':list(dict.fromkeys(result['reasons']+[reason])),'wait':_wait(waits)}
+            return result|{'reasons':list(dict.fromkeys(result['reasons']+[reason])),'wait':_wait(waits,budget.get('answered'))}
         data=next(iter(works.values()));id=data['work_id'];provider=data.get('provider','fantlab');source_url=data.get('source_url') or 'https://fantlab.ru/work'+str(id)
         if not isinstance(data.get('authors'),list) or not isinstance(data.get('work_name_alts',[]),list) or not isinstance(data.get('parents',{}),dict):return result|{'reasons':['Book identity uncertain — malformed public evidence']}
         if any(marker in text(data.get('work_type_name')).casefold() for marker in ('antholog','collection','сборник')):
             try:return self._collection_lookup(row,data,source_url,stop,budget,result)
             except ResearchWait as wait:
-                return result|{'reasons':['Collection component source unavailable'],'wait':_wait(waits+[wait])}
+                return result|{'reasons':['Collection component source unavailable'],'wait':_wait(waits+[wait],budget.get('answered'))}
             except (ValueError,TypeError) as error:
-                return result|{'reasons':[str(error)[:300] or 'Collection component evidence uncertain'],'wait':_wait(waits)}
+                return result|{'reasons':[str(error)[:300] or 'Collection component evidence uncertain'],'wait':_wait(waits,budget.get('answered'))}
         authors=[a for a in data.get('authors',[]) if isinstance(a,dict) and a.get('type')=='autor']
         titles=[data.get('work_name'),data.get('work_name_orig')]+data.get('work_name_alts',[])
         names=[a.get('name') for a in authors]+[a.get('name_orig') for a in authors]
@@ -647,8 +693,234 @@ class PublicResearch:
             result['evidence'].append({'field':field,'cited_value':value,'source_url':primary_fact_sources.get(field,source_url),'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':basis})
         if english_verified:
             result['evidence'].append({'field':'title','cited_value':canonical_title,'source_url':english_title_source,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':'Published English title and author matched in the fetched associated publisher credit; separate from the original-work title.'})
-        result['reasons']=list(dict.fromkeys(reasons));result['wait']=_wait(waits)
+        result['reasons']=list(dict.fromkeys(reasons));result['wait']=_wait(waits,budget.get('answered'))
         return result
+
+    # ------------------------------------------------------------ local agreement
+    def _siblings(self,row):
+        """Same-folder audio files outside this candidate, from the app's own catalog."""
+        from local_identity import folder_siblings
+        database=getattr(self.client,'database',None)
+        if not database:return None
+        try:return folder_siblings(database,row)
+        except Exception:return [{'path':'','filename':'','tags':{},'unreadable':True}]
+
+    def _local_lookup(self,row,local,stop,budget,progress,result):
+        """Identity from agreeing local sources; the Internet fills only missing fields."""
+        import local_identity
+        from standing_metadata import build_policy
+        fields=local['fields'];title=fields['title']['value'];author=fields['author']['value']
+        waits=[];filled=self._gap_fill(local,title,author,stop,budget,waits,progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
+        catalog=filled.get('catalog') or {}
+        language=catalog.get('language','')
+        titles=local_identity.title_forms(local)
+        authors=local_identity.author_forms(local)
+        local_script=local_identity.script(author)
+        names=[author]
+        name_source=''
+        if catalog and language:
+            names=[catalog['author_native'] if language=='ru' else catalog['author_latin'] or catalog['author_native']]
+            name_source=catalog['source_url']
+        elif filled.get('author_full'):
+            names=[filled['author_full']['name']];name_source=filled['author_full']['source_url']
+        elif catalog and fields['author'].get('partial'):
+            chosen=catalog['author_native'] if local_script=='cyrillic' else catalog['author_latin']
+            if chosen:names=[chosen];name_source=catalog['source_url']
+        names=[text(n) for n in names if text(n)]
+        reasons=[]
+        if not names or len(local_identity.words(names[0]))<2 and fields['author'].get('partial'):
+            reasons.append('Author full name not established')
+            names=names or [author]
+        for value in (catalog.get('original_title'),catalog.get('title_native')):
+            if value and value not in titles:titles.append(value)
+        for value in names+([catalog.get('author_native'),catalog.get('author_latin')] if catalog else []):
+            if value and value not in authors:authors.append(value)
+        series=dict(local['series']) if local['series'] else dict(filled.get('series') or {})
+        work_ids=[catalog['work_id']] if catalog.get('work_id') else [local_identity.work_id(local)]
+        work={'id':work_ids[0],'titles':titles,'author_aliases':author_variants(authors),'original_language':language,
+            'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
+            'source_surnames':[],'verified_series':series,'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,
+            'recording_completeness':'unknown'}
+        preferred=title
+        if language=='ru':preferred=catalog.get('title_native') or title
+        elif language=='en':preferred=catalog.get('original_title') or title
+        result['work']=work
+        review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
+        facts['work_ids']=work_ids
+        facts['gap_search']={'gaps':list(local['gaps']),'unfilled':list(filled.get('unfilled',[])),'closed_sources':list(filled.get('closed',[]))}
+        reasons.extend(policy_reasons);reasons.extend(source_gate(row,work))
+        result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':facts['local_agreement']})
+        agreed=local_identity.summary(local)
+        def described(name):
+            value=agreed[name]
+            return value['value']+' ('+value['how']+'; '+', '.join(s['kind']+(' '+s['field'] if s.get('field') else '')+' "'+s['value']+'"' for s in value['sources'])+')'
+        basis='Local agreement '+local_identity.AGREEMENT_VERSION+' (Sergei decision 2026-10-12): embedded tags and file/folder names agree. Title: '+described('title')+'. Author: '+described('author')+'. No Internet confirmation required.'
+        identity='Books Arranger local agreement '+local_identity.AGREEMENT_VERSION
+        def evidence(field,value,url,why):
+            result['evidence'].append({'field':field,'cited_value':value,'source_url':url,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':identity,'basis':why[:3900]})
+        evidence('title',title,'',basis)
+        if facts['original_title']!=title:
+            evidence('title',facts['original_title'],catalog.get('source_url',''),'Original-work title from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')
+        evidence('authors',review['canonical_author'],name_source,basis if not name_source else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')
+        if language:
+            evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
+        if review['series']:
+            url=series.get('source_url','')
+            why=('Series and position from the catalog record matching the locally agreed title and author.' if url else
+                'Embedded series tags repeated in the folder/file name: '+described('series')+'; '+described('number')+'.')
+            evidence('series',review['series'],url,why);evidence('number',review['number'],url,why)
+        result.update(review=review,metadata_facts=facts)
+        result['reasons']=list(dict.fromkeys(reasons))
+        # Only a missing required field (full author name) waits for a source; optional gaps never do.
+        result['wait']=_wait(waits,budget.get('answered')) if 'Author full name not established' in result['reasons'] and filled.get('closed') else None
+        result['gap_wait']=_wait(waits,budget.get('answered')) if not result['reasons'] and filled.get('closed') else None
+        return result
+
+    def _gap_fill(self,local,title,author,stop,budget,waits,progress,result):
+        """Ask only the sources that can answer a field missing locally; never block."""
+        gaps=set(local['gaps']);found={'closed':[]}
+        partial=bool(local['fields']['author'].get('partial'))
+        def attempt(source,function):
+            try:return function()
+            except ResearchWait as wait:waits.append(wait);found['closed'].append(source)
+            except (ValueError,TypeError,KeyError,AttributeError):pass
+            return None
+        if gaps&{'original_title','author_full'}:
+            progress('FantLab','Filling missing original title')
+            catalog=attempt('fantlab',lambda:self._gap_fantlab(title,author,partial,stop,budget,result))
+            if catalog:found['catalog']=catalog
+        if 'series' in gaps or 'original_title' in gaps and not found.get('catalog'):
+            progress('Wikidata','Filling missing series position')
+            entry=attempt('wikidata',lambda:self._gap_wikidata(title,author,partial,stop,budget,result))
+            if entry:
+                if entry.get('series') and 'series' in gaps:found['series']=entry['series']
+                if not found.get('catalog') and entry.get('language'):found['catalog']=entry
+        if 'author_full' in gaps and not found.get('catalog'):
+            for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
+                progress({'openlibrary':'Open Library','googlebooks':'Google Books','itunes':'iTunes'}[source],'Filling missing full author name')
+                name=attempt(source,lambda:function(title,author,stop,budget,result))
+                if name:found['author_full']=name;break
+        unfilled=[]
+        if 'original_title' in gaps and not found.get('catalog'):unfilled.append('original_title')
+        if 'series' in gaps and not found.get('series'):unfilled.append('series')
+        if 'author_full' in gaps and not (found.get('author_full') or found.get('catalog')):unfilled.append('author_full')
+        serves={'fantlab':{'original_title','author_full'},'wikidata':{'original_title','series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
+        found['closed']=[source for source in found['closed'] if serves[source]&set(unfilled)]
+        found['unfilled']=unfilled
+        return found
+
+    def _gap_receipt(self,url,result,citation,fields):
+        result['sources'].append(self.client.receipt(url)|{'url':citation,'api_url':url,'kind':'catalog_gap','verified_identity':False,'fields':fields})
+
+    def _gap_fantlab(self,title,author,partial,stop,budget,result):
+        from local_identity import title_key
+        url='https://api.fantlab.ru/search-works?'+urllib.parse.urlencode({'q':title,'onlymatches':1})
+        records=self.client.json(url,stop,budget)
+        if not isinstance(records,list):raise ValueError('Malformed catalog search')
+        ids=[]
+        for record in records[:5]:
+            if not isinstance(record,dict) or type(record.get('work_id')) is not int or not 0<record['work_id']<10**10:continue
+            if title_key(title) not in {title_key(v) for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v}:continue
+            if not any(isinstance(v,str) and _name_matches(author,v,partial) for v in (record.get('all_autor_name'),record.get('all_autor_rusname'))):continue
+            if record['work_id'] not in ids:ids.append(record['work_id'])
+        if len(ids)!=1:return None
+        api='https://api.fantlab.ru/work/'+str(ids[0])+'/extended'
+        data=self.client.json(api,stop,budget)
+        if not isinstance(data,dict) or data.get('work_id')!=ids[0]:raise ValueError('Catalog work changed')
+        if any(marker in text(data.get('work_type_name')).casefold() for marker in ('antholog','collection','сборник','цикл','cycle','эпопея')):return None
+        authors=[a for a in data.get('authors',[]) if isinstance(a,dict) and a.get('type')=='autor'] if isinstance(data.get('authors'),list) else []
+        if len(authors)!=1:return None
+        native=text(authors[0].get('name'));latin=_latin_credit(authors[0].get('name_orig')) or text(authors[0].get('name_orig'))
+        if not any(v and _name_matches(author,v,partial) for v in (native,latin)):return None
+        language={'jp':'ja'}.get(text(data.get('lang_code')),text(data.get('lang_code')))
+        original=text(data.get('work_name_orig') or data.get('work_name'))
+        if not original:return None
+        citation='https://fantlab.ru/work'+str(ids[0])
+        self._gap_receipt(api,result,citation,['original_title','original_language','author'])
+        return {'provider':'fantlab','work_id':'fantlab:'+str(ids[0]),'source_url':citation,'language':language if re.fullmatch('[a-z]{2,3}',language) else '',
+            'original_title':original,'title_native':text(data.get('work_name')),'author_native':native,'author_latin':latin}
+
+    def _gap_wikidata(self,title,author,partial,stop,budget,result):
+        from public_work_identity import ids,names,wikidata_work
+        from local_identity import title_key
+        language='ru' if re.search('[А-Яа-яЁё]',title) else 'en'
+        url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':title,'language':language,'uselang':language,'type':'item','limit':5,'format':'json'})
+        data=self.client.json(url,stop,budget);search=data.get('search') if isinstance(data,dict) else None
+        if not isinstance(search,list):raise ValueError('Malformed Wikidata search evidence')
+        found=list(dict.fromkeys(r['id'] for r in search[:5] if isinstance(r,dict) and re.fullmatch(r'Q[1-9][0-9]{0,11}',str(r.get('id','')))))
+        if not found:return None
+        def entities(values):
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(values),'props':'labels|aliases|claims','languages':'en|ru|ja','format':'json'})
+            records=self.client.json(url,stop,budget).get('entities')
+            if not isinstance(records,dict):raise ValueError('Malformed Wikidata work evidence')
+            return {id:e for id,e in records.items() if id in values and isinstance(e,dict) and e.get('id')==id and all(isinstance(e.get(k,{}),dict) for k in ('labels','aliases','claims'))}
+        works=entities(found)
+        exact=[w for w in works.values() if title_key(title) in {title_key(v) for v in names(w)}]
+        if not exact:return None
+        links=list(dict.fromkeys(id for w in exact for prop in ('P50','P407','P31','P179') for id in ids(w,prop)))[:20]
+        related=entities(links) if links else {}
+        matches=[m for m in (wikidata_work(w,related,title,author,norm,lambda a,b:_name_matches(a,b,partial)) for w in exact) if m]
+        if len(matches)!=1:return None
+        match=matches[0];citation=match['source_url']
+        self._gap_receipt(url,result,citation,['series','original_title','original_language'])
+        author_names=match['authors'][0]
+        return {'provider':'wikidata','work_id':'wikidata:'+match['work_id'],'source_url':citation,'language':match['lang_code'],
+            'original_title':match['work_name_orig'],'title_native':match['work_name'],'author_native':text(author_names.get('name')),
+            'author_latin':text(author_names.get('name_orig')),'series':match.get('verified_series') or None}
+
+    def _full_name(self,title,author,candidates,citation_for):
+        """One unique full name whose words include the local partial name."""
+        from local_identity import title_key,words,compare_names
+        chosen={}
+        for record_title,record_authors,citation in candidates:
+            if not isinstance(record_title,str) or title_key(record_title)!=title_key(title):continue
+            if not isinstance(record_authors,list) or len(record_authors)!=1 or not isinstance(record_authors[0],str):continue
+            name=text(record_authors[0]);match=compare_names(author,name)
+            if match and len(words(name))>=2:chosen.setdefault(name,citation)
+        if len(chosen)!=1:return None
+        name,citation=next(iter(chosen.items()))
+        return {'name':name,'source_url':citation}
+
+    def _gap_openlibrary(self,title,author,stop,budget,result):
+        url='https://openlibrary.org/search.json?'+urllib.parse.urlencode({'title':title,'author':author,'limit':5,'fields':'key,title,author_name'})
+        data=self.client.json(url,stop,budget);docs=data.get('docs') if isinstance(data,dict) else None
+        if not isinstance(docs,list):raise ValueError('Malformed catalog search')
+        candidates=[(d.get('title'),d.get('author_name'),'https://openlibrary.org'+d['key']) for d in docs[:5] if isinstance(d,dict) and re.fullmatch('/works/OL[1-9][0-9]{0,11}W',str(d.get('key','')))]
+        found=self._full_name(title,author,candidates,None)
+        if found:self._gap_receipt(url,result,found['source_url'],['author'])
+        return found
+
+    def _gap_googlebooks(self,title,author,stop,budget,result):
+        url='https://www.googleapis.com/books/v1/volumes?'+urllib.parse.urlencode({'q':'intitle:'+title+' inauthor:'+author,'maxResults':5,'printType':'books','fields':'items(id,volumeInfo(title,authors))'})
+        data=self.client.json(url,stop,budget);items=data.get('items',[]) if isinstance(data,dict) else None
+        if not isinstance(items,list):raise ValueError('Malformed catalog search')
+        candidates=[]
+        for item in items[:5]:
+            info=item.get('volumeInfo') if isinstance(item,dict) else None
+            if isinstance(info,dict) and isinstance(item.get('id'),str) and re.fullmatch(r'[A-Za-z0-9_-]{4,40}',item['id']):
+                candidates.append((info.get('title'),info.get('authors'),'https://books.google.com/books?id='+item['id']))
+        found=self._full_name(title,author,candidates,None)
+        if found:self._gap_receipt(url,result,found['source_url'],['author'])
+        return found
+
+    def _gap_itunes(self,title,author,stop,budget,result):
+        country='RU' if re.search('[А-Яа-яЁё]',title+author) else 'US'
+        url='https://itunes.apple.com/search?'+urllib.parse.urlencode({'term':title+' '+author,'media':'audiobook','entity':'audiobook','limit':5,'country':country})
+        data=self.client.json(url,stop,budget);items=data.get('results') if isinstance(data,dict) else None
+        if not isinstance(items,list):raise ValueError('Malformed catalog search')
+        candidates=[]
+        for item in items[:5]:
+            if not isinstance(item,dict) or type(item.get('collectionId')) is not int:continue
+            candidates.append((item.get('collectionName'),[item.get('artistName')],'https://books.apple.com/audiobook/id'+str(item['collectionId'])))
+        found=self._full_name(title,author,candidates,None)
+        if found:self._gap_receipt(url,result,found['source_url'],['author'])
+        return found
+
+def _name_matches(local,other,partial=False):
+    """Same person in any script or word order; a surname-only local name may match a full one."""
+    from local_identity import compare_names
+    match=compare_names(local,other)
+    return bool(match) and (partial or not match['subset'] or len(str(other).split())<len(str(local).split()))
 
 def recording_alias(page,source_title,work):
     """A fetched unofficial translation credit can bridge a source alias, not invent an edition."""
@@ -670,9 +942,23 @@ def _credit_matches(a,b):
     return len(at)>=2 and all(len(t)>1 for t in at) and sorted(at)==sorted(bt)
 def _stamp():return dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
 def _page_record(url,raw,pair):return {'url':url,'kind':'recording_credit' if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS else 'publisher_or_journal','sha256':hashlib.sha256(raw).hexdigest(),'retrieved_utc':_stamp(),'credit':pair,'verified_identity':bool(pair)}
-def _wait(waits):
+def _wait(waits,answered=()):
+    """Retry when the candidate can actually progress, not when any one source reopens.
+
+    A stage is blocked when every source it tried was closed and none answered.
+    The candidate needs all its blocked stages open again, so it waits for the
+    latest of their earliest reopenings. When no stage is blocked the closed
+    sources are optional alternatives and the earliest reopening is used.
+    """
     if not waits:return None
-    wait=min(waits,key=lambda w:w.retry_at)
+    answered=set(answered or ())
+    blocked=[]
+    for hosts in STAGES.values():
+        closed=[w for w in waits if w.source in hosts]
+        if closed and not answered&hosts:blocked.append(min(closed,key=lambda w:w.retry_at))
+    other=[w for w in waits if not any(w.source in hosts for hosts in STAGES.values())]
+    if other:blocked.append(min(other,key=lambda w:w.retry_at))
+    wait=max(blocked,key=lambda w:w.retry_at) if blocked else min(waits,key=lambda w:w.retry_at)
     return {'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
 
 
