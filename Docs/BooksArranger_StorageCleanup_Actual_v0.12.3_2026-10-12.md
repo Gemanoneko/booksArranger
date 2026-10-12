@@ -1,6 +1,6 @@
 # Books Arranger exact staging cleanup / stable v0.12.3 application — 2026-10-12
 
-Status: supported pause/shutdown complete; source application and final actual-call clearance pending. No actual staging disposition has occurred.
+Final status: stable v0.12.3 is running, the exact cleanup passed, the server Ready filter returns five eligible books, and automatic metadata research resumed after one guarded Start. Earlier sections record the reviewed preparation and operation history.
 
 The existing normal audiobook Resume route prunes every completed job, runs folder housekeeping and resumes pending audio/source work. Automatic Start with an empty audio queue does not call that route. To avoid broad replay, the approved exact operation is one offline StorageCleanup.run for job96f89af4-c6ce-46ad-a795-bd792445c6c1 with include_recovery=False. No MergeService construction, folder/source/recovery/conversion entry point is invoked.
 
@@ -22,3 +22,16 @@ The fixed cleanup ran exactly once and passed, exit code 0, complete owned closu
 The exact 24 approved staging files now have terminal `removed` receipts. Three files remain: ownership.json and the two old failed-attempt stdout/stderr logs. Storage cleanup is durably completed with the exact fifth M4B hash and empty reason. No source, final output, recovery, folder, conversion or queue action was invoked. The original recovery copy and its exact 24-hour expiry remained unchanged. All five completed rows and checkpoint remained byte-for-byte equal.
 
 Futaba independently checked the immutable actual proof and declared it launch-safe. Normal user Windows launch has been requested; the app has not been tool-launched. The prepared continuation guard checks the fresh loaded v0.12.3 owner, old-owner absence, all 85 released files, exact five records/checkpoint/cleanup tables, and a fresh bounded server Ready query returning five eligible rows including the fifth book. Senua cleared the final continuation action guard at SHA256 `722bb24f63a96b824d51b71e322a81237b7d3d0810a09de92976b9393143bbab`. Normal user Windows launch confirmation, fresh-owner/Ready5 verification and the single supported Start remain pending. No Ready-server or resumed-processing claim is made yet.
+
+
+## Verified normal launch and resumed processing
+
+After user-confirmed normal Windows launch, the fresh stable owner was v0.12.3, Pythonw PID 84036, instance `8da5ee732c2b31081f1b57109e114c9e`. The unchanged Senua-cleared continuation guard `722bb24f63a96b824d51b71e322a81237b7d3d0810a09de92976b9393143bbab` verified all 85 released source/interface files, exact completed cleanup/source/recovery receipts, all five full completed records, the saved Paused checkpoint and a fresh server Ready response of five eligible books including «Дельфин в пустыне».
+
+The first read-only verification refused on an old numeric PID check. A subsequent exact process-identity probe found PID 103408 absent and the fresh expected owner verified. The identity at the instant of the initial refusal is unknown; PID reuse is not claimed as proven. Root/Senua authorized one renewed read-only verification with the same unchanged guard; it passed completely. There was no bypass, cleanup replay or Start on the refused call. Evidence is retained in `old-pid-identity-refusal.json` and `verification-refusal-notes.json`.
+
+Exactly one supported Start was accepted with exclusive `start-issued.json` and durable `start-reply.json`. The bounded snapshot at 2026-10-12 12:07:33 UTC (15:07 Israel) confirmed automatic Running/research, finding Wikipedia reference leads for Small Gods. Counts are five completed, five converted, five approved, zero failed and zero queued. No encoding was active. All five completed records remain exact, digest `3c299753f7024677f30510c0659b584dd8dbb9fbad07916a2a8282c1fa4b4112`; metadata work legitimately advanced the checkpoint after Start.
+
+The Ready filter discrepancy and temporary-storage attention are resolved. The historical durable controller SQLITE_BUSY diagnostic remains in the saved run; this bounded continuation does not promise uninterrupted future processing or full-library conversion. The approved 24-hour original recovery and all protected outputs remain intact.
+
+Runtime proof SHA256 values: new-owner-proof.json `101fff4be63ce8adbc52c2ff838815648207d448e9c54805c31629922236f67e`; start-issued.json `7cff7077f4a43c2f0ab70f26d002aea30eed1d79045cfd3a81413c415eb7ed6b`; start-reply.json `56827e686b7fe6247cfa3d57c49192e379dbf64663842dbb49b20ea0ef1bae82`; observation-120733.json `d0df59cdead8eeca99bf3e52d7c345903314263a502e43e39030f5a1f9288161`. Complete saved JSON evidence is authoritative; routine console output for verification/Start was display-truncated by the tool, both calls exited successfully.

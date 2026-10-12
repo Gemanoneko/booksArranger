@@ -1,6 +1,18 @@
 # Books Arranger v0.12.3 application and staging cleanup QA — 2026-10-12
 
-**Current verdict: GO for normal user launch.** The exact released v0.12.3 source and one-time offline staging cleanup are independently verified from saved immutable evidence. New loaded owner, server Ready count 5 and one supported Start remain pending normal Windows launch. No live cleanup, controls, query, launch or mutation was performed by Futaba.
+**Current verdict: GO — v0.12.3 applied, exact staging cleanup completed, server Audiobook Ready contains five books, and automatic research resumed.** The new normal-launch owner, all 85 released physical pins, protected records/checkpoint, one supported Start and bounded progress are independently verified from saved evidence. No live cleanup, controls, query, launch or mutation was performed by Futaba. No uninterrupted-processing guarantee is made.
+
+## Normal launch, Ready count and resume — final verification
+
+`actual-cleanup/new-owner-proof.json` SHA256 `101fff4be63ce8adbc52c2ff838815648207d448e9c54805c31629922236f67e` identifies **v0.12.3 Pythonw PID 84036**, instance **8da5ee732c2b31081f1b57109e114c9e**, port 5210, old PID absent. Futaba independently matched its **85 physical pins** to the installed source manifest, all five full completed records and saved checkpoint `e0ceb38c…` to the actual cleanup receipt, and every cleanup/retirement/retention after-table snapshot exactly. Before Start automatic processing was Paused.
+
+The saved HTTP server Ready response has **total 5, five rows, all audiobook_ready=true**. It includes exact recovered candidate `137b5e43-8f6f-44d9-887f-b2b094f233ab`, job `96f89af4-c6ce-46ad-a795-bd792445c6c1`, temporary_cleanup completed, preserved_evidence_count 2, and original recovery retained through the unchanged 24-hour expiry. This verifies the Ready filter's server result; QA did not operate or screenshot the browser.
+
+The first verify-new guard refused because the numeric old PID was reported alive; its process identity at that instant is unknown. No complete new-owner proof or Start marker existed then. A subsequent scoped identity-only proof found that PID absent; root/Senua authorized a renewed **unchanged** read-only guard, which passed all predicates. No ownership guard bypass or repeated Start was used.
+
+`actual-cleanup/start-issued.json` SHA256 `7cff7077f4a43c2f0ab70f26d002aea30eed1d79045cfd3a81413c415eb7ed6b` records **one Start** bound to the new owner and saved run `96cbe916-3b2b-4858-b386-89d493cb4f24`. `start-reply.json` SHA256 `56827e686b7fe6247cfa3d57c49192e379dbf64663842dbb49b20ea0ef1bae82` confirms accepted Running/research. Matching reply bytes to an earlier reply are not counted as an additional call; the owner-bound issuance marker is authoritative for this launch.
+
+Bounded `actual-cleanup/observation-120733.json` SHA256 `d0df59cdead8eeca99bf3e52d7c345903314263a502e43e39030f5a1f9288161`, observed **15:07:33 Israel time**, identifies the same owner, automatic **Running/research**, current **Small Gods / Wikipedia / Finding article reference leads**. Audiobook jobs: Completed, **completed 5 / converted 5 / approved 5 / failed 0 / queued 0**, no active encoding or cleanup. All five full completed records remain exactly equal to the actual cleanup receipt, digest `3c299753f7024677f30510c0659b584dd8dbb9fbad07916a2a8282c1fa4b4112`. Checkpoint legitimately advanced to `cfa57feb0a3120c62b1ad2cb98f283f4823e4da510d378adc2f64945f59c568b` after resume; it was preserved exactly before Start. No new fault was observed in this bounded sample.
 
 ## Exact installation and operation
 
@@ -22,6 +34,6 @@ Source cleanup, source retirement, recovery completion and recovery retention ta
 
 ## Remaining checks and scope
 
-The historical temporary-cleanup Major issue is verified resolved for this exact offline operation at the durable/native receipt boundary. Server Ready count and normal launch/resume still need new loaded-owner evidence; this report does not infer a UI count from a cleanup row. Metadata research uninterruptedness is not promised. Senua's two Minor candidate notes (lifetime path-receipt cache and shared diagnostic phase/disposition under possible concurrent callers) remain advisory and are not evidence of general serialization.
+The historical temporary-cleanup Major issue is verified resolved for this exact offline operation at the durable/native receipt boundary. Normal owner/resume and actual server Ready count 5 are verified above; the count was not inferred from a cleanup row. Metadata research uninterruptedness is not promised. Senua's two Minor candidate notes (lifetime path-receipt cache and shared diagnostic phase/disposition under possible concurrent callers) remain advisory and are not evidence of general serialization.
 
-The independent private candidate QA report remains **45 unique cases**, distinct from this actual-operation proof; no 45-case rerun or count inflation. Comics/Comix, Open Library, source policy, metadata decisions and unrelated work were untouched. Unique source/receipt/failed-attempt evidence is preserved. No live actions are pending for Futaba before normal-launch proofs arrive.
+The independent private candidate QA report remains **45 unique cases**, distinct from this runtime/application evidence; no 45-case rerun or count inflation. Comics/Comix, Open Library, source policy, metadata decisions and unrelated work were untouched. Unique source/receipt/failed-attempt evidence is preserved. **No QA tests, live actions or documentation writes remain pending for this application handoff.**
