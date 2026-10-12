@@ -77,3 +77,13 @@ Sergei: “Please make sure we always run the latest stable version of app. Ask 
 Sergei: “It's a standing rule to never reduce the source quality, but also not to inflate the source files. So, for example, if the source file is 128 kbps mono, then it should stay 128 kbps mono.” Preserve the verified source bitrate and channel layout; do not apply a larger stereo profile to mono sources. File-size comparisons must distinguish audio settings from container, artwork and chapter overhead. Matching nominal bitrate/channel settings is not proof of bit-identical quality: another lossy encoding must not be described as lossless or as guaranteed identical to the source.
 
 Sergei subsequently authorized: “Delete all 3 existing conversions and create one final conversions according to all the rules.” For Eye of God, create and fully validate one final version from the 40 protected original tracks, publish and register the final artifact as the current audiobook, then retire only the three explicitly identified old conversions through verified native dispositions and the approved recovery safeguards. Preserve the original tracks and the 24-hour recovery protection; do not overwrite a colliding output or delete the old files before the new final has passed verification. The original conversion/repair history remains auditable. This task-specific authorization does not grant blanket deletion or rewriting of other existing audiobooks.
+
+## Sergei decision — local evidence is enough when it agrees (2026-10-12)
+
+Supersedes the "filenames, embedded metadata and folders are clues only" boundary above for work identity.
+
+- If the tags, file name and folder agree with each other, accept that as the book's identity. No outside confirmation is required.
+- Search the Internet only for what is missing or conflicting: series number, original English title, author's full name, cover.
+- Contradictions between local sources still hold the book for research/review; all media verification, publication checks and the 24-hour recovery policy are unchanged.
+- Same name in different languages or scripts counts as agreement (Sergei: folder "Rollins James" and tag "Джеймс Роллинс" agree). Name order (surname first or last) also does not matter. The detailed matching logic is Ender's design, specified before implementation.
+- Sequencing: after the Eye of God replacement completes, together with the approved search-channel work (catalogs, DuckDuckGo, Google human-check).
