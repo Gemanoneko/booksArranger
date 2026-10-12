@@ -1,6 +1,6 @@
 # Books Arranger — bounded SQLite checkpoint/cache retry candidate
 
-2026-10-12. **Status: isolated final candidate, producer and independent receiver each 78/78 PASS; Futaba GO and Senua candidate RELEASE CLEAR. Release publication remains pending Sully; the patch is not applied to the live app.** Baseline is released v0.12.0 commit `b569cc1e556726043671f9b329a2f3cb0cf49ea7`, extracted with read-only Git archive into `scratch/sqlite-busy-2026-10-12/candidate`. No canonical product source, runtime, Git index, Comics, Open Library or real-library content was modified for this investigation.
+2026-10-12. **Final status: producer and independent receiver each 78/78 PASS; Futaba GO and Senua RELEASE CLEAR. Published v0.12.1 at a36d3fe9e61d5b6663dddba9322031ef9d9b194c, safely applied and verified through normal Windows launch, then resumed once. Historical investigation stages and failed receipts below remain retained; bounded recovery and persistent Stop-entry limits remain.** Baseline is released v0.12.0 commit `b569cc1e556726043671f9b329a2f3cb0cf49ea7`, extracted with read-only Git archive into `scratch/sqlite-busy-2026-10-12/candidate`. No canonical product source, runtime, Git index, Comics, Open Library or real-library content was modified for this investigation.
 
 ## Demonstrated failure and limits
 
