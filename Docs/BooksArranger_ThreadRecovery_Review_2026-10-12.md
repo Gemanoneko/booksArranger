@@ -71,8 +71,6 @@ Pinned shutdown proof reports the exact v0.12.2 owner PID54388 / instance79ad53f
 
 Authorized sequence: keep the app offline; run this exact call once; inspect owned exit/drain receipt and actual archive/queue/checkpoint/completed-record proof; only then proceed to the normal Windows launch and separately guarded owner/Start verification. If execution, truncation or post-commit proof fails, STOP and inspect the authoritative archive/queue before considering any retry. The receipt's started marker deliberately prevents blind repetition. Actual success evidence is pending; the known original failure cannot be declared repaired solely from this review.
 
-## Historical minimum actual-operation gate
-
 ## Actual outcome and replacement verification/Start guard
 
 The one authorized actual invocation completed. Senua independently matched actual-operation-owned-receipt.json SHA-256 `54adde30659fda2a04b23c068f7771c2950a3e49e63f08e78cfc9c55daa4ef39`, read passed=true/exit0/no error, outer6.4506625s, stdout170785bytes/stderr0 and no truncation. Its actual proof reports the exact Pending/queued result, complete original archive, freshly protected source proof, unchanged four completed records and unchanged saved checkpoint. Root and independent Futaba confirmed the full saved proof launch-safe. This establishes saved queue recovery; it does not certify the retried book's encoding/playback/publication or claim resumed processing before a new owner/Start is observed.
