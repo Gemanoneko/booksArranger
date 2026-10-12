@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.12.3] - 2026-10-12
+
+### Fixed
+
+- Retry only short native SQLITE_BUSY storage receipt transactions within existing bounds; full-row comparisons preserve output/file provenance and monotonic cleanup state without repeating native disposal.
+- Retain bounded typed database diagnostics and logical disposition phase while preserving the primary exception if diagnostic persistence also fails.
+- Correct a private recovery-retention fake's missing initialization field; no production recovery or Ready semantics change.
+
+### Changed
+
+- Leave actual fifth-book temporary cleanup for separately guarded stable application. UI, provider behavior, verified output/source protection and 24-hour recovery remain unchanged.
+
+
 ## [v0.12.2] - 2026-10-12
 
 ### Fixed

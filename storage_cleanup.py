@@ -8,6 +8,9 @@ import hashlib
 import json
 import re
 import uuid
+import sqlite3
+import traceback
+from sqlite_retry import transaction
 from pathlib import Path
 from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
@@ -21,7 +24,12 @@ class StorageCleanup:
         self.stage_root = ordinary(stage_root)
         self.recovery_root = ordinary(recovery_root)
         self.guard = guard
+        self._receipts = {}
+        self.last_errors = {}
+        self._phase = "not_started"
+        self._disposition = "not_started"
         with connect(self.database) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_errors(id TEXT PRIMARY KEY,job_id TEXT,output_hash TEXT,created TEXT,diagnostic TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_jobs(job_id TEXT PRIMARY KEY, output_hash TEXT, state TEXT, reason TEXT, updated TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_authorizations(path TEXT PRIMARY KEY,job_id TEXT,output_hash TEXT,sha256 TEXT,size INTEGER,proof_hash TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_preserved(path TEXT PRIMARY KEY,job_id TEXT,reason TEXT)')
@@ -29,9 +37,62 @@ class StorageCleanup:
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_directories(job_id TEXT,path TEXT,identity TEXT,ancestry TEXT,state TEXT,reason TEXT,updated TEXT,PRIMARY KEY(job_id,path))')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_files(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER, facts TEXT, state TEXT, updated TEXT)')
 
+    @staticmethod
+    def _cas(db, table, expected, target):
+        key = 'path' if table != 'storage_cleanup_jobs' else 'job_id'
+        actual = db.execute('SELECT * FROM '+table+' WHERE '+key+'=?', (target[key],)).fetchone()
+        actual = dict(actual) if actual else None
+        if actual == target:return target
+        if actual != expected:raise BoundaryError('Cleanup receipt changed; preserved')
+        if expected is None:
+            columns=list(target)
+            db.execute('INSERT INTO '+table+' ('+','.join(columns)+') VALUES ('+','.join('?' for _ in columns)+')',tuple(target.values()))
+        else:
+            columns=list(target);prior=list(expected)
+            changed=db.execute('UPDATE '+table+' SET '+','.join(c+'=?' for c in columns)+' WHERE '+ ' AND '.join(c+' IS ?' for c in prior),tuple(target.values())+tuple(expected.values())).rowcount
+            if changed!=1:raise BoundaryError('Cleanup receipt CAS refused; preserved')
+        return target
+
     def _set(self, job_id, output_hash, state, reason=''):
-        with connect(self.database) as db:
-            db.execute('INSERT OR REPLACE INTO storage_cleanup_jobs VALUES(?,?,?,?,?)', (job_id, output_hash, state, reason, stamp()))
+        timestamp=stamp();frozen=[]
+        def write(db):
+            row=db.execute('SELECT * FROM storage_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
+            row=dict(row) if row else None
+            if not frozen:
+                if row and row['output_hash']!=output_hash and not (row['output_hash']=='' and row['state']=='needs_attention' and state=='checking' and output_hash):raise BoundaryError('Cleanup output provenance changed')
+                if row and row['state']=='completed':
+                    if state=='completed' and row['reason']!=reason:raise BoundaryError('Completed receipt reason differs')
+                    return row  # Never downgrade durable cleanup success.
+                if row and row['state']=='removing' and state=='checking':
+                    return row  # Resume revalidates without rolling back durable intent.
+                if row and row['state']==state and row['reason']==reason:return row
+                allowed={'checking':{'removing','needs_attention'},'removing':{'completed','needs_attention'},'needs_attention':{'checking'}}
+                if (row and state not in allowed.get(row['state'],set())) or (not row and state not in {'checking','needs_attention'}):raise BoundaryError('Invalid cleanup job transition')
+                frozen.extend([row,{'job_id':job_id,'output_hash':output_hash,'state':state,'reason':reason,'updated':timestamp}])
+            return self._cas(db,'storage_cleanup_jobs',frozen[0],frozen[1])
+        return transaction(self.database,write)
+
+    def _diagnose(self, job_id, output_hash, error):
+        frames=[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name} for f in traceback.extract_tb(error.__traceback__)[-12:]]
+        diagnostic={'exception_class':type(error).__name__,'message':str(error)[:1000],
+                    'sqlite_errorcode':getattr(error,'sqlite_errorcode',None),'sqlite_errorname':getattr(error,'sqlite_errorname',None),
+                    'phase':self._phase,'disposition':self._disposition,'stack':frames,'secondary':[]}
+        self.last_errors[job_id]=diagnostic
+        while len(self.last_errors)>32:self.last_errors.pop(next(iter(self.last_errors)))
+        values=(str(uuid.uuid4()),job_id,output_hash,stamp(),packed(diagnostic))
+        try:
+            def append(db):
+                old=db.execute('SELECT * FROM storage_cleanup_errors WHERE id=?',(values[0],)).fetchone()
+                if old:
+                    if tuple(old)!=values:raise BoundaryError('Diagnostic identity changed')
+                    return
+                db.execute('INSERT INTO storage_cleanup_errors VALUES(?,?,?,?,?)',values)
+            transaction(self.database,append)
+        except Exception as secondary:
+            diagnostic['secondary'].append({'operation':'diagnostic persistence','exception_class':type(secondary).__name__,'message':str(secondary)[:1000]})
+        try:self._set(job_id,output_hash,'needs_attention',str(error))
+        except Exception as secondary:
+            diagnostic['secondary'].append({'operation':'state persistence','exception_class':type(secondary).__name__,'message':str(secondary)[:1000]})
 
     def status(self):
         with connect(self.database) as db:
@@ -101,6 +162,7 @@ class StorageCleanup:
                     raise BoundaryError('Missing-copy receipt differs from approved bytes')
                 if old['state'] not in TERMINAL:
                     state = 'removed' if old['state'] == 'disposition_set' else 'absent_after_intent'
+                    self._receipts[str(path)]=old
                     self._file_state(path, state)
                 return None
             raise BoundaryError('Copy is missing without verified removal intent: ' + str(path))
@@ -122,25 +184,47 @@ class StorageCleanup:
             if old['job_id'] != job_id or old['kind'] != kind or (old['sha256'], old['size']) != (sha, facts['size']) or json.loads(old['facts']) != facts:
                 raise BoundaryError('Copy identity changed after cleanup intent; preserved')
         else:
-            with connect(self.database) as db:
-                db.execute('INSERT INTO storage_cleanup_files VALUES(?,?,?,?,?,?,?,?)',
-                           (str(path), job_id, kind, sha, facts['size'], packed(facts), 'verified', stamp()))
+            target={'path':str(path),'job_id':job_id,'kind':kind,'sha256':sha,'size':facts['size'],'facts':packed(facts),'state':'verified','updated':stamp()}
+            def insert(db):
+                current=db.execute('SELECT * FROM storage_cleanup_files WHERE path=?',(str(path),)).fetchone()
+                if current:
+                    current=dict(current)
+                    if current['state']!='verified' or any(current[k]!=target[k] for k in target if k!='updated'):raise BoundaryError('Verified cleanup receipt provenance changed')
+                    return current
+                return self._cas(db,'storage_cleanup_files',None,target)
+            old=transaction(self.database,insert)
+        self._receipts[str(path)]=old
         return path, handle, ancestry
 
     def _file_state(self, path, state):
-        with connect(self.database) as db:
-            db.execute('UPDATE storage_cleanup_files SET state=?,updated=? WHERE path=?', (state, stamp(), str(path)))
+        expected=self._receipts.get(str(path))
+        if not expected:raise BoundaryError('No held cleanup receipt provenance')
+        if expected['state']==state:
+            return transaction(self.database,lambda db:self._cas(db,'storage_cleanup_files',expected,expected))
+        allowed={'verified':{'removal_intended'},'removal_intended':{'disposition_set','absent_after_intent'},'disposition_set':{'removed'}}
+        if state not in allowed.get(expected['state'],set()):raise BoundaryError('Invalid cleanup file transition')
+        target=dict(expected,state=state,updated=stamp())
+        result=transaction(self.database,lambda db:self._cas(db,'storage_cleanup_files',expected,target))
+        self._receipts[str(path)]=result
+        return result
 
     def _dispose(self, prepared, guard=None):
         for path, handle, ancestry in prepared:
             (guard or self.guard)(); ancestry.revalidate()
+            self._phase='commit removal intent'
             self._file_state(path, 'removal_intended')
+            self._disposition='intent_committed'
             handle.dispose()
+            self._disposition='disposition_called'
+            self._phase='commit disposition receipt'
             self._file_state(path, 'disposition_set')
+            self._disposition='disposition_receipt_committed'
             handle.__exit__(None, None, None)
             try:
                 path.stat()
             except FileNotFoundError:
+                self._disposition='confirmed_absent'
+                self._phase='commit removed receipt'
                 self._file_state(path, 'removed')
             else:
                 raise BoundaryError('Verified copy disposition did not remove its name')
@@ -229,7 +313,14 @@ class StorageCleanup:
                 if authorization:approved=(authorization['sha256'],authorization['size'])
                 if approved is None:
                     if re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout)',name) or name=='chapters.txt':
-                        with connect(self.database) as db:db.execute('INSERT OR REPLACE INTO storage_cleanup_preserved VALUES(?,?,?)',(str(path),job_id,'Legacy evidence lacks exact producer bytes; preserved'))
+                        values=(str(path),job_id,'Legacy evidence lacks exact producer bytes; preserved')
+                        def preserve(db):
+                            prior=db.execute('SELECT * FROM storage_cleanup_preserved WHERE path=?',(values[0],)).fetchone()
+                            if prior:
+                                if tuple(prior)!=values:raise BoundaryError('Preserved evidence provenance changed')
+                                return
+                            db.execute('INSERT INTO storage_cleanup_preserved VALUES(?,?,?)',values)
+                        transaction(self.database,preserve)
                         continue
                     raise BoundaryError('Exact producer artifact receipt is required: '+name)
                 targets.append((path, 'staging', approved))
@@ -245,15 +336,19 @@ class StorageCleanup:
 
     def run(self, job_id, include_recovery=False):
         output_hash = ''
+        self._phase='verify completed output';self._disposition='not_started'
         try:
             with self.protected_output(job_id) as (manifest, output):
                 output_hash = output['sha256']
                 previous = next((r for r in self.status() if r['job_id'] == job_id), None)
                 if previous and previous['state'] == 'completed' and previous['output_hash'] == output_hash:
                     return
+                self._phase='commit checking receipt'
                 self._set(job_id, output_hash, 'checking')
                 with contextlib.ExitStack() as stack:
+                    self._phase='verify source retirement'
                     cleanup, members = self._source_safety(stack, job_id, manifest, output)
+                    self._phase='verify staging'
                     targets = self._staging(stack, job_id, manifest, output)
                     if cleanup and include_recovery:
                         recovery_dir=self.recovery_root/cleanup['id']
@@ -267,17 +362,20 @@ class StorageCleanup:
                             if p.parent != self.recovery_root / cleanup['id']:
                                 raise BoundaryError('Recovery-copy location changed')
                             targets.append((p, 'recovery', (s['sha256'], s['size'], s['modified'])))
+                    self._phase='prepare verified file receipts'
                     prepared = []
                     for path, kind, expected in targets:
                         item = self._prepare(stack, job_id, kind, path, self.recovery_root if kind == 'recovery' else self.stage_root, expected)
                         if item:
                             prepared.append(item)
                     # All copies and obligations are checked before any disposition.
+                    self._phase='commit removing receipt'
                     self._set(job_id, output_hash, 'removing')
                     self._dispose(prepared)
+                self._phase='commit completed receipt'
                 self._set(job_id, output_hash, 'completed')
         except Exception as error:
-            self._set(job_id, output_hash, 'needs_attention', str(error))
+            self._diagnose(job_id,output_hash,error)
             raise
 
 

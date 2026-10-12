@@ -108,7 +108,7 @@ class AdmissionTests(unittest.TestCase):
             entries.append('admitted');yield
         s.start_retention(admission);self.assertTrue(called.wait(2));s.close();self.assertFalse(s._retention_thread.is_alive());self.assertEqual(entries,['admitted'])
         from web_server import BrowserServer
-        server=BrowserServer.__new__(BrowserServer);server.control_condition=threading.Condition();server.closing=False;server.merge_admissions=0;server.scan_active=lambda:False
+        server=BrowserServer.__new__(BrowserServer);server.control_condition=threading.Condition();server.closing=False;server.merge_admissions=0;server.recovery_operations=0;server.scan_active=lambda:False
         with server.recovery_admission():self.assertEqual(server.merge_admissions,1)
         self.assertEqual(server.merge_admissions,0);server.scan_active=lambda:True
         with self.assertRaises(ValueError):
