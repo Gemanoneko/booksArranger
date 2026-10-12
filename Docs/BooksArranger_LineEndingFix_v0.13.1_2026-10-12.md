@@ -1,6 +1,6 @@
 # Books Arranger v0.13.1 — line-ending fix: handoff for Futaba and Senua (2026-10-12)
 
-Author: Ender. Status: uncommitted in worktree `scratch/eye-of-god-2026-10-12/metadata/release-staging-0.13.1` (branch `codex/books-release-0.13.1`, HEAD `b5c5937`). Sully commits.
+Author: Ender. Status: candidate committed by Sully as `b662709` in worktree `scratch/eye-of-god-2026-10-12/metadata/release-staging-0.13.1` (branch `codex/books-release-0.13.1`). The regression test below is uncommitted on top of it. Sully commits.
 
 ## Cause: confirmed
 The real Eye of God admission returned HTTP 400 because the plan-hash guard in `merge_service.py:394` rejected the installed `replacement_eye_plan.json`.
@@ -20,6 +20,7 @@ The real Eye of God admission returned HTTP 400 because the plan-hash guard in `
 - `.gitattributes` (new): `replacement_eye_plan.json text eol=lf` (sha256 `b68aa072…`)
 - `VERSION`: 0.13.1
 - `CHANGELOG.md`: v0.13.1 entry
+- `tests/test_replacement_plan_bytes.py` (new): regression test, see below
 - this doc
 
 The worktree's own copy of the plan was rewritten to LF (`db493dbb`, `w/lf attr/text eol=lf`). This step does not show in `git diff`.
@@ -55,8 +56,25 @@ Fixture bugs caught on the way (receipts kept):
 
 The earlier v1 fixture failed because `checkout-index -f` does not rewrite a stat-clean file. Its baseline was never CRLF. This is the same behaviour as C5.
 
+## Regression test
+`tests/test_replacement_plan_bytes.py`, class `ReplacementPlanBytesTests`:
+- `test_checked_out_plan_passes_real_admission_guard`: runs the real `MergeService.replace_audiobook` guard on the plan next to `merge_service.py`, with a stub that stops at the first statement after the guard. A CRLF checkout fails the suite, and the message gives the raw sha256, the CRLF count and the fix.
+- `test_guard_rejects_crlf_copy_of_plan`: sensitivity control. A CRLF temp copy must be rejected on every run.
+- `test_gitattributes_pins_plan_to_lf`: the effective `.gitattributes` rule for the plan must stay `eol=lf` with `text` not unset. Later matching lines are taken into account.
+
+The test reads the hash from the guard itself; it does not copy the constant.
+
+Positive control (`v4/run_regression_test_control.py`, receipt `v4/regression-test-control-receipt-20261012.json`, 10/10 as expected, `"passed": true`):
+- a temp CRLF copy (sha256 `42da5fc0…a3a811`, 16730 bytes, the same bytes as the live install) **fails**; an edited LF copy **fails**; an identical LF temp copy and the real LF file **pass**
+- `.gitattributes` empty, rule followed by `* -text`, or `eol=crlf` all **fail**; the real file **passes**
+- real plan and `.gitattributes` hashes are unchanged before and after; the plan is still `db493dbb`
+
+In the live install, this test fails until the plan is re-materialised (step 3 above). It then passes, so it can also confirm that step.
+
 ## Test suite
 `python -m unittest discover -s tests -p "test_*.py"` in this worktree: 487 tests, 10 errors (`v4/unittest-0.13.1-worktree.txt`).
+
+With the regression test: 490 tests, the same 10 errors and the 3 new tests pass (`v4/unittest-0.13.1-with-regression-test.txt`, `v4/failure-set-0.13.1-with-regression-test.txt`). One extra failure in that run, `test_fresh_stat…test_replaced_fixture_invalidates_review_through_scan_error_path`, was a transient `WinError 5` on a fixture rename. It passed 4/4 on rerun (`v4/unittest-fresh-stat-rerun.txt`). The new test does not touch that fixture.
 
 Control: a fresh clone of v0.13.0 at the **same path length** (`v4/base-v0.13.0`) gave the same 10 errors plus 2 timing failures (`v4/failure-set-*.txt`). Those 2 tests (`test_waiting_*`) passed on rerun in both trees (`v4/unittest-waiting-rerun.txt`).
 

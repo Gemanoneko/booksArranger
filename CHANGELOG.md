@@ -5,6 +5,7 @@
 ### Fixed
 
 - Preserve the approved replacement recipe as exact LF bytes on Windows Git checkouts, preventing line-ending conversion from triggering the unchanged-plan admission guard. Genuine recipe edits remain rejected.
+- Add regression test `tests/test_replacement_plan_bytes.py`: the checked-out recipe must pass the real admission guard (a CRLF checkout fails the suite), a CRLF copy must be rejected, and `.gitattributes` must keep its `eol=lf` rule.
 
 ## [v0.13.0] - 2026-10-12
 
