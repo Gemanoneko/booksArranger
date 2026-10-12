@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.13.1] - 2026-10-12
+
+### Fixed
+
+- Preserve the approved replacement recipe as exact LF bytes on Windows Git checkouts, preventing line-ending conversion from triggering the unchanged-plan admission guard. Genuine recipe edits remain rejected.
+
 ## [v0.13.0] - 2026-10-12
 
 ### Added
