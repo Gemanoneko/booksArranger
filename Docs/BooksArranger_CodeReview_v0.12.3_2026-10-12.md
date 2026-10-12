@@ -7,13 +7,13 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-10-12
 Tool: Books Arranger
 Release: v0.12.3
-Commit range: 315aec2699d6d57dda5944a2e93fdf3e2a53172b..source-pinned candidate (commit pending)
+Commit range: 315aec2699d6d57dda5944a2e93fdf3e2a53172b..93c5c385e8962ae2c12b9469a0e8b37154096f24
 Released product baseline: v0.12.2, 0a238ba370edadd2adf809fc22efaae07977be8e
-Files changed: 3 code/test files; storage_cleanup.py +107/-9, new 135-line test module, one fixture initialization correction
+Files changed: 8 files, +462/-11; 3 code/test files, VERSION, CHANGELOG and 3 authorized reports
 Stand-down dimensions: none; UI/browser/media subprocess implementations unchanged
 ```
 
-This initial clearance certifies the exact candidate below. Sully must supply the actual source commit for range reconciliation before tagging or publishing; it does not yet certify an unidentified commit.
+Committed endpoint independently reconciled: tree `8da389e2df1505e7d362f1fb9782ca96865917b5`, exactly the eight declared paths. All three committed Git blobs match the reviewed candidate after CRLF normalization, with SHA256 respectively `205e246d8da71d4c22a3404e1b08365068a6ce88093718f29c7e50ea97f81ea4`, `0d01d0ecf2b139ed3976bb5f3b3b1fc6e7659c5a97b216b3695e1562c93b5015`, and `ad041ffd3de9acd864d449432e943ae42e7e4364c2148321fed6739bb034d579`. VERSION is 0.12.3 and CHANGELOG accurately scopes the patch. The ensuing report-only child may carry this reconciliation without changing certified product/test bytes.
 
 ## Summary
 
@@ -82,7 +82,7 @@ Pass — frozen design and reports distinguish bounded receipt-write recovery fr
 
 ### 9. Build & Release Hygiene
 
-Pass for exact candidate — reviewed finite routes hold manifest/source/runtime pins, refuse candidate cached bytecode, install bounded drains before suspended Job admission, require descendant/drain closure and use exclusive separate receipts. Total deadline 600000 ms. Final receiver outer SHA `9f64aca2025dccc9fdf95aabfadbd69dbf4394fd095403304a078fcd8650de78`, inner SHA `0137413285fb6b8b339132244698cc082abd91aab56a03c08430b66e7b0c0046`. Version/changelog and final committed range remain Sully's reconciliation step; no release mutation is authorized by this report alone.
+Pass — reviewed finite routes hold manifest/source/runtime pins, refuse candidate cached bytecode, install bounded drains before suspended Job admission, require descendant/drain closure and use exclusive separate receipts. Total deadline 600000 ms. Final receiver outer SHA `9f64aca2025dccc9fdf95aabfadbd69dbf4394fd095403304a078fcd8650de78`, inner SHA `0137413285fb6b8b339132244698cc082abd91aab56a03c08430b66e7b0c0046`. Independently verified final committed range, allowed paths, normalized code/test pins, VERSION and CHANGELOG. Git/release operations remain Sully's responsibility.
 
 ## Verdict
 
