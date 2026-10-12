@@ -7,20 +7,22 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-10-12
 Tool: Books Arranger
 Release: v0.13.0
-Commit range: 93c5c385e8962ae2c12b9469a0e8b37154096f24..18dd53ee8524f09758eeea6153f028c836d018b2 plus exact pinned uncommitted product endpoint below
+Commit range: 93c5c385e8962ae2c12b9469a0e8b37154096f24..7691025e543803d517445ea59877a2206f4722ea
+Core application range: 18dd53ee8524f09758eeea6153f028c836d018b2..7691025e543803d517445ea59877a2206f4722ea
+Endpoint tree: dea736a202fb402bc631b5bc52535a44020bef0c
 Product baseline: fbd8cfa0cb7fabd81d00a4edef897a0f56024a38 (v0.12.3)
-Product endpoint: source1ee6cba1ba430a9ec1522c35da416aefb71b45a1fc67eb51c3306e8f31daa52c; Sully core commit pending
-Files changed: 19 product/test/version/changelog paths, +2420 / -32; committed documentation counted at final reconciliation
+Product endpoint: source1ee6cba1ba430a9ec1522c35da416aefb71b45a1fc67eb51c3306e8f31daa52c
+Files changed: accumulated31 paths, +2855 / -38; core23 paths, +2646 / -32 (19 product/test/version/changelog plus four reports)
 Stand-down dimensions: none; Electron-specific configuration N/A (Python/local browser interface)
 ```
 
-This initial verdict covers the concrete pinned candidate and proposed release metadata. It does not invent or certify an uncreated commit. Sully must supply the committed endpoint for independent source/blob/range reconciliation before tag/publication.
+The actual core commit and tree were independently reconciled read-only. Its exact23-path set is the seventeen promoted source/test paths, VERSION, CHANGELOG and Implementation/DesignReview/QAReport/CodeReview reports. All seventeen committed source/test blobs equal the reviewed candidate after explicit CRLF-to-LF normalization; physical checkout pins also match. VERSION and CHANGELOG retain their reviewed physical hashes. The accumulated previous-review-to-core range includes eight earlier documentation changes and no intervening product source changes. A subsequent report-only child must carry these exact reconciled report bytes and preserve this certified source endpoint.
 
 ## Summary
 
 One explicitly authorized Eye of God replacement uses forty protected original MP3 sources, source-matched AAC-LC128 kbps mono44100 and a distinct Final output. Atomic admission and current-publication relations preserve original history; current registration follows validated media publication and ordinary staging cleanup. Only then does the app retire the exact three proven former publications into separate verified recovery. Original forty sources are KEEP. Metadata, Ready, folder actions and distinct-book counts share the publication relation. The narrow Judy disclosure sizing correction preserves native markers and focus.
 
-Final seventeen-path packet SHA256 `30360213f82e8bd19aa02dc85138fb5c5bf3a407c125c859c9b9f5078e36bf37`; manifest `78b5dca6bb9fed4b9e057a44771e1c9af7b3e7737d86c382a1cc12bf426ca949`. All seventeen promoted physical source/test pins independently match both candidate and isolated release-staging. VERSION0.13.0 SHA256 `181fb5a5f5f8b7e93e53d3e53e73106401e58af55f52c7bcd9d8ced7657b464f`; CHANGELOG `c6f579eefddd273e2920a489cca958b876a3347501545a03c3233eb8dfc2e452`. The original sixteen source/test pins remain unchanged; CSS `3aa0c023a21d032c8d26d6a98cdc76649518c9db3d3c522872e4ebf69f5c8289` matches committed Judy spec18dd53ee.
+Final seventeen-path packet SHA256 `30360213f82e8bd19aa02dc85138fb5c5bf3a407c125c859c9b9f5078e36bf37`; manifest `78b5dca6bb9fed4b9e057a44771e1c9af7b3e7737d86c382a1cc12bf426ca949`. All seventeen promoted physical source/test pins independently match both candidate and isolated release-staging. VERSION 0.13.0 SHA256 `181fb5a5f5f8b7e93e53d3e53e73106401e58af55f52c7bcd9d8ced7657b464f`; CHANGELOG `c6f579eefddd273e2920a489cca958b876a3347501545a03c3233eb8dfc2e452`. The original sixteen source/test pins remain unchanged; CSS `3aa0c023a21d032c8d26d6a98cdc76649518c9db3d3c522872e4ebf69f5c8289` matches committed Judy spec18dd53ee.
 
 ## Rubric
 
@@ -58,7 +60,7 @@ Pass — Changelog/implementation report distinguish lossy encoding, saved inher
 
 ### 9. Build & Release Hygiene
 
-Pass — Minor version and changelog match the capability, pinned promotion contains only reviewed files, actual independent functional/geometry checks passed, and finite owned routes prove closure. Exact committed source endpoint reconciliation remains mandatory before publication.
+Pass — Minor version and changelog match the capability, committed promotion contains only reviewed files, actual independent functional/geometry checks passed, finite owned routes prove closure, and the exact committed range/tree/source blobs were reconciled before publication.
 
 ## Evidence
 
