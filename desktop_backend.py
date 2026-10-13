@@ -52,12 +52,18 @@ class DesktopControl:
                 value['busy'] = self.busy()
             except Exception:
                 value['busy'] = None
+        try:
+            from app_launcher import verify_idle
+            verify_idle(self.server.state('Audiobooks'))
+            value['idle']=not self.server.closing and not self.server.merge_admissions
+        except Exception:value['idle']=False
         return value
 
     def quit(self):
         with self.lock:
-            if self.phase != 'running':
+            if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
                 return {'phase': self.phase}
+            self.error = ''
             self.phase = 'finishing'
             self.requested_at = time.time()
         with self.server.control_condition:
@@ -86,21 +92,37 @@ class DesktopControl:
                         self.phase = 'parking'
                 time.sleep(.5)
         except Exception as error:
-            # Never leave the shell waiting forever on a monitoring failure; the
-            # shutdown below still stops every worker at its safe checkpoint.
-            self.error = type(error).__name__
-        with self.lock:
-            self.phase = 'exiting'
+            with self.lock:
+                self.phase = 'blocked'
+                self.error = str(error)[:512] or type(error).__name__
+            return  # Keep server, native catalog lease and ownership record alive.
         self._shutdown()
 
     def _shutdown(self):
         try:
             self.server.finish_shutdown()
         except Exception as error:
-            self.error = self.error or type(error).__name__
-        finally:
-            # finish_shutdown stops serving only after a clean close; always stop serving.
-            self.server.shutdown()
+            with self.lock:
+                self.phase = 'blocked'
+                self.error = str(error)[:512] or type(error).__name__
+            return False  # A failed close is not authority to release ownership.
+        with self.lock:
+            self.phase = 'exiting'
+        return True
+
+    def prepare_update(self):
+        """Atomic full-idle fence; normal Quit does not install updates."""
+        from app_launcher import verify_idle
+        with self.server.control_condition:
+            if self.server.closing or self.server.merge_admissions:
+                raise RuntimeError('Wait until all Books Arranger work is idle before restarting to update')
+            verify_idle(self.server.state('Audiobooks'))
+            self.server.closing=True
+        with self.lock:
+            self.phase='updating';self.error=''
+        self.thread=threading.Thread(target=self._shutdown,name='books-desktop-update',daemon=True)
+        self.thread.start()
+        return {'phase':'updating'}
 
     def stop_now(self):
         """Immediate safe stop (Windows sign-out or shell loss): the book in progress restarts later."""
@@ -136,7 +158,7 @@ def handler_class(base, token):
 
         def do_POST(self):
             path = urlsplit(self.path).path
-            if path not in ('/api/desktop/quit', '/api/desktop/stop-now'):
+            if path not in ('/api/desktop/quit', '/api/desktop/stop-now', '/api/desktop/update'):
                 return super().do_POST()
             if not self.desktop_trusted():
                 return
@@ -146,7 +168,10 @@ def handler_class(base, token):
             except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as error:
                 return self.fail(400, str(error))
             control = self.server.desktop
-            self.response(202, control.quit() if path.endswith('/quit') else control.stop_now())
+            try:
+                result=control.prepare_update() if path.endswith('/update') else control.quit() if path.endswith('/quit') else control.stop_now()
+            except RuntimeError as error:return self.fail(409,str(error))
+            self.response(202,result)
 
     return DesktopHandler
 
@@ -185,32 +210,57 @@ def _process_running(pid):
         kernel.CloseHandle(handle)
 
 
-def retire_stale_record(database):
-    """Move aside an ownership record whose recorded process is gone (the app was ended abruptly).
+def retire_stale_record(database, roots, port):
+    """Preserve one exact, valid dead-owner record under catalog/data ownership.
 
-    A record that cannot be read, or whose process still runs, is left in place, and the
-    normal startup refuses as before. The stale record is kept beside it as evidence.
+    Called only by web_server's guarded startup after source exclusion and the
+    catalog lease. Unknown records are never adopted, renamed or deleted.
     """
-    record = Path(database).parent / 'web-instance.json'
-    try:
-        raw = record.read_bytes() if record.is_file() and not record.is_symlink() else None
-    except OSError:
-        return None
-    if raw is None or len(raw) > 4096:
-        return None
-    try:
-        pid = json.loads(raw.decode('utf-8'))['pid']
-    except (ValueError, KeyError, TypeError, UnicodeError):
-        return None
-    if type(pid) is not int or pid <= 0 or pid == os.getpid() or _process_running(pid):
-        return None
-    aside = record.with_name(f'web-instance.stale-{time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())}-pid{pid}.json')
-    try:
-        os.rename(record, aside)  # never replaces an existing file
-    except OSError:
-        return None  # another starter moved it first, or it is in use: normal startup decides
-    print(f'Previous Books Arranger process {pid} had ended without closing; its record was kept as {aside.name}', flush=True)
-    return aside
+    import hashlib, uuid
+    from catalog_owner import ACTIVE_CATALOG
+    if ACTIVE_CATALOG.get() != str(Path(database).absolute()):
+        raise RuntimeError('Stale owner retirement requires the retained catalog lease')
+    from scanner import inside
+    from native_io import DirectoryBoundary, VerifiedFile, publish_no_replace
+    from source_cleanup import single_stream
+    database = Path(database).absolute()
+    if any(inside(database, root) for root in roots.values()):
+        raise ValueError('Keep the inventory database outside source libraries')
+    record = database.parent / 'web-instance.json'
+    with DirectoryBoundary(record.anchor, record.parent) as boundary:
+        if not record.exists():
+            return None
+        with VerifiedFile(record, delete=True) as held:
+            facts = held.facts()
+            if facts['links'] != 1 or facts['size'] > 4096:
+                raise RuntimeError('Previous ownership record is not a bounded unique file')
+            single_stream(record)
+            raw = b''.join(held.chunks())
+            try:
+                value = json.loads(raw.decode('utf-8'))
+            except (ValueError, UnicodeError):
+                raise RuntimeError('Unknown ownership record was preserved')
+            if (not isinstance(value, dict) or value.get('application') != 'Books Arranger' or
+                    type(value.get('pid')) is not int or value['pid'] <= 0 or
+                    not isinstance(value.get('instance'), str) or len(value['instance']) != 32 or
+                    any(c not in '0123456789abcdef' for c in value['instance']) or
+                    not isinstance(value.get('version'), str) or
+                    value.get('url') != f'http://127.0.0.1:{port}/'):
+                raise RuntimeError('Unknown ownership record was preserved')
+            pid = value['pid']
+            if pid == os.getpid() or _process_running(pid):
+                return None
+            identity = [held.info.volume, held.info.index_high, held.info.index_low]
+            digest = hashlib.sha256(raw).hexdigest()
+        aside = record.with_name('web-instance.stale-' + uuid.uuid4().hex + '.json')
+        def exact_generation(observed):
+            if observed['identity'] != identity or _process_running(pid):
+                raise RuntimeError('Changed or live ownership record was preserved')
+            single_stream(record)
+        publish_no_replace(record, aside, boundary, expected_sha256=digest,
+                           expected_size=len(raw), before_rename=exact_generation)
+        print('Previous dead Books Arranger ownership record retained as ' + aside.name, flush=True)
+        return aside
 
 
 def database_argument(argv):
@@ -224,6 +274,12 @@ def database_argument(argv):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
+    mode=None
+    for value in list(argv):
+        if value.startswith('--catalog-mode='):
+            if mode is not None:raise SystemExit('Duplicate catalog selection mode')
+            mode=value.split('=',1)[1];argv.remove(value)
+    if mode not in ('existing','new'):raise SystemExit('Desktop catalog requires explicit Existing or New selection')
     token = os.environ.pop(TOKEN_VARIABLE, '')
     if len(token) < 32 or not token.isascii():
         raise SystemExit('Books Arranger desktop backend must be started by the Books Arranger app.')
@@ -234,7 +290,6 @@ def main(argv=None):
     database = database_argument(argv)
     if not database:
         raise SystemExit('Books Arranger desktop backend needs --database.')
-    retire_stale_record(database)
     import web_server
 
     def ready(server):
@@ -242,7 +297,11 @@ def main(argv=None):
         server.desktop = DesktopControl(server)
         threading.Thread(target=watch_shell, args=(server.desktop,), name='books-desktop-shell', daemon=True).start()
 
-    web_server.main(argv, ready=ready)
+    def startup_guard(database, roots, port):
+        from desktop_catalog import inspect_folder
+        inspect_folder(Path(database).parent,mode,roots,(Path(__file__).resolve().parent,))
+    web_server.main(argv, ready=ready, before_start=retire_stale_record,
+                    startup_guard=startup_guard,create_data=mode=='new')
     return 0
 
 

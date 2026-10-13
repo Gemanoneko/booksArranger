@@ -83,6 +83,11 @@ class BrowserServer(ThreadingHTTPServer):
         with self.control_condition:
             while self.merge_admissions:
                 self.control_condition.wait(timeout=.5)
+        self.inventory.stop()
+        worker=self.inventory.worker
+        if worker and worker.is_alive():
+            worker.join(timeout=20)
+            if worker.is_alive():raise TimeoutError('Inventory worker has not reached its safe checkpoint; ownership retained')
         self.merge.close()
         self.shutdown()
 
@@ -187,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('The application page takes no query parameters')
                 page = (BASE / 'web' / 'index.html').read_text(encoding='utf-8').replace('{{REQUEST_TOKEN}}',self.server.token)
                 self.response(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            elif path in {'/app.js','/style.css'}:
+            elif path in {'/app.js','/desktop-ui.js','/style.css'}:
                 content_type = 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8'
                 self.response(200,(BASE / 'web' / path[1:]).read_bytes(),content_type)
             elif path == '/api/cover':
@@ -533,7 +538,7 @@ def owned_instance_record(path, health):
             single_stream(path)
             current.dispose()
 
-def main(argv=None, *, ready=None):
+def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create_data=True):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',default=str(BASE / 'data' / 'inventory.sqlite3'))
     parser.add_argument('--roots-json',help='Optional local fixture roots; not exposed through HTTP')

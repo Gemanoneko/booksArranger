@@ -1,7 +1,7 @@
 {
   "name": "books-arranger",
   "productName": "Books Arranger",
-  "version": "0.14.0",
+  "version": "0.16.0",
   "private": true,
   "description": "Inventory and arrange audiobook, podcast and ebook libraries",
   "main": "desktop/main.js",
@@ -10,7 +10,9 @@
     "fetch-runtime": "node scripts/fetch-runtime.mjs",
     "stage-backend": "node scripts/stage-backend.mjs",
     "clean:dist": "node scripts/clean-dist.js",
-    "pack": "npm run fetch-runtime && npm run stage-backend && npm run clean:dist && electron-builder --win --publish never"
+    "pack": "node scripts/build-step.mjs pack",
+    "release": "node scripts/release.mjs",
+    "check": "node scripts/check-desktop.mjs"
   },
   "build": {
     "appId": "com.antigravity.booksarranger",
@@ -22,8 +24,7 @@
       "buildResources": "desktop"
     },
     "files": [
-      "desktop/main.js",
-      "desktop/icon.png",
+      "desktop/**",
       "package.json"
     ],
     "extraResources": [
@@ -64,13 +65,24 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": false,
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Gemanoneko",
+      "repo": "booksArranger",
+      "releaseType": "release"
+    },
+    "artifactName": "Books-Arranger-Setup-${version}.${ext}"
   },
   "devDependencies": {
+    "7zip-bin": "5.2.0",
     "electron": "44.4.5",
     "electron-builder": "26.15.3"
   },
   "allowScripts": {
     "electron-winstaller": false
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }

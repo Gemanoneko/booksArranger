@@ -4,8 +4,8 @@
 // Close button: hide to the tray, work continues. Quit (tray): the book in progress
 // finishes, nothing new starts, the backend exits, then the shell exits.
 
-const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell } = require('electron');
-const { spawn, spawnSync } = require('node:child_process');
+const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ipcMain } = require('electron');
+const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -56,6 +56,10 @@ if (profileDir) app.setPath('userData', profileDir);
 const state = {
   backend: null,
   backendExited: false,
+  owner: null,
+  hostOutput: '',
+  engineVersion: '',
+  updateIdle: false,
   baseUrl: '',
   token: crypto.randomBytes(32).toString('hex'),
   win: null,
@@ -80,11 +84,13 @@ function inside(child, parent) {
 }
 
 function readSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'desktop-settings.json'), 'utf8'));
-  } catch {
-    return {};
-  }
+  const file=path.join(app.getPath('userData'),'desktop-settings.json');
+  if(!fs.existsSync(file))return {};
+  const info=fs.lstatSync(file);
+  if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Desktop settings are not an ordinary bounded file; retained unchanged.');
+  const value=JSON.parse(fs.readFileSync(file,'utf8'));
+  if(!value||typeof value.dataDir!=='string'||!path.isAbsolute(value.dataDir))throw new Error('Desktop settings need an explicit absolute data folder; retained unchanged.');
+  return value;
 }
 
 function configuration() {
@@ -92,6 +98,7 @@ function configuration() {
   const installDir = path.dirname(process.execPath);
   let dataDir = absoluteOption('data-dir');
   if (!dataDir && typeof settings.dataDir === 'string' && path.isAbsolute(settings.dataDir)) dataDir = path.resolve(settings.dataDir);
+  const requiresSetup = !dataDir;
   if (!dataDir) {
     dataDir = isDev
       ? path.join(repoRoot, 'scratch', 'desktop-dev', 'data')
@@ -108,14 +115,27 @@ function configuration() {
   if (!rootsJson && isDev) rootsJson = devRoots();
 
   // Dev runs use the same pinned runtime the installer bundles (npm run fetch-runtime).
-  const runtime = isDev ? path.join(repoRoot, 'build-cache', 'runtime') : process.resourcesPath;
+  let runtime=process.resourcesPath;
+  if(isDev){
+    const pointerPath=path.join(repoRoot,'build-cache','runtime-pointer.json');
+    const info=fs.lstatSync(pointerPath);if(!info.isFile()||info.isSymbolicLink()||info.size>1024*1024)throw new Error('Runtime pointer is not an ordinary bounded file');
+    const pointer=JSON.parse(fs.readFileSync(pointerPath,'utf8'));
+    if(pointer.schema!=='books-runtime-pointer-v1'||!path.isAbsolute(pointer.root)||!inside(pointer.root,path.join(repoRoot,'build-cache','builds'))||!pointer.files)throw new Error('Runtime pointer differs from the owned build layout');
+    const digest=crypto.createHash('sha256').update(JSON.stringify(pointer.files)).digest('hex');
+    if(digest!==pointer.manifest_sha256)throw new Error('Runtime pointer manifest differs');
+    runtime=pointer.root;
+    for(const [name,expected] of Object.entries(pointer.files)){
+      const candidate=path.resolve(runtime,name);if(!inside(candidate,runtime))throw new Error('Runtime file escapes owned layout');
+      const stat=fs.lstatSync(candidate);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||crypto.createHash('sha256').update(fs.readFileSync(candidate)).digest('hex')!==expected.sha256)throw new Error('Runtime file differs from pinned build');
+    }
+  }
   const python = path.join(runtime, 'python', 'python.exe');
   const ffmpegDir = path.join(runtime, 'ffmpeg');
   if (!fs.existsSync(python) || !fs.existsSync(path.join(ffmpegDir, 'ffmpeg.exe'))) {
     throw new Error(isDev ? 'The bundled runtime is missing. Run: npm run fetch-runtime' : 'The installation is incomplete. Reinstall Books Arranger.');
   }
   const backendDir = isDev ? repoRoot : path.join(process.resourcesPath, 'backend');
-  return { dataDir, port, rootsJson, python, backendDir, ffmpegDir };
+  return { dataDir, requiresSetup, catalogMode: settings.catalogMode || (option(argv,'catalog-mode') || 'existing'), port, rootsJson, python, backendDir, ffmpegDir };
 }
 
 // Dev runs never touch the real libraries unless --roots-json says so.
@@ -130,9 +150,9 @@ function devRoots() {
 
 // ── Backend process ─────────────────────────────────────────────────────────
 function startBackend(config) {
-  fs.mkdirSync(config.dataDir, { recursive: true });
-  const args = ['-I', '-B', path.join(config.backendDir, 'desktop_backend.py'),
-    '--database', path.join(config.dataDir, 'inventory.sqlite3'), '--port', String(config.port)];
+  state.backendExited=false;state.owner=null;state.hostOutput='';
+  const args = ['-I', '-B', path.join(config.backendDir, 'desktop_host.py'),
+    '--database', path.join(config.dataDir, 'inventory.sqlite3'), '--port', String(config.port), '--catalog-mode=' + config.catalogMode];
   if (config.rootsJson) args.push('--roots-json', config.rootsJson);
   const pathEntries = [config.ffmpegDir, system32, process.env.SystemRoot || 'C:\\Windows'];
   const env = {};
@@ -144,18 +164,37 @@ function startBackend(config) {
   env.NoDefaultCurrentDirectoryInExePath = '1';
   env.BOOKS_ARRANGER_DESKTOP_TOKEN = state.token;
   state.baseUrl = `http://127.0.0.1:${config.port}`;
-  // detached: not in libuv's kill-on-close job, so if the shell dies the engine sees its
-  // standard input close and stops at a safe point (removing its ownership record)
-  // instead of being terminated mid-write.
+  // The detached native host retains the engine's Job and process HANDLE.
+  // Shell-pipe loss requests checkpoint shutdown; HTTP failures never kill it.
   const child = spawn(config.python, args, { cwd: config.backendDir, env, windowsHide: true, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
-  child.stdout.on('data', remember);
+  child.stdout.on('data', (chunk) => {
+    remember(chunk);
+    state.hostOutput += chunk.toString('utf8');
+    if (state.hostOutput.length > 32768) state.hostOutput = state.hostOutput.slice(-32768);
+    let end;
+    while ((end = state.hostOutput.indexOf('\n')) !== -1) {
+      const line = state.hostOutput.slice(0, end).trim();
+      state.hostOutput = state.hostOutput.slice(end + 1);
+      if (!line.startsWith('BOOKS_ENGINE_OWNER ')) continue;
+      try {
+        const proof = JSON.parse(line.slice('BOOKS_ENGINE_OWNER '.length));
+        if (state.owner || proof.type !== 'books-native-owner-v1' || proof.host_pid !== child.pid ||
+            !Number.isInteger(proof.pid) || proof.pid <= 0 || !/^\d+$/.test(String(proof.creation_filetime)) ||
+            path.resolve(proof.image).toLowerCase() !== path.resolve(config.python).toLowerCase()) {
+          throw new Error('Engine native ownership proof differs');
+        }
+        state.owner = proof;
+      } catch (error) { remember('\n' + error.message + '\n'); }
+    }
+  });
   child.stderr.on('data', remember);
   child.stdin.on('error', () => {});
   child.on('error', (error) => remember(`\n${error.message}\n`));
   child.on('exit', (code) => {
     state.backendExited = true;
     if (!state.ready) return; // startup reports it: waitForBackend sees the exit
-    if (state.quit !== 'none') return finishExit(0);
+    if (state.quit === 'updating') return;
+    if (state.quit !== 'none') return finishExit(code === 0 ? 0 : 1);
     if (code === 0) return finishExit(0); // the backend's own Stop server control
     reportError('Books Arranger stopped', `The Books Arranger engine stopped unexpectedly (exit ${code}).\n\n${lastLines(state.output)}`);
     finishExit(1);
@@ -204,7 +243,11 @@ async function waitForBackend(child) {
     try {
       const health = await request('GET', '/api/health', { timeout: 2000 });
       // Never attach to some other program (or another copy) that holds the port.
-      if (health.application === 'Books Arranger' && health.pid === child.pid) return health;
+      if (state.owner && health.application === 'Books Arranger' && health.pid === state.owner.pid &&
+          health.version === app.getVersion() && typeof health.instance === 'string') {
+        state.engineVersion = health.version;
+        return health;
+      }
       if (health.application) throw new Error(`Port ${new URL(state.baseUrl).port} belongs to another Books Arranger (PID ${health.pid}).`);
     } catch (error) {
       if (/belongs to another/.test(error.message)) throw error;
@@ -212,11 +255,6 @@ async function waitForBackend(child) {
     await sleep(250);
   }
   throw new Error('The engine did not become ready within 3 minutes.');
-}
-
-function killBackendTree() {
-  if (!state.backend || state.backendExited) return;
-  spawnSync(path.join(system32, 'taskkill.exe'), ['/PID', String(state.backend.pid), '/T', '/F'], { windowsHide: true });
 }
 
 // ── Window and tray ─────────────────────────────────────────────────────────
@@ -229,7 +267,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1280, height: 860, minWidth: 950, minHeight: 650,
     show: false, title: 'Books Arranger', backgroundColor: '#121820', autoHideMenuBar: true, icon: iconImage(),
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+    webPreferences: { preload:path.join(__dirname,'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url) && !url.startsWith(`${origin}/`)) shell.openExternal(url);
@@ -282,7 +320,10 @@ function trayMenu() {
     { type: 'separator' },
     quitting
       ? { label: 'Quitting after the current book…', enabled: false }
-      : { label: 'Quit', click: () => requestQuit({ confirmed: false }) },
+      : { label: 'Quit Books Arranger', click: () => requestQuit({ confirmed: false }) },
+    { type:'separator' },
+    { label:'Check for updates',enabled:!!updateController&&!quitting,click:()=>updateController.check().catch(error=>reportError('Update check failed',error.message)) },
+    ...(updateController&&updateController.ready&&!quitting&&state.updateIdle?[{label:'Restart to update',click:()=>updateController.restart().catch(error=>reportError('Update could not install',error.message))}]:[]),
   ]);
 }
 
@@ -301,12 +342,14 @@ function refreshTray(tooltip) {
 
 // ── Quit ────────────────────────────────────────────────────────────────────
 async function requestQuit({ confirmed }) {
+  if(state.backendExited)return finishExit(state.backend?.exitCode===0?0:1);
   if (state.quit !== 'none') return;
   let status;
   try {
     status = await request('GET', '/api/desktop/status', { desktop: true });
-  } catch {
-    return forceExit(); // engine unreachable: nothing to finish
+  } catch (error) {
+    reportError('Books Arranger is still running', 'The engine did not confirm a safe Quit. Try Quit again when it responds.\n\n' + error.message);
+    return;
   }
   const busy = status.busy || {};
   if (busy.converting && !confirmed) {
@@ -315,7 +358,7 @@ async function requestQuit({ confirmed }) {
       type: 'question', title: 'Quit Books Arranger',
       message: 'Quit after the current book?',
       detail: `${title} finishes converting first, then Books Arranger closes. Queued books stay queued for next time.`,
-      buttons: ['Quit after this book', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true,
+      buttons: ['Quit after this book', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
     });
     if (choice.response !== 0 || state.quit !== 'none') return;
   }
@@ -323,31 +366,30 @@ async function requestQuit({ confirmed }) {
   refreshTray(busy.converting ? 'Books Arranger — quitting after the current book' : 'Books Arranger — quitting');
   try {
     await request('POST', '/api/desktop/quit', { desktop: true });
-  } catch {
-    return forceExit();
+  } catch (error) {
+    state.quit = 'none';
+    refreshTray('Books Arranger — Quit could not be confirmed');
+    reportError('Books Arranger is still running', 'Quit could not be confirmed; ownership remains held.\n\n' + error.message);
+    return;
   }
   watchQuit();
 }
 
-// The engine exits on its own once parked; the child 'exit' handler then ends the app.
-// If it stops answering and does not exit, end its process tree after a grace period.
+// HTTP failure never proves a safe checkpoint. The native host remains alive.
 async function watchQuit() {
-  let silentSince = null;
-  while (!state.backendExited) {
+  while (!state.backendExited && state.quit === 'requested') {
     await sleep(1000);
     try {
-      await request('GET', '/api/desktop/status', { desktop: true, timeout: 3000 });
-      silentSince = null;
-    } catch {
-      silentSince = silentSince || Date.now();
-      if (Date.now() - silentSince > 90000) return forceExit();
-    }
+      const status = await request('GET', '/api/desktop/status', { desktop: true, timeout: 3000 });
+      refreshTray('Books Arranger — ' + status.phase);
+      if (status.phase === 'blocked') {
+        state.quit = 'none';
+        refreshTray('Books Arranger — Quit blocked');
+        reportError('Books Arranger is still running', status.error || 'A worker has not reached its safe checkpoint. Try Quit again.');
+        return;
+      }
+    } catch { refreshTray('Books Arranger — waiting for engine checkpoint'); }
   }
-}
-
-function forceExit() {
-  killBackendTree();
-  finishExit(0);
 }
 
 async function stopNowAndExit() {
@@ -372,6 +414,110 @@ function handleCommand(args) {
   else showWindow();
 }
 
+// IPC accepts only this app's current page or the local first-run selector.
+let currentConfig=null;
+let setupWindow=null;
+let updateController=null;
+function trustedSender(event){
+  const wc=event.sender;
+  if(setupWindow&&!setupWindow.isDestroyed()&&wc===setupWindow.webContents&&wc.getURL()===require('node:url').pathToFileURL(path.join(__dirname,'setup.html')).href)return 'setup';
+  if(state.win&&!state.win.isDestroyed()&&wc===state.win.webContents&&new URL(wc.getURL()).origin===state.baseUrl)return 'app';
+  throw new Error('Unknown desktop control sender');
+}
+function runReadOnlyPython(config,script,args){return new Promise((resolve,reject)=>{
+  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,script),...args],{cwd:config.backendDir,windowsHide:true,stdio:['ignore','pipe','pipe']});
+  let output='',error='';const timer=setTimeout(()=>{child.kill();reject(new Error('Data folder check timed out'));},15000);
+  child.stdout.on('data',b=>{output+=b.toString('utf8');if(output.length>16384)child.kill();});
+  child.stderr.on('data',b=>{error=(error+b.toString('utf8')).slice(-4096);});
+  child.on('error',e=>{clearTimeout(timer);reject(e);});
+  child.on('exit',code=>{clearTimeout(timer);try{const result=JSON.parse(output);if(code||!result.ok)reject(new Error(result.error||error||'Data folder check failed'));else resolve(result);}catch(e){reject(new Error(error||e.message));}});
+});}
+function broadcastStatus(){
+  const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};
+  if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:status',value);
+  refreshTray('Books Arranger'+(state.quit==='none'?'':' — '+state.quit));
+}
+function acquireUpdateArtifact(config,artifact){return new Promise((resolve,reject)=>{
+  const child=spawn(config.python,['-I','-B',path.join(config.backendDir,'desktop_update_lease.py'),artifact.path,artifact.sha512],{cwd:config.backendDir,windowsHide:true,detached:true,stdio:['pipe','pipe','pipe']});
+  let output='',error='',settled=false;const timer=setTimeout(()=>{child.stdin.end();reject(new Error('Installer integrity check timed out'));},30000);
+  child.stdin.on('error',()=>{});
+  child.stderr.on('data',b=>error=(error+b.toString('utf8')).slice(-4096));
+  child.stdout.on('data',b=>{output+=b.toString('utf8');if(!output.includes('\n'))return;
+    try{const proof=JSON.parse(output.trim());if(proof.type!=='books-update-lease-v1'||proof.sha512!==artifact.sha512)throw new Error('Installer lease differs');
+      clearTimeout(timer);settled=true;resolve({isAlive:()=>child.exitCode===null,close:async()=>{child.stdin.end();}});
+    }catch(e){clearTimeout(timer);child.stdin.end();reject(e);}});
+  child.on('error',e=>{clearTimeout(timer);reject(e);});
+  child.on('exit',code=>{clearTimeout(timer);if(!settled)reject(new Error(error||'Installer integrity check failed ('+code+')'));});
+});}
+function configureUpdater(config){
+  const {autoUpdater}=require('electron-updater');
+  const {UpdateController}=require('./update-controller');
+  if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
+  updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,notify:broadcastStatus,
+    acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
+    parkEngine:async()=>{
+      if(state.quit!=='none'||state.backendExited||!state.owner)throw new Error('Owned running engine is required before restarting to update');
+      await request('POST','/api/desktop/update',{desktop:true});
+      state.quit='updating';broadcastStatus();
+      const deadline=Date.now()+60000;
+      while(!state.backendExited&&Date.now()<deadline){
+        await sleep(200);if(state.backendExited)break;
+        let status=null;
+        try{status=await request('GET','/api/desktop/status',{desktop:true,timeout:1000});}catch{/* Serving may stop before the retained native host exits; absence alone is not success. */}
+        if(status?.phase==='blocked')throw new Error(status.error||'Engine checkpoint blocked');
+      }
+      if(!state.backendExited||state.backend.exitCode!==0)throw new Error('The exact owned engine did not exit safely; update cancelled');
+    },
+    install:async()=>{state.quit='exiting';autoUpdater.quitAndInstall(false,true);await sleep(250);if(!autoUpdater.quitAndInstallCalled){state.quit='none';throw new Error('Installer did not start; reopen Books Arranger and try again');}}
+  });
+  setInterval(async()=>{
+    if(state.backendExited||state.quit!=='none'){state.updateIdle=false;return;}
+    try{const status=await request('GET','/api/desktop/status',{desktop:true});state.updateIdle=status.idle===true;}catch{state.updateIdle=false;}
+    refreshTray('Books Arranger');
+  },1000);
+  broadcastStatus();
+}
+ipcMain.handle('books:update-check',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.check();});
+ipcMain.handle('books:update-download',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.download();});
+ipcMain.handle('books:update-install',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.restart();});
+async function startConfigured(config){
+  currentConfig=config;
+  const child=startBackend(config);
+  if(!state.tray)createTray();
+  await waitForBackend(child);
+  state.ready=true;
+  if(state.backendExited)throw new Error(lastLines(state.output)||'Engine exited during startup');
+  createWindow();
+  configureUpdater(config);
+}
+async function chooseCatalog(){
+  setupWindow=new BrowserWindow({width:1280,height:860,minWidth:950,minHeight:650,title:'Books Arranger — Choose data folder',backgroundColor:'#1B2530',autoHideMenuBar:true,
+    webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+  setupWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  setupWindow.webContents.on('will-navigate',event=>event.preventDefault());
+  setupWindow.on('closed',()=>{setupWindow=null;if(!state.ready&&!state.backend)finishExit(0);});
+  await setupWindow.loadFile(path.join(__dirname,'setup.html'));
+}
+ipcMain.handle('books:setup',event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');return {defaultFolder:currentConfig.dataDir};});
+ipcMain.handle('books:browse',async event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');const result=await dialog.showOpenDialog(setupWindow,{title:'Choose data folder',properties:['openDirectory','createDirectory']});return result.canceled?null:result.filePaths[0];});
+ipcMain.handle('books:select',async(event,choice)=>{
+  if(trustedSender(event)!=='setup'||state.backend)throw new Error('Catalog selection is unavailable');
+  if(!choice||Object.keys(choice).sort().join(',')!=='folder,mode'||typeof choice.folder!=='string'||!path.isAbsolute(choice.folder)||!['existing','new'].includes(choice.mode))throw new Error('Choose an absolute data folder');
+  const config={...currentConfig,dataDir:path.resolve(choice.folder),catalogMode:choice.mode,requiresSetup:false};
+  const args=['--folder',config.dataDir,'--mode',choice.mode,'--install-root',path.dirname(process.execPath),'--install-root',process.resourcesPath];
+  if(config.rootsJson)args.push('--roots-json',config.rootsJson);
+  await runReadOnlyPython(config,'desktop_catalog.py',args);
+  try{await startConfigured(config);}catch(error){if(state.backend&&!state.backendExited)state.backend.stdin.end();throw error;}
+  // Persist only after owner/version verified healthy startup. CREATE_NEW refuses
+  // unexpected existing settings; no fallback or migration of selected data.
+  const settingsFile=path.join(app.getPath('userData'),'desktop-settings.json');
+  await runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir]);
+  if(setupWindow){setupWindow.close();setupWindow=null;}
+  return {opened:true};
+});
+ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(source==='setup'){if(state.backend)throw new Error('Catalog is still opening');finishExit(0);return;}return requestQuit({confirmed:false});});
+ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await request('GET','/api/desktop/status',{desktop:true});}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};});
+
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
@@ -390,14 +536,13 @@ if (!app.requestSingleInstanceLock()) {
     let config;
     try {
       config = configuration();
-      const child = startBackend(config);
-      createTray();
-      await waitForBackend(child);
-      state.ready = true;
-      if (state.backendExited) throw new Error(lastLines(state.output) || 'The engine exited during startup.');
-      createWindow();
+      currentConfig=config;
+      if(config.requiresSetup)await chooseCatalog();
+      else await startConfigured(config);
     } catch (error) {
-      killBackendTree();
+      // Close the private host pipe only on startup failure. Its retained native
+      // job requests checkpoint shutdown; no numeric-PID kill or port assumption.
+      if (state.backend && !state.backendExited) state.backend.stdin.end();
       reportError('Books Arranger could not start', error.message);
       finishExit(1);
     }

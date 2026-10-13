@@ -6,7 +6,7 @@ requires exclusive existing app catalog ownership and an unchanged native plan.
 import argparse,hashlib,json,sqlite3
 from pathlib import Path
 from contextlib import closing
-from app import catalog_lock
+from catalog_owner import catalog_lock
 from scanner import DEFAULT_ROOTS
 from storage_cleanup import StorageCleanup
 from native_io import BoundaryError,ordinary

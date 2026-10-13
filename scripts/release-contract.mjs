@@ -1,5 +1,6 @@
 // Pure validation shared by the local publisher and offline tests.
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 export const KEEP_RELEASES = 4;
 export function version(value) {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) throw new Error('Expected canonical x.y.z version');
@@ -72,4 +73,10 @@ export function acceptanceIndex(index,expectedVersion) {
     if(typeof index[kind]!=='string'||!new RegExp('^Docs/BooksArranger_'+prefix+'_v'+escape+'_\\d{4}-\\d{2}-\\d{2}\\.md$').test(index[kind]))throw new Error('Unsafe acceptance report path');
   }
   return [['qa',index.qa],['review',index.review]];
+}
+
+export function leasedExecutable(proof,command) {
+ const executable=command==='node-builder'?proof.node:proof.executables?.[command];
+ if(!['git','gh','node-builder'].includes(command)||typeof executable!=='string'||!path.isAbsolute(executable))throw new Error('Exact native leased executable is missing');
+ return executable;
 }

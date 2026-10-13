@@ -101,24 +101,52 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(control.quit()['phase'], 'finishing')  # a second Quit is idempotent
         jobs_thread.is_alive.return_value = False; server.merge.drained.return_value = True
         control.thread.join(5)
-        server.finish_shutdown.assert_called_once_with(); server.shutdown.assert_called()
+        server.finish_shutdown.assert_called_once_with(); server.shutdown.assert_not_called()
         self.assertEqual(control.status()['phase'], 'exiting')
 
-    def test_shutdown_still_stops_serving_when_close_fails(self):
+    def test_shutdown_failure_retains_serving_and_can_retry_after_safe_checkpoint(self):
         server, _ = fake_server(finish=Mock(side_effect=TimeoutError('worker still at checkpoint')))
         control = DesktopControl(server)
         control.quit(); control.thread.join(5)
-        server.shutdown.assert_called()
-        self.assertEqual(control.status()['error'], 'TimeoutError')
+        server.shutdown.assert_not_called()
+        self.assertEqual(control.status()['phase'], 'blocked')
+        self.assertIn('worker still at checkpoint',control.status()['error'])
+        server.finish_shutdown.side_effect=None
+        control.quit(); control.thread.join(5)
+        self.assertEqual(control.status()['phase'],'exiting')
+        self.assertEqual(server.finish_shutdown.call_count,2)
 
     def test_stop_now_is_immediate_and_single(self):
         server, _ = fake_server(converting=True)
         control = DesktopControl(server)
-        self.assertEqual(control.stop_now()['phase'], 'stopping')
-        self.assertEqual(control.stop_now()['phase'], 'stopping')
+        self.assertIn(control.stop_now()['phase'], ('stopping','exiting'))
+        self.assertIn(control.stop_now()['phase'], ('stopping','exiting'))
         self.assertTrue(server.closing)
         time.sleep(.3)
         server.finish_shutdown.assert_called_once_with()
+
+    def test_update_busy_admission_refuses_without_closing_or_shutdown(self):
+        server,_=fake_server();server.merge_admissions=1;server.state=Mock()
+        control=DesktopControl(server)
+        with self.assertRaises(RuntimeError):control.prepare_update()
+        self.assertFalse(server.closing);server.finish_shutdown.assert_not_called();server.state.assert_not_called()
+
+    def test_update_checks_full_idle_under_admission_lock(self):
+        server,_=fake_server();server.merge_admissions=0;server.state=Mock(return_value={'fixture':'full state'})
+        control=DesktopControl(server)
+        def verified(state):
+            self.assertTrue(server.control_lock.locked());self.assertEqual(state,{'fixture':'full state'});self.assertFalse(server.closing)
+        with patch('app_launcher.verify_idle',side_effect=verified):control.prepare_update()
+        control.thread.join(5)
+        self.assertTrue(server.closing);server.finish_shutdown.assert_called_once_with()
+        self.assertEqual(control.phase,'exiting')
+
+    def test_update_nonidle_keeps_owner_and_serving(self):
+        server,_=fake_server();server.merge_admissions=0;server.state=Mock(return_value={})
+        control=DesktopControl(server)
+        with patch('app_launcher.verify_idle',side_effect=RuntimeError('Recovery work is active')):
+            with self.assertRaisesRegex(RuntimeError,'Recovery'):control.prepare_update()
+        self.assertFalse(server.closing);server.finish_shutdown.assert_not_called();self.assertEqual(control.phase,'running')
 
 
 class HandlerTests(unittest.TestCase):
@@ -163,23 +191,64 @@ class StaleRecordTests(unittest.TestCase):
     def test_only_a_record_of_an_ended_process_is_moved_aside(self):
         import subprocess, sys
         from desktop_backend import retire_stale_record
+        from catalog_owner import catalog_lock
         with tempfile.TemporaryDirectory(dir=AREA) as temp:
             database = Path(temp) / 'inventory.sqlite3'; record = Path(temp) / 'web-instance.json'
+            roots={'Audiobooks':str(Path(temp)/'library'),'Podcasts':str(Path(temp)/'library/podcasts'),'Ebooks':str(Path(temp)/'ebooks')}
+            def retire():
+                with catalog_lock(database,roots):return retire_stale_record(database,roots,5211)
+            def owner(pid):return {'application':'Books Arranger','pid':pid,'instance':'a'*32,'version':'0.16.0','url':'http://127.0.0.1:5211/'}
             ended = subprocess.run([sys.executable, '-c', 'import os;print(os.getpid())'], capture_output=True, text=True, check=True)
             dead_pid = int(ended.stdout)
             alive = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(30)'])
             try:
-                record.write_text(json.dumps({'application': 'Books Arranger', 'pid': alive.pid}), encoding='utf-8')
-                self.assertIsNone(retire_stale_record(database)); self.assertTrue(record.exists())
+                record.write_text(json.dumps(owner(alive.pid)), encoding='utf-8')
+                self.assertIsNone(retire()); self.assertTrue(record.exists())
                 record.write_text('{not json', encoding='utf-8')
-                self.assertIsNone(retire_stale_record(database)); self.assertTrue(record.exists())
-                record.write_text(json.dumps({'application': 'Books Arranger', 'pid': dead_pid}), encoding='utf-8')
-                aside = retire_stale_record(database)
+                with self.assertRaises(RuntimeError):retire()
+                self.assertTrue(record.exists())
+                record.write_text(json.dumps(owner(dead_pid)), encoding='utf-8')
+                aside = retire()
                 self.assertFalse(record.exists()); self.assertTrue(aside.exists())
                 self.assertEqual(json.loads(aside.read_text(encoding='utf-8'))['pid'], dead_pid)
-                self.assertIsNone(retire_stale_record(database))  # nothing left to move
+                self.assertIsNone(retire())  # nothing left to move
             finally:
                 alive.kill(); alive.wait()
+
+    def test_source_library_record_is_never_mutated_before_refusal(self):
+        from desktop_backend import retire_stale_record
+        from catalog_owner import catalog_lock
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            base=Path(temp); database=base/'inventory.sqlite3'; record=base/'web-instance.json'
+            raw=b'{"pid":99999999}';record.write_bytes(raw)
+            roots={'Audiobooks':str(base),'Podcasts':str(base/'p'),'Ebooks':str(base/'e')}
+            with self.assertRaises(ValueError):
+                with catalog_lock(database,roots):retire_stale_record(database,roots,5211)
+            self.assertEqual(record.read_bytes(),raw)
+            self.assertEqual(list(base.glob('web-instance.stale-*')),[])
+            self.assertFalse(Path(str(database)+'.lock').exists())
+
+    def test_unknown_record_and_extra_stream_are_preserved(self):
+        from desktop_backend import retire_stale_record
+        from catalog_owner import catalog_lock
+        from native_io import BoundaryError
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            base=Path(temp); database=base/'inventory.sqlite3'; record=base/'web-instance.json'
+            roots={'Audiobooks':str(base/'a'),'Podcasts':str(base/'p'),'Ebooks':str(base/'e')}
+            record.write_text(json.dumps({'application':'Other','pid':99999999}),encoding='utf-8')
+            before=record.read_bytes()
+            with catalog_lock(database,roots):
+                with self.assertRaises(RuntimeError):retire_stale_record(database,roots,5211)
+            self.assertEqual(record.read_bytes(),before)
+            Path(str(record)+':Zone.Identifier').write_bytes(b'fixture')
+            with catalog_lock(database,roots):
+                with self.assertRaises(BoundaryError):retire_stale_record(database,roots,5211)
+            self.assertEqual(Path(str(record)+':Zone.Identifier').read_bytes(),b'fixture')
+
+    def test_retirement_requires_catalog_lease(self):
+        from desktop_backend import retire_stale_record
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            with self.assertRaises(RuntimeError):retire_stale_record(Path(temp)/'inventory.sqlite3',{},5211)
 
 
 class VersionTests(unittest.TestCase):

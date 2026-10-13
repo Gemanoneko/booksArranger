@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.16.0] - 2026-10-13
+
+### Added
+
+- Standalone Windows Electron installer with bundled Python and FFmpeg, an explicit data-folder selector and a tray window. Closing the window keeps processing alive; Quit waits for the current book and preserves pending work.
+- Manual update checks, downloads and explicit idle-only restart to update. Startup and update relaunch keep automatic processing paused.
+
+### Fixed
+
+- Native engine and catalog ownership remain held when safe checkpoint shutdown fails; stale ownership records cannot authorize an unguarded launch or PID-only forced termination.
+- Installer staging and publication use owned bounded workers, exact artifact/source proofs and a single documented release path.
+
 ## [v0.15.0] - 2026-10-13
 
 ### Added

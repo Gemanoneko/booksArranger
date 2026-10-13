@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { releaseFlow } from './release-flow.mjs';
+import { leasedExecutable } from './release-contract.mjs';
 import cleanup from './cleanup-releases.js';
 import { runNativeOwned, validateChildLease } from './guarded-io.mjs';
 
@@ -19,14 +20,6 @@ function baseEnv() {
   const env={...process.env,GIT_OPTIONAL_LOCKS:'0'};
   for(const key of ['GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN','GH_HOST','NODE_OPTIONS','NODE_PATH','ELECTRON_RUN_AS_NODE'])delete env[key];
   return env;
-}
-function ghExecutable() {
-  if(process.platform!=='win32')return 'gh';
-  for(const folder of [process.env.ProgramFiles,process.env['ProgramFiles(x86)']]) {
-    if(folder){const candidate=path.join(folder,'GitHub CLI','gh.exe');if(fs.existsSync(candidate))return candidate;}
-  }
-  // Native supervisor independently verifies the resolved executable identity.
-  return 'gh';
 }
 function inspectFile(file) {
   const stat=fs.lstatSync(file);
@@ -61,7 +54,7 @@ async function ownedRelease() {
   // The option is not authority: this checks a per-launch stdin nonce, native
   // supervisor generation/image and retained lease. No fallback is permitted.
   const ownership=await validateChildLease({mode:'release',root});
-  if(path.resolve(ownership.ownedRoot)!==root||!Number.isFinite(ownership.deadline)||ownership.deadline<=Date.now())throw new Error('Invalid native release lease');
+  if(ownership.root!==root||!path.isAbsolute(ownership.ownedRoot)||!path.resolve(ownership.ownedRoot).startsWith(path.join(root,'build-cache','builds')+path.sep)||!Number.isFinite(ownership.deadline)||ownership.deadline<=Date.now())throw new Error('Invalid native release lease');
   let token=null;
   const safePath=relative=>{
     if(typeof relative!=='string'||relative.includes('\\')||path.isAbsolute(relative)||relative.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error('Unsafe release path');
@@ -72,7 +65,7 @@ async function ownedRelease() {
     const builder=command==='node-builder';
     if(!['git','gh','node-builder'].includes(command))throw new Error('Unapproved release subprocess');
     if(credential&&(!builder||!token))throw new Error('Credential child is not the artifact publisher');
-    const executable=builder?process.execPath:command==='gh'?ghExecutable():'git';
+    const executable=leasedExecutable(ownership,command);
     const argv=builder?[require.resolve('electron-builder/out/cli/cli.js'),...args]:args;
     const env=baseEnv();if(credential)env.GH_TOKEN=token;
     const result=spawnSync(executable,argv,{cwd:root,env,encoding:'utf8',windowsHide:true,shell:false,maxBuffer:16*1024*1024,timeout:Math.max(1,Math.min(builder?550000:30000,ownership.deadline-Date.now()))});

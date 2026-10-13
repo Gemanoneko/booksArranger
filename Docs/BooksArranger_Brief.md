@@ -284,3 +284,18 @@ Handoff, test record and Judy notes: `Docs/BooksArranger_Electron_M1_2026-10-13.
 | Electron fuses: `runAsNode` and `NODE_OPTIONS` off, app only from asar | The packaged exe cannot be reused as a Node runtime (a VS Code environment variable made it do exactly that during testing) | — |
 
 Commands (from the repo root): `npm ci`; `npm run fetch-runtime` (downloads and verifies the pinned Python/FFmpeg into `build-cache/`); `npm start` (dev shell); `npm run pack` (stages the engine and builds `dist/Books Arranger Setup <version>.exe` with `--publish never`). Test-run flags: `--data-dir=`, `--port=`, `--roots-json=`, `--shell-profile=`, `--start-hidden`, `--show-inactive`, `--capture=`, `--quiet-errors`; a second launch with `--quit` or `--close-window` drives the running copy. Python checks are unchanged plus `tests/test_desktop_quit.py`. Release path (QuickLaunch-style `release.mjs`/keep-last-4) and the updater are milestone 2.
+
+
+## Standalone desktop M2 candidate (2026-10-13)
+
+The integrated Electron branch preserves v0.15 working cleanup, job-wide exact PCM/ordered concat proof, free-space holds, retirement/native proofs and24-hour recovery. M1 historical packaging was0.14.0; that milestone is not a release clearance for M2. Sully owns the0.16.0 package/lock version bump.
+
+Explicit first-run Existing/New catalog selection opens existing data in place. The fresh default is LOCALAPPDATA/Books Arranger/data, created only after explicit Create catalog. Catalog recognition is read-only; native ordinary ancestry and catalog ownership recheck before startup. Chosen settings are CREATE_NEW after verified healthy engine startup. No migration or receipt identity rewrite.
+
+Electron uses desktop_host.py to retain the engine native process generation and Job; unavailable HTTP and shutdown timeouts never authorize a numeric-PID kill. Full Quit drains the current book including cleanup. Failed close keeps serving and retains ownership for retry. Stale ownership retirement is behind catalog/source-root/data ancestry guards, schema/native identity/hash checked and handle-renamed without replacement; unknown records stay untouched.
+
+Manual Check for updates/Download update/Restart to update uses electron-updater6.8.9 and the public Gemanoneko/booksArranger GitHub feed. Normal Quit never installs. Restart requires a checksum-verified native-held installer, atomic full-idle admission fence and exact engine exit; the selected catalog stays in place and opens Paused.
+
+Build/release: npm run pack invokes scripts/build-step.mjs under a native owned build; npm run check invokes scripts/check-desktop.mjs (declared pure-node focused graph); npm run release invokes scripts/release.mjs, publishing only already-built QA/review-accepted exe/blockmap/latest.yml via electron-builder artifact publisher. Authentication uses gh auth token only in the publisher child; last4 remote releases retained. Actual installer/ASAR/backend/runtime/raw JSON equivalence is emitted in dist/release-artifacts.json and bound in both reports. No rebuild after acceptance.
+
+Trusted bootstrap: installed byte-pinned Python and the invoked Node runtime are trusted launch bases. Native ordinary ancestry/file leases hold known build boundaries and inputs; fresh UUID operations refuse preexisting junctions and unknown cleanup targets. This does not claim protection from an arbitrary concurrent hostile writer creating new descendants inside external builder output while the builder runs.
