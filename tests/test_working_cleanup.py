@@ -84,6 +84,18 @@ class WorkingCleanupTests(unittest.TestCase):
         expected=plan['files'];expected[0]['facts']['ino']+=1
         with self.assertRaises(BoundaryError):self.storage.working_files(self.job_id,normalized_only=True,expected_plan=expected)
         self.assertTrue(wav.exists())
+    def test_frozen_remaining_plan_resumes_only_receipted_absence(self):
+        from cleanup_published_working import remaining_plan
+        wav=self.normalized();plan=self.storage.working_files(self.job_id,True,True)
+        self.storage.working_files(self.job_id,normalized_only=True)
+        self.assertEqual(remaining_plan(self.storage,plan),[])
+        wav.write_bytes(b'private exact normalized bytes')
+        self.assertEqual(remaining_plan(self.storage,plan),plan['files'])
+        with self.assertRaises(BoundaryError):self.storage.working_files(self.job_id,True,True)
+    def test_frozen_remaining_plan_refuses_unreceipted_absence(self):
+        from cleanup_published_working import remaining_plan
+        wav=self.normalized();plan=self.storage.working_files(self.job_id,True,True);wav.unlink()
+        with self.assertRaises(BoundaryError):remaining_plan(self.storage,plan)
     def test_wrong_ownership_blocks(self):
         wav=self.normalized();(self.job/'ownership.json').write_text('{}')
         with self.assertRaises(BoundaryError):self.storage.working_files(self.job_id,normalized_only=True)

@@ -19,7 +19,7 @@ Commands after independent subset QA GO and review CLEAR (absolute pinned interp
     python -I -B cleanup_published_working.py plan --data-root <live data> --catalog-copy <one backup copy> --plan <new evidence plan>
     python -I -B cleanup_published_working.py apply --data-root <live data> --catalog-copy <same copy> --plan <same plan> --plan-sha256 <reviewed SHA-256>
 
-The plan/apply commands are operational permission boundaries, not a QA handoff receipt. Abrupt partial disposition retains per-file journal evidence and refuses a silently changed aggregate; follow-up replan/review must explicitly account for already-removed bytes instead of guessing authorization.
+The plan/apply commands are operational permission boundaries, not a QA handoff receipt. Abrupt partial disposition retains per-file journal evidence. The same frozen plan resumes by proving the union of remaining native identities and absent names backed by exact durable removal-intent/completion receipts. Unknown absence, native replacements or mismatching provenance still block. No wider sweep or new approval scope is used.
 
 ## Private verification contract
 

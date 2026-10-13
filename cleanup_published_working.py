@@ -34,6 +34,30 @@ def build_plan(storage):
  if (count,size)!=(OBSERVED_COUNT,APPROVED_BYTES):raise BoundaryError('Approved historical working inventory changed; preserve and review')
  return {'jobs':jobs,'count':count,'bytes':size}
 
+def remaining_plan(storage, job):
+ remaining=[]
+ for item in job['files']:
+  path=ordinary(item['path'])
+  if path.exists():remaining.append(item);continue
+  receipt=storage._known(path)
+  if not receipt or receipt['job_id']!=job['job_id'] or receipt['kind']!='staging' or receipt['state'] not in {'removed','absent_after_intent','removal_intended','disposition_set'} or (receipt['sha256'],receipt['size'])!=(item['sha256'],item['size']) or json.loads(receipt['facts'])!=item['facts']:
+   raise BoundaryError('Absent working name lacks exact frozen-plan removal proof')
+ return remaining
+
+def validate_frozen_plan(storage, expected):
+ if tuple(job['job_id'] for job in expected['jobs'])!=APPROVED_JOBS or (expected['count'],expected['bytes'])!=(OBSERVED_COUNT,APPROVED_BYTES):
+  raise BoundaryError('Frozen approval scope changed')
+ if sum(len(job['files']) for job in expected['jobs'])!=OBSERVED_COUNT or sum(item['size'] for job in expected['jobs'] for item in job['files'])!=APPROVED_BYTES:
+  raise BoundaryError('Frozen approval totals changed')
+ remaining=[]
+ for job in expected['jobs']:
+  wanted=remaining_plan(storage,job)
+  actual=storage.working_files(job['job_id'],dry_run=True,normalized_only=True)
+  if actual['files']!=wanted or actual['output_sha256']!=job['output_sha256']:
+   raise BoundaryError('Native working inventory changed; preserved')
+  remaining.append(wanted)
+ return remaining
+
 def main():
  parser=argparse.ArgumentParser(description=__doc__)
  parser.add_argument('mode',choices=('plan','apply'))
@@ -62,12 +86,11 @@ def main():
    if hashlib.sha256(json.dumps(current,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()!=expected['records_sha256']:
     raise BoundaryError('Published catalog proof changed; preserved')
    storage=StorageCleanup(database,stage,recovery)
-   actual=build_plan(storage)
-   if actual['jobs']!=expected['jobs'] or (expected['count'],expected['bytes'])!=(OBSERVED_COUNT,APPROVED_BYTES):raise BoundaryError('Native working inventory changed; preserved')
+   remaining=validate_frozen_plan(storage,expected)
    removed=[]
-   for job in expected['jobs']:
-    removed.append(storage.working_files(job['job_id'],normalized_only=True,expected_plan=job['files']))
+   for job,wanted in zip(expected['jobs'],remaining):
+    removed.append(storage.working_files(job['job_id'],normalized_only=True,expected_plan=wanted))
    if records(database)!=current:raise BoundaryError('Protected publication records changed')
-   print(json.dumps({'removed_count':sum(len(job['files']) for job in removed),'removed_bytes':sum(job['bytes'] for job in removed)}))
+   print(json.dumps({'removed_count':sum(len(job['files']) for job in removed),'removed_bytes':sum(job['bytes'] for job in removed),'approved_total_bytes':APPROVED_BYTES,'approved_total_count':OBSERVED_COUNT}))
 
 if __name__=='__main__':main()
