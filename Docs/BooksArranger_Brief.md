@@ -259,3 +259,11 @@ Sergei: "go for it" on grouping split books (Jane brief, 2026-10-13). Handoff an
 | A trailing four-digit number is never a part number in the sibling check | "Метро 2033" beside "Метро 2034", "Фантастика 2021" beside "Фантастика 2018" were held as parts of one book | — |
 | A resumed automatic run adds every current candidate it has not seen (on resume and before each wait) | Regrouping replaces candidates with new ids; the live run's checkpoint holds the old per-file ids | — |
 | `AGREEMENT_VERSION` local-agree-v4 (v3 records still validate), `RESEARCH_VERSION` standing-19-v1 | New decisions are labelled; approved and completed books keep validating; every waiting/held book gets one fresh pass | — |
+
+### Working-file cleanup, exact PCM and disk holds (2026-10-13)
+
+Sergei approved receipt-matched historical working cleanup (A), then required cleanup after appropriate actions. The corrected inventory was 136 WAVs across the same eight published jobs, totaling 119317276892 bytes; the independently reviewed operation removed them while preserving snapshots, recovery and protected catalog state. The app remains stopped pending the final release and normal user launch. Implementation and evidence: `Docs/BooksArranger_WorkingCleanup_FullDelta_2026-10-13.md`.
+
+Verified publication now disposes only of producer-receipted working files before original retirement; explicit resume retries published pending working cleanup. This does not complete full Ready, retirement or recovery obligations. Normalization selects one smallest exact PCM representation proven across every source in the job, emits one WAV per source and proves the actual ordered concatenation against original decoded PCM before AAC. Source copies, WAVs and outputs have space admission/rechecks; ENOSPC parks the queue at its saved checkpoint. Source verification, publication, retirement and 24-hour recovery remain unchanged.
+
+B authorizes read-only original NTFS stream inspection and normal retirement only when the additional streams are solely Zone.Identifier. This release does not implement that exception: existing source stream guards remain unchanged.

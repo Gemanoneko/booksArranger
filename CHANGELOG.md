@@ -17,6 +17,12 @@
 - A trailing four-digit number is part of a title, not a part number ("Метро 2033" beside "Метро 2034" is not a split part).
 - A running automatic pass adds candidates created by the new grouping instead of waiting for a new discovery pass. Every waiting or held book gets one fresh pass. Media verification, publication, source retirement and 24-hour recovery are unchanged.
 
+### Fixed
+
+- Verified published jobs dispose of their exact producer-receipted working files independently of original retirement. Source snapshots, recovery, unknown files and full Ready/retirement obligations stay protected.
+- Normalization chooses one smallest sample-exact PCM format for the whole job and proves the actual ordered concatenated PCM before AAC encoding. Rejected format comparisons create no WAV files.
+- Space estimates and staging rechecks hold a job when space is short; ENOSPC parks the remaining queue at its saved checkpoint instead of accumulating failed working directories. Restart stays inactive until explicit Start.
+
 ## [v0.14.0] - 2026-10-13
 
 ### Added
