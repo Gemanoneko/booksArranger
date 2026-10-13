@@ -136,7 +136,7 @@ class HoldTests(unittest.TestCase):
         self.held(files,'a part has its own title')
     def test_tag_and_name_orders_disagree(self):
         files=[row('Stephen King/Чужак %d.m4b'%n,{'album':'Чужак','artist':'Стивен Кинг','track':'%d/2'%(3-n)}) for n in (1,2)]
-        self.held(files,'order the parts differently')
+        self.held(files,'differ from the track numbers')
     def test_protected_sibling_with_same_title_holds(self):
         files=[row('Stephen King/Чужак %d.m4b'%n,{'album':'Чужак','artist':'Стивен Кинг','track':'%d/3'%n}) for n in (1,2,3)]
         first=groups.member(files[0])
@@ -145,6 +145,78 @@ class HoldTests(unittest.TestCase):
         self.assertFalse(split_scopes(built))
         _,holds=split_books.plan([groups.member(r) for r in files[1:]],[first])
         self.assertTrue(any('separate candidates or protected' in r for h in holds for r in h['reasons']),holds)
+
+class ReviewFindingTests(unittest.TestCase):
+    """Senua's (C1, M1, M2, M6, M7) and Futaba's (F1) cases on 3346da1: separate works never join."""
+    def assert_not_grouped(self,files):
+        built=groups.build(files)
+        self.assertFalse(split_scopes(built),list(built));self.assertEqual(len(built),len(files))
+    def test_c1_a_title_on_one_part_only_still_holds_hunger_games(self):
+        # Live tags: album "The Hungar games", tracks 1/3..3/3, a title on book 2 only; names "The Hunger Games 1..3".
+        files=[row('Suzanne Collins/Suzanne Collins/The Hunger Games %d.m4b'%n,dict({'album':'The Hungar games','artist':'Suzanne Collins','track':'%d/3'%n},**({'title':'Book 2 Cathing Fire'} if n==2 else {})))
+               for n in (1,2,3)]
+        self.assert_not_grouped(files)
+    def test_c1_tim_miller_with_one_title_missing_holds(self):
+        files=[row('Tim Miller/Тёмный экзорцист %d.m4b'%n,dict({'album':'Тёмный экзорцист','artist':'Тим Миллер','track':'%d/2'%n},**({'title':'Тёмный экзорцист Том I'} if n==1 else {})))
+               for n in (1,2)]
+        self.assert_not_grouped(files)
+    def test_m1_albums_differing_only_in_brackets_hold(self):
+        files=[row('Suzanne Collins/The Hunger Games %d.m4b'%n,{'album':'The Hunger Games (Book %d)'%n,'artist':'Suzanne Collins','track':'%d/3'%n}) for n in (1,2,3)]
+        self.assert_not_grouped(files)
+        files=[row('Стругацкие/Пикник на обочине %d.m4b'%n,{'album':'Пикник на обочине (%s)'%r,'artist':'Аркадий и Борис Стругацкие','track':'%d/2'%n}) for n,r in ((1,'Кузнецов'),(2,'Козий'))]
+        self.assert_not_grouped(files)
+    def test_m2_episode_cd_track_with_a_name_is_a_separate_work(self):
+        for names in (['Эпизод 1. Скрытая угроза','Эпизод 2. Атака клонов'],['CD1 Хоббит','CD2 Властелин колец'],['Track 1 - Хоббит','Track 2 - Сильмариллион']):
+            with self.subTest(names=names):
+                files=[row('Shelf/%s.m4b'%name,{'album':'Собрание','artist':'Джон Толкин','track':'%d/2'%n}) for n,name in enumerate(names,1)]
+                self.assert_not_grouped(files)
+        files=[row('Shelf/Часть %d. %s.m4b'%(n,name),{'album':'Оно','artist':'Стивен Кинг','track':'%d/2'%n}) for n,name in ((1,'Тень прошлого'),(2,'Июнь 1958 года'))]
+        self.assertTrue(split_scopes(groups.build(files)))
+    def test_f1_numbers_that_are_part_of_titles_never_number_parts(self):
+        cases=[('Метро 2033','Метро 2034','Метро'),('Fallout 3','Fallout 4','Fallout'),('Фантастика 2021','Фантастика 2022','Фантастика')]
+        for first,second,album in cases:
+            with self.subTest(album=album):
+                files=[row('Shelf/%s.m4b'%name,{'album':album,'artist':'Дмитрий Глуховский','track':str(n)}) for n,name in ((1,first),(2,second))]
+                self.assert_not_grouped(files)
+        files=[row('Shelf/Area %d.m4b'%n,{'title':'Area %d'%n,'artist':'Matthew Reilly','track':str(t)}) for t,n in ((1,51),(2,52))]
+        self.assert_not_grouped(files)
+        # The same shape with real part numbers stays one book (positive control).
+        files=[row('Shelf/Метро 2033 %d.m4b'%n,{'album':'Метро 2033','artist':'Дмитрий Глуховский','track':'%d/2'%n}) for n in (1,2)]
+        self.assertTrue(split_scopes(groups.build(files)))
+    def test_f1_end_to_end_metro_pair_is_not_approvable(self):
+        from public_research import PublicClient,PublicResearch
+        from test_local_identity import candidate
+        temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(temp.cleanup);base=Path(temp.name)
+        catalog=Catalog();catalog.closed={'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.googleapis.com','itunes.apple.com'}
+        client=PublicClient(base/'catalog.sqlite3',fetch=catalog.fetch)
+        files=[('Глуховский Дмитрий/Метро 2033.m4b',{'album':'Метро','artist':'Дмитрий Глуховский','track':'1'}),
+               ('Глуховский Дмитрий/Метро 2034.m4b',{'album':'Метро','artist':'Дмитрий Глуховский','track':'2'})]
+        rows=[]
+        for relative,tags in files:
+            path=base/relative;metadata={'tags':tags,'probe':{'format':{'duration':'600'},'streams':[{'codec_type':'audio','codec_name':'aac','sample_rate':'44100','channels':1}]}}
+            rows.append({'root':str(base),'path':str(path),'kind':'audiobook','size':10,'modified':10,'metadata':json.dumps(metadata,ensure_ascii=False),'error':'','missing':0})
+        built=groups.build(rows)
+        self.assertFalse(split_scopes(built));self.assertEqual(len(built),2)
+        for group in built.values():
+            fixture=catalogue(client.database,base,dict(group,fingerprint='private-fixture'))
+            for other in built.values():catalogue(client.database,base,dict(other,fingerprint='private-fixture'))
+            result=PublicResearch(client,leads=[]).lookup(rendered(json.loads(json.dumps(fixture))),str(base))
+            self.assertTrue(result['reasons'],result.get('review'))
+    def test_m6_zero_padded_part_numbers_are_parts(self):
+        def single(name,album):
+            return {'path':ROOT+'\\Дорога\\'+name,'filename':name,'metadata':{'tags':{'album':album,'artist':'Кормак Маккарти'}}}
+        local=agreement({'members':[single('Дорога 0001.m4b','Дорога 0001')]},ROOT,[{'path':ROOT+'\\Дорога\\Дорога 0002.m4b','filename':'Дорога 0002.m4b','tags':{'album':'Дорога 0002'}}],frozenset())
+        self.assertTrue(any('beside it' in c['detail'] for c in local['conflicts']),local['conflicts'])
+    def test_m7_scope_collision_fails_closed(self):
+        files=[row('Dan Simmons/Террор %d.m4b'%n,{'album':'Террор','artist':'Дэн Симмонс','track':'%d/2'%n}) for n in (1,2)]
+        group=next(iter(groups.build(files).values()));protected={group['scope']:json.loads(json.dumps(group,ensure_ascii=False))}
+        # The reviewed parts are retagged (another book key) and new files with the old title appear.
+        retagged=[row('Dan Simmons/Террор %d.m4b'%n,{'album':'Террор. Новая редакция','artist':'Дэн Симмонс','track':'%d/2'%n}) for n in (1,2)]
+        arrivals=[row('Dan Simmons/Террор новое %d.m4b'%n,{'album':'Террор','artist':'Дэн Симмонс','track':'%d/2'%n}) for n in (1,2)]
+        built=groups.build(retagged+arrivals,protected)
+        self.assertEqual(sorted(m['path'] for m in built[group['scope']]['members']),sorted(r['path'] for r in retagged))
+        self.assertEqual(sum(len(g['members']) for g in built.values()),4)
+
 
 class ProtectedSplitTests(unittest.TestCase):
     def test_reviewed_split_book_is_stable_and_fails_closed_when_parts_change(self):
@@ -169,13 +241,13 @@ class SplitGateTests(unittest.TestCase):
         self.assertIn('Source membership uncertain',source_gate(broken,work))
 
 
-def make_part(path,title,track,chapters=False):
+def make_part(path,title,track,chapters=False,album='Чужак',artist='Стивен Кинг',total=2):
     ffmpeg=shutil.which('ffmpeg')
     args=[ffmpeg,'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=1']
     if chapters:
         meta=path.with_suffix('.txt');meta.write_text(';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=500\ntitle=A\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=500\nEND=1000\ntitle=B\n',encoding='utf-8')
         args+=['-f','ffmetadata','-i',str(meta),'-map','0:a','-map_chapters','1']
-    args+=['-c:a','aac','-ar','44100','-ac','1','-metadata','album=Чужак','-metadata','artist=Стивен Кинг','-metadata','title='+title,'-metadata','track=%d/2'%track,str(path)]
+    args+=['-c:a','aac','-ar','44100','-ac','1','-metadata','album='+album,'-metadata','artist='+artist,'-metadata','title='+title,'-metadata','track=%d/%d'%(track,total),str(path)]
     subprocess.run(args,check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     if chapters:path.with_suffix('.txt').unlink()
 
@@ -219,6 +291,16 @@ class SplitAdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:self.service.approve_automatic(self.row,self.result,threading.Event(),self.client)
         self.assertIn('carry their own chapters',str(raised.exception))
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
+        # Sergei 2026-10-13: never joined. The fact regroups the catalog: each part is its own candidate.
+        rows=self.service.reviews.page()['rows']
+        self.assertEqual(len(rows),2,[r['scope'] for r in rows]);self.assertFalse(any(r.get('split_book') for r in rows))
+        self.assertTrue(all(r['scope'].endswith('Part with its own chapters') and len(r['members'])==1 for r in rows))
+        # "Чужак 1" has no title of its own: no evidence of what it is, so it stays held.
+        from public_research import PublicResearch
+        for row in rows:
+            result=PublicResearch(self.client,leads=[]).lookup(row,str(self.audio))
+            self.assertTrue(result['reasons']);self.assertEqual(result['local_agreement']['part_book']['parts'],2)
+            self.assertIn('no title of its own',result['local_agreement']['title']['how'])
     def test_parts_whose_audio_profiles_differ_at_admission_are_held(self):
         self.build()
         import audio_pipeline
@@ -267,6 +349,125 @@ class JoinedM4BMediaTests(unittest.TestCase):
         self.assertIn('carry their own chapters',str(raised.exception))
 
 
+IMAJICA=[('1. Пятый Доминион. Главы 1-20','Книга 1. Пятый Доминион. Главы 1-20'),('2. Пятый Доминион. Главы 21-36','Книга 1. Пятый Доминион. Главы 21-36'),
+         ('3. Примирение. Главы 37-48','Книга 2. Примирение. Главы 37-48'),('4. Примирение. Главы 49-62','Книга 2. Примирение. Главы 49-62')]
+IMAJICA_FOLDER='Clive Barker/1290. Имаджика (Светлана Смелова)'
+
+def part_rows(folder,album,artist,parts,total=None):
+    total=total or len(parts)
+    return [row('%s/%s.m4b'%(folder,stem),{'album':album,'artist':artist,'title':title,'composer':'Светлана Смелова','track':'%d/%d'%(n,total)},duration=36000.0)
+            for n,stem,title in parts]
+
+def siblings_of(rows,index):
+    out=[]
+    for i,r in enumerate(rows):
+        if i!=index:
+            tags={k.casefold():str(v) for k,v in json.loads(r['metadata'])['tags'].items()}
+            out.append({'path':r['path'],'filename':Path(r['path']).name,'tags':tags})
+    return out
+
+def candidate_of(built,path):
+    return rendered(next(g for g in built.values() if g['members'][0]['path']==path))
+
+
+class PartBookTests(unittest.TestCase):
+    """Sergei 2026-10-13: M4B parts with their own chapters are never joined; each part is its own book."""
+    def test_imajica_parts_are_separate_books_named_from_evidence(self):
+        rows=part_rows(IMAJICA_FOLDER,'Имаджика','Клайв Баркер',[(n,s,t) for n,(s,t) in enumerate(IMAJICA,1)])
+        built=groups.build(rows)
+        self.assertEqual(len(built),4);self.assertFalse(split_scopes(built))
+        titles=[]
+        for index,r in enumerate(rows):
+            group=candidate_of(built,r['path'])
+            local=agreement(group,ROOT,siblings_of(rows,index),frozenset())
+            self.assertTrue(local['accepted'],local['conflicts'])
+            self.assertEqual(local['part_book'],{'parts':4,'position':index+1,'set_title':'Имаджика','requires_own_chapters':True})
+            self.assertEqual(local['series'],{'name':'Имаджика','number':str(index+1)})
+            titles.append(local['fields']['title']['value'])
+            work={'titles':[local['fields']['title']['value'],'Имаджика'],'author_aliases':['Клайв Баркер'],'identity_basis':'local_agreement','policy_version':'standing-17-v1','part_book':True}
+            self.assertEqual(source_gate(group,work),[])
+            # Positive control: without the part-book mark the set total "N/4" holds a single file.
+            self.assertIn('Source membership uncertain',source_gate(group,dict(work,part_book=False)))
+        self.assertEqual(titles,['Пятый Доминион. Главы 1-20','Пятый Доминион. Главы 21-36','Примирение. Главы 37-48','Примирение. Главы 49-62'])
+    def test_series_only_with_evidence(self):
+        parts=[(1,'01. Повелитель Хаоса','01. Повелитель Хаоса'),(2,'02. Элрик из Мелнибонэ','02. Элрик из Мелнибонэ')]
+        rows=part_rows('Michael John Moorcock/Elric of Melniboné','Сага об Элрике','Майкл Муркок',parts)
+        local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
+        self.assertEqual(local['fields']['title']['value'],'Повелитель Хаоса');self.assertEqual(local['series'],{})
+        self.assertNotEqual(local['fields']['series']['state'],'green')
+    def test_part_without_a_title_of_its_own_stays_held(self):
+        parts=[(n,'Торадора! Том %d'%n,'Торадора! Том %d'%n) for n in (1,2,3)]
+        rows=part_rows('Light Novels/Yuyuko Takemiya/Toradora!','Торадора!','Ююко Такэмия',parts)
+        local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
+        self.assertFalse(local['accepted']);self.assertTrue(local['part_book'])
+        self.assertIn('no title of its own',local['fields']['title']['how'])
+    def test_incoherent_set_is_not_a_part_book(self):
+        parts=[(n,s,t) for n,(s,t) in enumerate(IMAJICA,1) if n!=3]
+        rows=part_rows(IMAJICA_FOLDER,'Имаджика','Клайв Баркер',parts,total=4)
+        local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
+        self.assertIsNone(local['part_book']);self.assertFalse(local['accepted'])
+        self.assertTrue(any('beside it' in c['detail'] for c in local['conflicts']),local['conflicts'])
+    def test_known_chaptered_parts_get_their_own_candidates(self):
+        files=[row('Stephen King/Чужак %d.m4b'%n,{'album':'Чужак','artist':'Стивен Кинг','title':'Чужак %d'%n,'track':'%d/2'%n}) for n in (1,2)]
+        self.assertTrue(split_scopes(groups.build(files)))
+        built=groups.build(files,chaptered=frozenset(f['path'] for f in files))
+        self.assertFalse(split_scopes(built));self.assertEqual(len(built),2)
+        self.assertTrue(all(s.endswith('\x1fPart with its own chapters') for s in built))
+        _,holds=split_books.plan([groups.member(f) for f in files],(),frozenset([files[0]['path']]))
+        self.assertTrue(any('own chapters' in r for h in holds for r in h['reasons']),holds)
+
+
+@unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'),'ffmpeg required')
+class PartBookAdmissionTests(unittest.TestCase):
+    """An Imajica-like folder: each chaptered part becomes its own verified M4B with its chapters kept."""
+    def build(self,chapters=True):
+        from scanner import Inventory
+        from merge_service import MergeService
+        from public_research import PublicClient
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.audio=self.base/'audio'
+        folder=self.audio/'Clive Barker'/'1290. Имаджика (Светлана Смелова)';folder.mkdir(parents=True);self.sources=[]
+        for n,(stem,title) in enumerate((('1. Пятый Доминион','Книга 1. Пятый Доминион'),('2. Примирение','Книга 2. Примирение')),1):
+            source=folder/(stem+'.m4b');make_part(source,title,n,chapters,album='Имаджика',artist='Клайв Баркер');self.sources.append(source)
+        roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
+        self.addCleanup(self.temp.cleanup);self.addCleanup(self.service.close)
+        def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
+        self.client=PublicClient(self.inv.database,fetch=offline)
+    def research(self,source):
+        from public_research import PublicResearch
+        rows=self.service.reviews.page()['rows']
+        self.assertEqual(len(rows),2,[r['scope'] for r in rows]);self.assertFalse(any(r.get('split_book') for r in rows))
+        row=next(r for r in rows if r['members'][0]['path']==str(source))
+        return row,PublicResearch(self.client,leads=[]).lookup(row,str(self.audio))
+    def wait(self):
+        limit=time.monotonic()+60
+        while self.service.state()['state'] in ('Running','Pausing') or self.service.state().get('queued') or self.service.state().get('cleanup_active'):
+            if time.monotonic()>limit:self.fail('Private part-book job exceeded 60s')
+            time.sleep(.05)
+    def test_each_chaptered_part_becomes_its_own_m4b_nothing_joined(self):
+        self.build()
+        names=[]
+        for source in self.sources:
+            row,result=self.research(source)
+            self.assertEqual(result['reasons'],[],result);self.assertTrue(result['local_agreement']['part_book'])
+            self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
+        jobs=self.service.jobs.status()['jobs'];self.assertEqual(len(jobs),2)
+        for job in jobs:
+            self.assertEqual(job['state'],'completed',job);self.assertEqual(len(job['manifest']['sources']),1)
+            validation=job['output']['validation'];self.assertEqual(validation['encoding']['mode'],'copy')
+            self.assertEqual([c['title'] for c in validation['preserved_source_chapters']],['A','B'])
+            names.append(Path(job['output']['final_path']).name)
+        self.assertEqual(sorted(names),['Имаджика - 1 - Пятый Доминион - Barker Clive.m4b','Имаджика - 2 - Примирение - Barker Clive.m4b'])
+        self.assertTrue(all(not p.exists() for p in self.sources))
+    def test_part_without_its_own_chapters_stays_held(self):
+        self.build(chapters=False)
+        row,result=self.research(self.sources[0])
+        self.assertEqual(result['reasons'],[],result)
+        with self.assertRaises(ValueError) as raised:self.service.approve_automatic(row,result,threading.Event(),self.client)
+        self.assertIn('without its own chapters',str(raised.exception))
+        self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
+
+
 class SpellingTests(unittest.TestCase):
     """One author, one folder: a fetched catalog spelling wins over a majority typo."""
     def setUp(self):
@@ -279,16 +480,18 @@ class SpellingTests(unittest.TestCase):
             for spelling,count in spellings:
                 for index in range(count):
                     db.execute("INSERT INTO files VALUES(?,?,'audiobook',?,0)",(ROOT,ROOT+'\\Shelf\\%s %02d\\01.mp3'%(spelling,index),json.dumps({'tags':{'artist':spelling,'album':'Книга %d'%index}})))
-            for n,(value,url,facts) in enumerate(evidence):
-                result={'metadata_facts':{'authors':[value]} if facts else None,'evidence':[{'field':'authors','cited_value':value,'source_url':url}]}
-                db.execute("INSERT INTO automatic_candidates VALUES(?,1,'f','Waiting for source',?,NULL,?,'v')",('c%d'%n,json.dumps(result),'2026-10-13T00:00:%02d'%n))
+            for n,item in enumerate(evidence):
+                value,url,facts=item[:3];state=item[3] if len(item)>3 else 'Queued';seen=item[4] if len(item)>4 else ()
+                result={'metadata_facts':{'authors':[value]} if facts else None,'evidence':[{'field':'authors','cited_value':value,'source_url':url}],
+                        'local_clues':[{'kind':'embedded','field':'artist','value':v} for v in seen]}
+                db.execute("INSERT INTO automatic_candidates VALUES(?,1,'f',?,?,NULL,?,'v')",('c%d'%n,state,json.dumps(result),'2026-10-13T00:00:%02d'%n))
             db.commit()
         return path
     PRATCHETT=(('Terry Pratchet',20),('Terry Pratchett',5),('Терри Пратчетт',11))
     def test_confirmed_spelling_wins_over_majority_typo(self):
         url='https://openlibrary.org/works/OL453749W'
-        index=catalog_index(self.database(self.PRATCHETT,[('Terry Pratchett',url,True)]),ROOT)
-        self.assertEqual(index['confirmed'],{'Terry Pratchett':[url]})
+        index=catalog_index(self.database(self.PRATCHETT,[('Terry Pratchett',url,True,'Queued',['Terry Pratchet'])]),ROOT)
+        self.assertEqual(index['confirmed'],{'Terry Pratchett':{'urls':[url],'seen':['terry pratchet']}})
         for agreed in ('Терри Пратчетт','Terry Pratchet','Pratchett Terry'):
             with self.subTest(agreed=agreed):
                 name,record=canonical_author(agreed,[agreed],index,'')
@@ -301,6 +504,20 @@ class SpellingTests(unittest.TestCase):
         # Zahn: no fetched evidence anywhere, the majority spelling stays (known limit).
         index=catalog_index(self.database((('Thimoty Zahn',2),('Timothy Zahn',1),('Тимоти Зан',1))),ROOT)
         self.assertEqual(canonical_author('Тимоти Зан',['Тимоти Зан'],index,'')[0],'Zahn Thimoty')
+    def test_unverified_research_never_confirms(self):
+        # Senua M5: the live Pratchett confirmations came from research still waiting with "Author and
+        # work not independently verified"; such records never confirm a spelling.
+        url='https://openlibrary.org/works/OL453749W'
+        for state in ('Waiting for source','Held','Researching'):
+            with self.subTest(state=state):
+                index=catalog_index(self.database(self.PRATCHETT,[('Terry Pratchett',url,True,state,['Terry Pratchet'])]),ROOT)
+                self.assertEqual(index['confirmed'],{});self.assertEqual(canonical_author('Терри Пратчетт',['Терри Пратчетт'],index,'')[0],'Pratchet Terry')
+    def test_slip_needs_the_confirming_record_to_have_seen_it(self):
+        url='https://openlibrary.org/works/OL453749W'
+        index=catalog_index(self.database(self.PRATCHETT,[('Terry Pratchett',url,True,'Queued',['Terry Pratchett'])]),ROOT)
+        # Same person by the name rules: adopted. A one-letter slip the record never saw: not adopted.
+        self.assertEqual(canonical_author('Терри Пратчетт',['Терри Пратчетт'],index,'')[0],'Pratchett Terry')
+        self.assertEqual(canonical_author('Terry Pratchet',['Terry Pratchet'],index,'')[0],'Pratchet Terry')
     def test_unusable_evidence_is_ignored(self):
         evidence=[('Terry Pratchett','',True),('Terry Pratchett','http://openlibrary.org/x',True),('Terry Pratchett','https://openlibrary.org/y',False),
                   ('Сборник','https://fantlab.ru/work1',True),('Neil Gaiman & Terry Pratchett','https://fantlab.ru/work2',True)]
@@ -318,6 +535,7 @@ class SpellingTests(unittest.TestCase):
         self.assertFalse(middle_initial_same('Толстой А.Н.','Толстой Алексей Николаевич'))
         self.assertFalse(middle_initial_same('Стругацкий А.','Стругацкий Борис'))
         self.assertFalse(middle_initial_same('Sawyer J.','Robert J. Sawyer'))
+        self.assertFalse(middle_initial_same('M. Mary Smith','Margaret Mary Smith'))
         self.assertFalse(middle_initial_same('Philip K. Dick','Дик Филип Киндред',['Philip M. Dick']))
         self.assertFalse(middle_initial_same('Philip K. Dick','Дик Филип Киндред',['Philip Kevin Dick']))
         index=catalog_index(self.database((('Philip K. Dick',1),('Дик Филип Киндред',1),('Philip M. Dick',1))),ROOT)

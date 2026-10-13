@@ -1,0 +1,173 @@
+# Books Arranger v0.15.0 QA — 2026-10-13
+
+Author: Futaba. Candidate: branch `codex/books-split-books-0.15.0`, exact commit `3346da12ccb512acd44bd120afea5af28b603da7` (3346da1). The worktree HEAD and the local remote-tracking ref `origin/codex/books-split-books-0.15.0` both read this hash (I made no network call, so "pushed" is read from that ref). Base: `2072cf1` (v0.14.0).
+
+Offline only, as briefed: no app, no port 5210, no live database, no Z:/Y:, no network, no real-desktop or real-input check (no away window confirmed). Everything below ran from `git archive` exports of 3346da1 and 2072cf1 (never a clone, never the live worktree) and from my own copy of Ender's catalog copy (sha256 `b16c048a…7256301`, identical to his file and unchanged at the end; his file was never touched). I committed nothing, fixed nothing, stashed nothing. Environment: Windows 11, Python 3.14.8.
+
+Note on the live worktree: when I started it was clean at 3346da1. By the end it showed uncommitted edits to `groups.py`, `local_identity.py`, `merge_service.py`, `public_research.py`, `source_identity.py`, `split_books.py`, `tests/test_split_books.py` and several docs (someone is working on it). **None of that is covered by this report.** This verdict is for the committed 3346da1 only.
+
+**Summary: NO-GO for 3346da1, on one failing control, not on anything found in the real library.** Zero wrong groupings exist among the 173 real grouped books (independent scan plus hand review), the suite shows zero new failures, the headline numbers reproduce exactly (445 → 528), order, spelling and protection checks all pass. But a control I built from the brief's own "year-like numbers" hazard groups separate books into one candidate that then reaches *approvable* with no Internet: titles that carry a number ("Метро 2033" / "Метро 2034", "Fallout 3" / "Fallout 4", "Area 51" / "Area 52") filed under one album with track tags 1..N. Under the dispatch rule (any wrong grouping that could retire the wrong originals is a NO-GO) that decides it. The fix looks small (section 8) and the real library is not affected today.
+
+## Result per check
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Full suite from `git archive` 3346da1 at a short path vs the 9-error baseline | PASS. Run 2: 587 tests, 9 errors, name-for-name identical to the baseline 9. Run 1 had one extra error, a file-lock flake that passes 3 of 3 isolated. 38 of 38 `test_split_books` tests pass |
+| 2 | Own scan over all 173 grouped books (940 files) | PASS on the real library: 0 wrong groupings. 14 groups raised a hard flag, all judged correct by hand (named or Roman-numeral parts of one novel). The scan also fires on the synthetic wrong groups (36 of 40 caught, 4 known blind spots listed in 5.2) |
+| 3 | 25 random groups by hand plus the 10 riskiest | PASS: 25 of 25 correct, 10 of 10 riskiest correct as one book each |
+| 4 | Synthetic wrong-group controls | **FAIL on one family.** 52 scenarios: 44 as expected, 3 failed, 5 are probes of inherent limits. The named three (series of separate novels, two recordings of one book, missing part) all hold. Numbered-title / year-like names do not (F1) |
+| 5 | Spelling: Pratchett, Dick, Zahn, no wrong merge | PASS. 7 Pratchett books to one spelling, all 7 Dick books one spelling, Zahn unchanged, all 24 spelling pairs the new rules can unify across the library (22 confirmed-spelling pairs, 2 middle-initial pairs) judged by hand: no two different people merged |
+| 6 | The 81 approvable grouped books carry the right order | PASS. 81 books, 707 files: recorded positions equal my own reading of the numbers in every one (80 from track tags, 1 from file names) |
+
+Also reproduced and checked (not separate briefed checks): 445 → 528 approvable exactly; 14 of 14 already approved/reviewed/job groups unchanged by the regroup; 0 regressions.
+
+## 1. Full suite
+
+`python -m unittest discover -s tests -p "test_*.py"` (timeout 600000), from `git archive` exports at `C:\Users\AnGeLZzZ\AppData\Local\Temp\fq\c` (candidate) and `...\fq\b` (2072cf1), 38-character paths (the long-path cause of the known errors is irrelevant at this depth).
+
+| Run | Tests | Errors | Failure set |
+|---|---|---|---|
+| Baseline 2072cf1 | 549 | 9 | The known 9, identical name-for-name to Ender's recorded baseline |
+| Candidate run 1 | 587 | 10 | The same 9 plus `test_partial_base_intent_absence_preserves_history_before_overall_completion` (`WinError 32`, file in use, in `DirectoryBoundary`). Passes 3 of 3 in isolation |
+| **Candidate run 2** | **587** | **9** | **Identical name-for-name to the baseline 9. Zero new failures** |
+| Focused `test_split_books.py` | 38 | 0 | OK (15.9 s) |
+
+The 9: `test_sort_title` actual review export, `test_native_thread_check` baseline race, `test_standing_admission` x3 (changed frozen source review, classified io failure, publication or unclassified failure), `test_collection_identity` lookup fetches components, `test_merge_http` protected cover enrichment, `test_chapter_repair` stream copy full presentation, `test_catalog_paging` grouping reused.
+
+## 2. Reproduction of the measurement (my own driver, not Ender's)
+
+My `futaba_measure.py`: copy of the catalog copy, `groups.sync` of the code under test, then `PublicResearch.lookup` with every public source closed on every waiting/held candidate (and every new split book).
+
+| | v0.14.0 | 3346da1 |
+|---|---|---|
+| Candidates checked | 2,416 | 1,649 (1,476 + 173 new split books) |
+| Approvable without the Internet | **445** | **528** |
+| Split books | 0 | 173 groups, 940 files; 81 approvable (707 files), 92 research path (233 files) |
+
+Comparison by member path set, v0.14.0 against the candidate:
+- 1,476 candidates unchanged in membership. **0** approvable in v0.14.0 that stopped being approvable.
+- **2** newly approvable with the same members: `Фантастика 2021 (без муз. сопр.)` and `Олег Булдаков - Тёмные Аллеи в Кино` (both "Разные авторы").
+- **9** approvable books whose author spelling changed, and no others: 7 Pratchett, 2 Dick.
+- 940 v0.14.0 candidates were absorbed into the 173 split books. All 940 were "Book identity uncertain" in v0.14.0, so no approvable book was absorbed. No candidate with non-split changed membership exists.
+- 14 protected groups (approved, reviewed or with an audio job): none overlaps the 940 files, and after the candidate's sync all 14 have the same revision, fingerprint and approved state.
+
+Discrepancy with the handoff doc (F2, Minor, doc only): the doc says 935 files in 173 books and 228 files in the 92 research books. The data, including Ender's own `m-after-final.log` (`split_files: 940`) and mine, says **940 and 233** (707 + 233). The 1,299-file accounting line should read 1,304 or the 363 should read 358.
+
+## 3. Independent scan over the 173 grouped books
+
+Own script `futaba_scan.py`, importing nothing from the candidate. It reads the RAW ffprobe format and stream tags from the catalog (not the app's derived tags) and checks per group: every author-like tag (artist, album_artist, author, composer, narrator, reader, performer, copyright, publisher), album, series, language, genre and date tags; readers named in comments; audio profile (codec, rate, channels, profile) and bitrate spread; duplicates by size plus duration; missing durations; embedded track numbers (gaps, duplicates, start, declared totals); the number that varies in the file names (gaps, duplicates, start, year-like >= 1000, track-versus-name order); words that differ between parts beyond the shared name; volume and season markers; year-like numbers differing between parts; abridged / adaptation markers on some parts only; parts spread over folders; and files in the same folder that share the album but are not in the group. A separate script checks that, wherever a group has both track tags and varying file-name numbers, the two are equal per file.
+
+Results over all 173:
+- Mixed authors, artists, composers, narrators or recordings (profile, rate, channels, language): **0**.
+- Numbering gaps, duplicates, wrong start, or declared totals not equal to the files found: **0**.
+- Same-album files left outside a group (an incomplete group): **0**. Parts in several folders: **0**.
+- Volume or season markers that differ between parts: **0**. Abridged / adaptation marker on some parts only: **0**. Duplicate files inside a group: **0**.
+- Year-like numbers that vary between parts: 1 hit, `Оно` (parts titled "Июнь 1958 года" and "Июль 1958 года" are the novel's own part titles, tracks 1/7..7/7, total matches). Correct.
+- Wherever a group has both track tags and varying name numbers (160 groups), the file-name number **equals** the track number for every file; 0 differ. 8 groups have no usable name numbers, 5 have no track tag (their order comes from file names).
+- Hard flags: 14 groups, all because parts carry their own names: Roman-numeral parts ("Часть I/II": 4 Гиперион/Эндимион books and 5 Harry Potter books), "Вступление" in Точка обмана, Мерзость ("Альпинисты / Гора / Мерзость"), Красные цепи ("Ртуть / Свинец / Сера"), Волки Кальи (Todash / Рассказывая истории / Волки), Оно. In each case the files carry a "Часть N" marker, the tracks run 1..N with the declared total equal to N, and the parts are the named parts of one novel. Judged correct.
+- Declared totals ("1/2") are absent in 11 groups (the four Dan Brown chapter sets of 108-155 files, Origin with 5, and six small ones). For those, a missing last part cannot be detected (inherent, 5.2).
+
+## 4. Hand judgement
+
+**25 random groups** (seed 13102026, indices into the 173-group list): 4, 22, 34, 36, 39, 40, 54, 55, 63, 68, 86, 88, 102, 109, 110, 111, 114, 117, 132, 155, 161, 162, 167, 168, 169. Each judged on file names, album, artist, composer/reader, track and total, durations. **25 of 25 are one book each:** Элементарно Ватсон, Аспект дьявола ("Черные холмы" Part 1/2), Harry Potter and the Goblet of Fire and Deathly Hallows (Часть I/II), Бог-император Дюны (1/3..3/3), Честь Королевы, Продажное королевство, Шестёрка воронов, Кости Авалона, Ученик монстролога, Ночная смена, Четыре сезона, Дьюма-Ки, Бессонница, Кристина, Кто нашёл берёт себе, Салимов удел, Чёрный дом (1/4..4/4), Сердце зимы (Wheel of Time 9), Splatterpunk stories 2 (an anthology in two files), Каменный город and Мастер снов (Сборник albums), Созвездие Льва 3 том 2 / 4 / 5. All have one album, one artist, one reader, one profile, and track n/N with N equal to the files found.
+
+**10 riskiest I found**, each looked at in full:
+
+| # | Group | Why risky | Judgement |
+|---|---|---|---|
+| 1 | Насекомые с Шаггаи, 5 mp3 (no tags, order from file names "Глава 1..5") | No tags at all | One short story in 5 chapters, 80 min, one folder named after it. Correct. Held for research (no author source) |
+| 2 | Глубина 01/02 and Светлана 01/02 in the story-per-file collection folder `Ужасы и трэшатинка`, no tags | Separate works numbered like parts, in a folder tree of 49 other single stories | Each is one story in two files (20 + 27 min, 31 + 36 min); the 11 other stories in the same folder (and 38 more in `Сборник 2-4`) are separate files with their own names and stay single. Correct. Held for research |
+| 3 | Лавка дурных снов 1-3 (King, no track tags, the only approvable group ordered by file names) | A collection of stories, order from names | Same album, title, artist, profile, bitrate 120 kbps; 26601 + 31523 + 26528 s; names 1,2,3 contiguous. Correct |
+| 4 | Странная погода 1, 2 (Joe Hill, four novellas) | A collection | Same album, composer, comment; names 1,2; bitrate 60 kbps both. Correct. Held for research |
+| 5 | Оно, 7 files (parts with sub-parts, "Июнь 1958 года 1/2") | Names carry duplicate part numbers, so track tags decide | Tracks 1/7..7/7, total 7, all parts of one novel. Correct and approvable, order checked in 6 |
+| 6 | Волки Кальи, 4 files with named parts | Distinct part titles | "Часть 1 / 2 (1) / 2 (2) / 3", tracks 1/4..4/4. Correct. Held for research |
+| 7 | Мерзость, 3 files "Часть N. Альпинисты / Гора / Мерзость" | Distinct part titles, approvable | Tracks 1/3..3/3, Часть 1,2,3. Correct |
+| 8 | Метро 2033 / 2034 / 2035 (three groups in one folder) | Year-like numbers | Each has its own album ("Метро 2033", ...) and stays its own 2-file group; no cross-grouping. Correct |
+| 9 | Иная and Иная 2001 (two groups in one folder, near-equal total length 55317 and 55319 s) | Two groups that could be one recording filed twice | Different albums, different artist spelling, each internally consistent; "Another" and "Another 2001" are two novels. Correct as two groups. See O1 |
+| 10 | Dan Brown chapter sets (155, 135, 129, 108 files) | The biggest sets, 527 of the 940 files | One album each, tracks 1..N complete, name numbers equal tracks, profile identical. Correct. Approvable, order checked |
+
+## 5. Controls
+
+### 5.1 Method
+
+Synthetic rows shaped like catalog `files` rows, run through the candidate's real `groups.build()` (in memory), so the integration code is exercised, not just `split_books.check`. Positive controls prove the harness can see a grouping. For the end-to-end shape, the same rows go through `groups.sync` on a disposable database and `PublicResearch.lookup` with every source closed ("E-series", author in folder and tags so a good book is approvable).
+
+Positive and structural controls, all as expected: P1 two-part book grouped; P2 12 chapter files grouped; P3 CD1/CD2 one m4b per disc grouped; P3b two m4b tracks per disc grouped; P3c three mp3 per disc stays a legacy multi-file group (not a split book); H8a one book from chapter files; H8b two books with chapter files in one folder come out as two groups of three, never one; E1 genuine two-part book is approvable end to end.
+
+Held as required (37 scenarios, all PASS):
+- Series of separate novels in one folder numbered 1..N: "1. X / 2. Y / 3. Z" under one series album with tracks 1..3 (H1a); title tags naming each novel, no tracks (H1b); bare 1/2/3 with distinct title tags (H1c); "Хоббит / Властелин колец" under the author as album (H1d); the English form (H1e).
+- Volumes and seasons: "Том 1/2" (H2a), "Книга 1/2" (H2b, and H2f under the author as album), "Season 1/2" (H2g).
+- Year-like with no track tags (H2d, H2e) hold, because numbering does not start at 1.
+- Two recordings of one book: readers differing in composer (H3a), only in file names with tracks continuing (H3b), differing sample rate (H3c), differing readers named in comments (H3d), duplicate track numbers across part folders (H3e), two recordings with tracks restarting (H12).
+- Missing part: middle (H4a, d), first (H4b), last with declared totals (H4c), missing disc folder (H4e), declared disc total not met (H4f), duplicate position (H4g).
+- Mixed authors under one album, mixed container, mixed channels, mixed language tag, mixed series tag (H5a-e); the same file twice (H6a); a part with its own title (H6b); full versus abridged named parts (H6c); tag order against name order (H7a); unreadable part (H7b); part without duration (H7c); a whole-book file beside numbered parts (H9); series number misused as a disc tag (H11).
+
+### 5.2 Failures and probes
+
+**Failed controls (3):**
+
+| ID | Files | Result |
+|---|---|---|
+| H2c | `Метро 2033.m4b`, `Метро 2034.m4b`, album "Метро", tracks 1 and 2 | grouped into one split book |
+| H2h | `Fallout 3.m4b`, `Fallout 4.m4b`, album "Fallout", tracks 1 and 2 | grouped |
+| H2i | `Area 51.m4b`, `Area 52.m4b`, no album, title tags "Area 51/52", tracks 1 and 2 | grouped |
+
+End to end, with the author in the folder and the tags (E-series): E2 (Метро 2033/2034 under album "Метро"), E5 ("Фантастика 2021" / "Фантастика 2022" under album "Фантастика", artist Сборник) and E9 (Fallout 3 / 4) all become **approvable without the Internet**, basis `local_agreement`: two separate books become one M4B titled "Метро" (or "Fallout", "Фантастика") and the originals of both are retired. See F1.
+
+**Probes of inherent limits (reported, not asserted; none occurs in the real library):**
+- X1 / E8: bare-numbered files `1.m4b, 2.m4b, 3.m4b` under one album that equals the folder name, tracks 1..3. Grouped, and approvable when the folder name agrees with the album (E8); held by identity when only the album names the book (E3). Indistinguishable from a three-part book by tags and names.
+- X2 / E6: the missing LAST part with no declared totals (tracks 1, 2 of a three-part book). Grouped, approvable. A missing last part cannot be known without a total.
+- X3 / E7: "полная версия" on part 1 and "сокращённая версия" on part 2, in comments only. Grouped, approvable; only reader names in comments are compared. Names carrying the marker (H6c) hold.
+- X5: parts of 2 h and 40 h at 64 and 192 kbps. Grouped; no duration or bitrate sanity check.
+- X4: a reader named in the comment of one part only: held.
+
+**Blind spots of my own scan** (known, none hits the real library): it does not hard-flag a differing `language` tag (soft only), a series number used as a disc tag, an unreadable part (the scan input carries no error flag), and bare names with distinct title tags (soft only). The 173 real groups carry no `language` tag, two have `disc 1/1` on every part, none has an error.
+
+## 6. Spelling
+
+Source of confirmed spellings (read from my copy of the catalog): 12 spellings with a fetched source URL (Van Vogt, Anatole France, Sanderson, Dan Brown, Hardinge, Rollins, Gaiman, Shimada Masahiko, Pratchett, Tremblay, Парфёнов, Обухова). I enumerated every library author spelling (837) against them with the candidate's own predicates to list what each confirmed spelling can absorb, then judged each pair myself:
+
+- 22 absorbed spellings, all the same person: Sanderson (Sanderson Brandon, Брендон Сандерсон, Сандерсон Брендон), Dan Brown (Дэн Браун), Hardinge (ФРЭНСИС ХАРДИНГ, Фрэнсис Хардинг), Rollins (Rollins James, Джеймс Роллинс, Роллинс Джеймс), Gaiman (Gaiman Neil, **"Neil Gayman" by the one-letter slip rule**, Гейман Нил, Нил Гейман), **Pratchett ("Terry Pratchet", 20 books, by the slip rule; Пратчетт Терри; Терри Пратчетт)**, Парфёнов (four е/ё and initials variants), Van Vogt (case), Обухова (Лена Обухова). The slip rule produced exactly two pairs in the whole library, both genuine typos of the same person.
+- Middle-initial rule: exactly two pairs library-wide, both the same person (Philip K. Dick ~ Дик Филип Киндред; Robert E. Howard ~ Роберт Ирвин Говард).
+- **Pratchett**: 7 approvable books `Pratchet Terry` → `Pratchett Terry`, no other Pratchett book changes. The co-authored credit "Neil Gaiman & Terry Pratchett" is left alone (correct). 114 other Pratchett-path candidates remain "Book identity uncertain" and are untouched.
+- **Dick**: v0.14.0 approvable Dick authors were `Dick Philip K.` (5) and `Дик Филип Киндред` (2); the candidate gives `Dick Philip K.` for all 7. One folder.
+- **Zahn**: `Zahn Thimoty` x3 before and after. No confirmed spelling exists, so unchanged as briefed. (The library holds "Thimoty Zahn" 2, "Timothy Zahn" 1, "Тимоти Зан" 1.)
+- No catalog-adopted spelling merged two different people. The `Булдаков` ruling fires on one book only (Тёмные Аллеи в Кино, "Разные авторы").
+
+## 7. Order of the 81 approvable grouped books
+
+For each of the 81 approvable split books (707 files) I took the order the candidate will use (the row's member order and recorded disc/track) and compared it with my own reading of the raw numbers: embedded track tag when every part has one (80 books), else the varying number in the file name (1 book, Лавка дурных снов). In all 81 the recorded track equals my number for every file, the numbers run 1..N with no gap or duplicate, the order is ascending, and the member list is already in that order. No multi-disc book is among the 81. The largest: The Lost Symbol 155 chapters 1..155, Точка обмана 135, Digital Fortress 129, Inferno 108, Оно 7 (tracks 1/7..7/7; its file names repeat part numbers, so the tags decide, which is right).
+
+Limit of this check: I verified the order in the candidate row, which is what `build_manifest` consumes through `track_order`. Whether the packaged conversion preserves it was only exercised by Ender's real-ffmpeg two-part test, not by me (NOT RUN, no app and no real conversion allowed).
+
+## 8. Findings
+
+**F1 — Major (release-gating under the dispatch rule). Titles that carry a number are grouped into one book when tracks run 1..N under one album.**
+- Repro: three files or two, same `album` (or no album and title tags "Area 51"/"Area 52"), embedded `track` 1, 2 (or 1..N), file names "`<Title> <n>`" where `<n>` is part of each title ("Метро 2033" / "Метро 2034", "Fallout 3" / "Fallout 4", "Area 51" / "Area 52"). Run `groups.build`: one `split_book` candidate. With the author in the folder and tags, `PublicResearch.lookup` returns it approvable (E2, E5, E9). Approval would convert both books into one M4B and retire both sets of originals.
+- Cause (read-only reasoning, confirmed by the failing controls): `split_books.check` accepts any one-to-four-digit number after the shared name as a part number (`LEADING_NUMBER` `\d{1,4}`), then compares only the ORDER of the embedded track numbers and the file-name numbers, never their values. Tracks 1,2 and names 2033,2034 (or 3,4, or 51,52) agree in order, so the group passes. The year-like guard Ender added lives only in the local-identity sibling check, not here, which is why the doc's "Year numbers" claim holds for identity but not for grouping.
+- Real library exposure today: none. All 160 testable real groups have file-name number equal to track number; none has a varying year-like number; none of the 173 is a numbered-title series.
+- Likelihood: needs a shared album tag over separate novels with numbered titles. The library's convention (one album per book) makes it rare, but the app's automatic run approves "approvable" books without a human, and the retirement is the destructive step (24-hour recovery only).
+- Suggested direction for Ender (not mine to fix): require the file-name number to equal the embedded track number per file when both exist (160 of 160 real groups satisfy that, so nothing real is lost), and read a 4-digit year-like number in a part name as a separate work (hold) rather than a part number; add the three held cases (H2c, H2h, H2i) as tests. Re-check with this control set; it re-runs in seconds.
+
+**F2 — Minor (doc).** The handoff and sample docs say 935 grouped files and 228 research-path files; the measurement is 940 and 233 (section 2).
+
+**Observations (no action required for this build; each has a disposition):**
+- O1: `Иная` and `Иная 2001`, `Метро 2033/2034/2035`, `DDD / DDD 2` sit in one folder as separate correct groups. The near-equal total length of `Иная` (55317 s) and `Иная 2001` (55319 s) with the same reader suggests a possible duplicate recording; the duplicate gate, not grouping, decides. Disposition: accept.
+- O2: the inherent limits X1, X2, X3, X5 (section 5.2): a missing last part without a declared total, an abridgement noted only in comments, bare-numbered files, absurd length or bitrate differences cannot be detected from tags. None occurs in the 173 real groups. Disposition: accept for this build; the 24-hour recovery and the research path are the backstops.
+
+## 9. Not run
+
+- NOT RUN: whether M4B parts carry their own chapters (the pipeline and admission hold those). The catalog probe stores no chapter list (`chapters` is absent for all 940 files), so this cannot be measured offline. Covered only by Ender's real-ffmpeg tests.
+- NOT RUN: a real conversion of a split book, retirement and recovery on real files (no app, no Z:/Y:).
+- NOT RUN: any real-desktop or real-input check (no away window confirmed), the packaged build, Sergei's Restart + Start sequence.
+- NOT RUN: manifest-level order for three or more parts in a real conversion (section 7 limit).
+
+## 10. Pattern alerts
+
+Pattern alert 1: the full suite shows one more `WinError 32` "file in use" error in a different test on each full run (seen in the v0.14.0 report and in Ender's own candidate run 1, and now `test_partial_base_intent_absence_preserves_history_before_overall_completion` here), always passing in isolation and on rerun. It is test-teardown locking, not a product defect. Disposition: defer (does not gate release; Ender can look at teardown locking when convenient).
+
+## Method record
+
+Scripts and raw outputs are in the session scratchpad `futaba-0150` (not in git): `futaba_scan.py` (independent scan), `futaba_measure.py` and `diff_measure.py` (reproduction), `controls.py` and `e2e_controls.py` (synthetic controls, in-memory and through sync plus lookup), `scan_control.py` (positive control of my scan: 36 of 40 forced-wrong groups caught), `order_check.py`, `spelling_pairs.py`, `spelling_pairs2.py`, `protected_check.py`, `compact.py` and the suite logs. My catalog copy (hash re-checked equal before removal) and the database scratch were removed through the studio hygiene planner (about 377 MB each, both complete). The two `git archive` exports (`Temp/fq/c` and `Temp/fq/b` under `C:/Users/AnGeLZzZ/AppData/Local`, 50 MB) are still on disk: they contain a `.claude` folder, which the planner refuses by name, so they need an owner's decision.
+
+**Verdict:** NO-GO — Books Arranger v0.15.0 candidate, exact commit 3346da12ccb512acd44bd120afea5af28b603da7 (3346da1): control failure F1 (numbered-title books grouped and approvable); zero wrong groupings found in the real library.

@@ -10,7 +10,7 @@ Ender, offline run of the v0.15.0 candidate against one consistent copy of the l
 |---|---|---|
 | Waiting/held books checked | 2416 | 1649 (173 of them new split books) |
 | Approvable without the Internet | 445 | **528** |
-| Split-part files held | 1,299 single files | 935 grouped into 173 books (707 files in 81 approvable books); 363 still held |
+| Split-part files held | 1,299 single files | 173 books from 940 files (935 held part files + 5 MP3 chapters): 707 files in 81 approvable books, 233 in 92 books needing research; 363 still held |
 
 A split book is grouped only when every part has the same album (book title), the same author, reader and recording tags, the same audio format, and gap-free numbering with no duplicates. Anything else stays held as separate files: gaps, duplicates, mixed readers or recordings, "Том 3" / "Книга 2" volume numbers (may be separate books), and parts with their own story or book titles.
 

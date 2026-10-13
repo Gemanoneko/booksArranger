@@ -786,6 +786,11 @@ class PublicResearch:
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
         titles=local_identity.title_forms(local)
+        part=local.get('part_book')
+        if part and part['set_title'] not in titles:
+            # One part of a multi-part set, its own book (Sergei 2026-10-13): the set's album is
+            # its parent work and a valid source title.
+            titles.append(part['set_title'])
         authors=local_identity.author_forms(local)
         local_script=local_identity.script(author)
         names=[author]
@@ -823,7 +828,7 @@ class PublicResearch:
         work={'id':work_ids[0],'titles':titles,'author_aliases':author_variants(authors),'original_language':language,
             'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
             'source_surnames':[],'verified_series':series,'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,
-            'recording_completeness':'unknown'}
+            'recording_completeness':'unknown','part_book':bool(part)}
         preferred=title
         if language=='ru':preferred=catalog.get('title_native') or title
         elif language=='en':preferred=catalog.get('original_title') or title
@@ -839,6 +844,7 @@ class PublicResearch:
             value=agreed[name]
             return value['value']+' ('+value['how']+'; '+', '.join(s['kind']+(' '+s['field'] if s.get('field') else '')+' "'+s['value']+'"' for s in value['sources'])+')'
         basis='Local agreement '+local_identity.AGREEMENT_VERSION+' (Sergei decision 2026-10-12): embedded tags and file/folder names agree. Title: '+described('title')+'. Author: '+described('author')+'. No Internet confirmation required.'
+        if part:basis+=' One part %d of a %d-part M4B set "%s", filed as its own book (Sergei 2026-10-13); it must carry its own chapters.'%(part['position'],part['parts'],part['set_title'])
         identity='Books Arranger local agreement '+local_identity.AGREEMENT_VERSION
         def evidence(field,value,url,why):
             result['evidence'].append({'field':field,'cited_value':value,'source_url':url,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':identity,'basis':why[:3900]})

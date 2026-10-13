@@ -489,7 +489,7 @@ class MergeService:
                 if stop.is_set():raise InterruptedError()
                 with generated_artifacts(self.reviews.cache) as artifacts:
                     try:
-                        profiles=[]
+                        profiles=[];own_chapters={}
                         for path in paths:
                             raw_profile=probe(path,self.reviews.cache,stop)
                             member=next(m for m in current['members'] if m['path']==path)
@@ -499,10 +499,22 @@ class MergeService:
                             streams=[s for s in raw_profile.get('streams',[]) if s.get('codec_type')=='audio']
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
                             stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
-                            # Joining parts re-encodes them with one chapter per part (v4 normalize);
-                            # a part's own chapter marks would be lost, so such a book is held.
-                            if len(paths)>1 and Path(path).suffix.lower() in ('.m4b','.m4a') and len(raw_profile.get('chapters') or [])>1:
-                                raise ValueError('Book parts carry their own chapters; joining them would keep only one chapter per part')
+                            if Path(path).suffix.lower() in ('.m4b','.m4a'):own_chapters[path]=len(raw_profile.get('chapters') or [])
+                        # Sergei 2026-10-13: M4B parts with their own chapters are never joined; each is its
+                        # own book. The fact is recorded (it regroups the catalog: each part becomes its own
+                        # candidate) and this joined attempt is held with every source preserved.
+                        chaptered={p:n for p,n in own_chapters.items() if n>1}
+                        if len(paths)>1 and chaptered:
+                            from groups import setup_part_chapters
+                            sizes={m['path']:(m['size'],str(m['modified'])) for m in current['members']}
+                            with connect(self.inventory.database) as db:
+                                setup_part_chapters(db)
+                                for p,n in sorted(chaptered.items()):
+                                    db.execute('INSERT OR REPLACE INTO part_chapters VALUES(?,?,?,?,?,?)',(self.inventory.roots['Audiobooks'],p,sizes[p][0],sizes[p][1],n,__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()))
+                            raise ValueError('Book parts carry their own chapters; each part becomes its own book')
+                        # One part of a multi-part set is its own book only with its own chapters (Sergei 2026-10-13).
+                        if local and (result['metadata_facts'].get('local_agreement') or {}).get('part_book') and (len(paths)!=1 or own_chapters.get(paths[0],0)<2):
+                            raise ValueError('One part of a multi-part set without its own chapters; one part is not the whole book')
                         # Split book (v0.15.0): every part must be the same recording profile; the v4
                         # normalizer would otherwise silently resample or upmix one of them.
                         if current.get('split_book') and len({p[:3] for p in profiles})!=1:

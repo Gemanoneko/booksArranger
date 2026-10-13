@@ -112,7 +112,10 @@ def source_gate(row,work):
             source_title=norm(named['title']) if len(members)==1 else norm(folder_title) if folder_context else ''
         if not source_title or not (title_matches(source_title,aliases,work.get('author_aliases',[])) or local and source_title in {norm(v) for v in (tags.get('album'),tags.get('title'),named.get('title'),Path(m['path']).parent.name) if v and same_title(v)}):reasons.append('Source membership uncertain')
         if m.get('order_conflict'):reasons.append('Playback order uncertain')
-        if len(members)==1:
+        # One part of a multi-part set filed as its own book (Sergei 2026-10-13): its set totals are
+        # the set's, not this book's. Re-derived at admission (local_identity.revalidate) and
+        # admitted only when the part carries its own chapters (merge_service).
+        if len(members)==1 and not (local and work.get('part_book')):
             denominator=re.fullmatch(r'\d+/(\d+)',str(tags.get('track') or tags.get('tracknumber') or '').strip())
             if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
             disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())

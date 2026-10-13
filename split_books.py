@@ -43,6 +43,11 @@ PART_MARKER = r'(?:часть|ч\.|глава|гл\.|chapter|ch\.|part|pt\.?|cd|
 VOLUME_WORDS = r'(?:книга|кн\.|том|т\.|volume|vol\.?|book|выпуск|сезон|season)'
 VOLUME_MARKER = re.compile(r'(?<![^\W\d_])' + VOLUME_WORDS + r'\s*[#№]?\s*\d', re.I)
 ROMAN = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100}
+# Only a chapter or part marker may carry a chapter name ("Часть 1. ТЕНЬ ПРОШЛОГО"); an episode,
+# CD, disc or track number followed by a name may be a separate work (Senua M2).
+NAMED_PART = r'(?:часть|ч\.|глава|гл\.|chapter|ch\.|part|pt\.?)'
+# A year-like number is part of a title ("Метро 2033", "Фантастика 2021"), never a part number.
+YEAR = re.compile(r'^(?:1[5-9]\d\d|20\d\d)$')
 MARKED_NUMBER = re.compile(PART_MARKER + r'\s*[#№]?\s*(\d{1,4})(?!\d)', re.I)
 LEADING_NUMBER = re.compile(r'^\W*(\d{1,4})(?!\d)')
 # Words that never name a separate work; front and back matter of a book.
@@ -50,8 +55,9 @@ GENERIC = {'unknown', 'title', 'untitled', 'track', 'трек', 'часть', '�
 MATTER = ('пролог', 'эпилог', 'вступление', 'введение', 'предисловие', 'послесловие', 'интерлюдия', 'аннотация', 'от автора', 'заключение',
           'prologue', 'prolog', 'epilogue', 'introduction', 'intro', 'foreword', 'preface', 'afterword', 'interlude', 'outro', 'conclusion',
           'opening credits', 'end credits', 'credits')
-# Tags that must be identical on every part (author, reader and recording credits).
-SAME_TAGS = ('artist', 'album_artist', 'albumartist', 'author', 'composer', 'narrator', 'reader', 'performer', 'language', 'series', 'series-part', 'series_part')
+# Tags that must be identical on every part: the album exactly, brackets included ("The Hunger
+# Games (Book 1)" vs "(Book 2)", Senua M1), and author, reader and recording credits.
+SAME_TAGS = ('album', 'artist', 'album_artist', 'albumartist', 'author', 'composer', 'narrator', 'reader', 'performer', 'language', 'series', 'series-part', 'series_part')
 NARRATOR_TEXT = ('comment', 'description', 'synopsis')
 
 
@@ -150,18 +156,15 @@ def label(value, prefix):
 
     Returns (kind, position): kind is 'number' / 'generic' / 'part' / 'matter' (a chapter or
     part), 'volume' (may be a separate book of a series) or 'distinct' (a separate work)."""
-    raw = _nfc(value)
-    rest = raw[len(prefix):] if prefix and raw.casefold().startswith(prefix.casefold()) else raw
-    rest = text(rest)
+    rest = text(_after_prefix(_nfc(value), prefix))
     if VOLUME_MARKER.search(rest):
         return 'volume', None
-    position = None
     marked = MARKED_NUMBER.search(rest)
     leading = LEADING_NUMBER.match(rest)
-    if leading:
-        position = int(leading[1])
-    elif marked:
-        position = int(marked[1])
+    number = leading or marked
+    position = int(number[1]) if number else None
+    if number and YEAR.match(number[1]):
+        return 'distinct', position
     remainder = rest
     if leading:
         remainder = remainder[leading.end():]
@@ -171,12 +174,28 @@ def label(value, prefix):
         return 'number', position
     if all(w in GENERIC for w in words):
         return 'generic', position
-    if re.match(PART_MARKER + r'\s*[#№]?\s*\d', remainder, re.I) or (marked and marked.start() <= (leading.end() if leading else 0) + 2):
+    if re.match(NAMED_PART + r'\s*[#№]?\s*\d', remainder, re.I) or (marked and marked.start() <= (leading.end() if leading else 0) + 2
+                                                                    and re.match(NAMED_PART, marked[0], re.I)):
         return 'part', position
     folded = ' '.join(words)
     if any(folded == m or folded.startswith(m + ' ') for m in MATTER):
         return 'matter', position
     return 'distinct', position
+
+
+def _after_prefix(raw, prefix):
+    """The rest of a name after a shared start, matched as written or by letters and digits only
+    ("Тёмный экзорцист Том I" after the album "Тёмный экзорцист")."""
+    if not prefix:
+        return raw
+    if raw.casefold().startswith(prefix.casefold()):
+        return raw[len(prefix):]
+    target = norm(prefix)
+    if target:
+        for cut in range(1, len(raw) + 1):
+            if norm(raw[:cut]) == target and (cut == len(raw) or not raw[cut].isalnum()):
+                return raw[cut:]
+    return raw
 
 
 def _labels(values):
@@ -199,14 +218,17 @@ def book_name(members):
     return text(name) if re.search(r'[^\W\d_]{2}', name) else ''
 
 
-def check(members, others=(), media=True):
+def check(members, others=(), media=True, durations=True, parts=False):
     """Decide whether these members are the parts of one book.
 
     members: candidate member dicts (path, filename, metadata, error, missing, duration);
     others: every other catalogued audio file of the same unit and book title that is not
     among the members (protected or already grouped elsewhere); media=False skips the audio
     profile check where the catalog probe is not carried (rendered rows: admission probes
-    every part again and refuses differing profiles).
+    every part again and refuses differing profiles); durations=False skips the duration check
+    for catalog siblings that carry tags only; parts=True asks whether the files are the
+    numbered parts of one set while each may be its own book (Sergei 2026-10-13: an M4B part
+    with its own chapters), so a part's own title or volume number does not hold.
     Returns {'ok': bool, 'reasons': [...], 'positions': [(disc, track), ...] in member order,
              'basis': str, 'book_name': str}."""
     reasons = []
@@ -231,7 +253,7 @@ def check(members, others=(), media=True):
         reasons.append('audio profile unknown')
     elif len(profiles) != 1:
         reasons.append('mixed recordings (audio profiles differ)')
-    if any(not isinstance(m.get('duration'), (int, float)) or m['duration'] <= 0 for m in members):
+    if durations and any(not isinstance(m.get('duration'), (int, float)) or m['duration'] <= 0 for m in members):
         reasons.append('a part has no known duration')
     keys = {book_key(m) for m in members}
     if len(keys) != 1 or None in keys:
@@ -248,13 +270,15 @@ def check(members, others=(), media=True):
     # when they differ, the title tags.
     stems = [_nfc(Path(m['filename']).stem) for m in members]
     stem_prefix, stem_labels = _labels(stems)
-    titles = [_nfc(text(t.get('title'))) for t in tags]
+    # Every title tag that exists is labelled (Senua C1: a title on one part only, "Book 2 Cathing
+    # Fire", still names a separate book); a title equal to the album says nothing.
+    album = _nfc(text(tags[0].get('album')))
+    present = [_arabic(x) for x in (_nfc(text(t.get('title'))) for t in tags) if x and norm(x) != norm(album)]
     title_labels = []
-    if all(titles) and len({x.casefold() for x in titles}) > 1:
-        albums = {norm(t.get('album')) for t in tags}
-        if not (len(albums) == 1 and all(norm(x) in albums for x in titles)):
-            _, title_labels = _labels(titles)
-    for kinds in (stem_labels, title_labels):
+    if present and not (len(present) == len(members) and len({x.casefold() for x in present}) == 1):
+        shared = _common_prefix(present) if len({x.casefold() for x in present}) > 1 else ''
+        title_labels = [label(x, album if album and norm(x).startswith(norm(album)) else shared) for x in present]
+    for kinds in (() if parts else (stem_labels, title_labels)):
         found = {k for k, _ in kinds}
         if 'volume' in found:
             reasons.append('a volume or book number: the files may be separate books of a series')
@@ -278,11 +302,12 @@ def check(members, others=(), media=True):
     if all(track is not None for track, _ in tracks):
         basis = 'embedded track numbers'
         positions = [(disc, track) for (disc, _), (track, _) in zip(discs, tracks)]
+        # Futaba F1: when the file names number every part, each number must equal its track
+        # number, not just sort the same way ("Метро 2033"/"2034" or "Fallout 3"/"4" as tracks 1, 2).
+        # Names that repeat a number ("Часть 2 … 1", "Часть 2 … 2") are sub-part labels: tags decide.
         if all(n is not None for n in named) and len(set(zip([d for d, _ in discs], named))) == len(named):
-            by_tag = sorted(range(len(members)), key=lambda i: positions[i])
-            by_name = sorted(range(len(members)), key=lambda i: (discs[i][0], named[i]))
-            if by_tag != by_name:
-                reasons.append('embedded track numbers and file names order the parts differently')
+            if any(n != track for n, (track, _) in zip(named, tracks)):
+                reasons.append('the numbers in the file names differ from the track numbers')
     elif any(track is not None for track, _ in tracks):
         basis = ''
         positions = []
@@ -320,12 +345,14 @@ def check(members, others=(), media=True):
     return result
 
 
-def plan(members, blocked=()):
+def plan(members, blocked=(), chaptered=frozenset()):
     """Group eligible single-file members into split books.
 
     members: member dicts of files that are currently single-file candidates (not protected);
     blocked: member dicts of every other catalogued audio file (protected or in a multi-file
-    group), so a book title shared with any of them holds the cluster.
+    group), so a book title shared with any of them holds the cluster; chaptered: paths of M4B
+    parts known to carry their own chapters (found at admission). Such parts are never joined:
+    each is its own book (Sergei 2026-10-13), so their cluster is never grouped.
     Returns (groups, holds): groups = [{'scope', 'unit', 'key', 'members', 'positions', 'basis',
     'book_name'}], holds = [{'unit', 'key', 'paths', 'reasons'}]."""
     clusters = {}
@@ -347,6 +374,9 @@ def plan(members, blocked=()):
             continue
         items = sorted(items, key=lambda m: m['path'])
         verdict = check(items, others.get((folder, kind, key), ()))
+        if any(m['path'] in chaptered for m in items):
+            verdict['ok'] = False
+            verdict['reasons'].append('parts carry their own chapters: each part is its own book (Sergei 2026-10-13)')
         if not verdict['ok']:
             holds.append({'unit': folder, 'kind': kind, 'key': key, 'paths': [m['path'] for m in items], 'reasons': verdict['reasons']})
             continue
