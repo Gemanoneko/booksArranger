@@ -113,3 +113,21 @@ Same uncommitted delta as the addendum above. Reports: `Docs/BooksArranger_CodeR
 | Not changed | M3 (bare numbers 1..N under one series album) and M4 (Булдаков exception with a folder-named author): held for Sergei. Minor left open: `middle_initial_same` does not compare word order ("Mary K. Smith" ~ "Kate Mary Smith"); the only live merge is Dick. The gate's own split re-proof still runs without neighbours (admission's sibling check covers local books) | — |
 
 **Measurement after the fixes (same copy, sha256 unchanged):** 173 split books from 940 files, 81 approvable (707 files): the fixes cost no real group, as both reviewers predicted. Total approvable stays **539** (528 split-book pass + 11 part books). The wrong-grouping scan stays 0 on every check; its positive control still flags all six planted groups. Spelling: verified confirmations are 6 (Rollins, Gaiman, Sanderson, Shimada, Обухова, Tremblay); **Pratchett loses its confirmation** (all three came from unverified research), so its 7 approvable books are filed as `Pratchet Terry` again; Zahn unchanged; Dick still one folder (`Dick Philip K.`, middle-initial rule).
+
+## Round-2 fix pass (on top of b756301) — Senua round 2 BLOCKED
+
+Uncommitted delta in the same worktree. Every new test fails on b756301 (positive control) and passes on this delta.
+
+| Finding | Fix | Test (`tests/test_split_books.py`) |
+| --- | --- | --- |
+| R2-C1 Critical: chaptered parts of one novel published without their parent work (Оно parts 3-7) and sets published piecemeal (Мерзость part 3 held for good) | `_part_book`: every part's series is the set's album whenever a folder or the shared file name repeats it, independent of the file-name number; the number is the proven track number; a set is filed part by part only when EVERY part has its own title, a parent-work lead and track numbering on one disc, else the whole set is held. Admission requires every part of the set to carry its own chapters (a part already admitted counts by its job's frozen chapter plan, since its original may be retired) | `PartBookRound2Tests.test_r2_c1_ono_every_part_keeps_its_parent_work` (live tags: all 7 parts "Оно - N - …"), `test_r2_c1_merzost_whole_set_held_when_one_part_has_no_title` (live tags), `PartBookTests.test_no_parent_work_holds_the_whole_set`, `PartBookAdmissionTests.test_a_set_with_one_part_lacking_chapters_is_held_whole` (real ffmpeg) |
+| R2-M1: re-filing reached .m4a files of multi-file groups; an .m4a part book was re-encoded | Only whole .m4b files become part books or are re-filed (`groups.build` ignores other chapter facts; admission records facts only for .m4b split-book members); any other joined set with a chaptered file is held together ("joining them would drop those chapters"); a part book must be admitted in copy mode | `test_r2_m1_m4a_is_never_a_part_book`, `test_r2_m1_m4a_group_never_loses_a_member`, `M4AGroupAdmissionTests.test_chaptered_m4a_file_keeps_its_group_whole` (real ffmpeg: no fact written, group keeps its 3 files) |
+| R2-M2: the protected split re-proof scanned the whole catalog per protected book | One (unit, book key) index per build, built only when reviewed split books exist | timing below |
+
+**Timing** (`groups.build` over the catalog copy, `mode=ro&immutable=1`, min of 3): b756301 → this delta: 0 protected split books 2.64 → 2.60 s; 81 → **13.20 → 2.91 s**; 173 → **25.03 → 2.93 s**. The build still runs inside the group lock and its transaction; with the index the lock time is back to the v0.14.0 level (+0.3 s), so the larger change of building outside the lock (which needs a revision recheck and retry) was not made.
+
+**Measurement (same copy, sha256 unchanged):** **538** approvable (528 split-book pass + 10 part books: Imajica 4, Зелёная миля 6; "Cathing Fire" now held because Hunger Games book 1 has no title of its own, as Senua predicted). 173 split books from 940 files, 81 approvable (707 files): unchanged. Wrong-grouping scan 0 on every check; its control still fires on 7 checks.
+
+**Suite:** 610 tests, 9 errors, the same set as the pristine baseline.
+
+Still waiting for Sergei: M3 (bare numbers 1..N), M4 (Булдаков exception with a folder-named author). Open Minors: the gate's own split re-proof runs without neighbours; `middle_initial_same` does not compare word order.

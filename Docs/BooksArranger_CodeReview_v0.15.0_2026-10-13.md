@@ -196,4 +196,125 @@ This is the same pattern as v0.14.0's C3 and R2-1: a guard that sees only part o
 |---|-----|-----|-----------|---------|--------------------------|
 | C1 | Critical | 2 Correctness / 5 Data | `split_books.py:251-264` | Title tags are ignored unless every part has one. Separate novels of a series (live Hunger Games tagging; Tim Miller "Том I/II") can be joined into one M4B and their originals retired. | Label every title tag that exists against the album/book name; a distinct title or volume word on any part holds. Add tests: the Hunger Games tags (one title "Book 2 Cathing Fire") with names "The Hunger Games 1..3" must hold; Tim Miller with one title missing must hold. Costs 0 of 173 live groups. Recommended in the same pass (Major): M1 (exact album equality plus a volume check on albums) and M2. |
 
-**Verdict:** RELEASE BLOCKED — 3346da1
+Round 1 verdict (superseded): RELEASE BLOCKED — 3346da1
+
+---
+
+## Round 2 — b756301
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-13
+Fix round: 3346da1..b756301 (14 files, +936 / -93; code: groups, local_identity, merge_service, public_research, source_identity, split_books; 1 test file)
+Full range: v0.14.0..b756301
+```
+
+### Method
+
+The review was red-team and read-only.
+- I re-ran every round-1 probe on a `git archive` export of b756301. The worktree was clean at b756301.
+- I probed the new part-book path with live tags from Ender's `m-fix-final.json`: Оно, Мерзость, Нужные вещи, Imajica and Зелёная миля.
+- I timed `groups.build` on the catalog copy, opened `mode=ro&immutable=1`.
+- `test_split_books.py` on the export: 55 run, 53 pass. The 2 errors are the known path-length environment error: my export path is longer than the baseline path.
+- No app, live database, Z:/Y: or network.
+
+### Round 1 findings, rechecked
+
+**Fixed.**
+- **C1 (the Critical).** The Hunger Games tags renamed "The Hunger Games 1..3" now hold, and so does Tim Miller with one title missing. "Часть N. Name" parts and "Террор 1..4" still group.
+- **M1.** Albums that differ only in brackets hold.
+- **M2.** Episode or CD plus a name holds.
+- **M5.** Only verified records confirm a spelling. A slip is adopted only when the confirming record carried it; Pratchett reverts.
+- **M6.** "Дорога 0001" holds again, while "Метро 2033" is still accepted.
+- **M7.** The scope collision now fails closed: the reviewed book is kept and the new files stay single candidates.
+- **Minors.** "M. Mary Smith" no longer merges, and the batch title no longer falls back to "split".
+- **Futaba F1.** "Метро 2033/2034" as tracks 1/2 holds.
+
+**Still open.** M3 (bare numbers 1..N) and M4 (Булдаков) are unchanged in code and wait for Sergei. Neither is Critical in this code. The gate's split re-proof still runs without neighbours (Minor).
+
+### New findings
+
+#### R2-C1 [Critical] — parts of one novel are published as standalone books, and sets are published piecemeal
+
+Location: `local_identity.py:1104-1157` (`_part_book`, series/number at `:1148`), with `merge_service.py:507-517`.
+
+**What the ruling covers.** Sergei's ruling makes each M4B part that has its own chapters a separate book. It also says "the folder name is a series/parent-work lead". His Imajica example gets series and number on all four parts.
+
+**What the code does differently.**
+- It adds the parent work (series) only when the part's track number equals the number in its file name.
+- It publishes any part of a set that has its own title, even when its sibling parts never can be published.
+
+**Live probes, with real tags from the approvable split books.** These outcomes happen if, at the first pass, admission finds chapters in the parts. The catalog stores no chapter data, so this cannot be ruled out offline.
+
+| Book (one novel) | What gets published | Problem |
+|---|---|---|
+| **Оно** (7 parts) | 7 separate King books; parts 1–2 as "ТЕНЬ ПРОШЛОГО" (Оно 1) and "ИЮНЬ 1958 ГОДА. 1" (Оно 2) | The other 5 have **no series**: "ИЮНЬ 1958 ГОДА. 2", "ВЗРОСЛЫЕ", "ИЮЛЬ 1958 ГОДА. 1/2", "РИТУАЛ ЧУДЬ". The folder "Оно" repeats the album, so the lead exists, but tracks 3–7 do not equal their file-name numbers. |
+| **Мерзость** (3 parts) | "Альпинисты" (Мерзость 1) and "Гора" (Мерзость 2) | Part 3, "Часть 3. Мерзость", has no title of its own, so it stays held for good. |
+| **Нужные вещи** (synthetic, consistent numbering) | Parts 3–4 | Parts "Премьера 1/2" stay held for good. |
+
+Each published part retires its own original, so the novel's originals go piecemeal. The parts without a parent-work link carry the fragment's name as if it were a whole book, which is the harm class of v0.14.0's C3.
+
+**Fix requirements.**
+1. Every part book carries its parent work: the series is the set's album whenever a folder or the shared file name repeats it, independent of the number. A part with no parent-work link is held.
+2. A set's parts are published only when every part of the set qualifies; otherwise the whole set is held.
+
+**Cost.** Imajica (4) and Зелёная миля (6) are unchanged. Only "Cathing Fire" would hold, because Hunger Games book 1 has no title of its own.
+
+#### R2-M1 [Major] — the chaptered-part re-filing reaches non-split .m4a groups
+
+Location: `groups.py:212` (pull-out), `merge_service.py:507`, `:523`.
+
+The ruling covers M4B parts. The code records and pulls out .m4a files from any multi-file group. This library has 25 multi-file .m4a groups.
+
+1. **A group can lose its last file.**
+   - Probe: three .m4a files, track numbers with no totals, the last file chaptered. The remaining two form the group, and the gate returns `[]` for research identity, so the book would be published without its last file.
+   - Local agreement holds, because the sibling check sees the pulled-out file.
+2. **An .m4a part book loses its chapters.**
+   - It is admitted because it has more than one chapter.
+   - It is then re-encoded: copy mode applies only to `.m4b`, and `source_chapters` is built only for `.m4b`.
+   - Its chapters are dropped before its original is retired. This contradicts "chapters kept, no re-encode".
+   - Live: 0 .m4a part books today.
+
+Suggested fix: re-file only split-book members and only `.m4b`, or give .m4a parts copy mode. Hold any legacy group that lost a member.
+
+#### R2-M2 [Major] — the protected split re-proof scans the whole catalog once per protected book
+
+Location: `groups.py:240`.
+
+Measured on the catalog copy:
+- a full build takes 2.6 s;
+- with 81 protected split books it takes 12.7 s, about +0.125 s per book. All 173 would take about 24 s.
+
+The build runs inside the group lock and `BEGIN IMMEDIATE`, on every catalog change, and every retirement is one. Completed jobs stay protected, so the cost grows as books convert.
+
+Suggested fix: build the (unit, book key) → files index once per build.
+
+### Answers to the three questions
+
+1. **Can a chaptered part of one book be published alone?** Yes, by the ruling. Two parts of it are defects, both under R2-C1:
+   - the parent work is dropped whenever track and file-name numbers differ;
+   - sets are published piecemeal.
+   Every retired original is fully inside its own verified copy-mode M4B with its chapters kept (.m4b). No original is retired without its audio.
+2. **Is "held once, then split" safe?** Yes.
+   - The `part_chapters` write happens under the review and group locks, before the hold.
+   - The regroup supersedes the joined candidate, so its id drops out of the run, and the run adds the new candidates.
+   - Facts are bound to size and modification time, and to the file being present and readable.
+   - Protected members are never re-filed.
+   - If only some parts are chaptered, every part becomes a single candidate: the rest of the cluster is held as a neighbour. The non-chaptered parts then stay held for good, which is the piecemeal case in R2-C1.
+3. **Does chapter detection come from the file?** Yes, for .m4b:
+   - admission runs `ffprobe -show_chapters` on the protected source after the size and modification-time check;
+   - a copy-mode manifest reads the chapters from the file again;
+   - the pipeline checks them against the hash-verified snapshot.
+   The exception is .m4a (R2-M1).
+
+### Round 2 verdict
+
+- Open Critical: 1 (R2-C1). Round-1 C1 is closed. The safety floor is intact: no new shell-outs, no out-of-scope writes and no secrets. Retirement and recovery code is untouched.
+- Open Major: 4 (R2-M1, R2-M2, M3, M4; M3 and M4 wait for Sergei).
+- Open Minor: 2 (the gate's split re-proof without neighbours; `middle_initial_same` ignores word order).
+
+| # | Sev | Dim | file:line | Finding | Must fix before release |
+|---|-----|-----|-----------|---------|--------------------------|
+| R2-C1 | Critical | 2 Correctness / 5 Data | `local_identity.py:1104-1157` (`:1148`) | Chaptered parts of one novel are published as standalone books with no parent work (Оно parts 3–7), and sets are published piecemeal (Мерзость part 3 held for good). | (1) Series = set album whenever a folder or the shared file name repeats it, independent of the number; hold a part book without it. (2) Publish part books only when every part of the set has its own title; else hold the whole set. Tests: Оно's live tags (all 7 carry series "Оно" or hold); Мерзость (whole set holds). Imajica and Зелёная миля unchanged. |
+
+**Verdict:** RELEASE BLOCKED — b756301

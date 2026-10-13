@@ -209,10 +209,13 @@ def build(rows,protected=None,chaptered=frozenset()):
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     members={row['path']:member(row) for row in audio}
     scopes={path:assigned.get(path) or partition(item) for path,item in members.items()}
+    # Only whole .m4b files (always single-file candidates by partition) are re-filed as their own
+    # books; an .m4a may sit in a multi-file group and would be re-encoded (Senua R2-M1).
+    chaptered=frozenset(path for path in chaptered if Path(path).suffix.lower()=='.m4b')
     for path in chaptered:
         # Its own book (Sergei 2026-10-13): a new scope, so a part that sat in a joined split book
         # becomes a new candidate that a running automatic pass picks up.
-        if path in scopes and path not in assigned and Path(path).suffix.lower() in ('.m4b','.m4a'):scopes[path]=str(Path(path))+'\x1fPart with its own chapters'
+        if path in scopes and path not in assigned:scopes[path]=str(Path(path))+'\x1fPart with its own chapters'
     split={}
     taken=set(scopes.values())
     for found in _split_plan(members,scopes,assigned,chaptered):
@@ -224,6 +227,13 @@ def build(rows,protected=None,chaptered=frozenset()):
     for row in audio:
         buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
+    # Senua R2-M2: same-title neighbours of reviewed split books from one index, built once per
+    # build and only when such books exist (no catalog-wide scan per book).
+    neighbours=None
+    if any(protected[scope].get('split_book') for scope in buckets if scope in protected):
+        neighbours={}
+        for path,item in members.items():
+            neighbours.setdefault((split_books.unit(path)[::2],split_books.book_key(item)),[]).append(item)
     for scope,items in buckets.items():
         if scope in split:
             verdict=split[scope]
@@ -237,7 +247,7 @@ def build(rows,protected=None,chaptered=frozenset()):
             # and while no other file beside it carries its book title (Senua minor).
             old=protected[scope];ordered=sorted((member(r) for r in items),key=lambda m:m['path'])
             own={m['path'] for m in ordered};keys={(split_books.unit(m['path'])[::2],split_books.book_key(m)) for m in ordered}
-            others=[m for path,m in members.items() if path not in own and (split_books.unit(path)[::2],split_books.book_key(m)) in keys]
+            others=[m for key in sorted(keys,key=repr) for m in neighbours.get(key,()) if m['path'] not in own]
             verdict=split_books.check(ordered,others)
             if verdict['ok']:
                 verdict['members']=ordered

@@ -500,21 +500,40 @@ class MergeService:
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
                             stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
                             if Path(path).suffix.lower() in ('.m4b','.m4a'):own_chapters[path]=len(raw_profile.get('chapters') or [])
-                        # Sergei 2026-10-13: M4B parts with their own chapters are never joined; each is its
-                        # own book. The fact is recorded (it regroups the catalog: each part becomes its own
-                        # candidate) and this joined attempt is held with every source preserved.
+                        # Sergei 2026-10-13: M4B parts with their own chapters are never joined. Only the .m4b
+                        # members of a split book are re-filed (the fact regroups the catalog: each part becomes
+                        # its own candidate); any other joined set is held as it is, every member kept together
+                        # (Senua R2-M1). Either way this joined attempt is held with every source preserved.
                         chaptered={p:n for p,n in own_chapters.items() if n>1}
                         if len(paths)>1 and chaptered:
+                            refile={p:n for p,n in chaptered.items() if current.get('split_book') and Path(p).suffix.lower()=='.m4b'}
+                            if not refile:raise ValueError('Book parts carry their own chapters; joining them would drop those chapters')
                             from groups import setup_part_chapters
                             sizes={m['path']:(m['size'],str(m['modified'])) for m in current['members']}
                             with connect(self.inventory.database) as db:
                                 setup_part_chapters(db)
-                                for p,n in sorted(chaptered.items()):
+                                for p,n in sorted(refile.items()):
                                     db.execute('INSERT OR REPLACE INTO part_chapters VALUES(?,?,?,?,?,?)',(self.inventory.roots['Audiobooks'],p,sizes[p][0],sizes[p][1],n,__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()))
                             raise ValueError('Book parts carry their own chapters; each part becomes its own book')
-                        # One part of a multi-part set is its own book only with its own chapters (Sergei 2026-10-13).
-                        if local and (result['metadata_facts'].get('local_agreement') or {}).get('part_book') and (len(paths)!=1 or own_chapters.get(paths[0],0)<2):
-                            raise ValueError('One part of a multi-part set without its own chapters; one part is not the whole book')
+                        part=(result['metadata_facts'].get('local_agreement') or {}).get('part_book') if local else None
+                        if part:
+                            # One part of a set is its own book only as a whole .m4b with its own chapters, kept in
+                            # copy mode (never re-encoded), and only when EVERY part of the set carries its own
+                            # chapters: a set is never published piecemeal (Senua R2-C1, R2-M1).
+                            if len(paths)!=1 or Path(paths[0]).suffix.lower()!='.m4b' or own_chapters.get(paths[0],0)<2:
+                                raise ValueError('One part of a multi-part set without its own chapters; one part is not the whole book')
+                            if (choose_automatic_encoding(profiles,single_m4b=True) or {}).get('mode')!='copy':
+                                raise ValueError('A part filed as its own book must keep its chapters without re-encoding')
+                            others=[p for p in part.get('members') or [] if p!=paths[0]]
+                            if not others or paths[0] not in (part.get('members') or []):raise ValueError('Local identity evidence changed')
+                            admitted={tuple(s['path'] for s in j['manifest']['sources']):len(j['manifest'].get('source_chapters') or []) for j in self.jobs.status()['jobs']}
+                            for other in others:
+                                # A part already admitted as its own book proved its chapters then (its original
+                                # may since be retired): the job's frozen chapter plan is the evidence.
+                                if admitted.get((other,),0)>1:continue
+                                try:count=len(probe(other,self.reviews.cache,stop).get('chapters') or [])
+                                except (ValueError,OSError):raise ValueError('Another part of this set could not be checked; the whole set is held') from None
+                                if count<2:raise ValueError('Another part of this set has no chapters of its own; the whole set is held (never published piecemeal)')
                         # Split book (v0.15.0): every part must be the same recording profile; the v4
                         # normalizer would otherwise silently resample or upmix one of them.
                         if current.get('split_book') and len({p[:3] for p in profiles})!=1:

@@ -247,7 +247,7 @@ def make_part(path,title,track,chapters=False,album='Чужак',artist='Сти�
     if chapters:
         meta=path.with_suffix('.txt');meta.write_text(';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=500\ntitle=A\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=500\nEND=1000\ntitle=B\n',encoding='utf-8')
         args+=['-f','ffmetadata','-i',str(meta),'-map','0:a','-map_chapters','1']
-    args+=['-c:a','aac','-ar','44100','-ac','1','-metadata','album='+album,'-metadata','artist='+artist,'-metadata','title='+title,'-metadata','track=%d/%d'%(track,total),str(path)]
+    args+=['-c:a','aac','-ar','44100','-ac','1','-metadata','album='+album,'-metadata','artist='+artist,'-metadata','title='+title,'-metadata','track='+('%d/%d'%(track,total) if total else str(track)),str(path)]
     subprocess.run(args,check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     if chapters:path.with_suffix('.txt').unlink()
 
@@ -381,7 +381,7 @@ class PartBookTests(unittest.TestCase):
             group=candidate_of(built,r['path'])
             local=agreement(group,ROOT,siblings_of(rows,index),frozenset())
             self.assertTrue(local['accepted'],local['conflicts'])
-            self.assertEqual(local['part_book'],{'parts':4,'position':index+1,'set_title':'Имаджика','requires_own_chapters':True})
+            self.assertEqual(local['part_book'],{'parts':4,'position':index+1,'set_title':'Имаджика','members':sorted(r['path'] for r in rows),'requires_own_chapters':True})
             self.assertEqual(local['series'],{'name':'Имаджика','number':str(index+1)})
             titles.append(local['fields']['title']['value'])
             work={'titles':[local['fields']['title']['value'],'Имаджика'],'author_aliases':['Клайв Баркер'],'identity_basis':'local_agreement','policy_version':'standing-17-v1','part_book':True}
@@ -389,12 +389,14 @@ class PartBookTests(unittest.TestCase):
             # Positive control: without the part-book mark the set total "N/4" holds a single file.
             self.assertIn('Source membership uncertain',source_gate(group,dict(work,part_book=False)))
         self.assertEqual(titles,['Пятый Доминион. Главы 1-20','Пятый Доминион. Главы 21-36','Примирение. Главы 37-48','Примирение. Главы 49-62'])
-    def test_series_only_with_evidence(self):
+    def test_no_parent_work_holds_the_whole_set(self):
+        # Senua R2-C1: a part never goes out without its parent work. The folder does not repeat
+        # the album "Сага об Элрике", so no part has a series and the whole set is held.
         parts=[(1,'01. Повелитель Хаоса','01. Повелитель Хаоса'),(2,'02. Элрик из Мелнибонэ','02. Элрик из Мелнибонэ')]
         rows=part_rows('Michael John Moorcock/Elric of Melniboné','Сага об Элрике','Майкл Муркок',parts)
-        local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
-        self.assertEqual(local['fields']['title']['value'],'Повелитель Хаоса');self.assertEqual(local['series'],{})
-        self.assertNotEqual(local['fields']['series']['state'],'green')
+        for index in (0,1):
+            local=agreement(candidate_of(groups.build(rows),rows[index]['path']),ROOT,siblings_of(rows,index),frozenset())
+            self.assertFalse(local['accepted']);self.assertIn('parent work',local['fields']['title']['how'])
     def test_part_without_a_title_of_its_own_stays_held(self):
         parts=[(n,'Торадора! Том %d'%n,'Торадора! Том %d'%n) for n in (1,2,3)]
         rows=part_rows('Light Novels/Yuyuko Takemiya/Toradora!','Торадора!','Ююко Такэмия',parts)
@@ -427,7 +429,8 @@ class PartBookAdmissionTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.audio=self.base/'audio'
         folder=self.audio/'Clive Barker'/'1290. Имаджика (Светлана Смелова)';folder.mkdir(parents=True);self.sources=[]
         for n,(stem,title) in enumerate((('1. Пятый Доминион','Книга 1. Пятый Доминион'),('2. Примирение','Книга 2. Примирение')),1):
-            source=folder/(stem+'.m4b');make_part(source,title,n,chapters,album='Имаджика',artist='Клайв Баркер');self.sources.append(source)
+            own=chapters[n-1] if isinstance(chapters,tuple) else chapters
+            source=folder/(stem+'.m4b');make_part(source,title,n,own,album='Имаджика',artist='Клайв Баркер');self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
         self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
         self.addCleanup(self.temp.cleanup);self.addCleanup(self.service.close)
@@ -459,6 +462,14 @@ class PartBookAdmissionTests(unittest.TestCase):
             names.append(Path(job['output']['final_path']).name)
         self.assertEqual(sorted(names),['Имаджика - 1 - Пятый Доминион - Barker Clive.m4b','Имаджика - 2 - Примирение - Barker Clive.m4b'])
         self.assertTrue(all(not p.exists() for p in self.sources))
+    def test_a_set_with_one_part_lacking_chapters_is_held_whole(self):
+        # Senua R2-C1: part 1 has its own chapters, part 2 does not: nothing is published piecemeal.
+        self.build(chapters=(True,False))
+        row,result=self.research(self.sources[0])
+        self.assertEqual(result['reasons'],[],result)
+        with self.assertRaises(ValueError) as raised:self.service.approve_automatic(row,result,threading.Event(),self.client)
+        self.assertIn('whole set is held',str(raised.exception))
+        self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
     def test_part_without_its_own_chapters_stays_held(self):
         self.build(chapters=False)
         row,result=self.research(self.sources[0])
@@ -466,6 +477,74 @@ class PartBookAdmissionTests(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:self.service.approve_automatic(row,result,threading.Event(),self.client)
         self.assertIn('without its own chapters',str(raised.exception))
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
+
+
+ONO=[('Часть 1. ТЕНЬ ПРОШЛОГО.','Часть 1. ТЕНЬ ПРОШЛОГО.',1),('Часть 2. ИЮНЬ 1958 ГОДА. 1','Часть 2. ИЮНЬ 1958 ГОДА. 1',2),('Часть 2 ИЮНЬ 1958 ГОДА. 2','Часть 2. ИЮНЬ 1958 ГОДА. 2',3),
+     ('Часть 3. ВЗРОСЛЫЕ.','Часть 3. ВЗРОСЛЫЕ.',4),('Часть 4. ИЮЛЬ 1958 ГОДА. 1','Часть 4. ИЮЛЬ 1958 ГОДА. 1',5),('Часть 4. ИЮЛЬ 1958 ГОДА. 2','Часть 4. ИЮЛЬ 1958 ГОДА. 2',6),
+     ('Часть 5. РИТУАЛ ЧУДЬ.','Часть 5. РИТУАЛ ЧУДЬ.',7)]
+MERZOST=[('Часть 1. Альпинисты','Часть 1. Альпинисты',1),('Часть 2. Гора','Часть 2. Гора',2),('Часть 3. Мерзость','Часть 3. Мерзость',3)]
+
+
+class PartBookRound2Tests(unittest.TestCase):
+    """Senua round 2 (b756301): every part keeps its parent work, a set is never filed piecemeal,
+    and only whole .m4b parts are re-filed or become part books (live tags of Оно and Мерзость)."""
+    def chaptered_set(self,folder,album,artist,parts):
+        files=[row('%s/%s.m4b'%(folder,stem),{'album':album,'artist':artist,'album_artist':artist,'title':title,'track':'%d/%d'%(n,len(parts))},duration=36000.0) for stem,title,n in parts]
+        built=groups.build(files,chaptered=frozenset(f['path'] for f in files))
+        self.assertFalse(split_scopes(built));self.assertEqual(len(built),len(files))
+        return files,built
+    def test_r2_c1_ono_every_part_keeps_its_parent_work(self):
+        files,built=self.chaptered_set('Stephen King/Оно','Оно','Кинг Стивен',ONO)
+        titles=[]
+        for index,f in enumerate(files):
+            local=agreement(candidate_of(built,f['path']),ROOT,siblings_of(files,index),frozenset())
+            self.assertTrue(local['accepted'],local['conflicts'])
+            n=ONO[index][2];self.assertEqual(local['series'],{'name':'Оно','number':str(n)});titles.append((n,local['fields']['title']['value']))
+        self.assertEqual(sorted(titles),[(1,'ТЕНЬ ПРОШЛОГО'),(2,'ИЮНЬ 1958 ГОДА. 1'),(3,'ИЮНЬ 1958 ГОДА. 2'),(4,'ВЗРОСЛЫЕ'),(5,'ИЮЛЬ 1958 ГОДА. 1'),(6,'ИЮЛЬ 1958 ГОДА. 2'),(7,'РИТУАЛ ЧУДЬ')])
+    def test_r2_c1_merzost_whole_set_held_when_one_part_has_no_title(self):
+        files,built=self.chaptered_set('Dan Simmons/Мерзость','Мерзость','Симмонс Дэн',MERZOST)
+        for index,f in enumerate(files):
+            local=agreement(candidate_of(built,f['path']),ROOT,siblings_of(files,index),frozenset())
+            self.assertFalse(local['accepted']);self.assertTrue(local['part_book'])
+            self.assertIn('only part of the book',local['fields']['title']['how'])
+        self.assertIn('whole set is held',agreement(candidate_of(built,files[0]['path']),ROOT,siblings_of(files,0),frozenset())['fields']['title']['how'])
+    def test_r2_m1_m4a_is_never_a_part_book(self):
+        rows=[row('%s/%s.m4a'%(IMAJICA_FOLDER,s),{'album':'Имаджика','artist':'Клайв Баркер','title':t,'track':'%d/4'%n}) for n,(s,t) in enumerate(IMAJICA,1)]
+        for index,f in enumerate(rows):
+            group=rendered(dict(groups.build([f])[next(iter(groups.build([f])))]))
+            local=agreement(group,ROOT,siblings_of(rows,index),frozenset())
+            self.assertIsNone(local['part_book']);self.assertFalse(local['accepted'])
+    def test_r2_m1_m4a_group_never_loses_a_member(self):
+        rows=[row('Stephen King/Чужак/%02d.m4a'%n,{'album':'Чужак','artist':'Стивен Кинг','track':str(n)}) for n in (1,2,3)]
+        built=groups.build(rows,chaptered=frozenset([rows[2]['path']]))
+        self.assertEqual(len(built),1);self.assertEqual(len(next(iter(built.values()))['members']),3)
+
+
+@unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'),'ffmpeg required')
+class M4AGroupAdmissionTests(unittest.TestCase):
+    """Senua R2-M1: a multi-file .m4a group with a chaptered file is held together, never re-filed."""
+    def test_chaptered_m4a_file_keeps_its_group_whole(self):
+        from scanner import Inventory
+        from merge_service import MergeService
+        from public_research import PublicClient,PublicResearch
+        temp=tempfile.TemporaryDirectory(dir=AREA);base=Path(temp.name);audio=base/'audio'
+        folder=audio/'Stephen King'/'Чужак';folder.mkdir(parents=True);sources=[]
+        for n in (1,2,3):
+            source=folder/('%02d.m4a'%n);make_part(source,'Глава %d'%n,n,n==3,total=0);sources.append(source)
+        roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
+        inv=Inventory(base/'catalog.sqlite3',roots);inv.launch('Audiobooks');inv.worker.join(10);service=MergeService(inv,base/'cache')
+        self.addCleanup(temp.cleanup);self.addCleanup(service.close)
+        def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
+        client=PublicClient(inv.database,fetch=offline)
+        rows=service.reviews.page()['rows'];self.assertEqual([len(r['members']) for r in rows],[3])
+        result=PublicResearch(client,leads=[]).lookup(rows[0],str(audio))
+        self.assertEqual(result['reasons'],[],result)
+        with self.assertRaises(ValueError) as raised:service.approve_automatic(rows[0],result,threading.Event(),client)
+        self.assertIn('joining them would drop those chapters',str(raised.exception))
+        with contextlib.closing(sqlite3.connect(inv.database)) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM part_chapters').fetchone()[0],0)
+        self.assertEqual([len(r['members']) for r in service.reviews.page()['rows']],[3])
+        self.assertEqual(service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in sources))
 
 
 class SpellingTests(unittest.TestCase):

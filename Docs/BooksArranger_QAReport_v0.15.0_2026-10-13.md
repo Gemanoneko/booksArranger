@@ -170,4 +170,104 @@ Pattern alert 1: the full suite shows one more `WinError 32` "file in use" error
 
 Scripts and raw outputs are in the session scratchpad `futaba-0150` (not in git): `futaba_scan.py` (independent scan), `futaba_measure.py` and `diff_measure.py` (reproduction), `controls.py` and `e2e_controls.py` (synthetic controls, in-memory and through sync plus lookup), `scan_control.py` (positive control of my scan: 36 of 40 forced-wrong groups caught), `order_check.py`, `spelling_pairs.py`, `spelling_pairs2.py`, `protected_check.py`, `compact.py` and the suite logs. My catalog copy (hash re-checked equal before removal) and the database scratch were removed through the studio hygiene planner (about 377 MB each, both complete). The two `git archive` exports (`Temp/fq/c` and `Temp/fq/b` under `C:/Users/AnGeLZzZ/AppData/Local`, 50 MB) are still on disk: they contain a `.claude` folder, which the planner refuses by name, so they need an owner's decision.
 
-**Verdict:** NO-GO — Books Arranger v0.15.0 candidate, exact commit 3346da12ccb512acd44bd120afea5af28b603da7 (3346da1): control failure F1 (numbered-title books grouped and approvable); zero wrong groupings found in the real library.
+Round 1 verdict (superseded by Round 2 below): NO-GO at 3346da1 — control failure F1 (numbered-title books grouped and approvable); zero wrong groupings found in the real library.
+
+
+## Round 2 — b756301
+
+Candidate: branch `codex/books-split-books-0.15.0`, exact commit `b756301cf8364f0a307a9547b104c52255833dca` (b756301), parent 3346da1. The worktree HEAD and the local remote-tracking ref `origin/codex/books-split-books-0.15.0` both read this hash (no network call; "pushed" is read from that ref). Same rules as round 1: offline, from a `git archive` export at the short path `C:/Users/AnGeLZzZ/AppData/Local/Temp/fq/r2`, my own fresh copy of Ender's catalog copy (sha256 `b16c048a…7256301`, unchanged at the end), no app, no port 5210, no live database, no Z:/Y:, no network, no real-desktop or real-input check. I committed nothing, fixed nothing, stashed nothing. The round-1 report was committed inside b756301 as it stood; this section and the superseded-verdict wording are my only changes.
+
+**Summary: GO for b756301.** F1 is fixed and my controls prove it: the three failing controls (Метро 2033/2034, Fallout 3/4, Area 51/52) and the Фантастика 2021/2022 end-to-end case are now held. The suite shows zero new failures. The 173 grouped books are the same 173 with the same order, 0 wrong. The new separate-part books behave as ruled, including on REAL chaptered M4B fixtures I built and drove through scan, research, approval, media, publication and retirement. No wrong grouping that could retire the wrong originals exists in this build. Open points are observations, listed in R2.7, none gating.
+
+### R2.1 Result per item
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Suite | PASS. 604 tests, 9 errors, name-for-name identical to the baseline 9 (baseline 2072cf1: 549 tests, 9 errors). Zero new failures. The single full run showed no flake, so no rerun was needed. `test_split_books.py` alone: 55 tests OK |
+| 2 | My control set | PASS. 57 scenarios now (the 52 plus 5 new for Senua's fixes): **52 as expected, 5 probes of inherent limits (unchanged), 0 failed**. Same set on 3346da1: 6 FAIL (H2c, H2h, H2i, H13, H14, H15), so the controls are seen to fail where the defects were |
+| 3 | Independent scan, all groups plus the new part books | PASS. 173 groups, 940 files, 0 wrong. The new separate-part rows are judged in R2.4 |
+| 4 | Imajica: 4 books under `Barker Clive` | PASS (R2.5) |
+| 5 | Fixtures with REAL chapters | PASS: 5 scenarios behave as required; 2 measured scenarios behave as designed (R2.6) |
+
+### R2.2 Controls
+
+All of round 1's HOLD controls still hold, and the three that failed now pass:
+
+| Control | Round 1 (3346da1) | Round 2 (b756301) |
+|---|---|---|
+| H2c "Метро 2033" / "Метро 2034", album "Метро", tracks 1,2 | grouped | held |
+| H2h "Fallout 3" / "Fallout 4", album "Fallout", tracks 1,2 | grouped | held |
+| H2i "Area 51" / "Area 52", no album, tracks 1,2 | grouped | held |
+| E2 / E5 / E9 end to end (Метро pair, "Фантастика 2021" / "2022" under album "Фантастика", Fallout pair) | approvable as one book | each file its own candidate, held "Book identity uncertain"; nothing joined |
+| E4 titles "Метро 2033" / "2034", no album, tracks 1,2 | one candidate | two separate candidates, each approvable alone (correct: they are two books) |
+
+New controls for Senua's fixes, all held or grouped as intended on b756301: H13 albums differing only in brackets "Игры (Книга 1)" / "(Книга 2)" (M1) held; H14 a title on one part only "Книга 2 Ловля огня" under a shared album (C1) held; H15 "CD 1 Волчья кровь" / "CD 2 Дорога домой" (M2) held; H16 three parts each with its own title tag under one album held; H17 zero-padded parts "Дорога 0001" / "0002" (M6) still grouped. The positive controls P1-P3c, the legacy CD case and H8b (two books in one folder come out as two groups) still behave. The five probes are unchanged: X1 and E8 (bare-numbered files whose album equals the folder name) still group and E8 is approvable; X2 (missing last part, no total), X3 and E7 (abridgement only in a comment), X5 (absurd length or bitrate difference) still group. These are the inherent limits of round 1 (O2); none occurs in the real library.
+
+### R2.3 Reproduction and scan
+
+My own driver, v0.14.0 against b756301, by member path set:
+- 2,416 candidates in v0.14.0 → 1,649 now. Approvable **445 → 539** = 445 + 81 split books + 2 singles (Фантастика 2021, Тёмные Аллеи в Кино) + 11 part books. Ender's count of 539 and 173 grouped reproduces exactly.
+- **0** books approvable in v0.14.0 that are not approvable now. All 940 files of the split books were "Book identity uncertain" in v0.14.0, so no approvable book was absorbed.
+- 173 split books, 940 files, 81 approvable (707 files), 92 on the research path (233 files). **The member sets of all 173 groups and the order of every member list are identical to round 1**, so nothing was split away from a book that stays whole in the real library (the catalog stores no chapters, so none can be, offline).
+- My scan reproduces round 1: 14 hard flags, all the same named or Roman-numeral parts of one novel; track tag equals file-name number in all 160 testable groups; 0 gaps or duplicates, 0 mixed authors, readers or recordings; 0 same-album files left outside a group. Order of the 81 approvable books re-checked against my own reading of the raw numbers: 81 of 81 correct.
+- The 14 already approved, reviewed or job-bound groups: unchanged after the regroup (same revision, same approved state).
+
+### R2.4 The new separate-part books (84 candidates)
+
+A single M4B whose same-album numbered siblings form a coherent set is now a "part book": its own title, series and number from evidence, admitted only when the file really has more than one chapter (checked at conversion). Offline: **84** such candidates, **11 approvable, 73 held**.
+
+| Set | Candidates | Outcome | Judgement |
+|---|---|---|---|
+| Имаджика, 4 parts, total 4 | 4 | approvable | R2.5 |
+| Зелёная миля, 6 parts, total 6 | 6 | approvable | Six named serial parts, tracks 1/6..6/6, one reader, title tag = file name for each ("Две убитых девочки", "Мышь на миле", ...), series "Зелёная миля" numbers 1..6. Consistent with Sergei's ruling |
+| Hunger Games "Book 2 Cathing Fire", set of 3 | 1 | approvable | A complete 11.7 h novel, not a part: title "Cathing Fire" comes from its tag (typo kept), no series. Books 1 and 3 have no title tag and stay held. See O4 |
+| Дюна, Впусти меня, SAO Stories, Торадора x10, Элрик x13, Дом Зверя, Голос ночной птицы, Нужные вещи, Тёмный экзорцист, Однажды, Ночной смотрящий, Мастер собак, Тобол, Нарния x6, Рассказы на ладони x5 | 73 | held (Book identity uncertain, Playback order uncertain, Sources disagree, Source membership uncertain) | Correctly not approved: no title of its own, or sources disagree |
+
+Judged by hand: none of the 11 approvable is a wrong grouping, because none groups anything: each is one file, becomes one book, and keeps its chapters (R2.6 A). The only consequence of a wrong call here would be a part filed as a book of its own, which is exactly what the ruling prescribes.
+
+### R2.5 Imajica rows
+
+Four rows under `Barker Clive` (the same spelling as Barker's other books), set total 4 met, tracks 1/4..4/4 equal the file-name numbers 1..4, one reader (Светлана Смелова), one album "Имаджика", all four approvable:
+
+| # | File | Title (own) | Series | Number |
+|---|---|---|---|---|
+| 1 | `1. Пятый Доминион. Главы 1-20.m4b` | Пятый Доминион. Главы 1-20 | Имаджика | 1 |
+| 2 | `2. Пятый Доминион. Главы 21-36.m4b` | Пятый Доминион. Главы 21-36 | Имаджика | 2 |
+| 3 | `3. Примирение. Главы 37-48.m4b` | Примирение. Главы 37-48 | Имаджика | 3 |
+| 4 | `4. Примирение. Главы 49-62.m4b` | Примирение. Главы 49-62 | Имаджика | 4 |
+
+The titles are the parts' own names including the "Главы N-M" range. That is what the evidence rules produce; whether "Главы 1-20" belongs in a book title is Sergei's call, not a defect. Whether the real four files carry chapters is unknown offline; without chapters they are held, with chapters each converts alone.
+
+### R2.6 Fixtures with REAL chapters
+
+Real M4B files made with ffmpeg (tones, real `[CHAPTER]` marks written with ffmetadata), in `C:/Users/AnGeLZzZ/AppData/Local/Temp/fq/fx`, driven through the real `Inventory` scan, grouping, offline `PublicResearch.lookup`, `MergeService.approve_automatic`, the media pipeline, publication and retirement. Library code only, no web server, no port, no network.
+
+| ID | Fixture | Result |
+|---|---|---|
+| A | Imajica-like: 4 parts, each with 3 real chapters, each with its own title | PASS. 4 rows, none joined, all 4 approvable; 4 jobs completed, one source each, media mode `copy`, 3 preserved chapters each; every output re-probed with 3 chapters; outputs `Имаджика - N - <part title> - Barker Clive.m4b`; the 4 originals retired |
+| B | Whole book, 3 parts WITHOUT chapters (must stay whole) | PASS. One split book, approved, one job with 3 sources, one M4B, 3 chapters ("Роман 1..3"), originals retired |
+| C | Same 3 parts, only part 2 has real chapters, no own titles | PASS as designed, measured: the joined attempt is refused ("Book parts carry their own chapters; each part becomes its own book"), 0 jobs, files intact; after the regroup 3 single rows (part 2 as "Part with its own chapters"), all held "Book identity uncertain". Nothing converted, nothing lost; see O3 |
+| D | 4 chapter files, ONE chapter each | PASS. Still joined: 1 job, 4 sources, 4 chapters |
+| D2 | 4 chapter files, TWO chapters each | PASS as designed, measured: refused, 0 jobs, files intact, the set dissolves into 4 held singles; see O3 |
+| E | One complete single-file book with 5 chapters beside an unrelated file | PASS. Not a part book; approved; `copy` mode; 5 chapters kept |
+| F | A part-book candidate (own title, set total met) WITHOUT chapters | PASS. Research approves it, admission refuses "One part of a multi-part set without its own chapters", 0 jobs, files intact |
+
+### R2.7 Spelling, order, other
+
+- Confirmed spellings fell from 12 to 6 (only verified records now confirm; Senua M5): Sanderson, Rollins, Gaiman, Shimada, Tremblay, Обухова. The slip rule now needs the confirming record to have seen the local spelling. 11 absorbed spellings library-wide, all the same person (Sanderson 3, Rollins 3, Gaiman 4 including the one-letter slip "Neil Gayman", Обухова 1).
+- **Pratchett reverts**: the 7 approvable Pratchett books are `Pratchet Terry` again, as in v0.14.0 (no confirmation by a verified record exists). The co-authored credit is untouched. This is the intended M5 effect, not a defect; it means the typo folder `Pratchet` stays until a verified record confirms the right one.
+- Dick: all 7 approvable books `Dick Philip K.`, one folder. Zahn: `Zahn Thimoty` x3 unchanged. Middle-initial rule: exactly two pairs library-wide, Dick and Howard, both the same person; the new "initial written first" guard does not touch them.
+- Order and protected groups: see R2.3.
+
+**Observations (none gating):**
+- O3: a chaptered part dissolves its whole set into held singles (fixtures C and D2). That follows from the ruling, and nothing is converted wrongly or lost, but a book with ONE chaptered half, or chapter-per-file sets whose files each carry two embedded chapters, will no longer be auto-joined and stays held. How many real sets are affected is unknown, because the catalog stores no chapters. Disposition: accept for this build; proposed follow-up for Jane and Sergei: a read-only `ffprobe -show_chapters` count over the 940 split files and the 84 part-book files in a window Sergei states, which turns this unknown into a number.
+- O4: "Book 2 Cathing Fire" is a complete novel that now passes as a part book; if it has no chapters the refusal text ("One part of a multi-part set... one part is not the whole book") is misleading, though safe. Minor, wording only.
+- O5 (carried from round 1, unchanged): inherent limits X1-X5 and E8. Disposition: accept.
+
+**NOT RUN:** the real files' chapters, real conversions on the real library, retirement on real files, real-desktop and real-input checks, the packaged build, Sergei's Restart + Start sequence. The fixtures above are real files but not the library.
+
+**Pattern alerts:** none new. Round 1's alert (file-lock flake in the suite) stays at disposition defer; it did not show in this round's single full run.
+
+**Round 2 method record:** new or updated scripts in the scratchpad `futaba-0150`: `controls.py` (57 scenarios), `e2e_controls.py`, `fixtures_chapters.py` (real-chapter fixtures A-F), `futaba_measure.py` (now also captures part books), `imajica_rows.py`, `spelling_pairs.py` (adapted to the verified-only structure), plus the round-1 scripts unchanged. My copy of the catalog and the fixture folder are disposable and are removed through the hygiene planner at the end; the export directories under `Temp/fq` stay until an owner decides (they hold a `.claude` folder the planner refuses).
+
+**Verdict:** GO — Books Arranger v0.15.0 candidate round 2, exact commit b756301cf8364f0a307a9547b104c52255833dca (b756301): F1 fixed, zero new suite failures, 0 wrong groupings, real-chapter fixtures behave as ruled.

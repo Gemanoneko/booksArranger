@@ -1105,21 +1105,24 @@ def _part_book(row, root, siblings, components):
     """Sergei 2026-10-13: an M4B part that carries its own chapters is its own book, never
     joined (example: Clive Barker's Imajica folder of part files).
 
-    Applies to a single M4B candidate whose same-album siblings form, with it, one coherent
+    Applies to a single .m4b candidate whose same-album siblings form, with it, one coherent
     numbered set (same author, reader and recording tags, gap-free numbering, declared totals
     met; split_books.check with parts=True, so own titles and volume numbers are allowed).
-    Names follow the evidence rules: the shared album is the series only when a folder or the
-    set's shared file name repeats it, the number only when the track tag and the file name
-    agree, the title is the part's own title where the title tag and the file name agree.
-    Unknowns are omitted. Its own chapters are proven at admission (merge_service); a part
-    without them stays held. Returns None when the candidate is not such a part."""
+    Every part keeps its parent work (Senua R2-C1): the series is the set's album whenever a
+    folder or the set's shared file name repeats it, the number is the part's proven track
+    number, the title is the part's own title where the title tag and the file name agree.
+    A set is filed part by part only when EVERY part qualifies; otherwise the whole set is
+    held (never published piecemeal). Every part's own chapters are proven at admission
+    (merge_service); without them the set stays held. Returns None when the candidate is
+    not such a part."""
     members = row.get('members', [])
     if len(members) != 1 or not siblings or any(s.get('unreadable') for s in siblings):
         return None
     member = members[0]
-    if Path(member['path']).suffix.lower() not in ('.m4b', '.m4a'):
+    # .m4b only: copy mode keeps a part's chapters; an .m4a would be re-encoded (Senua R2-M1).
+    if Path(member['path']).suffix.lower() != '.m4b':
         return None
-    from split_books import book_key, book_name, check, _labels, _number
+    from split_books import book_key, book_name, check, _number
     key = book_key(member)
     if not key or key[0] != 'album':
         return None
@@ -1132,28 +1135,38 @@ def _part_book(row, root, siblings, components):
     if not verdict['ok']:
         return None
     index = group.index(member)
-    disc, position = verdict['positions'][index]
     tags = _tags(member)
     set_title = text(tags.get('album'))
-    stem = Path(member['filename']).stem
-    record = {'parts': len(group), 'position': position, 'set_title': set_title, 'title': None, 'series': None, 'number': None}
-    raw_title = text(tags.get('title'))
-    own_tag, own_name = _part_core(raw_title, set_title), _part_core(stem, set_title)
-    if own_tag and own_name and title_key(own_tag) == title_key(own_name):
-        record['title'] = {'state': 'green', 'value': own_tag, 'how': 'own title of one part of a %d-part set: the title tag and the file name agree without the part number, volume marker and set name' % len(group),
-                           'sources': [{'kind': 'embedded', 'field': 'title', 'value': raw_title}, {'kind': 'file name', 'value': stem}]}
+    shared = book_name(group)
+    leads = [c for c in components if c['kind'] in ('folder', 'parent folder')] + ([{'kind': 'file names', 'value': shared, 'numbered': False}] if shared else [])
+    lead = _supports_title(set_title, leads, '')
+    record = {'parts': len(group), 'position': verdict['positions'][index][1], 'set_title': set_title,
+              'members': [m['path'] for m in group], 'title': None, 'series': None, 'number': None, 'blocked': ''}
+    titles = []
+    for m in group:
+        m_tags = _tags(m)
+        raw_title, stem = text(m_tags.get('title')), Path(m['filename']).stem
+        own_tag, own_name = _part_core(raw_title, set_title), _part_core(stem, set_title)
+        titles.append((own_tag if own_tag and own_name and title_key(own_tag) == title_key(own_name) else '', raw_title, stem))
+    lacking = [verdict['positions'][i][1] for i, (own, _, _) in enumerate(titles) if not own]
+    if not titles[index][0]:
+        record['blocked'] = 'one part of a %d-part set "%s" with no title of its own: this may be only part of the book; how to name it needs a rule' % (len(group), set_title)
+    elif lacking:
+        record['blocked'] = 'part %d of the %d-part set "%s" has no title of its own: this may be only part of the book, so the whole set is held (never filed piecemeal)' % (lacking[0], len(group), set_title)
+    elif not lead:
+        record['blocked'] = 'no folder or file name repeats the set "%s": its parts would lose their parent work, so the whole set is held' % set_title
+    elif verdict['basis'] != 'embedded track numbers' or any(disc != 1 for disc, _ in verdict['positions']):
+        record['blocked'] = 'the parts of "%s" are not numbered by track tags on one disc, so the whole set is held' % set_title
+    if record['blocked']:
+        return record
+    own, raw_title, stem = titles[index]
+    record['title'] = {'state': 'green', 'value': own, 'how': 'own title of one part of a %d-part set: the title tag and the file name agree without the part number, volume marker and set name' % len(group),
+                       'sources': [{'kind': 'embedded', 'field': 'title', 'value': raw_title}, {'kind': 'file name', 'value': stem}]}
+    record['series'] = {'state': 'green', 'value': set_title, 'how': 'the album shared by the set, repeated in the %s; each part is its own book of that parent work (Sergei 2026-10-13)' % lead['kind'],
+                        'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': lead['kind'], 'value': lead['value']}]}
     track, _ = _number(tags.get('track') or tags.get('tracknumber'))
-    _, labels = _labels([Path(m['filename']).stem for m in group])
-    named = labels[index][1]
-    if disc == 1 and verdict['basis'] == 'embedded track numbers' and track is not None and track == named:
-        shared = book_name(group)
-        leads = [c for c in components if c['kind'] in ('folder', 'parent folder')] + ([{'kind': 'file names', 'value': shared, 'numbered': False}] if shared else [])
-        lead = _supports_title(set_title, leads, '')
-        if lead:
-            record['series'] = {'state': 'green', 'value': set_title, 'how': 'the album shared by the set, repeated in the %s; each part is its own book (Sergei 2026-10-13)' % lead['kind'],
-                                'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': lead['kind'], 'value': lead['value']}]}
-            record['number'] = {'state': 'green', 'value': str(track), 'how': 'the part number in the track tag and the file name',
-                                'sources': [{'kind': 'embedded', 'field': 'track', 'value': text(tags.get('track') or tags.get('tracknumber'))}, {'kind': 'file name', 'value': stem}]}
+    record['number'] = {'state': 'green', 'value': str(track), 'how': 'the part\'s track number, gap-free across the %d-part set' % len(group),
+                        'sources': [{'kind': 'embedded', 'field': 'track', 'value': text(tags.get('track') or tags.get('tracknumber'))}, {'kind': 'set numbering', 'value': '1-%d' % len(group)}]}
     return record
 
 
@@ -1186,9 +1199,8 @@ def agreement(row, root='', siblings=None, readers=None):
     if part:
         # Its own book (Sergei 2026-10-13): its own title, not the set's album, is the title.
         title = {'kind': 'embedded', 'field': 'title', 'value': part['title']['value']} if part['title'] else None
-        if not part['title']:
-            conflicts.append({'field': 'title', 'detail': 'one part of a %d-part set "%s" with no title of its own: this may be only part of the book; how to name it needs a rule'
-                              % (part['parts'], part['set_title']), 'force': True})
+        if part['blocked']:
+            conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True})
     readers = embedded['readers'] + narrator_names([c['value'] for c in components])
     if len(embedded['people']) > 1:
         # Two different people in author/artist credits (often author and narrator). Resolve
@@ -1346,7 +1358,9 @@ def agreement(row, root='', siblings=None, readers=None):
             gaps.append('series')
         if fields['author'].get('partial'):
             gaps.append('author_full')
-    part_book = {'parts': part['parts'], 'position': part['position'], 'set_title': part['set_title'], 'requires_own_chapters': True} if part else None
+    # Every part of the set must carry its own chapters at admission (merge_service).
+    part_book = {'parts': part['parts'], 'position': part['position'], 'set_title': part['set_title'], 'members': list(part['members']),
+                 'requires_own_chapters': True} if part else None
     return {'version': AGREEMENT_VERSION, 'accepted': accepted, 'route': route, 'part_book': part_book, 'fields': fields, 'series': series, 'gaps': gaps,
             'ignored': ignored, 'conflicts': conflicts,
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
