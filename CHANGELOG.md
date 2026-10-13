@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.15.0] - 2026-10-13
+
+### Added
+
+- Split books: files that provably form one book become one candidate whose ordered parts become one M4B, one chapter per part (for example the 155 chapter files of one Dan Brown novel, "Чужак 1.m4b" / "Чужак 2.m4b", CD1/CD2 folders). Grouped only when every part has the same book title (album), the same author, reader and recording tags, the same audio format, and gap-free numbering with no duplicates (embedded track numbers, part numbers in the file names, or disc folders). Gaps, duplicates, mixed readers or recordings, volume numbers ("Том 3", "Книга 2") and parts with their own story or book titles hold the files as before.
+- One author, one folder: a spelling confirmed by fetched catalog evidence anywhere in the library wins over a more common local typo ("Pratchet" becomes "Pratchett Terry" for every book). Without a confirmation the most common local spelling is kept.
+
+### Changed
+
+- M4B parts are joined by the existing v4 normalizer: decoded and re-encoded once at the parts' own bitrate, sample rate and channels. Joining AAC by stream copy is not supported (each part carries its own encoder delay), so it is not attempted. A part that already has its own chapters is held, so no chapter marks are lost; parts whose audio profiles differ at conversion are held.
+- "Philip K. Dick" and "Дик Филип Киндред" are one person: a middle initial may stand for a middle name when the first name and surname are written in full on both sides and the library has no other middle name for that person. An initial still never stands for a first name.
+- Under a collection folder, a plain credit of Олег Булдаков (named in Sergei's ruling 1 and credited as a reader in the library) is the narrator: such books are filed under Сборники as before for his comment-credited collections.
+- A trailing four-digit number is part of a title, not a part number ("Метро 2033" beside "Метро 2034" is not a split part).
+- A running automatic pass adds candidates created by the new grouping instead of waiting for a new discovery pass. Every waiting or held book gets one fresh pass. Media verification, publication, source retirement and 24-hour recovery are unchanged.
+
 ## [v0.14.0] - 2026-10-13
 
 ### Added

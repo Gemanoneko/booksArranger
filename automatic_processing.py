@@ -215,6 +215,20 @@ class AutomaticProcessing:
     def _manual_draft(self,row):
         ctx=self.merge.reviews._context(row)
         return bool(row.get('review') and not (ctx.get('automatic_approval') or ctx.get('automatic_pending'))) or bool(ctx.get('manual_draft_active'))
+    def _add_current_candidates(self,checkpoint):
+        """Regrouping (split books, v0.15.0) replaces candidates with new ids; a saved run adds
+        every current candidate it has not seen, so new books are researched without a new
+        discovery pass. Superseded ids are skipped where they come up (candidate no longer current)."""
+        seen=set(checkpoint.get('pending',[]))|set(checkpoint.get('done',[]))|set(checkpoint.get('deferred',[]))
+        listing=getattr(self.inventory,'candidates',None)
+        page=listing('Audiobooks',limit=1000000) if callable(listing) else None
+        # An inventory without a candidate listing (private test stubs) adds nothing.
+        if not isinstance(page,dict) or not isinstance(page.get('rows'),list):return 0
+        current=[r['id'] for r in page['rows']]
+        added=[identity for identity in current if identity not in seen]
+        checkpoint['pending']=list(checkpoint.get('pending',[]))+added
+        return len(added)
+
     def _refresh_observed_sources(self,row,previous):
         """Only stale/unreadable, unprotected observed members are refreshed."""
         stale={'Source files changed','Source embedded identity or order evidence changed','Source changed — review required','Source files unavailable or unreadable'}
@@ -293,6 +307,8 @@ class AutomaticProcessing:
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
                 if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self.merge.resume()
+                if self._add_current_candidates(checkpoint):
+                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             checkpoint['pending']=list(dict.fromkeys(checkpoint.get('pending',[])+checkpoint.get('deferred',[])))
             checkpoint['done']=list(dict.fromkeys(checkpoint.get('done',[])))
             checkpoint['deferred']=[];deferred=checkpoint['deferred']
@@ -305,6 +321,7 @@ class AutomaticProcessing:
                         if self.stop_event.wait(.2):raise InterruptedError()
                         if self.merge.state()['state']=='Paused':raise InterruptedError()
                     checkpoint['pending']=list(dict.fromkeys(deferred));deferred.clear()
+                    self._add_current_candidates(checkpoint)
                     with connect(self.database) as db:
                         times={r['id']:r['retry_at'] for r in db.execute("SELECT id,retry_at FROM automatic_candidates WHERE state IN ('Waiting for source','Held')")}
                     next_at=min(times.get(candidate) or self.clock() for candidate in checkpoint['pending'])

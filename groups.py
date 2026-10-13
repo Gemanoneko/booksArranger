@@ -6,7 +6,11 @@ import re
 import uuid
 import math
 from metadata import propose, future_audio_tags
-from source_identity import partition, clues, VERSION as GROUP_VERSION
+from collections import Counter
+from source_identity import partition, clues, VERSION as SOURCE_VERSION
+import split_books
+# Changing the grouping algorithm re-syncs every root once (split books, v0.15.0).
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION
 
 def setup(connection):
     connection.execute('''CREATE TABLE IF NOT EXISTS book_groups(
@@ -82,7 +86,8 @@ def member(row):
       'disc':disc,'track':track if track is not None else filename_number,
       'duration':duration,'order_evidence':evidence,'order_conflict':conflict}
 
-def _legacy_build(rows):
+def _legacy_build(rows,split=None):
+    """split: {path: (disc, position)} of one proven split book; all its files form one batch."""
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     companions=[row for row in rows if row['kind']=='companion']
     companions_by_folder={}
@@ -97,7 +102,14 @@ def _legacy_build(rows):
         album=str(tags.get('album') or '').strip()
         # Disc siblings may share a candidate only when an explicit album clue agrees.
         disc_folder=re.fullmatch(r'(?:cd|disc|disk|диск)[ _.-]*(\d+)',parent.name,re.I)
-        if Path(row['path']).suffix.lower()=='.m4b':
+        if split is not None:
+            # Positions were proven by split_books.check; filename/tag clues stay in the record.
+            scope='split'
+            item['disc'],item['track']=split[row['path']][:2]
+            item['order_evidence']='Split book part %d%s; %s'%(item['track'],'' if item['disc']==1 else ' of disc %d'%item['disc'],split[row['path']][2])
+            item['order_conflict']=False
+            grouping='Split book: the parts of one book, grouped by matching title, credits, audio profile and gap-free numbering'
+        elif Path(row['path']).suffix.lower()=='.m4b':
             scope=str(Path(row['path']))+'\x1fSingle audiobook file'
             grouping='Existing single audiobook file; it is not a chapter merge candidate'
         elif disc_folder and album:
@@ -153,14 +165,62 @@ def _legacy_build(rows):
           order_unverified=True,membership_unverified=True,completeness_unverified=True)
     return batches
 
+def _split_group(items,companions,scope,verdict):
+    """One candidate for a proven split book; verdict comes from split_books.check."""
+    positions={m['path']:(disc,track,verdict['basis']) for m,(disc,track) in zip(verdict['members'],verdict['positions'])}
+    legacy=_legacy_build(items+companions,split=positions)
+    group=next(iter(legacy.values()))
+    group['scope']=scope
+    group['split_book']={'version':split_books.VERSION,'parts':len(group['members']),'order_basis':verdict['basis'],'book_name':verdict['book_name']}
+    if not group['title_evidence'] and verdict['book_name']:
+        from source_identity import filename_identity
+        group['title_clue']=filename_identity(verdict['book_name']+'.x')['title'] or group['title_clue']
+    group['local_clues']=[{'path':m['path'],'clues':clues(m)} for m in group['members']]
+    return group
+
+def _split_plan(members,scopes,assigned):
+    """Single-file candidates that are provably the parts of one book (split_books.plan).
+    members: {path: member}; scopes: {path: partition scope}; assigned: protected paths."""
+    counts=Counter(scope for path,scope in scopes.items() if path not in assigned)
+    eligible=[item for path,item in members.items() if path not in assigned and counts[scopes[path]]==1]
+    blocked=[item for path,item in members.items() if path in assigned or counts[scopes[path]]!=1]
+    found,_=split_books.plan(eligible,blocked)
+    return found
+
 def build(rows,protected=None):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
-    for row in rows:
-        if row['kind']!='audiobook' or json.loads(row['metadata']).get('arranger_output'):continue
-        scope=assigned.get(row['path']) or partition(member(row))
-        buckets.setdefault(scope,[]).append(row)
+    audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
+    members={row['path']:member(row) for row in audio}
+    scopes={path:assigned.get(path) or partition(item) for path,item in members.items()}
+    split={}
+    for found in _split_plan(members,scopes,assigned):
+        for item in found['members']:scopes[item['path']]=found['scope']
+        split[found['scope']]=found
+    for row in audio:
+        buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
     for scope,items in buckets.items():
+        if scope in split:
+            verdict=split[scope]
+            output[scope]=_split_group(items,companions,scope,verdict)
+            continue
+        if scope in protected and protected[scope].get('split_book'):
+            # A reviewed split book keeps its scope only while its parts still prove one book.
+            old=protected[scope];ordered=sorted((member(r) for r in items),key=lambda m:m['path'])
+            verdict=split_books.check(ordered)
+            if verdict['ok']:
+                verdict['members']=ordered
+                found=_split_group(items,companions,scope,verdict)
+                output[scope]=old if found['members']==old['members'] and found['companions']==old['companions'] else found
+            else:
+                # Fail closed: every member stays visible and the book is held for review.
+                merged=[m for value in _legacy_build(items+companions).values() for m in value['members']]
+                found=dict(old);found['members']=sorted(merged,key=lambda m:m['path'])
+                for order,item in enumerate(found['members'],1):item['order']=order
+                found['source_partition_uncertain']=True
+                found['conflicts']=list(old.get('conflicts',[]))+['Split book parts no longer prove one book: '+'; '.join(verdict['reasons'][:3])]
+                output[scope]=found
+            continue
         legacy=_legacy_build(items+companions)
         if scope in protected:
             old=protected[scope]

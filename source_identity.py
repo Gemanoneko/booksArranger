@@ -85,13 +85,24 @@ def source_gate(row,work):
             from local_identity import compare_names
             return any(compare_names(value,alias) for alias in work.get('author_aliases',[]))
         return False
+    # Split book (v0.15.0): the parts are re-proven from the current row with the same pure
+    # check that grouped them; their verified positions replace per-file order clues.
+    split=None
+    if row.get('split_book'):
+        from split_books import check
+        split=check(sorted(members,key=lambda m:m['path']),media=False)
+        if not split['ok']:reasons.append('Source membership uncertain')
+        else:
+            proven=dict(zip(sorted(m['path'] for m in members),split['positions']))
+            if any(proven[m['path']]!=((m.get('disc') or 1),m.get('track')) for m in members):reasons.append('Playback order uncertain')
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))
     for m in members:
         tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
         album=norm(tags.get('album'))
-        named=filename_identity(m['filename'])
+        # A split part's own name adds its number and chapter label to the book name.
+        named=filename_identity(split['book_name']+'.x') if split and split['ok'] and split['book_name'] else {'title':'','author':''} if split else filename_identity(m['filename'])
         if album and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
         if named.get('author') and (not (same_title(named['title']) if local else norm(named['title']) in aliases) or not source_author(named['author'])):
             reasons.append('Sources disagree on the title or author')
@@ -124,7 +135,11 @@ def source_gate(row,work):
             match=re.match(r'^(\d{1,4})[ _.-]+',m['filename'])
             filename_positions.append(int(match[1]) if match else None)
         use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions))
-        positions=[(m.get('disc') or 1,m.get('track') if m.get('track') is not None else filename_positions[i] if use_filenames else None) for i,m in enumerate(members)]
+        if split:
+            # Proven above (embedded track numbers, part numbers in the names or disc folders).
+            use_filenames=bool(standing and split['ok'])
+            positions=[(m.get('disc') or 1,m.get('track')) for m in members]
+        else:positions=[(m.get('disc') or 1,m.get('track') if m.get('track') is not None else filename_positions[i] if use_filenames else None) for i,m in enumerate(members)]
         if any(p[1] is None for p in positions) or len(set(positions))!=len(positions):reasons.append('Playback order uncertain')
         # No natural filename sort can certify a gap-free recording.
         for disc in {p[0] for p in positions}:

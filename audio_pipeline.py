@@ -179,8 +179,10 @@ def ffmetadata_escape(value):
 def snapshot_manifest(manifest,stage,stop):
     sources=manifest['sources']
     if not sources:raise ValidationError('No reviewed source files are included')
-    if manifest.get('profile')==AUTOMATIC_PROFILE and any(Path(item['path']).suffix.lower()=='.m4b' for item in sources) and len(sources)!=1:
-        raise ValidationError('Existing M4B files must be arranged individually to preserve every source chapter plan')
+    # Split books (v0.15.0): M4B parts are joined by the v4 normalizer (decoded and re-encoded once,
+    # one chapter per part). A part that carries its own chapter plan is refused below, on its
+    # protected snapshot, so no existing chapter plan is ever dropped.
+    joined_m4b=manifest.get('profile')==AUTOMATIC_PROFILE and len(sources)!=1 and any(Path(item['path']).suffix.lower() in ('.m4b','.m4a') for item in sources)
     root=ordinary(manifest['root'])
     copies=[];durations=[];profiles=[];compatibility=None
     total_bytes=sum(item['size'] for item in sources)
@@ -200,6 +202,8 @@ def snapshot_manifest(manifest,stage,stop):
         with ProtectedFiles([alias]):
             if digest(alias,stop)!=item['sha256']:raise ValidationError('Protected snapshot differs from reviewed source bytes')
             raw=probe(alias,stage,stop)
+            if joined_m4b and alias.suffix in ('.m4b','.m4a') and len(raw.get('chapters') or [])>1:
+                raise ValidationError('Existing M4B parts carry their own chapters; they must be arranged individually to preserve every source chapter plan')
             duration,profile=audio_info(raw)
             if manifest.get('profile')==LEGACY_PROFILE and compatibility is not None and compatibility!=profile:
                 raise ValidationError('Included files have incompatible recording/audio stream parameters')

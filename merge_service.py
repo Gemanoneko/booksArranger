@@ -499,6 +499,14 @@ class MergeService:
                             streams=[s for s in raw_profile.get('streams',[]) if s.get('codec_type')=='audio']
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
                             stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
+                            # Joining parts re-encodes them with one chapter per part (v4 normalize);
+                            # a part's own chapter marks would be lost, so such a book is held.
+                            if len(paths)>1 and Path(path).suffix.lower() in ('.m4b','.m4a') and len(raw_profile.get('chapters') or [])>1:
+                                raise ValueError('Book parts carry their own chapters; joining them would keep only one chapter per part')
+                        # Split book (v0.15.0): every part must be the same recording profile; the v4
+                        # normalizer would otherwise silently resample or upmix one of them.
+                        if current.get('split_book') and len({p[:3] for p in profiles})!=1:
+                            raise ValueError('Split book parts are different recordings (audio profiles differ)')
                         try:
                             if standing:choose_automatic_encoding(profiles,single_m4b=len(paths)==1 and Path(paths[0]).suffix.lower()=='.m4b')
                             else:choose_encoding(profiles)
