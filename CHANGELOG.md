@@ -10,9 +10,13 @@
 ### Changed
 
 - Local conflicts still hold a book for the existing research path: different titles or authors between tags and names, two different people in author/artist tags (unless an author folder names exactly one), and a file sitting beside other files with the same title (one part of a split book).
+- Readers and compilers are never authors: credits with a reader marker (читает, исп., read by …), a credit equal to the named reader, an author credited as a reader on other books in the library, and collection credits (Сборник, Разные авторы) all hold the book; collection folders and titles go to research.
+- Names match across scripts only as a real transliteration, vowels included (Хокинг is not King); -ович/-евич/-ич surnames are never dropped as patronymics; a first name alone never matches a full name.
+- A series name, a lone numbered part or chapter, or a disc/part folder whose sibling parts exist is never accepted as a whole book; the split-part check reads every file beside the book and fails closed.
+- Sergei rulings (2026-10-13): collections compiled or read by a narrator are filed under Сборники with the narrator recorded only as narrator; a title spelling slip agrees and the tag spelling wins; one canonical author spelling per person (Russian name for Russian originals, English otherwise, most common local spelling, surname first, recorded); generic titles such as "Сборник рассказов" are accepted when the author agrees.
 - Optional missing fields never block a book; a book waits for them only while the converter is busy, at most three queue drains.
 - Retry timing waits for the sources a book actually needs instead of the first source that reopens.
-- Host pacing follows published vendor limits (Open Library, iTunes, Google Books); other hosts unchanged. Requests identify the app with the public repository URL. A DuckDuckGo human check is respected as a one-hour pause. The research cache keeps up to 5,000 responses / 64 MB.
+- Host pacing is raised only where the vendor publishes a limit (Open Library, iTunes); Google Books has a courtesy cap below the default (no published anonymous number); other hosts unchanged. Requests identify the app with the public repository URL. A DuckDuckGo human check is respected as a one-hour pause. The research cache keeps up to 5,000 responses / 64 MB, with expiry and eviction through a small index so the shared catalog is not locked while raw responses are scanned.
 - Every waiting or held book gets one fresh pass under the new rule. Media verification, publication, source retirement and 24-hour recovery are unchanged.
 
 ## [v0.13.1] - 2026-10-12

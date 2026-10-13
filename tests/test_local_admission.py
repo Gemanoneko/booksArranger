@@ -39,7 +39,8 @@ class LocalAdmissionTests(unittest.TestCase):
         fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['job_id'],job_id);self.assertEqual(job['state'],'completed',job)
         self.assertTrue(job['output']['validation']['passed']);self.assertTrue(Path(job['output']['final_path']).is_file())
-        self.assertEqual(Path(job['output']['final_path']).name,'Око Бога - Джеймс Роллинс.m4b')
+        # Ruling 3: an English spelling exists locally (folder "Rollins James"), surname first.
+        self.assertEqual(Path(job['output']['final_path']).name,'Око Бога - Rollins James.m4b')
         self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'retained')
         facts=job['manifest']['metadata_facts'];self.assertEqual(facts['identity_basis'],'local_agreement');self.assertEqual(facts['local_agreement']['author']['state'],'yellow')
         local=[e for e in job['manifest']['evidence']['metadata_fields'] if e['source_url']=='']

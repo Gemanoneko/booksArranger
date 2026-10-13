@@ -470,10 +470,13 @@ class MergeService:
             if self.automatic.manual_draft(current):raise ValueError('Manual draft retained')
             if self.candidate_status(row['id']):raise ValueError('Audiobook job already exists')
             if local:
-                from local_identity import revalidate,folder_siblings
-                try:siblings=folder_siblings(self.inventory.database,current)
-                except sqlite3.Error:raise ValueError("Folder contents could not be checked; local identity held") from None
-                revalidate(current,self.inventory.roots['Audiobooks'],result['metadata_facts']['local_agreement'],siblings)
+                from local_identity import revalidate,folder_siblings,catalog_index
+                # Any failure to read the folder contents holds this book; it never stops the run.
+                try:
+                    siblings=folder_siblings(self.inventory.database,current,self.inventory.roots['Audiobooks'])
+                    readers=catalog_index(self.inventory.database,self.inventory.roots['Audiobooks'])['readers']
+                except Exception:raise ValueError("Folder contents could not be checked; local identity held") from None
+                revalidate(current,self.inventory.roots['Audiobooks'],result['metadata_facts']['local_agreement'],siblings,readers)
             reasons=source_gate(current,result['work'])
             if reasons:raise ValueError('; '.join(reasons))
             paths=[m['path'] for m in current['members']]

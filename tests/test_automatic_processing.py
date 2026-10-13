@@ -23,15 +23,19 @@ def fixture_payload(language='en',cycles=None):
         'image':'https://fantlab.ru/images/cover.jpg','translations':[]}
 
 class AutoTests(unittest.TestCase):
+    # Internet-path cases pin local agreement off; test_local_identity reruns their holds with the default rule.
+    local_agreement_default=True
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.db=self.base/'catalog.sqlite3';self.controllers=[]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
-        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
+        research_path=patch.object(PublicResearch,'local_agreement',self.local_agreement_default);research_path.start();self.addCleanup(research_path.stop)
     def tearDown(self):
         for auto in self.controllers:auto.close()
         self.temp.cleanup()
     def candidate(self,title='A Book',author='John Writer'):
-        return next(iter(groups.build([row(self.base/(author+' – '+title+'.mp3'),title,author)]) .values()))|{'fingerprint':'private-fixture-fingerprint'}
+        # Author only in the tags (file named by title alone): local sources do not agree, so the
+        # default rule sends this book to the Internet research path these cases exercise.
+        return next(iter(groups.build([row(self.base/(title+'.mp3'),title,author)]) .values()))|{'fingerprint':'private-fixture-fingerprint'}
     def client(self,work=None,page=b'<p>John Writer. A Book</p>'):
         work=work or fixture_payload();calls=[]
         def fetch(url,*_):

@@ -79,7 +79,12 @@ def source_gate(row,work):
         from local_identity import title_segments_match
         return title_segments_match(raw,work.get('titles',[]))
     def source_author(value):
-        return author_matches(value,author_aliases) or bool(standing and work.get('full_author_verified') and norm(value) in {norm(v) for v in work.get('source_surnames',[])})
+        if author_matches(value,author_aliases) or bool(standing and work.get('full_author_verified') and norm(value) in {norm(v) for v in work.get('source_surnames',[])}):return True
+        # Local identity: the same name rules as the agreement (initials such as "Robert J. Sawyer").
+        if work.get('identity_basis')=='local_agreement':
+            from local_identity import compare_names
+            return any(compare_names(value,alias) for alias in work.get('author_aliases',[]))
+        return False
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))

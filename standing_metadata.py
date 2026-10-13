@@ -92,7 +92,14 @@ def validate_policy(row,review,facts):
     if identity not in (None,'local_agreement'):raise ValueError('Invalid identity provenance')
     if identity=='local_agreement':
         agreed=facts.get('local_agreement')
-        if not isinstance(agreed,dict) or agreed.get('version')!='local-agree-v1' or any(agreed.get(k,{}).get('state') not in ('green','yellow') for k in ('title','author')):raise ValueError('Local identity agreement record invalid')
+        from local_identity import AGREEMENT_VERSION
+        if not isinstance(agreed,dict) or agreed.get('version')!=AGREEMENT_VERSION:raise ValueError('Local identity agreement record invalid')
+        if agreed.get('route'):
+            # Ruling 1 collection: the title agrees and the narrator is never the author credit.
+            narrators=agreed['route'].get('narrators',[])
+            if agreed.get('title',{}).get('state')!='green' or not review.get('anthology') or (facts.get('collection') or {}).get('kind')!='narrator_collection' or review.get('canonical_author') in narrators:
+                raise ValueError('Local collection record invalid')
+        elif any(agreed.get(k,{}).get('state') not in ('green','yellow') for k in ('title','author')):raise ValueError('Local identity agreement record invalid')
     elif basis=='local_agreement':raise ValueError('Local title provenance without local identity')
     if basis=='source_russian' and review.get('title')!=russian_source_title(row):raise ValueError('Russian source title changed or ambiguous')
     if facts.get('series_state')=='omitted_unknown' and (review.get('series') or review.get('number')):raise ValueError('Unknown series must be omitted')

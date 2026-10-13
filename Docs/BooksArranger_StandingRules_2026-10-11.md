@@ -87,3 +87,10 @@ Supersedes the "filenames, embedded metadata and folders are clues only" boundar
 - Contradictions between local sources still hold the book for research/review; all media verification, publication checks and the 24-hour recovery policy are unchanged.
 - Same name in different languages or scripts counts as agreement (Sergei: folder "Rollins James" and tag "Джеймс Роллинс" agree). Name order (surname first or last) also does not matter. The detailed matching logic is Ender's design, specified before implementation.
 - Sequencing: after the Eye of God replacement completes, together with the approved search-channel work (catalogs, DuckDuckGo, Google human-check).
+
+## Sergei decisions — local-agreement edge cases (2026-10-13)
+
+1. Collections compiled or read by a narrator (e.g. Князев, Булдаков, "Антология русской мистики"): file under the collections root `Сборники`; the narrator is recorded only as narrator, never as author.
+2. Title spelled differently in the tag and the file name (e.g. a typo such as "ГЕограф"): the tag wins.
+3. One author written several ways: follow the existing language rule (Russian canonical name for Russian original works, English otherwise, surname first); within that, the app picks the most common local spelling, deterministically and with the choice recorded.
+4. Generic titles such as "Сборник рассказов": accept when the author agrees locally.

@@ -253,8 +253,39 @@ class PublicClient:
             db.execute('CREATE TABLE IF NOT EXISTS public_research_requests(host TEXT,at REAL)')
             db.execute('CREATE INDEX IF NOT EXISTS public_research_requests_host_at ON public_research_requests(host,at)')
             db.execute('CREATE TABLE IF NOT EXISTS public_research_limits(host TEXT PRIMARY KEY,next_at REAL,reason TEXT)')
-            db.execute('DELETE FROM public_research_cache WHERE fetched<=?',(self.clock()-7*86400,))
+            # Small side index (url, fetched, size): expiry and eviction never read the raw
+            # responses, so the shared catalog's write lock is held only for a few row edits.
+            db.execute('CREATE TABLE IF NOT EXISTS public_research_cache_index(url TEXT PRIMARY KEY,fetched REAL NOT NULL,size INTEGER NOT NULL)')
+            db.execute('CREATE INDEX IF NOT EXISTS public_research_cache_index_fetched ON public_research_cache_index(fetched)')
+            db.execute('CREATE INDEX IF NOT EXISTS public_research_cache_fetched ON public_research_cache(fetched)')
+            # One-time backfill for responses cached before this index existed.
+            db.execute('INSERT OR IGNORE INTO public_research_cache_index SELECT url,fetched,length(raw) FROM public_research_cache WHERE url NOT IN (SELECT url FROM public_research_cache_index)')
+            db.execute('DELETE FROM public_research_cache_index WHERE url NOT IN (SELECT url FROM public_research_cache)')
+            self._expire(db,self.clock())
             db.execute('DELETE FROM public_research_requests WHERE at<?',(self.clock()-7*86400,))
+    @staticmethod
+    def _expire(db,now):
+        # Both deletes are index range scans (fetched is indexed in both tables).
+        db.execute('DELETE FROM public_research_cache WHERE fetched<=?',(now-7*86400,))
+        db.execute('DELETE FROM public_research_cache_index WHERE fetched<=?',(now-7*86400,))
+    @staticmethod
+    def _evict(db):
+        """Keep the newest responses within CACHE_ENTRIES and CACHE_BYTES, evicting in one batch
+        down to 90% of the bound so this runs rarely, not on every fetch."""
+        count,total=db.execute('SELECT count(*),total(size) FROM public_research_cache_index').fetchone()
+        if count<=CACHE_ENTRIES and total<=CACHE_BYTES:return
+        # Rare path: drop index rows whose response is already gone, then recount.
+        db.execute('DELETE FROM public_research_cache_index WHERE url NOT IN (SELECT url FROM public_research_cache)')
+        count,total=db.execute('SELECT count(*),total(size) FROM public_research_cache_index').fetchone()
+        if count<=CACHE_ENTRIES and total<=CACHE_BYTES:return
+        victims=[]
+        for url,size in db.execute('SELECT url,size FROM public_research_cache_index ORDER BY fetched,url'):
+            if count<=CACHE_ENTRIES*0.9 and total<=CACHE_BYTES*0.9:break
+            victims.append(url);count-=1;total-=size
+        for index in range(0,len(victims),500):
+            batch=victims[index:index+500];marks=','.join('?'*len(batch))
+            db.execute('DELETE FROM public_research_cache WHERE url IN ('+marks+')',batch)
+            db.execute('DELETE FROM public_research_cache_index WHERE url IN ('+marks+')',batch)
     def _host_ready(self,db,host,now):
         reservations=db.execute('SELECT at FROM public_research_requests WHERE host=? AND at>? ORDER BY at',(host,now-APP_HOST_WINDOW)).fetchall()
         bound=host_policy(host)[0]
@@ -279,7 +310,7 @@ class PublicClient:
         with self.lock:
             now=self.clock()
             with connect(self.database) as db:
-                db.execute('DELETE FROM public_research_cache WHERE fetched<=?',(now-7*86400,))
+                self._expire(db,now)
                 cached=db.execute('SELECT * FROM public_research_cache WHERE url=? AND fetched>?',(url,now-7*86400)).fetchone()
                 if cached:
                     raw=base64.b64decode(cached['raw'],validate=True)
@@ -334,12 +365,12 @@ class PublicClient:
                     db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
                 raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
             def cache_fetched(db):
-                db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,base64.b64encode(raw).decode('ascii'),hashlib.sha256(raw).hexdigest(),self.clock()))
+                encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
+                db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,encoded,hashlib.sha256(raw).hexdigest(),fetched))
+                db.execute('INSERT OR REPLACE INTO public_research_cache_index VALUES(?,?,?)',(url,fetched,len(encoded)))
                 # Keep the newest responses within both an entry and a byte bound, so
                 # revisits reuse evidence instead of refetching it (was 100 entries).
-                db.execute('''DELETE FROM public_research_cache WHERE url IN (SELECT url FROM (SELECT url,
-                    SUM(length(raw)) OVER (ORDER BY fetched DESC,url) AS total,ROW_NUMBER() OVER (ORDER BY fetched DESC,url) AS n
-                    FROM public_research_cache) WHERE total>? OR n>?)''',(CACHE_BYTES,CACHE_ENTRIES))
+                self._evict(db)
             transaction(self.database,cache_fetched,stop)
             if budget is not None:budget.setdefault('answered',set()).add(host)
             return raw
@@ -514,9 +545,11 @@ class PublicResearch:
         # Sergei decision 2026-10-12: tags, file name and folder that agree are the identity.
         # Only missing optional fields are searched; a local conflict keeps the research path.
         import local_identity
-        local=local_identity.agreement(row,root,self._siblings(row))
+        siblings,index=self._siblings(row,root)
+        local=local_identity.agreement(row,root,siblings,index['readers'] if index else None)
         result['local_agreement']=local_identity.summary(local)
-        if local['accepted'] and self.local_agreement:return self._local_lookup(row,local,stop,budget,progress,result)
+        if self.local_agreement and local.get('route'):return self._local_collection(row,local,result)
+        if local['accepted'] and self.local_agreement:return self._local_lookup(row,local,stop,budget,progress,result,index)
         if len(candidates)>3:return result|{'reasons':['Mixed recordings in this group']}
         attempt=row.get('_research_attempt',0)
         if type(attempt) is not int or not 0<=attempt<=100000:raise ValueError('Invalid research history')
@@ -697,15 +730,48 @@ class PublicResearch:
         return result
 
     # ------------------------------------------------------------ local agreement
-    def _siblings(self,row):
-        """Same-folder audio files outside this candidate, from the app's own catalog."""
-        from local_identity import folder_siblings
+    def _siblings(self,row,root):
+        """Files beside this candidate and the library's reader names, from the app's own catalog.
+        Fails closed: an unreadable catalog yields the unreadable marker and holds the book."""
+        from local_identity import folder_siblings,catalog_index,UNREADABLE
         database=getattr(self.client,'database',None)
-        if not database:return None
-        try:return folder_siblings(database,row)
-        except Exception:return [{'path':'','filename':'','tags':{},'unreadable':True}]
+        if not database:return [dict(UNREADABLE)],None
+        try:return folder_siblings(database,row,root),catalog_index(database,root)
+        except Exception:return [dict(UNREADABLE)],None
 
-    def _local_lookup(self,row,local,stop,budget,progress,result):
+    def _local_collection(self,row,local,result):
+        """Ruling 1 (Sergei 2026-10-13): a collection compiled or read by a narrator, clear from two
+        local signals, is filed under the collections root; the narrator is recorded only as narrator."""
+        import local_identity
+        from standing_metadata import build_policy
+        route=local['route'];title=local['fields']['title']['value']
+        credits=set(route['narrators'])|{route['credit']}
+        for member in row['members']:
+            tags={k.casefold():v for k,v in member['metadata'].get('tags',{}).items()}
+            credits.update(text(tags.get(k)) for k in local_identity.AUTHOR_TAGS if text(tags.get(k)))
+            named=filename_identity(member['filename'])
+            if named.get('author'):credits.add(named['author'])
+        work={'id':local_identity.work_id(local),'titles':local_identity.title_forms(local),'author_aliases':author_variants(sorted(c for c in credits if c)),
+            'original_language':'','original_title':title,'policy_version':'standing-17-v1','full_author_verified':True,'source_surnames':[],'verified_series':{},
+            'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,'recording_completeness':'unknown'}
+        collection={'kind':'narrator_collection','narrators':list(route['narrators']),'signals':list(route['signals']),'credit_basis':route['credit_basis']}
+        summary=local_identity.summary(local)
+        review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary)
+        review['narrator']='; '.join(route['narrators'])
+        facts['work_ids']=[work['id']]
+        reasons=list(reasons)+source_gate(row,work)
+        result['work']=work
+        result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':summary})
+        identity='Books Arranger local agreement '+local_identity.AGREEMENT_VERSION
+        basis=('Collection compiled or read by a narrator (Sergei decision 2026-10-13): filed under the collections root. Signals: '+'; '.join(route['signals'])+
+            '. Title agrees: '+summary['title']['value']+' ('+summary['title']['how']+'). Narrator recorded only as narrator: '+(', '.join(route['narrators']) or 'not named')+
+            '. Author credit "'+route['credit']+'" ('+route['credit_basis']+').')
+        for field,value in (('title',title),('authors',review['canonical_author'])):
+            result['evidence'].append({'field':field,'cited_value':value,'source_url':'','retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':identity,'basis':basis[:3900]})
+        result.update(review=review,metadata_facts=facts,reasons=list(dict.fromkeys(reasons)),wait=None,gap_wait=None)
+        return result
+
+    def _local_lookup(self,row,local,stop,budget,progress,result,index=None):
         """Identity from agreeing local sources; the Internet fills only missing fields."""
         import local_identity
         from standing_metadata import build_policy
@@ -731,6 +797,14 @@ class PublicResearch:
         if not names or len(local_identity.words(names[0]))<2 and fields['author'].get('partial'):
             reasons.append('Author full name not established')
             names=names or [author]
+        spelling=None
+        if not reasons:
+            # Ruling 3 (Sergei 2026-10-13): one canonical spelling per author across the library.
+            canonical,spelling=local_identity.canonical_author(names[0],authors+names,index,language)
+            if spelling['spelling']!=names[0] or canonical!=names[0]:
+                # Reordering keeps the citation; a different local spelling is cited as local.
+                if local_identity.text(spelling['spelling'])!=local_identity.text(names[0]):name_source=''
+                names=[canonical]
         for value in (catalog.get('original_title'),catalog.get('title_native')):
             if value and value not in titles:titles.append(value)
         for value in names+([catalog.get('author_native'),catalog.get('author_latin')] if catalog else []):
@@ -747,6 +821,7 @@ class PublicResearch:
         result['work']=work
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
+        if spelling:facts['author_spelling']=spelling
         facts['gap_search']={'gaps':list(local['gaps']),'unfilled':list(filled.get('unfilled',[])),'closed_sources':list(filled.get('closed',[]))}
         reasons.extend(policy_reasons);reasons.extend(source_gate(row,work))
         result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':facts['local_agreement']})
@@ -761,7 +836,8 @@ class PublicResearch:
         evidence('title',title,'',basis)
         if facts['original_title']!=title:
             evidence('title',facts['original_title'],catalog.get('source_url',''),'Original-work title from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')
-        evidence('authors',review['canonical_author'],name_source,basis if not name_source else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')
+        spelled=('' if not spelling else ' Canonical spelling (Sergei 2026-10-13): "'+spelling['chosen']+'" from "'+spelling['spelling']+'"; '+spelling['why']+'; '+spelling['order']+'.')
+        evidence('authors',review['canonical_author'],name_source,(basis if not name_source else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')+spelled)
         if language:
             evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
         if review['series']:

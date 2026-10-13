@@ -61,16 +61,18 @@ def cap_fantlab(database,now):
         db.executemany('INSERT INTO public_research_requests(host,at) VALUES(?,?)',[('api.fantlab.ru',now-1)]*100)
 
 class FallbackTests(unittest.TestCase):
+    # Internet-path cases pin local agreement off; test_local_identity reruns their holds with the default rule.
+    local_agreement_default=True
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);self.now=[100000.0]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
-        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
+        research_path=patch.object(PublicResearch,'local_agreement',self.local_agreement_default);research_path.start();self.addCleanup(research_path.stop)
         self.fixture=FallbackFixture();self.client=PublicClient(self.base/'catalog.sqlite3',fetch=self.fixture.fetch,clock=lambda:self.now[0]);cap_fantlab(self.client.database,self.now[0])
         class ClockStop:
             def is_set(_self):return False
             def wait(_self,seconds):self.now[0]+=seconds;return False
         self.stop=ClockStop()
-        self.row=next(iter(groups.build([row(self.base/'John Writer - A Book.mp3','A Book')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
+        self.row=next(iter(groups.build([row(self.base/'A Book.mp3','A Book')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
     def lookup(self):return PublicResearch(self.client,leads=[]).lookup(self.row,str(self.base),self.stop)
     def test_host_cap_uses_independent_work_and_preserves_actual_credit_gate(self):
         result=self.lookup();self.assertEqual(result['reasons'],[],result)
@@ -158,7 +160,7 @@ class FallbackTests(unittest.TestCase):
         self.fixture.work['claims']['P1476']=[claim('P1476',{'text':'Souvenir','language':'fr'})]
         self.fixture.related['Q300']=entity('Q300','French',{'P218':[claim('P218','fr')]})
         self.fixture.page='<p>Книга - Джон Писатель. A standalone novel.</p>'.encode()
-        self.row=next(iter(groups.build([row(self.base/'Джон Писатель - Книга.mp3','Книга','Джон Писатель')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
+        self.row=next(iter(groups.build([row(self.base/'Книга.mp3','Книга','Джон Писатель')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
         fetch=self.fixture.fetch
         def with_translation(url,*args):
             parsed=urllib.parse.urlsplit(url)

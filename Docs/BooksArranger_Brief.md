@@ -219,7 +219,7 @@ Focused verification comprises standing metadata, collection identity, public wo
 
 ## v0.14.0 — local-agreement identity and gap-only search (2026-10-13)
 
-Implements the Sergei decision "local evidence is enough when it agrees" (2026-10-12, recorded in `Docs/BooksArranger_StandingRules_2026-10-11.md`). Handoff and test plan: `Docs/BooksArranger_FastIdentity_v0.14.0_2026-10-13.md`. Offline result on a copy of the live catalog: 403 of 2,426 waiting/held books become approvable without the Internet (0 before); sample with field chips: `Docs/BooksArranger_IdentitySample_2026-10-13.md`.
+Implements the Sergei decision "local evidence is enough when it agrees" (2026-10-12, recorded in `Docs/BooksArranger_StandingRules_2026-10-11.md`). Handoff and test plan: `Docs/BooksArranger_FastIdentity_v0.14.0_2026-10-13.md`. Offline result on a copy of the live catalog: 445 of 2,426 waiting/held books become approvable without the Internet (378 author books and 67 collections under Сборники; 0 before); sample with field chips: `Docs/BooksArranger_IdentitySample_2026-10-13.md`.
 
 | Decision | Reason | Revisit when |
 | --- | --- | --- |
@@ -234,4 +234,8 @@ Implements the Sergei decision "local evidence is enough when it agrees" (2026-1
 | User-Agent names the public repo as contact; no e-mail is sent | Open Library and Wikimedia ask for identification; no personal data in requests | A contact e-mail is approved |
 | DuckDuckGo HTTP 202 (its anomaly/human-check page) and challenge markers are a 1-hour pause, not a 5-minute retry; no bypass | One bounded diagnostic GET with the app transport returned 202: an external challenge, not an app defect | DuckDuckGo behaviour changes |
 | Research cache bounded by 5,000 entries and 64 MB instead of 100 entries | Revisits reuse fetched evidence instead of refetching | Disk use is a concern |
+| Review fixes (local-agree-v2): reader markers, collection credits/folders/titles, catalog-wide reader names, -ич surnames kept, vowel-aware transliteration, exact sibling listing with disc/part folders, lone parts and series-as-title held | Futaba NO-GO and Senua BLOCKED on 67e3d43: narrators and compilers became authors, Hawking matched King, the split guard missed root and disc layouts | A reviewed narrator-tag convention or collection research exists |
+
+| Sergei rulings 2026-10-13: narrator collections to Сборники (narrator only as narrator), tag wins on a title spelling slip, one canonical author spelling (Russian for Russian originals, English otherwise, most common local spelling, surname first, recorded in metadata_facts.author_spelling), generic titles accepted when the author agrees | Sergei's decisions on the review's open cases; spelling variants fell from 30 people/201 books to 2 people/9 books (middle-name differences) | Middle-name variants should be merged, or a reviewed English-name source exists |
+
 | `RESEARCH_VERSION` standing-18-v1 | All waiting and held candidates (2,426 in the 2026-10-12 copy) get one fresh pass under the new rule after the upgrade | — |
