@@ -87,3 +87,7 @@ Concrete coordination request, prepared for Sergei's review: ask the “Diagnose
 After a supported route exists: independently verify the exact raw plan digest and current input hashes; get Senua's operation-specific clearance; run only the focused inert controls first; then separately review and run context assembly, identical Ender/Futaba canonical invocations, guarded pack, packaged QA and final source/artifact acceptance. Native retained-parent rename refusal and the actual 137 Python / 29 Node graph remain untested. Preserve all historical failures.
 
 Current authorized installed v0.15.0 is deliberately left running and its built-in browser tab is retained. No live restart, Stop, second Start or retirement bypass is needed for this installer blocker. All owners produced zero new disposable output in this preparation; source edits and this evidence record are intentional retained work.
+
+## Authorized hook-owner coordination — 2026-10-14
+
+Sergei approved: “Yes, send the blocker to the QuickLaunch safety chat and continue once it’s resolved.” The exact blocker, checkpoint/source pins, pending first-operation digest, reviewed bounded contract and exclusions were sent to “Diagnose QuickLaunch denial failure” (chat `01a136b2-f3af-7aa2-91c1-2af3aee2979f`). Delivery was confirmed. This supersedes the earlier pending messaging authorization. Books will read that chat's resolution, preserve safeguards and revalidate exact current inputs/plan with Senua before executing. No actual resolution or new execution clearance is claimed yet.
