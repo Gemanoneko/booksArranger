@@ -24,7 +24,6 @@ const system32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
 // --shell-profile=<abs> Electron profile (test instances keep away from the real one)
 // --start-hidden       start in the tray without showing the window
 // --show-inactive      show the window without taking focus
-// --capture=<abs.png>  after the page loads, save a screenshot of the window
 // --quiet-errors       report startup/engine errors on stderr instead of a dialog (test runs)
 // Sent to an already running copy: --quit (same Quit as the tray, no prompt),
 // --close-window (same as the window close button), --show.
@@ -35,6 +34,7 @@ function option(argv, name) {
 }
 const flag = (argv, name) => argv.includes(`--${name}`);
 const argv = process.argv.slice(1);
+require('./launch-options').refuseCapture(argv);
 
 function reportError(title, message) {
   if (flag(argv, 'quiet-errors')) process.stderr.write(`${title}: ${message}\n`);
@@ -291,17 +291,6 @@ function createWindow() {
     if (flag(argv, 'show-inactive')) win.showInactive();
     else win.show();
   });
-  const capture = absoluteOption('capture');
-  if (capture) {
-    win.webContents.once('did-finish-load', () => setTimeout(async () => {
-      try {
-        const image = await win.webContents.capturePage();
-        fs.writeFileSync(capture, image.toPNG());
-      } catch (error) {
-        remember(`\ncapture failed: ${error.message}\n`);
-      }
-    }, 3000));
-  }
   win.loadURL(`${origin}/`);
   state.win = win;
 }
