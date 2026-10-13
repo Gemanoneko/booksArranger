@@ -94,3 +94,4 @@ Supersedes the "filenames, embedded metadata and folders are clues only" boundar
 2. Title spelled differently in the tag and the file name (e.g. a typo such as "ГЕограф"): the tag wins.
 3. One author written several ways: follow the existing language rule (Russian canonical name for Russian original works, English otherwise, surname first); within that, the app picks the most common local spelling, deterministically and with the choice recorded.
 4. Generic titles such as "Сборник рассказов": accept when the author agrees locally.
+5. Collections with no author credit anywhere in their tags are labelled "Разные авторы" (Sergei confirmed 2026-10-13).
