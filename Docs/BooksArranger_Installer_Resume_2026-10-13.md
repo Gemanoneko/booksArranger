@@ -66,3 +66,24 @@ Reviewed source pins:
 The modified historical `entry-check.test.mjs` remains tied to QuickLaunch data/runtime and is forbidden to execute in this Books task. The focused inert suite is the proposed first operation under its exact separately reviewed guardian plan.
 
 Complete ownership runtime maps include both Koffi (87 files) and its sibling native optional addon (5 files), rather than the JavaScript package alone. Future contexts must preserve native identity for `C:/b16` through the complete check; documentary context fields alone are insufficient. A proposed path calculation of 230 characters is not executed-fixture evidence. Existing snapshots, hook settings, sources and unresolved evidence remain preserved.
+
+## Current blocked invocation and next handoff — 2026-10-14
+
+Sully committed and immediately pushed exact source-only WIP checkpoints:
+
+- Studio `648ccb0cfdde0af47e8ce33422b59d693023413c`: the four canonical checker/test files only.
+- Books `ca126e51e308cf7ab500936d94528fe7e4dc8978`: guardian, context writer and this resumption record only.
+
+Both had verified remote parity and empty indexes after publication; Books was clean. Unrelated root/QuickLaunch work was excluded. No version bump, tag, release or installation accompanied this checkpoint.
+
+Senua's final static operational-source review is clear at the pins above, with no actual execution clearance. The exact proposed inert-controls plan's claimed digest is `79969f79fbf38751d64b3358a568da0b2ac835da6428458f6069d4ec038a503d`; it remains independently unverified.
+
+The host PreToolUse P9 command-safety guard refused Senua's read-only hash command before execution because the literal `run_entry_checks.mjs` occurred inside the JSON. It requested a timeout field which the available `exec_command` schema does not expose. Ender's earlier read-only batch was likewise refused. These are command-launch refusals with a reported P9 reason, not proof of automatic approval review. No control invocation, assembly, test graph or packaging was attempted afterward. No alternate encoding/transport, safeguard changes or yield-as-timeout substitution was used.
+
+Next owner: the existing command-safety hook owner must resolve the supported invocation-contract mismatch, preserving the reviewed bounded ownership, input pins, native closure and total deadline. Books work does not authorize hook/trust/config changes. Sending this blocker to another chat requires Sergei's explicit authorization; no cross-chat reply/message has been sent by this Books chat.
+
+Concrete coordination request, prepared for Sergei's review: ask the “Diagnose QuickLaunch denial failure” chat to reconcile P9's required timeout with this API's supported fields for the exact reviewed Books guardian/plan-hash route. Include both checkpoint pins, the pending plan digest and the refusal. Do not disable the guard, broaden policy, treat static review as actual enforcement or authorize installer publication.
+
+After a supported route exists: independently verify the exact raw plan digest and current input hashes; get Senua's operation-specific clearance; run only the focused inert controls first; then separately review and run context assembly, identical Ender/Futaba canonical invocations, guarded pack, packaged QA and final source/artifact acceptance. Native retained-parent rename refusal and the actual 137 Python / 29 Node graph remain untested. Preserve all historical failures.
+
+Current authorized installed v0.15.0 is deliberately left running and its built-in browser tab is retained. No live restart, Stop, second Start or retirement bypass is needed for this installer blocker. All owners produced zero new disposable output in this preparation; source edits and this evidence record are intentional retained work.
