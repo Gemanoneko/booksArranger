@@ -211,7 +211,7 @@ Ids to re-check (prefixes, full ids in my scratch evidence): A `17eecad8 d78860f
 - Kept as unresolved evidence in `...\scratchpad\futaba-0140`: `scripts\` (scan, fixture and probe scripts), `out\` (suite outputs and fail sets, scan results, fixture results, `suspects.json` with the 13 full ids, `measure-cand.json` and `measure-base.json`). They can be removed once Ender has the findings.
 - `Docs/BooksArranger_CodeReview_v0.14.0_2026-10-13.md` appeared untracked in the worktree while I worked. It is not mine; I did not open it, so this verdict is independent of Senua's.
 
-**Verdict:** NO-GO — Books Arranger v0.14.0 / commit 67e3d43
+Round 1 verdict (superseded): NO-GO — Books Arranger v0.14.0 / commit 67e3d43
 
 
 ---
@@ -333,4 +333,93 @@ Pattern alerts: 1. **PA1, a claimed fix that did not show in the real-catalog ru
 - **NOT REMOVED** (`rm -rf` still denied): `C:/Users/<user>/AppData/Local/Temp/fq/new2` (a7d9b42 export), `.../fq/base` and `.../fq/cand` (round-1 clones, v0.13.1 and 67e3d43), and in `C:/Users/<user>/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/2b7de6b0-ce4b-4a27-9134-6e4452d270f4/scratchpad/futaba-0140`: `cand` and `base` (round 1). About 55 MB in all.
 - Kept as unresolved evidence in the same scratchpad folder: `scripts/` (round 1 and round 2 scan and control scripts, including `fixtures2.py` and `scan_r2.py`) and `out2/` (suite outputs, fail sets, scans, control results, spelling and pair lists).
 
-**Verdict:** GO — Books Arranger v0.14.0 / commit a7d9b42
+Round 2 verdict (superseded): GO — Books Arranger v0.14.0 / commit a7d9b42
+
+
+---
+
+# Round 3–4 — 82bc67d and abd70ef
+
+Author: Futaba. Round 3 candidate: `82bc67d4476a7a771b911387e64e543978ddecbe` (parent a7d9b42). Round 4 candidate, the one this section gives its verdict on: `abd70efacf77465b8efc664081568cbce2b21a4b` (parent 82bc67d; worktree HEAD; no uncommitted code edits, only docs). Same rules: offline only, no app, live DB, network or Z:/Y:, Bash, no commit, nothing fixed. Both candidates are `git archive` exports at path length 44, tested beside the v0.13.1 baseline clone at the same depth. Fresh copy of Ender's catalog copy (sha256 `06fa82d7f039e2294b60470b98245a81ae84913d998f47dc750d01c14799a6d0`, identical).
+
+Release-gate housekeeping: the earlier bold verdict lines of rounds 1 and 2 are now plain "(superseded)" text and nothing else in those rounds was changed, so the only machine-readable verdict line in this file is the last line. The sentence in round 2 about "two verdict lines" is historical and no longer true.
+
+**Summary: GO for abd70ef.** Round 3 fixed N1 (the identical-credit holds) and the lone-part gap from round 2, and round 4 closes Senua's R3-1 without changing a single approval. The 455 approvals (389 author books and 66 collections) were scanned again and no narrator, compiler, translator, series name or part file is approved. Controls you named all hold, including the Глуховский-style ones that 82bc67d still got wrong. Two Minor items are new.
+
+## Result per check (round 3–4)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Full suite from `git archive` exports vs baseline | PASS, no new failure (R1) |
+| 2 | Full scan of ALL approvals | PASS, 0 wrong authors, narrators, compilers (R2) |
+| 3 | 20 random approvals by hand | PASS, 0 false (R3) |
+| 4 | Controls incl. Стругацкий А./Б., Толстой А.Н./Л.Н., King + "Сборник", the Sawyer books, Глуховский-style | PASS (R4) |
+| 5 | Round 4 delta: abd70ef vs 82bc67d | PASS, identical 455 and 66, identical review text (R5) |
+
+## R1. Suite
+`python -m unittest discover -s tests -p "test_*.py"`, timeout 600000, path length 44 for every tree.
+
+| Tree | Tests | Result |
+|---|---|---|
+| v0.13.1 baseline | 490 | 9 errors (the known set) |
+| 82bc67d | 548 | the same 9 errors, plus 2 intermittent: `test_catalog_owner_lock_and_strict_port` (a `test_web` setUp lock, 12 of 12 isolated reruns pass on both trees) and `test_waiting_uses_earliest_candidate_and_does_not_revisit_later_source_early` (the old F4 timing flake: isolated reruns fail 4 times in 102 on 82bc67d and 3 times in 102 on v0.13.1) |
+| abd70ef | 549 | the same 9 errors plus `test_restart_guard_rejects_wrong_instance_busy_admission_and_active_research` (the known `test_web` tearDown lock: 2 of 10 isolated reruns fail on abd70ef, 1 of 10 on v0.13.1; it has also hit the baseline in earlier rounds) |
+
+No new failure: every extra name is a flake that fails at the same rate on the baseline. Focused `test_local_*.py`: 58 tests OK on 82bc67d, 59 OK on abd70ef.
+
+## R2. Full scan of all approvals (abd70ef)
+Reproduction: 2,426 waiting/held books, **455 approvable = 389 author books + 66 collections**, matching Ender. 82bc67d and abd70ef give the **same ids, the same reason lists and the same approved review text** for every book.
+
+Same scan as round 2 on the 389 author books: reader marker or collection word in the author text 0; author equals a reader-like name seen anywhere in the library (9,520 audio files, 98 names) 0; author equals a composer used beside 3 or more artists 0; author equals the reader on its own row 0; author equals a translator 0; author under a collection-like folder 0; no narrator named in a collection is the author of another approval.
+
+The 66 collections: every one sits under a collection-like folder (`Сборники`, a "Сборник - …" folder); none carries a person credit tag (credit tags: 57 collection-only, 6 collection plus reader, 3 reader-only); none has a reader-named folder. 9 of the 66 record a narrator. Chapter or part files approved: none; author books under an hour are the same 8 short works as in round 2.
+
+Changes since round 2 (445 approvals): 443 kept, **2 dropped, 12 added**.
+- Dropped: `bf893305` "Игры Немезиды" (the file is "5. Игры Немезиды 1": held as a numbered part by design; I showed in round 2 that this 923 MB file is a whole book, so this is one accepted false hold) and `e10d5261` Булдаков "Тёмные Аллеи в Кино" (his only credit is a plain person credit and he is a reader elsewhere, so it is held for research instead of being filed).
+- Added: the **9 Robert J. Sawyer books** and the **3 Кабир books** (Мухи, Мокрый мир, Голоса из подвала) that N1 had held. All 12 read correctly. PA1 is closed.
+
+## R3. 20 random approvals by hand (seed 20261013)
+Koontz x2, Кристиан Роберт Винд, Шваб, Tim Curran, Джеймс Гилмер (a story in the "Бойся Чужого" anthology folder), Stephenson, **Robert J. Sawyer "Конец эры"**, a "Пять вечеров" collection, Уна Харт, McMahon, Хайнлайн, Обухова/Тимошенко, Конан Дойл "Сборник рассказов", Тимошенко, King x2, Рэмси Кэмпбелл, a "Глубина" collection, Вилсон "Застава" (32 files): **0 false**. Readers (Милюхин, Большакова, Финагин, Булдаков, Кашникова, Casper Valter) are never used as authors.
+
+## R4. Controls (82bc67d and abd70ef; real `folder_siblings` and `catalog_index` over a private synthetic catalog, 91 cases)
+All of these hold on both commits, except where marked:
+
+| Control | Result |
+|---|---|
+| Стругацкий А. tag, folder Борис Стругацкий; Аркадий Стругацкий tag, folder Стругацкий Б.; one author listed as "А. Стругацкий, Б. Стругацкий" with only А. tagged | **held**. The true pair "Стругацкий А." with folder "Аркадий Стругацкий" and the same letters on both sides approve |
+| Толстой А.Н. against folder Толстой Л.Н. (also artist plus album_artist identical); А. Н. Толстой against Лев Толстой; Алексей Толстой against Лев Толстой | **held**. The true pairs Л. Н. Толстой / Лев Николаевич Толстой and А. Н. Толстой / Алексей Николаевич Толстой approve |
+| Stephen King + "Сборник" album_artist in a `Сборники` folder; King + "Разные авторы"; "Сборник" artist + King album_artist | **held**, never filed. A pure "Сборник" credit under `Сборники` still routes |
+| Sawyer: artist and album_artist identical with a middle initial; Кабир Максим Ахмадович twice; Laurell K. Hamilton twice | **approve**. Robert J. Sawyer against folder Robert K. Sawyer: held |
+| "5. Игры Немезиды 1.m4b" with the album lacking the number; "Название (часть 1)"; a lone "Глава 5"; a single file tagged "2" | **held**. A single file with title tag "1" (A Face in the Crowd pattern), "Гелий-3", "Волкодав 02. Право на поединок" stay whole books and approve |
+| Sibling check with a root that does not match the catalog | **fails closed**: siblings unreadable, agreement not accepted; the right root approves |
+| Carried over: Hawking/King both ways, Wild Cards, Гашек/Гжендович, Хазанович/Костюкевич, root-level and disc-folder split parts, series-name titles | all **held** |
+| **Глуховский-style (round 4):** Глуховский reads his own "Рассказы о Родине" (comment or narrator tag, folder named for him); a Глуховский-named or Булдаков-named folder inside `Сборники` with a collection credit and reader marker; a collection credit plus reader marker with no collection folder | **abd70ef holds all five. 82bc67d filed all five as collections** (so R3-1 was real and is fixed). The "Антология" pattern and the Булдаков "Тёмные Аллеи" pattern under `Сборники` still route; Глуховский "Пост" (his own book, not a collection) approves as his book and is not routed |
+
+Three of 91 cases differ from my expectation, none new: "Michael Crichton" against "Майкл Крайтон" is held (documented false hold), a folder named for a translator with the translator in album_artist approves (low realism, no instance), and two different people in artist and album_artist where an author folder names one resolve to that one (existing designed rule).
+
+## R5. Round 4 delta
+`git diff 82bc67d abd70ef`: `local_identity.py`, a few lines (a route now needs a collection folder and no reader-named folder) and one new test class. No real approval changed: the offline run gives the same 455 and 66 on both commits.
+
+## Findings (round 3–4)
+
+| ID | Severity | Status | Owner | Finding |
+|---|---|---|---|---|
+| N1 | was Major | **Fixed** | Ender | Identical duplicate credits are one person: the 9 Sawyer and 3 Кабир books are approved |
+| N6 | was Minor | **Mostly fixed** | Ender | Lone chapter and numbered-part files with no sibling are held (cost: "Игры Немезиды 1", a whole book, is held). Not re-tested: a lone middle name ("Conan") supporting a full author |
+| N8 | Minor (ruling 3) | New | Ender / Jane | One author is split again: "Philip K. Dick" has `Dick Philip K.` on 5 books and `Дик Филип Киндред` on 2, because the new initial rule treats "K." against "Киндред" as a different person in the canonical-spelling step. 7 books, 1 person; round 2 had none. The same rule is why Лаймон and Ходжсон still differ by a middle name |
+| N9 | Minor | New | Ender | `e10d5261` Булдаков "Тёмные Аллеи в Кино" is now held, not filed under `Сборники`: ruling 1 names Булдаков, so Jane may want it filed; same family as N4 |
+| N2, N3, N4, N5 | Minor | Open, unchanged | Jane / Ender | Majority typos in author spelling ("Pratchet Terry" 7 books, "Zahn Thimoty" 3); 57 of 66 collections have no narrator at all; Князев x3 and the Лавкрафт episode held; reader in closing brackets not parsed |
+
+Pattern alerts: PA1 (a claimed fix not visible in the real-catalog run) is **closed**: the 9 Sawyer and 3 Кабир rows named in round 2 are approved in the real run. No new pattern alert.
+
+## Not run / limits (round 3–4)
+- NOT RUN: the app, a real admission, any network call, published-library folder spellings, audio probing beyond the stored durations, the `qa-handoff` entry script.
+- Judgements rest on tags, names and folders; a class of error I did not think of would not be found. 20 books by hand in this round, 70 across rounds 2 to 4, plus rule-based scans of all 455.
+- The suite's intermittent failures are attributed to flakes by isolated reruns on both trees (rates above); a rate of about 3 in 100 means a single red run can still occur.
+
+## Cleanup (round 3–4)
+- Removed: my copies of the catalog copy, their SQLite side files, the derived row files and the private fixture databases (single-file `rm --`). Ender's evidence folder untouched.
+- **NOT REMOVED** (`rm -rf` still denied): `C:/Users/<user>/AppData/Local/Temp/fq/` (`base`, `cand`, `new2`, `new3`, `new4`) and, in `C:/Users/<user>/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/2b7de6b0-ce4b-4a27-9134-6e4452d270f4/scratchpad/futaba-0140`, `cand` and `base`. About 60 MB in all.
+- Kept as unresolved evidence in the same scratchpad folder: `scripts/` (including `fixtures4.py`, `scan_r2.py`) and `out3/` (suite outputs, fail sets, scans, control results).
+
+**Verdict:** GO — Books Arranger v0.14.0 / commit abd70ef

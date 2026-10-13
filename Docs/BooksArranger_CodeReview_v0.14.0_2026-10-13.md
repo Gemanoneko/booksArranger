@@ -357,4 +357,56 @@ Location: `local_identity.py:562` and `:1033-1044`.
 |---|-----|-----------|--------------------------|
 | R3-1 | Critical | `local_identity.py:1033-1044` | Do not route when the book's folder or parent folder names the reader (an author folder). Hold for research instead. Also require a `collection folder` signal for every route. Both cost 0 of the 66 live routes. Add a test: artist "Дмитрий Глуховский" + comment "Читает Дмитрий Глуховский" + album "Рассказы о Родине" under `Глуховский Дмитрий\` must not route. |
 
-**Verdict:** RELEASE BLOCKED — 82bc67d
+Round 3 verdict (superseded): RELEASE BLOCKED — 82bc67d
+
+---
+
+## Round 4 — abd70ef
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-13
+Fix round: 82bc67d..abd70ef (4 files, +112 / -3; code: local_identity.py +6/-1, one new test class; the rest is docs, including the committed round-3 append)
+Full range certified: v0.13.1..abd70ef
+```
+
+### Method
+
+The review was red-team and read-only. I used a fresh scratch copy of the evidence catalog and reran `evidence/measure.py` at abd70ef. I compared the result with Ender's v5 (82bc67d) and v6 (abd70ef) runs and probed `agreement` on synthetic rows. Ender's r4 suite failure set equals the baseline (549 run, the same 9 environment errors). No app, live database, network or Z:/Y: access.
+
+### R3-1 — fixed
+
+The fix is at `local_identity.py:1036-1042`. A book is filed as a collection only when a collection-folder ancestor exists (`marked`) and no folder or parent folder names its reader (`reader_folder`).
+
+Probes that are now **held, not routed**:
+- Глуховский self-read "Рассказы о Родине" with the reader in a comment or in the narrator tag, under `Глуховский Дмитрий\`;
+- the same under a surname-only `Глуховский\` folder;
+- the same under `Сборники\Глуховский Дмитрий - Рассказы о Родине\`;
+- the same with no collection folder.
+
+Controls that still behave as before:
+- `АНТОЛОГИЯ РУССКОЙ МИСТИКИ` and Булдаков's "Пока все дома" still file as collections (ruling 1).
+- The R2-1 King probes, the R2-2 Стругацкий А./Б. probe and the root-mismatch fail-closed check are unchanged.
+
+**No change to the live result.** My abd70ef run gives 455 approvable and 66 collection filings. The approvable set, the collection set and every canonical author are identical to Ender's v5 (82bc67d) and v6 (abd70ef).
+
+### Residual, accepted (Minor)
+
+A book is still filed as a collection in one shape:
+- a self-reading author;
+- placed under `Сборники\` in a folder named by the title, not the author;
+- with the file named by the author.
+
+This is structurally the same as the live ruling-1 Булдаков layout (`Сборники\Пока все дома\Булдаков Олег - Пока все дома.m4b`). Local data cannot tell them apart, and Sergei placed the book under the collections root himself. It is not a code defect. If Sergei wants author-read collections told apart from narrator-compiled ones, that is a new ruling.
+
+### Round 4 verdict
+
+- Open Critical: 0. Round-1 C1–C3, round-2 R2-1/R2-2 and round-3 R3-1 are all closed. The safety floor is intact: no new shell-outs, no out-of-scope writes, no secrets, and retirement, recovery, media, publication and web code are untouched across v0.13.1..abd70ef.
+- Open Major: 0.
+- Open Minor: 3:
+  1. the residual above;
+  2. with the original language unknown, the English spelling is chosen whenever a Latin folder exists;
+  3. "А.Н."/"Н.А." initial order is ignored in `same_person`.
+- Information only: misspelled folder names become canonical spellings (ruling 3 working as written).
+
+**Verdict:** RELEASE CLEAR — abd70ef
