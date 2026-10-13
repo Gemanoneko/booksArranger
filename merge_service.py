@@ -36,6 +36,8 @@ def operation(method):
 
 
 class MergeService:
+    draining=False # Set by a desktop Quit: the current book finishes, nothing new starts.
+
     def __init__(self, inventory, cache_dir):
         self.inventory = inventory
         self.operation_lock=threading.RLock()
@@ -184,10 +186,22 @@ class MergeService:
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False}
 
     def pause(self):
+        # During a desktop Quit drain the current book finishes; nothing is interrupted.
+        if self.draining:return self.state()
         self.cleanup.pause();self.jobs.pause();return self.state()
+
+    def drain(self):
+        """Desktop Quit: finish the current book and its cleanup, start nothing new."""
+        self.draining=True;self.jobs.drain();return self.state()
+
+    def drained(self):
+        jobs=bool(self.jobs._thread and self.jobs._thread.is_alive())
+        cleanup=bool(self.cleanup.thread and self.cleanup.thread.is_alive())
+        return not jobs and not cleanup and not self.cleanup.current and not self._post_current
 
     @operation
     def resume(self):
+        if self.draining:return self.state() # Quitting: queued books stay saved for the next launch.
         self._no_scan()
         if self.jobs._thread and self.jobs._thread.is_alive():return self.state()
         if self.cleanup.thread and self.cleanup.thread.is_alive():return self.state()

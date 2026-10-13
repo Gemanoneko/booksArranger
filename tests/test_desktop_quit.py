@@ -1,0 +1,200 @@
+"""Desktop shell contract: finish-then-quit drain, desktop control auth, version source."""
+import io
+import json
+from email.message import Message
+from pathlib import Path
+import tempfile
+import threading
+import time
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+import uuid
+
+from audio_jobs import AudioJobs
+from desktop_backend import DesktopControl, handler_class
+from encoding_policy import PROFILE
+from merge_service import MergeService
+import web_server
+from web_server import Handler
+
+AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'desktop-quit-tests'
+AREA.mkdir(parents=True, exist_ok=True)
+TOKEN = 'd' * 64
+
+
+def manifest():
+    return {'job_id': str(uuid.uuid4()), 'candidate_id': str(uuid.uuid4()), 'candidate_revision': 1,
+            'sources': [{'sha256': 'a' * 64, 'fingerprint': {}}], 'metadata': {}, 'destination': 'fixture',
+            'profile': PROFILE, 'evidence': {}, 'cover': {}}
+
+
+class DrainTests(unittest.TestCase):
+    def test_current_book_finishes_uninterrupted_and_next_book_stays_queued(self):
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            started = threading.Event(); release = threading.Event(); seen = []
+
+            def runner(job, stop, checkpoint):
+                seen.append(job['job_id']); started.set()
+                release.wait(5)
+                self.assertFalse(stop.is_set(), 'drain must not interrupt the book in progress')
+                record = {'job_id': job['job_id'], 'final_path': 'fixture.m4b', 'owned_temp': 'fixture.partial',
+                          'sha256': 'b' * 64, 'size': 1, 'validation': {'passed': True}}
+                checkpoint('publishing', record)
+                return record
+
+            queue = AudioJobs(Path(temp) / 'db.sqlite3', runner, lambda m: True, lambda r: True)
+            first, second = manifest(), manifest()
+            queue.enqueue(first); queue.enqueue(second); queue.resume()
+            self.assertTrue(started.wait(5))
+            queue.drain()
+            self.assertEqual(queue.status()['state'], 'Running')
+            release.set(); queue._thread.join(5)
+            self.assertFalse(queue._thread.is_alive())
+            states = {job['job_id']: job['state'] for job in queue.status()['jobs']}
+            self.assertEqual(states[first['job_id']], 'completed')
+            self.assertEqual(states[second['job_id']], 'pending')
+            self.assertEqual(seen, [first['job_id']])
+            queue.resume(); queue._thread.join(5)  # still draining: nothing new starts
+            self.assertEqual(seen, [first['job_id']])
+            queue.close()
+
+    def test_merge_pause_and_resume_are_inert_while_draining(self):
+        merge = MergeService.__new__(MergeService)
+        merge.draining = False
+        merge.jobs = SimpleNamespace(drain=Mock(), pause=Mock(), _thread=None)
+        merge.cleanup = SimpleNamespace(pause=Mock(), thread=None, current=None)
+        merge._post_current = None
+        merge.operation_lock = threading.RLock()
+        merge.state = Mock(return_value={'state': 'Running'})
+        merge.drain()
+        self.assertTrue(merge.draining); merge.jobs.drain.assert_called_once_with()
+        merge.pause(); merge.resume()
+        merge.jobs.pause.assert_not_called(); merge.cleanup.pause.assert_not_called()
+        self.assertTrue(merge.drained())
+        merge.cleanup.current = 'cleanup-in-progress'
+        self.assertFalse(merge.drained())
+
+
+def fake_server(*, converting=False, finish=None):
+    lock = threading.Lock()
+    jobs_thread = SimpleNamespace(is_alive=Mock(return_value=converting))
+    merge = SimpleNamespace(jobs=SimpleNamespace(_thread=jobs_thread), drain=Mock(), drained=Mock(return_value=not converting),
+                            state=Mock(return_value={'state': 'Running' if converting else 'Paused', 'current_title': 'Fixture', 'stage': 'creating', 'queued': 2}))
+    merge.automatic = SimpleNamespace(stop=Mock(), status=Mock(return_value={'state': 'Running'}), thread=None)
+    server = SimpleNamespace(merge=merge, inventory=SimpleNamespace(stop=Mock()), closing=False, control_lock=lock,
+                             control_condition=threading.Condition(lock), scan_active=Mock(return_value=False),
+                             finish_shutdown=finish or Mock(), shutdown=Mock())
+    return server, jobs_thread
+
+
+class ControlTests(unittest.TestCase):
+    def test_quit_refuses_new_work_waits_for_book_then_shuts_down(self):
+        server, jobs_thread = fake_server(converting=True)
+        control = DesktopControl(server)
+        self.assertTrue(control.status()['busy']['converting'])
+        self.assertEqual(control.quit()['phase'], 'finishing')
+        self.assertTrue(server.closing)
+        server.merge.drain.assert_called_once_with(); server.inventory.stop.assert_called(); server.merge.automatic.stop.assert_called_once_with()
+        time.sleep(.8)
+        server.finish_shutdown.assert_not_called()  # the book is still converting
+        self.assertEqual(control.quit()['phase'], 'finishing')  # a second Quit is idempotent
+        jobs_thread.is_alive.return_value = False; server.merge.drained.return_value = True
+        control.thread.join(5)
+        server.finish_shutdown.assert_called_once_with(); server.shutdown.assert_called()
+        self.assertEqual(control.status()['phase'], 'exiting')
+
+    def test_shutdown_still_stops_serving_when_close_fails(self):
+        server, _ = fake_server(finish=Mock(side_effect=TimeoutError('worker still at checkpoint')))
+        control = DesktopControl(server)
+        control.quit(); control.thread.join(5)
+        server.shutdown.assert_called()
+        self.assertEqual(control.status()['error'], 'TimeoutError')
+
+    def test_stop_now_is_immediate_and_single(self):
+        server, _ = fake_server(converting=True)
+        control = DesktopControl(server)
+        self.assertEqual(control.stop_now()['phase'], 'stopping')
+        self.assertEqual(control.stop_now()['phase'], 'stopping')
+        self.assertTrue(server.closing)
+        time.sleep(.3)
+        server.finish_shutdown.assert_called_once_with()
+
+
+class HandlerTests(unittest.TestCase):
+    def setUp(self):
+        self.server, _ = fake_server()
+        self.server.server_port = 5211; self.server.token = 'page-token'
+        self.server.origins = {'http://127.0.0.1:5211', 'http://localhost:5211'}
+        self.server.desktop = SimpleNamespace(status=Mock(return_value={'phase': 'running'}), quit=Mock(return_value={'phase': 'finishing'}),
+                                              stop_now=Mock(return_value={'phase': 'stopping'}))
+        self.cls = handler_class(Handler, TOKEN)
+
+    def call(self, path, method='POST', body=b'{}', desktop=TOKEN, extra=None):
+        h = self.cls.__new__(self.cls); h.server = self.server; h.path = path
+        h.headers = Message(); h.headers['Host'] = '127.0.0.1:5211'
+        if desktop is not None: h.headers['X-Books-Desktop'] = desktop
+        for key, value in (extra or {}).items(): h.headers[key] = value
+        h.headers['Content-Type'] = 'application/json'; h.headers['Content-Length'] = str(len(body)); h.rfile = io.BytesIO(body)
+        h.result = None
+        h.response = lambda status, value, content_type='application/json': setattr(h, 'result', (status, value))
+        (h.do_POST if method == 'POST' else h.do_GET)()
+        return h.result
+
+    def test_desktop_routes_require_desktop_token_and_local_origin(self):
+        self.assertEqual(self.call('/api/desktop/status', 'GET'), (200, {'phase': 'running'}))
+        self.assertEqual(self.call('/api/desktop/quit'), (202, {'phase': 'finishing'}))
+        self.assertEqual(self.call('/api/desktop/stop-now'), (202, {'phase': 'stopping'}))
+        for desktop in (None, 'x' * 64, 'page-token'):
+            self.assertEqual(self.call('/api/desktop/quit', desktop=desktop)[0], 403)
+            self.assertEqual(self.call('/api/desktop/status', 'GET', desktop=desktop)[0], 403)
+        self.assertEqual(self.call('/api/desktop/quit', extra={'Origin': 'https://example.com'})[0], 403)
+        self.assertEqual(self.call('/api/desktop/quit', extra={'Sec-Fetch-Site': 'cross-site'})[0], 403)
+        self.assertEqual(self.call('/api/desktop/quit', body=b'{"now":true}')[0], 400)
+        self.assertEqual(self.call('/api/desktop/status?x=1', 'GET')[0], 400)
+        self.server.desktop.quit.assert_called_once_with(); self.server.desktop.stop_now.assert_called_once_with()
+
+    def test_other_routes_keep_page_token_rules(self):
+        result = self.call('/api/shutdown', desktop=None, extra={'X-Books-Token': 'wrong'})
+        self.assertEqual(result[0], 403)
+
+
+class StaleRecordTests(unittest.TestCase):
+    def test_only_a_record_of_an_ended_process_is_moved_aside(self):
+        import subprocess, sys
+        from desktop_backend import retire_stale_record
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            database = Path(temp) / 'inventory.sqlite3'; record = Path(temp) / 'web-instance.json'
+            ended = subprocess.run([sys.executable, '-c', 'import os;print(os.getpid())'], capture_output=True, text=True, check=True)
+            dead_pid = int(ended.stdout)
+            alive = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(30)'])
+            try:
+                record.write_text(json.dumps({'application': 'Books Arranger', 'pid': alive.pid}), encoding='utf-8')
+                self.assertIsNone(retire_stale_record(database)); self.assertTrue(record.exists())
+                record.write_text('{not json', encoding='utf-8')
+                self.assertIsNone(retire_stale_record(database)); self.assertTrue(record.exists())
+                record.write_text(json.dumps({'application': 'Books Arranger', 'pid': dead_pid}), encoding='utf-8')
+                aside = retire_stale_record(database)
+                self.assertFalse(record.exists()); self.assertTrue(aside.exists())
+                self.assertEqual(json.loads(aside.read_text(encoding='utf-8'))['pid'], dead_pid)
+                self.assertIsNone(retire_stale_record(database))  # nothing left to move
+            finally:
+                alive.kill(); alive.wait()
+
+
+class VersionTests(unittest.TestCase):
+    def test_package_json_is_the_version_source_with_generated_file_fallback(self):
+        with tempfile.TemporaryDirectory(dir=AREA) as temp:
+            base = Path(temp)
+            with patch.object(web_server, 'BASE', base):
+                self.assertEqual(web_server.version(), 'prototype')
+                (base / 'VERSION').write_text('1.2.3\n', encoding='utf-8')
+                self.assertEqual(web_server.version(), '1.2.3')
+                (base / 'package.json').write_text(json.dumps({'version': '2.0.0'}), encoding='utf-8')
+                self.assertEqual(web_server.version(), '2.0.0')
+        repo = Path(__file__).resolve().parents[1]
+        self.assertEqual(web_server.version(), json.loads((repo / 'package.json').read_text(encoding='utf-8'))['version'])
+
+
+if __name__ == '__main__':
+    unittest.main()

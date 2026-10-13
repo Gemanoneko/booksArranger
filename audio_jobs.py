@@ -36,6 +36,8 @@ class AudioJobs:
         self.postprocessing=None
         self._lock = threading.RLock()
         self._stop = threading.Event()
+        # Desktop Quit: no new book starts; the book in progress is not interrupted.
+        self._drain = threading.Event()
         self._thread = None
         self._closed = False
         self.after_completed = None
@@ -205,6 +207,12 @@ class AudioJobs:
             self._stop.set()
         return self.status()
 
+    def drain(self):
+        """Let the current book (and its cleanup) finish, then stop before the next one."""
+        with self._lock:
+            self._drain.set()
+        return self.status()
+
     def close(self, timeout=30):
         with self._lock:
             self._closed = True
@@ -232,11 +240,11 @@ class AudioJobs:
         # Resume only explicitly paused durable postprocessing; never loop unclassified failures.
         if self.pending_postprocessing and self.postprocessing:
             for job_id in self.pending_postprocessing():
-                if self._stop.is_set():return
+                if self._stop.is_set() or self._drain.is_set():return
                 try:self.postprocessing(job_id)
                 except InterruptedError:return
                 except Exception:pass # The postprocessor retains original/secondary failure evidence.
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._drain.is_set():
             pending = self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
             if not pending: return
             row = pending[0]

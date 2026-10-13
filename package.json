@@ -1,0 +1,76 @@
+{
+  "name": "books-arranger",
+  "productName": "Books Arranger",
+  "version": "0.14.0",
+  "private": true,
+  "description": "Inventory and arrange audiobook, podcast and ebook libraries",
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "electron .",
+    "fetch-runtime": "node scripts/fetch-runtime.mjs",
+    "stage-backend": "node scripts/stage-backend.mjs",
+    "clean:dist": "node scripts/clean-dist.js",
+    "pack": "npm run fetch-runtime && npm run stage-backend && npm run clean:dist && electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "com.antigravity.booksarranger",
+    "productName": "Books Arranger",
+    "copyright": "Copyright © 2026 Antigravity Projects",
+    "icon": "desktop/icon.png",
+    "directories": {
+      "output": "dist",
+      "buildResources": "desktop"
+    },
+    "files": [
+      "desktop/main.js",
+      "desktop/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build-cache/backend",
+        "to": "backend"
+      },
+      {
+        "from": "build-cache/runtime/python",
+        "to": "python"
+      },
+      {
+        "from": "build-cache/runtime/ffmpeg",
+        "to": "ffmpeg"
+      }
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "onlyLoadAppFromAsar": true
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  },
+  "allowScripts": {
+    "electron-winstaller": false
+  }
+}

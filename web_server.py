@@ -12,7 +12,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from app import BASE, catalog_lock
+from catalog_owner import BASE, catalog_lock
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 
@@ -20,6 +20,13 @@ PORT = 5210
 MAX_BODY = 256 * 1024
 
 def version():
+    # package.json is the single version source; packaged backends carry a generated VERSION.
+    try:
+        value = json.loads((BASE / 'package.json').read_text(encoding='utf-8'))['version']
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     try:
         return (BASE / 'VERSION').read_text(encoding='utf-8').strip()
     except OSError:
@@ -530,7 +537,10 @@ def main(argv=None, *, ready=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',default=str(BASE / 'data' / 'inventory.sqlite3'))
     parser.add_argument('--roots-json',help='Optional local fixture roots; not exposed through HTTP')
+    parser.add_argument('--port',type=int,default=PORT,help='Strict loopback port; no fallback when occupied')
     args = parser.parse_args(argv)
+    if not 1024<=args.port<=65535:parser.error('Port must be between 1024 and 65535')
+    port = args.port
     roots = DEFAULT_ROOTS
     if args.roots_json:
         roots = json.loads(Path(args.roots_json).read_text(encoding='utf-8'))
@@ -539,13 +549,13 @@ def main(argv=None, *, ready=None):
     with catalog_lock(args.database,roots):
         inventory = Inventory(args.database,roots)
         try:
-            server = BrowserServer(('127.0.0.1',PORT),inventory)
+            server = BrowserServer(('127.0.0.1',port),inventory)
         except OSError as error:
-            raise RuntimeError(f'Books Arranger cannot bind its assigned port {PORT}; stop the existing owner first. No fallback port is used.') from error
+            raise RuntimeError(f'Books Arranger cannot bind its assigned port {port}; stop the existing owner first. No fallback port is used.') from error
         instance_file = Path(args.database).parent / 'web-instance.json'
         try:
             from native_io import DirectoryBoundary
-            with DirectoryBoundary(instance_file.anchor,instance_file.parent),owned_instance_record(instance_file,server.health() | {'url':f'http://127.0.0.1:{PORT}/'}):
+            with DirectoryBoundary(instance_file.anchor,instance_file.parent),owned_instance_record(instance_file,server.health() | {'url':f'http://127.0.0.1:{port}/'}):
                 def stop(_signal=None,_frame=None):
                     inventory.stop()
                     server.closing = True
@@ -553,7 +563,7 @@ def main(argv=None, *, ready=None):
                 signal.signal(signal.SIGINT,stop)
                 if hasattr(signal,'SIGTERM'):signal.signal(signal.SIGTERM,stop)
                 if sys.stdout is not None:
-                    print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{PORT}/ — PID {os.getpid()}',flush=True)
+                    print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{port}/ — PID {os.getpid()}',flush=True)
                 if ready is not None:ready(server)
                 server.serve_forever(poll_interval=.2)
         finally:
