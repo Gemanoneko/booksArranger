@@ -96,6 +96,13 @@ class WorkingCleanupTests(unittest.TestCase):
         from cleanup_published_working import remaining_plan
         wav=self.normalized();plan=self.storage.working_files(self.job_id,True,True);wav.unlink()
         with self.assertRaises(BoundaryError):remaining_plan(self.storage,plan)
+    def test_working_pending_tracks_remaining_and_recreated_media(self):
+        wav=self.normalized();self.assertTrue(self.storage.working_pending(self.job_id))
+        self.storage.working_files(self.job_id)
+        self.assertFalse(self.storage.working_pending(self.job_id))
+        wav.write_bytes(b'private exact normalized bytes')
+        self.assertTrue(self.storage.working_pending(self.job_id))
+        with self.assertRaises(BoundaryError):self.storage.working_files(self.job_id)
     def test_wrong_ownership_blocks(self):
         wav=self.normalized();(self.job/'ownership.json').write_text('{}')
         with self.assertRaises(BoundaryError):self.storage.working_files(self.job_id,normalized_only=True)

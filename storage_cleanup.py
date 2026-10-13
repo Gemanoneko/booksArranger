@@ -334,6 +334,29 @@ class StorageCleanup:
                     targets.append((p, 'staging', (r['sha256'], r['size'])))
         return targets
 
+    def working_pending(self, job_id):
+        """Read-only scheduling hint; it never authorizes disposition or Ready.
+
+        Startup remains inactive. Explicit resume checks completed jobs, including
+        retirement attention, without repeatedly hashing already disposed media.
+        """
+        manifest,output=self._job(job_id)
+        recorded=output['validation'].get('staging_artifacts',{})
+        attempt_id=recorded.get('attempt_id')
+        if not attempt_id:return False  # No exact producer receipt, no candidate.
+        if str(uuid.UUID(attempt_id))!=attempt_id:raise BoundaryError('Invalid published attempt identity')
+        snapshots={f'source{i:05d}'+Path(item['path']).suffix.lower() for i,item in enumerate(manifest['sources'])}
+        from encoding_policy import AUTOMATIC_PROFILE
+        for name,entry in recorded.get('files',{}).items():
+            if name in snapshots:continue
+            disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name) or (manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name))
+            if not disposable:continue
+            path=self.stage_root/job_id/attempt_id/name
+            if path.exists():return True  # Includes a replacement at a terminal name.
+            old=self._known(path)
+            if not old or old['job_id']!=job_id or old['kind']!='staging' or old['state'] not in TERMINAL or (old['sha256'],old['size'])!=(entry['sha256'],entry['size']):return True
+        return False
+
     def working_files(self, job_id, dry_run=False, normalized_only=False, expected_plan=None):
         """Discard exact published-attempt disposable receipts, preserving snapshots.
 

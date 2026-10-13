@@ -70,6 +70,7 @@ class MergeService:
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
+        self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
             if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
@@ -312,12 +313,27 @@ class MergeService:
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
 
+    def _prune_working(self,job_id):
+        output_hash=''
+        try:
+            if not self.storage_cleanup.working_pending(job_id):return
+            self._post_current=(job_id,'temporary')
+            self.storage_cleanup._phase='verify published working receipts'
+            with connect(self.inventory.database) as db:
+                row=db.execute('SELECT output FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            output_hash=json.loads(row['output'])['sha256']
+            self.storage_cleanup.working_files(job_id)
+        except Exception as error:
+            self.storage_cleanup._diagnose(job_id,output_hash,error)
+        finally:self._post_current=None
+
     def _prune_completed(self,job_id):
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
                 with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
                 if self.retirement.historical_retired(parent):return
+        self._prune_working(job_id)
         self.recovery.sync()
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
@@ -334,6 +350,7 @@ class MergeService:
     def _after_completed(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
+        self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id

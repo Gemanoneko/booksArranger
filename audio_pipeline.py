@@ -1,5 +1,5 @@
 """Owned immutable-source M4B staging and strict validation; no source rewrites."""
-import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib
+import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,struct,errno
 from pathlib import Path
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
 
@@ -176,6 +176,60 @@ def decoded_duration(path,stage,stop,estimated):
 def ffmetadata_escape(value):
     return str(value).replace('\\','\\\\').replace('=','\\=').replace(';','\\;').replace('#','\\#').replace('\r','').replace('\n','\\\n')
 
+def output_space_required(source_bytes, durations, encoding, count):
+    if type(source_bytes) is not int or source_bytes<0 or not durations or any(not math.isfinite(d) or d<=0 for d in durations):
+        raise ValidationError('Working-space estimate requires complete source durations')
+    duration=sum(durations);rate=encoding['sample_rate']
+    if not math.isfinite(duration) or type(count) is not int or count!=len(durations) or type(rate) is not int or not 8000<=rate<=192000:
+        raise ValidationError('Working-space estimate has invalid complete-source bounds')
+    payload=source_bytes if encoding.get('mode')=='copy' else math.ceil(duration*(encoding['bitrate']/8+rate/1024*128))
+    return max(source_bytes,payload)+count*4096+16*1024*1024
+
+
+def working_space_required(source_bytes, durations, encoding, count):
+    output=output_space_required(source_bytes,durations,encoding,count)
+    pcm=math.ceil(sum(durations)*encoding['sample_rate']*encoding['channels']*8)+count*4096 if encoding.get('mode')=='normalize' else 0
+    # Reserve snapshots + worst-case double WAV + both chapter-rewrite outputs +
+    # publication copy even when destination/stage share a filesystem.
+    return source_bytes+pcm+3*output+64*1024*1024
+
+
+def check_working_space(manifest, stage, stop):
+    if shutil.disk_usage(stage).free<sum(item['size'] for item in manifest['sources'])+64*1024*1024:
+        raise OSError(errno.ENOSPC,'Insufficient staging space before source admission; originals retained')
+    durations=[];profiles=[]
+    for item in manifest['sources']:
+        path=ordinary(item['path'])
+        if not path.is_relative_to(ordinary(manifest['root'])) or path.suffix.lower() not in INPUT_FORMATS:
+            raise ValidationError('Source is outside the supported audiobook boundary')
+        with DirectoryBoundary(manifest['root'],path.parent),VerifiedFile(path) as held:
+            if held.facts()['size']!=item['size'] or str(held.facts()['modified'])!=str(item['modified']) or held.sha256()!=item['sha256']:
+                raise ValidationError('Source changed before working-space admission')
+            raw=probe(path,stage,stop);duration,profile=audio_info(raw)
+            stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
+            profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
+            durations.append(decoded_duration(path,stage,stop,duration))
+    if manifest.get('profile')==AUTOMATIC_PROFILE:
+        encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
+    elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
+    elif manifest.get('profile')==LEGACY_PROFILE:encoding={'bitrate':160000,'channels':2,'sample_rate':44100}
+    else:raise ValidationError('Unsupported frozen encoding profile')
+    source_bytes=sum(item['size'] for item in manifest['sources'])
+    required=working_space_required(source_bytes,durations,encoding,len(durations))
+    if shutil.disk_usage(stage).free<required:
+        raise OSError(errno.ENOSPC,f'Insufficient working space; need {required} bytes before snapshotting; originals retained')
+    root=ordinary(manifest['root']);destination=ordinary(manifest['destination'])
+    if not destination.is_relative_to(root):raise ValidationError('Destination is outside the audiobook library')
+    parent=destination.parent
+    while not parent.exists():
+        if parent==root:raise ValidationError('Audiobook destination root is unavailable')
+        parent=parent.parent
+    with DirectoryBoundary(root,parent):
+        if shutil.disk_usage(parent).free<output_space_required(source_bytes,durations,encoding,len(durations)):
+            raise OSError(errno.ENOSPC,'Insufficient destination space before conversion; originals retained')
+    return required
+
+
 def snapshot_manifest(manifest,stage,stop):
     sources=manifest['sources']
     if not sources:raise ValidationError('No reviewed source files are included')
@@ -185,9 +239,7 @@ def snapshot_manifest(manifest,stage,stop):
     joined_m4b=manifest.get('profile')==AUTOMATIC_PROFILE and len(sources)!=1 and any(Path(item['path']).suffix.lower() in ('.m4b','.m4a') for item in sources)
     root=ordinary(manifest['root'])
     copies=[];durations=[];profiles=[];compatibility=None
-    total_bytes=sum(item['size'] for item in sources)
-    if shutil.disk_usage(stage).free<total_bytes*2+32*1024*1024:
-        raise ValidationError('Insufficient private staging space for snapshots and audiobook output')
+    check_working_space(manifest,stage,stop)
     for index,item in enumerate(sources):
         source=ordinary(item['path'])
         try:source.relative_to(root)
@@ -268,23 +320,73 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     return output,validation
 
 
+def normalization_filter(encoding):
+    return f"aformat=sample_fmts=dbl,aresample={encoding['sample_rate']},aformat=sample_fmts=dbl:channel_layouts={'mono' if encoding['channels']==1 else 'stereo'}"
+
+
+class ExpandedPcmHash:
+    """Expand candidate PCM into canonical doubles without quantizing the proof.
+
+    Bounded chunks preserve every sample and channel; final partial frames fail.
+    """
+    def __init__(self, channels, kind):
+        self.channels=channels;self.kind=kind;self.width={'s16':2,'s24':3,'s32':4,'f32':4}[kind]
+        self.pending=b'';self.proof=None
+    def feed(self, raw):
+        if self.proof is None:self.proof=NativePcmHash(self.channels)
+        raw=self.pending+raw;end=len(raw)//self.width*self.width;self.pending=raw[end:];raw=raw[:end]
+        expanded=bytearray()
+        if self.kind=='s24':
+            values=(int.from_bytes(raw[i:i+3],'little',signed=True)/8388608 for i in range(0,len(raw),3))
+        else:
+            fmt={'s16':'<h','s32':'<i','f32':'<f'}[self.kind];scale={'s16':32768,'s32':2147483648,'f32':1}[self.kind]
+            values=(value[0]/scale for value in struct.iter_unpack(fmt,raw))
+        for value in values:expanded.extend(struct.pack('<d',value))
+        self.proof.feed(expanded)
+    def result(self):
+        if self.pending or self.proof is None:raise ValidationError('Candidate normalized PCM proof is incomplete')
+        return self.proof.result()
+
+
+def normalized_pcm_evidence(path,stage,stop,duration,encoding,kind=None):
+    proof=NativePcmHash(encoding['channels']) if kind is None else ExpandedPcmHash(encoding['channels'],kind)
+    codec,format=('pcm_f64le','f64le') if kind is None else {'s16':('pcm_s16le','s16le'),'s24':('pcm_s24le','s24le'),'s32':('pcm_s32le','s32le'),'f32':('pcm_f32le','f32le')}[kind]
+    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+      '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0',
+      '-af',normalization_filter(encoding),'-c:a',codec,'-f',format,'pipe:1'],stage,stop,max(300,duration*2),telemetry=proof)
+    return proof.result()
+
+
+def choose_normalized_pcm(path,stage,stop,duration,encoding):
+    reference=normalized_pcm_evidence(path,stage,stop,duration,encoding)
+    # Smallest exact representation, tested before creating any working WAV.
+    # Full hashes/counts, not a prefix, duration, or source format label, decide.
+    for kind,codec in (('s16','pcm_s16le'),('s24','pcm_s24le'),('s32','pcm_s32le'),('f32','pcm_f32le')):
+        if normalized_pcm_evidence(path,stage,stop,duration,encoding,kind)==reference:
+            return codec,reference
+    return 'pcm_f64le',reference
+
+
 def normalize_sources(stage,copies,encoding,stop,durations):
-    # Normalize each fully decoded source before concatenation; concat cannot safely
-    # infer changing sample rates or channel counts from compressed packet headers.
-    required=math.ceil(sum(durations)*encoding['sample_rate']*encoding['channels']*8)+32*1024*1024
-    if shutil.disk_usage(stage).free<required:raise ValidationError('Insufficient staging space for complete lossless normalization')
+    required=working_space_required(0,durations,encoding,len(copies))
+    if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Insufficient staging space for complete exact normalization and publication; originals retained')
     result=[];receipts={}
     for index,(name,duration) in enumerate(zip(copies,durations)):
+        remaining_pcm=math.ceil(sum(durations[index:])*encoding['sample_rate']*encoding['channels']*8)+(len(copies)-index)*4096
+        remaining_required=remaining_pcm+3*output_space_required(0,durations,encoding,len(copies))+64*1024*1024
+        if shutil.disk_usage(stage).free<remaining_required:raise OSError(errno.ENOSPC,'Staging space changed before normalization; originals retained')
         output=stage/(f'normalized{index:05}.wav')
+        codec,reference=choose_normalized_pcm(stage/name,stage,stop,duration,encoding)
         run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',
           '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
-          '-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-c:a','pcm_f64le','-rf64','always','-f','wav',str(output)],stage,stop,max(300,duration*2))
-        decoded=decoded_duration(output,stage,stop,duration)
-        if abs(decoded-duration)>.1:raise ValidationError('Normalized source duration differs from its complete original')
+          '-af',normalization_filter(encoding),'-c:a',codec,'-rf64','always','-f','wav',str(output)],stage,stop,max(300,duration*2))
         with VerifiedFile(output) as held:
+            actual=native_pcm_evidence(output,stage,stop,duration,encoding)
+            if any(actual[key]!=reference[key] for key in reference):
+                raise ValidationError('Normalized PCM differs from complete source normalization')
             facts=held.facts();expected=held.sha256()
             if facts['links']!=1:raise ValidationError('Normalized source snapshot has unexpected links')
-            receipts[output.name]={'facts':facts,'sha256':expected}
+            receipts[output.name]={'facts':facts,'sha256':expected,'pcm':reference,'codec':codec}
             remember_generated(output,expected,facts['size'])
         result.append(output.name)
     return result,receipts
@@ -397,6 +499,8 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
 
 
 def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies):
+    required=3*output_space_required(sum(item['size'] for item in manifest['sources']),durations,encoding,len(copies))+64*1024*1024
+    if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Staging space changed before output creation; originals retained')
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
     write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
