@@ -270,4 +270,58 @@ Real M4B files made with ffmpeg (tones, real `[CHAPTER]` marks written with ffme
 
 **Round 2 method record:** new or updated scripts in the scratchpad `futaba-0150`: `controls.py` (57 scenarios), `e2e_controls.py`, `fixtures_chapters.py` (real-chapter fixtures A-F), `futaba_measure.py` (now also captures part books), `imajica_rows.py`, `spelling_pairs.py` (adapted to the verified-only structure), plus the round-1 scripts unchanged. My copy of the catalog and the fixture folder are disposable and are removed through the hygiene planner at the end; the export directories under `Temp/fq` stay until an owner decides (they hold a `.claude` folder the planner refuses).
 
-**Verdict:** GO — Books Arranger v0.15.0 candidate round 2, exact commit b756301cf8364f0a307a9547b104c52255833dca (b756301): F1 fixed, zero new suite failures, 0 wrong groupings, real-chapter fixtures behave as ruled.
+Round 2 verdict (superseded by Round 3 below): GO at b756301 — F1 fixed, zero new suite failures, 0 wrong groupings, real-chapter fixtures behave as ruled.
+
+
+## Round 3 — d3c5526
+
+Delta check of `d3c55261cf64e8b8040ecc4cb86d551f51bdddfa` (d3c5526), one commit on top of b756301. The worktree HEAD and the local remote-tracking ref `origin/codex/books-split-books-0.15.0` both read this hash (no network call). Same rules: offline, from a `git archive` export at the short path `C:/Users/AnGeLZzZ/AppData/Local/Temp/fq/r3`, my own fresh copy of Ender's catalog copy (sha256 `b16c048a…7256301`), no app, no port 5210, no live database, no Z:/Y:, no network, no real-desktop or real-input check, nothing committed, fixed or stashed. The disk was at 100% (under 1 GB free) during this round, so I ran my large steps one at a time; no step failed for lack of space and the suite log has no disk-full error.
+
+**Summary: GO for d3c5526.** The suite shows zero new failures, all 57 controls hold, the 173 grouped books are unchanged, and the new rule works on real chaptered files: a chaptered part is published only when every part of a complete named set has real chapters, otherwise nothing from the set is published. The Оно-like 7-part set either publishes all 7 as "Оно - N - …" or none.
+
+### R3.1 Result per item
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Suite | PASS. 610 tests, 9 errors, name-for-name identical to the baseline 9 (zero new, zero baseline-only). `test_split_books.py` alone: 61 tests OK |
+| 2 | 57 controls plus chapter fixtures | PASS. Controls: 52 as expected, 5 inherent-limit probes (unchanged), 0 failed. The end-to-end cases Метро 2033/2034, Фантастика 2021/2022 and Fallout 3/4 are still held as separate candidates. Fixtures A-F pass again and the 6 new ones below pass |
+| 3 | One chaptered part only: whole set held | PASS (fixtures G and I) |
+| 4 | Оно-like 7-part set: all 7 as "Оно - N - …" or held, never partial | PASS (fixtures H and I) |
+| 5 | .m4a group | PASS (fixtures K1, K2, L) |
+| 6 | Scan re-run | PASS. 173 groups, 0 wrong; member lists and order identical to rounds 1 and 2 |
+
+### R3.2 Measurement and scan
+
+My own driver, v0.14.0 against d3c5526:
+- Approvable **445 → 538** = 445 + 81 split books + 2 singles + **10** part books (Imajica 4, Зелёная миля 6). Ender's 538 reproduces. **"Cathing Fire" is now held** ("Book identity uncertain"); Hunger Games Books 1 and 3 stay held. 84 part-book candidates in all, 10 approvable, 74 held.
+- 0 books approvable in v0.14.0 that stopped being approvable; the 940 split files were all held in v0.14.0, so no approvable book was absorbed.
+- 173 split books, 940 files, 81 approvable (707 files), 92 on the research path (233 files). The **ordered member lists of all 173 groups are identical to round 1**. My scan: the same 14 hard flags (named or Roman-numeral parts of one novel), file-name number equals track number in all 160 testable groups, 0 gaps or duplicates, 0 mixed authors, readers or recordings. Order of the 81 approvable books: 81 of 81 correct.
+- The 14 already approved, reviewed or job-bound groups are unchanged after the regroup.
+- The indexed regroup builds its neighbour index only when a reviewed split book exists; the catalog holds none, so I could not exercise it on real data (covered by Ender's tests, all passing). I make no claim about its speed: my two comparable measurements (b756301 and d3c5526) both took 41.5 s end to end, as expected for a path that is not taken here.
+
+### R3.3 Fixtures with REAL chapters (new ones)
+
+Real M4B or M4A files with real `[CHAPTER]` marks, driven through scan, grouping, offline research, `approve_automatic`, media, publication and retirement, as in round 2.
+
+| ID | Fixture | Result |
+|---|---|---|
+| G | Imajica-like, 4 parts with own titles, folder repeats the set; ONLY part 2 has chapters | PASS. 0 approved, 0 jobs, 4 files intact. Part 2 is refused with "Another part of this set has no chapters of its own; the whole set is held (never published piecemeal)", the other three with "One part of a multi-part set without its own chapters" |
+| H | Оно-like: 7 parts (Часть 1..5 with the two sub-parts of 2 and 4), tracks 1/7..7/7, album "Оно", every part with 2 real chapters | PASS. First a joined 7-part set, refused ("each part becomes its own book"); after the regroup 7 rows; **all 7 approved**, 7 jobs, `copy` mode, each output re-probed with its 2 chapters, 7 originals retired. Names: `Оно - 1 - ТЕНЬ ПРОШЛОГО - King Stephen.m4b`, `Оно - 2 - ИЮНЬ 1958 ГОДА. 1 - …`, `Оно - 3 - ИЮНЬ 1958 ГОДА. 2 - …`, `Оно - 4 - ВЗРОСЛЫЕ - …`, `Оно - 5 - ИЮЛЬ 1958 ГОДА. 1 - …`, `Оно - 6 - ИЮЛЬ 1958 ГОДА. 2 - …`, `Оно - 7 - РИТУАЛ ЧУДЬ - …` |
+| I | Same 7 parts, part 4 has NO chapters (6 of 7 chaptered) | PASS. **0 approved, 0 jobs, all 7 files intact.** Every chaptered part is refused with "Another part of this set has no chapters of its own; the whole set is held (never published piecemeal)", part 4 with "without its own chapters". No partial set |
+| K1 | .m4a group of 3 (same album, tracks 1..3), part 2 with real chapters | PASS. One group of 3 before and after; refused with "joining them would drop those chapters"; 0 jobs; files intact. The group is not broken up |
+| K2 | .m4a group of 3 without chapters | PASS. Joins normally: 1 job, 3 sources, 3 chapters |
+| L | .m4a set of 3 with own titles and real chapters on every part | PASS. Not a part book, 1 group of 3, 0 jobs, files intact, refused with "joining them would drop those chapters". An .m4a is never filed as its own book and never re-encoded |
+
+Fixtures A-F (round 2) repeat unchanged: A still turns 4 chaptered Imajica-like parts into 4 separate M4Bs in `copy` mode with 3 chapters each; B and D still join chapterless sets into one M4B; C and D2 still dissolve a set with a chaptered part into held singles (nothing converted); E and F as before.
+
+### R3.4 Findings and observations
+
+No new finding. Carried, unchanged: O3 (a chaptered part leaves its whole set held; now also when only SOME parts of a complete named set have chapters, which is exactly the intent and is safe: nothing from the set is published), O5 (inherent limits). O4 is closed: "Cathing Fire" is held. The number of real sets affected by the chapter rules is still unknown because the catalog stores no chapters; the read-only `ffprobe -show_chapters` survey I proposed in round 2 still turns that into a number.
+
+**NOT RUN:** the real files' chapters, real conversions on the real library, real-desktop and real-input checks, the packaged build, Sergei's Restart + Start sequence.
+
+**Pattern alerts:** none new. Round 1's alert stays at disposition defer; no flake showed in this round's single full run. New environment note for Jane, not a pattern alert: the machine's C: drive was at 100% (under 1 GB free) during this round.
+
+**Round 3 method record:** `fixtures_chapters.py` now has fixtures A-L, `controls.py` and `e2e_controls.py` unchanged; my catalog copy and the fixture folder are disposable and removed through the hygiene planner at the end.
+
+**Verdict:** GO — Books Arranger v0.15.0 candidate round 3, exact commit d3c55261cf64e8b8040ecc4cb86d551f51bdddfa (d3c5526): zero new suite failures, 57 controls hold, 173 groups unchanged, chaptered parts publish only as a complete set.

@@ -317,4 +317,76 @@ Suggested fix: build the (unit, book key) → files index once per build.
 |---|-----|-----|-----------|---------|--------------------------|
 | R2-C1 | Critical | 2 Correctness / 5 Data | `local_identity.py:1104-1157` (`:1148`) | Chaptered parts of one novel are published as standalone books with no parent work (Оно parts 3–7), and sets are published piecemeal (Мерзость part 3 held for good). | (1) Series = set album whenever a folder or the shared file name repeats it, independent of the number; hold a part book without it. (2) Publish part books only when every part of the set has its own title; else hold the whole set. Tests: Оно's live tags (all 7 carry series "Оно" or hold); Мерзость (whole set holds). Imajica and Зелёная миля unchanged. |
 
-**Verdict:** RELEASE BLOCKED — b756301
+Round 2 verdict (superseded): RELEASE BLOCKED — b756301
+
+---
+
+## Round 3 — d3c5526
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-13
+Fix round: b756301..d3c5526 (9 files, +413 / -52; code: groups.py, local_identity.py, merge_service.py; tests)
+Full range certified: v0.14.0..d3c5526
+```
+
+### Method
+
+The review was red-team and read-only.
+- I probed a `git archive` export of d3c5526. The worktree was clean at d3c5526.
+- I used the real Оно and Мерзость tags from Ender's `m-fix-final.json`, plus synthetic sets.
+- I built the local identity and gate exactly as `_local_lookup` does: titles plus the set album, and author variants.
+- I timed `groups.build` on the catalog copy, opened `mode=ro&immutable=1`.
+- `test_split_books.py` on the export: 61 run, 59 pass. The 2 errors are the known path-length environment error.
+- No app, live database, Z:/Y: or network.
+
+### Round 2 findings, rechecked
+
+**R2-C1 — fixed.**
+- Every part of a set now carries the set album as its series and its track number as its number (`local_identity.py:1104-1170`). If any part lacks its own title, a folder or file-name lead, or track numbering on one disc, the whole set is held.
+- **Оно (live tags).** All 7 parts become "Оно - 1…7 - <part title>", and the gate passes each one.
+- **Мерзость (live tags).** All 3 parts are held ("part 3 … has no title of its own").
+- **Chapters across the set.** Admission now needs each part to carry its own chapters, as a whole .m4b in copy mode (`merge_service.py:517-536`). Every other part of the set must carry chapters too: checked from its job's frozen chapter plan if it was already admitted, otherwise by probing the file. A part that cannot be checked holds the set.
+- **Partly chaptered sets.** When only some parts of a joined set have chapters, the parts without chapters fail that check at every admission, so the whole set stays held.
+
+**R2-M1 — fixed.**
+- Only `.m4b` files are re-filed (`groups.py:214`), and only the members of a split book (`merge_service.py:509`).
+- Any other chaptered set is held together. Probe: an .m4a group with its last file chaptered stays one group of three.
+- An .m4a file is never a part book.
+
+**R2-M2 — fixed.** One neighbour index per build. Measured: 2.66 s plain, and 2.84 s with all 173 split books protected (was 12.7 s with 81).
+
+**Unchanged and not Critical.** M3 and M4 still wait for Sergei. The gate's split re-proof without neighbours and the `middle_initial_same` word order stay Minor.
+
+### New finding
+
+#### R3-M1 [Major] — a per-part gate hold can still leave a set published piecemeal
+
+Location: `merge_service.py:526-536`.
+
+The all-parts admission check proves only that every other part has chapters. It does not prove that every other part can pass its own gate.
+
+**Probe** (synthetic set; Голос ночной птицы and Тобол use the same naming live):
+- names "1-1 …", "1-2 …", "2-1 …", "2-2 …", tracks 1–4, every part with its own title, author folder;
+- part 1-1 passes everything and would be published as "Голос ночной птицы - 1 - Книга первая: Суд над ведьмой";
+- parts 1-2, 2-1 and 2-2 each hold on "Playback order uncertain", because the file-name number is not the track number;
+- those three stay held for good.
+
+The published part is correctly named with its parent work, so this is not R2-C1's wrong-identity harm. It does break the "never published piecemeal" promise.
+
+Live: 0. The live sets with this naming are already held for other reasons (an uncertain author, no titles of their own).
+
+Suggested fix: in `_part_book`, hold the whole set when any part's file-name number differs from its track number. Alternatively, run each other part's gate at admission.
+
+Residual, not counted: a transient hold on one part (cover source, I/O) after its siblings converted still leaves a set partial. A set-level job would be needed to make that atomic.
+
+### Round 3 verdict
+
+- **Open Critical: 0.** Round-1 C1 and round-2 R2-C1 are closed. The safety floor is intact:
+  - no new shell-outs (the extra `ffprobe` runs through the existing argument-list `run_owned`);
+  - no out-of-scope writes and no secrets;
+  - retirement and recovery code is untouched across v0.14.0..d3c5526.
+- **Open Major: 3** (R3-M1; M3 and M4, both waiting for Sergei).
+- **Open Minor: 2** (the gate's split re-proof without neighbours; `middle_initial_same` word order).
+
+**Verdict:** RELEASE CLEAR — d3c5526
