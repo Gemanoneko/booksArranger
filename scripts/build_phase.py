@@ -20,7 +20,6 @@ def run(argv, proof, cwd=ROOT):
     return result.stdout.decode('utf8',errors='strict').replace('\r\n','\n')
 
 def prepare(tree,proof):
-    if (ROOT/'dist'/'release-artifacts.json').exists() or (ROOT/'build-cache'/'runtime-pointer.json').exists():raise RuntimeError('Existing accepted candidate/runtime pointer preserved; exact-identity retirement required before a new build')
     owned=tree.directory(proof['ownedRoot']);tree.created[str(owned).casefold()]=owned
     pins_path=ROOT/'desktop'/'runtime-pins.json';tree.protect(pins_path)
     pins=json.loads(pins_path.read_text('utf8'));runtime=tree.directory(owned/'runtime',create=True)
@@ -71,7 +70,7 @@ def prepare(tree,proof):
     if version!=pkg['version']:raise RuntimeError('Staged backend version mismatch')
     return runtime,backend,pins,pkg
 
-def build(tree,proof,runtime,backend,pins,pkg):
+def build(tree,proof,runtime,backend,pins,pkg,prior):
     output=tree.fresh(ROOT/'dist'/'builds');build_id=output.name
     config={**pkg['build'],'directories':{**pkg['build']['directories'],'output':str(output)},'extraResources':[{'from':str(backend),'to':'backend'},{'from':str(runtime/'python'),'to':'python'},{'from':str(runtime/'ffmpeg'),'to':'ffmpeg'}],'artifactName':'Books-Arranger-Setup-'+pkg['version']+'.exe'}
     config_path=Path(proof['ownedRoot'])/'builder-config.json'
@@ -120,24 +119,50 @@ def build(tree,proof,runtime,backend,pins,pkg):
     if verifier.returncode:raise RuntimeError('Installer verification refused: '+verifier.stderr.decode(errors='replace')[-8000:])
     manifest=json.loads(verifier.stdout)
     if manifest.get('payload',{}).get('verified') is not True:raise RuntimeError('Verifier did not attest actual payload')
-    # Stable accepted pointer uses CREATE_NEW only. Previous/unknown manifests
-    # refuse publication until exact accepted-identity cleanup is completed.
+    from build_fs_guard import producer_receipt,publish_metadata,disposable_stage_receipts,retire_disposable_stage
+    # New metadata is fully materialized/verified before touching old pointers.
+    # CREATE_NEW unique temporaries and a native producer record bind every old
+    # file identity in a later run; a schema/hash-only file is never adopted.
     tree.created[str(ROOT/'dist').casefold()]=ROOT/'dist'
-    manifest_facts=tree.write(ROOT/'dist'/'release-artifacts.json',[verifier.stdout])
+    tree.created[str(ROOT/'build-cache').casefold()]=ROOT/'build-cache'
+    import uuid
+    transaction=str(uuid.uuid4())
+    manifest_temp=ROOT/'dist'/('release-artifacts.json.new-'+transaction)
+    pointer_temp=ROOT/'build-cache'/('runtime-pointer.json.new-'+transaction)
+    tree.write(manifest_temp,[verifier.stdout])
     runtime_files=dict(sorted(tree.tree_manifest(runtime).items()))
     pointer={'schema':'books-runtime-pointer-v1','build_id':build_id,'root':str(runtime),'files':runtime_files,'manifest_sha256':hashlib.sha256(json.dumps(runtime_files,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
-    tree.created[str(ROOT/'build-cache').casefold()]=ROOT/'build-cache'
-    tree.write(ROOT/'build-cache'/'runtime-pointer.json',[json.dumps(pointer,sort_keys=True).encode()])
-    print(json.dumps({'verified':True,'output':str(output),'build_id':build_id,'manifest':str(ROOT/'dist'/'release-artifacts.json'),'manifest_sha256':manifest_facts['sha256']}))
+    tree.write(pointer_temp,[json.dumps(pointer,sort_keys=True,separators=(',',':')).encode()])
+    record=producer_receipt(tree,Path(proof['ownedRoot']),manifest,pointer,manifest_temp,pointer_temp)
+    record['disposable_stage_files']=disposable_stage_receipts(tree,Path(proof['ownedRoot']))
+    tree.write(Path(proof['ownedRoot'])/'producer-receipt.json',[json.dumps(record,sort_keys=True,separators=(',',':')).encode()])
+    tree.write(Path(proof['ownedRoot'])/'metadata-rotation-plan.json',[json.dumps({'schema':'books-build-rotation-plan-v1','transaction':transaction,'old':prior.plans,'new':{'manifest':str(manifest_temp),'pointer':str(pointer_temp)},'producer_receipt':str(Path(proof['ownedRoot'])/'producer-receipt.json'),'state':'verified-new-before-old-archive'},sort_keys=True).encode()])
+    archived=prior.archive()
+    tree.write(Path(proof['ownedRoot'])/'metadata-rotation-archives.json',[json.dumps({'schema':'books-build-rotation-archives-v1','transaction':transaction,'archived':archived},sort_keys=True).encode()])
+    try:
+        pointer_receipt=publish_metadata(tree,pointer_temp,ROOT/'build-cache'/'runtime-pointer.json')
+        manifest_receipt=publish_metadata(tree,manifest_temp,ROOT/'dist'/'release-artifacts.json')
+    except Exception:
+        # Never overwrite an unexpected stable path. Exact archived originals,
+        # unique new files and durable intent remain for an explicit recovery.
+        # A missing/colliding pair is refused by subsequent preparation.
+        raise RuntimeError('Metadata publication stopped; prior/new evidence preserved at '+str(Path(proof['ownedRoot'])/'metadata-rotation-plan.json'))
+    tree.write(Path(proof['ownedRoot'])/'metadata-rotation-complete.json',[json.dumps({'schema':'books-build-rotation-complete-v1','transaction':transaction,'archived':archived,'manifest_receipt':manifest_receipt,'pointer_receipt':pointer_receipt},sort_keys=True).encode()])
+    cleanup_warning=None;disposed=0
+    try:disposed=retire_disposable_stage(tree,Path(proof['ownedRoot']),record['disposable_stage_files'])
+    except Exception as error:cleanup_warning=str(error)
+    tree.write(Path(proof['ownedRoot'])/'staging-cleanup-result.json',[json.dumps({'schema':'books-build-staging-cleanup-v1','removed_files':disposed,'warning':cleanup_warning,'old_accepted_artifacts':'preserved','runtime':'preserved','prior_cleanup_requires':['new QA GO and review CLEAR','new runtime owner generation verified','exact old producer native facts','preserve installers/data/recovery/unknown files']},sort_keys=True).encode()])
+    print(json.dumps({'verified':True,'output':str(output),'build_id':build_id,'manifest':str(ROOT/'dist'/'release-artifacts.json'),'manifest_sha256':manifest_receipt['sha256'],'prior_archived':archived,'staging_cleanup_removed':disposed,'cleanup_warning':cleanup_warning}))
 
 def main():
     proof=json.loads(sys.stdin.read());proof.pop('manifestPath',None)
     with contextlib.ExitStack() as stack:
         bootstrap(stack);lease_check(proof)
-        from build_fs_guard import BuildTree
+        from build_fs_guard import BuildTree,PriorBuild
         with BuildTree(ROOT) as tree:
+            prior=PriorBuild(tree)
             runtime,backend,pins,pkg=prepare(tree,proof)
-            build(tree,proof,runtime,backend,pins,pkg)
+            build(tree,proof,runtime,backend,pins,pkg,prior)
 if __name__=='__main__':
     try:main()
     except Exception as e:print('Guarded build phase: '+str(e),file=sys.stderr);sys.exit(1)

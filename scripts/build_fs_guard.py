@@ -59,7 +59,8 @@ class BuildTree:
             def revalidate(inner):
                 now=FileInfo()
                 if not kernel.GetFileInformationByHandle(handle,ctypes.byref(now)) or now.attributes&0x400 or (now.volume,now.index_high,now.index_low)!=(info.volume,info.index_high,info.index_low):raise BoundaryError('Fresh directory native identity changed')
-        self.directories[str(value).casefold()]=Lease()
+        lease=Lease();lease.parent=value
+        self.directories[str(value).casefold()]=lease
         return value
     def directory(self, path, create=False):
         value = self.child(path)
@@ -192,8 +193,227 @@ def remove_manifest_files(root, folder, manifest):
                 if not path.is_relative_to(folder): raise BoundaryError('Cleanup path escapes exact owned folder')
                 tree.directory(path.parent)
                 item = deletes.enter_context(VerifiedFile(path, delete=True))
-                if item.facts()['links'] != 1 or {'sha256': item.sha256(), 'size': item.facts()['size']} != expected:
-                    raise BoundaryError('Cleanup manifest identity/content mismatch; nothing removed')
+                native=item.facts()
+                actual={k:native[k] for k in ('identity','dev','ino','identity_method','attributes','links','modified','size')}|{'sha256':item.sha256()}
+                no_named_streams(path)
+                if native['links']!=1:raise BoundaryError('Cleanup hardlink refused')
+                _receipt_equal(actual,expected)
                 held.append(item)
             for item in held: item.dispose()
         return len(held)
+
+
+def no_named_streams(path):
+    """Refuse ambiguous metadata; rename never discards unexamined ADS."""
+    class Stream(ctypes.Structure):
+        _fields_=[('size',ctypes.c_longlong),('name',wintypes.WCHAR*296)]
+    kernel.FindFirstStreamW.argtypes=[wintypes.LPCWSTR,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD];kernel.FindFirstStreamW.restype=wintypes.HANDLE
+    kernel.FindNextStreamW.argtypes=[wintypes.HANDLE,ctypes.c_void_p];kernel.FindNextStreamW.restype=wintypes.BOOL
+    kernel.FindClose.argtypes=[wintypes.HANDLE]
+    stream=Stream();handle=kernel.FindFirstStreamW(str(path),0,ctypes.byref(stream),0)
+    if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Metadata stream enumeration unavailable')
+    try:
+        while True:
+            if stream.name!='::$DATA':raise BoundaryError('Metadata named stream refused; original preserved')
+            if not kernel.FindNextStreamW(handle,ctypes.byref(stream)):
+                if ctypes.get_last_error()!=38:raise BoundaryError('Metadata stream enumeration incomplete')
+                return
+    finally:kernel.FindClose(handle)
+
+
+def _native_receipt(tree,path):
+    value=tree.child(path);facts=tree.protect(value);no_named_streams(value)
+    held=tree.files[str(value).casefold()]
+    refreshed=FileInfo()
+    if not kernel.GetFileInformationByHandle(held.handle,ctypes.byref(refreshed)) or refreshed.attributes&(0x400|0x10) or refreshed.links!=1:raise BoundaryError('Native receipt reparse/type/link drift')
+    held.info=refreshed
+    original=held.facts()
+    return {k:original[k] for k in ('identity','dev','ino','identity_method','attributes','links','modified','size')}|{'sha256':facts['sha256']}
+
+
+def _receipt_equal(actual,expected):
+    wanted=('identity','dev','ino','identity_method','attributes','links','modified','size','sha256')
+    if not isinstance(expected,dict) or any(k not in expected or actual[k]!=expected[k] for k in wanted):
+        raise BoundaryError('Original native identity/content receipt differs; substituted file preserved')
+
+
+def capture_metadata(tree,path):
+    """Hold and remember the exact original stable file before a long build."""
+    value=tree.child(path)
+    receipt=_native_receipt(tree,value)
+    if receipt['size']>16*1024*1024:raise BoundaryError('Build metadata exceeds bounded size')
+    return {'path':str(value),'receipt':receipt}
+
+
+def release_file(tree,path):
+    key=str(tree.child(path)).casefold()
+    held=tree.files.pop(key,None)
+    if held is not None:held.__exit__(None,None,None)
+
+
+def archive_metadata(tree,plan,validator,before_open=None):
+    """CAS archive exact old metadata through native rename, never a pathname.
+
+    The read lease is deliberately released because DELETE requires sharing.
+    That gap confers no authority: publish's same original identity+bytes must
+    match, and its retained DELETE handle prevents a name swap during callback.
+    """
+    from native_io import publish_no_replace
+    source=tree.child(plan['path']);parent=tree.directory(source.parent)
+    destination=parent/(source.name+'.previous-'+str(uuid.uuid4()))
+    expected=plan['receipt']
+    release_file(tree,source)
+    if before_open:before_open(source)
+    boundary=tree.directories[str(parent).casefold()]
+    def checked(proof):
+        if proof['identity']!=expected['identity'] or proof['sha256']!=expected['sha256'] or proof['size']!=expected['size']:raise BoundaryError('Metadata CAS native identity/content substituted; original preserved')
+        # The publisher's retained DELETE handle excludes write/rename. A read
+        # handle with SHARE_DELETE can inspect that exact file without weakening
+        # the publisher handle's restrictive sharing on other openers.
+        handle=kernel.CreateFileW(str(source),0x81,7,None,3,0x00200000,None)
+        if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot inspect metadata held by rename')
+        try:
+            info=FileInfo()
+            if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes&(0x400|0x10) or info.links!=1 or [info.volume,info.index_high,info.index_low]!=expected['identity'] or info.attributes!=expected['attributes'] or ((info.write.dwHighDateTime<<32)|info.write.dwLowDateTime)-116444736000000000!=expected['modified']//100:raise BoundaryError('Metadata rename attributes/link/identity drift')
+            no_named_streams(source)
+            validator()
+        finally:kernel.CloseHandle(handle)
+    publish_no_replace(source,destination,boundary,expected_sha256=expected['sha256'],expected_size=expected['size'],before_rename=checked)
+    try:
+        _receipt_equal(_native_receipt(tree,destination),expected)
+    except BoundaryError as drift:
+        # An arriving stream/link is never discarded. Restore this same original
+        # identity to its original empty name, including every stream, then
+        # refuse the rotation. A colliding/replaced name is never overwritten.
+        release_file(tree,destination)
+        def original_only(proof):
+            if proof['identity']!=expected['identity']:raise BoundaryError('Archival recovery original identity differs')
+        try:publish_no_replace(destination,source,boundary,expected['sha256'],expected['size'],original_only)
+        except Exception as error:raise BoundaryError('Archival drift; exact previous evidence preserved at '+str(destination)) from error
+        raise drift
+    return str(destination)
+
+
+def publish_metadata(tree,temporary,destination):
+    from native_io import publish_no_replace
+    temporary=tree.child(temporary);destination=tree.child(destination)
+    receipt=_native_receipt(tree,temporary)
+    parent=tree.directory(destination.parent)
+    release_file(tree,temporary)
+    def checked(proof):
+        if proof['identity']!=receipt['identity']:raise BoundaryError('New metadata native identity substituted')
+        no_named_streams(temporary)
+    publish_no_replace(temporary,destination,tree.directories[str(parent).casefold()],receipt['sha256'],receipt['size'],checked)
+    _receipt_equal(_native_receipt(tree,destination),receipt)
+    return receipt
+
+
+def _relative_file(tree,base,name):
+    if not isinstance(name,str) or not name or '\\' in name or Path(name).is_absolute() or any(p in ('','.','..') for p in name.split('/')):raise BoundaryError('Producer record path refused')
+    value=tree.child(base/name)
+    if not value.is_relative_to(base):raise BoundaryError('Producer record escapes exact build')
+    return value
+
+
+def _json_metadata(path):
+    import json
+    def pairs(items):
+        result={}
+        for key,value in items:
+            if key in result:raise BoundaryError('Duplicate metadata field refused')
+            result[key]=value
+        return result
+    try:return json.loads(Path(path).read_text('utf8'),object_pairs_hook=pairs)
+    except (ValueError,UnicodeError) as error:raise BoundaryError('Corrupt metadata preserved') from error
+
+
+class PriorBuild:
+    """Verified old producer receipt retained while a new build is prepared."""
+    def __init__(self,tree):
+        self.tree=tree;root=tree.root
+        manifest=root/'dist'/'release-artifacts.json';pointer=root/'build-cache'/'runtime-pointer.json'
+        present=[os.path.lexists(manifest),os.path.lexists(pointer)]
+        self.plans={}
+        if not any(present):return
+        if not all(present):raise BoundaryError('Incomplete prior candidate preserved; manual exact-evidence recovery required')
+        self.plans={'manifest':capture_metadata(tree,manifest),'pointer':capture_metadata(tree,pointer)}
+        self.manifest=_json_metadata(manifest);self.pointer=_json_metadata(pointer)
+        m,p=self.manifest,self.pointer
+        try:
+            identity=str(uuid.UUID(m['build_id']))
+            if identity!=m['build_id'] or p['build_id']!=identity or m['schema']!='books-desktop-artifacts-v1' or p['schema']!='books-runtime-pointer-v1' or m['unpacked']!='builds/'+identity+'/win-unpacked' or m['payload']['verified'] is not True or m['payload']['installer_equivalent'] is not True:raise ValueError('schema')
+            self.runtime=tree.child(p['root'])
+            relative=self.runtime.relative_to(root/'build-cache'/'builds')
+            if len(relative.parts)!=2 or relative.parts[1]!='runtime' or str(uuid.UUID(relative.parts[0]))!=relative.parts[0]:raise ValueError('runtime ownership')
+            self.unpacked=root/'dist'/'builds'/identity/'win-unpacked'
+            producer=self.runtime.parent/'producer-receipt.json'
+            self.producer_plan=capture_metadata(tree,producer);self.producer=_json_metadata(producer)
+            r=self.producer
+            if r['schema']!='books-build-producer-v1' or r['build_id']!=identity or r['owned_root']!=str(self.runtime.parent) or r['source_head']!=m['source_head']:raise ValueError('producer')
+            _receipt_equal(self.plans['manifest']['receipt'],r['manifest_receipt'])
+            _receipt_equal(self.plans['pointer']['receipt'],r['pointer_receipt'])
+            self.verify()
+        except (KeyError,ValueError,TypeError) as error:raise BoundaryError('Unknown/corrupt prior producer metadata preserved') from error
+    def verify(self):
+        if not self.plans:return
+        tree=self.tree;m,p,r=self.manifest,self.pointer,self.producer
+        _receipt_equal(_native_receipt(tree,self.producer_plan['path']),self.producer_plan['receipt'])
+        import re,json
+        if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)',m.get('version','')) or not re.fullmatch('[a-f0-9]{40}',m.get('source_head','')) or not re.fullmatch('[a-f0-9]{64}',m.get('product_digest','')) or m['payload'].get('shell_version')!=m['version'] or m['payload'].get('backend_version')!=m['version']:raise BoundaryError('Prior version/source proof differs')
+        if hashlib.sha256(json.dumps(p['files'],sort_keys=True,separators=(',',':')).encode()).hexdigest()!=p['manifest_sha256']:raise BoundaryError('Prior runtime map digest differs')
+        for base,hashes,natives in [(self.runtime,p['files'],r['runtime_files']),(self.unpacked,m['payload']['files'],r['payload_files'])]:
+            if set(tree.tree_manifest(base))!=set(hashes) or set(hashes)!=set(natives):raise BoundaryError('Prior build file membership differs')
+            for name,expected in hashes.items():
+                path=_relative_file(tree,base,name)
+                tree.protect(path,expected);_receipt_equal(_native_receipt(tree,path),natives[name])
+        artifacts=m['artifacts']
+        if not isinstance(artifacts,list) or len(artifacts)!=3:raise BoundaryError('Prior artifact inventory differs')
+        names=set()
+        for artifact in artifacts:
+            name=artifact['path'];names.add(name)
+            if not name.startswith('builds/'+m['build_id']+'/'):raise BoundaryError('Prior artifact path outside exact build')
+            path=_relative_file(tree,tree.root/'dist',name)
+            tree.protect(path,{'sha256':artifact['sha256'],'size':artifact['size']})
+            _receipt_equal(_native_receipt(tree,path),r['artifacts'][name])
+        stem='builds/'+m['build_id']+'/Books-Arranger-Setup-'+m['version']+'.exe'
+        if names!={stem,stem+'.blockmap','builds/'+m['build_id']+'/latest.yml'} or names!=set(r['artifacts']):raise BoundaryError('Prior artifact producer membership differs')
+    def archive(self):
+        result={}
+        try:
+            for name,plan in self.plans.items():result[name]=archive_metadata(self.tree,plan,self.verify)
+        except Exception:
+            for name,previous in result.items():
+                try:publish_metadata(self.tree,previous,self.plans[name]['path'])
+                except Exception as error:raise BoundaryError('Prior metadata archive stopped; exact previous evidence retained at '+previous) from error
+            raise
+        return result
+
+
+def producer_receipt(tree,owned_root,manifest,pointer,manifest_temp,pointer_temp):
+    root=tree.root;runtime=Path(pointer['root']);unpacked=root/'dist'/manifest['unpacked']
+    return {'schema':'books-build-producer-v1','build_id':manifest['build_id'],'owned_root':str(owned_root),'source_head':manifest['source_head'],
+        'manifest_receipt':_native_receipt(tree,manifest_temp),'pointer_receipt':_native_receipt(tree,pointer_temp),
+        'runtime_files':{name:_native_receipt(tree,_relative_file(tree,runtime,name)) for name in pointer['files']},
+        'payload_files':{name:_native_receipt(tree,_relative_file(tree,unpacked,name)) for name in manifest['payload']['files']},
+        'artifacts':{item['path']:_native_receipt(tree,_relative_file(tree,root/'dist',item['path'])) for item in manifest['artifacts']}}
+
+
+def disposable_stage_receipts(tree,owned_root):
+    """Only newly owned redundant copies, never runtime/artifacts/metadata."""
+    owned=tree.child(owned_root)
+    result={}
+    for name in ['downloads','extract','backend','nsis-archive','nsis-payload']:
+        folder=owned/name
+        if not os.path.lexists(folder):continue
+        for relative in tree.tree_manifest(folder):
+            path=_relative_file(tree,folder,relative)
+            result[path.relative_to(owned).as_posix()]=_native_receipt(tree,path)
+    return result
+
+
+def retire_disposable_stage(tree,owned_root,receipts):
+    owned=tree.child(owned_root)
+    for name in receipts:
+        if name.split('/')[0] not in {'downloads','extract','backend','nsis-archive','nsis-payload'}:raise BoundaryError('Disposable staging domain refused')
+        release_file(tree,_relative_file(tree,owned,name))
+    return remove_manifest_files(tree.root,owned,receipts)

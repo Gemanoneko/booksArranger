@@ -455,19 +455,7 @@ function configureUpdater(config){
   if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
   updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,notify:broadcastStatus,
     acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
-    parkEngine:async()=>{
-      if(state.quit!=='none'||state.backendExited||!state.owner)throw new Error('Owned running engine is required before restarting to update');
-      await request('POST','/api/desktop/update',{desktop:true});
-      state.quit='updating';broadcastStatus();
-      const deadline=Date.now()+60000;
-      while(!state.backendExited&&Date.now()<deadline){
-        await sleep(200);if(state.backendExited)break;
-        let status=null;
-        try{status=await request('GET','/api/desktop/status',{desktop:true,timeout:1000});}catch{/* Serving may stop before the retained native host exits; absence alone is not success. */}
-        if(status?.phase==='blocked')throw new Error(status.error||'Engine checkpoint blocked');
-      }
-      if(!state.backendExited||state.backend.exitCode!==0)throw new Error('The exact owned engine did not exit safely; update cancelled');
-    },
+    parkEngine:()=>require('./engine-update').parkOwnedEngine({state,request,sleep,broadcast:broadcastStatus}),
     install:async()=>{state.quit='exiting';autoUpdater.quitAndInstall(false,true);await sleep(250);if(!autoUpdater.quitAndInstallCalled){state.quit='none';throw new Error('Installer did not start; reopen Books Arranger and try again');}}
   });
   setInterval(async()=>{

@@ -551,30 +551,44 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
         roots = json.loads(Path(args.roots_json).read_text(encoding='utf-8'))
         if set(roots)!=set(DEFAULT_ROOTS) or any(not isinstance(path,str) or not os.path.isabs(path) for path in roots.values()):
             parser.error('Root configuration must contain exactly the three absolute library paths')
-    with catalog_lock(args.database,roots):
-        inventory = Inventory(args.database,roots)
-        try:
-            server = BrowserServer(('127.0.0.1',port),inventory)
-        except OSError as error:
-            raise RuntimeError(f'Books Arranger cannot bind its assigned port {port}; stop the existing owner first. No fallback port is used.') from error
-        instance_file = Path(args.database).parent / 'web-instance.json'
-        try:
-            from native_io import DirectoryBoundary
-            with DirectoryBoundary(instance_file.anchor,instance_file.parent),owned_instance_record(instance_file,server.health() | {'url':f'http://127.0.0.1:{port}/'}):
-                def stop(_signal=None,_frame=None):
-                    inventory.stop()
-                    server.closing = True
-                    threading.Thread(target=server.finish_shutdown,daemon=True).start()
-                signal.signal(signal.SIGINT,stop)
-                if hasattr(signal,'SIGTERM'):signal.signal(signal.SIGTERM,stop)
-                if sys.stdout is not None:
-                    print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{port}/ — PID {os.getpid()}',flush=True)
-                if ready is not None:ready(server)
-                server.serve_forever(poll_interval=.2)
-        finally:
-            inventory.stop()
-            if inventory.worker and inventory.worker.is_alive():inventory.worker.join(timeout=20)
-            server.server_close()
+    from scanner import inside
+    from native_io import DirectoryBoundary
+    database_path = Path(args.database).absolute()
+    if any(inside(database_path, root) for root in roots.values()):
+        raise ValueError('Keep the inventory database outside source libraries')
+    # Existing mode cannot create missing ancestry. Explicit new mode alone may
+    # create the selected empty folder; the final guard runs before lock/schema.
+    with DirectoryBoundary(database_path.anchor, database_path.parent, create=create_data):
+        if startup_guard is not None:startup_guard(database_path, roots, port)
+        with catalog_lock(args.database,roots):
+            if before_start is not None:before_start(database_path, roots, port)
+            return serve_owned(args, roots, port, ready)
+
+
+def serve_owned(args, roots, port, ready):
+    inventory = Inventory(args.database,roots)
+    try:
+        server = BrowserServer(('127.0.0.1',port),inventory)
+    except OSError as error:
+        raise RuntimeError(f'Books Arranger cannot bind its assigned port {port}; stop the existing owner first. No fallback port is used.') from error
+    instance_file = Path(args.database).parent / 'web-instance.json'
+    try:
+        from native_io import DirectoryBoundary
+        with DirectoryBoundary(instance_file.anchor,instance_file.parent),owned_instance_record(instance_file,server.health() | {'url':f'http://127.0.0.1:{port}/'}):
+            def stop(_signal=None,_frame=None):
+                inventory.stop()
+                server.closing = True
+                threading.Thread(target=server.finish_shutdown,daemon=True).start()
+            signal.signal(signal.SIGINT,stop)
+            if hasattr(signal,'SIGTERM'):signal.signal(signal.SIGTERM,stop)
+            if sys.stdout is not None:
+                print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{port}/ — PID {os.getpid()}',flush=True)
+            if ready is not None:ready(server)
+            server.serve_forever(poll_interval=.2)
+    finally:
+        inventory.stop()
+        if inventory.worker and inventory.worker.is_alive():inventory.worker.join(timeout=20)
+        server.server_close()
 
 if __name__ == '__main__':
     main()
