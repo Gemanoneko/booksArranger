@@ -348,12 +348,18 @@ class ExpandedPcmHash:
         return self.proof.result()
 
 
-def normalized_pcm_evidence(path,stage,stop,duration,encoding,kind=None):
+def normalized_pcm_evidence(path,stage,stop,duration,encoding,kind=None,aggregate=None):
     proof=NativePcmHash(encoding['channels']) if kind is None else ExpandedPcmHash(encoding['channels'],kind)
+    telemetry=proof
+    if aggregate is not None:
+        if kind is not None:raise ValidationError('Canonical aggregate cannot use a quantized candidate')
+        class Fanout:
+            def feed(self,raw):proof.feed(raw);aggregate.feed(raw)
+        telemetry=Fanout()
     codec,format=('pcm_f64le','f64le') if kind is None else {'s16':('pcm_s16le','s16le'),'s24':('pcm_s24le','s24le'),'s32':('pcm_s32le','s32le'),'f32':('pcm_f32le','f32le')}[kind]
     run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
       '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0',
-      '-af',normalization_filter(encoding),'-c:a',codec,'-f',format,'pipe:1'],stage,stop,max(300,duration*2),telemetry=proof)
+      '-af',normalization_filter(encoding),'-c:a',codec,'-f',format,'pipe:1'],stage,stop,max(300,duration*2),telemetry=telemetry)
     return proof.result()
 
 
@@ -367,16 +373,32 @@ def choose_normalized_pcm(path,stage,stop,duration,encoding):
     return 'pcm_f64le',reference
 
 
+def choose_normalized_pcm_set(stage,copies,encoding,stop,durations,aggregate=None):
+    """Select one exact format for the entire concat-demuxer input set.
+
+    Concat packets inherit the first input's codec configuration. Different PCM
+    widths, and especially s32/f32 equal widths, must never be mixed here.
+    """
+    references=[normalized_pcm_evidence(stage/name,stage,stop,duration,encoding,aggregate=aggregate) for name,duration in zip(copies,durations)]
+    for kind,codec in (('s16','pcm_s16le'),('s24','pcm_s24le'),('s32','pcm_s32le'),('f32','pcm_f32le')):
+        for name,duration,reference in zip(copies,durations,references):
+            if normalized_pcm_evidence(stage/name,stage,stop,duration,encoding,kind)!=reference:break
+        else:return codec,references
+    return 'pcm_f64le',references
+
+
 def normalize_sources(stage,copies,encoding,stop,durations):
     required=working_space_required(0,durations,encoding,len(copies))
     if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Insufficient staging space for complete exact normalization and publication; originals retained')
+    aggregate=NativePcmHash(encoding['channels'])
+    codec,references=choose_normalized_pcm_set(stage,copies,encoding,stop,durations,aggregate)
     result=[];receipts={}
     for index,(name,duration) in enumerate(zip(copies,durations)):
         remaining_pcm=math.ceil(sum(durations[index:])*encoding['sample_rate']*encoding['channels']*8)+(len(copies)-index)*4096
         remaining_required=remaining_pcm+3*output_space_required(0,durations,encoding,len(copies))+64*1024*1024
         if shutil.disk_usage(stage).free<remaining_required:raise OSError(errno.ENOSPC,'Staging space changed before normalization; originals retained')
         output=stage/(f'normalized{index:05}.wav')
-        codec,reference=choose_normalized_pcm(stage/name,stage,stop,duration,encoding)
+        reference=references[index]
         run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',
           '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
           '-af',normalization_filter(encoding),'-c:a',codec,'-rf64','always','-f','wav',str(output)],stage,stop,max(300,duration*2))
@@ -389,6 +411,9 @@ def normalize_sources(stage,copies,encoding,stop,durations):
             receipts[output.name]={'facts':facts,'sha256':expected,'pcm':reference,'codec':codec}
             remember_generated(output,expected,facts['size'])
         result.append(output.name)
+    joined=aggregate.result()
+    if joined['sample_count']!=sum(reference['sample_count'] for reference in references):raise ValidationError('Joined original normalized sample count changed')
+    for receipt in receipts.values():receipt['joined_pcm']=joined
     return result,receipts
 
 
@@ -485,17 +510,36 @@ def native_pcm_evidence(path,stage,stop,duration,encoding):
       '-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),telemetry=proof)
     return proof.result()|{'sample_rate':encoding['sample_rate'],'channels':encoding['channels'],'channel_layout':encoding.get('channel_layout')}
 
+def verify_normalized_concat(stage,copies,durations,encoding,stop,expected):
+    proof=NativePcmHash(encoding['channels'])
+    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+      '-protocol_whitelist','file','-format_whitelist','concat,wav','-f','concat','-safe','1','-i',str(stage/'inputs.txt'),
+      '-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,sum(durations)*2),telemetry=proof)
+    if proof.result()!=expected:raise ValidationError('Concatenated normalized PCM differs from the complete ordered source proof')
+
+
 def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
-    original_copies=list(copies)
+    original_copies=list(copies);joined=None;codec=None
     with contextlib.ExitStack() as guards:
         if encoding.get('mode')=='normalize':
             copies,receipts=normalize_sources(stage,copies,encoding,stop,durations)
+            codecs={receipt['codec'] for receipt in receipts.values()}
+            if len(codecs)!=1:raise ValidationError('Normalized concat inputs have incompatible PCM codecs')
+            codec=next(iter(codecs));joined=receipts[copies[0]]['joined_pcm']
             for name in copies:
                 held=guards.enter_context(VerifiedFile(stage/name))
-                if held.facts()!=receipts[name]['facts'] or held.sha256()!=receipts[name]['sha256']:
+                if held.facts()!=receipts[name]['facts'] or held.sha256()!=receipts[name]['sha256'] or receipts[name]['joined_pcm']!=joined:
                     raise ValidationError('Normalized snapshot differs from its complete-source receipt')
-        # Leases remain open until the final media consumer and verification finish.
-        return _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies)
+            write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
+            guards.enter_context(VerifiedFile(stage/'inputs.txt'))
+            # This expected digest came from the ORIGINAL protected sources,
+            # never from the possibly misinterpreted concat demuxer's output.
+            verify_normalized_concat(stage,copies,durations,encoding,stop,joined)
+        # Input/plan leases remain open through final media verification.
+        output,validation=_encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies)
+        if joined is not None:
+            validation['normalized_joined_pcm']=joined;validation['normalized_pcm_codec']=codec
+        return output,validation
 
 
 def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies):
@@ -503,7 +547,7 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
     if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Staging space changed before output creation; originals retained')
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
-    write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
+    if encoding.get('mode')!='normalize':write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
     review=manifest['metadata'];comments=manifest.get('comments','')
     if review.get('series'):
         comments+=('\n' if comments else '')+f"Series: {review['series']}\nSeries number: {review.get('number','')}"

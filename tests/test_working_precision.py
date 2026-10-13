@@ -32,6 +32,11 @@ class ExpandedPcmTests(unittest.TestCase):
             with self.subTest(raw=raw,channels=channels):
                 proof=pipeline.ExpandedPcmHash(channels,kind);proof.feed(raw)
                 with self.assertRaises(pipeline.ValidationError):proof.result()
+    def test_shared_selector_requires_exact_every_member(self):
+        a={'sha256':'a','sample_count':7,'bytes':56,'sample_format':'pcm_f64le'};b=dict(a,sha256='b')
+        with patch.object(pipeline,'normalized_pcm_evidence',side_effect=[a,b,a,dict(b,sha256='rounded'),dict(a,sha256='rounded'),a,b]) as evidence:
+            codec,proofs=pipeline.choose_normalized_pcm_set(Path('private'),['a.wav','b.wav'],{'channels':1},None,[1,1])
+        self.assertEqual(codec,'pcm_s32le');self.assertEqual(proofs,[a,b]);self.assertEqual(evidence.call_count,7)
     def test_precision_selector_compares_complete_hash_and_frame_count(self):
         reference={'sha256':'full','sample_count':7,'bytes':56,'sample_format':'pcm_f64le'}
         with patch.object(pipeline,'normalized_pcm_evidence',side_effect=[reference,dict(reference,sample_count=6),dict(reference,sha256='prefix'),dict(reference,bytes=48),reference]) as evidence:
@@ -77,6 +82,53 @@ class RealPrecisionTests(unittest.TestCase):
         with pipeline.generated_artifacts(self.stage):copies,receipts=pipeline.normalize_sources(self.stage,[source.name],self.encoding,self.stop,[duration])
         receipt=receipts[copies[0]];actual=pipeline.native_pcm_evidence(self.stage/copies[0],self.stage,self.stop,duration,self.encoding)
         self.assertEqual({key:actual[key] for key in receipt['pcm']},receipt['pcm']);self.assertEqual(actual['channels'],2)
+    def mixed_join(self,recipes,expected_codec,label):
+        stage=self.stage/label;stage.mkdir();copies=[];durations=[];expected=pipeline.NativePcmHash(1)
+        for index,(kind,values) in enumerate(recipes):
+            source=stage/f'source{index:05d}.wav';durations.append(wav(source,kind,values));copies.append(source.name)
+            raw=source.read_bytes()[44:]
+            if kind=='s24':values=[int.from_bytes(raw[i:i+3],'little',signed=True)/8388608 for i in range(0,len(raw),3)]
+            else:
+                fmt={'s16':'h','s32':'i','f32':'f','f64':'d'}[kind];scale={'s16':32768,'s32':2147483648,'f32':1,'f64':1}[kind]
+                values=[value[0]/scale for value in struct.iter_unpack('<'+fmt,raw)]
+            expected.feed(b''.join(struct.pack('<d',value) for value in values))
+        with pipeline.generated_artifacts(stage):
+            normalized,receipts=pipeline.normalize_sources(stage,copies,self.encoding,self.stop,durations)
+            self.assertEqual({r['codec'] for r in receipts.values()},{expected_codec})
+            inputs=stage/'inputs.txt';pipeline.write_generated(inputs,''.join(f"file '{name}'\n" for name in normalized))
+            actual=pipeline.NativePcmHash(1)
+            pipeline.run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-protocol_whitelist','file','-f','concat','-safe','1','-i',str(inputs),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,self.stop,30,telemetry=actual)
+        self.assertEqual(actual.result(),expected.result())
+        self.assertEqual(receipts[normalized[0]]['joined_pcm'],expected.result())
+        self.assertEqual(len(list(stage.glob('normalized*.wav'))),2)
+        from test_automatic_media_policy import PrivateMediaTests
+        manifest=PrivateMediaTests.manifest(type('RootFixture',(),{'root':stage})(),[stage/name for name in copies])
+        before=[pipeline.digest(stage/name) for name in copies]
+        output,validation=pipeline.create_private(manifest,stage/'actual-app-stage',self.stop)
+        self.assertTrue(output.is_file());self.assertEqual(validation['checks'],'Output checks passed')
+        self.assertEqual(validation['normalized_pcm_codec'],expected_codec)
+        self.assertEqual(validation['normalized_joined_pcm'],expected.result())
+        self.assertEqual(before,[pipeline.digest(stage/name) for name in copies])
+    def test_mixed_s32_f32_join_is_exact_in_both_orders(self):
+        recipes=[('s32',[-2147483647,-1,0,1,1073741825]),('f32',[2**-140,0.5,-0.3,-0.0])]
+        self.mixed_join(recipes,'pcm_f64le','integer_first');self.mixed_join(list(reversed(recipes)),'pcm_f64le','float_first')
+    def test_different_integer_widths_join_is_exact_in_both_orders(self):
+        recipes=[('s16',[-1,0,1,16384]),('s24',[-8388607,-1,0,1,4194305])]
+        self.mixed_join(recipes,'pcm_s24le','short_first');self.mixed_join(list(reversed(recipes)),'pcm_s24le','long_first')
+    def test_real_create_private_refuses_truncated_concat_plan_before_aac(self):
+        from test_automatic_media_policy import PrivateMediaTests
+        first=self.stage/'first.wav';second=self.stage/'second.wav'
+        wav(first,'s32',[1,1073741825,-2147483647]);wav(second,'f32',[2**-140,0.3,-0.0])
+        manifest=PrivateMediaTests.manifest(type('RootFixture',(),{'root':self.stage})(),[first,second])
+        before=[pipeline.digest(first),pipeline.digest(second)];original=pipeline.write_generated
+        def truncate(path,text):
+            if Path(path).name=='inputs.txt':text=text.splitlines()[0]+'\n'
+            return original(path,text)
+        with patch.object(pipeline,'write_generated',side_effect=truncate):
+            with self.assertRaisesRegex(pipeline.ValidationError,'Concatenated normalized PCM'):
+                pipeline.create_private(manifest,self.stage/'actual-app-stage',self.stop)
+        self.assertEqual(before,[pipeline.digest(first),pipeline.digest(second)])
+        self.assertEqual(list((self.stage/'actual-app-stage').rglob('checked.m4b')),[])
     def test_normalizer_short_space_writes_no_wav(self):
         with patch.object(pipeline.shutil,'disk_usage',return_value=shutil._ntuple_diskusage(10,10,0)),patch.object(pipeline,'run_owned') as producer:
             with self.assertRaises(OSError) as caught:pipeline.normalize_sources(self.stage,['source00000.wav'],self.encoding,self.stop,[100])
