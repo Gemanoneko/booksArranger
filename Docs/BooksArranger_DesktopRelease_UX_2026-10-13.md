@@ -30,6 +30,32 @@ Use the existing approved update check, without adding processing or restart aut
 
 When downloaded while busy, show a normal-flow notice: “vX.Y.Z is ready. Finish or pause active work before restarting to update.” Omit the restart action until the engine positively verifies all required idle conditions, including scanner, research, jobs and cleanup; an empty conversion slot alone is insufficient. Do not invent percent completion or a countdown. When idle, notice “vX.Y.Z is ready to install.” with “Restart to update” and tooltip “Save pending work, close Books Arranger and install vX.Y.Z. Processing stays paused after restart.” Tray item: “Restart to update to vX.Y.Z”. It uses the same idle-gated action. If work becomes active between rendering and click, refuse safely and refresh to the busy notice. Hide/disable update restart during accepted Quit. Install only after an explicit restart-to-update action; startup remains paused. Keep the notice visible until state changes; do not require a dismiss feature.
 
+### Manual check, download and retry actions (Sergei reinforcement)
+
+Reference: QuickLaunch `src/main/updater.js`, `src/main/tray.js` and the renderer Check for updates action: check → explicit download → explicit install/restart; normal Quit does not install. Books Arranger retains its stronger atomic idle gate and complete owned-engine exit before installation. This addition specifies the necessary visible actions, not a new settings screen or installer policy.
+
+Add a quiet “Check for updates” button to the desktop toolbar alongside “Quit Books Arranger”, before Quit in tab order. Tooltip: “Check GitHub for a newer Books Arranger version.” Add the same “Check for updates” command to the tray between Open and Quit, separated from Quit. Both commands use the same updater state. Checking from the tray must not open or focus the window; keep the result for the next explicit Open. A user check updates one normal-flow update status panel below the header; do not interrupt conversion with a modal. Where a check-on-launch already exists, it uses the same state and cannot download/install or start processing without the corresponding explicit action.
+
+| State | Visible copy | Action |
+| --- | --- | --- |
+| No check requested | No result message | Check for updates |
+| Checking | Checking for updates… | Check disabled until this request finishes |
+| Current | Books Arranger is up to date (vX.Y.Z). | Check for updates |
+| New version found | vX.Y.Z is available. | Download update |
+| Downloading | Downloading vX.Y.Z…; show real measured percentage only when available | Disable duplicate Check/Download |
+| Download failed | Could not download the update. Your current version is still installed. | Retry download |
+| Check failed | Could not check for updates. Try again. | Check for updates |
+| Download verified; busy | vX.Y.Z is ready. Finish or pause active work before restarting to update. | No restart action until idle is positively established |
+| Download verified; idle | vX.Y.Z is ready to install. | Restart to update |
+| Install/restart accepted | Installing vX.Y.Z. Books Arranger will reopen paused. | Disable update actions; state advances only from actual updater/engine facts |
+| Install refused/failed while still running | Could not install the update. Your current version is still installed. | Retry install only if the verified payload remains valid and the idle gate passes; otherwise return to Download update |
+
+Download update tooltip: “Download vX.Y.Z. Installation waits until you choose Restart to update.” Retry download repeats only the failed download, without installing. The install retry is labeled “Restart to update”, with the existing restart tooltip; there is no bypass action. Check/download may operate while conversion is busy but never change jobs, pause them or weaken the idle gate. Once a version is available, its download action can be mirrored as “Download update to vX.Y.Z” in the tray; during download replace that with a disabled “Downloading vX.Y.Z…”. Once verified use the existing ready-idle tray item. An accepted full Quit disables update mutations and exits normally without installing.
+
+Do not erase an already verified ready payload because a later network check fails; display the check failure separately from the authoritative ready state. Do not say “Your current version is still installed” if installation actually succeeded and only relaunch failed: then show the true startup failure and identify the installed version if verified. On successful relaunch the loaded version badge must match the installed release, pending work remains saved, automatic processing stays Paused, and stale ready/error notices clear. Do not display development-mode “up to date” as evidence that GitHub was checked; dev mode says “Update checks are available in the installed app.”
+
+Additional QA: manual window/tray checks converge on one state; available/download/current/check-error/download-error/install-refusal/retry/ready-busy/ready-idle states show truthful actions; repeated clicks create one operation; check/download does not interfere with conversion; normal Quit never installs; busy transition between render/click refuses installation; successful actual packaged updater relaunch reports the new version and stays Paused. Measure Check/Download/Retry/Restart button rects and panel bounds in each applicable state with keyboard focus, long errors and 200% scaling.
+
 ## First-run data folder selection
 
 Authority: the M1 Brief already approves a selectable data folder outside the install folder and the default `%LOCALAPPDATA%\Books Arranger\data`. This selector chooses where the catalog is opened or explicitly created. It does not move a folder or rewrite stored paths/native identities. Existing users should select their current data folder in place so saved jobs, receipts and recovery remain associated with it. No additional product ruling is required for this selection flow.
