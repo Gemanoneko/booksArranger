@@ -212,3 +212,125 @@ Ids to re-check (prefixes, full ids in my scratch evidence): A `17eecad8 d78860f
 - `Docs/BooksArranger_CodeReview_v0.14.0_2026-10-13.md` appeared untracked in the worktree while I worked. It is not mine; I did not open it, so this verdict is independent of Senua's.
 
 **Verdict:** NO-GO — Books Arranger v0.14.0 / commit 67e3d43
+
+
+---
+
+# Round 2 — a7d9b42
+
+Author: Futaba. Candidate: commit `a7d9b4206974f9c6c88504b48d768c3a40c6f0a4` on `codex/books-fast-identity-0.14.0` (parent `67e3d43`; worktree HEAD agrees). Same rules as round 1: offline only, no app, live DB, network or Z:/Y:, Bash, no commit, nothing fixed. The round-1 sections above are unchanged.
+
+Method differences: I made no new clone. The candidate is a `git archive` export of a7d9b42 (44-character path, the same depth as the retained v0.13.1 baseline clone), because `rm -rf` of my round-1 clones is still denied. The catalog copy is a fresh copy of Ender's file (sha256 `06fa82d7f039e2294b60470b98245a81ae84913d998f47dc750d01c14799a6d0`, identical). **The worktree has uncommitted edits made after a7d9b42** (`local_identity.py`, `tests/test_local_identity.py`, `tests/test_local_identity_fixes.py` and four docs). I did not test them; this verdict is for the committed a7d9b42 only.
+
+**Summary: GO for a7d9b42, with the non-blocking findings below.** In all 445 approvals I found no narrator, compiler, translator or series name approved as the author or the title, and no chapter or part file approved as a book. All the controls you listed hold. The suite shows no new failure. One regression remains that only holds books (N1), plus a few Minor items.
+
+## Result per check (round 2)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Full suite on a7d9b42 vs v0.13.1 | PASS, no new failure (section R1) |
+| 2 | Scan of ALL approvals for wrong authors, narrators, compilers | PASS, 0 found (R2) |
+| 3 | 40 random approvals by hand, plus 10 new `Сборники` ones | PASS, 0 false of 40 and 0 false of 10 (R3) |
+| 4 | Controls: Hawking/King, Wild Cards, Гжендович/Гашек, Костюкевич/Хазанович, root-level and disc-folder split parts | PASS, all held (R4) |
+| 5 | The 39 cross-script pairs again | PASS, 30 still match and all are the same person, the 9 dropped are the 5 false ones plus four two-person credits (R5) |
+| 6 | One author, one folder spelling | PASS with caveats: 138 author strings = 138 people, 2 partial-name pairs; typos win (R6) |
+| 7 | Sergei's 4 rulings | Implemented; ruling 1 only partly (R7) |
+
+## R1. Full suite
+`python -m unittest discover -s tests -p "test_*.py"`, timeout 600000, a7d9b42 export and the v0.13.1 clone, both at path length 44.
+
+| Tree | Tests | Result |
+|---|---|---|
+| a7d9b42 | 543 (515 + 28 new) | 9 errors, 1 failure. The 9 errors are **name-for-name identical** to the v0.13.1 baseline set (and to Ender's) |
+| v0.13.1 | 490 | 9 errors, 0 failures this run |
+
+The one failure, `test_required_working_cleanup_drains_before_retry_is_armed` (`'Needs attention' != 'Paused'`), is a **pre-existing flake**: isolated reruns, 30 per tree, passed 25 and failed 5 on a7d9b42 and passed 25 and failed 5 on v0.13.1. Not caused by this candidate. Focused `test_local_*.py`: 53 tests, OK.
+
+## R2. Scan of all 445 approvals
+Reproduction first: 2,426 waiting/held books, **445 approvable = 378 author books + 67 collections filed under `Сборники`**, record for record identical to Ender's `fix2/measure-after-v3.json` (approvable ids and every reason list). Remaining holds: 1,924 "Book identity uncertain", 24 mixed, 19 playback order, 15 sources disagree, 7 membership, 1 full author name.
+
+Checks on the 378 author books (every one, own scripts, not Ender's):
+- reader marker or collection word in the author text: **0**;
+- author matches a reader-like name seen anywhere in the library (9,520 audio files; 98 names from narrator/reader/performer tags and from "читает / исп. / read by" in any tag): **0**; surname-level cross-check: 1 shared word (Иванов, a different person);
+- author matches a name used as composer beside 3 or more different artists (17 such names, likely readers): **0**;
+- author equals the reader named on its own row: **0**; author equals a translator: **0**; author under a collection-like folder: **0**;
+- every one of the 138 author strings read by eye for a known narrator or compiler: none (the readers that came up in round 1, Булдаков, Князев, Головин, Волков-pattern, are not authors of any approval);
+- the 67 collections: credit "Разные авторы" and `anthology` on all; no routed row discards a real person credit (credit tags are 57 collection-only, 6 collection plus reader, 4 reader-only); no narrator named in a collection is the author of another approval.
+
+Round-1 suspects: of the 13 (A, B1-B3) **9 are now filed under `Сборники` as "Разные авторы" with the reader recorded as narrator** (the five "читает …" rows, Головин, Булдаков x3) and **4 are held** (Князев x3, Лавкрафт episode). None is an author book. The 6 generic-title books and `0163bed7` are approved with their real authors (rulings 4 and 2); the two stray-guillemet titles (`7e6a6dee`, `31eb2e0f`) are held.
+
+Chapter or part files: none. Approvable single files with a track or disc tag "N of M, M above 1": 0. No approved single file under 20 MB except a 40-minute short story; 8 author books run under an hour and all are known short works (Лес на холме, Железная преисподняя, Большая симолеоновая афера and similar).
+
+## R3. Hand check
+**Random 40** (seed 13102026; 38 author books, 2 collections): **0 false matches**. Every one judged on tags, file, folder: Gaiman, Dick, Обухова/Тимошенко, Laymon, Rollins, Abnett, Шваб, Кайм, Волкодав, Дивов, Nevill, Ходжсон, Митчелл, King x5, Scalzi, Хоар, Гжендович, Варго, Pratchett, Sanderson, Атеев, Мастертон, Сапковский, Суэнвик, Anderson and others, plus `7fd4e232` (Булдаков collection, narrator recorded) and `b580c71a` (a "Глубина" collection). Readers (Булдаков, Большакова, Екатерина Бранд, Ксеноморф) are not used as authors anywhere. Notes only: the author text is the library's majority spelling, e.g. "Pratchet Terry" (R6).
+
+**10 new `Сборники` collections** (seed 20261013, drawn from the 58 not approvable in round 1): all 10 are real collections and correctly filed. 9 are the "Глубина" series (artist "Сборник", composer "разные исполнители", folder `Сборники/Глубина`: Антиутопия, Алкоголь, Собаки, Фантастика, Русская готика, Открытия, Море, Космос из прошлого, Сто лет назад. Рассказы 1923 года); 1 is "Ужастики" (artist "Разные авторы"). **0 false.** Of the 67 collections only 10 name a narrator at all (R7, N3).
+
+## R4. Controls (a7d9b42, real `folder_siblings` and `catalog_index` over a private synthetic catalog, 54 cases)
+All held, as required:
+
+| Control | Result |
+|---|---|
+| Hawking tag in a King folder; King tag in a Hawking folder | **held** both ways (round 1: approved). True pair Hawking/Хокинг still approves |
+| Wild Cards folder, "О. С. Кард" tag | **held** (true pair Orson Scott Card still approves) |
+| Гашек folder, Гжендович tag and the reverse | **held**; "Гжендович Я." folder with an "Ярослав Гжендович" tag approves |
+| Хазанович folder, Костюкевич tag and the reverse; Алексиевич/Иванова; Сенкевич/Ибсен; bare "Владимир" folder | **held** |
+| Root-level part file beside its sibling parts (7); root level with 44 root files and 2,500 nested files (no cap) | **held** |
+| CD1 beside CD2; "(часть 1)" beside "(часть 2)"; Disc 1 beside Disc 2 | **held** (a lone whole book in a CD1 folder approves) |
+| Readers and compilers: "читает X" as author slot, "Разные авторы" plus narrator, comment "Читает <credited author>", author who reads other books in the library, reader named in the file name | none approved as an author book. The first, second, third and file-name patterns are filed as collections under `Сборники`, the library-reader case is held |
+| Series name as title ("Траун" vs "Траун. Союзники"), "Гарри Поттер" vs the full title, volume numbers 2033/2034, "Дом"/"Дым" | **held** |
+| Ruling 2 ("ГЕограф" tag, clean file), invisible U+200E and stray "»" | approved with the **tag** spelling; control characters and stray quote removed |
+| Lone numbered part ("Игры Немезиды 1" with no sibling) | **held** |
+| Generic title with an agreeing author; the same inside a collection folder | approved; **held** inside a collection folder |
+
+3 of the 54 cases did not behave as I expected; none changes the verdict (all three are residual or documented): `Michael Crichton` against "Майкл Крайтон" is now held (a documented false hold, vowel not written the standard way); a **lone chapter file with no catalogued sibling** and a title that does not name the part still approves (no instance in the 445); and a folder named for a **translator** with the translator also in album_artist approves with the translator as author (low realism, no instance).
+
+## R5. The cross-script pairs again
+- Round-1 39 unlinked pairs: **30 still match, all the same person** (Dembski-Bowden, Blackwood, Counter, Abnett x2, Koontz x2, Martin x2, McGill, McNeill, Frank Herbert x2, Rollins x4, Harwood, Nasu, Gaiman x3, Stine, R. C. Wilson, Howard x2, Pratchett x2, Zahn, Шендеров). **9 dropped**: Hawking/King x4, Wild Cards/Кард, and four "Gaiman & Pratchett" two-person credit strings.
+- Fresh pass over the whole name population (801 names): 125 cross-script matches, 93 inside one row, **32 unlinked, all the same person, 0 false** (two new ones, Swallow and Beckett, are correct).
+- Pairs the old matcher accepted and the new one refuses: 9 in total; 4 are the false ones, 4 are real same-person pairs now held (Bruce Sterling, Dennis Wheatley, Graham Masterton against "Грэхэм", Michael John Moorcock) and 1 is a title pair. These authors go to research: friction, not safety.
+- Same script (886 names): 79 non-exact matches, none between different people; one oddity: "Conan" alone supports "Arthur Conan Doyle" (a middle name, no instance).
+
+## R6. One author, one folder spelling
+- 378 author books carry **138 distinct author strings = 138 people**: no person has two spellings by a full match, and none is split between Latin and Cyrillic. Round 1 had 31 people spelled two or three ways across 207 books.
+- Two people still have a pair differing by a middle name (`Laymon Richard` 5 books against `Лаймон Ричард Карл` 1; `Ходжсон Уильям` 1 against `Ходжсон Уильям Хоуп` 2): 9 books, 2 people, as Ender states.
+- The choice is deterministic and recorded on every book (`author_spelling`: chosen, counts, reason, order).
+- Consequences to know: 131 Russian-titled books now get a Latin surname-first folder ("King Stephen", "Rollins James"; the rule sends an unknown-original book to English when an English spelling exists locally). **The majority spelling wins even when it is a typo:** "Pratchet Terry" (20 local folders against 5 correct, 7 books) and "Zahn Thimoty" (2 against 1, 3 books). That follows ruling 3 as written; Sergei may want to see it (N2).
+- NOT RUN: whether already-published folders in the live library match these spellings; the catalog copy holds candidates only.
+
+## R7. Sergei's rulings
+1. Collections compiled or read by a narrator go to `Сборники`, narrator only as narrator: **done for 9 of the 13 round-1 cases (the Волков-pattern x5, Головин, Булдаков x3).** The 3 Князев collections, Sergei's own example, and the Лавкрафт episode are still held for research (N4).
+2. Tag wins on a spelling slip: done (R4). No approval in the 445 actually needed the slip rule.
+3. One canonical spelling: done (R6).
+4. Generic titles accepted when the author agrees: done (10 approvals; held inside a collection folder).
+
+## R8. What moved between round 1 and round 2
+403 approvals in round 1; 445 now: **359 kept, 44 dropped, 86 added** (58 collections, 28 author books; the 28 all read correctly). Of the 44 dropped, 6 were the flawed ones (4 held suspects, 2 title-text); the rest are safe over-holds: about 22 Warhammer story files in collection folders or "Author - Рассказы" folders, 7 whose "Author - Series" folder is read as another book (Хобб x2, Вонг x3, Нарния, Райбер), 3 Волков (the author also reads other books), 3 Кабир (N1), 4 titles ending in a short number or letter ("Apartment 16", "Трофики 64", "К-10 (сборник)", "Н"), 1 Креативщик (20 files). Split parts: 1,306 of the 1,309 round-1 split-part books are still held; the 3 that became approvable are correct (Траун, book 1 of a series whose siblings are books 2 and 3; Перерождение, volume 1; Пока все дома, an episode beside "… Новогодняя серия"). 1,303 rows now carry the sibling conflict, 69 more are held because the title names a part or a number, none because the folder could not be read.
+
+## New findings (round 2)
+
+| ID | Severity | Status | Owner | Finding |
+|---|---|---|---|---|
+| N1 | Major (friction, safe direction) | Open | Ender | `same_person(x, x)` is false for an identical credit that contains an initial or a "-ович/-евич/-ич" word in a name of three or more words (`"Robert J. Sawyer"`, `"Laurell K. Hamilton"`, `"Кабир Максим Ахмадович"`, `"О. С. Кард"`). When artist and album_artist hold the **same** string, the book is read as two people and held with "name different people". 40 books are held this way (about 23 single-author or two-author books). It cost 3 Кабир approvals from round 1, and it is why all 9 Robert J. Sawyer books are **still held** although F9 was listed as fixed: the unit test passes the source gate, the real rows stop earlier. Holds only, no false approval. Worktree edits made after a7d9b42 touch `compare_names`; not tested |
+| N2 | Minor (rule outcome) | Open | Jane / Sergei | The majority local spelling is used even when it is a typo: "Pratchet Terry", "Zahn Thimoty" will be written into the library names |
+| N3 | Minor (scope) | Open | Jane / Ender | 57 of the 67 "narrator collections" have no narrator (artist "Сборник" or "Разные авторы", folder `Сборники`, mostly the "Глубина" series). They are correctly collections, but ruling 1 spoke of narrator-compiled ones and these used to go to collection research. Fact kind is still `narrator_collection`. A reader named in a bracket ("[Илья Дементьев]") is not recorded as narrator |
+| N4 | Minor (ruling gap) | Open | Ender / Jane | Князев x3 (`710a6a3c`, `aedf2ae0`, `d27f8da7`, Sergei's own example) and the Лавкрафт episode `ed9488eb` are held, not filed under `Сборники`: Князев is never credited as reader locally, so author against compiler is "unclear" |
+| N5 | Minor | Open | Ender | A reader named inside closing brackets, "(читает Гарри Стил)", is cut to the first name, so "author equals reader" is missed. Only matters when an author reads his own book (Глуховский, correctly approved) |
+| N6 | Minor | Open | Ender | Residual mechanisms with no instance in the 445: lone chapter file with no catalogued sibling; a middle name alone ("Conan") supports a full author; translator folder. "Michael Crichton" no longer matches "Майкл Крайтон" (documented) |
+| N7 | Minor | Open | Ender | The identity sample doc and the handoff were re-issued in a7d9b42; I did not re-check the doc this round |
+
+Round-1 findings: F1 and F2 fixed (A-class and B-class); F3 fixed; F4 fixed; F5 fixed (caveat N2); F6 fixed; F7 fixed by ruling 2; F8 accepted by ruling 4; **F9 not fixed in the data (N1)**; F10 partly fixed (N6); F11 fixed in the handoff; F12 still not verifiable offline (the CHANGELOG now calls the Google Books cap a courtesy cap below the default and raises only Open Library and iTunes); F13 unchanged.
+
+Pattern alerts: 1. **PA1, a claimed fix that did not show in the real-catalog run:** F9 ("Robert J. Sawyer") is described as fixed with a unit test, while all 9 real rows stay held by a different rule. Proposed disposition for Jane: fix, by listing the rows a fix claims to unblock in Ender's measurement run.
+
+## Not run / limits (round 2)
+- NOT RUN: the app, a real admission, any network call, live-library folder spellings, audio probing beyond the durations stored in the catalog copy, `qa-handoff` entry script.
+- Judgements rest on tags, names, folders and what the same catalog says about readers; the 445 were scanned by my own rules and read in samples (50 books by hand, all 67 collections by one line each, all 138 author strings). A class I did not think of would not be found.
+- This verdict covers only the committed a7d9b42. The uncommitted edits in the worktree after it are untested. This file now holds two verdict lines (round 1 NO-GO at 67e3d43 above, round 2 below); the checker should read the last one.
+
+## Cleanup (round 2)
+- Removed: my two copies of the catalog copy (377 MB each, single-file `rm --`), their SQLite side files, the derived `rows2.json` and the private fixture database. Ender's evidence folder untouched.
+- **NOT REMOVED** (`rm -rf` still denied): `C:/Users/<user>/AppData/Local/Temp/fq/new2` (a7d9b42 export), `.../fq/base` and `.../fq/cand` (round-1 clones, v0.13.1 and 67e3d43), and in `C:/Users/<user>/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/2b7de6b0-ce4b-4a27-9134-6e4452d270f4/scratchpad/futaba-0140`: `cand` and `base` (round 1). About 55 MB in all.
+- Kept as unresolved evidence in the same scratchpad folder: `scripts/` (round 1 and round 2 scan and control scripts, including `fixtures2.py` and `scan_r2.py`) and `out2/` (suite outputs, fail sets, scans, control results, spelling and pair lists).
+
+**Verdict:** GO — Books Arranger v0.14.0 / commit a7d9b42

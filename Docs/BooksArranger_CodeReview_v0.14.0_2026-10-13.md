@@ -161,3 +161,120 @@ Confirmed sound:
 | C1 | Critical | 2 Correctness | `local_identity.py:308` (`_embedded`), `:359` (`_supports_author`) | Narrator credits ("читает X") become the author. 5 live approvable books in `АНТОЛОГИЯ РУССКОЙ МИСТИКИ`. | (1) Treat any credit or path author piece containing a narrator marker (читает, читают, чит., исполняет, исп., озвучил/а, read by, narrated by, narrator, reader) as a recording credit, never an author. (2) If an author or artist tag is a `NOT_PEOPLE` collection credit, do not fall through to another credit: no local acceptance (research path). Add the 5 live rows as test fixtures and confirm they are held. |
 | C2 | Critical | 2 Correctness | `local_identity.py:52`, `:130-138`, `:321` | -ович/-евич/-ич surnames are dropped as patronymics, so different people match on the given name. A narrator can become the author. | (1) Drop a patronymic token only when the name has 3 or more words and at least 2 other non-initial words remain. (2) In `_embedded`, merge two credits only on a full, non-subset match with no dropped tokens. Add tests for Костюкевич/Хазанович and Гжендович/Хорошков (artist plus album_artist). |
 | C3 | Critical | 2 Correctness / 5 Data | `local_identity.py:386-408` (`folder_siblings`), `:251-261` | The split guard fails open. (a) At the root, LIMIT 2000 over the subtree shows only 1 of 44 root files. (b) Disc and part folders are checked one at a time. | (1) Select direct children exactly, with no LIMIT. Or, if a cap is kept, return `unreadable` (fail closed) when it is hit or when more than 20 folders exist. (2) When the candidate's folder matches `DISC`, or its folder or file name carries a part marker the title lacks, include the sibling disc and part folders under the parent in the sibling set. Add tests for the root-level "(Часть 1)/(Часть 2)" pair and for `CD1/CD2`. |
+
+---
+
+## Round 2 — a7d9b42
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-13
+Fix round: 67e3d43..a7d9b42 (17 files, +1591 / -301)
+Full range re-confirmed: v0.13.1..a7d9b42 (22 files, +2748 / -41)
+```
+
+### Method
+
+The review was red-team and read-only. I made a scratch copy of the evidence catalog and reran Ender's `evidence/measure.py` against a7d9b42. The result matches Ender's `fix2/measure-after-v3.json` exactly: 445 approvable, 67 of them routed to `Сборники`, and 479 that agree locally. I ran pure-function probes on synthetic rows. I queried the copy with `mode=ro&immutable=1`. I did not run the app, read the live database, use the network or touch Z:/Y:.
+
+### Round 1 findings, rechecked
+
+**C1 — narrator taken as author: fixed.**
+- No approvable author carries a reader marker, and none matches a catalog reader.
+- The 5 `АНТОЛОГИЯ РУССКОЙ МИСТИКИ` books now route as collections, with the narrator recorded only as narrator.
+
+**C2 — -ич surnames dropped: fixed.**
+- These pairs no longer match: Гжендович/Хорошков, Костюкевич/Хазанович and Abramovich/Polanski.
+- `_embedded` merges two credits only through `same_person`.
+
+**C3 — split-part guard: fixed for both layouts.**
+- `folder_siblings` uses the `(root,path)` primary-key range. The query plan is `SEARCH … COVERING INDEX`, with no LIMIT.
+- For a root-level candidate it returns 43 of 43 siblings in 0.03–0.09 s.
+- `catalog_index` takes 1.1 s once, then 0.002 s while cached. The cache is keyed to the trigger-maintained `book_catalog_revision`.
+- With no root, more than 20 folders, or a read error, the guard fails closed. Both callers turn any exception into a hold (`merge_service.py:474-479`, `_siblings`).
+- Disc and part sibling folders are now included.
+
+**M2, M3 and M4 are fixed:**
+- **M2:** vowels now count in cross-script matching. Kong, Simonova, "Brs Kn" and Хокинг/King no longer match.
+- **M3:** eviction now goes through the small side-index table, and expiry is an indexed delete.
+- **M4:** the legacy tests run under the default rule. The final suite failure set equals the baseline (543 run, the same 9 environment errors).
+
+**M1 — lone numbered part: still open on the live file. [Major]**
+- `James S. A. Corey\5. Игры Немезиды\5. Игры Немезиды 1.m4b` is approvable in both my run and Ender's v3 run.
+- `PART_TITLE` (`local_identity.py:879`) checks only the title tag. Here the tag says "Игры Немезиды", and only the file name carries the trailing " 1".
+- `test_m_lone_numbered_part_or_chapter_is_held` uses `album='Игры Немезиды 1'`, which is not the live tag. The handoff's claim that this file is held is wrong.
+- Fix: apply the part check to the file stem when the stem minus a trailing number equals the title.
+
+**M5 — anthologies: addressed through ruling 1.** That route is reviewed below.
+
+### New findings
+
+#### R2-1 [Critical] — the ruling-1 route files real single-author books as "Разные авторы"
+
+Location: `local_identity.py:957-976`, `public_research.py:742`.
+
+The route needs two signals, and the "collection credit" and "credited person is the reader" signals count even when a real person credit is still present. The person is then dropped, and the book is published as `Сборники\<title>` under "Разные авторы". Synthetic probes on `agreement()`:
+
+1. **A "Сборник" tag overrides an author the tags and folder agree on.**
+   - Setup: artist "Стивен Кинг", album_artist "Сборник", folder `Сборники\Стивен Кинг - Ночная смена\`.
+   - Result: the route fires, although tags and folder agree on King.
+   - The variant with author="Сборник" and a collection title also routes.
+2. **An author who reads their own books becomes a narrator.**
+   - Setup: artist "Дмитрий Глуховский" (catalog-wide a reader of his own books), album "Рассказы о Родине".
+   - Result: routed. Глуховский is recorded only as narrator, and the credit becomes "Разные авторы".
+   - Here the catalog-reader hold at `:875-876` is meant to send the book to research, but `reader_credit` at `:958` turns it into a route signal instead.
+3. **An author not named in the path is dropped.**
+   - Setup: under `Сборники\`, artist "Стивен Кинг", album_artist "читает Игорь Князев", author not named in the path.
+   - Result: routed, narrator Князев, King discarded.
+
+Scope:
+- **Live: 0.** All 67 routed books in the copy carry only collection or reader credits; I checked each one.
+- **Why it still blocks:** this is a wrong-author path to publication and retirement, by the same bar as round-1 C2 and C3. It also contradicts the intent stated for the fix ("collections *with no author credit*") and ruling 1, which concerns narrator-compiled collections, not single-author books.
+
+#### R2-2 [Critical] — conflicting initials agree, and the canonical-spelling merge unifies different people
+
+Location: `local_identity.py:309-319` and `:335-337` (`compare_names`), `:744-746` (`canonical_author.same`).
+
+Initials on one side are compared only against the extra full words on the other side. Initials present on both sides are never compared with each other, so "А. Стругацкий" = "Б. Стругацкий" (a non-subset match).
+
+1. **Agreement.**
+   - Tag "Стругацкий А." with folder and file name "Стругацкий Б." is **accepted**: green, author "Стругацкий А.". "Robert J. Sawyer" against "Robert K. Sawyer" is also accepted.
+   - That is a local contradiction treated as agreement.
+2. **Ruling-3 canonical spelling.**
+   - `same()` accepts any non-subset match, so the most common spelling wins across different people:
+     - "Толстой А.Н." becomes "Толстой Л.Н." (Leo Tolstoy) when the library has Л.Н. 12× vs А.Н. 2×;
+     - "А. Стругацкий" becomes "Стругацкий Б.";
+     - "Robert J. Sawyer" becomes "Sawyer Robert K.";
+     - "Иванов А." becomes whichever of Иванов Андрей / Алексей is more common.
+   - The canonical name becomes the author folder of the published book.
+
+Scope:
+- **Live: 0** conflicting-initial groups among the 837 catalog spellings, and 0 among the 378 author approvals.
+- Two Tolstoys written with initials is ordinary in a Russian library.
+
+### Other findings
+
+- **[Major] Silent fail-open when the root string does not match.** `folder_siblings` returns an empty list, not "unreadable", when no row matches the root string. With a trailing `\` or a lowercase root it returned 0 siblings.
+  - Production passes the same `inventory.roots` string the scanner stores, so nothing triggers this today.
+  - Fix: fail closed when the candidate's own paths are not found by the range query.
+- **[Minor]** With the original language unknown, ruling 3 picks the English spelling whenever a Latin folder exists (`local_identity.py:769-770`). For a Russian original that would contradict "Russian name for Russian originals". No live case: every Latin result in the copy is a foreign author.
+- **[Minor]** Ruling 3 faithfully adopts misspelled folder names as canonical: "Pratchet Terry", "Zahn Thimoty". This is Sergei's rule working as written, so I list it as information only.
+- **[Minor] Doc drift:** the handoff's M1 row says the live "Игры Немезиды 1" is held. It is not (see M1).
+
+**Unchanged and confirmed across v0.13.1..a7d9b42:**
+- Retirement, recovery, media, publication and web modules are untouched (`source_cleanup`, `recovery_retention`, `replacement_retirement`, `audio_jobs`, `native_io`, `audio_pipeline`, `web_server`).
+- `VERSION` is 0.14.0.
+- The evidence and SQL handling from round 1 still pass.
+
+### Round 2 verdict
+
+- Open Critical: 2 (R2-1, R2-2). Round-1 C1–C3 are closed.
+- Open Major: 2 (M1 live file, fail-open on root mismatch).
+- Open Minor: 3.
+
+| # | Sev | file:line | Must fix before release |
+|---|-----|-----------|--------------------------|
+| R2-1 | Critical | `local_identity.py:957-976` | Route to `Сборники` only when no person credit remains after reader and collection credits are removed (`embedded['people']` empty, and no uncorroborated author tag). Never count the catalog-wide "reads other books" conflict (`:875-876`) as a route signal; that stays a research hold. Add tests for the three probes above (King plus a "Сборник" tag; Глуховский self-reader; King plus "читает Князев" under `Сборники`). |
+| R2-2 | Critical | `local_identity.py:309-337`, `:744-746` | Initials present on both sides must pair one-to-one with matching letters, otherwise no match. In `canonical_author`, count only spellings that are `same_person` with the agreed name, and never expand an initial to a full given name when the library holds more than one distinct given name for that surname and initial. Add tests: А./Б. Стругацкий, Толстой А.Н./Л.Н., J./K. Sawyer, Иванов А. with two Ивановs. |
+
+**Verdict:** RELEASE BLOCKED — a7d9b42

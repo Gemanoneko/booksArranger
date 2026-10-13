@@ -24,6 +24,14 @@ def candidate(base,files):
     assert len(built)==1,built
     return next(iter(built.values()))|{'fingerprint':'private-fixture-fingerprint'}
 
+def catalogue(database,root,row):
+    """Put a fixture candidate's files into the private catalog, as the scanner would."""
+    with connect(database) as db:
+        for m in row['members']:
+            db.execute("INSERT OR REPLACE INTO files(root,path,size,modified,kind,metadata,error,missing) VALUES(?,?,?,?,'audiobook',?,'',0)",
+                (str(root),m['path'],m.get('size',10),m.get('modified',10),json.dumps(m['metadata'])))
+    return row
+
 SERGEI=[('Rollins James/Око Бога/01.mp3',{'album':'Око Бога','artist':'Джеймс Роллинс','track':'1/2'}),
         ('Rollins James/Око Бога/02.mp3',{'album':'Око Бога','artist':'Джеймс Роллинс','track':'2/2'})]
 
@@ -75,11 +83,14 @@ class AgreementTests(unittest.TestCase):
     def test_a_file_beside_others_with_the_same_title_is_not_the_whole_book(self):
         files=[('Dan Brown/Deception Point/Дэн Браун - Точка обмана - 21 - Глава 20.m4b',{'album':'Точка обмана','title':'Глава 20','artist':'Дэн Браун'})]
         sibling={'path':'x','filename':'Дэн Браун - Точка обмана - 22 - Глава 21.m4b','tags':{'album':'Точка обмана','title':'Глава 21'}}
-        self.assertTrue(self.record(files)['accepted'])
+        # Tagged only "Глава 20": a chapter even with no catalogued sibling (Futaba round 2 residual).
+        self.assertFalse(self.record(files)['accepted'])
         local=self.record(files,[sibling])
         self.assertFalse(local['accepted']);self.assertEqual(local['fields']['title']['state'],'red');self.assertIn('only part of the book',local['fields']['title']['how'])
         other={'path':'y','filename':'Дэн Браун - Код да Винчи.m4b','tags':{'album':'Код да Винчи'}}
-        self.assertTrue(self.record(files,[other])['accepted'])
+        self.assertFalse(self.record(files,[other])['accepted'])
+        whole=[('Dan Brown/Deception Point/Дэн Браун - Точка обмана.m4b',{'album':'Точка обмана','title':'Точка обмана','artist':'Дэн Браун'})]
+        self.assertTrue(self.record(whole,[other])['accepted'])
         self.assertFalse(self.record(files,[{'unreadable':True,'path':'','filename':'','tags':{}}])['accepted'])
         part=[('James S. A. Corey/5. Игры Немезиды/5. Игры Немезиды 1.m4b',{'album':'Игры Немезиды 1','artist':'Джеймс Кори'})]
         self.assertFalse(self.record(part)['accepted'])
@@ -126,7 +137,7 @@ class GapSearchTests(unittest.TestCase):
             def wait(_self,seconds):self.now[0]+=seconds;return False
         self.stop=ClockStop()
     def lookup(self,files):
-        self.row=candidate(self.base,files)
+        self.row=catalogue(self.client.database,self.base,candidate(self.base,files))
         return PublicResearch(self.client,leads=[]).lookup(self.row,str(self.base),self.stop)
     def test_agreeing_local_sources_approve_without_identity_research(self):
         self.catalog.closed={'api.fantlab.ru','www.wikidata.org'}

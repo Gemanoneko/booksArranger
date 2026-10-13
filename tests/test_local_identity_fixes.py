@@ -97,7 +97,8 @@ class C2SurnamesAndMerging(unittest.TestCase):
         self.assertFalse(record([('Ярослав Гашек/Ярослав Гашек - Пепел и пыль.m4b',{'album':'Пепел и пыль','artist':'Ярослав Гжендович'})])['accepted'])
     def test_c2_initial_pairs_with_given_name(self):
         # Futaba F6 false hold "Таксидермист": folder "Гжендович Я." is the same author.
-        self.assertTrue(same_person('Гжендович Я.','Ярослав Гжендович'))
+        # It agrees, but an initial standing for a first name is never merged as the same spelling (R2-2).
+        self.assertTrue(compare_names('Гжендович Я.','Ярослав Гжендович'));self.assertFalse(same_person('Гжендович Я.','Ярослав Гжендович'))
         local=record([('Гжендович Я./Таксидермист.m4b',{'album':'Таксидермист','artist':'Ярослав Гжендович'})])
         self.assertTrue(local['accepted'],local['conflicts']);self.assertEqual(local['fields']['author']['value'],'Ярослав Гжендович')
 
@@ -130,6 +131,10 @@ class C3SiblingGuard(unittest.TestCase):
             with self.subTest(path=path):
                 row=self.candidate(path);siblings=folder_siblings(self.database,row,ROOT)
                 self.assertEqual(len(siblings),1);self.assertFalse(agreement(row,ROOT,siblings)['accepted'])
+    def test_c3_root_string_mismatch_fails_closed(self):
+        row=self.candidate(ROOT+'\\Пётр Сидоров - Длинная книга (Часть 1).m4b')
+        for wrong in (ROOT+'\\',ROOT.lower(),'Z:\\Other'):
+            with self.subTest(root=wrong):self.assertEqual(folder_siblings(self.database,row,wrong),[UNREADABLE])
     def test_c3_fails_closed(self):
         many={'members':[{'path':ROOT+'\\F%02d\\x.mp3'%i,'filename':'x.mp3','metadata':{'tags':{}}} for i in range(21)]}
         self.assertEqual(folder_siblings(self.database,many,ROOT),[UNREADABLE])
@@ -158,6 +163,12 @@ class MajorFixes(unittest.TestCase):
         local=record([('Timothy Zahn/Тимоти Зан - Траун. Союзники.m4b',{'album':'Союзники','artist':'Тимоти Зан'})])
         self.assertTrue(local['accepted']);self.assertEqual(local['fields']['title']['value'],'Союзники')
     def test_m_lone_numbered_part_or_chapter_is_held(self):
+        # The live tags (Senua round 2): only the file name carries the part number.
+        live={'title':'Игры Немезиды','artist':'Джеймс Кори','album':'Игры Немезиды','album_artist':'Кирилл Головин'}
+        local=record([('James S. A. Corey/5. Игры Немезиды/5. Игры Немезиды 1.m4b',live)])
+        self.assertFalse(local['accepted']);self.assertIn('numbers this file as one part',local['fields']['title']['how'])
+        self.assertFalse(record([('Пётр Сидоров/Пётр Сидоров - Длинная книга (Часть 1).m4b',{'album':'Длинная книга','artist':'Пётр Сидоров'})])['accepted'])
+        self.assertFalse(record([('Пётр Сидоров/Длинная книга (часть 2)/01.mp3',{'album':'Длинная книга','artist':'Пётр Сидоров'})])['accepted'])
         for rel,tags in (('James S. A. Corey/5. Игры Немезиды/5. Игры Немезиды 1.m4b',{'album':'Игры Немезиды 1','artist':'Джеймс Кори'}),
                          ('Дэн Браун/Дэн Браун - Глава 01.m4b',{'album':'Глава 01','artist':'Дэн Браун'}),
                          ('Дэн Браун/Дэн Браун - 01.m4b',{'album':'01','artist':'Дэн Браун'})):
@@ -208,6 +219,8 @@ class M4DefaultRuleCoverage(unittest.TestCase):
             raise AssertionError('identity research must not run: '+url)
         client=PublicClient(base/'catalog.sqlite3',fetch=fetch,clock=lambda:100000.0)
         row=next(iter(groups.build([automatic_fixtures.row(base/'John Writer – A Book.mp3','A Book')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
+        from test_local_identity import catalogue
+        catalogue(client.database,base,row)
         result=PublicResearch(client,leads=[]).lookup(row,str(base))
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['metadata_facts']['identity_basis'],'local_agreement')
         self.assertEqual(result['review']['canonical_author'],'Writer John');self.assertEqual(result['review']['title'],'A Book')
@@ -227,6 +240,8 @@ class SergeiRulings20261013(unittest.TestCase):
             path=self.base/relative;metadata={'title':tags.get('title',''),'artist':tags.get('artist',''),'tags':tags,'probe':{'format':{'duration':'1'}}}
             rows.append({'root':str(path.parent),'path':str(path),'kind':'audiobook','size':10,'modified':10,'metadata':json.dumps(metadata),'error':'','missing':0})
         row=next(iter(groups.build(rows).values()))|{'fingerprint':'private-fixture-fingerprint'}
+        from test_local_identity import catalogue
+        catalogue(self.client.database,self.base,row)
         return row,PublicResearch(self.client,leads=[]).lookup(row,str(self.base))
     def test_r1_narrator_collection_filed_under_collections_root(self):
         from metadata import propose
@@ -282,5 +297,57 @@ class SergeiRulings20261013(unittest.TestCase):
         # Author-safety fixes still apply: a reader or a collection credit is never accepted as the author.
         self.assertFalse(record([('Рассказы/читает Роман Волков - Сборник рассказов.m4b',{'album':'Сборник рассказов','album_artist':'читает Роман Волков'})])['accepted'])
         self.assertFalse(record([('Сборники/Владимир Князев - Сборник рассказов.m4b',{'album':'Сборник рассказов','artist':'Владимир Князев'})])['accepted'])
+
+class Round2Criticals(unittest.TestCase):
+    """Senua round 2 (a7d9b42): R2-1 route never drops a person; R2-2 initials pair letter for letter."""
+    def test_r2_1_route_never_drops_a_person(self):
+        # 1. King with one "Сборник" tag: tags and folder agree on King, never "Разные авторы".
+        local=record([('Сборники/Стивен Кинг - Ночная смена/01.mp3',{'album':'Ночная смена','artist':'Стивен Кинг','album_artist':'Сборник','track':'1'})])
+        self.assertIsNone(local['route'])
+        local=record([('Сборники/Стивен Кинг - Ночная смена/01.mp3',{'album':'Ночная смена. Сборник рассказов','artist':'Стивен Кинг','author':'Сборник'})])
+        self.assertIsNone(local['route'])
+        # 2. Глуховский reads his own books elsewhere: a research hold, never a collection.
+        readers=frozenset({'Дмитрий Глуховский','Олег Булдаков'})
+        local=agreement({'members':[member('Глуховский Дмитрий/Дмитрий Глуховский - Рассказы о Родине.m4b',album='Рассказы о Родине',artist='Дмитрий Глуховский')]},ROOT,[],readers)
+        self.assertIsNone(local['route']);self.assertFalse(local['accepted']);self.assertIn('reader on other books',local['fields']['author']['how'])
+        # 3. King with "читает Князев" under Сборники: King is not dropped; the reader is not the author.
+        local=record([('Сборники/Ночная смена/01.mp3',{'album':'Ночная смена','artist':'Стивен Кинг','album_artist':'читает Игорь Князев','track':'1'})])
+        self.assertIsNone(local['route']);self.assertFalse(local['accepted'])
+        # A collection with no person credit at all still routes (ruling 1).
+        local=record([('Сборники/АНТОЛОГИЯ РУССКОЙ МИСТИКИ/01 читает Роман Волков - Недобрый глаз.mp3',{'album':'Недобрый глаз','artist':'Сборник','album_artist':'читает Роман Волков'})])
+        self.assertIsNotNone(local['route']);self.assertEqual(local['route']['narrators'],['Роман Волков'])
+    def test_r2_2_conflicting_initials_stay_distinct(self):
+        from local_identity import canonical_author
+        for left,right in (('Стругацкий А.','Стругацкий Б.'),('А. Стругацкий','Б. Стругацкий'),('Толстой А.Н.','Толстой Л.Н.'),('Robert J. Sawyer','Robert K. Sawyer'),('Толстой Л.Н.','Алексей Толстой')):
+            with self.subTest(left=left):self.assertIsNone(compare_names(left,right))
+        self.assertFalse(record([('Стругацкий Б./Стругацкий Б. - Понедельник начинается в субботу.m4b',{'album':'Понедельник начинается в субботу','artist':'Стругацкий А.'})])['accepted'])
+        def index(spellings):
+            keys={}
+            for spelling in spellings:
+                for key in __import__('local_identity')._spelling_keys(spelling):keys.setdefault(key,[]).append(spelling)
+            return {'spellings':dict(spellings),'keys':keys}
+        self.assertEqual(canonical_author('Толстой А.Н.',['Толстой А.Н.'],index({'Толстой Л.Н.':12,'Толстой А.Н.':2}),'')[1]['spelling'],'Толстой А.Н.')
+        self.assertEqual(canonical_author('Стругацкий А.',['Стругацкий А.'],index({'Стругацкий Б.':9,'Аркадий Стругацкий':4}),'')[1]['spelling'],'Стругацкий А.')
+        self.assertEqual(canonical_author('Иванов А.',['Иванов А.'],index({'Иванов Андрей':5,'Иванов Алексей':3}),'')[1]['spelling'],'Иванов А.')
+        self.assertEqual(canonical_author('Robert J. Sawyer',['Robert J. Sawyer'],index({'Robert K. Sawyer':8}),'')[1]['spelling'],'Robert J. Sawyer')
+
+class FutabaRound2(unittest.TestCase):
+    """Futaba round 2 (a7d9b42) non-blocking items folded in."""
+    def test_n1_identical_duplicate_credit_is_one_person(self):
+        for credit in ('Robert J. Sawyer','Кабир Максим Ахмадович','Максим Кабир, Парфенов М.С.'):
+            with self.subTest(credit=credit):
+                local=record([('%s/%s - Книга.m4b'%(credit,credit),{'album':'Книга','artist':credit,'album_artist':credit})])
+                self.assertTrue(local['accepted'],local['conflicts'])
+        # The R2-2 initials fix still holds: different initials are different people.
+        self.assertFalse(same_person('Стругацкий А.','Стругацкий Б.'));self.assertFalse(same_person('Толстой А.Н.','Толстой Л.Н.'))
+    def test_residual_lone_chapter_file_is_held(self):
+        # Futaba H9: "Глава 5" alone in its folder, album = the book, no catalogued sibling.
+        local=record([('Иванов Алексей/Тобол/Глава 5.m4b',{'album':'Тобол','title':'Глава 5','artist':'Алексей Иванов'})],[])
+        self.assertFalse(local['accepted']);self.assertIn('one chapter',local['fields']['title']['how'])
+        local=record([('Иванов Алексей/Тобол/05.m4b',{'album':'Тобол','artist':'Алексей Иванов'})],[])
+        self.assertFalse(local['accepted'])
+        self.assertTrue(record([('Иванов Алексей/Тобол/Тобол.m4b',{'album':'Тобол','title':'Тобол','artist':'Алексей Иванов'})],[])['accepted'])
+        # A lone "01" is how some rips name a one-file book: allowed.
+        self.assertTrue(record([('Иванов Алексей/Тобол/01.m4b',{'album':'Тобол','artist':'Алексей Иванов'})],[])['accepted'])
 
 if __name__=='__main__':unittest.main()

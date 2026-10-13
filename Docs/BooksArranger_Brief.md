@@ -219,7 +219,7 @@ Focused verification comprises standing metadata, collection identity, public wo
 
 ## v0.14.0 — local-agreement identity and gap-only search (2026-10-13)
 
-Implements the Sergei decision "local evidence is enough when it agrees" (2026-10-12, recorded in `Docs/BooksArranger_StandingRules_2026-10-11.md`). Handoff and test plan: `Docs/BooksArranger_FastIdentity_v0.14.0_2026-10-13.md`. Offline result on a copy of the live catalog: 445 of 2,426 waiting/held books become approvable without the Internet (378 author books and 67 collections under Сборники; 0 before); sample with field chips: `Docs/BooksArranger_IdentitySample_2026-10-13.md`.
+Implements the Sergei decision "local evidence is enough when it agrees" (2026-10-12, recorded in `Docs/BooksArranger_StandingRules_2026-10-11.md`). Handoff and test plan: `Docs/BooksArranger_FastIdentity_v0.14.0_2026-10-13.md`. Offline result on a copy of the live catalog: 455 of 2,426 waiting/held books become approvable without the Internet (389 author books and 66 collections under Сборники; 0 before); sample with field chips: `Docs/BooksArranger_IdentitySample_2026-10-13.md`.
 
 | Decision | Reason | Revisit when |
 | --- | --- | --- |

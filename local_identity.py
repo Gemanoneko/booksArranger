@@ -59,6 +59,7 @@ PART_TITLE = re.compile(r'(?:^|\s|[-–—.,:(])(?:глава|часть|ч\.|ch
 CONTAINER_NAMES = {'unsorted', 'audiobooks', 'аудиокниги', 'audio', 'books', 'книги', 'mp3', 'новое', 'new', 'incoming', 'downloads'}
 DISC = re.compile(r'(?:cd|disc|disk|диск|часть|part)[ _.-]*\d{1,3}', re.I)
 PART_SEGMENT = re.compile(r'\W*(?:(?:глава|часть|ч\.|chapter|part|cd|disc|диск|track|трек)\s*)?\d{1,4}\W*', re.I)
+TRAILING_PART = re.compile(r'(?:\s*[-_.,]\s*|\s+)(?:\d{1,3}|(?:часть|ч\.|part|глава|chapter|том|vol\.?)\s*\d{1,3})\s*$', re.I)
 PART_FOLDER = re.compile(r'(?:\(|\s|^)(?:часть|ч\.|part|cd|disc|диск|том|vol\.?|volume)\s*\d{1,3}\)?\s*$', re.I)
 PEOPLE_SEPARATOR = re.compile(r'\s[-–—]\s|[&,;/\\]|\s(?:и|and)\s', re.I)
 PATRONYMIC = re.compile(r'(?:[а-я]+(?:ович|евич|ич|овна|евна|ична|инична))|(?:[a-z]+(?:ovich|evich|ovna|evna|ichna))')
@@ -308,18 +309,33 @@ def compare_names(left, right):
             continue
         extra = [large[j] for j in range(len(large)) if j not in chosen]
         unused = list(small_initials)
+        expanded = False
         for word in list(extra):
             fit = next((i for i in unused if _initial_fits(i, word)), None)
             if fit is not None:
                 unused.remove(fit)
                 extra.remove(word)
+                expanded = True
+        # Initials written on both sides must pair one to one, letter for letter:
+        # "Стругацкий А." is not "Стругацкий Б.", "Толстой А.Н." is not "Толстой Л.Н.".
+        other = list(large_initials)
+        for initial in list(unused):
+            fit = next((x for x in other if x == initial or _initial_fits(initial, x)), None)
+            if fit is not None:
+                other.remove(fit)
+                unused.remove(initial)
+        if unused and other:
+            continue
+        # An initial left over beside an unmatched full word names a different first name.
+        if unused and extra:
+            continue
         kind = 'cross' if 'cross' in kinds else 'same'
         rank = (len(extra), kind == 'cross')
         if best is None or rank < best[0]:
-            best = (rank, kind, extra, unused)
+            best = (rank, kind, extra, unused + other, expanded)
     if best is None:
         return None
-    _, kind, extra, unused = best
+    _, kind, extra, unused, expanded = best
     subset = bool(extra)
     if subset:
         if several or len(extra) > 2:
@@ -334,12 +350,15 @@ def compare_names(left, right):
         how.append('one source gives only the surname')
     if a_dropped or b_dropped or unused or a_initials and not b_initials or b_initials and not a_initials:
         how.append('initials/patronymic ignored')
-    exact = not subset and not (a_dropped or b_dropped or unused)
-    return {'match': kind, 'subset': subset, 'exact': exact, 'how': '; '.join(how)}
+    exact = not subset and not (a_dropped or b_dropped or unused or expanded)
+    return {'match': kind, 'subset': subset, 'exact': exact, 'expanded': expanded, 'how': '; '.join(how)}
 
 
 def same_person(left, right):
-    """Two credits merge only on a full match: no extra or dropped word."""
+    """Two credits merge only on a full match: no extra or dropped word. The same words
+    (initials and patronymics included, any order) are always the same credit."""
+    if words(left) and sorted(words(left)) == sorted(words(right)):
+        return True
     match = compare_names(left, right)
     return bool(match and match['exact'])
 
@@ -624,6 +643,44 @@ def _supports_author(author, components):
     return best
 
 
+def _numbered_part(title, components):
+    """A single file named "Title 1" / "Title (часть 1)", or a folder named with a part marker,
+    whose name without that number is the book title: one numbered part, not the whole book."""
+    key = title_key(title)
+    for component in components:
+        if component['kind'] not in ('file name', 'folder'):
+            continue
+        raw = component['value']
+        parsed = filename_identity(raw + '.x')
+        forms = {_index_stripped(raw), _index_stripped(parsed.get('title') or raw)}
+        for form in forms:
+            if PART_FOLDER.search(form) and title_key(PART_FOLDER.sub('', form)) == key:
+                return component
+            if component['kind'] == 'file name':
+                cleaned = clean_title(form)
+                stripped = TRAILING_PART.sub('', cleaned)
+                if stripped != cleaned and title_key(stripped) == key:
+                    return component
+    return None
+
+
+def _chapter_only(row, title):
+    """The single file's own name or title tag says only "Глава 5", "Part 2" or "05"."""
+    member = row['members'][0]
+    stem = Path(member['filename']).stem
+    parsed = filename_identity(member['filename'])
+    track_title = text(_tags(member).get('title'))
+    for value in (stem, parsed.get('title') or stem, track_title):
+        value = clean_title(value)
+        if value and title_key(value) != title_key(title) and PART_SEGMENT.fullmatch(value.strip()):
+            # A lone "01" is how some rips name a one-file book; any other bare number, or a
+            # chapter/part name, is one piece of a larger book.
+            if re.fullmatch(r'\W*0*1\W*', value.strip()):
+                continue
+            return '"%s"' % value
+    return ''
+
+
 def _claims_person(value):
     """A structured name's author slot makes a person claim only when it looks like a name."""
     return bool(value) and not re.search(r'\d', value) and 1 <= len(words(value)) <= 4 and not NARRATOR_MARKER.search(value)
@@ -742,8 +799,10 @@ def canonical_author(agreed, forms, index, language=''):
     English otherwise; within that the most common local spelling (book folders), ties broken
     alphabetically; then surname first. Returns (name, record of the choice)."""
     def same(value):
+        # Only the same person: never a surname alone, and never an initial read as a full
+        # first name (the library may hold two different people behind "Толстой А.").
         match = compare_names(value, agreed)
-        return bool(match and not match['subset'])
+        return bool(match and not match['subset'] and not match['expanded'])
     counts = Counter()
     if index:
         # Library-wide counts only, so every book of one author sees the same counts and the
@@ -816,6 +875,10 @@ def folder_siblings(database, row, root):
         wanted = []
         for folder in folders:
             wanted += [p for p in under(folder) if str(Path(p).parent) == folder]
+        if not own <= set(wanted):
+            # The range query must find the candidate's own files; otherwise the root or path
+            # strings do not match the catalog and nothing beside the book can be ruled out.
+            return [dict(UNREADABLE)]
         for parent in parents:
             base = title_key(PART_FOLDER.sub('', Path(folders[0]).name), True)
             for path in under(parent):
@@ -878,6 +941,16 @@ def agreement(row, root='', siblings=None, readers=None):
     title_marked = bool(title and COLLECTION_TITLE.search(clean_title(title['value'])))
     if title and (PART_TITLE.search(clean_title(title['value'])) or not re.search(r'[^\W\d_]{2}', clean_title(title['value']))):
         conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True})
+    elif title and len(row.get('members', [])) == 1 and _chapter_only(row, title['value']):
+        # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
+        # chapter of that book, even when no sibling chapter is catalogued.
+        conflicts.append({'field': 'title', 'detail': 'this single file is named or tagged as one chapter or part (%s); one chapter is not the whole book'
+                          % _chapter_only(row, title['value']), 'force': True})
+    elif title:
+        part = _numbered_part(title['value'], components)
+        if part:
+            conflicts.append({'field': 'title', 'detail': '%s "%s" numbers this file as one part of "%s"; one part is not the whole book'
+                              % (part['kind'], part['value'], clean_title(title['value'])), 'force': True})
     if siblings and any(s.get('unreadable') for s in siblings):
         # Fail closed: without the folder contents a part of a larger book cannot be ruled out.
         conflicts.append({'field': 'title', 'detail': 'the other files beside this book could not be checked', 'force': True})
@@ -955,8 +1028,12 @@ def agreement(row, root='', siblings=None, readers=None):
     accepted = fields['title']['state'] in ('green', 'yellow') and fields['author']['state'] in ('green', 'yellow') \
         and not any(fields[n]['state'] == 'red' for n in ('series', 'number'))
     route = None
-    reader_credit = any('reader' in i['why'] for i in ignored) or any(c['field'] == 'author' and 'reader' in c['detail'] for c in conflicts)
-    if not accepted and fields['title']['state'] == 'green' and not any(c['field'] == 'title' for c in conflicts) \
+    # Only credits set aside in this book's own tags as readers count; "reads other books
+    # elsewhere" is a research hold, never a reason to file the book as a collection.
+    reader_credit = any('reader' in i['why'] for i in embedded['ignored'])
+    # Never route while any person credit remains (a real author is never dropped).
+    no_person = not embedded['people']
+    if no_person and not accepted and fields['title']['state'] == 'green' and not any(c['field'] == 'title' for c in conflicts) \
             and fields['author']['state'] != 'green' and fields['author']['state'] != 'yellow' \
             and (embedded['collection_credits'] or reader_credit) and not any(fields[n]['state'] == 'red' for n in ('series', 'number')):
         # Ruling 1: a collection compiled or read by a narrator goes to the collections root when
@@ -966,8 +1043,7 @@ def agreement(row, root='', siblings=None, readers=None):
             (['the credited person is the reader'] if reader_credit else [])
         if len(signals) >= 2:
             names = []
-            for value in embedded['readers'] + [i['value'] for i in ignored if 'reader' in i['why']] + \
-                    ([author['value']] if author and any(c['field'] == 'author' and 'reader' in c['detail'] for c in conflicts) else []):
+            for value in embedded['readers'] + [i['value'] for i in embedded['ignored'] if 'reader' in i['why']]:
                 name = text(narrator_names([value])[0]) if NARRATOR_MARKER.search(value) and narrator_names([value]) else text(value)
                 if name and not any(same_person(name, n) for n in names) and norm(name) not in NOT_PEOPLE:
                     names.append(name)
