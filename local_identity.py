@@ -34,7 +34,14 @@ from pathlib import Path
 
 from source_identity import filename_identity, norm, text
 
-AGREEMENT_VERSION = 'local-agree-v3'
+AGREEMENT_VERSION = 'local-agree-v4'
+# Records written by earlier versions keep validating (approved and completed books).
+KNOWN_AGREEMENT_VERSIONS = ('local-agree-v3', AGREEMENT_VERSION)
+# Sergei ruling 1 (2026-10-13) names these readers as narrator-compilers of collections. Under a
+# collection folder, a plain credit of exactly this person, who the library also credits as a
+# reader, is the narrator, never the author. Князев is not listed: two different Князевs read
+# books in this library (Игорь, Владимир) and the ruling names only the surname.
+RULED_NARRATORS = ('Олег Булдаков',)
 STATES = ('green', 'yellow', 'red', 'grey')
 AUTHOR_TAGS = ('author', 'album_artist', 'albumartist', 'artist')
 # composer is not used: in this library it holds the author as often as the reader.
@@ -354,6 +361,58 @@ def compare_names(left, right):
     return {'match': kind, 'subset': subset, 'exact': exact, 'expanded': expanded, 'how': '; '.join(how)}
 
 
+def middle_initial_same(left, right, spellings=()):
+    """'Dick Philip K.' = 'Дик Филип Киндред': the surname and the first name are written in full
+    on both sides and only the middle name is an initial on one side.
+
+    Never an initial standing for a first name (Senua R2-2: "Толстой А." stays apart from
+    "Толстой Алексей"), and never when any library spelling of the same first name and
+    surname carries a different middle name or middle initial (two different people)."""
+    match = compare_names(left, right)
+    if not match or match['subset'] or not match['expanded']:
+        return False
+    (short, short_initials, _), (large, large_initials, _) = sorted((_parts(left), _parts(right)), key=lambda side: len(side[0]))
+    if len(short) < 2 or len(large) != len(short) + 1 or len(short_initials) != 1 or large_initials:
+        return False
+    # An initial written first ("M. Mary Smith") is a first-name initial, never a middle one (Senua minor).
+    written = words(left if len(_parts(left)[0]) == len(short) else right)
+    if written and len(written[0]) == 1:
+        return False
+    if not any(norm(word) in GIVEN_NAMES for word in short):
+        return False
+    middle = [word for word in large if not any(_pair(word, s) for s in short)]
+    if len(middle) != 1 or not _initial_fits(short_initials[0], middle[0]):
+        return False
+    for spelling in spellings:
+        full, initials, _ = _parts(spelling)
+        core = [word for word in full if any(_pair(word, s) for s in short)]
+        if len(core) != len(short):
+            continue
+        if any(not _pair(word, middle[0]) for word in full if word not in core) or any(not _initial_fits(i, middle[0]) for i in initials):
+            return False
+    return True
+
+
+def slip_same(left, right):
+    """One word differs by a single letter in the same script (a doubled letter, "Pratchet" /
+    "Pratchett"), every other word identical; words of 6+ letters only. Used only to adopt a
+    spelling that fetched catalog evidence confirms (confirmed_spellings)."""
+    a, b = words(left), words(right)
+    if len(a) != len(b) or len(a) < 2:
+        return False
+    rest = list(b)
+    unmatched = []
+    for word in a:
+        if word in rest:
+            rest.remove(word)
+        else:
+            unmatched.append(word)
+    if len(unmatched) != 1 or len(rest) != 1:
+        return False
+    x, y = unmatched[0], rest[0]
+    return script(x) == script(y) != 'other' and min(len(x), len(y)) >= 6 and _edits(x, y, 1) == 1 and x[0] == y[0]
+
+
 def same_person(left, right):
     """Two credits merge only on a full match: no extra or dropped word. The same words
     (initials and patronymics included, any order) are always the same credit."""
@@ -475,7 +534,14 @@ def _path_components(row, root):
     for member in members[:1] if single else []:
         components.append({'kind': 'file name', 'value': Path(member['filename']).stem, 'numbered': False})
     # File names of a multi-file recording usually repeat "Author - Title NN".
-    if not single:
+    if not single and row.get('split_book'):
+        # Split book (v0.15.0): the shared start of the part names ("Dan Brown - The Lost Symbol"
+        # of "Dan Brown - The Lost Symbol - 01 - unknown title"), re-derived from the files.
+        from split_books import book_name
+        shared = book_name(members)
+        if shared:
+            components.append({'kind': 'file names', 'value': shared, 'numbered': False})
+    elif not single:
         stems = {title_key(Path(m['filename']).stem, True) for m in members}
         if len(stems) == 1 and next(iter(stems)) and filename_identity(members[0]['filename']).get('author'):
             components.append({'kind': 'file names', 'value': Path(members[0]['filename']).stem, 'numbered': True})
@@ -740,7 +806,7 @@ def catalog_index(database, root):
         revision = db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() if has else None
         key = (str(Path(database).resolve()), root, revision[0] if revision else None)
         if revision and key in _INDEX:
-            return _INDEX[key]
+            return dict(_INDEX[key], confirmed=confirmed_spellings(database))
         readers = set()
         uses = set()
         root_key = norm(str(Path(root)))
@@ -769,7 +835,87 @@ def catalog_index(database, root):
     if revision:
         _INDEX.clear()
         _INDEX[key] = index
-    return index
+    return dict(index, confirmed=confirmed_spellings(database))
+
+
+_CONFIRMED = {}
+# Fetched 'authors' evidence from VERIFIED records only (Senua M5): research results that were
+# admitted (state Queued), approved reviews and job manifests. A source URL is present only for
+# fetched catalog or publisher pages; local-agreement citations have none. Research that is
+# still waiting or held (for example "Author and work not independently verified") never confirms.
+CONFIRMED_QUERIES = {
+    'automatic_candidates': "SELECT json_extract(e.value,'$.cited_value'),json_extract(e.value,'$.source_url'),c.result FROM "
+                            "(SELECT result FROM automatic_candidates WHERE state='Queued' AND json_valid(result) AND json_type(result,'$.metadata_facts')='object') c,"
+                            "json_each(c.result,'$.evidence') e WHERE json_extract(e.value,'$.field')='authors'",
+    'candidate_context': "SELECT json_extract(e.value,'$.cited_value'),json_extract(e.value,'$.source_url'),NULL FROM "
+                         "(SELECT data FROM candidate_context WHERE json_valid(data) AND json_extract(data,'$.metadata_approved')=1) c,"
+                         "json_each(c.data,'$.metadata_evidence') e WHERE json_extract(e.value,'$.field')='authors'",
+    'audio_jobs': "SELECT json_extract(e.value,'$.cited_value'),json_extract(e.value,'$.source_url'),j.manifest FROM "
+                  "(SELECT manifest FROM audio_jobs WHERE json_valid(manifest)) j,json_each(j.manifest,'$.evidence.metadata_fields') e "
+                  "WHERE json_extract(e.value,'$.field')='authors'"}
+CONFIRMED_KEYS = {'automatic_candidates': "SELECT count(*),max(attempted) FROM automatic_candidates WHERE state='Queued'",
+                  'candidate_context': 'SELECT count(*),sum(revision) FROM candidate_context',
+                  'audio_jobs': 'SELECT count(*),max(updated) FROM audio_jobs'}
+
+
+def _record_spellings(record):
+    """Author spellings the confirming record itself saw locally (tags, file and folder names)."""
+    import json
+    seen = set()
+    try:
+        data = json.loads(record) if isinstance(record, str) else {}
+    except ValueError:
+        return seen
+    for clue in data.get('local_clues') or []:
+        if isinstance(clue, dict) and (clue.get('field') in AUTHOR_TAGS or clue.get('field') == 'author'):
+            seen.add(text(clue.get('value')))
+    for source in data.get('sources') or []:
+        if not isinstance(source, dict) or not source.get('path'):
+            continue
+        tags = {str(k).casefold(): v for k, v in ((source.get('metadata') or {}).get('tags') or {}).items()}
+        seen.update(text(tags.get(k)) for k in AUTHOR_TAGS)
+        for level in list(Path(str(source['path'])).parents)[:3]:
+            parsed = filename_identity(level.name + '.x')
+            seen.add(text(parsed['author'] if parsed.get('author') else level.name))
+    return {unicodedata.normalize('NFC', s).casefold() for s in seen if s}
+
+
+def confirmed_spellings(database):
+    """Library-wide author spellings confirmed by fetched, verified catalog or publisher evidence
+    (read-only): {spelling: {'urls': [...], 'seen': [local spellings in the confirming records]}}.
+    Any read problem yields {} (current behaviour: the most common local spelling)."""
+    import contextlib
+    import json
+    import sqlite3
+    try:
+        with contextlib.closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True, timeout=5)) as db:
+            db.execute('PRAGMA query_only=ON')
+            tables = sorted(name for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'") if name in CONFIRMED_QUERIES)
+            key = (str(Path(database).resolve()),) + tuple(tuple(db.execute(CONFIRMED_KEYS[name]).fetchone()) for name in tables)
+            if key in _CONFIRMED:
+                return _CONFIRMED[key]
+            found = {}
+            for name in tables:
+                for value, url, record in db.execute(CONFIRMED_QUERIES[name]):
+                    url = str(url or '')
+                    if not url.startswith('https://'):
+                        continue
+                    try:
+                        values = json.loads(value) if isinstance(value, str) and value.startswith('[') else [value]
+                    except ValueError:
+                        values = [value]
+                    for item in values if isinstance(values, list) else [values]:
+                        spelling = unicodedata.normalize('NFC', text(item))
+                        if _person_like(spelling) and not PEOPLE_SEPARATOR.search(spelling):
+                            entry = found.setdefault(spelling, {'urls': set(), 'seen': set()})
+                            entry['urls'].add(url)
+                            entry['seen'] |= _record_spellings(record)
+    except (sqlite3.Error, OSError, ValueError):
+        return {}
+    result = {spelling: {'urls': sorted(e['urls'])[:5], 'seen': sorted(e['seen'])} for spelling, e in found.items()}
+    _CONFIRMED.clear()
+    _CONFIRMED[key] = result
+    return result
 
 
 def catalog_readers(database, root):
@@ -797,20 +943,32 @@ def surname_first(name):
 def canonical_author(agreed, forms, index, language=''):
     """One spelling per person (Sergei 2026-10-13, ruling 3): Russian name for a Russian original,
     English otherwise; within that the most common local spelling (book folders), ties broken
-    alphabetically; then surname first. Returns (name, record of the choice)."""
+    alphabetically; then surname first. Returns (name, record of the choice).
+
+    v0.15.0: within the chosen script, a spelling that fetched catalog or publisher evidence
+    confirms anywhere in the library (index['confirmed'], confirmed_spellings) wins over the
+    local majority, so a majority typo ("Pratchet") gives way to the confirmed spelling and
+    every book of the author gets one folder. Without a confirmation nothing changes. A middle
+    initial may stand for the middle name when first name and surname are written in full on
+    both sides (middle_initial_same: "Dick Philip K." / "Дик Филип Киндред")."""
+    candidates = set()
+    if index:
+        for k in _spelling_keys(agreed):
+            candidates.update(index['keys'].get(k, ()))
+    library = sorted(candidates)
+
     def same(value):
         # Only the same person: never a surname alone, and never an initial read as a full
         # first name (the library may hold two different people behind "Толстой А.").
         match = compare_names(value, agreed)
-        return bool(match and not match['subset'] and not match['expanded'])
+        if match and not match['subset'] and not match['expanded']:
+            return True
+        return middle_initial_same(value, agreed, library)
     counts = Counter()
     if index:
         # Library-wide counts only, so every book of one author sees the same counts and the
         # same choice; this book's own folder is already among them.
-        candidates = set()
-        for k in _spelling_keys(agreed):
-            candidates.update(index['keys'].get(k, ()))
-        for spelling in sorted(candidates):
+        for spelling in library:
             if same(spelling):
                 counts[spelling] += index['spellings'].get(spelling, 0)
     for form in forms:
@@ -829,6 +987,20 @@ def canonical_author(agreed, forms, index, language=''):
         pool, why = latin, 'original language unknown; an English spelling exists locally, so the English name is used'
     else:
         pool, why = counts, 'original language unknown; only Russian spellings exist locally'
+    # The script is chosen from local spellings only (ruling 3); a confirmed spelling of the same
+    # person in that script then wins (same name rules, or a one-letter slip of a local spelling).
+    scripts = {script(k) for k in pool}
+    confirmed = {}
+    for spelling, entry in sorted(((index or {}).get('confirmed') or {}).items()):
+        # A one-letter slip is adopted only when the confirming record itself saw that local
+        # spelling (Senua M5): "Terry Pratchet" files confirmed as "Terry Pratchett".
+        seen = set(entry.get('seen', ()))
+        slip = any(slip_same(spelling, local) and unicodedata.normalize('NFC', text(local)).casefold() in seen for local in [agreed] + sorted(pool))
+        if script(spelling) in scripts and (same(spelling) or slip):
+            confirmed[spelling] = entry['urls']
+    if confirmed:
+        pool = {spelling: counts.get(spelling) or (index or {}).get('spellings', {}).get(spelling, 0) for spelling in confirmed}
+        why += '; spelling confirmed by fetched catalog evidence (library-wide confirmed-spelling list)'
     # Case variants ("РОБЕРТ ХАЙНЛАЙН" folder, "Роберт Хайнлайн" tag) are one spelling; show the
     # most common form that is not written in capitals.
     groups = {}
@@ -839,8 +1011,11 @@ def canonical_author(agreed, forms, index, language=''):
         return written.title() if written.isupper() else written
     ranked = sorted(((display(v), sum(c for _, c in v)) for v in groups.values()), key=lambda item: (-item[1], item[0]))
     chosen, order = surname_first(ranked[0][0])
-    return chosen, {'chosen': chosen, 'spelling': ranked[0][0], 'why': why, 'order': order,
-                    'counts': [[k, v] for k, v in sorted(counts.items(), key=lambda item: (-item[1], item[0]))][:8]}
+    record = {'chosen': chosen, 'spelling': ranked[0][0], 'why': why, 'order': order,
+              'counts': [[k, v] for k, v in sorted(counts.items(), key=lambda item: (-item[1], item[0]))][:8]}
+    if confirmed:
+        record['confirmed_by'] = next((urls for spelling, urls in confirmed.items() if spelling.casefold() == ranked[0][0].casefold()), [])
+    return chosen, record
 
 
 def folder_siblings(database, row, root):
@@ -902,6 +1077,99 @@ def folder_siblings(database, row, root):
     return found
 
 
+PART_LEAD = re.compile(r'^\W*(?:книга|кн\.|том|т\.|volume|vol\.?|book|часть|ч\.|part|выпуск)\s*[#№]?\s*\d{1,3}\s*[.:,\-–—)]*\s*', re.I)
+
+
+def _part_core(value, set_title):
+    """A part's own title: its name without the leading number, the set name and a leading
+    volume or part marker ("Книга 1. Пятый Доминион. Главы 1-20" -> "Пятый Доминион. Главы 1-20")."""
+    from split_books import _arabic
+    value = clean_title(_arabic(value))
+    for _ in range(3):
+        before = value
+        value = _index_stripped(value).strip()
+        if set_title:
+            target = norm(set_title)
+            for cut in range(1, len(value) + 1):
+                if norm(value[:cut]) == target and (cut == len(value) or not value[cut].isalnum()):
+                    value = value[cut:]
+                    break
+        value = PART_LEAD.sub('', value).strip(' .,:;-–—')
+        if value == before:
+            break
+    value = text(value)
+    return value if re.search(r'[^\W\d_]{2}', value) else ''
+
+
+def _part_book(row, root, siblings, components):
+    """Sergei 2026-10-13: an M4B part that carries its own chapters is its own book, never
+    joined (example: Clive Barker's Imajica folder of part files).
+
+    Applies to a single .m4b candidate whose same-album siblings form, with it, one coherent
+    numbered set (same author, reader and recording tags, gap-free numbering, declared totals
+    met; split_books.check with parts=True, so own titles and volume numbers are allowed).
+    Every part keeps its parent work (Senua R2-C1): the series is the set's album whenever a
+    folder or the set's shared file name repeats it, the number is the part's proven track
+    number, the title is the part's own title where the title tag and the file name agree.
+    A set is filed part by part only when EVERY part qualifies; otherwise the whole set is
+    held (never published piecemeal). Every part's own chapters are proven at admission
+    (merge_service); without them the set stays held. Returns None when the candidate is
+    not such a part."""
+    members = row.get('members', [])
+    if len(members) != 1 or not siblings or any(s.get('unreadable') for s in siblings):
+        return None
+    member = members[0]
+    # .m4b only: copy mode keeps a part's chapters; an .m4a would be re-encoded (Senua R2-M1).
+    if Path(member['path']).suffix.lower() != '.m4b':
+        return None
+    from split_books import book_key, book_name, check, _number
+    key = book_key(member)
+    if not key or key[0] != 'album':
+        return None
+    mates = [{'path': s['path'], 'filename': s['filename'], 'metadata': {'tags': s['tags']}} for s in siblings]
+    mates = [m for m in mates if book_key(m) == key]
+    if not mates:
+        return None
+    group = sorted([member] + mates, key=lambda m: m['path'])
+    verdict = check(group, media=False, durations=False, parts=True)
+    if not verdict['ok']:
+        return None
+    index = group.index(member)
+    tags = _tags(member)
+    set_title = text(tags.get('album'))
+    shared = book_name(group)
+    leads = [c for c in components if c['kind'] in ('folder', 'parent folder')] + ([{'kind': 'file names', 'value': shared, 'numbered': False}] if shared else [])
+    lead = _supports_title(set_title, leads, '')
+    record = {'parts': len(group), 'position': verdict['positions'][index][1], 'set_title': set_title,
+              'members': [m['path'] for m in group], 'title': None, 'series': None, 'number': None, 'blocked': ''}
+    titles = []
+    for m in group:
+        m_tags = _tags(m)
+        raw_title, stem = text(m_tags.get('title')), Path(m['filename']).stem
+        own_tag, own_name = _part_core(raw_title, set_title), _part_core(stem, set_title)
+        titles.append((own_tag if own_tag and own_name and title_key(own_tag) == title_key(own_name) else '', raw_title, stem))
+    lacking = [verdict['positions'][i][1] for i, (own, _, _) in enumerate(titles) if not own]
+    if not titles[index][0]:
+        record['blocked'] = 'one part of a %d-part set "%s" with no title of its own: this may be only part of the book; how to name it needs a rule' % (len(group), set_title)
+    elif lacking:
+        record['blocked'] = 'part %d of the %d-part set "%s" has no title of its own: this may be only part of the book, so the whole set is held (never filed piecemeal)' % (lacking[0], len(group), set_title)
+    elif not lead:
+        record['blocked'] = 'no folder or file name repeats the set "%s": its parts would lose their parent work, so the whole set is held' % set_title
+    elif verdict['basis'] != 'embedded track numbers' or any(disc != 1 for disc, _ in verdict['positions']):
+        record['blocked'] = 'the parts of "%s" are not numbered by track tags on one disc, so the whole set is held' % set_title
+    if record['blocked']:
+        return record
+    own, raw_title, stem = titles[index]
+    record['title'] = {'state': 'green', 'value': own, 'how': 'own title of one part of a %d-part set: the title tag and the file name agree without the part number, volume marker and set name' % len(group),
+                       'sources': [{'kind': 'embedded', 'field': 'title', 'value': raw_title}, {'kind': 'file name', 'value': stem}]}
+    record['series'] = {'state': 'green', 'value': set_title, 'how': 'the album shared by the set, repeated in the %s; each part is its own book of that parent work (Sergei 2026-10-13)' % lead['kind'],
+                        'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': lead['kind'], 'value': lead['value']}]}
+    track, _ = _number(tags.get('track') or tags.get('tracknumber'))
+    record['number'] = {'state': 'green', 'value': str(track), 'how': 'the part\'s track number, gap-free across the %d-part set' % len(group),
+                        'sources': [{'kind': 'embedded', 'field': 'track', 'value': text(tags.get('track') or tags.get('tracknumber'))}, {'kind': 'set numbering', 'value': '1-%d' % len(group)}]}
+    return record
+
+
 def agreement(row, root='', siblings=None, readers=None):
     """Field-by-field local agreement record for one candidate row.
 
@@ -911,12 +1179,28 @@ def agreement(row, root='', siblings=None, readers=None):
     """
     embedded = _embedded(row)
     components = _path_components(row, root)
+    if readers and any(COLLECTION_FOLDER.search(n) for n in _ancestors(row, root)):
+        # Ruling 1 names these readers as narrator-compilers: under a collection folder their
+        # exact credit, when the library also credits them as readers, is a reader credit. The
+        # R3-1 self-reading guard below still holds a folder that names the reader.
+        for person in list(embedded['people']):
+            if any(same_person(person['value'], n) for n in RULED_NARRATORS) and any(same_person(person['value'], r) for r in readers):
+                embedded['people'].remove(person)
+                embedded['ignored'].append({'field': person['field'], 'value': person['value'],
+                                            'why': 'a reader named in Sergei ruling 1 (2026-10-13) and credited as a reader in this library; the narrator, never the author'})
+        embedded['author'] = embedded['people'][0] if len(embedded['people']) == 1 else None
     fields = {}
     conflicts = list(embedded['conflicts'])
     ignored = list(embedded['ignored'])
     title = embedded['title']
     author = embedded['author']
     catalog = readers or ()
+    part = _part_book(row, root, siblings, components)
+    if part:
+        # Its own book (Sergei 2026-10-13): its own title, not the set's album, is the title.
+        title = {'kind': 'embedded', 'field': 'title', 'value': part['title']['value']} if part['title'] else None
+        if part['blocked']:
+            conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True})
     readers = embedded['readers'] + narrator_names([c['value'] for c in components])
     if len(embedded['people']) > 1:
         # Two different people in author/artist credits (often author and narrator). Resolve
@@ -941,25 +1225,27 @@ def agreement(row, root='', siblings=None, readers=None):
     title_marked = bool(title and COLLECTION_TITLE.search(clean_title(title['value'])))
     if title and (PART_TITLE.search(clean_title(title['value'])) or not re.search(r'[^\W\d_]{2}', clean_title(title['value']))):
         conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True})
-    elif title and len(row.get('members', [])) == 1 and _chapter_only(row, title['value']):
+    elif title and not part and len(row.get('members', [])) == 1 and _chapter_only(row, title['value']):
         # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
         # chapter of that book, even when no sibling chapter is catalogued.
         conflicts.append({'field': 'title', 'detail': 'this single file is named or tagged as one chapter or part (%s); one chapter is not the whole book'
                           % _chapter_only(row, title['value']), 'force': True})
-    elif title:
-        part = _numbered_part(title['value'], components)
-        if part:
+    elif title and not part:
+        numbered_part = _numbered_part(title['value'], components)
+        if numbered_part:
             conflicts.append({'field': 'title', 'detail': '%s "%s" numbers this file as one part of "%s"; one part is not the whole book'
-                              % (part['kind'], part['value'], clean_title(title['value'])), 'force': True})
+                              % (numbered_part['kind'], numbered_part['value'], clean_title(title['value'])), 'force': True})
     if siblings and any(s.get('unreadable') for s in siblings):
         # Fail closed: without the folder contents a part of a larger book cannot be ruled out.
         conflicts.append({'field': 'title', 'detail': 'the other files beside this book could not be checked', 'force': True})
-    elif title and siblings:
+    elif title and siblings and not part:
         # Other audio files beside this candidate with the same title: it may be one part
         # (chapter, disc, volume file) of a larger book, so its own files are not the whole book.
         key = title_key(title['value'])
         base = title_key(title['value'], True)
-        numbered = base != key
+        # A trailing year (1500-2099) is part of the title ("Метро 2033" beside "Метро 2034",
+        # "Иная 2001"), never a part number; a zero-padded "Дорога 0001" stays a part (Senua M6).
+        numbered = base != key and not re.search(r'(?<!\d)(?:1[5-9]\d\d|20\d\d)\s*$', clean_title(title['value']))
 
         def part_of_same(sibling):
             names = [v for v in (sibling['tags'].get('album'), sibling['tags'].get('title'), Path(sibling['filename']).stem) if v]
@@ -985,6 +1271,8 @@ def agreement(row, root='', siblings=None, readers=None):
             component, how = support
             fields['title'] = {'state': 'green', 'value': clean_title(title['value']),
                                'sources': [title, {'kind': component['kind'], 'value': component['value']}], 'how': how}
+    if part and part['title']:
+        fields['title'] = part['title']
     # A structured-name contradiction always holds, even when another name supports the field.
     conflicts += [dict(c, force=True) for c in _contradicts(components, title['value'] if title else '', author['value'] if author else '')]
     real_author = 'author' in fields and not any(c['field'] == 'author' and (c.get('force') or c['detail'].startswith('embedded')) for c in conflicts)
@@ -1025,6 +1313,8 @@ def agreement(row, root='', siblings=None, readers=None):
         fields[name] = ({'state': 'green', 'value': value['value'], 'sources': [value, {'kind': supported['kind'], 'value': supported['value']}],
                          'how': 'embedded tag repeated in the %s' % supported['kind']} if supported else
                         {'state': 'grey', 'value': value['value'], 'sources': [value], 'how': 'only the embedded tag names it'})
+    if part and part['series'] and 'red' not in (fields['series']['state'], fields['number']['state'])             and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+        fields['series'], fields['number'] = part['series'], part['number']
     accepted = fields['title']['state'] in ('green', 'yellow') and fields['author']['state'] in ('green', 'yellow') \
         and not any(fields[n]['state'] == 'red' for n in ('series', 'number'))
     route = None
@@ -1068,7 +1358,10 @@ def agreement(row, root='', siblings=None, readers=None):
             gaps.append('series')
         if fields['author'].get('partial'):
             gaps.append('author_full')
-    return {'version': AGREEMENT_VERSION, 'accepted': accepted, 'route': route, 'fields': fields, 'series': series, 'gaps': gaps,
+    # Every part of the set must carry its own chapters at admission (merge_service).
+    part_book = {'parts': part['parts'], 'position': part['position'], 'set_title': part['set_title'], 'members': list(part['members']),
+                 'requires_own_chapters': True} if part else None
+    return {'version': AGREEMENT_VERSION, 'accepted': accepted, 'route': route, 'part_book': part_book, 'fields': fields, 'series': series, 'gaps': gaps,
             'ignored': ignored, 'conflicts': conflicts,
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
 
@@ -1107,7 +1400,8 @@ def summary(record):
                 'sources': [{k: s[k] for k in ('kind', 'field', 'value') if k in s} for s in value['sources'] if s][:4]}
     return {'version': AGREEMENT_VERSION, 'title': field('title'), 'author': field('author'),
             'series': field('series'), 'number': field('number'), 'gaps': list(record['gaps']),
-            'ignored': [dict(i) for i in record['ignored']][:6], 'route': dict(record['route']) if record.get('route') else None}
+            'ignored': [dict(i) for i in record['ignored']][:6], 'route': dict(record['route']) if record.get('route') else None,
+            'part_book': dict(record['part_book']) if record.get('part_book') else None}
 
 
 def revalidate(row, root, recorded, siblings=None, readers=None):
@@ -1118,6 +1412,8 @@ def revalidate(row, root, recorded, siblings=None, readers=None):
                 or current['fields']['title']['value'] != recorded['title']['value']:
             raise ValueError('Local collection evidence changed')
         return current
+    if (current.get('part_book') or None) != (recorded.get('part_book') or None):
+        raise ValueError('Local identity evidence changed')
     if not current['accepted']:
         raise ValueError('Local identity evidence no longer agrees')
     for name in ('title', 'author', 'series', 'number'):

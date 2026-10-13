@@ -72,6 +72,7 @@ class MergeService:
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
+        self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
             if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
@@ -326,12 +327,27 @@ class MergeService:
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
 
+    def _prune_working(self,job_id):
+        output_hash=''
+        try:
+            if not self.storage_cleanup.working_pending(job_id):return
+            self._post_current=(job_id,'temporary')
+            self.storage_cleanup._phase='verify published working receipts'
+            with connect(self.inventory.database) as db:
+                row=db.execute('SELECT output FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            output_hash=json.loads(row['output'])['sha256']
+            self.storage_cleanup.working_files(job_id)
+        except Exception as error:
+            self.storage_cleanup._diagnose(job_id,output_hash,error)
+        finally:self._post_current=None
+
     def _prune_completed(self,job_id):
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
                 with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
                 if self.retirement.historical_retired(parent):return
+        self._prune_working(job_id)
         self.recovery.sync()
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
@@ -348,6 +364,7 @@ class MergeService:
     def _after_completed(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
+        self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
@@ -503,7 +520,7 @@ class MergeService:
                 if stop.is_set():raise InterruptedError()
                 with generated_artifacts(self.reviews.cache) as artifacts:
                     try:
-                        profiles=[]
+                        profiles=[];own_chapters={}
                         for path in paths:
                             raw_profile=probe(path,self.reviews.cache,stop)
                             member=next(m for m in current['members'] if m['path']==path)
@@ -513,6 +530,45 @@ class MergeService:
                             streams=[s for s in raw_profile.get('streams',[]) if s.get('codec_type')=='audio']
                             if len(streams)!=1:raise ValueError('Audio format needs an encoding decision')
                             stream=streams[0];profiles.append((stream.get('codec_name'),stream.get('sample_rate'),stream.get('channels'),stream.get('bit_rate'),stream.get('channel_layout')))
+                            if Path(path).suffix.lower() in ('.m4b','.m4a'):own_chapters[path]=len(raw_profile.get('chapters') or [])
+                        # Sergei 2026-10-13: M4B parts with their own chapters are never joined. Only the .m4b
+                        # members of a split book are re-filed (the fact regroups the catalog: each part becomes
+                        # its own candidate); any other joined set is held as it is, every member kept together
+                        # (Senua R2-M1). Either way this joined attempt is held with every source preserved.
+                        chaptered={p:n for p,n in own_chapters.items() if n>1}
+                        if len(paths)>1 and chaptered:
+                            refile={p:n for p,n in chaptered.items() if current.get('split_book') and Path(p).suffix.lower()=='.m4b'}
+                            if not refile:raise ValueError('Book parts carry their own chapters; joining them would drop those chapters')
+                            from groups import setup_part_chapters
+                            sizes={m['path']:(m['size'],str(m['modified'])) for m in current['members']}
+                            with connect(self.inventory.database) as db:
+                                setup_part_chapters(db)
+                                for p,n in sorted(refile.items()):
+                                    db.execute('INSERT OR REPLACE INTO part_chapters VALUES(?,?,?,?,?,?)',(self.inventory.roots['Audiobooks'],p,sizes[p][0],sizes[p][1],n,__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()))
+                            raise ValueError('Book parts carry their own chapters; each part becomes its own book')
+                        part=(result['metadata_facts'].get('local_agreement') or {}).get('part_book') if local else None
+                        if part:
+                            # One part of a set is its own book only as a whole .m4b with its own chapters, kept in
+                            # copy mode (never re-encoded), and only when EVERY part of the set carries its own
+                            # chapters: a set is never published piecemeal (Senua R2-C1, R2-M1).
+                            if len(paths)!=1 or Path(paths[0]).suffix.lower()!='.m4b' or own_chapters.get(paths[0],0)<2:
+                                raise ValueError('One part of a multi-part set without its own chapters; one part is not the whole book')
+                            if (choose_automatic_encoding(profiles,single_m4b=True) or {}).get('mode')!='copy':
+                                raise ValueError('A part filed as its own book must keep its chapters without re-encoding')
+                            others=[p for p in part.get('members') or [] if p!=paths[0]]
+                            if not others or paths[0] not in (part.get('members') or []):raise ValueError('Local identity evidence changed')
+                            admitted={tuple(s['path'] for s in j['manifest']['sources']):len(j['manifest'].get('source_chapters') or []) for j in self.jobs.status()['jobs']}
+                            for other in others:
+                                # A part already admitted as its own book proved its chapters then (its original
+                                # may since be retired): the job's frozen chapter plan is the evidence.
+                                if admitted.get((other,),0)>1:continue
+                                try:count=len(probe(other,self.reviews.cache,stop).get('chapters') or [])
+                                except (ValueError,OSError):raise ValueError('Another part of this set could not be checked; the whole set is held') from None
+                                if count<2:raise ValueError('Another part of this set has no chapters of its own; the whole set is held (never published piecemeal)')
+                        # Split book (v0.15.0): every part must be the same recording profile; the v4
+                        # normalizer would otherwise silently resample or upmix one of them.
+                        if current.get('split_book') and len({p[:3] for p in profiles})!=1:
+                            raise ValueError('Split book parts are different recordings (audio profiles differ)')
                         try:
                             if standing:choose_automatic_encoding(profiles,single_m4b=len(paths)==1 and Path(paths[0]).suffix.lower()=='.m4b')
                             else:choose_encoding(profiles)

@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.15.0] - 2026-10-13
+
+### Added
+
+- Split books: files that provably form one book become one candidate whose ordered parts become one M4B, one chapter per part (for example the 155 chapter files of one Dan Brown novel, "Чужак 1.m4b" / "Чужак 2.m4b", CD1/CD2 folders). Grouped only when every part has the same book title (album), the same author, reader and recording tags, the same audio format, and gap-free numbering with no duplicates (embedded track numbers, part numbers in the file names, or disc folders). Gaps, duplicates, mixed readers or recordings, volume numbers ("Том 3", "Книга 2") and parts with their own story or book titles hold the files as before.
+- Split-book safeguards (review of the first candidate): the numbers in the file names must equal the track numbers, so numbered titles such as "Метро 2033" / "Метро 2034" or "Fallout 3" / "Fallout 4" are never one book; a year in a name is part of the title; a title tag on any single part, the exact album (brackets included) and an episode, CD or track number followed by a name each keep separate works apart; a zero-padded part ("0001") is a part, not a year.
+- One author, one folder: a spelling confirmed by fetched, verified catalog or publisher evidence (books admitted for conversion, approved reviews, conversion jobs) anywhere in the library wins over a more common local spelling; a one-letter slip is replaced only when the confirming book itself carried that slip. Unverified research never confirms. Without a confirmation the most common local spelling is kept (Pratchett and Zahn have no verified confirmation today).
+
+### Changed
+
+- M4B parts are joined by the existing v4 normalizer: decoded and re-encoded once at the parts' own bitrate, sample rate and channels. Joining AAC by stream copy is not supported (each part carries its own encoder delay), so it is not attempted. Parts whose audio profiles differ at conversion are held.
+- M4B parts that carry their own chapters are never joined (Sergei 2026-10-13): each part is its own book with its chapters kept (single-M4B copy, no re-encode). Example: Clive Barker's Imajica folder becomes "Имаджика - 1 - Пятый Доминион. Главы 1-20" … "Имаджика - 4 - …". Every part keeps its parent work: the set's album is its series (only when a folder or the shared file name repeats it), its track number is its number, and its own title (where tag and file name agree) is its title. A set is filed part by part only when every part qualifies and every part carries its own chapters; otherwise the whole set stays held, so a book is never published piecemeal. Only whole .m4b files become part books or are re-filed; a multi-file .m4a group with a chaptered file is held together. Parts of a joined book found with their own chapters at conversion are re-filed as separate books.
+- "Philip K. Dick" and "Дик Филип Киндред" are one person: a middle initial may stand for a middle name when the first name and surname are written in full on both sides and the library has no other middle name for that person. An initial written before the first name is never read as a middle name; the word order of the two spellings is not compared (known limit; the only live merge is Dick).
+- Under a collection folder, a plain credit of Олег Булдаков (named in Sergei's ruling 1 and credited as a reader in the library) is the narrator: such books are filed under Сборники as before for his comment-credited collections.
+- A trailing four-digit number is part of a title, not a part number ("Метро 2033" beside "Метро 2034" is not a split part).
+- A running automatic pass adds candidates created by the new grouping instead of waiting for a new discovery pass. Every waiting or held book gets one fresh pass. Media verification, publication, source retirement and 24-hour recovery are unchanged.
+
+### Fixed
+
+- Verified published jobs dispose of their exact producer-receipted working files independently of original retirement. Source snapshots, recovery, unknown files and full Ready/retirement obligations stay protected.
+- Normalization chooses one smallest sample-exact PCM format for the whole job and proves the actual ordered concatenated PCM before AAC encoding. Rejected format comparisons create no WAV files.
+- Space estimates and staging rechecks hold a job when space is short; ENOSPC parks the remaining queue at its saved checkpoint instead of accumulating failed working directories. Restart stays inactive until explicit Start.
+
 ## [v0.14.0] - 2026-10-13
 
 ### Added

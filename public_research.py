@@ -58,7 +58,7 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
     'discovery':{'html.duckduckgo.com','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'},'credit':CREDIT_HOSTS|{'fantlab.ru'}}
 
 # 18: local agreement identity and gap-only search; older results get one fresh pass.
-RESEARCH_VERSION='standing-18-v1'
+RESEARCH_VERSION='standing-19-v1'
 
 class ChallengeDetected(ValueError):pass
 
@@ -530,8 +530,14 @@ class PublicResearch:
     def lookup(self,row,root,stop=None,progress=lambda *_:None):
         stop=stop or threading.Event();budget={'remaining':12};all_clues=[c for m in row['members'] for c in clues(m,root)]
         candidates=[]
+        # A split book's parts share one book name; their own numbers and chapter labels are not titles.
+        split_name=None
+        if row.get('split_book'):
+            from split_books import book_name
+            split_name=book_name(row['members'])
         for m in row['members']:
-            p=filename_identity(m['filename']);tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
+            p=(filename_identity(split_name+'.x') if split_name else {'title':'','author':''}) if split_name is not None else filename_identity(m['filename'])
+            tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
             author=p.get('author') or text(tags.get('author') or tags.get('album_artist') or tags.get('artist'))
             if p.get('author') and (p['title'],author) not in candidates:candidates.append((p['title'],author))
             title=text(tags.get('album') or (tags.get('title') if len(row['members'])==1 else '') or (p['title'] if len(row['members'])==1 else ''))
@@ -780,6 +786,11 @@ class PublicResearch:
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
         titles=local_identity.title_forms(local)
+        part=local.get('part_book')
+        if part and part['set_title'] not in titles:
+            # One part of a multi-part set, its own book (Sergei 2026-10-13): the set's album is
+            # its parent work and a valid source title.
+            titles.append(part['set_title'])
         authors=local_identity.author_forms(local)
         local_script=local_identity.script(author)
         names=[author]
@@ -805,6 +816,9 @@ class PublicResearch:
                 # Reordering keeps the citation; a different local spelling is cited as local.
                 if local_identity.text(spelling['spelling'])!=local_identity.text(names[0]):name_source=''
                 names=[canonical]
+            if spelling.get('confirmed_by'):
+                # v0.15.0: the library-wide confirmed spelling cites its fetched catalog page.
+                name_source=spelling['confirmed_by'][0]
         for value in (catalog.get('original_title'),catalog.get('title_native')):
             if value and value not in titles:titles.append(value)
         for value in names+([catalog.get('author_native'),catalog.get('author_latin')] if catalog else []):
@@ -814,7 +828,7 @@ class PublicResearch:
         work={'id':work_ids[0],'titles':titles,'author_aliases':author_variants(authors),'original_language':language,
             'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
             'source_surnames':[],'verified_series':series,'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,
-            'recording_completeness':'unknown'}
+            'recording_completeness':'unknown','part_book':bool(part)}
         preferred=title
         if language=='ru':preferred=catalog.get('title_native') or title
         elif language=='en':preferred=catalog.get('original_title') or title
@@ -830,6 +844,7 @@ class PublicResearch:
             value=agreed[name]
             return value['value']+' ('+value['how']+'; '+', '.join(s['kind']+(' '+s['field'] if s.get('field') else '')+' "'+s['value']+'"' for s in value['sources'])+')'
         basis='Local agreement '+local_identity.AGREEMENT_VERSION+' (Sergei decision 2026-10-12): embedded tags and file/folder names agree. Title: '+described('title')+'. Author: '+described('author')+'. No Internet confirmation required.'
+        if part:basis+=' One part %d of a %d-part M4B set "%s", filed as its own book (Sergei 2026-10-13); it must carry its own chapters.'%(part['position'],part['parts'],part['set_title'])
         identity='Books Arranger local agreement '+local_identity.AGREEMENT_VERSION
         def evidence(field,value,url,why):
             result['evidence'].append({'field':field,'cited_value':value,'source_url':url,'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':identity,'basis':why[:3900]})
@@ -837,7 +852,8 @@ class PublicResearch:
         if facts['original_title']!=title:
             evidence('title',facts['original_title'],catalog.get('source_url',''),'Original-work title from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')
         spelled=('' if not spelling else ' Canonical spelling (Sergei 2026-10-13): "'+spelling['chosen']+'" from "'+spelling['spelling']+'"; '+spelling['why']+'; '+spelling['order']+'.')
-        evidence('authors',review['canonical_author'],name_source,(basis if not name_source else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')+spelled)
+        confirmed_note='Author spelling confirmed by fetched catalog evidence for this author elsewhere in the library (library-wide confirmed-spelling list); the locally agreed identity is unchanged.'
+        evidence('authors',review['canonical_author'],name_source,(basis if not name_source else confirmed_note if spelling and spelling.get('confirmed_by') else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')+spelled)
         if language:
             evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
         if review['series']:

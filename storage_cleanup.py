@@ -334,6 +334,91 @@ class StorageCleanup:
                     targets.append((p, 'staging', (r['sha256'], r['size'])))
         return targets
 
+    def working_pending(self, job_id):
+        """Read-only scheduling hint; it never authorizes disposition or Ready.
+
+        Startup remains inactive. Explicit resume checks completed jobs, including
+        retirement attention, without repeatedly hashing already disposed media.
+        """
+        manifest,output=self._job(job_id)
+        recorded=output['validation'].get('staging_artifacts',{})
+        attempt_id=recorded.get('attempt_id')
+        if not attempt_id:return False  # No exact producer receipt, no candidate.
+        if str(uuid.UUID(attempt_id))!=attempt_id:raise BoundaryError('Invalid published attempt identity')
+        snapshots={f'source{i:05d}'+Path(item['path']).suffix.lower() for i,item in enumerate(manifest['sources'])}
+        from encoding_policy import AUTOMATIC_PROFILE
+        for name,entry in recorded.get('files',{}).items():
+            if name in snapshots:continue
+            disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name) or (manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name))
+            if not disposable:continue
+            path=self.stage_root/job_id/attempt_id/name
+            if path.exists():return True  # Includes a replacement at a terminal name.
+            old=self._known(path)
+            if not old or old['job_id']!=job_id or old['kind']!='staging' or old['state'] not in TERMINAL or (old['sha256'],old['size'])!=(entry['sha256'],entry['size']):return True
+        return False
+
+    def working_files(self, job_id, dry_run=False, normalized_only=False, expected_plan=None):
+        """Discard exact published-attempt disposable receipts, preserving snapshots.
+
+        Historical cleanup uses this same path. Unknown files/attempts are never
+        selected; publication and native byte/name/stream guards stay mandatory.
+        This never satisfies the full staging/retirement/Ready obligation.
+        """
+        with self.protected_output(job_id) as (manifest, output):
+            recorded = output['validation'].get('staging_artifacts', {})
+            attempt_id = recorded.get('attempt_id')
+            if not attempt_id or str(uuid.UUID(attempt_id)) != attempt_id:
+                raise BoundaryError('Exact published-attempt receipt is required')
+            job = self.stage_root / job_id
+            attempt = job / attempt_id
+            snapshot_names = {f'source{i:05d}' + Path(item['path']).suffix.lower() for i, item in enumerate(manifest['sources'])}
+            result = []
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(DirectoryBoundary(self.stage_root.anchor, attempt))
+                marker = stack.enter_context(VerifiedFile(job / 'ownership.json'))
+                if marker.facts()['size'] > 16*1024*1024 or json.loads(b''.join(marker.chunks()).decode('utf-8')) != {'job_id':job_id, 'manifest':manifest}:
+                    raise BoundaryError('Private staging ownership changed')
+                prepared = []
+                for name, entry in recorded.get('files', {}).items():
+                    if name in snapshot_names:
+                        continue
+                    disposable = name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)', name)
+                    from encoding_policy import AUTOMATIC_PROFILE
+                    disposable = disposable or (manifest.get('profile') == AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav', name))
+                    if normalized_only and not re.fullmatch(r'normalized[0-9]{5}\.wav',name):continue
+                    if not disposable:
+                        continue  # A receipt alone never expands the disposable-name policy.
+                    path = attempt / name
+                    expected = (entry['sha256'], entry['size'])
+                    if dry_run:
+                        old = self._known(path)
+                        if not path.exists():
+                            if old and old['job_id']==job_id and old['kind']=='staging' and old['state'] in TERMINAL | {'removal_intended','disposition_set'} and (old['sha256'],old['size'])==expected:
+                                continue
+                            raise BoundaryError('Working file absent without verified removal intent')
+                        ancestry=stack.enter_context(DirectoryBoundary(self.stage_root.anchor,path.parent))
+                        parent=path.parent
+                        while parent.is_relative_to(self.stage_root):
+                            if (parent/'.git').exists():raise BoundaryError('Nested Git data preserved')
+                            if parent==self.stage_root:break
+                            parent=parent.parent
+                        handle=stack.enter_context(VerifiedFile(path))
+                        facts=handle.facts();single_stream(path)
+                        if facts['links']!=1 or (handle.sha256(),facts['size'])!=expected:
+                            raise BoundaryError('Working file differs from its producer receipt')
+                        if old and (old['job_id']!=job_id or old['kind']!='staging' or old['state'] in TERMINAL or json.loads(old['facts'])!=facts):
+                            raise BoundaryError('Working file cleanup identity changed')
+                    else:
+                        item=self._prepare(stack,job_id,'staging',path,self.stage_root,expected)
+                        if not item:continue
+                        prepared.append(item)
+                        facts=item[1].facts()
+                    result.append({'path':str(path),'sha256':expected[0],'size':expected[1],'facts':facts})
+                if expected_plan is not None and result!=expected_plan:
+                    raise BoundaryError('Working cleanup dry-run identity changed; preserved')
+                if not dry_run:self._dispose(prepared)
+            return {'job_id':job_id,'output_sha256':output['sha256'],'files':result,'bytes':sum(item['size'] for item in result),'dry_run':dry_run}
+
     def run(self, job_id, include_recovery=False):
         output_hash = ''
         self._phase='verify completed output';self._disposition='not_started'

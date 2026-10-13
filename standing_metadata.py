@@ -92,8 +92,9 @@ def validate_policy(row,review,facts):
     if identity not in (None,'local_agreement'):raise ValueError('Invalid identity provenance')
     if identity=='local_agreement':
         agreed=facts.get('local_agreement')
-        from local_identity import AGREEMENT_VERSION
-        if not isinstance(agreed,dict) or agreed.get('version')!=AGREEMENT_VERSION:raise ValueError('Local identity agreement record invalid')
+        from local_identity import KNOWN_AGREEMENT_VERSIONS
+        # Books approved under an earlier agreement version keep validating (v0.15.0: v3 and v4).
+        if not isinstance(agreed,dict) or agreed.get('version') not in KNOWN_AGREEMENT_VERSIONS:raise ValueError('Local identity agreement record invalid')
         if agreed.get('route'):
             # Ruling 1 collection: the title agrees and the narrator is never the author credit.
             narrators=agreed['route'].get('narrators',[])

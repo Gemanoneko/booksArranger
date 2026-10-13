@@ -39,7 +39,11 @@ class AutomaticMediaTests(unittest.TestCase):
         row=self.service.reviews.page()['rows'][0];result=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(result['reasons'],[],result);return row,result
     def wait(self):
         limit=time.monotonic()+30
-        while self.service.state()['state'] in ('Running','Pausing') or self.service.state().get('queued') or self.service.state().get('cleanup_active'):
+        while True:
+            state=self.service.state()  # One snapshot; separate polls can cross cleanup enrollment.
+            audio_worker=self.service.jobs._thread;cleanup_worker=self.service.cleanup.thread
+            active=bool((audio_worker and audio_worker.is_alive()) or (cleanup_worker and cleanup_worker.is_alive()))
+            if not (active or state['state'] in ('Running','Pausing') or state.get('queued') or state.get('cleanup_active')):return
             if time.monotonic()>limit:self.fail('Private automatic media job exceeded30s')
             time.sleep(.05)
     def test_confident_no_manual_form_to_verified_chapters_retained_recovery(self):

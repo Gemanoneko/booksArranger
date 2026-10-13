@@ -95,3 +95,7 @@ Supersedes the "filenames, embedded metadata and folders are clues only" boundar
 3. One author written several ways: follow the existing language rule (Russian canonical name for Russian original works, English otherwise, surname first); within that, the app picks the most common local spelling, deterministically and with the choice recorded.
 4. Generic titles such as "Сборник рассказов": accept when the author agrees locally.
 5. Collections with no author credit anywhere in their tags are labelled "Разные авторы" (Sergei confirmed 2026-10-13).
+
+## Sergei decision — multi-part M4B sets with their own chapters (2026-10-13)
+
+M4B parts that already carry their own chapters are not joined. Treat each part as a separate book (Sergei's example: Clive Barker's Imajica folder holding several part files). The folder name is a series/parent-work lead for the parts; series/number/title per part follow the existing evidence rules.
