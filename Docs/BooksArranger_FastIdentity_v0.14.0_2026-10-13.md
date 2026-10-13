@@ -2,6 +2,14 @@
 
 Ender, 2026-10-13. Worktree `scratch/fast-identity-2026-10-13/worktree`, branch `codex/books-fast-identity-0.14.0`. Sully committed the first candidate as `67e3d43` (it already includes Jane's standing-rule section, `e68597a`); the review fixes below are uncommitted edits on top of it. Rule implemented: Sergei decision "local evidence is enough when it agrees" (2026-10-12), last section of `Docs/BooksArranger_StandingRules_2026-10-11.md`.
 
+## Round 4 fix (on top of 82bc67d) — Senua round 3
+
+| Finding | Fix | Test |
+| --- | --- | --- |
+| R3-1 Critical: an author who reads his own book was filed under `Сборники` as "Разные авторы" | A collection filing now requires a collection-folder signal, and a book whose folder or parent folder names its reader is held for research | `Round3Critical.test_r3_1_self_reading_author_is_held_not_routed` (`tests/test_local_identity_fixes.py`) |
+
+**Round 4 results (fresh copy, sha256 `06fa82d7…` unchanged):** 455 approvable (389 author books + 66 under `Сборники`), the same approvable set, reviews and 66 collection filings as 82bc67d. Positive control: the round-3 probe routes on 82bc67d and is held now. Scans unchanged: routed with a person credit 0, reader or collection authors 0, conflicting initials 0, cross-script false pairs 0.
+
 ## Round 3 fixes (on top of a7d9b42) — Senua round 2
 
 | Finding | Fix | Test (`tests/test_local_identity_fixes.py`) |

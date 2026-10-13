@@ -350,4 +350,19 @@ class FutabaRound2(unittest.TestCase):
         # A lone "01" is how some rips name a one-file book: allowed.
         self.assertTrue(record([('Иванов Алексей/Тобол/01.m4b',{'album':'Тобол','artist':'Алексей Иванов'})],[])['accepted'])
 
+class Round3Critical(unittest.TestCase):
+    """Senua round 3 (82bc67d): an author who reads his own book is never filed as a collection."""
+    def test_r3_1_self_reading_author_is_held_not_routed(self):
+        for tags in ({'album':'Рассказы о Родине','artist':'Дмитрий Глуховский','comment':'Читает Дмитрий Глуховский'},
+                     {'album':'Рассказы о Родине','artist':'Дмитрий Глуховский','narrator':'Дмитрий Глуховский'}):
+            with self.subTest(tags=sorted(tags)):
+                local=record([('Глуховский Дмитрий/Рассказы о Родине.m4b',tags)],[])
+                self.assertIsNone(local['route']);self.assertFalse(local['accepted'])
+        # Without a collection folder there is no collection filing either.
+        local=record([('Мистика/Сборник рассказов.m4b',{'album':'Сборник рассказов','artist':'Разные авторы','album_artist':'читает Роман Волков'})],[])
+        self.assertIsNone(local['route'])
+        # A real narrator-read collection under a collection folder still routes (ruling 1).
+        local=record([('Сборники/АНТОЛОГИЯ РУССКОЙ МИСТИКИ/01 читает Роман Волков - Недобрый глаз.mp3',{'album':'Недобрый глаз','artist':'Сборник','album_artist':'читает Роман Волков'})],[])
+        self.assertIsNotNone(local['route'])
+
 if __name__=='__main__':unittest.main()

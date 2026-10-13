@@ -154,7 +154,7 @@ Confirmed sound:
 - Total Major: 5
 - Total Minor: 8
 
-**Verdict:** RELEASE BLOCKED
+Round 1 verdict (superseded): RELEASE BLOCKED
 
 | # | Sev | Dim | file:line | Finding | Must fix before release |
 |---|-----|-----|-----------|---------|--------------------------|
@@ -277,4 +277,84 @@ Scope:
 | R2-1 | Critical | `local_identity.py:957-976` | Route to `Сборники` only when no person credit remains after reader and collection credits are removed (`embedded['people']` empty, and no uncorroborated author tag). Never count the catalog-wide "reads other books" conflict (`:875-876`) as a route signal; that stays a research hold. Add tests for the three probes above (King plus a "Сборник" tag; Глуховский self-reader; King plus "читает Князев" under `Сборники`). |
 | R2-2 | Critical | `local_identity.py:309-337`, `:744-746` | Initials present on both sides must pair one-to-one with matching letters, otherwise no match. In `canonical_author`, count only spellings that are `same_person` with the agreed name, and never expand an initial to a full given name when the library holds more than one distinct given name for that surname and initial. Add tests: А./Б. Стругацкий, Толстой А.Н./Л.Н., J./K. Sawyer, Иванов А. with two Ивановs. |
 
-**Verdict:** RELEASE BLOCKED — a7d9b42
+Round 2 verdict (superseded): RELEASE BLOCKED — a7d9b42
+
+---
+
+## Round 3 — 82bc67d
+
+```
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-13
+Fix round: a7d9b42..82bc67d (8 files, +447 / -38; code change is local_identity.py only, plus tests and docs)
+Full range: v0.13.1..82bc67d
+```
+
+### Method
+
+The review was red-team and read-only. I used a fresh scratch copy of the evidence catalog and reran `evidence/measure.py` at 82bc67d, which reproduces Ender's **455 approvable** (489 agree locally, 66 routed to `Сборники`). I compared the result with the a7d9b42 run and ran synthetic probes of `agreement` and `canonical_author`. Ender's r3 suite failure set equals the baseline (548 run, the same 9 environment errors). No app, live database, network or Z:/Y: access.
+
+### Round 2 findings, rechecked
+
+**R2-1 — person credit dropped by the collection route: fixed for the shapes probed in round 2.** All three probes now hold, with no route:
+- King plus a "Сборник" tag;
+- Глуховский credited as a reader on other books;
+- King plus "читает Князев" under `Сборники`.
+
+The route requires `embedded['people']` to be empty (`local_identity.py:1035`). "Reads elsewhere" stays a hold.
+
+**R2-2 — conflicting initials and the spelling merge: fixed.**
+- Initials on both sides must pair (`:327`). "Стругацкий А." with a "Стругацкий Б." path is held, and J./K. Sawyer is held.
+- `canonical_author` excludes subset and initial-expanded matches (`:805`). Толстой А.Н. stays А.Н. against 12× Л.Н., А. Стругацкий stays А., and "Иванов А." stays as written.
+
+**Futaba N1 does not reopen R2-2.** The new identical-words shortcut (`:360`) merges only identical word multisets. "Стругацкий А." vs "Стругацкий Б." and "Толстой А.Н." vs "Толстой Л.Н." remain different people.
+
+**M1 — lone numbered part: fixed.** The live `5. Игры Немезиды 1.m4b` is now held (file name numbers it as part 1). Lone "Глава 05" and "02" files are held. A lone "01" and "Метро 2033" stay accepted, which is fine.
+
+**Root mismatch: fixed.** It now fails closed: a trailing `\` or lowercase root returns `unreadable`, and the correct root still lists 43 siblings.
+
+**The 12 newly approvable books are correct.** Ten are Robert J. Sawyer books, freed by N1. The other two are Кабир co-author credits that are identical in tag and file name. The 2 books that dropped out are Игры Немезиды (M1) and Булдаков's "Тёмные Аллеи в Кино" (now a person-credit hold).
+
+**Live scans of all 455:**
+- 0 approvable authors are readers or carry a reader marker.
+- 0 have conflicting initials.
+- 0 routed books carry a person credit.
+- The only canonical change that is not a reorder is the pen-name merge "Александр Варго (Сергей Давиденко)" → "Варго Александр", which is the same person.
+
+### New finding
+
+#### R3-1 [Critical] — a self-reading author is still routed to `Сборники` as "Разные авторы"
+
+Location: `local_identity.py:562` and `:1033-1044`.
+
+**How it happens.** When the book's own tags name the author as its reader (narrator tag, or "Читает …" in a comment or other free text), `_embedded` sets the artist credit aside as "same person as the reader". `embedded['people']` is then empty, so the R2-1 guard passes.
+
+**Probe.**
+- Tags: artist "Дмитрий Глуховский", comment "Читает Дмитрий Глуховский", album "Рассказы о Родине".
+- Path: author folder `Глуховский Дмитрий\`.
+- Result: **routed**. Narrator Глуховский; filed as `Сборники\Рассказы о Родине`, credited to "Разные авторы". The same happens with `narrator=` "Дмитрий Глуховский".
+- The two signals were the collection title and "the credited person is the reader".
+
+**Why it is a defect.** Ruling 1 covers collections compiled by a narrator (Князев, Булдаков). An author reading his own story collection is not that case: the author is demoted to narrator and replaced by "Разные авторы", and the originals are retired.
+
+**Scope.**
+- **Live: 0.** All 66 live routes carry a collection-folder signal, and none has a folder or parent folder that names its narrator (checked).
+- The fix below therefore costs no live route.
+
+### Other notes
+
+- **[Minor]** `same_person` treats "Толстой А.Н." and "Толстой Н.А." as one credit, because the initial order is ignored. This is contrived and needs no action.
+- **Carried over without change:** the language-unknown English-spelling choice (Minor) and the misspelled-folder canonical spellings (information only).
+- Retirement, recovery, media, publication and web code is still untouched (this round changed only `local_identity.py`, tests and docs).
+
+### Round 3 verdict
+
+- Open Critical: 1 (R3-1). R2-1, R2-2, M1 and the root mismatch are closed.
+- Open Major: 0.
+- Open Minor: 2.
+
+| # | Sev | file:line | Must fix before release |
+|---|-----|-----------|--------------------------|
+| R3-1 | Critical | `local_identity.py:1033-1044` | Do not route when the book's folder or parent folder names the reader (an author folder). Hold for research instead. Also require a `collection folder` signal for every route. Both cost 0 of the 66 live routes. Add a test: artist "Дмитрий Глуховский" + comment "Читает Дмитрий Глуховский" + album "Рассказы о Родине" under `Глуховский Дмитрий\` must not route. |
+
+**Verdict:** RELEASE BLOCKED — 82bc67d

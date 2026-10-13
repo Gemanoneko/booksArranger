@@ -1033,7 +1033,13 @@ def agreement(row, root='', siblings=None, readers=None):
     reader_credit = any('reader' in i['why'] for i in embedded['ignored'])
     # Never route while any person credit remains (a real author is never dropped).
     no_person = not embedded['people']
-    if no_person and not accepted and fields['title']['state'] == 'green' and not any(c['field'] == 'title' for c in conflicts) \
+    # R3-1: an author folder that names the reader means the author reads his own book: hold it.
+    reader_values = [text(narrator_names([v])[0]) if NARRATOR_MARKER.search(v) and narrator_names([v]) else text(v)
+                     for v in embedded['readers'] + [i['value'] for i in embedded['ignored'] if 'reader' in i['why']]]
+    reader_folder = any(compare_names(r, piece) for r in reader_values if r for c in components
+                        if c['kind'] in ('folder', 'parent folder') for piece in _person_pieces(c))
+    # Every collection filing needs a collection folder; a reader-named folder never routes.
+    if no_person and marked and not reader_folder and not accepted and fields['title']['state'] == 'green' and not any(c['field'] == 'title' for c in conflicts) \
             and fields['author']['state'] != 'green' and fields['author']['state'] != 'yellow' \
             and (embedded['collection_credits'] or reader_credit) and not any(fields[n]['state'] == 'red' for n in ('series', 'number')):
         # Ruling 1: a collection compiled or read by a narrator goes to the collections root when
