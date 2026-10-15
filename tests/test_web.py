@@ -283,6 +283,41 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.call('/api/review',body|{'library':'Ebooks','path':item['path'],'size':item['size'],'modified':item['modified']})[0],400)
 
 
+    def test_automatic_start_status_matches_audio_conflict_and_preserves_run(self):
+        with patch.object(self.server.merge,'state',return_value={'state':'Running'}) as jobs:
+            status,value=self.json_call('/api/state?library=Audiobooks')
+            self.assertEqual(status,200);automatic=value['automatic_processing']
+            self.assertFalse(automatic['can_start']);self.assertEqual(automatic['start_block_reason'],'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.')
+            status,rejected=self.json_call('/api/automatic/start',{})
+            self.assertEqual(status,409);self.assertEqual(rejected['error'],automatic['start_block_reason'])
+            self.assertEqual(rejected['automatic_processing']['state'],automatic['state'])
+            self.assertIsNone(self.server.merge.automatic.thread)
+
+    def test_automatic_start_rechecks_conflict_after_available_snapshot(self):
+        with patch.object(self.server.merge,'state',return_value={'state':'Paused'}) as jobs:
+            status,available=self.json_call('/api/state?library=Audiobooks')
+            self.assertEqual(status,200);self.assertTrue(available['automatic_processing']['can_start'])
+            jobs.return_value={'state':'Pausing'}
+            status,rejected=self.json_call('/api/automatic/start',{})
+            self.assertEqual(status,409);self.assertFalse(rejected['automatic_processing']['can_start'])
+            self.assertEqual(rejected['error'],'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.')
+            self.assertIsNone(self.server.merge.automatic.thread)
+
+    def test_automatic_discovery_and_closing_explanations_match_status(self):
+        with patch.object(self.inventory,'worker',SimpleNamespace(is_alive=lambda:True)),patch.object(self.server.merge,'state',return_value={'state':'Paused'}):
+            status,value=self.json_call('/api/state?library=Audiobooks')
+            self.assertEqual(status,200);self.assertFalse(value['automatic_processing']['can_start'])
+            status,rejected=self.json_call('/api/automatic/start',{})
+            self.assertEqual(status,409);self.assertEqual(rejected['error'],value['automatic_processing']['start_block_reason'])
+            self.assertEqual(rejected['error'],'Discovery is in progress. Wait for it to stop before starting automatic processing.')
+        self.server.closing=True
+        try:
+            status,value=self.json_call('/api/state?library=Audiobooks')
+            self.assertEqual(status,200);self.assertFalse(value['automatic_processing']['can_start'])
+            status,rejected=self.json_call('/api/automatic/start',{})
+            self.assertEqual(status,409);self.assertEqual(rejected['error'],value['automatic_processing']['start_block_reason'])
+        finally:self.server.closing=False
+
 class WindowlessMainTests(unittest.TestCase):
     def test_readiness_runs_before_serving_with_no_standard_streams(self):
         import web_server

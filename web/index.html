@@ -20,10 +20,11 @@
       </div>
       <p id="root" class="path"></p>
       <div id="automatic-controls" class="toolbar" hidden>
-        <button id="start-automatic" type="button" title="Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held." aria-describedby="automatic-help" disabled>Start automatic processing</button>
+        <button id="start-automatic" type="button" title="Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held." aria-describedby="automatic-help automatic-start-reason" disabled>Start automatic processing</button>
         <button id="stop-automatic" type="button" class="quiet" title="Stop research and pause audiobook jobs. Save pending work; finished books stay in place." aria-describedby="automatic-help" disabled>Stop automatic processing</button>
       </div>
-      <p id="automatic-help" class="field-help" hidden>Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it.</p>
+      <p id="automatic-help" class="field-help" hidden>Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it. Existing audiobook jobs must be paused before starting automatic discovery.</p>
+      <p id="automatic-start-reason" class="field-help" role="status" aria-live="polite" hidden></p>
       <p id="automatic-policy" class="notice" hidden>Verified audiobooks replace their included originals. Recovery copies expire 24 hours after source cleanup completes, while the app is running.</p>
       <div id="automatic-status-block" hidden>
         <p id="automatic-status" aria-live="polite">Automatic processing: status unavailable</p>

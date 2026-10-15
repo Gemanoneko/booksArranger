@@ -74,7 +74,7 @@ async function request(route, data) {
   if (data !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(data); }
   const response = await fetch(route, options);
   const result = await response.json();
-  if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;throw error;}
+  if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;throw error;}
   return result;
 }
 function message(value='') { $('message').textContent=value; }
@@ -83,6 +83,7 @@ function controls() {
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
   $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
+  renderAutomaticEligibility();
   $('stop-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_stop!==true;
   const stopped = ['stopped','offline','failed'].includes(state?.status?.state);
   $('start').disabled = busy || ended || recoveryDisconnected || !!active || stopped || !state || automaticOwnsScanner;
@@ -408,11 +409,22 @@ $('recovery-dialog').addEventListener('keydown',event=>{if(!recoveryConfirmation
 const automaticStates=new Set(['Idle','Running','Stopping','Paused','Completed','Needs attention']);
 function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
 function automaticPhase(value){return {discovery:'discovery',research:'metadata research',conversion:'audiobook jobs',paused:'saving pending work',completed:'finishing the pass'}[value] || 'pending work';}
+function renderAutomaticEligibility(){
+  const automatic=state?.automatic_processing;
+  let reason='';
+  if(ended)reason='The local server is stopping or stopped. Start is unavailable.';
+  else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason='Start availability is unknown. Waiting for the local server.';
+  else if(automaticRequest==='start' || draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
+  else if(automatic.can_start!==true)reason=automatic.start_block_reason || 'Start availability is unknown. Waiting for the local server.';
+  setText('automatic-start-reason',reason);
+  $('automatic-start-reason').hidden=$('library').value!=='Audiobooks' || !reason;
+  $('start-automatic').title=reason || (automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.');
+}
 function renderAutomatic(){
   const automatic=state?.automatic_processing,known=automaticStates.has(automatic?.state),stale=recoveryDisconnected || ended?'Last confirmed — ':'';
   setText('automatic-status',stale+'Automatic processing: '+(known?automatic.state:'status unavailable'));
   setText('automatic-request',automaticRequest==='start'?'Starting automatic processing…':automaticRequest==='stop'?'Requesting automatic stop…':'');
-  $('start-automatic').title=automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.';
+  renderAutomaticEligibility();
   let detail='';
   if(automatic?.state==='Stopping')detail='Stopping automatic processing — '+(automatic.reason || automaticPhase(automatic.phase));
   else if(automatic?.state==='Paused')detail=automatic.restart_paused?'Paused after server restart — start to continue saved work':(automatic.reason || 'Paused — pending work saved');
@@ -439,8 +451,11 @@ async function automaticAction(kind){
     const acknowledged=result.automatic_processing || result.state?.automatic_processing;
     if(acknowledged && state){state={...state,automatic_processing:acknowledged};renderAutomatic();}
     lastKey=null;if(await refresh(true))clearConnectionNotice();
-  }catch(error){message(error.message);if(!error.httpStatus)refreshFailed(error);}
-  finally{automaticRequest=null;busy=false;renderAutomatic();controls();}
+  }catch(error){
+    if(error.automaticProcessing && state)state={...state,automatic_processing:error.automaticProcessing};
+    message(error.message);
+    if(error.httpStatus){lastKey=null;await refresh(true);}else refreshFailed(error);
+  }finally{automaticRequest=null;busy=false;renderAutomatic();controls();}
 }
 $('start-automatic').addEventListener('click',()=>automaticAction('start'));
 $('stop-automatic').addEventListener('click',()=>automaticAction('stop'));
