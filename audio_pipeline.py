@@ -1,6 +1,7 @@
 """Owned immutable-source M4B staging and strict validation; no source rewrites."""
-import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,struct,errno
+import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,struct,errno,sys
 from pathlib import Path
+from fractions import Fraction
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
 
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding, AUTOMATIC_PROFILE, freeze_automatic_policy, choose_automatic_encoding
@@ -31,6 +32,7 @@ def same_source(item,stop):
 
 def copy_owned(source,destination,expected,stop):
     destination=Path(destination)
+    plan_generated(destination)
     value=hashlib.sha256()
     with open(source,'rb') as incoming,open(destination,'xb') as outgoing:
         while block:=incoming.read(1024*1024):
@@ -42,11 +44,46 @@ def copy_owned(source,destination,expected,stop):
 
 _ARTIFACTS=threading.local()
 @contextlib.contextmanager
-def generated_artifacts(stage):
+def generated_artifacts(stage, observer=None, attempt_context=None):
+    if attempt_context is not None:attempt_context['entered']=True
     previous=getattr(_ARTIFACTS,'current',None)
-    receipts={};_ARTIFACTS.current=(Path(stage),receipts)
+    receipts={};closure={'safe':True}
+    _ARTIFACTS.current=(Path(stage),receipts,observer,closure)
     try:yield receipts
-    finally:_ARTIFACTS.current=previous
+    finally:
+        error=sys.exc_info()[1]
+        _ARTIFACTS.current=previous
+        if observer is not None:
+            try:
+                captured=observer.closed(Path(stage),producer_closed=closure['safe'])
+                if captured:receipts.update(captured)
+            except Exception:
+                if error is None:raise  # Never replace the original conversion failure.
+
+
+def plan_generated(path):
+    current=getattr(_ARTIFACTS,'current',None)
+    if current and current[2] is not None and Path(path).parent==current[0]:
+        current[2].planned(current[0],Path(path))
+
+
+def uncertain_producer():
+    current=getattr(_ARTIFACTS,'current',None)
+    if current:current[3]['safe']=False
+
+
+@contextlib.contextmanager
+def closed_media_job(process):
+    owner=OwnedProcessJob(process)
+    try:owner.__enter__()
+    except BaseException:
+        uncertain_producer();raise
+    try:yield owner
+    finally:
+        try:owner.__exit__(*sys.exc_info())
+        except BaseException:
+            uncertain_producer();raise
+
 
 def remember_generated(path,sha256,size):
     current=getattr(_ARTIFACTS,'current',None)
@@ -63,6 +100,7 @@ def producer_bytes(stream,path):
     return raw
 
 def write_generated(path,text):
+    plan_generated(path)
     raw=text.encode('utf-8')
     with open(path,'xb') as stream:
         stream.write(raw);stream.flush();os.fsync(stream.fileno())
@@ -88,6 +126,7 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
     """Owned child cancellation; bounded diagnostics and transient encoding pipe."""
     directory=Path(directory);token=uuid.uuid4().hex
     stdout=directory/(token+'.stdout');stderr=directory/(token+'.stderr')
+    plan_generated(stdout);plan_generated(stderr)
     with open(stdout,'x+b') as out,open(stderr,'x+b') as err:
         process=subprocess.Popen(arguments,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE if telemetry else out,stderr=err,
             shell=False,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0)|4)
@@ -98,7 +137,7 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
                 while block:=process.stdout.read1(65536):telemetry.feed(block)
             except Exception as error:failure.append(error)
         try:
-            with OwnedProcessJob(process):
+            with closed_media_job(process):
                 if telemetry:
                     drain=threading.Thread(target=consume,name='BooksArrangerEncodingProgress',daemon=True);drain.start()
                 while process.poll() is None:
@@ -108,14 +147,17 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
                     if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
                     time.sleep(.1)
         finally:
-            if process.poll() is None:
-                process.terminate()
-                try:process.wait(timeout=3)
-                except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
-            if drain:
-                drain.join(3)
-                process.stdout.close()
-                if drain.is_alive():raise ValidationError('Owned encoding progress has not finished draining')
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try:process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
+                if drain:
+                    drain.join(3)
+                    process.stdout.close()
+                    if drain.is_alive():raise ValidationError('Owned encoding progress has not finished draining')
+            except BaseException:
+                uncertain_producer();raise
         if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
         raw=producer_bytes(out,stdout);error=producer_bytes(err,stderr)
     if len(raw)>max_output or len(error)>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
@@ -143,6 +185,7 @@ def decoded_duration(path,stage,stop,estimated):
     """Count decoded PCM frames; MP3 TLEN/bitrate estimates are not completeness facts."""
     stderr=Path(stage)/(uuid.uuid4().hex+'.decode-stderr')
     state={'bytes':0,'error':None}
+    plan_generated(stderr)
     with open(stderr,'x+b') as errors:
         args=[shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
           '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],'-i',str(path),'-map','0:a:0','-ar','44100','-ac','2','-c:a','pcm_s16le','-f','s16le','pipe:1']
@@ -156,17 +199,23 @@ def decoded_duration(path,stage,stop,estimated):
         thread=threading.Thread(target=consume,daemon=True);thread.start()
         started=time.monotonic()
         try:
-            with OwnedProcessJob(process):
+            with closed_media_job(process):
                 while process.poll() is None:
                     if stop.is_set():raise Paused('Decode verification paused; this book restarts')
                     if time.monotonic()-started>max(300,estimated*2):raise TimeoutError('Owned decode verification exceeded its deadline')
                     if stderr.stat().st_size>1024*1024:raise ValidationError('Decode diagnostics exceeded their limit')
                     time.sleep(.05)
         finally:
-            if process.poll() is None:process.kill();process.wait(timeout=3)
-            thread.join(3)
-            process.stdout.close()
-        if thread.is_alive():raise ValidationError('Owned decoder output has not finished draining')
+            try:
+                if process.poll() is None:process.kill();process.wait(timeout=3)
+                thread.join(3)
+                process.stdout.close()
+                if thread.is_alive():uncertain_producer()
+            except BaseException:
+                uncertain_producer();raise
+        if thread.is_alive():
+            uncertain_producer()
+            raise ValidationError('Owned decoder output has not finished draining')
         error_raw=producer_bytes(errors,stderr)
     if state['error'] or process.returncode or state['bytes']%4:
         raise ValidationError('Full audio decode failed: '+error_raw.decode('utf-8','replace')[-1000:])
@@ -280,7 +329,24 @@ def snapshot_manifest(manifest,stage,stop):
         run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-protocol_whitelist','file','-f','image2','-i',str(cover_copy),'-map','0:v:0','-frames:v','1','-f','null','-'],stage,stop,30)
     return copies,durations,cover_copy,profiles
 
-def create_private(manifest,stage_root,stop,progress=lambda *_:None):
+def create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None):
+    if artifact_observer is None:
+        return _create_private(manifest,stage_root,stop,progress)
+    artifact_observer.begin(manifest)
+    stage=ordinary(stage_root)/manifest['job_id']/manifest['attempt_id']
+    attempt_context={'entered':False}
+    try:return _create_private(manifest,stage_root,stop,progress,artifact_observer,attempt_context)
+    finally:
+        # Failure before entering generated_artifacts created no media producer.
+        # Inside it, closed() always records either closed or uncertain first.
+        if not attempt_context['entered']:
+            error=sys.exc_info()[1]
+            try:artifact_observer.closed(stage,producer_closed=True)
+            except Exception:
+                if error is None:raise
+
+
+def _create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None,attempt_context=None):
     identity=manifest['job_id']
     if str(uuid.UUID(identity))!=identity:raise ValidationError('Invalid owned job identity')
     attempt=manifest.get('attempt_id') or str(uuid.uuid4())
@@ -299,7 +365,7 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None):
                     json.dump({'job_id':identity,'manifest':frozen},stream,ensure_ascii=False)
                     stream.flush();os.fsync(stream.fileno())
             if stage.exists():raise BoundaryError('Existing attempt directory is not reused or overwritten')
-            with DirectoryBoundary(job,stage,create=True),generated_artifacts(stage) as generated:
+            with DirectoryBoundary(job,stage,create=True),generated_artifacts(stage,artifact_observer,attempt_context) as generated:
                 progress('Checking sources',{})
                 copies,durations,cover,profiles=snapshot_manifest(manifest,stage,stop)
                 with ProtectedFiles([stage/name for name in copies]+[cover]):
@@ -398,6 +464,7 @@ def normalize_sources(stage,copies,encoding,stop,durations):
         remaining_required=remaining_pcm+3*output_space_required(0,durations,encoding,len(copies))+64*1024*1024
         if shutil.disk_usage(stage).free<remaining_required:raise OSError(errno.ENOSPC,'Staging space changed before normalization; originals retained')
         output=stage/(f'normalized{index:05}.wav')
+        plan_generated(output)
         reference=references[index]
         run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',
           '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
@@ -464,6 +531,37 @@ class PacketTimingHash:
         return {'sha256':self.hash.hexdigest(),'packet_count':self.count}
 
 
+def _copy_presentation(stream, movie):
+    """Map positive rational ticks to exact decoded-sample bounds, preserving holds."""
+    try:
+        if isinstance(stream['sample_rate'], bool):raise ValueError('Boolean sample rate')
+        rate_text = str(stream['sample_rate'])
+        if not rate_text.isascii() or not rate_text.isdecimal():raise ValueError('Invalid sample rate')
+        rate = int(rate_text)
+        parts = stream['time_base'].split('/')
+        if len(parts) != 2 or not all(p.isascii() and p.isdecimal() for p in parts):raise ValueError('Malformed time base')
+        numerator, denominator = (int(p) for p in parts)
+        if rate <= 0 or numerator <= 0 or denominator <= 0:raise ValueError('Nonpositive clock')
+        scale = Fraction(numerator * rate, denominator)
+        if any(isinstance(stream[k], bool) for k in ('start_pts', 'duration_ts')):raise ValueError('Boolean bound')
+        tick_values = [str(stream[k]) for k in ('start_pts', 'duration_ts')]
+        if not all(v.lstrip('-').isascii() and v.lstrip('-').isdecimal() for v in tick_values):raise ValueError('Noninteger tick bound')
+        start_ticks, duration_ticks = (int(v) for v in tick_values)
+        if duration_ticks <= 0:raise ValueError('Nonpositive duration')
+        start, end = start_ticks * scale, (start_ticks + duration_ticks) * scale
+        if start.denominator != 1 or end.denominator != 1:raise ValueError('Fractional decoded-sample boundary')
+        movie_start_exact = Fraction(str(movie['start_time'])) * rate
+        movie_end_exact = Fraction(str(movie['duration'])) * rate
+        if movie_end_exact <= 0:raise ValueError('Nonpositive movie duration')
+        movie_start, movie_end = round(movie_start_exact), round(movie_end_exact)
+    except (ValueError, TypeError, KeyError, OverflowError, ZeroDivisionError, AttributeError):
+        raise ValidationError('M4B presentation bounds cannot be verified')
+    if start != 0 or movie_start_exact != 0 or end <= 0 or abs(movie_end - end) > 1:
+        raise ValidationError('M4B leading gaps or edit presentation require a verified preservation plan')
+    return {'audio_start_sample':int(start), 'audio_end_sample':int(end),
+            'movie_start_sample':movie_start, 'movie_end_sample':movie_end}
+
+
 def copied_audio_evidence(path,stage,stop,duration):
     executable=shutil.which('ffprobe')
     raw=run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
@@ -474,16 +572,7 @@ def copied_audio_evidence(path,stage,stop,duration):
     keys=('codec_name','profile','sample_rate','channels','channel_layout','time_base','extradata_hash')
     config={key:stream.get(key) for key in keys}
     if not config['extradata_hash'] or not config['time_base']:raise ValidationError('M4B decoder configuration evidence is missing')
-    try:
-        rate=int(stream['sample_rate']);timebase=stream['time_base'].split('/')
-        if timebase!=['1',str(rate)]:raise ValueError('noncanonical timebase')
-        start=int(stream['start_pts']);end=start+int(stream['duration_ts'])
-        movie_start=round(float(data['format']['start_time'])*rate)
-        movie_end=round(float(data['format']['duration'])*rate)
-    except (ValueError,TypeError,KeyError,OverflowError):raise ValidationError('M4B presentation bounds cannot be verified')
-    if start!=0 or movie_start!=0 or end<=0 or abs(movie_end-end)>1:
-        raise ValidationError('M4B leading gaps or edit presentation require a verified preservation plan')
-    presentation={'audio_start_sample':start,'audio_end_sample':end,'movie_start_sample':movie_start,'movie_end_sample':movie_end}
+    presentation=_copy_presentation(stream,data.get('format',{}))
     timing=PacketTimingHash()
     run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
       '-select_streams','a:0','-show_packets','-show_entries','packet=pts,dts,duration:packet_side_data=side_data_type,skip_samples,discard_padding','-of','compact=p=0:nk=0',str(path)],
@@ -602,11 +691,13 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
     for name,value in tags.items():args+=['-metadata',name+'='+value]
     args+=['-progress','pipe:1','-stats_period','1','-nostats','-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
+    plan_generated(output)
     run_owned(args,stage,stop,max(300,sum(durations)*2),telemetry=EncodingProgress(sum(durations),lambda value:progress('Creating audio',{'progress':value})))
     chapter_format=None
     sort_title=audiobook_sort_title(review)
     if chapters or sort_title!=review['title']:
         compatible=stage/'compatible.m4b'
+        plan_generated(compatible)
         chapter_format=normalize(output,compatible,stop,sort_title=sort_title if sort_title!=review['title'] else None,normalize_chapters=bool(chapters))
         output=compatible
     with VerifiedFile(output) as held_output:
@@ -662,6 +753,7 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     for key,value in expected_tags:
         if tags.get(key)!=value:raise ValidationError('Output metadata check failed: '+key)
     picture=Path(stage)/(uuid.uuid4().hex+('.png' if pictures[0].get('codec_name')=='png' else '.jpg'))
+    plan_generated(picture)
     run_owned([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-protocol_whitelist','file','-i',str(output),'-map','0:v:0','-c:v','copy','-frames:v','1',str(picture)],stage,stop,30)
     if digest(picture,stop)!=manifest['cover']['sha256']:raise ValidationError('Attached cover bytes differ from the reviewed artwork')
     remember_generated(picture,manifest['cover']['sha256'],picture.stat().st_size)

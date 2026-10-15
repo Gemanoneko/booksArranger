@@ -113,12 +113,14 @@ class BrowserServer(ThreadingHTTPServer):
 
     def state(self, library):
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
+        jobs=self.merge.state()
+        automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
         return self.health() | {'library': library, 'root': self.inventory.roots[library],
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
-            'status': self.inventory.status(library), 'audiobook_jobs': self.merge.state(),
-            'automatic_processing': self.merge.automatic.status() if hasattr(self.merge,'automatic') else None}
+            'status': self.inventory.status(library), 'audiobook_jobs': jobs,
+            'automatic_processing': automatic}
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'
@@ -303,7 +305,12 @@ class Handler(BaseHTTPRequestHandler):
                 if type(revision) is not int or revision<1:raise ValueError('Invalid candidate revision')
                 self.response(200,automatic.draft(identity,revision,data['active']));return
             if data:raise ValueError('Automatic controls require an empty object; scope is Audiobooks')
-            if path.endswith('/start'):self.server.active_library='Audiobooks';value=automatic.start()
+            if path.endswith('/start'):
+                try:value=automatic.start(server_closing=self.server.closing)
+                except ValueError as error:
+                    current=automatic.status(jobs=self.server.merge.state(),scanning=self.server.scan_active(),server_closing=self.server.closing)
+                    self.response(409,{'error':current.get('start_block_reason') or str(error),'automatic_processing':current});return
+                self.server.active_library='Audiobooks'
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
         reviews=self.server.merge.reviews
@@ -406,7 +413,7 @@ class Handler(BaseHTTPRequestHandler):
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
             with self.server.control_lock:
                 if self.server.closing:
-                    self.fail(409,'Server is shutting down');return
+                    self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
                 if path in {'/api/scan/start','/api/scan/resume','/api/scan/stop'}:
                     if set(data)!={'library'}: raise ValueError('Scan controls require only a library')
                     library=self.library(data['library'])
@@ -436,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/automatic/start','/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':

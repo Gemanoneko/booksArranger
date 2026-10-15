@@ -200,12 +200,16 @@ def _process_running(pid):
     kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel.OpenProcess.restype = wintypes.HANDLE
     kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = kernel.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
     if not handle:
         return ctypes.get_last_error() != 87  # only "invalid parameter" proves no such process
     try:
-        return kernel.WaitForSingleObject(handle, 0) == 0x102  # WAIT_TIMEOUT: still running
+        status=kernel.WaitForSingleObject(handle,0)
+        if status==0:return False  # WAIT_OBJECT_0: exact retained process has exited.
+        if status==0x102:return True  # WAIT_TIMEOUT: still running.
+        raise RuntimeError('Previous app lifetime cannot be verified; ownership record preserved')
     finally:
         kernel.CloseHandle(handle)
 

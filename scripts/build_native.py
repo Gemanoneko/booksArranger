@@ -126,7 +126,9 @@ def main():
             proof={'schema':'books-build-lease-v1','mode':mode,'root':str(ROOT),'ownedRoot':str(owned),'lease_path':str(owned/'lease.json'),'nonce':secrets.token_hex(32),'deadline':int((time.time()+590)*1000),'supervisor':identity,'node':request['node']}
             from native_io import DirectoryBoundary,VerifiedFile
             externals={}
-            for name,location in ({'git':'C:/Program Files/Git/cmd/git.exe','gh':'C:/Program Files/GitHub CLI/gh.exe'} if mode=='release' else {}).items():
+            tools={'git':'C:/Program Files/Git/cmd/git.exe'} if mode in {'build','release'} else {}
+            if mode=='release':tools['gh']='C:/Program Files/GitHub CLI/gh.exe'
+            for name,location in tools.items():
                 path=Path(location).absolute()
                 stack.enter_context(DirectoryBoundary(path.anchor,path.parent))
                 held=stack.enter_context(VerifiedFile(path))
@@ -145,15 +147,34 @@ def main():
                 env.update({'TEMP':str(owned),'TMP':str(owned),'ELECTRON_BUILDER_CACHE':str(owned/'builder-cache'),'npm_config_cache':str(owned/'npm-cache')})
                 child=subprocess.Popen([str(node),str(ROOT/script),'--owned-'+mode],cwd=ROOT,env=env,stdin=subprocess.PIPE,creationflags=0x08000000|4)
                 child._books_suspended=True
+                child_identity=None
+                closure_verified=False
                 try:
-                    with OwnedProcessJob(child):
+                    child_identity=owner_proof(child,node)
+                    with OwnedProcessJob(child) as job:
                         child.communicate(json.dumps(proof).encode(),timeout=590)
-                        if child.returncode:raise RuntimeError('Owned worker failed: '+str(child.returncode))
+                        class Accounting(ctypes.Structure):
+                            _fields_=[('user',ctypes.c_longlong),('system',ctypes.c_longlong),('period_user',ctypes.c_longlong),('period_system',ctypes.c_longlong),('faults',wintypes.DWORD),('total',wintypes.DWORD),('active',wintypes.DWORD),('terminated',wintypes.DWORD)]
+                        K.QueryInformationJobObject.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD,ctypes.c_void_p];K.QueryInformationJobObject.restype=wintypes.BOOL
+                        accounting=Accounting()
+                        if not K.QueryInformationJobObject(job.handle,1,ctypes.byref(accounting),ctypes.sizeof(accounting),None) or accounting.active:
+                            raise RuntimeError('Build worker returned without a positively empty native Job')
+                    # Native accounting was zero before closing the retained Job.
+                    closure_verified=True
+                    if child.returncode:raise RuntimeError('Owned worker failed: '+str(child.returncode))
                 finally:
                     if child.poll() is None:
                         # This is the retained Popen HANDLE of our newly suspended
                         # child, never a PID lookup/foreign process tree.
                         child.terminate();child.wait(timeout=5)
+                    tree.write(owned/'native-operation-result.json',[json.dumps({
+                        'schema':'books-native-operation-result-v1','mode':mode,
+                        'supervisor':identity,'worker':child_identity,
+                        'root_exit_code':child.returncode,
+                        'native_job_closed':closure_verified,
+                        'active_processes_after':0 if closure_verified else None,
+                        'completed_utc_seconds':time.time(),
+                    },sort_keys=True).encode()])
 
 if __name__=='__main__':
     try:main()

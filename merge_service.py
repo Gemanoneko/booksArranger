@@ -64,15 +64,20 @@ class MergeService:
         self.cleanup.after_drain=lambda:self.jobs.resume()
         from storage_cleanup import StorageCleanup
         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard)
+        from working_lifecycle import WorkingLifecycle
+        self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
+        self.jobs.before_attempt=self.working.admit
+        self.jobs.after_attempt=self.working.terminal
         from recovery_retention import RecoveryRetention
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
         self.cleanup.recovery_status=self.recovery_status
         self._retention_stop=threading.Event();self._retention_wake=threading.Event();self._retention_thread=None;self._manual_recovery=None
-        self.cleanup.on_completed=self._prune_completed
+        self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
+        self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
             if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
@@ -277,6 +282,14 @@ class MergeService:
         if self.jobs._stop.is_set():
             raise InterruptedError('Temporary cleanup interrupted; remaining copies retained')
 
+    def _working_guard(self):
+        self._no_scan()
+        closing=getattr(self,'_retention_stop',None)
+        if closing is not None and closing.is_set():raise InterruptedError('Working cleanup is closing')
+        if self.working.in_background:
+            if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive() or self._post_current:
+                raise InterruptedError('Foreground audiobook work takes priority over idle working cleanup')
+
     def _retention_guard(self):
         self._no_scan()
         if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
@@ -310,6 +323,12 @@ class MergeService:
         if self._retention_thread:return
         def work():
             while not self._retention_stop.is_set():
+                published_revisits=[]
+                # This distinct unpublished-working operation holds only its
+                # relevant job/native leases. No central operation/admission lock
+                # spans its hashing; foreground start preempts it between blocks.
+                try:self.working.reconcile(limit=1,storage=self.storage_cleanup)
+                except (InterruptedError,ValueError):pass
                 try:
                     with admission():
                         with self.operation_lock:
@@ -318,12 +337,17 @@ class MergeService:
                             selected=[manual[0]] if manual else self.recovery.due()
                             for id in selected:
                                 self._recovery_idle();self._post_current=(id,'temporary')
-                                try:self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
+                                try:
+                                    self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
+                                    published_revisits.append(id)
                                 except InterruptedError:pass # Keep the durable partial purge resumable at startup.
                                 except Exception as error:self.recovery._set(id,'needs_attention',str(error)) # Preserve failed/stale sets and report their reason.
                                 finally:self._post_current=None
                             if manual:self._manual_recovery=None
                 except ValueError:pass # Busy/closing admission defers; never purges while scanning.
+                for id in published_revisits:
+                    try:self.working.schedule_published(id)
+                    except (InterruptedError,ValueError,OSError):pass
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
 
@@ -341,7 +365,8 @@ class MergeService:
             self.storage_cleanup._diagnose(job_id,output_hash,error)
         finally:self._post_current=None
 
-    def _prune_completed(self,job_id):
+    def _prune_completed(self,job_id,source_completed=False):
+        if source_completed:self.working.schedule_published(job_id)
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
@@ -365,6 +390,8 @@ class MergeService:
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
         self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
+        try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
+        except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
@@ -659,9 +686,70 @@ class MergeService:
 
     def retry_automatic_job(self,job_id,now):
         self._no_scan()
+        from failed_m4b_retry import eligible
+        parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
+        if parent and eligible(parent):
+            result=self._retry_preserved_m4b(parent,now)
+            if result.get('requeued'):self.resume()
+            return result
         result=self.jobs.retry_failed(job_id,now)
         if result.get('requeued'):self.resume()
         return result
+
+    def _retry_preserved_m4b(self,parent,now):
+        """Admit one new child, retaining the failed parent's entire durable row."""
+        from failed_m4b_retry import bind,profile_proof
+        result={'retryable':True,'retry_at':now+3600,'requeued':False}
+        if self.jobs._thread and self.jobs._thread.is_alive():return result
+        manifest=json.loads(parent['manifest'])
+        # Old attempts predate receipt-owned lifecycle cleanup. Never clone their
+        # compressed source or generated candidates while that debt is retained.
+        job_root=self.stage_root/parent['job_id']
+        try:
+            with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
+                if job_root.exists():
+                    with DirectoryBoundary(job_root.anchor,job_root):
+                        for attempt in job_root.iterdir():
+                            if not attempt.is_dir():continue
+                            with DirectoryBoundary(attempt.anchor,attempt):
+                                if any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):
+                                    return result|{'reason':'Prior audio working files need verified disposal before another source copy'}
+        except (ValueError,OSError) as error:
+            return result|{'reason':'Prior working-file ownership requires attention: '+str(error)}
+        from source_cleanup import single_stream
+        import m4b_preservation
+        try:
+            with contextlib.ExitStack() as holds:
+                source=ordinary(manifest['sources'][0]['path'])
+                holds.enter_context(DirectoryBoundary(manifest['root'],source.parent))
+                held=holds.enter_context(VerifiedFile(source));single_stream(source)
+                if held.facts()['links']!=1:raise ValueError('Source alias is not eligible for repaired admission')
+                module=Path(m4b_preservation.__file__).absolute()
+                holds.enter_context(DirectoryBoundary(module.anchor,module.parent))
+                module_file=holds.enter_context(VerifiedFile(module))
+                with connect(self.inventory.database) as db:
+                    group_before=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                    context_before=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                if not group_before or not context_before:raise ValueError('Reviewed candidate unavailable')
+                fresh=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,stop=self.automatic.stop_event)
+                title=fresh['metadata'].get('title')
+                if not isinstance(title,str) or not title:raise ValueError('Approved title unavailable')
+                with source.open('rb') as reader:
+                    def read_at(offset,count):
+                        if self.automatic.stop_event.is_set():raise InterruptedError('Automatic processing stopped')
+                        reader.seek(offset);return reader.read(count)
+                    profile=m4b_preservation.plan(held.facts()['size'],read_at,{'title':title},None)
+                proof=profile_proof(profile,module_file.sha256())
+                fresh=bind(parent,fresh,proof)
+                with connect(self.inventory.database) as db:
+                    group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(fresh['candidate_id'],)).fetchone()
+                    context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(fresh['candidate_id'],)).fetchone()
+                if not group or not context or tuple(group)!=tuple(group_before) or tuple(context)!=tuple(context_before):raise ValueError('Reviewed candidate changed during source proof')
+                child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)))
+                return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
+        except InterruptedError:raise
+        except (ValueError,OSError,sqlite3.Error) as error:
+            return result|{'reason':'Failed M4B retained: '+str(error)}
 
     def _recording_review(self,row,result,stop):
         """Full source-byte comparisons only; freshly validate any completed counterpart."""
@@ -760,7 +848,7 @@ class MergeService:
 
     def _run(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
-        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info))
+        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working)
         if manifest.get('replacement_id'):
             from replacement_media import verify_replacement
             validation=verify_replacement(manifest,validation,output,output.parent,stop)

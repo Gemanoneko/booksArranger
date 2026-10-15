@@ -101,8 +101,11 @@ class AutomaticProcessing:
         predicate=" AND state='Running'" if fields.get('state')=='Stopping' else ''
         transaction(self.database,lambda db:db.execute('UPDATE automatic_runs SET '+','.join(k+'=?' for k in fields)+' WHERE id=?'+predicate,(*fields.values(),id)),self.stop_event if cancel else None)
     def _record(self,row,state,result=None,retry_at=None):
-        result=dict(result or {},research_version=RESEARCH_VERSION)
-        with connect(self.database) as db:
+        # Replay only this local candidate write. Each BEGIN IMMEDIATE retry
+        # rereads committed history; never mutate a prior attempt's input/result.
+        supplied=dict(result or {},research_version=RESEARCH_VERSION)
+        def persist(db):
+            recorded=dict(supplied)
             old=db.execute('SELECT revision,fingerprint,state,result FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
             prior=json.loads(old['result']) if old else {}
             attempt=prior.get('research_attempt',0)
@@ -110,13 +113,15 @@ class AutomaticProcessing:
             if old and (old['revision']!=row['revision'] or old['fingerprint']!=row['fingerprint']):
                 history=history+[{'attempt':attempt,'at':stamp(),'state':old['state'],'revision':old['revision'],'fingerprint':old['fingerprint'],
                     'reasons':prior.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in prior.get('sources',[])[:20]]}]
-            if old and old['fingerprint']==row['fingerprint'] and 'source_refresh' not in result and prior.get('source_refresh'):
-                result['source_refresh']=prior['source_refresh']
+            if old and old['fingerprint']==row['fingerprint'] and 'source_refresh' not in recorded and prior.get('source_refresh'):
+                recorded['source_refresh']=prior['source_refresh']
             if state in ('Held','Waiting for source','Queued'):
                 attempt+=1
-                history=history+[{'attempt':attempt,'at':stamp(),'state':state,'reasons':result.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in result.get('sources',[])[:20]]}]
-            result['research_attempt']=attempt;result['research_history']=history[-20:]
-            db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(result,ensure_ascii=False),retry_at,stamp(),VERSION))
+                history=history+[{'attempt':attempt,'at':stamp(),'state':state,'reasons':recorded.get('reasons',[])[:8],'sources':[{'url':s.get('url'),'sha256':s.get('sha256'),'kind':s.get('kind')} for s in recorded.get('sources',[])[:20]]}]
+            recorded['research_attempt']=attempt;recorded['research_history']=history[-20:]
+            db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['revision'],row['fingerprint'],state,json.dumps(recorded,ensure_ascii=False),retry_at,stamp(),VERSION))
+        worker=threading.current_thread() is self.thread
+        transaction(self.database,persist,self.stop_event if worker else None)
     def _paused_checkpoint(self,id,checkpoint):
         encoded=json.dumps(checkpoint);updated=stamp()
         def persist(db):
@@ -145,7 +150,24 @@ class AutomaticProcessing:
                 result=json.loads(record['result']);result['wait']=revised
                 db.execute("UPDATE automatic_candidates SET result=?,retry_at=? WHERE id=? AND revision=? AND fingerprint=? AND state='Waiting for source'",(json.dumps(result,ensure_ascii=False),revised['retry_at'],row['id'],row['revision'],row['fingerprint']))
         return self.candidate(row)
-    def status(self):
+    def _start_block_reason(self,state,*,jobs=None,scanning=None,server_closing=False):
+        # This is a read-only snapshot, with no new lock acquisition. In
+        # particular, never take merge/scanner locks while holding self.lock.
+        if self.closed or server_closing:return 'The local server is stopping or stopped. Start is unavailable.'
+        if self.volatile_failure:return 'Automatic processing cannot restart because its failure record could not be saved.'
+        if state=='Stopping':return 'Automatic processing is stopping. Wait for it to finish stopping.'
+        if state=='Running' or self.thread and self.thread.is_alive():return 'Automatic processing is already running.'
+        if scanning is None:
+            worker=getattr(self.inventory,'worker',None)
+            scanning=bool(worker and worker.is_alive())
+        if scanning:return 'Discovery is in progress. Wait for it to stop before starting automatic processing.'
+        job_state=jobs.get('state') if isinstance(jobs,dict) else None
+        if job_state=='Running':return 'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.'
+        if job_state=='Pausing':return 'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'
+        if job_state not in ('Idle','Paused','Completed','Needs attention'):
+            return 'Start availability is unknown. Waiting for the local server.'
+        return ''
+    def status(self,*,jobs=None,scanning=None,server_closing=False):
         run=self._run_row();counts={'researching':0,'waiting':0,'held':0}
         with connect(self.database) as db:
             for r in db.execute('SELECT a.state,count(*) n FROM automatic_candidates a JOIN book_groups g ON g.id=a.id AND g.revision=a.revision AND g.fingerprint=a.fingerprint WHERE g.superseded=0 GROUP BY a.state'):
@@ -160,19 +182,24 @@ class AutomaticProcessing:
             state='Needs attention';diagnostic=self.volatile_failure['diagnostic'];counts['researching']=0
         active=state in ('Running','Stopping')
         armed=state=='Running' and self.next_retry_at is not None and not self.stop_event.is_set() and not self.closed
+        block=self._start_block_reason(state,jobs=jobs,scanning=scanning,server_closing=server_closing)
         return {'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
-                'can_start':not self.closed and not active and not self.volatile_failure,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
+                'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
                 'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None}
-    def start(self):
+    def start(self,*,server_closing=False):
         with self.lock:
+            if server_closing:raise ValueError('The local server is stopping or stopped. Start is unavailable.')
             if self.closed:raise ValueError('Automatic processing is closed')
             if self.volatile_failure:raise ValueError('Failure checkpoint could not be saved; automatic processing remains stopped')
             if self.thread and self.thread.is_alive():return self.status()
-            self.merge._no_scan()
-            jobs=self.merge.state()
-            if jobs['state'] in ('Running','Pausing'):raise ValueError('Pause existing audiobook work before automatic discovery')
             run=self._run_row()
+            scanner=getattr(self.inventory,'worker',None)
+            if scanner and scanner.is_alive():
+                raise ValueError(self._start_block_reason(run['state'] if run else 'Idle',scanning=True,server_closing=server_closing))
+            block=self._start_block_reason(run['state'] if run else 'Idle',jobs=self.merge.state(),server_closing=server_closing)
+            if block:raise ValueError(block)
+            self.merge._no_scan()  # Recheck discovery immediately before admission.
             if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
                 id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
                 with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))

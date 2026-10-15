@@ -24,7 +24,11 @@ def setup(connection):
         connection.execute('DELETE FROM book_group_sync') if connection.execute("SELECT 1 FROM sqlite_master WHERE name='book_group_sync'").fetchone() else None
         connection.execute('INSERT OR REPLACE INTO book_group_algorithm VALUES(1,?)',(GROUP_VERSION,))
     connection.execute('CREATE TABLE IF NOT EXISTS book_catalog_revision(id INTEGER PRIMARY KEY, revision INTEGER NOT NULL)')
-    connection.execute('INSERT OR IGNORE INTO book_catalog_revision VALUES(1,0)')
+    # An initialized status poll must not reserve the SQLite writer merely to
+    # ignore the already-present seed. Bootstrap/concurrent initializers retain
+    # the same idempotent INSERT when the singleton is genuinely absent.
+    if connection.execute('SELECT 1 FROM book_catalog_revision WHERE id=1').fetchone() is None:
+        connection.execute('INSERT OR IGNORE INTO book_catalog_revision VALUES(1,0)')
     connection.execute('CREATE TABLE IF NOT EXISTS book_group_sync(root TEXT PRIMARY KEY, revision INTEGER NOT NULL)')
     for operation in ('INSERT','DELETE'):
         connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_files_{operation.lower()} AFTER {operation} ON files BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
