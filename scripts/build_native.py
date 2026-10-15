@@ -34,7 +34,7 @@ def bootstrap(stack):
         for p in reversed([path,*path.parents]): hold(p,True)
     hold(Path(sys.executable),False)
     if hashlib.sha256(Path(sys.executable).read_bytes()).hexdigest()!=PYTHON_SHA256: raise RuntimeError('Bootstrap Python fingerprint changed')
-    for name in ['native_io.py','desktop_host.py','scripts/build_fs_guard.py','scripts/build_native.py']:
+    for name in ['native_io.py','desktop_host.py','scripts/build_fs_guard.py','scripts/build_external_tools.py','scripts/build_native.py']:
         p=ROOT/name
         for d in reversed([p.parent,*p.parent.parents]): hold(d,True)
         hold(p,False)
@@ -129,6 +129,10 @@ def main():
             tools={'git':'C:/Program Files/Git/cmd/git.exe'} if mode in {'build','release'} else {}
             if mode=='release':tools['gh']='C:/Program Files/GitHub CLI/gh.exe'
             for name,location in tools.items():
+                if name=='git':
+                    from build_external_tools import retain_git
+                    externals[name]=retain_git(stack)
+                    continue
                 path=Path(location).absolute()
                 stack.enter_context(DirectoryBoundary(path.anchor,path.parent))
                 held=stack.enter_context(VerifiedFile(path))
