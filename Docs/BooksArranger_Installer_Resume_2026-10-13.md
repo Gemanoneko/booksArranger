@@ -1,5 +1,8 @@
 # Books Arranger installer resumption — 2026-10-13
 
+> Superseding operational status — 2026-10-15: read [BooksArranger_Resume_2026-10-15.md](BooksArranger_Resume_2026-10-15.md) before acting. The historical “left running” and “leave the running converter alone” statements below were superseded by Sergei’s reported safe shutdown on October 14 at 05:05:10 UTC. Current native process/port/catalog ownership is unverified. Do not automatically restart processing or install the candidate. The continuation heartbeat remains paused. Earlier evidence below is preserved as history.
+
+
 User authorization: continue the restart handoff. This record supplements, and preserves, `BooksArranger_Parked_Installer_2026-10-13.md`.
 
 ## Verified restart state
