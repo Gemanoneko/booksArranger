@@ -146,7 +146,7 @@ class BusyTests(unittest.TestCase):
     def test_supported_stop_recovers_busy_atomic_pause_and_restart_remains_paused(self):
         identity=str(uuid.uuid4());row={'id':identity,'revision':1,'fingerprint':'private','members':[],'title_clue':'Private book'}
         checkpoint={'pending':[identity],'done':['completed-1','completed-2','completed-3','completed-4']}
-        self.auto._update(self.run,checkpoint=json.dumps(checkpoint))
+        self.auto._update(self.run,state='Paused',checkpoint=json.dumps(checkpoint))
         self.auto.inventory.roots={'Audiobooks':str(self.database.parent/'private-sources')}
         self.auto.inventory.worker=None;self.auto.inventory.stop=Mock()
         self.auto.merge.state=lambda:{'state':'Completed','queued':0,'cleanup_active':False}
