@@ -18,6 +18,20 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _failure_details(error, stage, now=None):
+    """Classify only a typed pre-publication error; never infer from its message."""
+    retryable = isinstance(error, (OSError, TimeoutError)) and not isinstance(error, InterruptedError)
+    code = getattr(error, 'sqlite_errorcode', None) if isinstance(error, sqlite3.Error) else None
+    if isinstance(error, sqlite3.OperationalError):
+        retryable = type(code) is int and code >= 0 and (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    details = {'exception_class': type(error).__name__, 'at': time.time() if now is None else now,
+               'retryable': retryable, 'stage': stage}
+    if isinstance(error, sqlite3.Error):
+        details['sqlite_errorcode'] = code
+        details['sqlite_errorname'] = getattr(error, 'sqlite_errorname', None)
+    return details
+
+
 class AudioJobs:
     """Single-owner queue; do not instantiate twice for the same database.
 
@@ -296,7 +310,8 @@ class AudioJobs:
                 elif isinstance(exc, InterruptedError) and self._stop.is_set():
                     self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
                 else:
-                    journal['failure']={'exception_class':type(exc).__name__,'at':time.time(),'retryable':isinstance(exc,(OSError,TimeoutError)) and not isinstance(exc,InterruptedError),'stage':row['stage']}
+                    failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
+                    journal['failure'] = _failure_details(exc, failure_stage)
                     self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
                     if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
                         self._stop.set()

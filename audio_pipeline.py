@@ -1,6 +1,7 @@
 """Owned immutable-source M4B staging and strict validation; no source rewrites."""
 import hashlib,json,math,os,shutil,subprocess,time,uuid,threading,contextlib,struct,errno
 from pathlib import Path
+from fractions import Fraction
 from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinary,ProtectedFiles,OwnedProcessJob,VerifiedFile
 
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding, AUTOMATIC_PROFILE, freeze_automatic_policy, choose_automatic_encoding
@@ -464,6 +465,37 @@ class PacketTimingHash:
         return {'sha256':self.hash.hexdigest(),'packet_count':self.count}
 
 
+def _copy_presentation(stream, movie):
+    """Map positive rational ticks to exact decoded-sample bounds, preserving holds."""
+    try:
+        if isinstance(stream['sample_rate'], bool):raise ValueError('Boolean sample rate')
+        rate_text = str(stream['sample_rate'])
+        if not rate_text.isascii() or not rate_text.isdecimal():raise ValueError('Invalid sample rate')
+        rate = int(rate_text)
+        parts = stream['time_base'].split('/')
+        if len(parts) != 2 or not all(p.isascii() and p.isdecimal() for p in parts):raise ValueError('Malformed time base')
+        numerator, denominator = (int(p) for p in parts)
+        if rate <= 0 or numerator <= 0 or denominator <= 0:raise ValueError('Nonpositive clock')
+        scale = Fraction(numerator * rate, denominator)
+        if any(isinstance(stream[k], bool) for k in ('start_pts', 'duration_ts')):raise ValueError('Boolean bound')
+        tick_values = [str(stream[k]) for k in ('start_pts', 'duration_ts')]
+        if not all(v.lstrip('-').isascii() and v.lstrip('-').isdecimal() for v in tick_values):raise ValueError('Noninteger tick bound')
+        start_ticks, duration_ticks = (int(v) for v in tick_values)
+        if duration_ticks <= 0:raise ValueError('Nonpositive duration')
+        start, end = start_ticks * scale, (start_ticks + duration_ticks) * scale
+        if start.denominator != 1 or end.denominator != 1:raise ValueError('Fractional decoded-sample boundary')
+        movie_start_exact = Fraction(str(movie['start_time'])) * rate
+        movie_end_exact = Fraction(str(movie['duration'])) * rate
+        if movie_end_exact <= 0:raise ValueError('Nonpositive movie duration')
+        movie_start, movie_end = round(movie_start_exact), round(movie_end_exact)
+    except (ValueError, TypeError, KeyError, OverflowError, ZeroDivisionError, AttributeError):
+        raise ValidationError('M4B presentation bounds cannot be verified')
+    if start != 0 or movie_start_exact != 0 or end <= 0 or abs(movie_end - end) > 1:
+        raise ValidationError('M4B leading gaps or edit presentation require a verified preservation plan')
+    return {'audio_start_sample':int(start), 'audio_end_sample':int(end),
+            'movie_start_sample':movie_start, 'movie_end_sample':movie_end}
+
+
 def copied_audio_evidence(path,stage,stop,duration):
     executable=shutil.which('ffprobe')
     raw=run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
@@ -474,16 +506,7 @@ def copied_audio_evidence(path,stage,stop,duration):
     keys=('codec_name','profile','sample_rate','channels','channel_layout','time_base','extradata_hash')
     config={key:stream.get(key) for key in keys}
     if not config['extradata_hash'] or not config['time_base']:raise ValidationError('M4B decoder configuration evidence is missing')
-    try:
-        rate=int(stream['sample_rate']);timebase=stream['time_base'].split('/')
-        if timebase!=['1',str(rate)]:raise ValueError('noncanonical timebase')
-        start=int(stream['start_pts']);end=start+int(stream['duration_ts'])
-        movie_start=round(float(data['format']['start_time'])*rate)
-        movie_end=round(float(data['format']['duration'])*rate)
-    except (ValueError,TypeError,KeyError,OverflowError):raise ValidationError('M4B presentation bounds cannot be verified')
-    if start!=0 or movie_start!=0 or end<=0 or abs(movie_end-end)>1:
-        raise ValidationError('M4B leading gaps or edit presentation require a verified preservation plan')
-    presentation={'audio_start_sample':start,'audio_end_sample':end,'movie_start_sample':movie_start,'movie_end_sample':movie_end}
+    presentation=_copy_presentation(stream,data.get('format',{}))
     timing=PacketTimingHash()
     run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
       '-select_streams','a:0','-show_packets','-show_entries','packet=pts,dts,duration:packet_side_data=side_data_type,skip_samples,discard_padding','-of','compact=p=0:nk=0',str(path)],
