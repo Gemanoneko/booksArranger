@@ -1,6 +1,6 @@
 # Changelog
 
-## [v0.16.0] - 2026-10-13
+## [v0.16.0] - 2026-10-15
 
 ### Added
 
@@ -9,6 +9,10 @@
 
 ### Fixed
 
+- Preserve supported AAC M4B media, chapters and presentation timing when replacing metadata, avoiding a remux that changed otherwise valid books.
+- Retire verified attempt-owned temporary files and published input snapshots at their terminal boundaries. Preserve originals, unfinished work and required recovery; repaired historical jobs cannot create another source snapshot while their old working files remain.
+- Allow verified original-file cleanup when the only extra stream is the exact recognized Zone.Identifier download marker. Unknown streams still hold cleanup, and normal original and recovery checks remain required.
+- Retry bounded automatic-processing SQLite contention and keep status reads from taking an unnecessary database write lock. Start availability follows the same state rules in the server and interface.
 - Native engine and catalog ownership remain held when safe checkpoint shutdown fails; stale ownership records cannot authorize an unguarded launch or PID-only forced termination.
 - Installer staging and publication use owned bounded workers, exact artifact/source proofs and a single documented release path.
 
