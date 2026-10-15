@@ -19,6 +19,7 @@ if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutpu
 const patterns=['test_desktop_quit.py','test_desktop_catalog.py','test_desktop_host.py','test_build_guard.py','test_working_cleanup.py','test_working_precision.py','test_working_lifecycle.py','test_storage_cleanup.py','test_automatic_media_policy.py','test_automatic_media.py','test_standing_admission.py','test_attempt_working_lifecycle.py','test_published_snapshot_lifecycle.py','test_attention_failure_policy.py','test_automatic_record_retry.py','test_web.py','test_sqlite_busy.py','test_automatic_processing.py','test_status_read_contention.py'];
 patterns.push('test_desktop_owner_recovery.py','test_failed_m4b_retry.py');
 patterns.push('test_m4b_preservation.py','test_m4b_dispatch.py');
+patterns.push('test_zone_identifier.py');
 const code="import sys,unittest,json;sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();[s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p)) for p in json.loads(sys.argv[2])];print('Integrated Python cases:',s.countTestCases(),flush=True);r=unittest.TextTestRunner(verbosity=2).run(s);sys.exit(not r.wasSuccessful() or bool(r.skipped))";
 const pythonOutput=run(python,['-I','-B','-c',code,root,JSON.stringify(patterns)]);
 const pythonCount=Number(/^Integrated Python cases: (\d+)$/m.exec(pythonOutput)?.[1]);

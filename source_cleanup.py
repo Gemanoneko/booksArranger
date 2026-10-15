@@ -33,6 +33,7 @@ def setup(db):
     if 'backup_facts' not in [r[1] for r in db.execute('PRAGMA table_info(cleanup_members)')]:db.execute("ALTER TABLE cleanup_members ADD COLUMN backup_facts TEXT NOT NULL DEFAULT ''")
     db.execute('CREATE TABLE IF NOT EXISTS recovery_completion(cleanup_id TEXT PRIMARY KEY,job_id TEXT UNIQUE,completed_at TEXT NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS source_retirements(root TEXT,path TEXT,cleanup_id TEXT,job_id TEXT,source_hash TEXT,size INTEGER,modified TEXT,state TEXT,PRIMARY KEY(root,path,cleanup_id))')
+    db.execute('CREATE TABLE IF NOT EXISTS source_zone_marker_intents(cleanup_id TEXT,path TEXT,marker_sha256 TEXT,receipt TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(cleanup_id,path,marker_sha256))')
 
 def single_stream(path):
     """Reject ADS rather than silently discard filesystem data in recovery."""
@@ -162,7 +163,7 @@ class CleanupJobs:
             self.thread.join(30)
             if self.thread.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
     def _work(self,selected=None,follow_audio=True):
-        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') ORDER BY created"):
+        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason=?) ORDER BY created",('Additional filesystem streams require review; original retained',)):
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
             self.current=row['id']
@@ -212,9 +213,19 @@ class CleanupJobs:
                     continue
                 if member and member['state']=='removal_intended' and not path.exists():
                     raise BoundaryError('Interrupted removal has unknown outcome; verified recovery can restore this original before another cleanup attempt')
-                stack.enter_context(DirectoryBoundary(root,path.parent));original=stack.enter_context(VerifiedFile(path,delete=True))
+                stack.enter_context(DirectoryBoundary(root,path.parent))
                 key=str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(str(path)))))
                 approved=intent['binding'].get('context',{}).get('source_hashes',{}).get(key)
+                from zone_identifier import remove_marker
+                def validate_marker_base(handle):
+                    self._match(handle,source,json.loads(member['facts']) if member else None,approved)
+                    with connect(self.database) as db:
+                        if not self.guard(db,intent):raise BoundaryError('Reviewed source changed before download marker removal')
+                def persist_marker(receipt):
+                    with connect(self.database) as db:
+                        db.execute('INSERT OR IGNORE INTO source_zone_marker_intents VALUES(?,?,?,?,?)',(id,str(path),receipt['marker_sha256'],packed(receipt),stamp()))
+                remove_marker(path,validate_marker_base,persist_marker)
+                original=stack.enter_context(VerifiedFile(path,delete=True))
                 facts=self._match(original,source,json.loads(member['facts']) if member else None,approved);single_stream(path)
                 if not member:
                     if backup.exists():raise BoundaryError('Unknown recovery collision; originals retained')
@@ -242,6 +253,7 @@ class CleanupJobs:
                     db.commit() # Intent must survive a crash before native disposition.
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
+                    single_stream(source['path'])
                     original.dispose()
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
                     db.commit()

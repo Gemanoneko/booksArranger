@@ -225,10 +225,15 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.inventory.status('Audiobooks')['count'],20)
 
     def test_catalog_owner_lock_and_strict_port(self):
+        import os
+        from native_io import BoundaryError
+        rejected=BoundaryError if os.name=='nt' else (RuntimeError,BlockingIOError)
         with catalog_lock(self.database,self.roots):
-            with self.assertRaises((RuntimeError,BlockingIOError)):
+            with self.assertRaises(rejected):
                 with catalog_lock(self.database,self.roots):
                     self.fail('Two catalog owners were allowed')
+        # A denied nested owner must not leak a lease beyond the outer owner.
+        with catalog_lock(self.database,self.roots):pass
         with self.assertRaises(OSError):
             BrowserServer(('127.0.0.1',self.server.server_port),self.inventory)
         with self.assertRaises(ValueError):

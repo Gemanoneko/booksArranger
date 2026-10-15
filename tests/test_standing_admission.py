@@ -11,7 +11,12 @@ from scanner import connect
 from public_research import PublicClient,PublicResearch
 
 class StandingAdmissionTests(unittest.TestCase):
-    def setUp(self):self.f=fixtures.AutomaticMediaTests('test_confident_no_manual_form_to_verified_chapters_retained_recovery');self.f.setUp()
+    def setUp(self):
+        # Long immutable QA capsule paths must not consume the path budget of
+        # the genuine collection title/author fixture. Keep it private/local.
+        area=Path(__file__).resolve().parents[1]/'scratch'/'sa';area.mkdir(parents=True,exist_ok=True)
+        self.f=fixtures.AutomaticMediaTests('test_confident_no_manual_form_to_verified_chapters_retained_recovery')
+        with patch.object(fixtures,'AREA',area):self.f.setUp()
     def tearDown(self):self.f.tearDown()
     def replace_sources(self):
         for source in self.f.sources:source.unlink()
