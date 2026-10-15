@@ -21,6 +21,9 @@ CORE_DLLS={
  'libpcre2-8-0.dll':'1f609cde2ce432efb7d2b0c7b84a14a6dbfc9622d1ac1a3cbadf51c5b0b4dada',
  'zlib1.dll':'11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d',
 }
+# Git for Windows installs each backend DLL as one file with exactly two names:
+# the backend folder and libexec/git-core. Both literal folders are pinned here.
+CORE_DLL_DIRS=(CORE.parent,CORE.parent.parent/'libexec'/'git-core')
 
 def _name(path):return os.path.normcase(os.path.abspath(path))
 
@@ -62,10 +65,26 @@ def _retain_profile(stack,primary,aliases,digest):
     if _native_aliases(primary)!=expected or held.facts()!=facts:raise BoundaryError('Fixed Git wrapper profile drifted while acquiring holds')
     return str(primary)
 
+def _retain_dependency(stack,primary,aliases,digest):
+    """Internal native fixture seam: one pinned DLL with exactly two same-named
+    aliases in two distinct literal folders. Production supplies only constants."""
+    primary=ordinary(primary);aliases=tuple(ordinary(path) for path in aliases)
+    expected={_name(path) for path in aliases}
+    if len(aliases)!=2 or len(expected)!=2 or _name(primary) not in expected or any(path.name!=primary.name for path in aliases) or len({_name(path.parent) for path in aliases})!=2:
+        raise BoundaryError('Fixed Git local runtime dependency profile is invalid')
+    for path in aliases:stack.enter_context(DirectoryBoundary(path.anchor,path.parent))
+    held=stack.enter_context(VerifiedFile(primary));facts=held.facts()
+    if facts['links']!=len(aliases) or held.sha256()!=digest:raise BoundaryError('Fixed Git local runtime dependency hash/link profile differs')
+    if _native_aliases(primary)!=expected:raise BoundaryError('Fixed Git local runtime dependency alias membership differs')
+    for path in aliases:
+        alias=stack.enter_context(VerifiedFile(path))
+        if alias.facts()!=facts:raise BoundaryError('Fixed Git local runtime dependency aliases do not identify the same immutable file')
+    if _native_aliases(primary)!=expected or held.facts()!=facts:raise BoundaryError('Fixed Git local runtime dependency drifted while acquiring holds')
+    return str(primary)
+
 def retain_git(stack):
     capability=_retain_profile(stack,GIT,GIT_ALIASES,GIT_WRAPPER_SHA256)
     _retain_profile(stack,CORE,CORE_ALIASES,CORE_SHA256)
     for name,digest in CORE_DLLS.items():
-        held=stack.enter_context(VerifiedFile(CORE.parent/name))
-        if held.facts()['links']!=1 or held.sha256()!=digest:raise BoundaryError('Fixed Git local runtime dependency differs')
+        _retain_dependency(stack,CORE.parent/name,tuple(folder/name for folder in CORE_DLL_DIRS),digest)
     return capability
