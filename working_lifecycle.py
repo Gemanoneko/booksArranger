@@ -463,6 +463,125 @@ class WorkingLifecycle:
             return
         self.retire(job_id, attempt_id)
 
+    def _published(self, attempt):
+        rows=self._rows('SELECT * FROM audio_jobs WHERE job_id=?',(attempt['job_id'],))
+        if len(rows)!=1:raise BoundaryError('Published job is unavailable')
+        row=rows[0];manifest=json.loads(attempt['manifest']);output=json.loads(row['output'] or '{}')
+        if row['state']!='completed' or row['attempt_id']!=attempt['attempt_id'] or row['manifest_hash']!=attempt['manifest_hash'] or json.loads(row['manifest'])!=manifest or digest(manifest)!=attempt['manifest_hash']:
+            raise BoundaryError('Published snapshot attempt changed')
+        if attempt['producer']!='closed' or output.get('job_id')!=attempt['job_id'] or output.get('validation',{}).get('staging_artifacts',{}).get('attempt_id')!=attempt['attempt_id']:
+            raise BoundaryError('Closed published producer is unavailable')
+        return manifest,output
+
+    def _published_references(self, attempt, paths):
+        wanted=[normalized(path) for path in paths]
+        with connect(self.database) as db:
+            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table in ('audio_jobs','working_attempts','working_files')+REFERENCE_TABLES+('audio_failure_history',):
+                if table not in tables:continue
+                for raw in db.execute('SELECT * FROM '+table):
+                    row=dict(raw)
+                    if table=='audio_jobs' and row['job_id']==attempt['job_id']:continue
+                    if table in {'working_attempts','working_files'} and row['job_id']==attempt['job_id'] and row['attempt_id']==attempt['attempt_id']:continue
+                    if table=='storage_cleanup_files' and row['job_id']==attempt['job_id'] and row['kind']=='staging':continue
+                    if any(path in normalized(packed(row)) for path in wanted):
+                        raise BoundaryError('Published snapshot has another durable dependency: '+table)
+
+    def schedule_published(self, job_id):
+        """A relevant completed cleanup event wakes one held attempt; no file IO."""
+        with self._locks_guard:lock=self._locks.setdefault(job_id,threading.RLock())
+        with lock:
+            for attempt in self._rows("SELECT * FROM working_attempts WHERE job_id=? AND state='published_held'",(job_id,)):
+                self._published(attempt)
+                self._set_attempt(attempt,state='published',reason='Relevant recovery cleanup completed; idle snapshot proof pending')
+
+    def discharge_published(self, job_id, storage, revisit=False):
+        """Relevant completed attempt only; no adoption of legacy working names."""
+        with self._locks_guard:lock=self._locks.setdefault(job_id,threading.RLock())
+        with lock:
+            attempts=self._rows("SELECT * FROM working_attempts WHERE job_id=? AND state IN ('published','published_held')",(job_id,))
+            if not attempts:return
+            if len(attempts)!=1:raise BoundaryError('Ambiguous published working attempts')
+            attempt=attempts[0]
+            if attempt['state']=='published_held' and not revisit:return
+            try:
+                self._discharge_published(attempt,storage)
+            except InterruptedError:raise
+            except (OSError,ValueError,BoundaryError) as error:
+                current=self._attempt(job_id,attempt['attempt_id'])
+                self._set_attempt(current,state='published_held',reason=str(error)[:1000])
+                raise
+
+    def _discharge_published(self, attempt, storage):
+        self.guard()
+        manifest,output=self._published(attempt)
+        entries=self._files(attempt['job_id'],attempt['attempt_id'])
+        snapshots={'source%05d'%i+Path(s['path']).suffix.lower():s for i,s in enumerate(manifest['sources'])}
+        sources=[entry for entry in entries if entry['role']=='source']
+        if {entry['name'] for entry in sources}!=set(snapshots):
+            raise BoundaryError('Complete captured source snapshots are required')
+        stage=self.stage_root/attempt['job_id']/attempt['attempt_id']
+        paths=[entry['path'] for entry in entries]
+        self._published_references(attempt,paths)
+        with storage.protected_output(attempt['job_id'],guard=self.guard) as (current_manifest,current_output),contextlib.ExitStack() as stack:
+            if current_manifest!=manifest or current_output!=output:
+                raise BoundaryError('Current protected publication changed')
+            boundary=stack.enter_context(DirectoryBoundary(stage.anchor,stage))
+            marker=stack.enter_context(VerifiedFile(stage.parent/'ownership.json'))
+            if marker.facts()['size']>16*1024*1024 or json.loads(b''.join(marker.chunks()))!={'job_id':attempt['job_id'],'manifest':manifest}:
+                raise BoundaryError('Published staging ownership changed')
+            known={entry['name'] for entry in entries}
+            with os.scandir(stage) as names:
+                if any(item.name not in known or not item.is_file(follow_symlinks=False) for item in names):
+                    raise BoundaryError('Unknown published attempt member preserved')
+            source_proof=storage.snapshot_source_safety(stack,attempt['job_id'],manifest,output,guard=self.guard)
+            prepared=[]
+            artifacts=output['validation']['staging_artifacts']['files']
+            for entry in sources:
+                path=ordinary(entry['path']);source=snapshots[entry['name']]
+                if path.parent!=stage or path.name!=entry['name'] or (entry['sha256'],entry['size'])!=(source['sha256'],source['size']) or artifacts.get(entry['name'])!={'sha256':entry['sha256'],'size':entry['size']}:
+                    raise BoundaryError('Frozen snapshot producer correspondence changed')
+                if entry['state'] in TERMINAL:
+                    if os.path.lexists(path):raise BoundaryError('Discarded snapshot name was replaced')
+                    continue
+                if entry['state']=='creation_intended':raise BoundaryError('Snapshot native producer identity was never captured')
+                if not os.path.lexists(path):
+                    receipt=storage._known(path)
+                    if receipt and receipt['job_id']==attempt['job_id'] and receipt['kind']=='staging' and receipt['state'] in {'removed','absent_after_intent'} and (receipt['sha256'],receipt['size'])==(entry['sha256'],entry['size']) and json.loads(receipt['facts'])==json.loads(entry['facts']):
+                        if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
+                    elif entry['state'] not in {'removal_intended','disposition_set'}:
+                        raise BoundaryError('Snapshot missing without accepted disposition intent')
+                    self._file_state(entry,'removed' if entry['state']=='disposition_set' else 'absent_after_intent')
+                    continue
+                handle=stack.enter_context(VerifiedFile(path,delete=True))
+                facts=handle.facts();single_stream(path)
+                if facts!=json.loads(entry['facts']) or facts['links']!=1 or facts['size']!=entry['size'] or self._hash(handle)!=entry['sha256']:
+                    raise BoundaryError('Published snapshot native identity or bytes changed')
+                prepared.append((entry,path,handle))
+            for entry,path,handle in prepared:
+                source_proof();self._published(attempt);self._published_references(attempt,[str(path)]);boundary.revalidate()
+                if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
+                if entry['state']=='removal_intended':
+                    handle.dispose();entry=self._file_state(entry,'disposition_set')
+                elif entry['state']=='disposition_set':handle.dispose()
+                else:raise BoundaryError('Snapshot retirement state is invalid')
+                handle.__exit__(None,None,None)
+                if os.path.lexists(path):raise BoundaryError('Discarded snapshot name survived or was replaced')
+                self._file_state(entry,'removed')
+            # Generated roles were handed to StorageCleanup. Recognize only its
+            # exact terminal native receipts; publication alone is not removal.
+            all_removed=True
+            for entry in self._files(attempt['job_id'],attempt['attempt_id']):
+                if entry['state'] in TERMINAL:
+                    if os.path.lexists(entry['path']):raise BoundaryError('Discarded published name was replaced')
+                    continue
+                receipt=storage._known(entry['path'])
+                if not receipt or receipt['job_id']!=attempt['job_id'] or receipt['kind']!='staging' or receipt['state'] not in {'removed','absent_after_intent'} or (receipt['sha256'],receipt['size'])!=(entry['sha256'],entry['size']) or json.loads(receipt['facts'])!=json.loads(entry['facts']) or os.path.lexists(entry['path']):
+                    all_removed=False;continue
+                if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
+                self._file_state(entry,'removed' if entry['state']=='disposition_set' else 'absent_after_intent')
+            self._set_attempt(self._attempt(attempt['job_id'],attempt['attempt_id']),state='retired' if all_removed else 'published_held',reason='' if all_removed else 'Published generated-file cleanup has remaining obligations')
+
     def admit(self, row):
         """No new source/derived copy until registered prior cleanup debt clears."""
         prior_id=row.get('attempt_id')
@@ -478,7 +597,7 @@ class WorkingLifecycle:
             if self._attempt(attempt['job_id'], attempt['attempt_id'])['state'] != 'retired':
                 raise BoundaryError('Prior working sources cannot be restaged; another attempt is not admitted')
 
-    def reconcile(self, limit=1):
+    def reconcile(self, limit=1, storage=None):
         """One closed attempt per idle tick; audio/scan start preempts its hash IO.
 
         Attention/retained-source rows are revisited only on relevant explicit
@@ -490,14 +609,16 @@ class WorkingLifecycle:
         if not self._reconcile_lock.acquire(blocking=False):return attention
         self._background_thread = threading.get_ident()
         try:
-            for attempt in self._rows("SELECT * FROM working_attempts WHERE state='closed' ORDER BY updated LIMIT ?", (limit,)):
+            states=('closed','published') if storage is not None else ('closed',)
+            for attempt in self._rows("SELECT * FROM working_attempts WHERE state IN ("+','.join('?' for _ in states)+") ORDER BY updated LIMIT ?", (*states,limit)):
                 try:
-                    self.terminal(attempt['job_id'], attempt['attempt_id'])
+                    if attempt['state']=='published':self.discharge_published(attempt['job_id'],storage)
+                    else:self.terminal(attempt['job_id'], attempt['attempt_id'])
                 except InterruptedError:
                     break  # A normal audio/scan/close admission takes priority.
                 except (OSError, ValueError, BoundaryError) as error:
                     current = self._attempt(attempt['job_id'], attempt['attempt_id'])
-                    self._set_attempt(current, state='attention', reason=str(error)[:1000])
+                    self._set_attempt(current, state='published_held' if attempt['state']=='published' else 'attention', reason=str(error)[:1000])
                     attention.append({'job_id': attempt['job_id'], 'attempt_id': attempt['attempt_id'], 'reason': str(error)})
         finally:
             self._background_thread = None

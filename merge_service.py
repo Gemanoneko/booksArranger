@@ -70,7 +70,7 @@ class MergeService:
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
         self.cleanup.recovery_status=self.recovery_status
         self._retention_stop=threading.Event();self._retention_wake=threading.Event();self._retention_thread=None;self._manual_recovery=None
-        self.cleanup.on_completed=self._prune_completed
+        self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
@@ -309,10 +309,11 @@ class MergeService:
         if self._retention_thread:return
         def work():
             while not self._retention_stop.is_set():
+                published_revisits=[]
                 # This distinct unpublished-working operation holds only its
                 # relevant job/native leases. No central operation/admission lock
                 # spans its hashing; foreground start preempts it between blocks.
-                try:self.working.reconcile(limit=1)
+                try:self.working.reconcile(limit=1,storage=self.storage_cleanup)
                 except (InterruptedError,ValueError):pass
                 try:
                     with admission():
@@ -322,12 +323,17 @@ class MergeService:
                             selected=[manual[0]] if manual else self.recovery.due()
                             for id in selected:
                                 self._recovery_idle();self._post_current=(id,'temporary')
-                                try:self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
+                                try:
+                                    self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
+                                    published_revisits.append(id)
                                 except InterruptedError:pass # Keep the durable partial purge resumable at startup.
                                 except Exception as error:self.recovery._set(id,'needs_attention',str(error)) # Preserve failed/stale sets and report their reason.
                                 finally:self._post_current=None
                             if manual:self._manual_recovery=None
                 except ValueError:pass # Busy/closing admission defers; never purges while scanning.
+                for id in published_revisits:
+                    try:self.working.schedule_published(id)
+                    except (InterruptedError,ValueError,OSError):pass
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
 
@@ -345,7 +351,8 @@ class MergeService:
             self.storage_cleanup._diagnose(job_id,output_hash,error)
         finally:self._post_current=None
 
-    def _prune_completed(self,job_id):
+    def _prune_completed(self,job_id,source_completed=False):
+        if source_completed:self.working.schedule_published(job_id)
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
@@ -369,6 +376,8 @@ class MergeService:
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
         self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
+        try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
+        except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id

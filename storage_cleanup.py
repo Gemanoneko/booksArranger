@@ -6,6 +6,7 @@ verified removal intent; unknown absence/replacement never counts as success.
 import contextlib
 import hashlib
 import json
+import os
 import re
 import uuid
 import sqlite3
@@ -133,7 +134,10 @@ class StorageCleanup:
         with DirectoryBoundary(root, final.parent) as ancestry, VerifiedFile(final) as handle:
             if [list(x) for x in ancestry.identities] != [list(x) for x in out['parent_identity']]:
                 raise BoundaryError('Completed output ancestry changed')
-            if handle.facts()['size'] != out['size'] or handle.sha256() != out['sha256']:
+            value=hashlib.sha256()
+            for block in handle.chunks():
+                (guard or self.guard)();value.update(block)
+            if handle.facts()['size'] != out['size'] or value.hexdigest() != out['sha256']:
                 raise BoundaryError('Completed output bytes changed; copies retained')
             yield m, out
 
@@ -262,6 +266,94 @@ class StorageCleanup:
             if handle.facts()['size'] != s['size'] or str(handle.facts()['modified']) != str(s['modified']) or handle.sha256() != s['sha256']:
                 raise BoundaryError('Retained original source changed; staging retained')
         return None, []
+
+    def snapshot_source_safety(self, stack, job_id, manifest, output, guard=None):
+        """Prove redundant published snapshots without retiring any original.
+
+        An enrolled/ADS-held source cleanup does not prohibit independently
+        verifying surviving original bytes. Missing sources require the existing
+        accepted retirement contract and actual recovery survival or disposal.
+        """
+        guard=guard or self.guard
+        def sha(handle):
+            value=hashlib.sha256()
+            for block in handle.chunks():
+                guard();value.update(block)
+            return value.hexdigest()
+        originals=stack.enter_context(contextlib.ExitStack())
+        try:
+            for source in manifest['sources']:
+                path=ordinary(source['path'])
+                if not path.is_relative_to(ordinary(manifest['root'])):
+                    raise BoundaryError('Frozen source escaped its library')
+                originals.enter_context(DirectoryBoundary(path.anchor,path.parent))
+                handle=originals.enter_context(VerifiedFile(path))
+                facts=handle.facts()
+                if facts['links']!=1 or facts['size']!=source['size'] or str(facts['modified'])!=str(source['modified']) or sha(handle)!=source['sha256']:
+                    raise BoundaryError('Frozen surviving source differs')
+            return lambda: guard()
+        except InterruptedError:raise
+        except (OSError,BoundaryError):
+            originals.close()
+        with connect(self.database) as db:
+            retirement=db.execute('SELECT state FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+        if not retirement or retirement['state']!='completed':
+            raise BoundaryError('Missing originals have no accepted completed retirement')
+        cleanup,members=self._source_safety(stack,job_id,manifest,output)
+        if not cleanup:
+            raise BoundaryError('Snapshot source survival is unavailable')
+        with connect(self.database) as db:
+            tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            retention=db.execute('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,)).fetchone() if 'recovery_retention' in tables else None
+            completion=db.execute('SELECT * FROM recovery_completion WHERE cleanup_id=?',(cleanup['id'],)).fetchone()
+            receipts={r['path']:dict(r) for r in db.execute("SELECT * FROM storage_cleanup_files WHERE job_id=? AND kind='recovery'",(job_id,))}
+        if not completion or completion['job_id']!=job_id:
+            raise BoundaryError('Immutable recovery completion is unavailable')
+        location=ordinary(self.recovery_root/cleanup['id'])
+        deleted=bool(retention and retention['state']=='deleted')
+        missing_location=deleted and not os.path.lexists(location)
+        stack.enter_context(DirectoryBoundary(location.anchor,self.recovery_root if missing_location else location))
+        if deleted:
+            from recovery_retention import moment,HOURS
+            from datetime import timedelta
+            if retention['cleanup_id']!=cleanup['id'] or retention['output_hash']!=output['sha256'] or retention['completed_at']!=completion['completed_at'] or (moment(completion['completed_at'])+timedelta(hours=HOURS)).isoformat()!=retention['expires_at']:
+                raise BoundaryError('Terminal recovery provenance changed')
+            if retention['actor'] not in {'manual','automatic','legacy'} or moment(retention['deleted_at'])<moment(completion['completed_at']):
+                raise BoundaryError('Actual recovery disposal completion is unavailable')
+            if retention['actor']=='automatic' and moment(retention['deleted_at'])<moment(retention['expires_at']):
+                raise BoundaryError('Automatic recovery disposal predates retention deadline')
+        elif retention and retention['state'] not in {'retained'}:
+            raise BoundaryError('Recovery has an active or uncertain operation')
+        for source in manifest['sources']:
+            member=next(r for r in members if r['path']==source['path'])
+            backup=ordinary(member['backup'])
+            if backup.parent!=location or not member['backup_facts'] or member.get('restore_intent'):
+                raise BoundaryError('Recovery input ownership is unavailable or restoring')
+            facts=json.loads(member['backup_facts'])
+            receipt=receipts.get(str(backup))
+            if deleted:
+                if not receipt or receipt['state'] not in TERMINAL or receipt['job_id']!=job_id or receipt['kind']!='recovery' or (receipt['sha256'],receipt['size'])!=(source['sha256'],source['size']) or json.loads(receipt['facts'])!=facts or os.path.lexists(backup):
+                    raise BoundaryError('Actual terminal recovery receipt is incomplete or replaced')
+            else:
+                if receipt and receipt['state'] in TERMINAL | {'removal_intended','disposition_set'}:
+                    raise BoundaryError('Recovery disposal has not reached a terminal outcome')
+                handle=stack.enter_context(VerifiedFile(backup))
+                if handle.facts()!=facts or facts['links']!=1 or facts['size']!=source['size'] or str(facts['modified'])!=str(source['modified']) or sha(handle)!=source['sha256']:
+                    raise BoundaryError('Registered recovery source changed')
+        def revalidate():
+            guard()
+            with connect(self.database) as db:
+                current=db.execute('SELECT * FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+                current_members=[dict(r) for r in db.execute('SELECT * FROM cleanup_members WHERE cleanup_id=?',(cleanup['id'],))]
+                current_retention=db.execute('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,)).fetchone() if 'recovery_retention' in tables else None
+            if not current or dict(current)!=dict(cleanup) or current_members!=members or (dict(current_retention) if current_retention else None)!=(dict(retention) if retention else None):
+                raise BoundaryError('Recovery/source retirement changed during snapshot disposal')
+            if missing_location and os.path.lexists(location):
+                raise BoundaryError('A replacement recovery directory appeared')
+            if deleted and any(os.path.lexists(member['backup']) for member in members):
+                raise BoundaryError('A replacement recovery member appeared')
+        revalidate()
+        return revalidate
 
     def _staging(self, stack, job_id, manifest, output):
         job = self.stage_root / job_id
