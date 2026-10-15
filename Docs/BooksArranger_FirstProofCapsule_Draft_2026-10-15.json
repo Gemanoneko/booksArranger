@@ -1,0 +1,52 @@
+{
+  "schema": "books-first-proof-draft-v1",
+  "status": "SOURCE_PREPARATION_ONLY_NOT_COMPLETE_OR_ENROLLED",
+  "operation": "books-maintenance-13-fixed",
+  "source_checkpoint": "880e267",
+  "source_root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-2026-10-15/maintenance-worktree",
+  "argv": [
+    "C:/Python314/python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-2026-10-15/first-proof-maintenance-13.py"
+  ],
+  "cwd": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-2026-10-15/maintenance-worktree",
+  "total_deadline_ms": 600000,
+  "outputs": [
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-2026-10-15/first-proof-maintenance-13"
+  ],
+  "expected_tests": 13,
+  "forbidden": [
+    "real catalog",
+    "Z:/",
+    "Y:/",
+    "app launch",
+    "media child",
+    "network",
+    "source/recovery deletion",
+    "arbitrary argv"
+  ],
+  "static_pins": {
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/resume-2026-10-15/first-proof-maintenance-13.py": "5986ac0b003180921c0d8c047d641ac934dcdebb75da205fcedc66510fdb4862",
+    "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/electron-2026-10-13/worktree/scripts/qa-owned-guardian.mjs": "4a521ec6a8844b8ffa625ade3bb9b0107ce59f62b33a45f7c5be4bb5d46824a2",
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba",
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs": "d852e07bdaec0c6fc62cf018a4e490e6a975c8dc63500105c92280f07c980438",
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-identity.mjs": "c0493782c8cd89244dfa67a2a141a2f9db89fe3383c5f585c4a257183fa3c63d",
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs": "3f7e6bc022fe9a34aad63340059bd0f975fad8948e1b770c0f7a3bd6e3c1038c",
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs": "c8278cb57c7882dba98dd3d004ced6d35a26e994b719b737dab4133ed39ffe94"
+  },
+  "source_map": "Docs/BooksArranger_AttentionFixes_SourceInputs_2026-10-15.json",
+  "incomplete": [
+    "full runtime/stdlib/native map",
+    "complete actual import closure",
+    "final fixed adapter/verifier/outer loader identity",
+    "supported literal command envelope and plan digest",
+    "fresh shared registration preimages and coordinated write window",
+    "Books-specific loaded enforcement positive/negative evidence",
+    "native exclusive output root receipt",
+    "validated child cwd/private TEMP/TMP/environment binding"
+  ],
+  "enrolled": false,
+  "executed": false
+}
