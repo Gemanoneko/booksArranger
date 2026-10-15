@@ -1,0 +1,277 @@
+{
+  "schema": "books-fixed-proof-review-capsule-v1",
+  "status": "STAGED_UNEXECUTED_NOT_REGISTERED",
+  "source_base": "88ef3df90506654eb3e213fdd51e47d23b27726d",
+  "purpose": "Exactly13 future SQLite-classification/rational-clock tests; not backlog timeline repair, packaging or live cleanup.",
+  "root": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof",
+  "policy": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\policy.json",
+    "sha256": "d7c1b8d4fd0e222b7769df357372529174675b5f1d57a435233339f18346f792"
+  },
+  "frozen": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\frozen.json",
+    "sha256": "a25faaa2929aaeaf987135cac6721064f7b8711a4e83f515c7532bc4a94b3b86"
+  },
+  "source_runtime_manifest": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\input-manifest.json",
+    "sha256": "0d8039294b5e3fd07fba733f3eab6188b8b175eb315e55d5b38381132a5fafba",
+    "method": "Complete static ordinary-file inventories; authenticated native leases and reinventory required at operation, not yet executed."
+  },
+  "argv": [
+    "C:\\Python314\\python.exe",
+    "-I",
+    "-S",
+    "-B",
+    "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\proof-entry.py"
+  ],
+  "cwd": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-inputs-13",
+  "environment": {
+    "SystemRoot": "C:\\Windows",
+    "WINDIR": "C:\\Windows",
+    "ComSpec": "C:\\Windows\\System32\\cmd.exe",
+    "PATH": "C:\\Python314;C:\\Windows\\System32",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "TEMP": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-run-13-01\\tmp",
+    "TMP": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-run-13-01\\tmp"
+  },
+  "inputs": [
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\runner.py",
+      "sha256": "a62a9ed2ee5a5098c82af36dfcc62e352a55427b8b37fc201b8c48f892070d5c"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\windows-owner.py",
+      "sha256": "525c9df2b22c732065cf1cd79cca7def1388885e99d58c4b0770cc5c09236bdd"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\proof-entry.py",
+      "sha256": "53fc9ef90d274d2c7f14eb4ff61be89bbe50b189ec59a72a66c2a1fde2597ce8"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\contract.mjs",
+      "sha256": "af7fa9c8d17bca1e4caaf7fb9b05d510a7a41082af1da523d1e24c82d297c1a0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\hook-adapter.mjs",
+      "sha256": "1b6918ba86a2ea83285af55d91e39fb237ecc375450250c8ebbdf71ff94d0f4f"
+    },
+    {
+      "path": "C:\\Python314\\python.exe",
+      "sha256": "434b361fe0c5960d404974feed493db47f2603a1ace2574312104fbed0182c6f"
+    },
+    {
+      "path": "C:\\Python314\\python3.dll",
+      "sha256": "f9acdbcf3383a52353f8d7db3cbda3d3701b1cf7ac3053985fdac766c29e7808"
+    },
+    {
+      "path": "C:\\Python314\\python314.dll",
+      "sha256": "854fe7549eb4b2ac478935a38ae2ca1b774c6fdc3d87f0263fbd697ff86d7149"
+    },
+    {
+      "path": "C:\\Python314\\vcruntime140.dll",
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "path": "C:\\Python314\\vcruntime140_1.dll",
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "sha256": "a619e2e09eb0d50ef4c733d678b4d22689d2afef138cd67fd3fa107b535f8819"
+    },
+    {
+      "path": "C:\\Users\\AnGeLZzZ\\.codex\\hooks\\command-safety-route\\runtime-repair-20261013\\timeout-compatibility-hook.mjs",
+      "sha256": "1207c0bb0837d111e8b62642b1d13595a6e4d36333f07688fd3365685cb63184"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\dispatch.mjs",
+      "sha256": "5246fe90e99948dc97eff6d7139c92eb35d596d9a314dbe576339e581eedbdaf"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\archive-docs-only-hook.mjs",
+      "sha256": "1f06a3f7fdc681bdb1117beab92e94fd695d603526955e1d6630cda4f77fdbe0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\dispatch.test.mjs",
+      "sha256": "ab569e985f4c5ffc93328f8f5a8b150e9cfbd26be4bdbf078df87ff73f83eeca"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\evidence-lint-hook.mjs",
+      "sha256": "809a134f6bcd9a3f436d3ccd745de0a5b115ec0da62679307e8a7119089c3b66"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\evidence-lint-hook.test.mjs",
+      "sha256": "d1a550763d7b424cb98e9553a9c664c53466490a92f88f5f6d7e9b73dc9e06a0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\archive-docs.mjs",
+      "sha256": "32237a4ff9eae8041b00b327d79c6373a0f43c9f5af1b6853e400d3f74dbf699"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\attribution-guard.mjs",
+      "sha256": "9255c33efa38fcf758d17a0c78c90efed88af9cda3ff41b8fca58462abf1a353"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\attribution-guard.test.mjs",
+      "sha256": "83e8bdafdf73db8561ef147bea8d654ebd2f579422d2992995ea7d77d9d045bf"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\bash-guard.mjs",
+      "sha256": "2e5a9ba57033d7fce6333a3ddb5035fc6a6af894bab3f9c39d0ac6a0cc6c1720"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\brief-facts-extract.mjs",
+      "sha256": "9786f96451aae5b2b81a7580570d1efebe1be771970d04565ae1d1051d21898d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\brief-facts.mjs",
+      "sha256": "2ed06e8e7580455d9eb0aa8bb50b489a59d4671ff26ac46eaae3219b5569c025"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\commit-checks.mjs",
+      "sha256": "a51a355a97e04906fdb051f82aca743e2b6939cdc903ceac5189cdb95e5665c4"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\commit-checks.test.mjs",
+      "sha256": "aa00ce23fa2383c54f32f6358aef35b5b5e34842bf5bf8a231d167d8308f70e4"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\evidence.mjs",
+      "sha256": "a4e4e6580abc8e5a85066e5bc739bfd1251677a323f13a9ed89f634692e1904d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\model-tier.mjs",
+      "sha256": "566b937e7cb096427420c49209c7aa34e4d0bd068c461e31f0f08ba2a48b667b"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\scratch-capture.mjs",
+      "sha256": "9c67bf2a96855c45165416e75fb438540fe216472d5e1e9b272b34b5cb36ca8f"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\selftest.mjs",
+      "sha256": "8aa87c7c6004258063cb21008a08c566a9cfb0a6e881f2dadf86dcc213d4d74d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\require-agent-model.mjs",
+      "sha256": "6a66c0080b8a1743477223e998adea17a7a2c5655a7100a3f9b9e4f9141a3809"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\require-agent-model.test.mjs",
+      "sha256": "286cfd7165758c4fff0084534ebc3f110ef42eb0dd6c024b12465b8abf2eecb6"
+    }
+  ],
+  "bounds": {
+    "selector_ms": 7000,
+    "adapter_ms": 6500,
+    "verifier_total_ms": 6000,
+    "evaluator_each_ms": 1500,
+    "outer_ms": 8000,
+    "registered_timeout_ms": 10000,
+    "production_total_ms": 600000
+  },
+  "side_effects": {
+    "verify": [
+      "Exclusive control operation.lock state; bounded native child stdin/stdout/stderr/identity logs below fixed proof-control-13.",
+      "No13tests, no proof-run-13-01 creation, no media/source/liveDB reads or writes."
+    ],
+    "production": [
+      "Fresh exclusive proof-run-13-01 and private tmp; SQLite fixtures and trusted negative-control module under private output only.",
+      "Control lease and bounded logs; no source/library/recovery/app mutation or children admitted."
+    ]
+  },
+  "native_acceptance": [
+    "Atomic suspended Job assignment; kill-on-close; exactroot retained and signaled; cumulativeJob total==1; active0; rootexit0; drainsclosed; allnativehandlesclosed.",
+    "Singleprocess graph only. Child admission or runtime/source inventory mismatch fails; not a reusable FFmpeg graph approval.",
+    "Whole production600000ms and whole verification6000ms include nativesetup/drains/cleanup."
+  ],
+  "import_boundary": [
+    "Complete40-file private input snapshot; no extra shadow/cache executable origins.",
+    "Full Python tree includes stdlib/native/cache; Python core bootstrap/OS loader are trusted bootstrap boundary.",
+    "Exact allowed immutable open/origin list; private output data cannot become executable import origin. Meaningful shadow import and cache audit refusal controls."
+  ],
+  "guard_boundary": [
+    "Unchanged P9 dispatcher internal single-process evaluation checks logical600000ms envelope and missing-timeout denial sentinel, refusing untrusted/self-test diagnostics.",
+    "Internal P9 result is not registered full fallback/observer or host enforcement proof.",
+    "Staged shared loader holds Books identities only onBooks prefix; unmatched old QL inputs/handler/fallback unchanged; fixedselector always held."
+  ],
+  "registration": {
+    "status": "STAGED_ONLY_NO_SHARED_WRITE_OR_EXECUTION",
+    "preimages": {
+      "hooks": "ac23d765e231357a0b33e3ca317d1f85f27cd073b2a2e1dd0ccdb2ae64f0119f",
+      "command": "94bd1e233d3b1d41c339b9fbe59160b25c8248e79f6bc67777f57923bbd9fb8a",
+      "body": "08c814622815d6c13df28a2c3660533be080d56bf94b4800a6630dbcdc9de57e",
+      "config": "a581baae8074654302d67dd7374ae2444daa2abf0bde23279ecfcaaa03c79336"
+    },
+    "frozenSha": "a25faaa2929aaeaf987135cac6721064f7b8711a4e83f515c7532bc4a94b3b86",
+    "changes": [
+      "Select bounded raw Books prefix BEFORE choosing native input leases; Books branch strong ancestry/kind/link checks, unmatched retains original QL record list plus fixed shared selector only",
+      "Select Books prefix only; all unmatched use byte-identical installed QuickLaunch handler and unchanged fallback",
+      "No config/trust/hash write included; fresh preimages, exact review, supported registration/trust/load and actual Books positive+negative required",
+      "Preserve host hook timeout10s and native outer worker8s, exact Windows strict-native-zero shell wrapper; quick identity verification must finish within existing host bound or fail closed."
+    ],
+    "files": [
+      {
+        "path": "route.mjs",
+        "sha256": "ca10d28df11947cf3560adcb57623ec2570feed10dd259fb1e3b606e0b4e697b"
+      },
+      {
+        "path": "checker.py",
+        "sha256": "04b91ec0546939b29e70f8846667a1447b7ad30cef3ce9394a1040c94ac386fd"
+      },
+      {
+        "path": "body.py",
+        "sha256": "7cc54e7f63db92f24410c87d76ac1575681c2f6554ce19ccc998ed91c81ff89b"
+      },
+      {
+        "path": "commandWindows.ps1",
+        "sha256": "3df4538c08250b09df894086ca3bc2bac8e630ee430f92e828b748b19967650e"
+      },
+      {
+        "path": "registration.patch.json",
+        "sha256": "ab530f89571d5ee857dbf405f58df4ed36c43779a1773bf4e7b501b17db8c329"
+      },
+      {
+        "path": "hooks.proposed.json",
+        "sha256": "31c21586d600233e9af4920de222c678973fb6c5ee92650d1df7cf83a27aaf1f"
+      }
+    ],
+    "installed_destination": "C:/Users/AnGeLZzZ/.codex/hooks.json",
+    "registration_json_pointers": [
+      "/hooks/PreToolUse/1/hooks/0/commandWindows"
+    ],
+    "supported_load_step": "Machine attest exact sole-field replacement within coordinated exclusive window. Fresh supported CLI /hooks must uniquely identify user-source PreToolUse Bash hook by order/prefix and10s mode and expected changed state. Human individual Trust only. UI truncation is not byte attestation; require separate machine pre/post command hashes and semantic config delta. No trust API, manual trusted_hash write or hot-reload guarantee. Stale/ambiguous view STOP. Each actual context needs attributable loaded positive+blocked negative before production.",
+    "host_proof_order": "Fresh attributable actual host VERIFY_ONLY positive and altered-prefix blocked negative in each actual context BEFORE exact13 production. verify literal authenticated in frozen.json; production literal separate. Direct evaluator sanity is not host proof.",
+    "hook_timeout_seconds": 10,
+    "preconditions": {
+      "hooks_sha256": "ac23d765e231357a0b33e3ca317d1f85f27cd073b2a2e1dd0ccdb2ae64f0119f",
+      "command_windows_sha256": "94bd1e233d3b1d41c339b9fbe59160b25c8248e79f6bc67777f57923bbd9fb8a",
+      "post_hooks_sha256": "31c21586d600233e9af4920de222c678973fb6c5ee92650d1df7cf83a27aaf1f",
+      "post_command_windows_sha256": "3df4538c08250b09df894086ca3bc2bac8e630ee430f92e828b748b19967650e",
+      "semantic_changed_fields": [
+        "/hooks/PreToolUse/1/hooks/0/commandWindows"
+      ]
+    },
+    "verification_bounds": {
+      "selector_ms": 7000,
+      "adapter_ms": 6500,
+      "verifier_total_ms": 6000,
+      "evaluator_each_ms": 1500,
+      "outer_ms": 8000,
+      "registered_timeout_ms": 10000,
+      "production_total_ms": 600000
+    }
+  },
+  "expected_proof_order": [
+    "Senua exact static source/capsule and safety-owner proposal acceptance.",
+    "Sully explicit-files checkpoint and immediatepush; freshpreimages+coordinatedexclusivewriter window.",
+    "Apply only approved commandWindows pointer; machine attest semanticdelta and unchangedconfig.",
+    "Fresh supported CLI/hooks humanindividualTrust of uniquelyidentified changed definition. No trust-store edits.",
+    "Each actual agent context: exact frozen VERIFY_ONLY positive and altered-prefixed command blockednegative. Retain loadeddefinition attribution and nativeexit facts.",
+    "Only then exact production literal:13run,0skip,strictnativeexit0; record receipt. Failure/guarddenial stops and preserves evidence."
+  ],
+  "unresolved": [
+    "No actual supported registration/trust/load or hostproof yet.",
+    "No tests executed; no installation, cleanup, retry or installer authorization inherited from this entry.",
+    "New MP4 prototype12tests and automatic-record fix are distinct sourcegraphs requiring new exact reviewed operation."
+  ]
+}

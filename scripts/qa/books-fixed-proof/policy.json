@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "entry": "books-maintenance-13-fixed",
+  "root": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof",
+  "guard_cwd": "C:\\Antigravity Projects\\Studio Illuminati",
+  "cwd": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-inputs-13",
+  "control": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-control-13",
+  "output": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-run-13-01",
+  "executable": "C:\\Python314\\python.exe",
+  "argv": [
+    "-I",
+    "-S",
+    "-B",
+    "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\proof-entry.py"
+  ],
+  "environment": {
+    "SystemRoot": "C:\\Windows",
+    "WINDIR": "C:\\Windows",
+    "ComSpec": "C:\\Windows\\System32\\cmd.exe",
+    "PATH": "C:\\Python314;C:\\Windows\\System32",
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+    "TEMP": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-run-13-01\\tmp",
+    "TMP": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\proof-run-13-01\\tmp"
+  },
+  "deadline_ms": 600000,
+  "pins": [
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\runner.py",
+      "sha256": "a62a9ed2ee5a5098c82af36dfcc62e352a55427b8b37fc201b8c48f892070d5c"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\windows-owner.py",
+      "sha256": "525c9df2b22c732065cf1cd79cca7def1388885e99d58c4b0770cc5c09236bdd"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\proof-entry.py",
+      "sha256": "53fc9ef90d274d2c7f14eb4ff61be89bbe50b189ec59a72a66c2a1fde2597ce8"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\contract.mjs",
+      "sha256": "af7fa9c8d17bca1e4caaf7fb9b05d510a7a41082af1da523d1e24c82d297c1a0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\hook-adapter.mjs",
+      "sha256": "1b6918ba86a2ea83285af55d91e39fb237ecc375450250c8ebbdf71ff94d0f4f"
+    },
+    {
+      "path": "C:\\Python314\\python.exe",
+      "sha256": "434b361fe0c5960d404974feed493db47f2603a1ace2574312104fbed0182c6f"
+    },
+    {
+      "path": "C:\\Python314\\python3.dll",
+      "sha256": "f9acdbcf3383a52353f8d7db3cbda3d3701b1cf7ac3053985fdac766c29e7808"
+    },
+    {
+      "path": "C:\\Python314\\python314.dll",
+      "sha256": "854fe7549eb4b2ac478935a38ae2ca1b774c6fdc3d87f0263fbd697ff86d7149"
+    },
+    {
+      "path": "C:\\Python314\\vcruntime140.dll",
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "path": "C:\\Python314\\vcruntime140_1.dll",
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "sha256": "a619e2e09eb0d50ef4c733d678b4d22689d2afef138cd67fd3fa107b535f8819"
+    },
+    {
+      "path": "C:\\Users\\AnGeLZzZ\\.codex\\hooks\\command-safety-route\\runtime-repair-20261013\\timeout-compatibility-hook.mjs",
+      "sha256": "1207c0bb0837d111e8b62642b1d13595a6e4d36333f07688fd3365685cb63184"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\dispatch.mjs",
+      "sha256": "5246fe90e99948dc97eff6d7139c92eb35d596d9a314dbe576339e581eedbdaf"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\archive-docs-only-hook.mjs",
+      "sha256": "1f06a3f7fdc681bdb1117beab92e94fd695d603526955e1d6630cda4f77fdbe0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\dispatch.test.mjs",
+      "sha256": "ab569e985f4c5ffc93328f8f5a8b150e9cfbd26be4bdbf078df87ff73f83eeca"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\evidence-lint-hook.mjs",
+      "sha256": "809a134f6bcd9a3f436d3ccd745de0a5b115ec0da62679307e8a7119089c3b66"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\evidence-lint-hook.test.mjs",
+      "sha256": "d1a550763d7b424cb98e9553a9c664c53466490a92f88f5f6d7e9b73dc9e06a0"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\archive-docs.mjs",
+      "sha256": "32237a4ff9eae8041b00b327d79c6373a0f43c9f5af1b6853e400d3f74dbf699"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\attribution-guard.mjs",
+      "sha256": "9255c33efa38fcf758d17a0c78c90efed88af9cda3ff41b8fca58462abf1a353"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\attribution-guard.test.mjs",
+      "sha256": "83e8bdafdf73db8561ef147bea8d654ebd2f579422d2992995ea7d77d9d045bf"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\bash-guard.mjs",
+      "sha256": "2e5a9ba57033d7fce6333a3ddb5035fc6a6af894bab3f9c39d0ac6a0cc6c1720"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\brief-facts-extract.mjs",
+      "sha256": "9786f96451aae5b2b81a7580570d1efebe1be771970d04565ae1d1051d21898d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\brief-facts.mjs",
+      "sha256": "2ed06e8e7580455d9eb0aa8bb50b489a59d4671ff26ac46eaae3219b5569c025"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\commit-checks.mjs",
+      "sha256": "a51a355a97e04906fdb051f82aca743e2b6939cdc903ceac5189cdb95e5665c4"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\commit-checks.test.mjs",
+      "sha256": "aa00ce23fa2383c54f32f6358aef35b5b5e34842bf5bf8a231d167d8308f70e4"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\evidence.mjs",
+      "sha256": "a4e4e6580abc8e5a85066e5bc739bfd1251677a323f13a9ed89f634692e1904d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\model-tier.mjs",
+      "sha256": "566b937e7cb096427420c49209c7aa34e4d0bd068c461e31f0f08ba2a48b667b"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\scratch-capture.mjs",
+      "sha256": "9c67bf2a96855c45165416e75fb438540fe216472d5e1e9b272b34b5cb36ca8f"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\lib\\selftest.mjs",
+      "sha256": "8aa87c7c6004258063cb21008a08c566a9cfb0a6e881f2dadf86dcc213d4d74d"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\require-agent-model.mjs",
+      "sha256": "6a66c0080b8a1743477223e998adea17a7a2c5655a7100a3f9b9e4f9141a3809"
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\require-agent-model.test.mjs",
+      "sha256": "286cfd7165758c4fff0084534ebc3f110ef42eb0dd6c024b12465b8abf2eecb6"
+    }
+  ],
+  "manifest": {
+    "path": "C:\\Antigravity Projects\\Studio Illuminati\\WIP\\Books Arranger\\scratch\\resume-2026-10-15\\maintenance-worktree\\scripts\\qa\\books-fixed-proof\\input-manifest.json",
+    "sha256": "0d8039294b5e3fd07fba733f3eab6188b8b175eb315e55d5b38381132a5fafba"
+  },
+  "fallback": {
+    "path": "C:/Users/AnGeLZzZ/.codex/hooks/command-safety-route/runtime-repair-20261013/timeout-compatibility-hook.mjs",
+    "sha256": "1207c0bb0837d111e8b62642b1d13595a6e4d36333f07688fd3365685cb63184",
+    "candidateSha": "fb695a60c92b8933521fa810ef870e11e5e0dc4dbaf1f85e5ec54220da64e222"
+  },
+  "evaluator": {
+    "path": "C:\\Antigravity Projects\\Studio Monday\\.claude\\hooks\\dispatch.mjs",
+    "sha256": "5246fe90e99948dc97eff6d7139c92eb35d596d9a314dbe576339e581eedbdaf"
+  }
+}

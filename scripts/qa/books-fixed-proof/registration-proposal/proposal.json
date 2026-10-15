@@ -1,0 +1,67 @@
+{
+  "status": "STAGED_ONLY_NO_SHARED_WRITE_OR_EXECUTION",
+  "preimages": {
+    "hooks": "ac23d765e231357a0b33e3ca317d1f85f27cd073b2a2e1dd0ccdb2ae64f0119f",
+    "command": "94bd1e233d3b1d41c339b9fbe59160b25c8248e79f6bc67777f57923bbd9fb8a",
+    "body": "08c814622815d6c13df28a2c3660533be080d56bf94b4800a6630dbcdc9de57e",
+    "config": "a581baae8074654302d67dd7374ae2444daa2abf0bde23279ecfcaaa03c79336"
+  },
+  "frozenSha": "a25faaa2929aaeaf987135cac6721064f7b8711a4e83f515c7532bc4a94b3b86",
+  "changes": [
+    "Select bounded raw Books prefix BEFORE choosing native input leases; Books branch strong ancestry/kind/link checks, unmatched retains original QL record list plus fixed shared selector only",
+    "Select Books prefix only; all unmatched use byte-identical installed QuickLaunch handler and unchanged fallback",
+    "No config/trust/hash write included; fresh preimages, exact review, supported registration/trust/load and actual Books positive+negative required",
+    "Preserve host hook timeout10s and native outer worker8s, exact Windows strict-native-zero shell wrapper; quick identity verification must finish within existing host bound or fail closed."
+  ],
+  "files": [
+    {
+      "path": "route.mjs",
+      "sha256": "ca10d28df11947cf3560adcb57623ec2570feed10dd259fb1e3b606e0b4e697b"
+    },
+    {
+      "path": "checker.py",
+      "sha256": "04b91ec0546939b29e70f8846667a1447b7ad30cef3ce9394a1040c94ac386fd"
+    },
+    {
+      "path": "body.py",
+      "sha256": "7cc54e7f63db92f24410c87d76ac1575681c2f6554ce19ccc998ed91c81ff89b"
+    },
+    {
+      "path": "commandWindows.ps1",
+      "sha256": "3df4538c08250b09df894086ca3bc2bac8e630ee430f92e828b748b19967650e"
+    },
+    {
+      "path": "registration.patch.json",
+      "sha256": "ab530f89571d5ee857dbf405f58df4ed36c43779a1773bf4e7b501b17db8c329"
+    },
+    {
+      "path": "hooks.proposed.json",
+      "sha256": "31c21586d600233e9af4920de222c678973fb6c5ee92650d1df7cf83a27aaf1f"
+    }
+  ],
+  "installed_destination": "C:/Users/AnGeLZzZ/.codex/hooks.json",
+  "registration_json_pointers": [
+    "/hooks/PreToolUse/1/hooks/0/commandWindows"
+  ],
+  "supported_load_step": "Machine attest exact sole-field replacement within coordinated exclusive window. Fresh supported CLI /hooks must uniquely identify user-source PreToolUse Bash hook by order/prefix and10s mode and expected changed state. Human individual Trust only. UI truncation is not byte attestation; require separate machine pre/post command hashes and semantic config delta. No trust API, manual trusted_hash write or hot-reload guarantee. Stale/ambiguous view STOP. Each actual context needs attributable loaded positive+blocked negative before production.",
+  "host_proof_order": "Fresh attributable actual host VERIFY_ONLY positive and altered-prefix blocked negative in each actual context BEFORE exact13 production. verify literal authenticated in frozen.json; production literal separate. Direct evaluator sanity is not host proof.",
+  "hook_timeout_seconds": 10,
+  "preconditions": {
+    "hooks_sha256": "ac23d765e231357a0b33e3ca317d1f85f27cd073b2a2e1dd0ccdb2ae64f0119f",
+    "command_windows_sha256": "94bd1e233d3b1d41c339b9fbe59160b25c8248e79f6bc67777f57923bbd9fb8a",
+    "post_hooks_sha256": "31c21586d600233e9af4920de222c678973fb6c5ee92650d1df7cf83a27aaf1f",
+    "post_command_windows_sha256": "3df4538c08250b09df894086ca3bc2bac8e630ee430f92e828b748b19967650e",
+    "semantic_changed_fields": [
+      "/hooks/PreToolUse/1/hooks/0/commandWindows"
+    ]
+  },
+  "verification_bounds": {
+    "selector_ms": 7000,
+    "adapter_ms": 6500,
+    "verifier_total_ms": 6000,
+    "evaluator_each_ms": 1500,
+    "outer_ms": 8000,
+    "registered_timeout_ms": 10000,
+    "production_total_ms": 600000
+  }
+}
