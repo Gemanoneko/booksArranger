@@ -7,7 +7,9 @@ from native_io import DirectoryBoundary,publish_no_replace,BoundaryError,ordinar
 from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encoding, AUTOMATIC_PROFILE, freeze_automatic_policy, choose_automatic_encoding
 from quicktime_chapters import normalize
 from metadata import audiobook_sort_title
+import m4b_preservation
 MAX_IMAGE=8*1024*1024
+PRESERVATION_CANDIDATE_NAME='checked.m4b'
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
 
 class Paused(InterruptedError):pass
@@ -562,7 +564,7 @@ def _copy_presentation(stream, movie):
             'movie_start_sample':movie_start, 'movie_end_sample':movie_end}
 
 
-def copied_audio_evidence(path,stage,stop,duration):
+def copied_audio_evidence(path,stage,stop,duration,*,source_relative=False):
     executable=shutil.which('ffprobe')
     raw=run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
       '-select_streams','a:0','-show_streams','-show_format','-show_data_hash','sha256','-of','json',str(path)],stage,stop,30)
@@ -572,7 +574,14 @@ def copied_audio_evidence(path,stage,stop,duration):
     keys=('codec_name','profile','sample_rate','channels','channel_layout','time_base','extradata_hash')
     config={key:stream.get(key) for key in keys}
     if not config['extradata_hash'] or not config['time_base']:raise ValidationError('M4B decoder configuration evidence is missing')
-    presentation=_copy_presentation(stream,data.get('format',{}))
+    if source_relative:
+        # Only the separate byte-exact preservation branch may retain existing
+        # edits/gaps. The remux guard below remains unchanged and strict.
+        presentation={key:stream.get(key) for key in ('start_pts','duration_ts','start_time','duration')}
+        presentation['movie']={key:data.get('format',{}).get(key) for key in ('start_time','duration')}
+        if any(presentation[key] is None for key in ('start_pts','duration_ts')):
+            raise ValidationError('Source-relative M4B presentation evidence is missing')
+    else:presentation=_copy_presentation(stream,data.get('format',{}))
     timing=PacketTimingHash()
     run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
       '-select_streams','a:0','-show_packets','-show_entries','packet=pts,dts,duration:packet_side_data=side_data_type,skip_samples,discard_padding','-of','compact=p=0:nk=0',str(path)],
@@ -663,6 +672,8 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
         tags['sort_album']=tags['album']
         if str(review.get('number','')).isdigit() and 0<int(review['number'])<65536:
             tags['track']=str(int(review['number']))
+    if encoding.get('mode')=='copy' and encoding.get('codec')=='aac' and len(original_copies)==1 and Path(original_copies[0]).suffix.lower()=='.m4b':
+        return _preserve_single_m4b(manifest,stage,original_copies[0],durations,cover,stop,progress,encoding,tags)
     output=stage/'checked.m4b'
     args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1','-protocol_whitelist','file',
       '-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
@@ -727,6 +738,71 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
         if held_output.sha256()!=validation['sha256'] or held_output.facts()['size']!=validation['size']:
             raise ValidationError('Final output differs from its leased verification artifact')
         return output,validation
+
+
+def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encoding,tags):
+    """One compressed candidate; no remux or chapter/timescale reconstruction."""
+    source=stage/name;output=stage/PRESERVATION_CANDIDATE_NAME;expected=sum(durations)
+    sort_title=audiobook_sort_title(manifest['metadata'])
+    if sort_title!=manifest['metadata']['title']:tags=tags|{'sort_name':sort_title}
+    chapters=source_chapters(source,stage,stop,expected)
+    if manifest.get('source_chapters')!=chapters:
+        raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
+    cover_bytes=Path(cover).read_bytes()
+    if len(cover_bytes)>MAX_IMAGE or hashlib.sha256(cover_bytes).hexdigest()!=manifest['cover']['sha256']:
+        raise ValidationError('Protected cover differs from reviewed artwork')
+    try:
+        with VerifiedFile(source) as held_source,open(source,'rb') as incoming:
+            source_facts=held_source.facts()
+            def read_at(offset,count):incoming.seek(offset);return incoming.read(count)
+            plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes)
+            if shutil.disk_usage(stage).free<source_facts['size']+len(plan.appended_movie)+16*1024*1024:
+                raise OSError(errno.ENOSPC,'Insufficient space for the single metadata candidate; originals retained')
+            plan_generated(output)
+            progress('Creating audio',{'encoding':encoding,'source_metadata_preservation':True})
+            with open(output,'xb') as outgoing:
+                receipt=m4b_preservation.stream_candidate(plan,read_at,outgoing.write,stop.is_set)
+                outgoing.flush();os.fsync(outgoing.fileno())
+            if receipt['source_sha256']!=manifest['sources'][0]['sha256']:
+                raise ValidationError('Preservation source differs from frozen bytes')
+            with VerifiedFile(output) as held_output,open(output,'rb') as candidate:
+                def candidate_read(offset,count):candidate.seek(offset);return candidate.read(count)
+                progress('Checking output',{})
+                reread=m4b_preservation.verify_candidate(plan,read_at,held_output.facts()['size'],candidate_read,stop.is_set)
+                if any(reread[key]!=receipt[key] for key in ('source_sha256','sha256','size')):
+                    raise ValidationError('Preservation candidate differs from its creation receipt')
+                source_evidence=copied_audio_evidence(source,stage,stop,expected,source_relative=True)
+                output_evidence=copied_audio_evidence(output,stage,stop,expected,source_relative=True)
+                if source_evidence!=output_evidence:raise ValidationError('Preservation changed decoder, packets or presentation')
+                source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding)
+                output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding)
+                if source_pcm!=output_pcm:raise ValidationError('Preservation changed complete native decoded audio')
+                raw=probe(output,stage,stop);duration,profile=audio_info(raw)
+                if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):
+                    raise ValidationError('Preserved output audio profile is incorrect')
+                actual_chapters=source_chapters(output,stage,stop,expected)
+                if actual_chapters!=chapters:raise ValidationError('Preserved source chapter presentation changed')
+                actual_tags={key.lower():str(value) for key,value in raw.get('format',{}).get('tags',{}).items()}
+                # Demuxers omit empty text items; exact binary metadata bytes
+                # were independently checked above, including an empty comment.
+                if any(actual_tags.get(key,'')!=str(value) for key,value in tags.items()):
+                    raise ValidationError('Preserved output approved metadata differs')
+                if held_source.facts()!=source_facts or held_source.sha256()!=receipt['source_sha256']:
+                    raise ValidationError('Preservation source identity changed')
+                if held_output.sha256()!=receipt['sha256']:raise ValidationError('Preserved candidate identity changed')
+                for item in manifest['sources']:same_source(item,stop)
+                if digest(manifest['cover']['path'],stop)!=manifest['cover']['sha256']:
+                    raise ValidationError('Selected cover changed — review required')
+                receipt.update(reread);receipt['pcm_verified']=True
+                validation={'profile':manifest.get('profile',LEGACY_PROFILE),'encoding':encoding,'duration':duration,
+                  'expected_duration':expected,'sha256':receipt['sha256'],'size':receipt['size'],'chapters':chapters,
+                  'preserved_source_chapters':chapters,'source_durations':durations,'source_pcm_frames':[output_pcm['sample_count']],
+                  'source_pcm_rate':output_pcm['sample_rate'],'decoded_duration':output_pcm['sample_count']/output_pcm['sample_rate'],
+                  'native_pcm_evidence':output_pcm,'copied_audio_evidence':output_evidence,'metadata_preservation':receipt,
+                  'checks':'Output checks passed','device':'Apple Books sync not checked','tags':actual_tags}
+                remember_generated(output,receipt['sha256'],receipt['size'])
+                return output,validation
+    except m4b_preservation.Refused as error:raise ValidationError('M4B preservation requires review: '+str(error)) from error
 
 
 def validate(output,manifest,durations,chapters,stage,stop,encoding=None):

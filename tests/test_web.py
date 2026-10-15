@@ -12,7 +12,7 @@ import urllib.request
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app import catalog_lock
+from catalog_owner import catalog_lock
 from metadata import ScanStopped
 from scanner import Inventory, connect
 from web_server import BrowserServer, Handler
