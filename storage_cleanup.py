@@ -334,6 +334,13 @@ class StorageCleanup:
                     targets.append((p, 'staging', (r['sha256'], r['size'])))
         return targets
 
+    @staticmethod
+    def working_name(manifest, name):
+        """Shared finite disposable role policy; never includes source snapshots."""
+        disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name)
+        from encoding_policy import AUTOMATIC_PROFILE
+        return bool(disposable or (manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name)))
+
     def working_pending(self, job_id):
         """Read-only scheduling hint; it never authorizes disposition or Ready.
 
@@ -349,7 +356,7 @@ class StorageCleanup:
         from encoding_policy import AUTOMATIC_PROFILE
         for name,entry in recorded.get('files',{}).items():
             if name in snapshots:continue
-            disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name) or (manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name))
+            disposable=self.working_name(manifest,name)
             if not disposable:continue
             path=self.stage_root/job_id/attempt_id/name
             if path.exists():return True  # Includes a replacement at a terminal name.
@@ -382,9 +389,9 @@ class StorageCleanup:
                 for name, entry in recorded.get('files', {}).items():
                     if name in snapshot_names:
                         continue
-                    disposable = name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)', name)
-                    from encoding_policy import AUTOMATIC_PROFILE
-                    disposable = disposable or (manifest.get('profile') == AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav', name))
+                    disposable=self.working_name(manifest,name)
+
+
                     if normalized_only and not re.fullmatch(r'normalized[0-9]{5}\.wav',name):continue
                     if not disposable:
                         continue  # A receipt alone never expands the disposable-name policy.

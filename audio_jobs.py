@@ -9,6 +9,7 @@ import time
 import threading
 import uuid
 from datetime import datetime, timezone
+from sqlite_retry import transaction
 
 
 STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
@@ -54,6 +55,9 @@ class AudioJobs:
         self._thread = None
         self._closed = False
         self.after_completed = None
+        self.before_attempt = None
+        self.after_attempt = None
+        self.on_working_hold = None
         self.on_space_hold = None
         self._progress = {}
         with self._db() as db:
@@ -178,6 +182,19 @@ class AudioJobs:
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
             return frozen["job_id"]
 
+    def _archive_attempt(self, row, now=None):
+        if not row.get('attempt_id'):
+            return
+        values=(row['job_id'],row['attempt_id'],row['journal'],time.time() if now is None else now)
+        def append(db):
+            db.execute('CREATE TABLE IF NOT EXISTS audio_failure_history(job_id TEXT,attempt_id TEXT,record TEXT,at REAL,PRIMARY KEY(job_id,attempt_id))')
+            prior=db.execute('SELECT record FROM audio_failure_history WHERE job_id=? AND attempt_id=?',values[:2]).fetchone()
+            if prior:
+                if prior['record']!=row['journal']:raise ValueError('Prior attempt history changed; preserved')
+                return
+            db.execute('INSERT INTO audio_failure_history VALUES(?,?,?,?)',values)
+        transaction(self.database,append)
+
     def retry_failed(self,job_id,now=None):
         """Retry only a classified pre-publication I/O failure on its exact frozen manifest."""
         now=time.time() if now is None else now
@@ -193,9 +210,7 @@ class AudioJobs:
             if self._thread and self._thread.is_alive():return {'retryable':True,'retry_at':now+300,'requeued':False}
             manifest=json.loads(row['manifest'])
             if self.revision_guard(copy.deepcopy(manifest)) is not True:return {'retryable':False,'reason':'Frozen source/review changed; failed job preserved'}
-            with self._db() as db:
-                db.execute('CREATE TABLE IF NOT EXISTS audio_failure_history(job_id TEXT,attempt_id TEXT,record TEXT,at REAL,PRIMARY KEY(job_id,attempt_id))')
-                db.execute('INSERT OR IGNORE INTO audio_failure_history VALUES(?,?,?,?)',(job_id,row['attempt_id'],row['journal'],now))
+            self._archive_attempt(row,now)
             self._update(job_id,state='pending',stage='queued',reason='Retrying verified pre-publication I/O failure; prior attempt retained')
             return {'retryable':True,'retry_at':now+3600,'requeued':True}
 
@@ -258,6 +273,14 @@ class AudioJobs:
             row = pending[0]
             job_id = row["job_id"]
             manifest = json.loads(row["manifest"])
+            try:
+                if self.before_attempt:self.before_attempt(copy.deepcopy(row))
+                self._archive_attempt(row)
+            except Exception as error:
+                self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
+                self._stop.set()
+                if self.on_working_hold:self.on_working_hold()
+                return  # No new attempt or source copy exists before admission.
             attempt = str(uuid.uuid4())
             journal = {"attempt_id": attempt, "history": []}
             with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources"}
@@ -287,36 +310,46 @@ class AudioJobs:
                 journal["history"].append(entry)
                 self._update(job_id, stage=stage, journal=json.dumps(journal, ensure_ascii=False))
             try:
-                if self.revision_guard(copy.deepcopy(manifest)) is not True:
-                    raise ValueError("Source changed — review required")
-                if self._stop.is_set(): raise InterruptedError("Paused before starting book")
-                runner_manifest = copy.deepcopy(manifest)
-                runner_manifest["attempt_id"] = attempt
-                record = self.runner(runner_manifest, self._stop, checkpoint)
-                intent = journal.get("publication_intent")
-                if intent is None or record != intent:
-                    raise ValueError("Runner completion does not match durable publication intent")
-                self._check_output(record)
-                self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
-            except Exception as exc:
-                # A publication boundary cannot be blindly reset to pending.
-                if journal.get("publication_intent"):
-                    try:
-                        record = journal["publication_intent"]
-                        self._check_output(record)
-                        self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
-                    except Exception as validation_exc:
-                        self._update(job_id, state="needs attention", reason=str(validation_exc) or type(validation_exc).__name__)
-                elif isinstance(exc, InterruptedError) and self._stop.is_set():
-                    self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
-                else:
-                    failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
-                    journal['failure'] = _failure_details(exc, failure_stage)
-                    self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
-                    if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
+                try:
+                    if self.revision_guard(copy.deepcopy(manifest)) is not True:
+                        raise ValueError("Source changed — review required")
+                    if self._stop.is_set(): raise InterruptedError("Paused before starting book")
+                    runner_manifest = copy.deepcopy(manifest)
+                    runner_manifest["attempt_id"] = attempt
+                    record = self.runner(runner_manifest, self._stop, checkpoint)
+                    intent = journal.get("publication_intent")
+                    if intent is None or record != intent:
+                        raise ValueError("Runner completion does not match durable publication intent")
+                    self._check_output(record)
+                    self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
+                except Exception as exc:
+                    # A publication boundary cannot be blindly reset to pending.
+                    if journal.get("publication_intent"):
+                        try:
+                            record = journal["publication_intent"]
+                            self._check_output(record)
+                            self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
+                        except Exception as validation_exc:
+                            self._update(job_id, state="needs attention", reason=str(validation_exc) or type(validation_exc).__name__)
+                    elif isinstance(exc, InterruptedError) and self._stop.is_set():
+                        self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+                    else:
+                        failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
+                        journal['failure'] = _failure_details(exc, failure_stage)
+                        self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
+                        if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
+                            self._stop.set()
+                            if self.on_space_hold:self.on_space_hold()
+                            return  # Preserve the rest of the queue without producing more attempts.
+            finally:
+                if self.after_attempt:
+                    try:self.after_attempt(job_id,attempt)
+                    except Exception as cleanup_error:
                         self._stop.set()
-                        if self.on_space_hold:self.on_space_hold()
-                        return  # Preserve the rest of the queue without producing more attempts.
+                        latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
+                        if latest and latest[0]['state'] in {'pending','needs attention'}:
+                            self._update(job_id,reason=(latest[0]['reason']+'; ' if latest[0]['reason'] else '')+'Working cleanup requires attention: '+str(cleanup_error))
+                        if self.on_working_hold:self.on_working_hold()
             if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
                 try:self.after_completed(job_id)
                 except InterruptedError:return

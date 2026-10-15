@@ -62,6 +62,10 @@ class MergeService:
         self.cleanup.after_drain=lambda:self.jobs.resume()
         from storage_cleanup import StorageCleanup
         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard)
+        from working_lifecycle import WorkingLifecycle
+        self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
+        self.jobs.before_attempt=self.working.admit
+        self.jobs.after_attempt=self.working.terminal
         from recovery_retention import RecoveryRetention
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
         self.cleanup.recovery_status=self.recovery_status
@@ -71,6 +75,7 @@ class MergeService:
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
+        self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
             if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
@@ -263,6 +268,14 @@ class MergeService:
         if self.jobs._stop.is_set():
             raise InterruptedError('Temporary cleanup interrupted; remaining copies retained')
 
+    def _working_guard(self):
+        self._no_scan()
+        closing=getattr(self,'_retention_stop',None)
+        if closing is not None and closing.is_set():raise InterruptedError('Working cleanup is closing')
+        if self.working.in_background:
+            if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive() or self._post_current:
+                raise InterruptedError('Foreground audiobook work takes priority over idle working cleanup')
+
     def _retention_guard(self):
         self._no_scan()
         if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
@@ -296,6 +309,11 @@ class MergeService:
         if self._retention_thread:return
         def work():
             while not self._retention_stop.is_set():
+                # This distinct unpublished-working operation holds only its
+                # relevant job/native leases. No central operation/admission lock
+                # spans its hashing; foreground start preempts it between blocks.
+                try:self.working.reconcile(limit=1)
+                except (InterruptedError,ValueError):pass
                 try:
                     with admission():
                         with self.operation_lock:
@@ -746,7 +764,7 @@ class MergeService:
 
     def _run(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
-        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info))
+        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working)
         if manifest.get('replacement_id'):
             from replacement_media import verify_replacement
             validation=verify_replacement(manifest,validation,output,output.parent,stop)
