@@ -2,7 +2,7 @@
 import hashlib
 import struct
 import unittest
-from m4b_preservation import Refused,boxes,build,plan,stream_candidate
+from m4b_preservation import Refused,boxes,build,plan,stream_candidate,verify_candidate
 
 def atom(kind,payload):return struct.pack('>I4s',8+len(payload),kind)+payload
 
@@ -166,5 +166,46 @@ class M4BPreservationTests(unittest.TestCase):
     def test_short_read_refused(self):
         source=fixture()
         with self.assertRaises(Refused):plan(len(source),lambda a,n:source[a:a+n-1],{'title':'x'})
+    def test_independent_reread_checks_all_retained_bytes(self):
+        source=fixture();p,candidate,receipt=self.transform(source)
+        actual=verify_candidate(p,lambda a,n:source[a:a+n],len(candidate),lambda a,n:candidate[a:a+n])
+        self.assertEqual(actual['sha256'],receipt['sha256']);self.assertTrue(actual['all_retained_bytes_verified'])
+    def test_reread_rejects_corrupt_audio_metadata_padding_and_extent(self):
+        source=fixture();p,candidate,_=self.transform(source)
+        for at in (0,p.movie_offset+4,len(source)-1,len(source)+8):
+            broken=bytearray(candidate);broken[at]^=1
+            with self.assertRaises(Refused):verify_candidate(p,lambda a,n:source[a:a+n],len(broken),lambda a,n:bytes(broken[a:a+n]))
+        with self.assertRaises(Refused):verify_candidate(p,lambda a,n:source[a:a+n],len(candidate)+1,lambda a,n:candidate[a:a+n])
+    def test_reread_rejects_partial_writer_and_cancellation(self):
+        source=fixture();p,candidate,_=self.transform(source)
+        with self.assertRaises(Refused):verify_candidate(p,lambda a,n:source[a:a+n],len(candidate),lambda a,n:candidate[a:a+n-1])
+        with self.assertRaises(InterruptedError):verify_candidate(p,lambda a,n:source[a:a+n],len(candidate),lambda a,n:candidate[a:a+n],lambda:True)
+    def roll_fixture(self,description=None,mapping=None):
+        description=bytes.fromhex('01000000726f6c6c0000000200000001ffff') if description is None else description
+        mapping=bytes.fromhex('00000000726f6c6c000000010000000300000001') if mapping is None else mapping
+        return change_movie(fixture(),lambda p:nested(p,b'trak',lambda t:nested(t,b'mdia',lambda m:nested(m,b'minf',lambda n:nested(n,b'stbl',lambda s:s+atom(b'sgpd',description)+atom(b'sbgp',mapping))))))
+    def test_exact_aac_roll_preroll_groups_preserved(self):self.transform(self.roll_fixture())
+    def test_unknown_roll_group_type_count_distance_and_reference_refused(self):
+        for description in (bytes.fromhex('01000000726f6c6c0000000200000001fffe'),bytes.fromhex('0100000070726f6c0000000200000001ffff')):
+            self.refuse(self.roll_fixture(description=description))
+        for mapping in (bytes.fromhex('00000000726f6c6c000000010000000200000001'),bytes.fromhex('00000000726f6c6c000000010000000300000002')):
+            self.refuse(self.roll_fixture(mapping=mapping))
+    def test_empty_wide_placeholder_before_mdat_preserves_all_original_offsets(self):
+        top=unpack(fixture())
+        source=top[b'ftyp'].raw+relocate(top[b'moov'].raw,8)+atom(b'wide',b'')+top[b'mdat'].raw
+        self.transform(source)
+    def test_wide_payload_extended_header_and_wrong_successor_refused(self):
+        for wide in (atom(b'wide',b'x'),build(b'wide',b'',extended=True)):
+            top=unpack(fixture());source=top[b'ftyp'].raw+relocate(top[b'moov'].raw,len(wide))+wide+top[b'mdat'].raw
+            with self.assertRaisesRegex(Refused,'wide placeholder extent'):plan(len(source),lambda a,n:source[a:a+n],{'title':'x'})
+        self.refuse(fixture()+atom(b'wide',b''))
+    def test_metadata_free_reservation_is_retained_byte_exact(self):
+        reservation=atom(b'free',b'original reserved metadata bytes'*23)
+        source=change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m+reservation)))
+        _,candidate,_=self.transform(source)
+        self.assertIn(reservation,unpack(candidate)[b'moov'].raw)
+    def test_unknown_metadata_structural_box_remains_refused(self):
+        source=change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m+atom(b'saio',bytes(12)))))
+        self.refuse(source)
 
 if __name__=='__main__':unittest.main()

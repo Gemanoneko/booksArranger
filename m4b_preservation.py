@@ -120,13 +120,22 @@ def validate_track(box,mdat_extents,chunk_budget):
     minf=boxes(one(media,b'minf').payload);profile(minf,{b'smhd',b'vmhd',b'nmhd',b'gmhd',b'dinf',b'stbl',b'hdlr'})
     dref(minf)
     stbl=boxes(one(minf,b'stbl').payload)
-    profile(stbl,{b'stsd',b'stts',b'ctts',b'stsc',b'stsz',b'stco',b'co64',b'stss',b'sdtp'})
+    profile(stbl,{b'stsd',b'stts',b'ctts',b'stsc',b'stsz',b'stco',b'co64',b'stss',b'sdtp',b'sgpd',b'sbgp'})
     for kind in {b'stsd',b'stts',b'stsc',b'stsz'}:one(stbl,kind)
     codec=sample_description(one(stbl,b'stsd').payload,handler)
     timing=one(stbl,b'stts').payload;nr=table(timing,8);samples=0;ticks=0
     for at in range(8,len(timing),8):
         count,delta=struct.unpack_from('>II',timing,at);need(count>0 and delta>0,'Invalid decode run');samples+=count;ticks+=count*delta
     need(0<samples<=MAX_SAMPLES and ticks==duration,'Decode count/media clock mismatch')
+    description=one(stbl,b'sgpd',True);mapping=one(stbl,b'sbgp',True)
+    if description is not None or mapping is not None:
+        # Narrow FFmpeg AAC preroll profile: one -1 roll descriptor applied
+        # to every sample. These address-free bytes remain wholly unchanged.
+        # libavformat/movenc.c mov_preroll_write_stbl_atoms (FFmpeg 8.1).
+        need(handler==b'soun' and codec==b'mp4a' and description is not None and mapping is not None,'Unsupported sample group pair')
+        need(description.payload==bytes.fromhex('01000000726f6c6c0000000200000001ffff'),'Unsupported AAC roll description')
+        p=mapping.payload
+        need(len(p)==20 and p[:12]==bytes.fromhex('00000000726f6c6c00000001') and u32(p,12)==samples and u32(p,16)==1,'AAC roll mapping count/reference')
     composition=one(stbl,b'ctts',True)
     if composition:
         p=composition.payload;table(p,8,(0,1));need(sum(u32(p,a) for a in range(8,len(p),8))==samples,'Composition sample count')
@@ -189,7 +198,7 @@ def rewrite_metadata(movie,tags,cover):
     up=boxes(udta.payload) if udta else [];profile(up,{b'meta',b'chpl',b'cprt'})
     meta=one(up,b'meta',True)
     mp=boxes(meta.payload[4:]) if meta else []
-    if meta:full(meta.payload);profile(mp,{b'hdlr',b'ilst'})
+    if meta:full(meta.payload);profile(mp,{b'hdlr',b'ilst',b'free'})
     hd=one(mp,b'hdlr',True)
     if hd:full(hd.payload);need(len(hd.payload)>=24 and hd.payload[8:12]==b'mdir','Metadata handler profile')
     else:hd=Box(b'hdlr',0,0,8,build(b'hdlr',bytes(8)+b'mdir'+bytes(12)))
@@ -230,7 +239,11 @@ def plan(source_size,read_at,tags,cover=None):
         need(size!=0,'EOF-sized box unsupported')
         if size==1:size=int.from_bytes(read(at+8,8),'big');header=16
         need(size>=header and at+size<=source_size,'Top-level extent invalid')
-        need(kind in {b'ftyp',b'moov',b'mdat',b'free',b'skip'},'Unsupported top-level reference/fragment box')
+        need(kind in {b'ftyp',b'moov',b'mdat',b'free',b'skip',b'wide'},'Unsupported top-level reference/fragment box')
+        # Apple's wide atom is exactly an empty8byte header reserving room for
+        # a future extended mdat header. Keep it at its original offset.
+        if top and top[-1]==b'wide':need(kind==b'mdat','Wide placeholder must precede retained mdat')
+        if kind==b'wide':need(size==8 and header==8,'Unsupported wide placeholder extent')
         if kind==b'ftyp':
             need(at==0 and size<=1024,'File type location/bound');p=read(at+header,size-header)
             need(len(p)>=8 and len(p)%4==0,'File type payload')
@@ -240,7 +253,7 @@ def plan(source_size,read_at,tags,cover=None):
             need(movie is None and size<=MAX_MOOV,'Multiple/oversized movie');movie=Box(kind,at,size,header,read(at,size))
         elif kind==b'mdat':extents.append((at+header,at+size))
         top.append(kind);at+=size
-    need(top.count(b'ftyp')==1 and movie is not None and extents,'Required top-level boxes')
+    need(top.count(b'ftyp')==1 and movie is not None and extents and top[-1]!=b'wide','Required top-level boxes/wide successor')
     parts=boxes(movie.payload);profile(parts,{b'mvhd',b'trak',b'udta'});clock(one(parts,b'mvhd').payload)
     track_boxes=[b for b in parts if b.kind==b'trak'];need(0<len(track_boxes)<=MAX_TRACKS,'Track count')
     tracks=[];remaining_chunks=MAX_CHUNKS
@@ -270,3 +283,28 @@ def stream_candidate(source_plan,read_at,write,stopped=lambda:False):
     if stopped():raise InterruptedError('Metadata preservation paused; source unchanged')
     write(source_plan.appended_movie);candidate_hash.update(source_plan.appended_movie)
     return {'schema':'m4b-metadata-preservation-v1','source_sha256':source_hash.hexdigest(),'sha256':candidate_hash.hexdigest(),'size':source_plan.source_size+len(source_plan.appended_movie),'old_moov_offset':source_plan.movie_offset,'old_moov_size':source_plan.movie_size,'old_moov_sha256':source_plan.movie_sha256,'appended_moov_sha256':hashlib.sha256(source_plan.appended_movie).hexdigest(),'track_sha256':[t['sha256'] for t in source_plan.tracks],'source_offsets_preserved':True,'fast_start_preserved':False,'pcm_verified':False}
+
+def verify_candidate(source_plan, source_read, candidate_size, candidate_read, stopped=lambda:False):
+    """Independently reread both immutable streams; permit only the planned patch.
+
+    This proves *all* retained bytes, including unknown mdat padding, rather than
+    trusting a successful writer or comparing only selected audio packets.
+    """
+    need(candidate_size==source_plan.source_size+len(source_plan.appended_movie),'Candidate extent changed')
+    offset=0;source_hash=hashlib.sha256();output_hash=hashlib.sha256()
+    patch=source_plan.movie_offset+4
+    while offset<source_plan.source_size:
+        if stopped():raise InterruptedError('Preservation verification paused')
+        count=min(1024*1024,source_plan.source_size-offset)
+        original=source_read(offset,count);actual=candidate_read(offset,count)
+        need(isinstance(original,bytes) and isinstance(actual,bytes) and len(original)==count and len(actual)==count,'Short verification read')
+        source_hash.update(original);output_hash.update(actual)
+        start=max(offset,patch);end=min(offset+count,patch+4)
+        expected=original
+        if start<end:expected=original[:start-offset]+b'free'[start-patch:end-patch]+original[end-offset:]
+        need(actual==expected,'Candidate changed retained source bytes')
+        offset+=count
+    appended=candidate_read(offset,len(source_plan.appended_movie))
+    need(appended==source_plan.appended_movie,'Candidate metadata differs from approved plan')
+    output_hash.update(appended)
+    return {'source_sha256':source_hash.hexdigest(),'sha256':output_hash.hexdigest(),'size':candidate_size,'all_retained_bytes_verified':True}
