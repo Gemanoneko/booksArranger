@@ -16,7 +16,8 @@ from build_native import bootstrap,lease_check
 def run(argv, proof, cwd=ROOT):
     remaining=max(1,(proof['deadline']-time.time()*1000)/1000)
     result=subprocess.run(argv,cwd=cwd,capture_output=True,timeout=remaining,creationflags=0x08000000,env=os.environ.copy())
-    if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+': '+result.stderr.decode(errors='replace')[-8000:])
+    # electron-builder reports its errors on stdout, so a stderr-only message is empty.
+    if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+': '+(result.stderr.decode(errors='replace')+'\n'+result.stdout.decode(errors='replace'))[-8000:])
     return result.stdout.decode('utf8',errors='strict').replace('\r\n','\n')
 
 def prepare(tree,proof):
@@ -71,7 +72,9 @@ def prepare(tree,proof):
     return runtime,backend,pins,pkg
 
 def build(tree,proof,runtime,backend,pins,pkg,prior):
-    output=tree.fresh(ROOT/'dist'/'builds');build_id=output.name
+    # electron-builder extracts Electron to win-unpacked.tmp then renames it to
+    # win-unpacked inside this directory; that rename needs WRITE (not DELETE) sharing.
+    output=tree.fresh(ROOT/'dist'/'builds',allow_child_rename=True);build_id=output.name
     config={**pkg['build'],'directories':{**pkg['build']['directories'],'output':str(output)},'extraResources':[{'from':str(backend),'to':'backend'},{'from':str(runtime/'python'),'to':'python'},{'from':str(runtime/'ffmpeg'),'to':'ffmpeg'}],'artifactName':'Books-Arranger-Setup-'+pkg['version']+'.exe'}
     config_path=Path(proof['ownedRoot'])/'builder-config.json'
     tree.write(config_path,[json.dumps(config,indent=2).encode()])

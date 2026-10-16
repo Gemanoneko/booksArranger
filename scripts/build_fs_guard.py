@@ -32,9 +32,12 @@ class BuildTree:
         if not value.is_relative_to(self.root):
             raise BoundaryError('Build path escapes owned checkout')
         return value
-    def _create_directory(self, value):
+    def _create_directory(self, value, share=1):
         # NtCreateFile(FILE_CREATE) opens the new directory atomically relative
         # to the retained parent HANDLE; no mkdir-then-adopt pathname window.
+        # share is READ (1) or READ|WRITE (3); DELETE sharing is never granted,
+        # so the held directory itself can never be renamed, deleted or replaced.
+        if share not in (1,3):raise BoundaryError('Fresh directory sharing must deny DELETE')
         parent=self.directory(value.parent)
         parent_lease=self.directories[str(parent).casefold()]
         parent_handle=parent_lease.handles[-1]
@@ -49,7 +52,7 @@ class BuildTree:
         attributes=Attributes(ctypes.sizeof(Attributes),parent_handle,ctypes.pointer(name),0x40,None,None)
         nt=ctypes.WinDLL('ntdll');nt.NtCreateFile.argtypes=[ctypes.POINTER(wintypes.HANDLE),wintypes.DWORD,ctypes.POINTER(Attributes),ctypes.POINTER(Status),ctypes.c_void_p,wintypes.ULONG,wintypes.ULONG,wintypes.ULONG,wintypes.ULONG,ctypes.c_void_p,wintypes.ULONG];nt.NtCreateFile.restype=wintypes.LONG
         handle=wintypes.HANDLE();status=Status()
-        result=nt.NtCreateFile(ctypes.byref(handle),0x100081,ctypes.byref(attributes),ctypes.byref(status),None,0x10,1,2,0x200021,None,0)
+        result=nt.NtCreateFile(ctypes.byref(handle),0x100081,ctypes.byref(attributes),ctypes.byref(status),None,0x10,share,2,0x200021,None,0)
         if result<0:raise BoundaryError('Fresh native directory creation refused: '+hex(result&0xffffffff))
         self.stack.callback(kernel.CloseHandle,handle)
         info=FileInfo()
@@ -88,11 +91,15 @@ class BuildTree:
         if expected is not None and result != expected:
             raise BoundaryError('Build file differs from accepted manifest')
         return result
-    def fresh(self, parent):
+    def fresh(self, parent, allow_child_rename=False):
         parent = self.directory(parent, create=True)
         value = parent / str(uuid.uuid4())
         # mkdir has no exist_ok: UUID collision refuses, never adopts.
-        self._create_directory(value)
+        # A Windows rename opens the TARGET parent directory for write, so a
+        # READ-only-shared hold makes every rename into it fail with EBUSY.
+        # allow_child_rename adds WRITE sharing only (never DELETE) for an
+        # output tree whose producer renames its own children inside it.
+        self._create_directory(value, 3 if allow_child_rename else 1)
         self.created[str(value).casefold()] = value
         return value
     def write(self, path, chunks):

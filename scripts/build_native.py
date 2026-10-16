@@ -161,7 +161,16 @@ def main():
                             _fields_=[('user',ctypes.c_longlong),('system',ctypes.c_longlong),('period_user',ctypes.c_longlong),('period_system',ctypes.c_longlong),('faults',wintypes.DWORD),('total',wintypes.DWORD),('active',wintypes.DWORD),('terminated',wintypes.DWORD)]
                         K.QueryInformationJobObject.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD,ctypes.c_void_p];K.QueryInformationJobObject.restype=wintypes.BOOL
                         accounting=Accounting()
-                        if not K.QueryInformationJobObject(job.handle,1,ctypes.byref(accounting),ctypes.sizeof(accounting),None) or accounting.active:
+                        # The console host (conhost.exe) of an exited CREATE_NO_WINDOW
+                        # child is a Job member that exits a few ms after its client.
+                        # Wait (bounded) for POSITIVE emptiness; a real survivor still fails.
+                        settle=time.monotonic()+3
+                        while True:
+                            if not K.QueryInformationJobObject(job.handle,1,ctypes.byref(accounting),ctypes.sizeof(accounting),None):
+                                raise RuntimeError('Build worker returned without a positively empty native Job')
+                            if not accounting.active or time.monotonic()>=settle:break
+                            time.sleep(0.02)
+                        if accounting.active:
                             raise RuntimeError('Build worker returned without a positively empty native Job')
                     # Native accounting was zero before closing the retained Job.
                     closure_verified=True
