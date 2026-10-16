@@ -17,7 +17,8 @@ def run(argv, proof, cwd=ROOT):
     remaining=max(1,(proof['deadline']-time.time()*1000)/1000)
     result=subprocess.run(argv,cwd=cwd,capture_output=True,timeout=remaining,creationflags=0x08000000,env=os.environ.copy())
     # electron-builder reports its errors on stdout, so a stderr-only message is empty.
-    if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+': '+(result.stderr.decode(errors='replace')+'\n'+result.stdout.decode(errors='replace'))[-8000:])
+    # Separate bounded tails: a long stdout can never push stderr out of the message.
+    if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+'\nstderr tail: '+result.stderr.decode(errors='replace')[-4000:]+'\nstdout tail: '+result.stdout.decode(errors='replace')[-4000:])
     return result.stdout.decode('utf8',errors='strict').replace('\r\n','\n')
 
 def prepare(tree,proof):
@@ -87,28 +88,40 @@ def build(tree,proof,runtime,backend,pins,pkg,prior):
     seven=ROOT/'node_modules'/'7zip-bin'/'win'/'x64'/'7za.exe'
     tree.protect(seven)
     installer=output/('Books-Arranger-Setup-'+pkg['version']+'.exe')
-    tree.protect(installer)
+    installer_size=tree.protect(installer)['size']
     listing=run([str(seven),'l','-slt',str(installer)],proof)
-    members=[]
-    for block in listing.split('----------')[-1].split('\n\n'):
-        properties=dict(line.split(' = ',1) for line in block.splitlines() if ' = ' in line)
-        name=properties.get('Path','')
-        if name.lower().endswith('.7z') and 'app' in Path(name).name.lower():members.append(name)
-    if len(members)!=1:raise RuntimeError('Expected exactly one actual NSIS app64 archive')
-    member=members[0]
-    if any(p in ('..','.') for p in member.replace('\\','/').split('/')) or ':' in member or member.startswith(('/', '\\')):raise RuntimeError('NSIS embedded archive path refused')
+    def entries(text):
+        result=[]
+        for block in text.split('----------')[-1].split('\n\n'):
+            properties=dict(line.split(' = ',1) for line in block.splitlines() if ' = ' in line)
+            if 'Path' in properties:result.append(properties)
+        return result
+    # 7zip-bin's reduced 7za has no NSIS handler: it opens the installer AS the one
+    # embedded app 7z it finds at an offset (NSIS stub before it, NSIS data after it).
+    # Require exactly that shape, then carve those exact bytes from the held installer
+    # handle. Member checks and the payload-equality verifier below are unchanged.
+    sections=listing.split('\n--\n')
+    header=dict(line.split(' = ',1) for line in sections[-1].split('\n----------\n')[0].splitlines() if ' = ' in line) if len(sections)==2 else {}
+    try:offset,physical,tail=int(header['Offset']),int(header['Physical Size']),int(header.get('Tail Size','0'))
+    except (KeyError,ValueError):raise RuntimeError('Expected exactly one embedded NSIS app 7z archive')
+    if header.get('Type')!='7z' or offset<=0 or physical<=0 or tail<0 or offset+physical+tail!=installer_size:raise RuntimeError('Expected exactly one embedded NSIS app 7z archive')
+    held_installer=tree.files[str(tree.child(installer)).casefold()]
+    def carve():
+        position=0
+        for block in held_installer.chunks():
+            start=max(offset-position,0);end=min(offset+physical-position,len(block));position+=len(block)
+            if start<end:yield block[start:end]
+            if position>=offset+physical:return
     embedded=tree.fresh(Path(proof['ownedRoot'])/'nsis-archive')
-    run([str(seven),'e',str(installer),member,'-o'+str(embedded),'-y'],proof)
-    archives=list(embedded.iterdir())
-    if len(archives)!=1:raise RuntimeError('NSIS extraction produced unexpected entries')
-    app_archive=archives[0];tree.protect(app_archive)
+    app_archive=embedded/'app-64.7z'
+    if tree.write(app_archive,carve())['size']!=physical:raise RuntimeError('Embedded NSIS app archive carve incomplete')
+    if next(tree.files[str(tree.child(app_archive)).casefold()].chunks(),b'')[:6]!=b"7z\xbc\xaf'\x1c":raise RuntimeError('Carved NSIS app archive signature refused')
     payload=tree.fresh(Path(proof['ownedRoot'])/'nsis-payload')
     app_listing=run([str(seven),'l','-slt',str(app_archive)],proof)
+    if sorted(e['Path'] for e in entries(app_listing))!=sorted(e['Path'] for e in entries(listing)):raise RuntimeError('Carved NSIS app archive members differ from installer listing')
     names=set()
-    for block in app_listing.split('----------')[-1].split('\n\n'):
-        properties=dict(line.split(' = ',1) for line in block.splitlines() if ' = ' in line)
-        relative=properties.get('Path')
-        if relative is None:continue
+    for properties in entries(app_listing):
+        relative=properties['Path']
         canonical=relative.replace('\\','/')
         if not canonical or canonical.startswith('/') or ':' in canonical or any(p in ('.','..') for p in canonical.split('/')) or canonical.casefold() in names or properties.get('Symbolic Link') or properties.get('Hard Link'):raise RuntimeError('NSIS app payload member refused')
         names.add(canonical.casefold())

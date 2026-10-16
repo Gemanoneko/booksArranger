@@ -167,7 +167,7 @@ def main():
                         settle=time.monotonic()+3
                         while True:
                             if not K.QueryInformationJobObject(job.handle,1,ctypes.byref(accounting),ctypes.sizeof(accounting),None):
-                                raise RuntimeError('Build worker returned without a positively empty native Job')
+                                raise RuntimeError('Cannot query native Job accounting: '+str(ctypes.WinError(ctypes.get_last_error())))
                             if not accounting.active or time.monotonic()>=settle:break
                             time.sleep(0.02)
                         if accounting.active:
