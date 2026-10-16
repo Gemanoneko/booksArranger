@@ -230,6 +230,21 @@ function request(method, route, { desktop = false, timeout = 5000 } = {}) {
   });
 }
 
+// Every desktop status reader shares one in-flight request and reuses its answer
+// until 1 s after it was sent (the engine also shares one state computation):
+// polls cannot pile up. Controls invalidate it before and after they run.
+const desktopStatus = require('./status-flight').createStatusFlight({
+  fetch: (timeout) => request('GET', '/api/desktop/status', { desktop: true, timeout }),
+});
+// The update park loop receives this instead of raw request(): its status reads
+// join the shared flight; its POST changes the phase, so the cached answer is dropped.
+function engineRequest(method, route, options = {}) {
+  if (method === 'GET' && route === '/api/desktop/status') return desktopStatus.get({ timeout: options.timeout, maxAge: 0 });
+  if (method !== 'POST') return request(method, route, options);
+  desktopStatus.invalidate();
+  return request(method, route, options).finally(() => desktopStatus.invalidate());
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitForBackend(child) {
@@ -335,7 +350,7 @@ async function requestQuit({ confirmed }) {
   if (state.quit !== 'none') return;
   let status;
   try {
-    status = await request('GET', '/api/desktop/status', { desktop: true });
+    status = await desktopStatus.get();
   } catch (error) {
     reportError('Books Arranger is still running', 'The engine did not confirm a safe Quit. Try Quit again when it responds.\n\n' + error.message);
     return;
@@ -354,7 +369,7 @@ async function requestQuit({ confirmed }) {
   state.quit = 'requested';
   refreshTray(busy.converting ? 'Books Arranger — quitting after the current book' : 'Books Arranger — quitting');
   try {
-    await request('POST', '/api/desktop/quit', { desktop: true });
+    await engineRequest('POST', '/api/desktop/quit', { desktop: true });
   } catch (error) {
     state.quit = 'none';
     refreshTray('Books Arranger — Quit could not be confirmed');
@@ -369,7 +384,7 @@ async function watchQuit() {
   while (!state.backendExited && state.quit === 'requested') {
     await sleep(1000);
     try {
-      const status = await request('GET', '/api/desktop/status', { desktop: true, timeout: 3000 });
+      const status = await desktopStatus.get({ timeout: 3000, maxAge: 0 });
       refreshTray('Books Arranger — ' + status.phase);
       if (status.phase === 'blocked') {
         state.quit = 'none';
@@ -444,12 +459,12 @@ function configureUpdater(config){
   if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
   updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,notify:broadcastStatus,
     acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
-    parkEngine:()=>require('./engine-update').parkOwnedEngine({state,request,sleep,broadcast:broadcastStatus}),
+    parkEngine:()=>require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus}),
     install:async()=>{state.quit='exiting';autoUpdater.quitAndInstall(false,true);await sleep(250);if(!autoUpdater.quitAndInstallCalled){state.quit='none';throw new Error('Installer did not start; reopen Books Arranger and try again');}}
   });
   setInterval(async()=>{
     if(state.backendExited||state.quit!=='none'){state.updateIdle=false;return;}
-    try{const status=await request('GET','/api/desktop/status',{desktop:true});state.updateIdle=status.idle===true;}catch{state.updateIdle=false;}
+    try{const status=await desktopStatus.get();state.updateIdle=status.idle===true;}catch{state.updateIdle=false;}
     refreshTray('Books Arranger');
   },1000);
   broadcastStatus();
@@ -493,7 +508,7 @@ ipcMain.handle('books:select',async(event,choice)=>{
   return {opened:true};
 });
 ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(source==='setup'){if(state.backend)throw new Error('Catalog is still opening');finishExit(0);return;}return requestQuit({confirmed:false});});
-ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await request('GET','/api/desktop/status',{desktop:true});}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};});
+ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};});
 
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {

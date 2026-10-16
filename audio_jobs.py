@@ -287,6 +287,11 @@ class AudioJobs:
         state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if counts["queued"] else "Needs attention" if counts["failed"] else "Completed"
         return {"state": state, **counts, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
+    def has_unfinished(self):
+        """Same answer as scanning status()['jobs'] for pending/running rows, without loading every manifest."""
+        with self._db() as db:
+            return db.execute("SELECT 1 FROM audio_jobs WHERE state IN ('pending','running') LIMIT 1").fetchone() is not None
+
     def _work(self):
         # Resume only explicitly paused durable postprocessing; never loop unclassified failures.
         if self.pending_postprocessing and self.postprocessing:

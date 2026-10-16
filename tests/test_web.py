@@ -255,6 +255,10 @@ class BrowserTests(unittest.TestCase):
         self.assertFalse(self.server.closing)
         self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance},authorized=False)[0],403)
         self.assertEqual(self.call('/api/shutdown',{'restart_instance':self.server.instance})[0],200)
+        # The 200 starts the server's own background shutdown (merge.close, then serve_forever ends).
+        # Wait for it: tearDown's second close must not overlap it while catalog handles are still open.
+        self.thread.join(5)
+        self.assertFalse(self.thread.is_alive())
 
     def test_shutdown_is_protected_and_controlled(self):
         self.assertEqual(self.call('/api/shutdown',{},authorized=False)[0],403)

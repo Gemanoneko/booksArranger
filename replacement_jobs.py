@@ -1,7 +1,9 @@
 """Exact approved successor relationships. Media/history are never rewritten."""
+import contextlib
 import copy
 import hashlib
 import json
+import threading
 from datetime import datetime, timezone
 from scanner import connect
 from sqlite_retry import transaction
@@ -23,8 +25,23 @@ class Replacements:
             db.execute('CREATE TABLE IF NOT EXISTS audiobook_replacements(id TEXT PRIMARY KEY,parent_job_id TEXT UNIQUE NOT NULL,replacement_job_id TEXT UNIQUE NOT NULL,candidate_id TEXT UNIQUE NOT NULL,candidate_revision INTEGER NOT NULL,parent_record_sha256 TEXT NOT NULL,previous_publication_json TEXT NOT NULL,approval_json TEXT NOT NULL,state TEXT NOT NULL,current_output_json TEXT NOT NULL DEFAULT \'\',failure_json TEXT NOT NULL DEFAULT \'\',created TEXT NOT NULL,updated TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS audiobook_replacement_retirements(replacement_id TEXT NOT NULL,original_path TEXT NOT NULL,provenance_json TEXT NOT NULL,recovery_json TEXT NOT NULL DEFAULT \'\',state TEXT NOT NULL,reason TEXT NOT NULL DEFAULT \'\',updated TEXT NOT NULL,PRIMARY KEY(replacement_id,original_path))')
 
+    def _status_local(self):
+        return self.__dict__.setdefault('_status_rows',threading.local())
+
     def rows(self):
+        cached=getattr(self._status_local(),'rows',None)
+        if cached is not None:return [dict(row) for row in cached]
         with connect(self.database) as db:return [dict(row) for row in db.execute('SELECT * FROM audiobook_replacements ORDER BY created,id')]
+
+    @contextlib.contextmanager
+    def snapshot(self):
+        """Read-only status computation: one consistent relation read on this thread instead of one per lookup."""
+        local=self._status_local()
+        if getattr(local,'rows',None) is not None:
+            yield;return
+        local.rows=self.rows()
+        try:yield
+        finally:local.rows=None
 
     def get(self,*,candidate=None,new_job=None,parent=None):
         matches=[r for r in self.rows() if (candidate is None or r['candidate_id']==candidate) and (new_job is None or r['replacement_job_id']==new_job) and (parent is None or r['parent_job_id']==parent)]

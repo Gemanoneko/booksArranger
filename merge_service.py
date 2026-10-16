@@ -7,6 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 import threading
+import time
 import hashlib
 import uuid
 import subprocess
@@ -27,6 +28,44 @@ from current_audiobook import CurrentAudiobooks
 import groups
 
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
+STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
+STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
+
+
+class StatusUnavailable(RuntimeError):
+    """Another thread's status computation did not finish within STATUS_WAIT; the poll reports status unavailable."""
+
+
+class SharedSnapshot:
+    """Single-flight read: concurrent callers wait for one computation, then reuse it until max_age after it started.
+
+    Threads arriving while a computation runs never start another one, so a slow
+    catalog cannot accumulate one expensive computation per poll. invalidate()
+    (after every control) drops the remembered answer and detaches a running
+    computation: its result is never cached and no later reader joins it.
+    """
+    def __init__(self,clock=time.monotonic,wait=STATUS_WAIT):
+        self._lock=threading.Lock();self._clock=clock;self._wait=wait;self._value=None;self._at=None;self._flight=None;self._generation=0
+
+    def invalidate(self):
+        with self._lock:self._generation+=1;self._value=None;self._at=None;self._flight=None
+
+    def get(self,compute,max_age):
+        with self._lock:
+            if self._at is not None and 0<=self._clock()-self._at<max_age:return copy.deepcopy(self._value)
+            flight=self._flight;owner=flight is None
+            if owner:flight=self._flight={'done':threading.Event(),'value':None,'error':None,'generation':self._generation,'started':self._clock()}
+        if owner:
+            try:flight['value']=compute()
+            except BaseException as error:flight['error']=error
+            finally:
+                with self._lock:
+                    if flight['error'] is None and flight['generation']==self._generation:self._value,self._at=flight['value'],flight['started']
+                    if self._flight is flight:self._flight=None
+                flight['done'].set()
+        elif not flight['done'].wait(self._wait):raise StatusUnavailable('Status computation is still running')
+        if flight['error'] is not None:raise flight['error']
+        return copy.deepcopy(flight['value'])
 
 def operation(method):
     @functools.wraps(method)
@@ -141,7 +180,21 @@ class MergeService:
                 if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding):converted.add(id)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted}
 
+    def status_snapshot(self,max_age=STATUS_MAX_AGE):
+        """Polling routes only: concurrent readers share one state() computation, reused briefly. Controls keep fresh state()."""
+        return self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(self.state,max_age)
+
+    def invalidate_status(self):
+        """A control ran: the next polling read recomputes instead of reusing a pre-control answer."""
+        shared=self.__dict__.get('_status_shared')
+        if shared is not None:shared.invalidate()
+
     def state(self):
+        snapshot=getattr(getattr(self,'replacements',None),'snapshot',None)
+        if snapshot is None:return self._state()
+        with snapshot():return self._state()
+
+    def _state(self):
         value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
         raw_jobs=value['jobs']
         if hasattr(self,'replacements'):
@@ -298,7 +351,9 @@ class MergeService:
         self._no_scan()
         if self._retention_stop.is_set():raise ValueError('Recovery cleanup is closing')
         if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for audiobook work to become idle')
-        if any(j['state'] in ('pending','running') for j in self.jobs.status()['jobs']):raise ValueError('Resolve queued audiobook work before deleting recovery copies')
+        unfinished=getattr(self.jobs,'has_unfinished',None)
+        # Runs once per cleanup row on every status poll: an indexed existence check, not a full job load.
+        if unfinished() if unfinished else any(j['state'] in ('pending','running') for j in self.jobs.status()['jobs']):raise ValueError('Resolve queued audiobook work before deleting recovery copies')
         if self.cleanup.current or self._post_current or any(c['state'] in ('waiting','checking','removing','pausing','paused') for c in self.cleanup._rows('SELECT state FROM source_cleanup')):raise ValueError('Wait for source cleanup to finish')
 
     def recovery_status(self,job_id):

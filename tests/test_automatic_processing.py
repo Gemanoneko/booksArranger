@@ -260,7 +260,7 @@ class AutoTests(unittest.TestCase):
             if delay>=1:
                 observed.append(auto.status());self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1);now[0]+=delay;return False
             return original(delay)
-        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
         self.assertEqual(state['state'],'Paused');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
         self.assertEqual(len(observed),1);waiting=observed[0]
         self.assertEqual((waiting['state'],waiting['phase'],waiting['next_retry_at']),('Running','waiting',100005));self.assertTrue(waiting['automatic_retry_enabled']);self.assertFalse(waiting['can_start']);self.assertTrue(waiting['can_stop']);self.assertIsNone(waiting['current'])
@@ -275,13 +275,15 @@ class AutoTests(unittest.TestCase):
         (self.base/'audio'/'John Writer – B Book.mp3').write_bytes(b'private second fixture');inv.reader=lambda p,k,s:json.loads(row(p,filename_identity(p)['title'])['metadata'])
         original=auto.stop_event.wait
         def advance(delay):
-            if auto.stop_event.is_set():return True
+            if delay<1:return original(delay)
+            # Fake clock with Event.wait semantics: any Stop (this fake or wait_auto's) ends the wait
+            # unrecorded. The final stop is decided from research counts, which a concurrent Stop
+            # does not change, and every recorded wake comes from the same single snapshot.
             state=auto.status()
-            if delay>=1 and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:
+            if auto.stop_event.is_set() or (state['research']['held'] and not state['research']['waiting']):
                 auto.stop_event.set();return True
-            if delay>=1:wakes.append(auto.status()['next_retry_at']);now[0]+=delay;return False
-            return original(delay)
-        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+            wakes.append(state['next_retry_at']);now[0]+=delay;return False
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
         self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
     def test_stop_during_armed_wait_preserves_pending_and_restart_stays_paused(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
@@ -300,14 +302,17 @@ class AutoTests(unittest.TestCase):
             return {'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':now[0]+5}} if len(visits)==1 else {'reasons':['Uncertain']}
         auto,merge,inv=self.fake_merge(lookup);auto.clock=lambda:now[0];original_state=merge.state;merge.state=lambda:original_state()|{'cleanup_active':cleanup[0]};original_wait=auto.stop_event.wait
         def advance(delay):
-            state=auto.status()
-            if delay>=1 and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:
-                auto.stop_event.set();return True
             if cleanup[0]:
-                self.assertFalse(auto.status()['automatic_retry_enabled']);self.assertIsNone(auto.status()['current']);drained.append(True);cleanup[0]=False;return False
-            if delay>=1:self.assertTrue(auto.status()['automatic_retry_enabled']);now[0]+=delay;return False
-            return original_wait(delay)
-        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto)
+                state=auto.status()
+                self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['current']);drained.append(True);cleanup[0]=False;return False
+            if delay<1:return original_wait(delay)
+            # Event.wait semantics: wait_auto's concurrent Stop ends the wait instead of tripping the
+            # armed-retry assertion inside the worker; the final stop is decided from research counts.
+            state=auto.status()
+            if auto.stop_event.is_set() or (state['research']['held'] and not state['research']['waiting']):
+                auto.stop_event.set();return True
+            self.assertTrue(state['automatic_retry_enabled']);now[0]+=delay;return False
+        with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
         self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
     def test_restart_of_waiting_running_checkpoint_does_not_arm_retry(self):
         auto,merge,inv=self.fake_merge();run_id=str(uuid.uuid4());now='2026-10-11T00:00:00Z'
@@ -487,11 +492,13 @@ class AutoTests(unittest.TestCase):
         research=SimpleNamespace(client=SimpleNamespace(retry_wait=lambda wait:dict(wait)),lookup=lookup or (lambda *args:{'reasons':['Book identity uncertain'],'sources':[]}))
         auto=AutomaticProcessing(merge,research);merge.automatic=auto;self.controllers.append(auto)
         return auto,merge,inv
-    def wait_auto(self,auto):
+    def wait_auto(self,auto,stop_when_held=True):
+        # stop_when_held=False: the test's fake stop_event.wait is the single stopper, so no second
+        # thread can Stop between that fake's status snapshot and its assertions (the old race).
         deadline=time.monotonic()+5
         while auto.thread.is_alive() and time.monotonic()<deadline:
             state=auto.status()
-            if state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:auto.stop()
+            if stop_when_held and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:auto.stop()
             auto.thread.join(.01)
         self.assertFalse(auto.thread.is_alive());return auto.status()
     def test_construction_and_inventory_only_never_approve(self):

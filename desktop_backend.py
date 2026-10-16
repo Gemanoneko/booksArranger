@@ -33,28 +33,47 @@ class DesktopControl:
     def _automatic(self):
         return getattr(self.server.merge, 'automatic', None)
 
-    def busy(self):
-        merge = self.server.merge
-        jobs = merge.state()
-        automatic = self._automatic()
+    def busy(self, snapshot=None):
+        """Derive busy facts from the caller's state snapshot; compute one only when none is supplied."""
+        if snapshot is not None and isinstance(snapshot.get('audiobook_jobs'), dict):
+            jobs = snapshot['audiobook_jobs']
+            automatic_state = (snapshot.get('automatic_processing') or {}).get('state', 'Idle')
+        else:
+            merge = self.server.merge
+            jobs = merge.status_snapshot() if hasattr(merge, 'status_snapshot') else merge.state()
+            automatic = self._automatic()
+            automatic_state = automatic.status()['state'] if automatic is not None else 'Idle'
         return {'converting': jobs['state'] in ('Running', 'Pausing'),
                 'current_title': jobs.get('current_title', ''),
                 'stage': jobs.get('stage', ''),
                 'queued': jobs.get('queued', 0),
-                'automatic': automatic.status()['state'] if automatic is not None else 'Idle',
+                'automatic': automatic_state,
                 'scanning': self.server.scan_active()}
 
     def status(self):
         with self.lock:
             value = {'phase': self.phase, 'error': self.error, 'requested_at': self.requested_at}
+        # One shared state computation per poll feeds both busy and idle (was two full computations).
+        from merge_service import StatusUnavailable
+        unavailable = False
+        try:
+            snapshot = self.server.state('Audiobooks', cached=True)
+        except StatusUnavailable:
+            # A slow computation is still running: answer "unknown" now rather than wait again.
+            # Phase stays readable, so Quit and its watch keep working.
+            snapshot, unavailable = None, True
+            value['status'] = 'unavailable'
+        except Exception:
+            snapshot = None
         if self.phase in ('running', 'finishing', 'parking'):
             try:
-                value['busy'] = self.busy()
+                value['busy'] = None if unavailable else self.busy(snapshot)
             except Exception:
                 value['busy'] = None
         try:
             from app_launcher import verify_idle
-            verify_idle(self.server.state('Audiobooks'))
+            if snapshot is None:raise RuntimeError('Status unavailable')
+            verify_idle(snapshot)
             value['idle']=not self.server.closing and not self.server.merge_admissions
         except Exception:value['idle']=False
         return value
@@ -162,6 +181,7 @@ def handler_class(base, token):
                 return super().do_POST()
             if not self.desktop_trusted():
                 return
+            self.status_control = True  # Desktop controls also drop the shared status answer (Handler.response).
             try:
                 if urlsplit(self.path).query or self.body():
                     raise ValueError('Desktop controls take an empty JSON object')

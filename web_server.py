@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from catalog_owner import BASE, catalog_lock
+from merge_service import StatusUnavailable
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 
@@ -111,9 +112,15 @@ class BrowserServer(ThreadingHTTPServer):
         return {'application': 'Books Arranger', 'version': self.loaded_version, 'instance': self.instance,
                 'pid': os.getpid(), 'port': self.server_port, 'closing': self.closing, 'restart_context': self.restart_context, 'recovery_active':bool(self.recovery_operations)}
 
-    def state(self, library):
+    def invalidate_status(self):
+        """Called before every trusted control reply: polling reads after it never get a pre-control answer."""
+        invalidate=getattr(self.merge,'invalidate_status',None)
+        if invalidate:invalidate()
+
+    def state(self, library, cached=False):
+        """cached=True is for polling reads only; restart/update fences and control replies stay fresh."""
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
-        jobs=self.merge.state()
+        jobs=self.merge.status_snapshot() if cached and hasattr(self.merge,'status_snapshot') else self.merge.state()
         automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
         return self.health() | {'library': library, 'root': self.inventory.roots[library],
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),
@@ -134,6 +141,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def response(self, status, body, content_type='application/json; charset=utf-8'):
+        # A trusted control drops the shared status answer BEFORE its reply leaves, so the
+        # page's follow-up /api/state read cannot receive the pre-control snapshot.
+        invalidate=getattr(self.server,'invalidate_status',None) if self.__dict__.pop('status_control',False) else None
+        if invalidate:invalidate()
         raw = json.dumps(body, ensure_ascii=False).encode('utf-8') if isinstance(body,(dict,list)) else body
         try:
             self.send_response(status)
@@ -215,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Unknown query parameters')
                 library = self.library(query.get('library'))
                 if path == '/api/state':
-                    self.response(200,self.server.state(library))
+                    self.response(200,self.server.state(library,cached=True))
                 else:
                     offset = query.get('offset','0')
                     if not offset.isascii() or not offset.isdigit() or len(offset)>9:
@@ -244,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.fail(404,'No such Books Arranger route')
         except (ValueError,TypeError) as error:
             self.fail(400,str(error))
+        except StatusUnavailable:
+            self.fail(503,'Status is still updating; retrying')
         except Exception:
             self.fail(500,'Local catalog request failed; source files remain untouched')
 
@@ -405,6 +418,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.trusted(token=True): return
+        self.status_control=True # Consumed by response(); see there.
         admitted=False
         try:
             path,query=self.query()
