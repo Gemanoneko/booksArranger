@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.16.1] - 2026-10-17
+
+v0.16.0 was never released; its changes ship in this version.
+
+### Fixed
+
+- The desktop window no longer piles up status requests on a large catalog. Previously the shell asked for status every second, each request did the same slow work twice, and abandoned requests kept running until the app ran out of threads and memory and could not quit. Status is now requested one at a time, computed once per call from a shared snapshot that is refreshed after every control, and reports "unavailable" instead of waiting more than 4 seconds. Cleanup checks and replacement lookups no longer reload the whole job table repeatedly.
+- Fixed three intermittent test races (automatic processing and web server teardown).
+
 ## [v0.16.0] - 2026-10-15
 
 ### Added
