@@ -1,0 +1,188 @@
+'use strict';
+// v0.16.7 needs-attention actions (Docs/BooksArranger_AttentionActions_Spec.md, amended): classes and hints,
+// row Retry and Repair, the repaired record, the group strip and the server-side Retry all with its inline
+// confirmation, the book-list loading state and request discipline, and two progress-row fixes. Runs the
+// real frontend on the Retry test's DOM/transport doubles.
+const fs=require('node:fs'),path=require('node:path');
+let harness=fs.readFileSync(path.join(__dirname,'test_retry_frontend.js'),'utf8');
+harness=harness.slice(0,harness.indexOf('(async()=>{'));
+harness+=String.raw`
+function attentionRow(name,group,extra={},job={}){
+  return blocked({id:'cand-'+name,path:'cand-'+name,title_clue:'Title '+name,review:{title:'Title '+name},...extra},{job_id:'job-'+name,reason:'raw reason '+name,attention:{group,cause:group==='retry'?'busy':null,originals_untouched:true},...job});
+}
+const DANGLING={kind:'dangling_chapter_reference',removed:[3],description:'The chapter list pointed to missing track 3. That pointer was removed; audio and chapters are unchanged.'};
+function damaged(name,damage=[DANGLING]){return attentionRow(name,'repair',{},{attention:{group:'repair',cause:null,originals_untouched:true,damage},retry:undefined,repair:{allowed:true,reason:''}});}
+function statusCell(tr){return tr.children[4];}
+function actionButtons(tr){return tr.children[5].children[0].children;}
+const posted=route=>calls.filter(call=>call.route===route);
+let repairOverride=null,retryAllOverride=null;const baseFetch=context.fetch;
+context.fetch=async(route,options)=>{
+  if(route==='/api/audiobook/repair'){calls.push({route,options});const data=JSON.parse(options.body);return repairOverride?repairOverride(data):{ok:true,status:202,json:async()=>({requeued:true,job_id:'child-'+data.job_id})};}
+  if(route==='/api/audiobook/retry-all'){calls.push({route,options});return retryAllOverride?retryAllOverride(JSON.parse(options.body)):{ok:true,status:202,json:async()=>({retry_all:{id:'run-1',state:'running',total:121,done:0,queued:0,refused:0}})};}
+  return baseFetch(route,options);
+};
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+(async()=>{
+  run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";viewControls()');
+  // Class copy comes from the API class, never from the reason text; missing class falls back.
+  const retry=attentionRow('a','retry'),space=attentionRow('b','retry',{},{attention:{group:'retry',cause:'space',originals_untouched:true},retry:{allowed:false,reason:'Not enough free disk space yet. Free up space, then retry.'}});
+  const unsupported=attentionRow('c','unsupported',{},{retry:undefined}),other=attentionRow('d','other',{},{retry:undefined}),repair=damaged('r');
+  const status=row=>run('candidateStatus('+JSON.stringify(row)+')');
+  assert.equal(status(retry),'Stopped — ready to retry');assert.equal(status(space),'Stopped — not enough disk space');
+  assert.equal(status(unsupported),"Can't convert — M4B not supported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
+  assert.match(status(blocked({},{attention:undefined})),/^Needs attention — /,'older data without a class falls back');
+
+  // Rows: short status, hint line, technical detail on hover; Retry or Repair first, only with API data.
+  context.fixture=[retry,space,unsupported,other,repair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
+  const trs=get('inventory').children;assert.equal(trs.length,5);
+  assert.equal(statusCell(trs[0]).textContent,'Stopped — ready to retry');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.');
+  assert.equal(statusCell(trs[0]).title,'Technical detail: raw reason a');
+  assert.equal(actionButtons(trs[0])[0].textContent,'Retry');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].getAttribute('aria-label'),'Retry: Title a');
+  assert.equal(actionButtons(trs[0])[0].className.split(' ').includes('quiet'),true,'row actions are quiet; the accent fill is for Retry all');
+  assert.equal(statusCell(trs[1]).children[0].textContent,'Not enough free disk space yet. Free up space, then retry.','an unavailable reason replaces the hint');assert.equal(actionButtons(trs[1])[0].disabled,true);
+  assert.equal(statusCell(trs[2]).children[0].textContent,'Nothing to do for now. Originals are untouched.');assert.notEqual(actionButtons(trs[2])[0].textContent,'Retry','no button, not even a disabled one');
+  assert.equal(statusCell(trs[3]).children[0].textContent,'Select the row to read why.');assert.notEqual(actionButtons(trs[3])[0].textContent,'Retry');
+  // Damaged: the damage line, Repair and never Retry; the technical note joins the hover detail.
+  assert.equal(statusCell(trs[4]).children[0].textContent,'The chapter list points to a missing part. Repair removes that pointer.');
+  assert.equal(statusCell(trs[4]).title,'Technical detail: raw reason r — '+DANGLING.description);
+  assert.equal(actionButtons(trs[4])[0].textContent,'Repair');assert.equal(actionButtons(trs[4])[0].getAttribute('aria-label'),'Repair: Title r');
+  assert.equal(actionButtons(trs[4])[0].title,'Patch the damage found in this book, then queue its audiobook job.');
+  assert.ok(![...actionButtons(trs[4])].some(button=>button.textContent==='Retry'),'a damaged book never shows both');
+  assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'future_kind'}]})+')'),'The app found damage it can patch. Repair fixes it.','unknown kind');
+  assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'mdat_tail_overrun',padding:8}]})+')'),'The file claims a few bytes past its end. Repair adds them; no audio is missing.');
+  assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100}]})+')'),'The last 0.02 s of audio is missing. Repair fills it with silence.');
+  assert.equal(run('patchCopy('+JSON.stringify({kind:'truncated_final_frames'})+')'),'Filled the missing end of the audio with silence.','no amount from the API, no number');
+  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,true);assert.equal(actionButtons(trs[0])[0].title,'Another operation is in progress.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
+
+  // Row Retry: one request, pending hint, then the book is queued; focus lands back in the list.
+  let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});inventoryRows=[space,unsupported,other,repair];const sent=calls.length;
+  actionButtons(trs[0])[0].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(statusCell(trs[0]).children[0].textContent,'Checking this book…');assert.equal(actionButtons(trs[0])[0].textContent,'Retrying…');
+  actionButtons(trs[0])[0].handlers.click({stopPropagation(){}});
+  answer({ok:true,status:202,json:async()=>({requeued:true})});await new Promise(resolve=>setTimeout(resolve,20));
+  const posts=calls.slice(sent).filter(call=>call.route==='/api/audiobook/retry');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].options.body).job_id,'job-a');
+  assert.equal(get('inventory').children.length,4);assert.equal(document.activeElement,get('inventory').children[0],'the row now at that index');
+  retryOverride=null;
+
+  // Queue next (M4B): accepted while a book converts; the row and panel say when it runs, with no button to press twice.
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,current_job_id:'job-running'}};run('state='+JSON.stringify(backend));
+  const m4b=attentionRow('m','retry',{},{attention:{group:'retry',cause:null,originals_untouched:true}});
+  const m4bQueued={...m4b,creation:{...m4b.creation,job:{...m4b.creation.job,readmission:{accepted:true,queued_next:true,position:1,kind:'retry',state:'queued'}}}};
+  context.fixture=[m4b];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
+  retryOverride=async data=>({ok:true,status:202,json:async()=>({job_id:data.job_id,requeued:false,accepted:true,queued_next:true,position:1,kind:'retry',state:'queued'})});
+  inventoryRows=[m4bQueued];const m4bSent=calls.length;
+  actionButtons(get('inventory').children[0])[0].handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(calls.slice(m4bSent).filter(call=>call.route==='/api/audiobook/retry').length,1);
+  let m4bRow=get('inventory').children[0];
+  assert.equal(statusCell(m4bRow).textContent,'Queued — runs after the current book');assert.equal(statusCell(m4bRow).children[0].textContent,'The book is checked again before it runs.');
+  assert.ok(![...actionButtons(m4bRow)].some(button=>/^Retry/.test(button.textContent)),'no button to press twice');
+  assert.equal(get('automatic-result-status').textContent,'Queued — runs after the current book');assert.equal(get('retry-block').hidden,true);
+  get('filter').value='all';await get('filter').handlers.change();
+  assert.equal(statusCell(get('inventory').children[0]).textContent,'Queued — runs after the current book','the state survives a filter change and list refresh');
+  run('filters.candidates="output_attention";viewControls()');
+  assert.equal(run('queuedNextText({position:3})'),'Queued — runs after 3 books');
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,current_job_id:null}}');assert.equal(run('queuedNextText({position:1})'),'Queued — runs next','nothing running');
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,current_job_id:"job-running"}}');
+  // A refusal found by the worker is shown for that book, and Retry is offered again.
+  const refusedM4b={...m4b,creation:{...m4b.creation,job:{...m4b.creation.job,readmission:{accepted:false,queued_next:false,reason:'Failed M4B retained: Reviewed candidate changed during source proof',kind:'retry',state:'refused'}}}};
+  context.fixture=[refusedM4b];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');m4bRow=get('inventory').children[0];
+  assert.equal(statusCell(m4bRow).children[0].textContent,'Retry was refused: Failed M4B retained: Reviewed candidate changed during source proof');assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
+  assert.equal(actionButtons(m4bRow)[0].textContent,'Retry');
+  // A queued child outside the attention list says the same.
+  assert.equal(status(blocked({status:'Queued',creation:{status:'Queued',reasons:[],job:{job_id:'child-m',state:'Queued',stage:'queued',reason:'',readmission:{accepted:true,queued_next:true,position:2,kind:'repair',state:'admitted'}}}})),'Queued — runs after 2 books');
+  retryOverride=null;context.fixture=[space,unsupported,other,repair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');inventoryRows=[space,unsupported,other,repair];
+
+  // Row Repair: its own endpoint and pending copy; a refusal shows the server message in the hint.
+  const repairRow=()=>[...get('inventory').children].find(tr=>tr.dataset.path==='cand-r');
+  repairOverride=async()=>({ok:false,status:409,json:async()=>({error:'This book cannot be repaired.'})});
+  actionButtons(repairRow())[0].handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(posted('/api/audiobook/repair').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/repair')[0].options.body),{library:'Audiobooks',id:'cand-r',revision:4,job_id:'job-r'});
+  assert.equal(statusCell(repairRow()).children[0].textContent,'This book cannot be repaired.');assert.ok(statusCell(repairRow()).children[0].classes.has('retry-refused'));
+  let repairAnswer;repairOverride=()=>new Promise(resolve=>{repairAnswer=resolve;});
+  actionButtons(repairRow())[0].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(actionButtons(repairRow())[0].textContent,'Repairing…');assert.equal(statusCell(repairRow()).children[0].textContent,'Repairing this book…');
+  inventoryRows=[space,unsupported,other];repairAnswer({ok:true,status:202,json:async()=>({requeued:true})});await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(posted('/api/audiobook/repair').length,2);assert.equal(get('retry-all-status').textContent,'Repair queued: The chapter list points to a missing part. Repair removes that pointer.');
+  assert.equal(get('retry-all-line').hidden,false);repairOverride=null;
+
+  // After Repair the row and the details panel keep the record, in any status.
+  const repairedJob=(applied)=>({job_id:'child-r',state:'Queued',stage:'queued',reason:'',repaired:{applied,patched:[{kind:'mdat_tail_overrun',padding:8},{kind:'dangling_chapter_reference',removed:[3]}],detail:'The audio container declared 8 bytes past the end of the file.'}});
+  const queuedRepair=blocked({id:'cand-q',path:'cand-q',title_clue:'Title q',status:'Queued',creation:{status:'Queued',reasons:[],job:repairedJob(false)}});
+  context.fixture=[queuedRepair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
+  assert.equal(statusCell(get('inventory').children[0]).children[0].textContent,'Repair queued: Added 8 missing bytes at the end of the file. No audio was missing. +1 more');
+  const doneRepair={...queuedRepair,status:'Audiobook created',audiobook_ready:true,creation:{status:'Audiobook created',reasons:[],job:{...repairedJob(true),state:'Audiobook created'}}};
+  context.fixture=doneRepair;run('automaticResultKey=null;renderAutomaticResult(fixture)');
+  assert.equal(get('automatic-repaired').hidden,false);assert.equal(get('automatic-repaired-title').textContent,'Repaired');
+  assert.deepEqual(get('automatic-repaired-list').children.map(item=>item.textContent),['Added 8 missing bytes at the end of the file. No audio was missing.','Removed a chapter-list pointer to a missing part.']);
+  assert.equal(get('automatic-technical').textContent,'Technical detail: The audio container declared 8 bytes past the end of the file.');
+  context.fixture=[doneRepair];run('rows=fixture.map(row=>({...row}));renderRows(true)');assert.match(statusCell(get('inventory').children[0]).children[0].textContent,/^Repaired: Added 8 missing bytes/);
+
+  // Group strip: live counts with Can repair, pressed state and a group request.
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,queued:5,attention_counts:{retry:121,repair:2,other:1,unsupported:0}}};run('state='+JSON.stringify(backend)+';controls()');
+  assert.equal(get('attention-groups').hidden,false);assert.equal(get('group-all').textContent,'All · 124');assert.equal(get('group-repair').textContent,'Can repair · 2');assert.equal(get('group-unsupported').textContent,'M4B not supported · 0');
+  assert.equal(get('group-all').getAttribute('aria-pressed'),'true');assert.equal(get('retry-all').hidden,true,'never in All');
+  assert.equal(get('retry-all-status').textContent,'Repair queued: The chapter list points to a missing part. Repair removes that pointer.','the repair line stays while the filter does');
+  const second=attentionRow('e','retry');inventoryRows=[retry,second];const before=calls.length;await get('group-retry').handlers.click();
+  assert.match(calls.slice(before).find(call=>call.route.startsWith('/api/inventory')).route,/&status=output_attention&group=retry$/);
+  assert.equal(get('retry-all-line').hidden,true,'a group change clears the strip line');
+  // Retry all: the whole server group (121) while the page shows 2, behind an inline confirmation.
+  assert.equal(get('group-retry').getAttribute('aria-pressed'),'true');assert.equal(get('retry-all').hidden,false);assert.equal(get('retry-all').textContent,'Retry all (121)');
+  assert.equal(get('retry-all').title,'Check these 121 books again and queue each audiobook job.');
+  get('retry-all').handlers.click();
+  assert.equal(get('retry-all').hidden,true);assert.equal(get('retry-all-confirm').hidden,false);assert.equal(document.activeElement,get('retry-all-cancel'),'focus on the safe default');
+  assert.equal(get('retry-all-question').textContent,'Queue 121 books to be checked again? They run one at a time, right after the current book.');assert.equal(get('retry-all-go').textContent,'Queue 121 books');
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,attention_counts:{retry:118,repair:2,other:1,unsupported:0}}};run('state='+JSON.stringify(backend)+';controls()');
+  assert.equal(get('retry-all-go').textContent,'Queue 121 books','polls never rebuild the confirmation');
+  get('retry-all-confirm').handlers.keydown({key:'Escape',preventDefault(){}});
+  assert.equal(get('retry-all-confirm').hidden,true);assert.equal(get('retry-all').hidden,false);assert.equal(document.activeElement,get('retry-all'));assert.equal(posted('/api/audiobook/retry-all').length,0);
+  get('retry-all').handlers.click();await get('retry-all-go').handlers.click();
+  assert.equal(posted('/api/audiobook/retry-all').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/retry-all')[0].options.body),{library:'Audiobooks'});
+  assert.equal(get('retry-all-status').textContent,'Retrying 121 books.');assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<span id="retry-all-status" role="status" tabindex="-1"><\/span><span id="retry-all-count" aria-hidden="true"><\/span>/,'the running count sits outside the live region');
+  // While it runs: the count outside the live region, every action disabled.
+  context.fixture=[retry,second];run('rows=fixture.map(row=>({...row}));renderRows(true)');
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,retry_all:{id:'run-1',state:'running',total:121,done:37,queued:36,refused:1}}};run('state='+JSON.stringify(backend)+';controls()');
+  assert.equal(get('retry-all-count').textContent,'37 of 121');assert.equal(get('retry-all-status').textContent,'Retrying 121 books.','the live region is not flooded');
+  assert.equal(get('retry-all').disabled,true);assert.equal(actionButtons(get('inventory').children[0])[0].disabled,true);
+  // The end: one line, the list reloads, focus returns to the group.
+  context.setTimeout=setTimeout;
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,retry_all:{id:'run-1',state:'done',total:121,done:121,queued:119,next:119,refused:2}}};run('state='+JSON.stringify(backend)+';controls()');
+  assert.equal(get('retry-all-status').textContent,'Queued 119 of 121. They run right after the current book, one at a time. 2 could not be retried.');assert.equal(get('retry-all-count').textContent,'');
+  await new Promise(resolve=>setTimeout(resolve,30));assert.equal(document.activeElement,get('group-retry'));
+  run('controls()');assert.equal(get('retry-all-status').textContent,'Queued 119 of 121. They run right after the current book, one at a time. 2 could not be retried.','the end line stays until the group or filter changes');
+  // A refused start shows the server message.
+  retryAllOverride=async()=>({ok:false,status:409,json:async()=>({error:'Retry all is already running.'})});
+  get('retry-all').handlers.click();await get('retry-all-go').handlers.click();assert.equal(get('retry-all-status').textContent,'Retry all is already running.');retryAllOverride=null;
+  // Leaving the filter resets the group and the strip.
+  get('filter').value='all';await get('filter').handlers.change();assert.equal(run('attentionGroup'),'all');assert.equal(get('attention-groups').hidden,true);assert.equal(run('stripNote'),'');
+  run('filters.candidates="output_attention";viewControls()');
+
+  // Details panel: the hint under the status and the technical detail as the last line.
+  context.fixture=retry;run('automaticResultKey=null;renderAutomaticResult(fixture)');
+  assert.equal(get('automatic-result-hint').textContent,'Safe to retry now.');assert.equal(get('automatic-result-hint').hidden,false);
+  assert.equal(get('automatic-technical').textContent,'Technical detail: raw reason a');assert.equal(get('automatic-repaired').hidden,true);
+  context.fixture=blocked({},{attention:undefined});run('automaticResultKey=null;renderAutomaticResult(fixture)');assert.equal(get('automatic-technical').hidden,true);
+  // The details-panel action reads Repair for a damaged book.
+  show(damaged('p'));run('controls()');assert.equal(get('retry-job').textContent,'Repair');assert.equal(get('retry-job').title,'Patch the damage found in this book, then queue its audiobook job.');
+
+  // 1a: while a list is on its way, polls do not restart it; a changed list shows a loading state, not the old rows.
+  let slow;inventoryOverride=()=>new Promise(resolve=>{slow=resolve;});const listed=()=>calls.filter(call=>call.route.startsWith('/api/inventory')).length;
+  run('selectedPath=null;selectedRow=null');
+  const startCount=listed();const first=run('refresh()');await tick();
+  assert.equal(listed(),startCount+1);assert.equal(await run('refresh()'),true);assert.equal(listed(),startCount+1,'a poll never restarts the pending list');
+  slow({ok:true,json:async()=>({rows:[retry],total:1})});await first;
+  context.fixture=[retry,other];run('rows=fixture.map(row=>({...row}));renderRows(true)');assert.equal(get('inventory').children.length,2);
+  let pendingList;inventoryOverride=()=>new Promise(resolve=>{pendingList=resolve;});get('filter').value='all';const changing=get('filter').handlers.change();await tick();
+  assert.equal(get('inventory').children.length,0,'the old list is not shown as the new result');assert.equal(get('page').textContent,'Loading All candidates…');assert.equal(get('empty').hidden,false);
+  document.activeElement=null;pendingList({ok:true,json:async()=>({rows:[other],total:1})});await changing;
+  assert.equal(get('inventory').children.length,1);assert.match(get('page').textContent,/All candidates/);inventoryOverride=null;
+
+  // 3c: whole files in the detail, the bar by fraction. 3d: research keeps one ETA history across books.
+  context.fixture={audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'conversion',kind:'conversion',subject:'B',step:'preparing',step_index:1,step_count:4,done:2,total:4,fraction:0.63,unit:'files',indeterminate:false,state:'running',step_started_at:Date.now()-20000}]};
+  run('state=fixture;renderJobs()');const preparing=get('jobs-rows').children[0];assert.equal(preparing.children[0].children[1].textContent,'2 of 4 files');assert.equal(preparing.children[1].value,63);
+  const researchStart=Date.now()-60000,researching=(title,done)=>({audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'scan',kind:'scan',subject:title,step:'researching',step_text:'x',done,total:100,unit:'books',indeterminate:false,state:'running',step_started_at:researchStart}]});
+  context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
+  context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
+  console.log('PASS attention classes, row hints, Retry and Repair, queued next, repaired record, group strip, server Retry all with confirmation, details lines, list loading and request discipline, whole files and research history');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`;
+const Module=require('node:module');const m=new Module(path.join(__dirname,'test_attention_frontend.js'),module);m.filename=path.join(__dirname,'test_attention_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

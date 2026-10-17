@@ -170,25 +170,18 @@ class PrivateMediaTests(unittest.TestCase):
                 create_private(manifest,self.root/'stage',threading.Event())
         self.assertEqual(len(reached),1);self.assertEqual(digest(offset),before)
         self.assertFalse(Path(manifest['destination']).exists())
-    def test_same_duration_pcm_substitution_before_consumption_is_refused(self):
+    def test_streamed_pcm_that_differs_from_its_proof_is_refused_unpublished(self):
         from unittest.mock import patch
         import audio_pipeline
-        path=self.media('source.flac','flac');manifest=self.manifest([path]);before=digest(path)
-        original=audio_pipeline.normalize_sources
-        def substitute(*args,**kwargs):
-            names,receipts=original(*args,**kwargs)
-            pcm=Path(args[0])/names[0]
-            # Change only PCM sample bytes, preserving the complete WAV format,
-            # byte count, rate, layout and decoded duration at the consumption window.
-            with open(pcm,'r+b') as stream:
-                stream.seek(-16,2);raw=stream.read(8);stream.seek(-16,2)
-                stream.write(bytes([raw[0]^1])+raw[1:])
-            return names,receipts
-        with patch('audio_pipeline.normalize_sources',side_effect=substitute):
-            with self.assertRaisesRegex(ValidationError,'Normalized snapshot differs'):
+        path=self.media('source.flac','flac');manifest=self.manifest([path]);before=digest(path);original=audio_pipeline.normalized_references
+        def substituted(*args,**kwargs):
+            references,joined=original(*args,**kwargs)
+            return [dict(references[0],sha256='f'*64)],joined
+        with patch('audio_pipeline.normalized_references',side_effect=substituted):
+            with self.assertRaisesRegex(ValidationError,'Streamed normalized PCM differs'):
                 create_private(manifest,self.root/'stage',threading.Event())
-        self.assertEqual(digest(path),before)
-        self.assertFalse(any((self.root/'stage').rglob('checked.m4b')))
+        self.assertEqual(digest(path),before);self.assertFalse(Path(manifest['destination']).exists())
+        self.assertFalse(any((self.root/'stage').rglob('normalized*.wav')))
     def test_changed_m4b_chapters_fail_closed(self):
         path=self.media('existing.m4b','aac');manifest=self.manifest([path]);manifest['source_chapters']=[{'start':0,'end':1000,'title':'Invented'}]
         with self.assertRaises(ValidationError):create_private(manifest,self.root/'stage',threading.Event())

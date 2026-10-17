@@ -48,6 +48,6 @@ def phase_progress(phase,measurement=None):
     if not isinstance(measurement,dict):return result
     if all(key in measurement for key in ('phase','completed','total')):
         # A measured step inside this journal stage (encoding, normalizing, copying to the library, ...).
-        result.update({key:measurement[key] for key in ('phase','completed','total','unit','item','items','started') if key in measurement})
+        result.update({key:measurement[key] for key in ('phase','completed','total','unit','item','items','fraction','started') if key in measurement})
     elif measurement.get('phase')==phase and 'started' in measurement:result['started']=measurement['started']
     return result

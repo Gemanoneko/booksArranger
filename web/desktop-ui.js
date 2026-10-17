@@ -8,7 +8,7 @@
  function button(label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.title=label;b.addEventListener('click',()=>fn().catch(showError));actions.append(b);return b;}
  const check=button('Check for updates',()=>api.checkUpdates());const download=button('Download update',()=>api.downloadUpdate());const restart=button('Restart to update',()=>api.installUpdate());
  function showError(error){text.textContent=String(error.message||error);}
- const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job'];
+ const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job','retry-all','retry-all-go'];
  function render(value){
   const desktop=value.desktop||{};const quitting=value.quit!=='none'||(desktop.phase&&desktop.phase!=='running');
   panel.hidden=!quitting;phase.textContent=desktop.error||({finishing:'Finishing the current book and cleanup…',parking:'Parking pending work…',updating:'Parking the idle engine for update…',blocked:'Quit blocked; ownership remains held.'}[desktop.phase]||'Waiting for the engine checkpoint…');

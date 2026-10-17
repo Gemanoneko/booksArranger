@@ -71,7 +71,7 @@ class AutomaticProcessing:
     def __init__(self,merge,research=None,clock=time.time):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
-        self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.current=None;self.closed=False;self.volatile_failure=None;self.clock=clock;self.next_retry_at=None
+        self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.current=None;self.live_checkpoint=None;self.closed=False;self.volatile_failure=None;self.clock=clock;self.next_retry_at=None
         with connect(self.database) as db:
             __import__('groups').setup(db)
             db.execute('CREATE TABLE IF NOT EXISTS automatic_runs(id TEXT PRIMARY KEY,state TEXT,phase TEXT,checkpoint TEXT,reason TEXT,created TEXT,updated TEXT,restart_paused INTEGER DEFAULT 0)')
@@ -129,6 +129,21 @@ class AutomaticProcessing:
             db.execute("UPDATE automatic_runs SET state='Paused',checkpoint=?,reason='Paused — pending work saved',updated=? WHERE id=?",(encoded,updated,id))
         # Stop is already set: finish this atomic save, never restart processing.
         transaction(self.database,persist)
+    def index(self):
+        """{id: {revision, fingerprint, state, duplicate_review}} for every recorded candidate, in one read.
+
+        The book list's Held and Recording review filters use it instead of one query per candidate;
+        a row still counts only when its revision and fingerprint match, exactly as candidate().
+        """
+        result={}
+        with connect(self.database) as db:
+            for r in db.execute('SELECT id,revision,fingerprint,state,result FROM automatic_candidates'):
+                try:duplicate=bool(json.loads(r['result'] or '{}').get('duplicate_review'))
+                except (TypeError,ValueError,AttributeError):duplicate=False
+                result[r['id']]={'revision':r['revision'],'fingerprint':r['fingerprint'],'state':r['state'],'duplicate_review':duplicate}
+        failure=self.volatile_failure
+        if failure and failure['diagnostic'].get('candidate_id') in result:result[failure['diagnostic']['candidate_id']]['state']='Needs attention'
+        return result
     def candidate(self,row):
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
@@ -186,18 +201,23 @@ class AutomaticProcessing:
         return {'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
                 'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
-                'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None,'research_pass':self._research_pass(run)}
+                'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None,'research_pass':self._research_pass(run,self.live_checkpoint)}
     @staticmethod
-    def _research_pass(run):
-        """Books researched of this pass's list, from the saved checkpoint; None outside research."""
-        # Display only, read on every poll and by the restart fence: any unexpected shape gives None, never an error.
+    def _research_pass(run,live=None):
+        """Books visited of this research sweep; None outside research.
+
+        The worker's live checkpoint is used while it runs: the saved one is written only at some
+        steps, so it lagged (2777 of 4026 while the current book changed 31 times). A book counts once
+        it has been visited, deferred or not; a sweep over deferred books starts its own count.
+        Display only, read on every poll and by the restart fence: any unexpected shape gives None.
+        """
         try:
             if not run or run['phase']!='research':return None
-            checkpoint=json.loads(run['checkpoint'] or '{}')
+            checkpoint=live if isinstance(live,dict) else json.loads(run['checkpoint'] or '{}')
             if not isinstance(checkpoint,dict):return None
-            ids=lambda key:{item for item in checkpoint.get(key) or [] if isinstance(item,str)} if isinstance(checkpoint.get(key) or [],list) else set()
-            done=len(ids('done'));left=len(ids('pending')|ids('deferred'))
-            return {'completed':done,'total':done+left} if done+left else None
+            ids=lambda key:{item for item in list(checkpoint.get(key) or []) if isinstance(item,str)} if isinstance(checkpoint.get(key) or [],list) else set()
+            pending=ids('pending');total=len(ids('done')|pending|ids('deferred'))
+            return {'completed':total-len(pending),'total':total} if total else None
         except Exception:return None
     def start(self,*,server_closing=False):
         with self.lock:
@@ -327,7 +347,7 @@ class AutomaticProcessing:
     def _work(self,id):
         row=None;identity=None;phase='unknown';research_failed=False;checkpoint={}
         try:
-            run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase']
+            run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase'];self.live_checkpoint=checkpoint
             if phase=='discovery':
                 # Existing queued jobs finish before a scan; never scan while encoding/cleanup runs.
                 if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):
@@ -341,7 +361,7 @@ class AutomaticProcessing:
                 if self.inventory.status('Audiobooks')['state'] not in ('completed',):
                     raise ValueError('Discovery incomplete or has read errors; saved progress preserved')
                 candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
-                checkpoint={'pending':[r['id'] for r in candidates],'done':[]}
+                checkpoint={'pending':[r['id'] for r in candidates],'done':[]};self.live_checkpoint=checkpoint
                 self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
@@ -456,7 +476,7 @@ class AutomaticProcessing:
                 self._update(id,state='Needs attention',phase='conversion',reason='Some audiobook jobs need attention; verified outputs and pending work are preserved')
             else:self._update(id,state='Completed',phase='completed',reason='')
         except InterruptedError:
-            self.current=None;self.next_retry_at=None
+            self.current=None;self.next_retry_at=None;self.live_checkpoint=None
             # Report Paused only after both scan and owned converter/cleanup have stopped.
             self.inventory.stop();self.merge.pause()
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)

@@ -257,13 +257,14 @@ class PageTests(unittest.TestCase):
             inventory.launch('Audiobooks');inventory.worker.join(5)
             service=CandidateReviewService(inventory,base/'covers');identity=service.page()['rows'][0]['id']
             job={'job_id':'job-a','state':'needs attention','stage':'queued','reason':LEGACY,'manifest':{'candidate_id':identity,'cleanup_policy':{'enabled':True}}}
-            retry=Mock(return_value={'job-a':{'allowed':True,'reason':''}})
-            service.jobs=SimpleNamespace(progress_books=lambda:{'converted_ids':set()},retry_statuses=retry,
+            retry=Mock(side_effect=lambda job_ids=None,retry=True:{'job-a':{'group':'retry','cause':'files','originals_untouched':True,'retry':{'allowed':True,'reason':''}}} if retry and 'job-a' in (job_ids or ['job-a']) else {})
+            service.jobs=SimpleNamespace(progress_books=lambda:{'converted_ids':set()},attention_summary=retry,
                 jobs=SimpleNamespace(status=lambda:{'jobs':[job]}),cleanup=SimpleNamespace(status=lambda _id:None,root=base/'recovery'))
             row=service.page()['rows'][0]
             self.assertEqual(row['creation']['job']['retry'],{'allowed':True,'reason':''});self.assertEqual(row['creation']['job']['reason'],LEGACY)
-            retry.assert_called_once_with()
-            retry.return_value={};self.assertNotIn('retry',service.page()['rows'][0]['creation']['job'])
+            retry.assert_called_once_with(['job-a'])  # v0.16.7: only for the shown page's needs-attention jobs
+            self.assertEqual(row['creation']['job']['attention'],{'group':'retry','cause':'files','originals_untouched':True})
+            retry.side_effect=lambda job_ids=None,retry=True:{};self.assertNotIn('retry',service.page()['rows'][0]['creation']['job'])
 
 
 class HTTPTests(unittest.TestCase):

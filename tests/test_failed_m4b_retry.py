@@ -108,3 +108,91 @@ class RepairAdmissionTests(unittest.TestCase):
         track=json.loads(stored['manifest'])['m4b_repair']['source_profile']['tracks'][0]
         self.assertEqual(track['handler'],'soun');self.assertEqual(track['codec'],'mp4a')
         self.assertEqual(track['sha256'],profile.tracks[0]['sha256'])
+
+    def test_old_remux_presentation_bounds_failure_is_eligible(self):
+        self.assertTrue(eligible(self.parent|{'reason':'M4B presentation bounds cannot be verified'}))
+
+    def test_writer_family_and_coverless_failures_are_eligible_but_other_reviews_are_not(self):
+        for reason in ('M4B preservation requires review: Unsupported/ambiguous brand',
+                       'M4B preservation requires review: Unsupported structural box',
+                       'Preservation changed decoder, packets or presentation'):
+            self.assertTrue(eligible(self.parent|{'reason':reason}),reason)
+        for reason in ('M4B preservation requires review: Top-level extent invalid',
+                       'M4B preservation requires review: Unresolved chapter reference',
+                       'Preservation changed complete native decoded audio'):
+            self.assertFalse(eligible(self.parent|{'reason':reason}),reason)
+
+    def test_user_requested_damage_repair_uses_the_one_child_ledger(self):
+        import m4b_repair
+        from test_m4b_preservation import TEXT_SOURCE,dangling
+        source=dangling(TEXT_SOURCE(),[3,2])
+        diagnosis=m4b_repair.diagnose(len(source),lambda offset,count:source[offset:offset+count])
+        self.assertTrue(m4b_repair.eligible(self.parent|{'reason':'M4B preservation requires review: Unresolved chapter reference'}))
+        child=self.jobs.enqueue(m4b_repair.bind(self.parent,self.fresh,diagnosis,'b'*64),repair_context=self.context)
+        stored=json.loads(self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(child,))[0]['manifest'])
+        self.assertEqual(m4b_repair.approved_repairs(stored),{'dangling_chapter_reference'})
+        child_row=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(child,))[0]|{'state':'needs attention'}
+        self.assertFalse(eligible(child_row|{'reason':'Remux changed the decoder configuration or relative audio packet timing'}))
+        self.assertFalse(m4b_repair.eligible(child_row))
+        other=copy.deepcopy(self.fresh);other['job_id']=str(uuid.uuid4())
+        with self.assertRaises(ValueError):self.jobs.enqueue(m4b_repair.bind(self.parent,other,diagnosis,'b'*64),repair_context=self.context)
+        with self.jobs._db() as db:self.assertEqual(db.execute('SELECT count(*) FROM audio_repair_admissions').fetchone()[0],1)
+
+
+class PriorityReadmissionTests(unittest.TestCase):
+    """Retry/Repair clicks are accepted while a book runs and run next, in click order."""
+    def setUp(self):
+        RepairAdmissionTests.setUp(self)
+        self.parents=[self.parent['job_id']]+[self.failed() for _ in range(2)]
+        self.normal=self.queued_job()  # an older ordinary queued book
+        self.made={};self.calls=[]
+    def failed(self):
+        manifest=copy.deepcopy(self.manifest);manifest['job_id']=str(uuid.uuid4());manifest['candidate_id']=str(uuid.uuid4())
+        self.jobs.enqueue(manifest);self.jobs._update(manifest['job_id'],state='needs attention',stage='checking',reason='Remux changed the decoder configuration or relative audio packet timing')
+        return manifest['job_id']
+    def queued_job(self):
+        manifest=copy.deepcopy(self.manifest);manifest['job_id']=str(uuid.uuid4());manifest['candidate_id']=str(uuid.uuid4())
+        return self.jobs.enqueue(manifest)
+    def admit(self,parent,kind,refuse=()):
+        self.calls.append((parent,kind))
+        if parent in refuse:return {'requeued':False,'reason':'Prior audio working files need verified disposal before another source copy'}
+        child=self.queued_job();self.made[parent]=child;return {'requeued':True,'job_id':child,'reason':'admitted'}
+    def request(self,parent,kind='retry'):
+        import m4b_readmission
+        with self.jobs._db() as db:return m4b_readmission.request(db,parent,kind,1000)
+    def describe(self,job_id):
+        import m4b_readmission
+        with self.jobs._db() as db:return m4b_readmission.describe(db,job_id)
+    def next_job(self,admit=None):
+        import m4b_readmission
+        return m4b_readmission.next_job(self.jobs._db,admit or self.admit,1000)
+
+    def test_clicks_are_accepted_in_click_order_and_repeated_clicks_keep_their_place(self):
+        a,b,c=self.parents
+        self.assertEqual([self.request(b)['position'],self.request(a,'repair')['position'],self.request(c)['position']],[1,2,3])
+        again=self.request(b);self.assertEqual((again['accepted'],again['queued_next'],again['position']),(True,True,1))
+        self.assertEqual(self.describe(a)['kind'],'repair')
+        with self.assertRaises(ValueError):self.request(a,'loosen')
+    def test_worker_admits_the_head_and_its_child_runs_before_the_normal_queue(self):
+        a,b,c=self.parents;self.request(b);self.request(a,'repair')
+        first=self.next_job();self.assertEqual(self.calls,[(b,'retry')]);self.assertEqual(first,self.made[b])
+        self.assertNotEqual(first,self.normal)  # the older ordinary book waits
+        self.assertEqual(self.describe(first)|{},self.describe(b));self.assertEqual(self.describe(first)['position'],1)
+        self.assertEqual(self.next_job(),first);self.assertEqual(len(self.calls),1)  # not admitted twice
+        self.jobs._update(first,state='running')
+        second=self.next_job();self.assertEqual(self.calls[-1],(a,'repair'));self.assertEqual(second,self.made[a])
+        self.jobs._update(second,state='running');self.assertIsNone(self.next_job())
+    def test_a_refused_book_is_recorded_alone_and_the_next_click_proceeds(self):
+        a,b,c=self.parents;self.request(b);self.request(a);self.request(c)
+        child=self.next_job(lambda parent,kind:self.admit(parent,kind,refuse={b}))
+        self.assertEqual(child,self.made[a])
+        refused=self.describe(b);self.assertFalse(refused['accepted']);self.assertIn('Prior audio working files',refused['reason'])
+        self.assertEqual(self.request(b)['position'],3)  # a new click joins the end: a's child, c, b
+    def test_deferred_or_interrupted_admission_keeps_its_place(self):
+        a,b,c=self.parents;self.request(b)
+        self.assertIsNone(self.next_job(lambda parent,kind:{'defer':True}));self.assertEqual(self.describe(b)['position'],1)
+        def stopped(parent,kind):raise InterruptedError('stop')
+        with self.assertRaises(InterruptedError):self.next_job(stopped)
+        self.assertEqual(self.describe(b)['position'],1)
+        self.assertEqual(self.next_job(),self.made[b])
+

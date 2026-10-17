@@ -7,6 +7,13 @@ from pathlib import Path
 REASONS={
     'Remux changed the decoder configuration or relative audio packet timing',
     'M4B leading gaps or edit presentation require a verified preservation plan',
+    # Raised by the old remux path's presentation proof, which byte-exact preservation does not use.
+    'M4B presentation bounds cannot be verified',
+    # Writer families now proven byte-exact (0.16.7); admission still requires a passing plan().
+    'M4B preservation requires review: Unsupported/ambiguous brand',
+    'M4B preservation requires review: Unsupported structural box',
+    # Coverless sources: the movie start now excludes the added attached cover (0.16.7).
+    'Preservation changed decoder, packets or presentation',
 }
 SCHEMA='m4b-metadata-preservation-v1'
 
@@ -20,7 +27,13 @@ def profile_proof(profile,module_sha256):
             'profile_only_not_pcm_verification':True}
 
 def eligible(row):
-    if row['state']!='needs attention' or row.get('output') or row.get('reason') not in REASONS:
+    if row.get('reason') not in REASONS:return False
+    return unpublished_single_m4b(row)
+
+def unpublished_single_m4b(row):
+    """Static rule shared with user-requested damage repair: a failed, unpublished,
+    hash-consistent single-.m4b job that is not itself a repair or replacement child."""
+    if row['state']!='needs attention' or row.get('output'):
         return False
     journal=json.loads(row['journal']);manifest=json.loads(row['manifest'])
     try:

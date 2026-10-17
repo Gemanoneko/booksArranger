@@ -38,7 +38,32 @@ def _failure_details(error, stage, now=None):
     if isinstance(error, sqlite3.Error):
         details['sqlite_errorcode'] = code
         details['sqlite_errorname'] = getattr(error, 'sqlite_errorname', None)
+    if isinstance(error, OSError) and type(error.errno) is int:
+        details['errno'] = error.errno  # typed, so a full disk is told apart without reading the message
     return details
+
+
+def failure_cause(row, journal):
+    """'busy' or 'space' when a recorded pre-publication failure is one a Retry can resolve; otherwise None.
+
+    Typed where the record is typed (sqlite_errorcode, errno). Older records carry no code, so two
+    exact, fixed shapes are accepted: SQLite's own SQLITE_BUSY text as the whole reason of an untyped
+    OperationalError (the v0.16.5 cleanup migration's precedent), and OSError's canonical
+    "[Errno 28] " prefix for an untyped OSError.
+    """
+    failure = journal.get('failure') if isinstance(journal, dict) else None
+    if not isinstance(failure, dict):
+        return None
+    kind, code, number = failure.get('exception_class'), failure.get('sqlite_errorcode'), failure.get('errno')
+    if kind == 'OperationalError':
+        if type(code) is int and code >= 0 and (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            return 'busy'
+        if code is None and row.get('reason') == 'database is locked':
+            return 'busy'
+    if kind == 'OSError':
+        if number == errno.ENOSPC or number is None and str(row.get('reason') or '').startswith('[Errno 28] '):
+            return 'space'
+    return None
 
 
 class RetryRefused(ValueError):
@@ -54,6 +79,58 @@ RETRY_REVIEW_CHANGED = "The book's review or source files changed. Review the bo
 RETRY_CLOSING = 'Books Arranger is closing. Retry after it restarts.'
 RETRY_SCANNING = 'Scanning is running. Retry when it stops.'
 RETRY_QUEUED = 'Queued again by Retry.'
+RETRY_SPACE = 'Not enough free disk space yet. Free up space, then retry.'
+# M4B Retry and Repair admit a new child job, and only while no audiobook is being created.
+RETRY_WORKER_BUSY = 'Retry can start when the current audiobook finishes.'
+REPAIR_WORKER_BUSY = 'Repair can start when the current audiobook finishes.'
+REPAIR_SCANNING = 'Scanning is running. Repair when it stops.'
+REPAIR_CLOSING = 'Books Arranger is closing. Repair after it restarts.'
+RETRY_ALL_RUNNING = 'Retry all is already running.'
+RETRY_ALL_NONE = 'No books can be retried right now.'
+
+
+def _m4b_fields(row):
+    """(repair field, M4B retry eligibility) of a raw needs-attention row. No I/O; display only, never raises.
+
+    repair: m4b_repair.classify (None, unchecked, or the cached check). retry: failed_m4b_retry.eligible,
+    a reason this version can now preserve (its REASONS), re-admitted as new, proven work.
+    """
+    try:
+        import failed_m4b_retry
+        import m4b_repair
+    except Exception:
+        return None, False
+    try:
+        repair = m4b_repair.classify(row)
+    except Exception:
+        repair = None
+    try:
+        retry = bool(failed_m4b_retry.eligible(row))
+    except Exception:
+        retry = False
+    return (repair if isinstance(repair, dict) else None), retry
+
+
+def repair_record(job):
+    """The user-approved damage repair a job carries (the Repair button made it), else None.
+
+    job: a status() job. applied is True once the verified output records the patch; until then the
+    record is the approved repair. patched: [{kind, padding | removed}]; detail: the technical note.
+    """
+    try:
+        import m4b_repair
+        manifest = job.get('manifest')
+        binding = manifest.get('m4b_repair') if isinstance(manifest, dict) else None
+        if not isinstance(binding, dict) or binding.get('schema') != m4b_repair.SCHEMA:
+            return None
+        output = job.get('output') if isinstance(job.get('output'), dict) else {}
+        validation = output.get('validation') if isinstance(output.get('validation'), dict) else {}
+        applied = validation.get('damage_repair') if isinstance(validation.get('damage_repair'), dict) else None
+        source = applied or binding
+        patched = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale') if key in item} for item in source.get('repairs') or [] if isinstance(item, dict)]
+        return {'applied': applied is not None, 'patched': patched, 'detail': source.get('note') if isinstance(source.get('note'), str) else ''}
+    except Exception:
+        return None
 
 
 class _Any:
@@ -90,6 +167,7 @@ class AudioJobs:
         self._closed = False
         self.after_completed = None
         self.before_attempt = None
+        self.next_priority = None  # m4b_readmission hook: the job id that runs next, or None
         self.after_attempt = None
         self.on_working_hold = None
         self.on_space_hold = None
@@ -367,7 +445,15 @@ class AudioJobs:
             self._update(job_id,state='pending',stage='queued',reason='Retrying verified pre-publication I/O failure; prior attempt retained')
             return {'retryable':True,'retry_at':now+3600,'requeued':True}
 
-    def _retry_shape(self, db, row):
+    @staticmethod
+    def _newest_jobs(db):
+        """{candidate id: newest job id}, in one pass (E6 for many rows at once)."""
+        newest = {}
+        for job_id, candidate in db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs ORDER BY created, job_id"):
+            newest[candidate] = job_id
+        return newest
+
+    def _retry_shape(self, db, row, latest=None):
         """The frozen manifest when this row was refused before any attempt started (Retry rules E1-E7), else None.
 
         Only the admission hold in _work writes 'needs attention' with no output, no publication
@@ -382,16 +468,19 @@ class AudioJobs:
             return None
         if not isinstance(journal, dict) or not isinstance(manifest, dict):
             return None
-        if 'publication_intent' in journal or 'failure' in journal:
-            return None  # E2, E3
+        # E2, E3: nothing published; and either refused before any attempt (no failure), or a failure a
+        # Retry can resolve (a busy catalog, or a full disk). Every other runtime failure stays out.
+        if 'publication_intent' in journal or 'failure' in journal and failure_cause(row, journal) is None:
+            return None
         if hashlib.sha256(row['manifest'].encode('utf-8')).hexdigest() != row['manifest_hash'] or manifest.get('job_id') != row['job_id']:
             return None  # E4
         if manifest.get('replacement_id') or manifest.get('m4b_repair'):
             return None  # E5
         if db.execute('SELECT 1 FROM audio_repair_admissions WHERE parent_job_id=? OR child_job_id=?', (row['job_id'], row['job_id'])).fetchone():
             return None  # E5
-        latest = db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone()
-        if not latest or latest[0] != row['job_id']:
+        newest = latest.get(manifest.get('candidate_id')) if latest is not None else (lambda found: found[0] if found else None)(db.execute(
+            "SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone())
+        if newest != row['job_id']:
             return None  # E6
         if row['attempt_id'] and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_failure_history'").fetchone():
             prior = db.execute('SELECT record FROM audio_failure_history WHERE job_id=? AND attempt_id=?', (row['job_id'], row['attempt_id'])).fetchone()
@@ -399,25 +488,88 @@ class AudioJobs:
                 return None  # E7: the worker's archive step would refuse and hold the queue again
         return manifest
 
-    def retry_statuses(self, admission_clear, job_id=None):
-        """{job_id: {'allowed', 'reason'}} for jobs refused before any attempt started; absent means hidden.
+    def _retry_allowed(self, row, cause, manifest, admission_clear, space_ready):
+        """E8: the cause is clear now. Read-only; returns (allowed, reason)."""
+        try:
+            admission_clear(copy.deepcopy(row))
+        except Exception:
+            return False, RETRY_FILES_PRESENT
+        if cause == 'space' and (space_ready is None or space_ready(manifest) is not True):
+            return False, RETRY_SPACE
+        return True, ''
 
-        One catalog read, then one read-only admission check (E8) per such job. It never runs the
-        revision guard and never reads media, so it is cheap enough for every poll.
+    def attention_summary(self, admission_clear=None, space_ready=None, job_ids=None, retry=True):
+        """{job_id: {'group', 'cause', 'originals_untouched', 'retry'}} for every job that needs attention.
+
+        group: 'repair' (a single M4B whose damage m4b_repair proved repairable; Repair, never Retry),
+        'retry' (refused before starting, a busy catalog or a full disk, or an M4B failure this version
+        can preserve: Retry can resolve it), 'unsupported' (an M4B the app cannot preserve: a validation
+        refusal of a single M4B/M4A source), or 'other'. Structural, never the English reason. Only each
+        book's newest job is listed: a superseded failure (say, the parent of a retry child) is history.
+        retry=False skips the read-only E8 checks (counts on every poll); with retry=True, 'retry' or
+        'repair' holds {'allowed', 'reason'}. 'repair_check': the M4B repair check has not run yet.
         """
-        query = "SELECT * FROM audio_jobs WHERE state='needs attention' AND output IS NULL" + (" AND job_id=?" if job_id else "") + " ORDER BY created, job_id"
+        query = "SELECT * FROM audio_jobs WHERE state='needs attention'" + (" AND job_id IN (%s)" % ','.join('?' * len(job_ids)) if job_ids else "") + " ORDER BY created, job_id"
+        if job_ids is not None and not job_ids:
+            return {}
         with self._db() as db:
-            shaped = [row for row in (dict(r) for r in db.execute(query, (job_id,) if job_id else ())) if self._retry_shape(db, row) is not None]
-        statuses = {}
-        for row in shaped:
+            rows = [dict(r) for r in db.execute(query, tuple(job_ids or ()))]
+            latest = self._newest_jobs(db) if rows else {}
+            cleaned = {r[0] for r in db.execute("SELECT job_id FROM source_cleanup")} if rows and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_cleanup'").fetchone() else set()
+            shapes = {row['job_id']: self._retry_shape(db, row, latest) for row in rows}
+            import m4b_readmission
+            readmission = m4b_readmission.status(db, [row['job_id'] for row in rows]) if rows else {}
+        summary = {}
+        worker = bool(self._thread and self._thread.is_alive())
+        for row in rows:
             try:
-                admission_clear(copy.deepcopy(row))
-                statuses[row['job_id']] = {'allowed': True, 'reason': ''}
-            except Exception:
-                statuses[row['job_id']] = {'allowed': False, 'reason': RETRY_FILES_PRESENT}
-        return statuses
+                journal = json.loads(row['journal']); manifest = json.loads(row['manifest'])
+            except (TypeError, ValueError):
+                journal, manifest = {}, {}
+            if latest.get(manifest.get('candidate_id') if isinstance(manifest, dict) else None) != row['job_id']:
+                continue  # superseded by newer work for the same book
+            repair, m4b_retry = _m4b_fields(row)
+            sources = manifest.get('sources') if isinstance(manifest, dict) else None
+            single_m4b = isinstance(sources, list) and len(sources) == 1 and str(sources[0].get('path', '')).lower().endswith(('.m4b', '.m4a'))
+            cause = failure_cause(row, journal) if isinstance(journal, dict) and 'failure' in journal else 'files'
+            failure = journal.get('failure') if isinstance(journal, dict) else None
+            if repair and repair.get('state') == 'repairable':
+                group, cause = 'repair', None
+            elif shapes[row['job_id']] is not None:
+                group = 'retry'
+            elif m4b_retry:
+                group, cause = 'retry', None
+            elif single_m4b and isinstance(failure, dict) and failure.get('exception_class') == 'ValidationError':
+                group, cause = 'unsupported', None
+            else:
+                group, cause = 'other', None
+            value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
+            if group == 'repair':
+                value['damage'] = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale', 'description') if key in item}
+                                   for item in repair.get('repairs') or [] if isinstance(item, dict)]
+                if retry:
+                    value['repair'] = {'allowed': True, 'reason': ''}  # accepted now, runs right after the current book
+            elif repair and repair.get('state') == 'unchecked':
+                value['repair_check'] = True
+            if retry and group == 'retry' and shapes[row['job_id']] is None:
+                value['retry'] = {'allowed': True, 'reason': ''}  # M4B: accepted now, runs right after the current book
+            elif retry and group == 'retry' and admission_clear is not None:
+                allowed, reason = self._retry_allowed(row, cause, shapes[row['job_id']], admission_clear, space_ready)
+                value['retry'] = {'allowed': allowed, 'reason': reason}
+            if row['job_id'] in readmission:value['readmission'] = readmission[row['job_id']]  # queued_next + position, or a refusal reason
+            summary[row['job_id']] = value
+        return summary
 
-    def retry_admission_hold(self, job_id, candidate_id, revision, admission_clear):
+    def retry_statuses(self, admission_clear, job_id=None, space_ready=None):
+        """{job_id: {'allowed', 'reason'}} for jobs a Retry can resolve; absent means hidden.
+
+        One catalog read, then read-only E8 checks per such job (a folder listing, and a free-space
+        check for a full-disk failure). It never runs the revision guard and never reads media.
+        """
+        summary = self.attention_summary(admission_clear, space_ready, [job_id] if job_id else None)
+        return {key: value['retry'] for key, value in summary.items() if 'retry' in value}
+
+    def retry_admission_hold(self, job_id, candidate_id, revision, admission_clear, space_ready=None):
         """Retry: requeue the same job, refused before any attempt started, once that refusal has cleared.
 
         Rules E1-E10, then a compare-and-set on the whole row as read. The frozen manifest, job id,
@@ -437,16 +589,16 @@ class AudioJobs:
             row = rows[0]
             with self._db() as db:
                 manifest = self._retry_shape(db, row)  # E1-E7
+                cause = failure_cause(row, json.loads(row['journal'])) if manifest is not None and 'failure' in json.loads(row['journal']) else 'files'
                 group = None
                 if manifest is not None and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_groups'").fetchone():
                     group = db.execute('SELECT revision FROM book_groups WHERE id=?', (candidate_id,)).fetchone()
             # E9: the book and revision on screen are this job's, and still current.
             if manifest is None or manifest.get('candidate_id') != candidate_id or manifest.get('candidate_revision') != revision or group is None or group[0] != revision:
                 raise RetryRefused(RETRY_BOOK_CHANGED)
-        try:
-            admission_clear(copy.deepcopy(row))  # E8
-        except Exception:
-            raise RetryRefused(RETRY_FILES_PRESENT) from None
+        allowed, reason = self._retry_allowed(row, cause, manifest, admission_clear, space_ready)  # E8, re-checked now
+        if not allowed:
+            raise RetryRefused(reason)
         try:
             current = self.revision_guard(copy.deepcopy(manifest)) is True  # E10
         except Exception:
@@ -562,7 +714,10 @@ class AudioJobs:
                 except InterruptedError:return
                 except Exception:pass # The postprocessor retains original/secondary failure evidence.
         while not self._stop.is_set() and not self._drain.is_set():
-            pending = self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
+            # Retry/Repair clicks run right after the current book, in click order (m4b_readmission).
+            try:priority = self.next_priority() if self.next_priority else None
+            except Exception:priority = None  # ordering only: the request keeps its place, the normal queue runs
+            pending = (self._rows("SELECT * FROM audio_jobs WHERE job_id=? AND state='pending'", (priority,)) if priority else []) or self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
             if not pending: return
             row = pending[0]
             job_id = row["job_id"]
@@ -592,7 +747,9 @@ class AudioJobs:
                         raise ValueError('Invalid progress denominator')
                     if ('item' in measured or 'items' in measured) and not (type(measured.get('item')) is int and type(measured.get('items')) is int and 1<=measured['item']<=measured['items']):
                         raise ValueError('Invalid progress item')
-                    measured={key:measured[key] for key in ('phase','completed','total','unit','item','items') if key in measured}
+                    if 'fraction' in measured and not (type(measured['fraction']) in (int,float) and math.isfinite(measured['fraction']) and 0<=measured['fraction']<=1):
+                        raise ValueError('Invalid progress fraction')
+                    measured={key:measured[key] for key in ('phase','completed','total','unit','item','items','fraction') if key in measured}
                     measured['unit']=units[measured['phase']]
                     # Never wait for the queue lock: it can be held across catalog I/O (busy timeout), and an
                     # FFmpeg drain thread blocked here fails the attempt. A dropped progress tick is harmless.

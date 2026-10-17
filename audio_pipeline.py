@@ -8,6 +8,7 @@ from encoding_policy import PROFILE, LEGACY_PROFILE, freeze_policy, choose_encod
 from quicktime_chapters import normalize
 from metadata import audiobook_sort_title
 import m4b_preservation
+import m4b_repair
 MAX_IMAGE=8*1024*1024
 PRESERVATION_CANDIDATE_NAME='checked.m4b'
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
@@ -38,7 +39,11 @@ class StepProgress:
         now=self.clock()
         if not force and self.sent is not None and now-self.sent<.5:return
         self.sent=now
-        value={'phase':self.phase,'completed':min(self.total,max(0.0,float(completed))),'total':self.total,'unit':self.unit}
+        completed=min(self.total,max(0.0,float(completed)))
+        value={'phase':self.phase,'completed':completed,'total':self.total,'unit':self.unit}
+        if self.unit=='files':
+            # Whole files only ("2 of 17 files"); the bar still moves within a track by the fraction.
+            value.update(completed=float(math.floor(completed)),fraction=completed/self.total)
         if self.items:value.update(item=max(1,min(self.items,int(item or 1))),items=self.items)
         try:self.report(value)
         except Exception:pass  # Progress display only: a failed report never fails the step.
@@ -199,6 +204,61 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
     if process.returncode:raise ValidationError(error.decode('utf-8','replace')[-2000:] or 'Media operation failed')
     return raw
 
+@contextlib.contextmanager
+def owned_stream(arguments,directory,stop,deadline,write=False,read=False):
+    """One owned media process streamed by the caller's own thread: its stdin is fed and/or its stdout read here.
+
+    There is no drain thread and no join timeout. A watchdog ends the process on Pause/Stop, the
+    deadline or runaway diagnostics, which also releases a blocked read or write, and that cause is
+    raised. After the body the input is closed and the exit status checked; a failed cleanup marks
+    the producer uncertain, exactly like run_owned.
+    """
+    directory=Path(directory);token=uuid.uuid4().hex
+    stdout=directory/(token+'.stdout');stderr=directory/(token+'.stderr');plan_generated(stderr)
+    if not read:plan_generated(stdout)
+    with open(stderr,'x+b') as err,(contextlib.nullcontext() if read else open(stdout,'x+b')) as out:
+        process=subprocess.Popen(arguments,stdin=subprocess.PIPE if write else subprocess.DEVNULL,stdout=subprocess.PIPE if read else out,stderr=err,
+            shell=False,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0)|4)
+        process._books_suspended=True
+        cause=[];finished=threading.Event();started=time.monotonic();failed=None
+        def watch():
+            while not finished.wait(.1):
+                if stop.is_set():cause.append(Paused('Audiobook operation paused; interrupted book restarts'))
+                elif time.monotonic()-started>deadline:cause.append(TimeoutError('Owned media operation exceeded its deadline'))
+                elif stderr.stat().st_size>1024*1024 or not read and stdout.stat().st_size>8*1024*1024:cause.append(ValidationError('Media diagnostic output exceeded its limit'))
+                else:continue
+                with contextlib.suppress(OSError):process.terminate()
+                return
+        with closed_media_job(process):
+            watchdog=threading.Thread(target=watch,name='BooksArrangerMediaWatch',daemon=True);watchdog.start()
+            try:
+                yield process
+                if write:process.stdin.close()
+                while process.poll() is None:time.sleep(.05)  # the watchdog still enforces stop and deadline
+            except BaseException as error:failed=error
+            finally:
+                finished.set()
+                try:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
+                    for pipe in (process.stdin,process.stdout):
+                        if pipe is not None:
+                            with contextlib.suppress(OSError):pipe.close()
+                    watchdog.join(1)
+                except BaseException:
+                    uncertain_producer();raise
+        detail=producer_bytes(err,stderr)
+        if cause:raise cause[0] from failed
+        if isinstance(failed,OSError) and process.returncode:
+            # A closed pipe is the encoder's own failure, never a transient I/O error.
+            raise ValidationError(detail.decode('utf-8','replace')[-2000:] or 'Media operation failed') from failed
+        if failed is not None:raise failed
+    if len(detail)>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
+    if process.returncode:raise ValidationError(detail.decode('utf-8','replace')[-2000:] or 'Media operation failed')
+
+
 def probe(path,stage,stop):
     executable=shutil.which('ffprobe')
     if not executable:raise ValidationError('Installed ffprobe is required for output checks')
@@ -272,10 +332,10 @@ def output_space_required(source_bytes, durations, encoding, count):
 
 def working_space_required(source_bytes, durations, encoding, count):
     output=output_space_required(source_bytes,durations,encoding,count)
-    pcm=math.ceil(sum(durations)*encoding['sample_rate']*encoding['channels']*8)+count*4096 if encoding.get('mode')=='normalize' else 0
-    # Reserve snapshots + worst-case double WAV + both chapter-rewrite outputs +
-    # publication copy even when destination/stage share a filesystem.
-    return source_bytes+pcm+3*output+64*1024*1024
+    # Peak on the working drive: the source snapshots plus three output-sized files (the encoded
+    # audiobook, its chapter/metadata rewrite and the publication copy when the library shares the
+    # drive), plus 64 MiB. Normalized audio is streamed into the encoder, never written to disk.
+    return source_bytes+3*output+64*1024*1024
 
 
 def check_working_space(manifest, stage, stop):
@@ -292,7 +352,7 @@ def check_working_space(manifest, stage, stop):
             raw=probe(path,stage,stop);duration,profile=audio_info(raw)
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            durations.append(decoded_duration(path,stage,stop,duration))
+            durations.append(duration if m4b_repair.silence_approved(manifest) else decoded_duration(path,stage,stop,duration))
     if manifest.get('profile')==AUTOMATIC_PROFILE:
         encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
     elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
@@ -301,7 +361,7 @@ def check_working_space(manifest, stage, stop):
     source_bytes=sum(item['size'] for item in manifest['sources'])
     required=working_space_required(source_bytes,durations,encoding,len(durations))
     if shutil.disk_usage(stage).free<required:
-        raise OSError(errno.ENOSPC,f'Insufficient working space; need {required} bytes before snapshotting; originals retained')
+        raise OSError(errno.ENOSPC,f'Insufficient working space; need {required/1024**3:.1f} GB free before snapshotting; originals retained')
     root=ordinary(manifest['root']);destination=ordinary(manifest['destination'])
     if not destination.is_relative_to(root):raise ValidationError('Destination is outside the audiobook library')
     parent=destination.parent
@@ -353,7 +413,7 @@ def snapshot_manifest(manifest,stage,stop,report=None):
             compatibility=profile
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            duration=decoded_duration(alias,stage,stop,duration)
+            if not m4b_repair.silence_approved(manifest):duration=decoded_duration(alias,stage,stop,duration)
         durations.append(duration);copies.append(alias.name)
         step.update(index+1,index+1,force=True)
     cover=manifest['cover']
@@ -478,72 +538,44 @@ def normalized_pcm_evidence(path,stage,stop,duration,encoding,kind=None,aggregat
     return proof.result()
 
 
-def choose_normalized_pcm(path,stage,stop,duration,encoding):
-    reference=normalized_pcm_evidence(path,stage,stop,duration,encoding)
-    # Smallest exact representation, tested before creating any working WAV.
-    # Full hashes/counts, not a prefix, duration, or source format label, decide.
-    for kind,codec in (('s16','pcm_s16le'),('s24','pcm_s24le'),('s32','pcm_s32le'),('f32','pcm_f32le')):
-        if normalized_pcm_evidence(path,stage,stop,duration,encoding,kind)==reference:
-            return codec,reference
-    return 'pcm_f64le',reference
+def normalized_references(stage,copies,encoding,stop,durations,report=None):
+    """Canonical proof of the complete normalized source audio: one f64 decode per track, hashed per track and joined.
 
-
-def choose_normalized_pcm_set(stage,copies,encoding,stop,durations,aggregate=None,report=None):
-    """Select one exact format for the entire concat-demuxer input set.
-
-    Concat packets inherit the first input's codec configuration. Different PCM
-    widths, and especially s32/f32 equal widths, must never be mixed here.
+    The encoder is later fed this same normalized PCM as a stream (stream_normalized), and every fed
+    byte must reproduce these proofs. No uncompressed copy of the book is ever written to disk.
     """
-    total=sum(durations);count=len(copies)
-    def track(step,index):
-        offset=sum(durations[:index]);step.update(offset,index+1,force=True)
-        return lambda seconds:step.update(offset+min(durations[index],seconds),index+1)
-    check=StepProgress(report,'checking audio',total,'seconds',count)
-    references=[normalized_pcm_evidence(stage/name,stage,stop,duration,encoding,aggregate=aggregate,on_seconds=track(check,index)) for index,(name,duration) in enumerate(zip(copies,durations))]
-    check.update(total,count,force=True)
-    for kind,codec in (('s16','pcm_s16le'),('s24','pcm_s24le'),('s32','pcm_s32le'),('f32','pcm_f32le')):
-        # One full pass per candidate format; a pass ends at the first track that differs.
-        match=StepProgress(report,'matching format',total,'seconds',count)
-        for index,(name,duration,reference) in enumerate(zip(copies,durations,references)):
-            if normalized_pcm_evidence(stage/name,stage,stop,duration,encoding,kind,on_seconds=track(match,index))!=reference:break
-        else:return codec,references
-    return 'pcm_f64le',references
-
-
-def normalize_sources(stage,copies,encoding,stop,durations,report=None):
-    required=working_space_required(0,durations,encoding,len(copies))
-    if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Insufficient staging space for complete exact normalization and publication; originals retained')
-    aggregate=NativePcmHash(encoding['channels'])
-    codec,references=choose_normalized_pcm_set(stage,copies,encoding,stop,durations,aggregate,report)
-    result=[];receipts={}
-    # Each track: writing the normalized file is its first half, its full proof decode the second.
-    step=StepProgress(report,'normalizing',sum(durations),'seconds',len(copies))
+    aggregate=NativePcmHash(encoding['channels']);total=sum(durations);count=len(copies)
+    step=StepProgress(report,'checking audio',total,'seconds',count);references=[]
     for index,(name,duration) in enumerate(zip(copies,durations)):
         offset=sum(durations[:index]);step.update(offset,index+1,force=True)
-        remaining_pcm=math.ceil(sum(durations[index:])*encoding['sample_rate']*encoding['channels']*8)+(len(copies)-index)*4096
-        remaining_required=remaining_pcm+3*output_space_required(0,durations,encoding,len(copies))+64*1024*1024
-        if shutil.disk_usage(stage).free<remaining_required:raise OSError(errno.ENOSPC,'Staging space changed before normalization; originals retained')
-        output=stage/(f'normalized{index:05}.wav')
-        plan_generated(output)
-        reference=references[index]
-        run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',
-          '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
-          '-af',normalization_filter(encoding),'-c:a',codec,'-rf64','always','-progress','pipe:1','-stats_period','1','-nostats','-f','wav',str(output)],stage,stop,max(300,duration*2),
-          telemetry=EncodingProgress(duration,lambda value,offset=offset,index=index,duration=duration:step.update(offset+.5*min(duration,value['completed']),index+1)))
-        with VerifiedFile(output) as held:
-            actual=native_pcm_evidence(output,stage,stop,duration,encoding,lambda seconds,offset=offset,index=index,duration=duration:step.update(offset+.5*duration+.5*min(duration,seconds),index+1))
-            if any(actual[key]!=reference[key] for key in reference):
-                raise ValidationError('Normalized PCM differs from complete source normalization')
-            facts=held.facts();expected=held.sha256()
-            if facts['links']!=1:raise ValidationError('Normalized source snapshot has unexpected links')
-            receipts[output.name]={'facts':facts,'sha256':expected,'pcm':reference,'codec':codec}
-            remember_generated(output,expected,facts['size'])
-        result.append(output.name)
-    step.update(sum(durations),len(copies),force=True)
+        references.append(normalized_pcm_evidence(stage/name,stage,stop,duration,encoding,aggregate=aggregate,
+            on_seconds=lambda seconds,offset=offset,index=index,duration=duration:step.update(offset+min(duration,seconds),index+1)))
+    step.update(total,count,force=True)
     joined=aggregate.result()
     if joined['sample_count']!=sum(reference['sample_count'] for reference in references):raise ValidationError('Joined original normalized sample count changed')
-    for receipt in receipts.values():receipt['joined_pcm']=joined
-    return result,receipts
+    return references,joined
+
+
+def stream_normalized(write,stage,copies,durations,encoding,stop,references,joined,report=None):
+    """Feed the encoder the complete normalized f64 PCM, track by track, re-proving every byte fed.
+
+    Each track's stream must equal its reference proof, and the whole fed stream the joined proof,
+    before the encoder's input is closed; any difference stops the encoder and nothing is published.
+    The decode is the reference decode (same filter, codec and format), so the bytes are identical.
+    """
+    aggregate=NativePcmHash(encoding['channels']);total=sum(durations);per_second=encoding['sample_rate']*encoding['channels']*8;fed=0
+    step=StepProgress(report,'encoding',total,'seconds');step.update(0,force=True)
+    for name,duration,reference in zip(copies,durations,references):
+        proof=NativePcmHash(encoding['channels'])
+        with owned_stream([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
+              '-protocol_whitelist','file','-f',INPUT_FORMATS[Path(name).suffix.lower()],'-i',str(stage/name),'-map','0:a:0',
+              '-af',normalization_filter(encoding),'-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),read=True) as decoder:
+            while block:=decoder.stdout.read1(1024*1024):
+                proof.feed(block);aggregate.feed(block);write(block);fed+=len(block)
+                step.update(fed/per_second)
+        if proof.result()!=reference:raise ValidationError('Streamed normalized PCM differs from its complete-source proof')
+    if aggregate.result()!=joined:raise ValidationError('Streamed normalized PCM differs from the complete ordered source proof')
+    step.update(total,force=True)
 
 
 def source_chapters(path,stage,stop,duration):
@@ -641,6 +673,14 @@ def copied_audio_evidence(path,stage,stop,duration,*,source_relative=False):
         presentation['movie']={key:data.get('format',{}).get(key) for key in ('start_time','duration')}
         if any(presentation[key] is None for key in ('start_pts','duration_ts')):
             raise ValidationError('Source-relative M4B presentation evidence is missing')
+        # format.start_time is the minimum over every stream, including the attached cover that
+        # preservation adds to a coverless source (its 1/90000 clock rounds earlier). The movie
+        # start is therefore taken, exactly, over the streams that are not attached pictures.
+        listing=json.loads(run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
+          '-show_entries','stream=index,start_time:stream_disposition=attached_pic','-of','json',str(path)],stage,stop,30))
+        starts=[item.get('start_time') for item in listing.get('streams',[]) if not (item.get('disposition') or {}).get('attached_pic')]
+        try:presentation['movie']['start_time']=min(starts,key=Fraction)
+        except (ValueError,TypeError,ZeroDivisionError):raise ValidationError('Source-relative M4B presentation evidence is missing')
     else:presentation=_copy_presentation(stream,data.get('format',{}))
     timing=PacketTimingHash()
     run_owned([executable,'-v','error','-protocol_whitelist','file','-f',INPUT_FORMATS[Path(path).suffix.lower()],
@@ -670,47 +710,26 @@ def native_pcm_evidence(path,stage,stop,duration,encoding,on_seconds=None):
       '-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,duration*2),telemetry=telemetry)
     return proof.result()|{'sample_rate':encoding['sample_rate'],'channels':encoding['channels'],'channel_layout':encoding.get('channel_layout')}
 
-def verify_normalized_concat(stage,copies,durations,encoding,stop,expected,report=None):
-    proof=NativePcmHash(encoding['channels'])
-    step=StepProgress(report,'joined audio',sum(durations),'seconds');step.update(0,force=True)
-    run_owned([shutil.which('ffmpeg'),'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1',
-      '-protocol_whitelist','file','-format_whitelist','concat,wav','-f','concat','-safe','1','-i',str(stage/'inputs.txt'),
-      '-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,stop,max(300,sum(durations)*2),telemetry=PcmSeconds(proof,encoding['sample_rate'],encoding['channels'],8,step.update))
-    step.update(sum(durations),force=True)
-    if proof.result()!=expected:raise ValidationError('Concatenated normalized PCM differs from the complete ordered source proof')
-
-
 def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
-    original_copies=list(copies);joined=None;codec=None
-    with contextlib.ExitStack() as guards:
-        if encoding.get('mode')=='normalize':
-            report=lambda value:progress('Checking sources',{'progress':value})
-            copies,receipts=normalize_sources(stage,copies,encoding,stop,durations,report)
-            codecs={receipt['codec'] for receipt in receipts.values()}
-            if len(codecs)!=1:raise ValidationError('Normalized concat inputs have incompatible PCM codecs')
-            codec=next(iter(codecs));joined=receipts[copies[0]]['joined_pcm']
-            for name in copies:
-                held=guards.enter_context(VerifiedFile(stage/name))
-                if held.facts()!=receipts[name]['facts'] or held.sha256()!=receipts[name]['sha256'] or receipts[name]['joined_pcm']!=joined:
-                    raise ValidationError('Normalized snapshot differs from its complete-source receipt')
-            write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
-            guards.enter_context(VerifiedFile(stage/'inputs.txt'))
-            # This expected digest came from the ORIGINAL protected sources,
-            # never from the possibly misinterpreted concat demuxer's output.
-            verify_normalized_concat(stage,copies,durations,encoding,stop,joined,report)
-        # Input/plan leases remain open through final media verification.
-        output,validation=_encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies)
-        if joined is not None:
-            validation['normalized_joined_pcm']=joined;validation['normalized_pcm_codec']=codec
-        return output,validation
+    original_copies=list(copies);joined=None;feed=None
+    if encoding.get('mode')=='normalize':
+        # The protected source snapshots are the only inputs; their normalized audio is proven, then
+        # streamed into the encoder and proven again byte for byte (no WAV or concat plan on disk).
+        report=lambda value:progress('Checking sources',{'progress':value})
+        references,joined=normalized_references(stage,copies,encoding,stop,durations,report)
+        feed=lambda write,fed_report:stream_normalized(write,stage,copies,durations,encoding,stop,references,joined,fed_report)
+    output,validation=_encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed)
+    if joined is not None:
+        validation['normalized_joined_pcm']=joined;validation['normalized_pcm_codec']='pcm_f64le'
+    return output,validation
 
 
-def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies):
+def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed=None):
     required=3*output_space_required(sum(item['size'] for item in manifest['sources']),durations,encoding,len(copies))+64*1024*1024
     if shutil.disk_usage(stage).free<required:raise OSError(errno.ENOSPC,'Staging space changed before output creation; originals retained')
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
-    if encoding.get('mode')!='normalize':write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
+    if feed is None:write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
     review=manifest['metadata'];comments=manifest.get('comments','')
     if review.get('series'):
         comments+=('\n' if comments else '')+f"Series: {review['series']}\nSeries number: {review.get('number','')}"
@@ -740,9 +759,10 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
     if encoding.get('mode')=='copy' and encoding.get('codec')=='aac' and len(original_copies)==1 and Path(original_copies[0]).suffix.lower()=='.m4b':
         return _preserve_single_m4b(manifest,stage,original_copies[0],durations,cover,stop,progress,encoding,tags)
     output=stage/'checked.m4b'
-    args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1','-protocol_whitelist','file',
-      '-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
-      *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')]),'-f','image2','-i',str(cover)]
+    if feed is not None:source_input=['-protocol_whitelist','pipe','-format_whitelist','f64le','-f','f64le','-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-i','pipe:0']
+    else:source_input=['-protocol_whitelist','file','-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
+      *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')])]
+    args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',*source_input,'-f','image2','-i',str(cover)]
     chapters=[]
     preserved=source_chapters(stage/original_copies[0],stage,stop,sum(durations)) if encoding.get('mode')=='copy' else []
     if encoding.get('mode')=='copy' and manifest.get('source_chapters')!=preserved:
@@ -765,10 +785,14 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
     else:args+=['-map_chapters','-1']
     args+=['-map','0:a:0','-map','1:v:0','-map_metadata:g','-1',*(['-c:a','copy'] if encoding.get('mode')=='copy' else ['-af','asetpts=N/SR/TB','-c:a','aac','-b:a',str(encoding['bitrate']),'-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-threads:a','2']),'-c:v','copy','-disposition:v:0','attached_pic','-movflags','+faststart+disable_chpl']
     for name,value in tags.items():args+=['-metadata',name+'='+value]
-    args+=['-progress','pipe:1','-stats_period','1','-nostats','-f','mp4',str(output)]
+    args+=(['-nostats'] if feed is not None else ['-progress','pipe:1','-stats_period','1','-nostats'])+['-f','mp4',str(output)]
     progress('Creating audio',{'duration':sum(durations),'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'encoding':encoding})
     plan_generated(output)
-    run_owned(args,stage,stop,max(300,sum(durations)*2),telemetry=EncodingProgress(sum(durations),lambda value:progress('Creating audio',{'progress':value})))
+    if feed is not None:
+        # Progress is the audio fed so far; the encoder trails it by at most a pipe buffer.
+        with owned_stream(args,stage,stop,max(300,sum(durations)*2),write=True) as encoder:
+            feed(encoder.stdin.write,lambda value:progress('Creating audio',{'progress':value}))
+    else:run_owned(args,stage,stop,max(300,sum(durations)*2),telemetry=EncodingProgress(sum(durations),lambda value:progress('Creating audio',{'progress':value})))
     chapter_format=None
     sort_title=audiobook_sort_title(review)
     if chapters or sort_title!=review['title']:
@@ -820,8 +844,9 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
         with VerifiedFile(source) as held_source,open(source,'rb') as incoming:
             source_facts=held_source.facts()
             def read_at(offset,count):incoming.seek(offset);return incoming.read(count)
-            plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes)
-            if shutil.disk_usage(stage).free<source_facts['size']+len(plan.appended_movie)+16*1024*1024:
+            plan=m4b_preservation.plan(source_facts['size'],read_at,tags,cover_bytes,m4b_repair.approved_repairs(manifest))
+            repair_note=m4b_repair.confirm(manifest,plan)
+            if shutil.disk_usage(stage).free<source_facts['size']+plan.tail_padding+len(plan.appended_media)+len(plan.appended_movie)+16*1024*1024:
                 raise OSError(errno.ENOSPC,'Insufficient space for the single metadata candidate; originals retained')
             plan_generated(output)
             progress('Creating audio',{'encoding':encoding,'source_metadata_preservation':True})
@@ -836,12 +861,17 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                 reread=m4b_preservation.verify_candidate(plan,read_at,held_output.facts()['size'],candidate_read,stop.is_set)
                 if any(reread[key]!=receipt[key] for key in ('source_sha256','sha256','size')):
                     raise ValidationError('Preservation candidate differs from its creation receipt')
-                source_evidence=copied_audio_evidence(source,stage,stop,expected,source_relative=True)
-                output_evidence=copied_audio_evidence(output,stage,stop,expected,source_relative=True)
-                if source_evidence!=output_evidence:raise ValidationError('Preservation changed decoder, packets or presentation')
-                source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding)
-                output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding)
-                if source_pcm!=output_pcm:raise ValidationError('Preservation changed complete native decoded audio')
+                if m4b_repair.silenced(plan):
+                    output_evidence,output_pcm,silence_proof=m4b_repair.prove_silenced_tail(source,output,plan,stage,stop,expected,encoding,
+                        evidence=copied_audio_evidence,run=run_owned)
+                    repair_note=repair_note|{'silence_proof':silence_proof}
+                else:
+                    source_evidence=copied_audio_evidence(source,stage,stop,expected,source_relative=True)
+                    output_evidence=copied_audio_evidence(output,stage,stop,expected,source_relative=True)
+                    if source_evidence!=output_evidence:raise ValidationError('Preservation changed decoder, packets or presentation')
+                    source_pcm=native_pcm_evidence(source,stage,stop,expected,encoding)
+                    output_pcm=native_pcm_evidence(output,stage,stop,expected,encoding)
+                    if source_pcm!=output_pcm:raise ValidationError('Preservation changed complete native decoded audio')
                 raw=probe(output,stage,stop);duration,profile=audio_info(raw)
                 if profile!=(encoding.get('codec','aac'),str(encoding['sample_rate']),encoding['channels']):
                     raise ValidationError('Preserved output audio profile is incorrect')
@@ -865,6 +895,7 @@ def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encod
                   'source_pcm_rate':output_pcm['sample_rate'],'decoded_duration':output_pcm['sample_count']/output_pcm['sample_rate'],
                   'native_pcm_evidence':output_pcm,'copied_audio_evidence':output_evidence,'metadata_preservation':receipt,
                   'checks':'Output checks passed','device':'Apple Books sync not checked','tags':actual_tags}
+                if repair_note:validation['damage_repair']=repair_note
                 remember_generated(output,receipt['sha256'],receipt['size'])
                 return output,validation
     except m4b_preservation.Refused as error:raise ValidationError('M4B preservation requires review: '+str(error)) from error

@@ -363,9 +363,13 @@ def render(row,root,coverage,retired=None):
       'active_members':[m for m in evidence['members'] if not m['intentionally_retired']],
       'coverage':'Scanned scope complete; recording completeness unverified' if coverage else 'Based on files scanned so far'}
 
-def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False):
+def page(connection,root,limit=100,offset=0,search='',status='all',coverage=False,ids=None):
+    """ids: only these candidates are rendered (the caller prefiltered them cheaply); None renders all."""
     sync(connection,root)
     retired=retired_sources(connection,root)
+    if ids is not None:
+        values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,)) if row['id'] in ids]
+        return {'rows':values[offset:offset+limit],'total':len(values)}
     if status=='all' and not search:
         total=connection.execute('SELECT count(*) FROM book_groups WHERE root=? AND superseded=0',(root,)).fetchone()[0]
         rows=connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope LIMIT ? OFFSET ?',(root,limit,offset))

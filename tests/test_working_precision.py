@@ -32,16 +32,6 @@ class ExpandedPcmTests(unittest.TestCase):
             with self.subTest(raw=raw,channels=channels):
                 proof=pipeline.ExpandedPcmHash(channels,kind);proof.feed(raw)
                 with self.assertRaises(pipeline.ValidationError):proof.result()
-    def test_shared_selector_requires_exact_every_member(self):
-        a={'sha256':'a','sample_count':7,'bytes':56,'sample_format':'pcm_f64le'};b=dict(a,sha256='b')
-        with patch.object(pipeline,'normalized_pcm_evidence',side_effect=[a,b,a,dict(b,sha256='rounded'),dict(a,sha256='rounded'),a,b]) as evidence:
-            codec,proofs=pipeline.choose_normalized_pcm_set(Path('private'),['a.wav','b.wav'],{'channels':1},None,[1,1])
-        self.assertEqual(codec,'pcm_s32le');self.assertEqual(proofs,[a,b]);self.assertEqual(evidence.call_count,7)
-    def test_precision_selector_compares_complete_hash_and_frame_count(self):
-        reference={'sha256':'full','sample_count':7,'bytes':56,'sample_format':'pcm_f64le'}
-        with patch.object(pipeline,'normalized_pcm_evidence',side_effect=[reference,dict(reference,sample_count=6),dict(reference,sha256='prefix'),dict(reference,bytes=48),reference]) as evidence:
-            codec,proof=pipeline.choose_normalized_pcm(Path('fixture.wav'),None,None,1,{'channels':1})
-        self.assertEqual(codec,'pcm_f32le');self.assertEqual(proof,reference);self.assertEqual(evidence.call_count,5)
 
 
 def wav(path,kind,values,rate=48000,channels=1):
@@ -58,19 +48,26 @@ class RealPrecisionTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.stage=Path(self.temp.name)
         self.stop=threading.Event();self.encoding={'mode':'normalize','sample_rate':48000,'channels':1,'bitrate':128000}
+    def streamed(self,source,duration):
+        """The real streamed proof path: reference decode, then the bytes actually handed to the encoder."""
+        fed=[]
+        with pipeline.generated_artifacts(self.stage):
+            references,joined=pipeline.normalized_references(self.stage,[source.name],self.encoding,self.stop,[duration])
+            pipeline.stream_normalized(fed.append,self.stage,[source.name],[duration],self.encoding,self.stop,references,joined)
+        raw=b''.join(fed);proof=pipeline.NativePcmHash(self.encoding['channels']);proof.feed(raw)
+        self.assertEqual(proof.result(),joined,'the encoder is fed exactly the proven PCM')
+        self.assertEqual(list(self.stage.glob('normalized*.wav')),[],'no uncompressed copy is written')
+        return raw
     def check(self,kind,values,expected,rate=48000,channels=1):
         source=self.stage/'source00000.wav';duration=wav(source,kind,values,rate,channels)
         self.encoding['channels']=channels
-        with pipeline.generated_artifacts(self.stage):
-            copies,receipts=pipeline.normalize_sources(self.stage,[source.name],self.encoding,self.stop,[duration])
-        self.assertEqual(copies,['normalized00000.wav'])
-        receipt=receipts[copies[0]];self.assertEqual(receipt['codec'],expected)
-        self.assertEqual(hashlib.sha256((self.stage/copies[0]).read_bytes()).hexdigest(),receipt['sha256'])
-        actual=pipeline.native_pcm_evidence(self.stage/copies[0],self.stage,self.stop,duration,self.encoding)
-        self.assertEqual({key:actual[key] for key in receipt['pcm']},receipt['pcm'])
-        self.assertEqual(pipeline.probe(self.stage/copies[0],self.stage,self.stop)['streams'][0]['codec_name'],expected)
-        self.assertEqual(len(list(self.stage.glob('normalized*.wav'))),1)
-        return receipt
+        raw=self.streamed(source,duration)
+        fed=[value[0] for value in struct.iter_unpack('<d',raw)]
+        if kind=='s24':exact=[value/8388608 for value in values]
+        elif kind in ('f32','f64'):exact=list(struct.unpack('<'+kind[1]*0+('f' if kind=='f32' else 'd')*len(values),struct.pack('<'+('f' if kind=='f32' else 'd')*len(values),*values)))
+        else:exact=[value/{'s16':32768,'s32':2147483648}[kind] for value in values]
+        repeated=(exact*max(1,2400//len(values)))
+        self.assertEqual([struct.pack('<d',v) for v in fed],[struct.pack('<d',v) for v in repeated],'every low bit, subnormal and signed zero survives into the encoder input')
     def test_smallest_exact_pcm16(self):self.check('s16',[-32768,-1,0,1,16384,32767],'pcm_s16le')
     def test_smallest_exact_pcm24(self):self.check('s24',[-8388607,-1,0,1,4194305],'pcm_s24le')
     def test_pcm32_low_bits_remain_exact(self):self.check('s32',[-2147483647,-1,0,1,1073741825],'pcm_s32le')
@@ -79,9 +76,7 @@ class RealPrecisionTests(unittest.TestCase):
     def test_resampled_stereo_uses_full_exact_reference(self):
         source=self.stage/'source00000.wav';duration=wav(source,'s16',[0,1,1000,-7000,12000,-2000],44100,2)
         self.encoding['channels']=2
-        with pipeline.generated_artifacts(self.stage):copies,receipts=pipeline.normalize_sources(self.stage,[source.name],self.encoding,self.stop,[duration])
-        receipt=receipts[copies[0]];actual=pipeline.native_pcm_evidence(self.stage/copies[0],self.stage,self.stop,duration,self.encoding)
-        self.assertEqual({key:actual[key] for key in receipt['pcm']},receipt['pcm']);self.assertEqual(actual['channels'],2)
+        raw=self.streamed(source,duration);self.assertEqual(len(raw)%16,0)
     def mixed_join(self,recipes,expected_codec,label):
         stage=self.stage/label;stage.mkdir();copies=[];durations=[];expected=pipeline.NativePcmHash(1)
         for index,(kind,values) in enumerate(recipes):
@@ -92,22 +87,14 @@ class RealPrecisionTests(unittest.TestCase):
                 fmt={'s16':'h','s32':'i','f32':'f','f64':'d'}[kind];scale={'s16':32768,'s32':2147483648,'f32':1,'f64':1}[kind]
                 values=[value[0]/scale for value in struct.iter_unpack('<'+fmt,raw)]
             expected.feed(b''.join(struct.pack('<d',value) for value in values))
-        with pipeline.generated_artifacts(stage):
-            normalized,receipts=pipeline.normalize_sources(stage,copies,self.encoding,self.stop,durations)
-            self.assertEqual({r['codec'] for r in receipts.values()},{expected_codec})
-            inputs=stage/'inputs.txt';pipeline.write_generated(inputs,''.join(f"file '{name}'\n" for name in normalized))
-            actual=pipeline.NativePcmHash(1)
-            pipeline.run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-protocol_whitelist','file','-f','concat','-safe','1','-i',str(inputs),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],stage,self.stop,30,telemetry=actual)
-        self.assertEqual(actual.result(),expected.result())
-        self.assertEqual(receipts[normalized[0]]['joined_pcm'],expected.result())
-        self.assertEqual(len(list(stage.glob('normalized*.wav'))),2)
         from test_automatic_media_policy import PrivateMediaTests
         manifest=PrivateMediaTests.manifest(type('RootFixture',(),{'root':stage})(),[stage/name for name in copies])
         before=[pipeline.digest(stage/name) for name in copies]
         output,validation=pipeline.create_private(manifest,stage/'actual-app-stage',self.stop)
         self.assertTrue(output.is_file());self.assertEqual(validation['checks'],'Output checks passed')
-        self.assertEqual(validation['normalized_pcm_codec'],expected_codec)
+        self.assertEqual(validation['normalized_pcm_codec'],'pcm_f64le')  # the encoder reads the exact f64 stream
         self.assertEqual(validation['normalized_joined_pcm'],expected.result())
+        self.assertEqual(list((stage/'actual-app-stage').rglob('normalized*.wav')),[]);self.assertEqual(list((stage/'actual-app-stage').rglob('inputs.txt')),[])
         self.assertEqual(before,[pipeline.digest(stage/name) for name in copies])
     def test_mixed_s32_f32_join_is_exact_in_both_orders(self):
         recipes=[('s32',[-2147483647,-1,0,1,1073741825]),('f32',[2**-140,0.5,-0.3,-0.0])]
@@ -115,30 +102,31 @@ class RealPrecisionTests(unittest.TestCase):
     def test_different_integer_widths_join_is_exact_in_both_orders(self):
         recipes=[('s16',[-1,0,1,16384]),('s24',[-8388607,-1,0,1,4194305])]
         self.mixed_join(recipes,'pcm_s24le','short_first');self.mixed_join(list(reversed(recipes)),'pcm_s24le','long_first')
-    def test_real_create_private_refuses_truncated_concat_plan_before_aac(self):
+    def test_real_create_private_refuses_a_stream_that_differs_from_its_proof(self):
         from test_automatic_media_policy import PrivateMediaTests
         first=self.stage/'first.wav';second=self.stage/'second.wav'
         wav(first,'s32',[1,1073741825,-2147483647]);wav(second,'f32',[2**-140,0.3,-0.0])
         manifest=PrivateMediaTests.manifest(type('RootFixture',(),{'root':self.stage})(),[first,second])
-        before=[pipeline.digest(first),pipeline.digest(second)];original=pipeline.write_generated
-        def truncate(path,text):
-            if Path(path).name=='inputs.txt':text=text.splitlines()[0]+'\n'
-            return original(path,text)
-        with patch.object(pipeline,'write_generated',side_effect=truncate):
-            with self.assertRaisesRegex(pipeline.ValidationError,'Concatenated normalized PCM'):
+        before=[pipeline.digest(first),pipeline.digest(second)];original=pipeline.normalized_references
+        def altered(*args,**kwargs):
+            references,joined=original(*args,**kwargs)
+            return [references[0],dict(references[1],sha256='0'*64)],joined
+        with patch.object(pipeline,'normalized_references',side_effect=altered):
+            with self.assertRaisesRegex(pipeline.ValidationError,'Streamed normalized PCM differs'):
                 pipeline.create_private(manifest,self.stage/'actual-app-stage',self.stop)
-        self.assertEqual(before,[pipeline.digest(first),pipeline.digest(second)])
-        self.assertEqual(list((self.stage/'actual-app-stage').rglob('checked.m4b')),[])
-    def test_normalizer_short_space_writes_no_wav(self):
-        with patch.object(pipeline.shutil,'disk_usage',return_value=shutil._ntuple_diskusage(10,10,0)),patch.object(pipeline,'run_owned') as producer:
-            with self.assertRaises(OSError) as caught:pipeline.normalize_sources(self.stage,['source00000.wav'],self.encoding,self.stop,[100])
-        self.assertEqual(caught.exception.errno,errno.ENOSPC);producer.assert_not_called();self.assertEqual(list(self.stage.glob('normalized*.wav')),[])
+        self.assertEqual(before,[pipeline.digest(first),pipeline.digest(second)]);self.assertFalse(Path(manifest['destination']).exists())
+        self.assertEqual(list((self.stage/'actual-app-stage').rglob('normalized*.wav')),[])
 
 class SpaceEstimateTests(unittest.TestCase):
-    def test_estimate_reserves_snapshots_full_double_pcm_and_three_outputs(self):
+    def test_estimate_reserves_snapshots_and_three_outputs_without_any_pcm_copy(self):
         encoding={'mode':'normalize','sample_rate':96000,'channels':2,'bitrate':256000};durations=[100,200];source=1000000
         output=pipeline.output_space_required(source,durations,encoding,2)
-        self.assertEqual(pipeline.working_space_required(source,durations,encoding,2),source+300*96000*2*8+2*4096+3*output+64*1024*1024)
+        self.assertEqual(pipeline.working_space_required(source,durations,encoding,2),source+3*output+64*1024*1024)
+    def test_the_lost_symbol_shape_needs_a_small_multiple_of_its_sources(self):
+        # 155 M4B parts, 1.28 GB, about 22 h of 44.1 kHz stereo at 128 kbit/s: v0.16.6 asked for 62.7 GB.
+        encoding={'mode':'normalize','sample_rate':44100,'channels':2,'bitrate':128000};source=1283446143;durations=[22.11*3600/155]*155
+        required=pipeline.working_space_required(source,durations,encoding,155)
+        self.assertLess(required,6*source);self.assertLess(required,8*1024**3)
     def test_copy_has_no_normalized_pcm_reservation(self):
         encoding={'mode':'copy','sample_rate':48000,'channels':6}
         output=pipeline.output_space_required(2000,[1],encoding,1)

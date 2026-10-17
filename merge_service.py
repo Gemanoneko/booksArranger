@@ -12,8 +12,9 @@ import hashlib
 import uuid
 import subprocess
 import functools
+import shutil
 
-from audio_jobs import AudioJobs
+from audio_jobs import AudioJobs, repair_record
 from audio_pipeline import create_private, publish, digest, fingerprint, Paused, PROFILE
 from native_io import DirectoryBoundary, ProtectedFiles, VerifiedFile, ordinary
 from review_backend import CandidateReviewService
@@ -109,6 +110,9 @@ class SharedSnapshot:
         if flight['error'] is not None:raise flight['error']
         return copy.deepcopy(flight['value'])
 
+_BULK_LOCK=threading.Lock()    # Retry all: its run record and thread
+_REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker thread
+
 def operation(method):
     @functools.wraps(method)
     def locked(self,*args,**kwargs):
@@ -155,6 +159,7 @@ class MergeService:
         from working_lifecycle import WorkingLifecycle
         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
         self.jobs.before_attempt=self.working.admit
+        self.jobs.next_priority=self._next_m4b_readmission
         self.jobs.after_attempt=self.working.terminal
         from recovery_retention import RecoveryRetention
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
@@ -245,8 +250,13 @@ class MergeService:
 
     def state(self):
         snapshot=getattr(getattr(self,'replacements',None),'snapshot',None)
-        if snapshot is None:return self._state()
-        with snapshot():return self._state()
+        if snapshot is None:value=self._state()
+        else:
+            with snapshot():value=self._state()
+        run=getattr(self,'_retry_all_run',None)
+        if run is not None and isinstance(value,dict):
+            with _BULK_LOCK:value['retry_all']=dict(run)
+        return value
 
     def _worker_active(self):
         """A book's inline cleanup holds the marker, or the cleanup or converter worker is alive.
@@ -296,7 +306,7 @@ class MergeService:
         elif errors:
             error=errors[0];current=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
-            progress={'phase':phase,'reason':error['reason']}
+            progress={'phase':phase,'reason':error['reason'],'attention':True}  # held, not running
             if phase=='originals':progress.update(completed=error['removed'],total=error['total'])
         elif value['state'] in ('Paused','Needs attention'):
             waiting=next((j for j in reversed(value['jobs']) if j['state'] in ('pending','needs attention') and j.get('progress')),None)
@@ -304,14 +314,31 @@ class MergeService:
         if current and (current.get('reason') or errors):
             progress=progress or {'phase':current['stage']}
             progress['reason']=current.get('reason') or next((e['reason'] for e in errors if e['job_id']==current['job_id']),'')
+        attention_row=None
+        if errors:
+            # Shown as its own needs-attention row whatever else runs, so it never flickers in as
+            # the active row between two books.
+            error=errors[0];held=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
+            phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
+            attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason','')}
+            if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self.progress_books(raw_jobs,cleanups,storage,folders)
+        self._converted_cache=(time.monotonic(),set(totals.get('converted_ids') or ()))
+        counts={'retry':0,'repair':0,'other':0,'unsupported':0}
+        for item in self.attention_summary(retry=False).values():counts[item['group']]+=1
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'published_check':value.get('published_check')}
+            'published_check':value.get('published_check'),'attention_counts':counts,'attention_row':attention_row}
+
+    def converted_ids(self,max_age=5.0):
+        """Converted candidate ids, reused from the last status computation when fresh (the book list asks every poll)."""
+        cached=getattr(self,'_converted_cache',None)
+        if cached and 0<=time.monotonic()-cached[0]<max_age:return set(cached[1])
+        value=set(self.progress_books()['converted_ids']);self._converted_cache=(time.monotonic(),value);return set(value)
 
     def pause(self):
         # During a desktop Quit drain the current book finishes; nothing is interrupted. No status is
@@ -432,10 +459,19 @@ class MergeService:
 
     def recovery_status(self,job_id):
         value=self.recovery.status(job_id)
-        try:self._recovery_idle()
-        except ValueError as error:value=value|{'eligible':False,'reason':str(error)}
+        reason=self._recovery_idle_reason()
+        if reason is not None:value=value|{'eligible':False,'reason':reason}
         if self._manual_recovery:value=value|{'eligible':False,'reason':'Recovery deletion is queued'}
         return value
+
+    def _recovery_idle_reason(self,max_age=1.0):
+        """Display only: one idle check shared by every book's recovery status for a second (a page asks
+        once per book). delete_recovery() always re-checks with _recovery_idle() itself."""
+        cached=self.__dict__.get('_idle_cache');now=time.monotonic()
+        if cached and 0<=now-cached[0]<max_age:return cached[1]
+        try:self._recovery_idle();reason=None
+        except ValueError as error:reason=str(error)
+        self._idle_cache=(now,reason);return reason
 
     @operation
     def delete_recovery(self,job_id,token,count,bytes):
@@ -627,15 +663,70 @@ class MergeService:
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
         value={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
         if job['state']=='needs attention':
-            retry=self.retry_statuses(job['job_id']).get(job['job_id'])
-            if retry is not None:value['retry']=retry
+            attention=self.attention_summary([job['job_id']]).get(job['job_id'])
+            if attention:
+                if 'retry' in attention:value['retry']=attention.pop('retry')
+                if 'repair' in attention:value['repair']=attention.pop('repair')
+                attention.pop('readmission',None)  # carried at the top level below, for every state
+                value['attention']=attention
+        import m4b_readmission
+        with self.jobs._db() as db:readmission=m4b_readmission.describe(db,job['job_id'])
+        if readmission:value['readmission']=readmission  # queued_next + position, or the refusal reason
+        repaired=repair_record(job)
+        if repaired:value['repaired']=repaired
         return value
 
     def retry_statuses(self,job_id=None):
-        """Retry data for audiobook jobs refused before any attempt started; the UI reads creation.job.retry."""
+        """Retry data for audiobook jobs a Retry can resolve; the UI reads creation.job.retry."""
         working=getattr(self,'working',None)
         if working is None:return {}
-        return self.jobs.retry_statuses(working.admission_clear,job_id)
+        return self.jobs.retry_statuses(working.admission_clear,job_id,self._space_ready)
+
+    def attention_summary(self,job_ids=None,retry=True):
+        """Group, cause and Retry data per job that needs attention (audio_jobs.attention_summary)."""
+        clear=getattr(getattr(self,'working',None),'admission_clear',None)
+        if not hasattr(self.jobs,'attention_summary'):return {}
+        summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
+        unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
+        if unchecked:self._check_repairs(unchecked)
+        return summary
+
+    def _check_repairs(self,job_ids):
+        """Classify unchecked M4B rows for Repair (m4b_repair.check), one at a time, off the request thread.
+
+        A check reads only the source's box headers and movie box, read-only; the next status read shows
+        the result. It never repairs anything: Repair runs only when the user presses it.
+        """
+        with _REPAIR_LOCK:
+            pending=self.__dict__.setdefault('_repair_pending',[]);skipped=self.__dict__.setdefault('_repair_skipped',set())
+            pending.extend(job_id for job_id in job_ids if job_id not in pending and job_id not in skipped)
+            stop=self.__dict__.setdefault('_repair_stop',threading.Event())
+            if not pending or self.__dict__.get('_repair_running') or stop.is_set():return
+            self._repair_running=True
+            self._repair_thread=threading.Thread(target=self._repair_check_work,args=(stop,),name='books-repair-check',daemon=True)
+            self._repair_thread.start()
+
+    def _repair_check_work(self,stop):
+        import m4b_repair
+        while True:
+            with _REPAIR_LOCK:
+                if stop.is_set() or not self._repair_pending:
+                    self._repair_running=False;return
+                job_id=self._repair_pending.pop(0)
+            try:
+                rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+                if rows and m4b_repair.classify(rows[0])=={'state':'unchecked'}:m4b_repair.check(rows[0],stop)
+            except Exception:
+                with _REPAIR_LOCK:self._repair_skipped.add(job_id)  # stays unchecked; never re-read in a loop
+
+    def _space_ready(self,manifest):
+        """A full-disk failure can be retried once the working drive has room for a conservative bound
+        (six times the source bytes plus 64 MiB; the real peak is the snapshots plus three outputs).
+        The worker's own admission still checks the exact requirement before any copy."""
+        try:
+            needed=6*sum(int(source['size']) for source in manifest['sources'])+64*1024*1024
+            return shutil.disk_usage(self.stage_root if self.stage_root.exists() else self.stage_root.parent).free>=needed
+        except (KeyError,TypeError,ValueError,OSError):return False
 
     @operation
     def retry_blocked_job(self,library,identity,revision,job_id):
@@ -644,17 +735,117 @@ class MergeService:
         It requeues the same job row (audio_jobs.retry_admission_hold); the worker's own admission
         and revision checks run again before any work. RetryRefused means nothing changed.
         """
-        from audio_jobs import RetryRefused,RETRY_CLOSING,RETRY_SCANNING
+        import failed_m4b_retry
+        from audio_jobs import RetryRefused,RETRY_CLOSING,RETRY_SCANNING,RETRY_WORKER_BUSY
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(RETRY_SCANNING)
         if self.draining:raise RetryRefused(RETRY_CLOSING)
+        if self._m4b_parent(job_id,identity,revision,failed_m4b_retry.eligible) is not None:
+            # An M4B failure this version can preserve: accepted at once, even while a book converts. The worker
+            # admits it right after that book through the proof route (m4b_readmission); a refusal is per book.
+            result=self._request_m4b_readmission(job_id,'retry')
+            return {'job_id':job_id,'requeued':False,**result,'audiobook_jobs':self.resume()}
         with self._review_boundary():
-            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear)
+            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready)
         return result|{'audiobook_jobs':self.resume()}
 
-    def current_audiobook(self,identity):
+    def _m4b_parent(self,job_id,identity,revision,check):
+        """The raw failed row when check(row) holds (M4B retry or repair eligibility), else None.
+
+        RetryRefused(RETRY_BOOK_CHANGED) when it does hold but the book or revision on screen is not this
+        job's, or the book already has newer work: nothing is admitted from an outdated view.
+        """
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows or not check(rows[0]):return None
+        manifest=json.loads(rows[0]['manifest'])
+        with self.jobs._db() as db:
+            newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1",(manifest.get('candidate_id'),)).fetchone()
+        if manifest.get('candidate_id')!=identity or manifest.get('candidate_revision')!=revision or not newest or newest[0]!=job_id:
+            raise RetryRefused(RETRY_BOOK_CHANGED)
+        return rows[0]
+
+    @operation
+    def repair_blocked_job(self,library,identity,revision,job_id):
+        """Repair button: the same request rules as Retry; the request is accepted at once and the worker runs
+        it right after the current book (_repair_damaged_m4b re-diagnoses the source under file holds and admits
+        one child job: a compare-and-set on the failed row, one child per failed parent). The original files are
+        only read. RetryRefused means nothing changed.
+        """
+        import m4b_repair
+        from audio_jobs import RetryRefused,REPAIR_CLOSING,REPAIR_SCANNING,RETRY_BOOK_CHANGED
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(REPAIR_SCANNING)
+        if self.draining:raise RetryRefused(REPAIR_CLOSING)
+        if self._m4b_parent(job_id,identity,revision,m4b_repair.eligible) is None:raise RetryRefused(RETRY_BOOK_CHANGED)
+        result=self._request_m4b_readmission(job_id,'repair')  # runs right after the current book
+        return {'job_id':job_id,'requeued':False,**result,'audiobook_jobs':self.resume()}
+
+    def retry_all(self):
+        """Retry all: every book in the Can retry group (the server's group, not a page), one at a time.
+
+        Runs on its own thread and returns at once; state()['retry_all'] carries the count. Each book goes
+        through its own Retry path and re-checks; a refused book keeps its row and reason. The queue
+        starts once, after the loop, so M4B children are admitted before the worker runs.
+        """
+        from audio_jobs import RetryRefused,RETRY_SCANNING,RETRY_CLOSING,RETRY_ALL_RUNNING,RETRY_ALL_NONE
+        if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(RETRY_SCANNING)
+        if self.draining:raise RetryRefused(RETRY_CLOSING)
+        with _BULK_LOCK:
+            current=getattr(self,'_retry_all_run',None)
+            if current and current['state']=='running':raise RetryRefused(RETRY_ALL_RUNNING)
+        ids=[job_id for job_id,item in self.attention_summary(retry=False).items() if item['group']=='retry']
+        if not ids:raise RetryRefused(RETRY_ALL_NONE)
+        with _BULK_LOCK:
+            current=getattr(self,'_retry_all_run',None)
+            if current and current['state']=='running':raise RetryRefused(RETRY_ALL_RUNNING)
+            run={'id':str(uuid.uuid4()),'state':'running','total':len(ids),'done':0,'queued':0,'next':0,'refused':0}
+            self._retry_all_run=run;stop=self.__dict__.setdefault('_retry_all_stop',threading.Event())
+            self._retry_all_thread=threading.Thread(target=self._retry_all_work,args=(run,ids,stop),name='books-retry-all',daemon=True)
+            self._retry_all_thread.start()
+            return dict(run)
+
+    def _retry_all_work(self,run,ids,stop):
+        queued=False
+        try:
+            for job_id in ids:
+                if stop.is_set() or self.draining:break
+                try:ok=self._retry_one(job_id)
+                except Exception:ok=None
+                queued=queued or bool(ok)
+                with _BULK_LOCK:
+                    run['done']+=1;run['queued' if ok else 'refused']+=1
+                    if ok=='next':run['next']+=1  # M4B: runs right after the current book
+        finally:
+            with _BULK_LOCK:run['state']='done' if run['done']==run['total'] else 'stopped'
+            if queued and not stop.is_set() and not self.draining:
+                try:self.resume()
+                except Exception:pass
+
+    def _retry_one(self,job_id):
+        """One Retry all book through its own Retry path, without starting the queue.
+
+        'next' (M4B: runs right after the current book), 'queued' (normal queue order) or None (refused).
+        """
+        import failed_m4b_retry
+        from audio_jobs import RetryRefused
+        with self.operation_lock:
+            if self.inventory.worker and self.inventory.worker.is_alive() or self.draining:return None
+            rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+            if not rows:return None
+            manifest=json.loads(rows[0]['manifest'])
+            try:
+                if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),failed_m4b_retry.eligible) is not None:
+                    return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
+                with self._review_boundary():
+                    self.jobs.retry_admission_hold(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),self.working.admission_clear,self._space_ready)
+                return 'queued'
+            except RetryRefused:return None
+
+    def current_audiobook(self,identity,jobs=None):
+        """jobs: the caller's one jobs list for a whole page (loading every job per row was the book list's main cost)."""
         if not hasattr(self,'publications'):return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}
-        value=self.publications.describe(self.jobs.status()['jobs'],identity)
+        value=self.publications.describe(jobs if jobs is not None else self.jobs.status()['jobs'],identity)
         return {key:copy.deepcopy(value[key]) for key in ('state','reason','path','identity','publication_id','kind','tags_state') if key in value}
 
     @operation
@@ -843,23 +1034,48 @@ class MergeService:
         self.resume()
         return fresh,job
 
-    def retry_automatic_job(self,job_id,now):
+    def _request_m4b_readmission(self,job_id,kind):
+        """A Retry/Repair click is accepted at once and runs right after the current book, in click order."""
+        import m4b_readmission
+        with self.jobs._db() as db:return m4b_readmission.request(db,job_id,kind,time.time())
+
+    def readmission_status(self,job_ids):
+        """{job_id: queued_next/position or refusal} for the book list's shown jobs (read-only)."""
+        import m4b_readmission
+        if not job_ids:return {}
+        with self.jobs._db() as db:return m4b_readmission.status(db,list(job_ids))
+
+    def _next_m4b_readmission(self):
+        """audio_jobs worker hook, between books (no operation lock): the job id that runs next, or None."""
+        import m4b_readmission
+        return m4b_readmission.next_job(self.jobs._db,self._admit_m4b_readmission,time.time())
+
+    def _admit_m4b_readmission(self,parent_job_id,kind):
+        """Worker thread, between books: the same proof routes as an idle click, minus the worker-busy refusal."""
+        if self.inventory.worker and self.inventory.worker.is_alive():return {'defer':True}  # after the scan
+        parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(parent_job_id,))),None)
+        if not parent:return {'requeued':False,'reason':'The failed book is no longer in the queue.'}
+        if kind=='retry':return self._retry_preserved_m4b(parent,time.time(),in_worker=True)
+        return self._repair_damaged_m4b(parent,time.time(),in_worker=True)
+
+    def retry_automatic_job(self,job_id,now,resume=True):
+        """resume=False: Retry all admits every book first and starts the queue once, after its loop."""
         self._no_scan()
         from failed_m4b_retry import eligible
         parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
         if parent and eligible(parent):
             result=self._retry_preserved_m4b(parent,now)
-            if result.get('requeued'):self.resume()
+            if result.get('requeued') and resume:self.resume()
             return result
         result=self.jobs.retry_failed(job_id,now)
-        if result.get('requeued'):self.resume()
+        if result.get('requeued') and resume:self.resume()
         return result
 
-    def _retry_preserved_m4b(self,parent,now):
+    def _retry_preserved_m4b(self,parent,now,in_worker=False):
         """Admit one new child, retaining the failed parent's entire durable row."""
         from failed_m4b_retry import bind,profile_proof
         result={'retryable':True,'retry_at':now+3600,'requeued':False}
-        if self.jobs._thread and self.jobs._thread.is_alive():return result
+        if not in_worker and self.jobs._thread and self.jobs._thread.is_alive():return result
         manifest=json.loads(parent['manifest'])
         # Old attempts predate receipt-owned lifecycle cleanup. Never clone their
         # compressed source or generated candidates while that debt is retained.
@@ -909,6 +1125,72 @@ class MergeService:
         except InterruptedError:raise
         except (ValueError,OSError,sqlite3.Error) as error:
             return result|{'reason':'Failed M4B retained: '+str(error)}
+
+    @operation
+    def repair_damaged_m4b(self,job_id,now):
+        """Repair entry point, never automatic: accepted at once and admitted by the worker right after the
+        current book (m4b_readmission), through _repair_damaged_m4b."""
+        import m4b_repair
+        self._no_scan()
+        parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
+        if not parent or not m4b_repair.eligible(parent):return {'requeued':False,'accepted':False,'reason':'This book cannot be repaired.'}
+        result=self._request_m4b_readmission(job_id,'repair');self.resume()
+        return result|{'requeued':False}
+
+    def _repair_damaged_m4b(self,parent,now,in_worker=False):
+        """Admit one child job that applies the user-approved, proven M4B damage repair (m4b_repair). The
+        failed parent row is kept unchanged; the child is verified like every preserved M4B before
+        publication, and originals then follow the normal cleanup and recovery policy."""
+        import m4b_preservation,m4b_repair
+        from source_cleanup import single_stream
+        from audio_jobs import REPAIR_WORKER_BUSY
+        result={'requeued':False}
+        if not m4b_repair.eligible(parent):return result|{'reason':'This book cannot be repaired.'}
+        if not in_worker and self.jobs._thread and self.jobs._thread.is_alive():return result|{'reason':REPAIR_WORKER_BUSY}
+        manifest=json.loads(parent['manifest'])
+        job_root=self.stage_root/parent['job_id']
+        try:
+            with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
+                if job_root.exists():
+                    with DirectoryBoundary(job_root.anchor,job_root):
+                        for attempt in job_root.iterdir():
+                            if not attempt.is_dir():continue
+                            with DirectoryBoundary(attempt.anchor,attempt):
+                                if any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):
+                                    return result|{'reason':'Prior audio working files need verified disposal before another source copy'}
+        except (ValueError,OSError) as error:
+            return result|{'reason':'Prior working-file ownership requires attention: '+str(error)}
+        try:
+            with contextlib.ExitStack() as holds:
+                source=ordinary(manifest['sources'][0]['path'])
+                holds.enter_context(DirectoryBoundary(manifest['root'],source.parent))
+                held=holds.enter_context(VerifiedFile(source));single_stream(source)
+                if held.facts()['links']!=1:raise ValueError('Source alias is not eligible for repaired admission')
+                module=Path(m4b_preservation.__file__).absolute()
+                holds.enter_context(DirectoryBoundary(module.anchor,module.parent))
+                module_file=holds.enter_context(VerifiedFile(module))
+                with connect(self.inventory.database) as db:
+                    group_before=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                    context_before=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                if not group_before or not context_before:raise ValueError('Reviewed candidate unavailable')
+                with source.open('rb') as reader:
+                    def read_at(offset,count):
+                        reader.seek(offset);return reader.read(count)
+                    diagnosis=m4b_repair.diagnose(held.facts()['size'],read_at)
+                if diagnosis['state']!='repairable':
+                    return result|{'reason':'No provable repair: '+(diagnosis['reason'] or 'the source is intact')}
+                fresh=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,stop=self.automatic.stop_event)
+                fresh=m4b_repair.bind(parent,fresh,diagnosis,module_file.sha256())
+                with connect(self.inventory.database) as db:
+                    group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(fresh['candidate_id'],)).fetchone()
+                    context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(fresh['candidate_id'],)).fetchone()
+                if not group or not context or tuple(group)!=tuple(group_before) or tuple(context)!=tuple(context_before):raise ValueError('Reviewed candidate changed during source proof')
+                child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)))
+        except InterruptedError:raise
+        except (ValueError,OSError,sqlite3.Error) as error:
+            return result|{'reason':'Repair refused: '+str(error)}
+        if not in_worker:self.resume()
+        return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'damage':diagnosis['damage'],'reason':'Repair admitted as new work'}
 
     def _recording_review(self,row,result,stop):
         """Full source-byte comparisons only; freshly validate any completed counterpart."""
@@ -1103,6 +1385,12 @@ class MergeService:
         except OSError:pass
 
     def close(self):
+        for name in ('_repair_stop','_retry_all_stop'):
+            event=self.__dict__.get(name)
+            if event:event.set()
+        for name in ('_repair_thread','_retry_all_thread'):
+            thread=self.__dict__.get(name)
+            if thread and thread is not threading.current_thread():thread.join(30)
         if hasattr(self,'automatic'):self.automatic.close()
         self._retention_stop.set();self._retention_wake.set()
         if self._retention_thread:

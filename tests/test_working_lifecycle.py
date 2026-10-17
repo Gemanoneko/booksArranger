@@ -34,13 +34,14 @@ class WorkingLifecycleTests(unittest.TestCase):
         with patch.object(self.f.service.storage_cleanup,'working_files',side_effect=BoundaryError('private working interruption')),patch.object(self.f.service.cleanup,'run',side_effect=BoundaryError('private retirement hold')):
             _,job_id=self.f.service.approve_automatic(row,result,threading.Event(),self.f.client);self.f.wait()
         job=self.f.service.jobs.status()['jobs'][0];stage=self.f.service.stage_root/job_id/job['output']['validation']['staging_artifacts']['attempt_id']
-        self.assertTrue(list(stage.glob('normalized*.wav')))
+        # v0.16.7: no normalized WAVs exist any more; the generated M4B candidates are the held working files.
+        self.assertTrue(list(stage.glob('*.m4b')))
         self.f.service.close()
         with patch('storage_cleanup.StorageCleanup.working_files',side_effect=AssertionError('startup must remain inactive')):
             self.f.service=MergeService(self.f.inv,self.f.base/'cache')
-        self.assertTrue(list(stage.glob('normalized*.wav')));self.assertFalse(self.f.service.jobs._thread)
+        self.assertTrue(list(stage.glob('*.m4b')));self.assertFalse(self.f.service.jobs._thread)
         self.f.service.resume();self.f.wait()
-        self.assertEqual(list(stage.glob('normalized*.wav')),[])
+        self.assertEqual(list(stage.glob('*.m4b')),[]);self.assertEqual(list(stage.glob('normalized*.wav')),[])
         self.assertEqual(self.f.service.cleanup.status(job_id)['state'],'needs_attention')
         self.assertTrue(all(source.exists() for source in self.f.sources));self.assertEqual(self.f.service.state()['converted_total'],0)
     def test_short_space_holds_before_snapshots_normalization_or_output(self):

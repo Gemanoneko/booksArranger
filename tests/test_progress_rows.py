@@ -119,9 +119,7 @@ class RealConversionTests(unittest.TestCase):
         phases=[]
         for value in measured:
             if not phases or phases[-1]!=value['phase']:phases.append(value['phase'])
-        for expected in ('preparing','source copies','checking audio','normalizing','joined audio','encoding','publishing'):self.assertIn(expected,phases)
-        self.assertLess(phases.index('preparing'),phases.index('source copies'));self.assertLess(phases.index('normalizing'),phases.index('joined audio'))
-        self.assertLess(phases.index('joined audio'),phases.index('encoding'));self.assertLess(phases.index('encoding'),phases.index('publishing'))
+        self.assertEqual(phases,['preparing','source copies','checking audio','encoding','publishing'])
         runs={}
         for value in measured:
             self.assertLessEqual(value['completed'],value['total']);self.assertEqual(value['unit'],MEASURED['copying' if value['phase']=='publishing' else 'creating' if value['phase']=='encoding' else 'checking sources'][value['phase']])
@@ -129,14 +127,15 @@ class RealConversionTests(unittest.TestCase):
                 previous=runs.get(value['phase'],-1);self.assertGreaterEqual(value['completed'],previous,value['phase']);runs[value['phase']]=value['completed']
         final={value['phase']:value for value in measured}
         self.assertEqual(final['preparing']['completed'],2);self.assertEqual(final['preparing']['items'],2)
-        for phase in ('source copies','normalizing','joined audio','publishing'):self.assertEqual(final[phase]['completed'],final[phase]['total'],phase)
-        self.assertAlmostEqual(final['normalizing']['total'],4,delta=.2)
+        for phase in ('source copies','checking audio','encoding','publishing'):self.assertEqual(final[phase]['completed'],final[phase]['total'],phase)
+        self.assertAlmostEqual(final['encoding']['total'],4,delta=.2)
+        self.assertEqual(list((self.root/'stage').rglob('normalized*.wav')),[],'no uncompressed copy of the book on disk')
 
 
 class LockedQueueTests(RealConversionTests):
     """Senua m1: a progress report never waits for the queue lock, so a held lock cannot fail a conversion step."""
     def test_every_step_reports_valid_monotonic_measurements(self):pass  # Covered once above.
-    def test_normalize_completes_while_the_queue_lock_is_held(self):
+    def test_conversion_completes_while_the_queue_lock_is_held(self):
         paths=[self.media('01.mp3','libmp3lame',22050,1),self.media('02.flac','flac',48000,2)]
         cover=self.root/'cover.png';cover.write_bytes(PNG)
         sources=[{'path':str(p),**fingerprint(p),'fingerprint':fingerprint(p),'sha256':digest(p),'metadata':{'tags':{}}} for p in paths]
@@ -150,7 +149,7 @@ class LockedQueueTests(RealConversionTests):
             def progress(stage,info):
                 value=(info or {}).get('progress') or {}
                 # The m1 case: the lock is taken while an FFmpeg drain thread (not the worker) is reporting.
-                if value.get('phase')=='normalizing' and threading.current_thread().name=='BooksArrangerEncodingProgress' and not held.is_set():
+                if value.get('phase')=='checking audio' and threading.current_thread().name=='BooksArrangerEncodingProgress' and not held.is_set():
                     threading.Thread(target=holder,daemon=True).start();held.wait(5)
                     threading.Timer(4,release.set).start()
                 started=time.monotonic();checkpoint(STAGES[stage],info);waits.append((value.get('phase'),time.monotonic()-started,threading.current_thread().name))
@@ -162,9 +161,9 @@ class LockedQueueTests(RealConversionTests):
             deadline=time.monotonic()+240
             while queue._thread and queue._thread.is_alive() and time.monotonic()<deadline:time.sleep(.05)
         release.set();row=queue._rows()[0];failure=json.loads(row['journal']).get('failure',{})
-        self.assertTrue(held.is_set(),'positive control: the lock really was held during normalizing')
+        self.assertTrue(held.is_set(),'positive control: the lock really was held during a drain-thread report')
         self.assertEqual(failure.get('exception_class'),'Done',row['reason'])
-        drained=[seconds for phase,seconds,thread in waits if phase in ('normalizing','joined audio','checking audio') and thread!=queue._thread.name]
+        drained=[seconds for phase,seconds,thread in waits if phase=='checking audio' and thread!=queue._thread.name]
         self.assertTrue(drained,'reports came from FFmpeg drain threads');self.assertLess(max(drained),.5,'no drain-thread report waited for the lock')
     def test_failing_reporter_never_fails_a_step(self):
         def broken(value):raise RuntimeError('display failed')
@@ -224,7 +223,9 @@ class ActivityRowTests(unittest.TestCase):
         self.assertEqual((rows[2]['step'],rows[2]['step_text'],rows[2]['subject'],rows[2]['done'],rows[2]['step_started_at']),('researching','Publisher - Fetching credits','Дюна',3,1000))
         # The first-seen start is kept while the step continues and resets when it changes.
         self.assertEqual(activities(jobs,None,None,automatic,memo,now_ms=5000)[2]['step_started_at'],1000)
-        automatic['current']['title']='Другая';self.assertEqual(activities(jobs,None,None,automatic,memo,now_ms=6000)[2]['step_started_at'],6000)
+        automatic['current']['title']='Другая';self.assertEqual(activities(jobs,None,None,automatic,memo,now_ms=6000)[2]['step_started_at'],1000,'v0.16.7: a new book is not a new research step')
+        automatic['phase']='discovery';activities(jobs,None,None,automatic,memo,now_ms=7000);automatic['phase']='research'
+        self.assertEqual(activities(jobs,None,None,automatic,memo,now_ms=8000)[2]['step_started_at'],8000,'a new sweep starts its own clock')
     def test_cleanup_temporary_scan_and_indeterminate_rows(self):
         rows=activities({'state':'Paused','current_title':'Book','progress':{'phase':'originals','completed':3,'total':9}},{'checked':10,'pending':30,'current':'Z:/a.mp3'},'Audiobooks',None,{},now_ms=1)
         self.assertEqual([(r['kind'],r['state']) for r in rows],[('cleanup','paused'),('scan','running')])
@@ -239,7 +240,7 @@ class ActivityRowTests(unittest.TestCase):
         self.assertEqual(activities({},None,None,{'state':'Paused','phase':'research'},{},now_ms=1),[])
     def test_research_pass_counts_this_pass(self):
         run={'phase':'research','checkpoint':json.dumps({'done':['a','b'],'pending':['c'],'deferred':['d','c']})}
-        self.assertEqual(AutomaticProcessing._research_pass(run),{'completed':2,'total':4})
+        self.assertEqual(AutomaticProcessing._research_pass(run),{'completed':3,'total':4})  # visited: a, b and the deferred d
         self.assertIsNone(AutomaticProcessing._research_pass({'phase':'discovery','checkpoint':'{}'}));self.assertIsNone(AutomaticProcessing._research_pass(None))
         for raw in ('[1,2]','{"done":[[1]],"pending":{"a":1}}','not json',None,'{"done":"abc"}'):
             self.assertIn(AutomaticProcessing._research_pass({'phase':'research','checkpoint':raw}),(None,{'completed':0,'total':0}),raw)

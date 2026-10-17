@@ -438,14 +438,14 @@ class Inventory:
             if not result.rowcount:
                 raise ValueError('Inventory file changed or is no longer available; reload its evidence before reviewing')
 
-    def candidates(self,label,limit=100,offset=0,search='',status='all'):
+    def candidates(self,label,limit=100,offset=0,search='',status='all',ids=None):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
         with self.group_lock,connect(self.database) as connection:
             connection.execute('BEGIN IMMEDIATE')
             current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(self.roots[label],)).fetchone()
             pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(self.roots[label],)).fetchone()[0]
             return groups.page(connection,self.roots[label],limit,offset,search,status,
-                bool(current and current['state']=='completed' and not pending and not current['errors']))
+                bool(current and current['state']=='completed' and not pending and not current['errors']),ids=ids)
 
     def candidate(self,label,identity):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')

@@ -48,6 +48,9 @@ def _measure(source, unit=None):
     if type(done) not in (int, float) or type(total) not in (int, float) or not total > 0 or not 0 <= done <= total:
         return {'indeterminate': True}
     value = {'done': done, 'total': total, 'unit': source.get('unit') or unit, 'indeterminate': False}
+    fraction = source.get('fraction')
+    if type(fraction) in (int, float) and 0 <= fraction <= 1:
+        value['fraction'] = fraction
     if type(source.get('item')) is int and type(source.get('items')) is int and 1 <= source['item'] <= source['items']:
         value.update(item=source['item'], items=source['items'])
     return value
@@ -67,7 +70,7 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
     rows = []
     jobs = jobs if isinstance(jobs, dict) else {}
     progress = jobs.get('progress')
-    if jobs.get('current_title') and isinstance(progress, dict) and progress.get('phase'):
+    if jobs.get('current_title') and isinstance(progress, dict) and progress.get('phase') and not progress.get('attention'):
         step = progress['phase']
         kind = 'cleanup' if step in CLEANUP_STEPS else 'conversion'
         unit = {'encoding': 'seconds', 'originals': 'files', 'recovery copies': 'files'}.get(step)
@@ -78,6 +81,10 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
         if type(progress.get('started')) is int:
             row['step_started_at'] = progress['started']
         rows.append(row)
+    held = jobs.get('attention_row')
+    if isinstance(held, dict) and not any(row['kind'] == 'cleanup' for row in rows):
+        rows.append({'id': 'cleanup', 'kind': 'cleanup', 'subject': held.get('title') or '', 'step': held.get('phase') or 'originals',
+                     'state': 'attention', 'reason': held.get('reason') or ''} | _measure(held, 'files'))
     check = jobs.get('published_check')
     if isinstance(check, dict):
         row = {'id': 'identity', 'kind': 'identity', 'subject': '', 'step': 'identity', 'state': 'running'} | _measure(check, 'books')
@@ -95,7 +102,8 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
                      'step_text': text, 'state': 'pausing' if automatic['state'] == 'Stopping' else 'running'} | _measure(automatic.get('research_pass'), 'books'))
     seen = set()
     for row in rows:
-        key = (row['id'], row['step'], row['subject'])
+        # Research's subject is the book being researched; its step (the sweep) keeps one clock.
+        key = (row['id'], row['step'], '' if row['step'] == 'researching' else row['subject'])
         seen.add(key)
         if 'step_started_at' not in row:
             row['step_started_at'] = memo.setdefault(key, now_ms)
@@ -296,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path in {'/api/state','/api/inventory'}:
                 if not self.trusted(token=True):
                     return
-                allowed = {'library'} if path == '/api/state' else {'library','offset','search','status','view'}
+                allowed = {'library'} if path == '/api/state' else {'library','offset','search','status','view','group'}
                 if set(query)-allowed:
                     raise ValueError('Unknown query parameters')
                 library = self.library(query.get('library'))
@@ -314,7 +322,9 @@ class Handler(BaseHTTPRequestHandler):
                     if view not in {'files','candidates'}:raise ValueError('Unknown inventory view')
                     if view=='candidates':
                         if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
-                        result=self.server.merge.reviews.page(100,int(offset),search,selected_status)
+                        group=query.get('group') or None
+                        if group is not None and group not in {'all','retry','repair','other','unsupported'}:raise ValueError('Unknown attention group')
+                        result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)
                         self.response(200,result | {'offset':int(offset),'page_size':100})
                         return
                     result = self.server.inventory.rows(library,100,int(offset),search,selected_status,page=True)
@@ -411,6 +421,25 @@ class Handler(BaseHTTPRequestHandler):
             except RetryRefused as error:
                 self.fail(409,str(error));return  # Nothing changed; the message is shown as written.
             self.response(202,result);return
+        if path=='/api/audiobook/repair':
+            # Repair button: the same request shape and answers as Retry.
+            self.shape(data,{'library','id','revision','job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id'])
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.repair_blocked_job(library,id,revision,job_id)
+            except RetryRefused as error:
+                self.fail(409,str(error));return
+            self.response(202,result);return
+        if path=='/api/audiobook/retry-all':
+            # Retry all: the whole Can retry group, server side; progress arrives in the status payload.
+            self.shape(data,{'library'})
+            if data['library']!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+            from audio_jobs import RetryRefused
+            try:run=self.server.merge.retry_all()
+            except RetryRefused as error:
+                self.fail(409,str(error));return
+            self.response(202,{'retry_all':run});return
         if path=='/api/audiobook/replace':
             self.shape(data,{'library','id','revision','parent_job_id'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
@@ -508,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -543,9 +572,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path in merge_routes:
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
-                    if path=='/api/audiobook/retry' and self.server.scan_active():
-                        from audio_jobs import RETRY_SCANNING
-                        self.fail(409,RETRY_SCANNING);return
+                    if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair'} and self.server.scan_active():
+                        from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING
+                        self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING);return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':
                     self.fail(404,'No such Books Arranger control');return

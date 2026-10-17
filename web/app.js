@@ -16,6 +16,8 @@ let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 let recoveryPanel=null,recoveryConfirmation=null,recoverySubmitting=false,recoveryDisconnected=false;
 let retryPending=null,retryResult=null,retryEpoch=0;
+let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='';
+const rowRetries=new Map();
 const pendingFolders=new Set(),folderMessages=new Map();
 
 function routingControls() {
@@ -82,7 +84,7 @@ function message(value='') { $('message').textContent=value; }
 // The only writer of #version: the engine's own version, as reported by its state.
 function renderVersion(){const value=typeof state?.version==='string' && state.version?'v'+state.version:'';if($('version').textContent!==value)$('version').textContent=value;$('version').hidden=!value;}
 function controls() {
-  updateRecovery();updateRetry();
+  updateRecovery();updateRetry();updateRowRetries();renderAttentionGroups();
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
   $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
@@ -183,8 +185,21 @@ function renderRows(force=false) {
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
     if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
     const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',row.error ? `Read error · ${row.error.split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
-    for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;if(row.kind==='candidate' && index===3 && recordingMarker(row)){td.append(node('p',recordingMarker(row),'field-help'));} tr.append(td); }
+    for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;
+      if(row.kind==='candidate' && index===3){
+        const attention=attentionText(row);
+        if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null});}
+        else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
+        if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
+      }
+      tr.append(td); }
     const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();
+    const rowRetry=rowRetries.get(row.path),action=rowAction(row);
+    if(rowRetry && action){
+      const retry=node('button',action.label,'quiet row-retry');retry.type='button';rowRetry.button=retry;
+      retry.addEventListener('click',event=>{event.stopPropagation();if(retry.getAttribute?.('aria-disabled')==='true' || retryPending)return;retryFromRow(row);});
+      retry.addEventListener('keydown',event=>event.stopPropagation());buttons.append(retry);
+    }
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title=row.kind==='candidate'?"Open this book's source folder in File Explorer.":"Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
@@ -200,6 +215,7 @@ function renderRows(force=false) {
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
   const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':`No ${unit} match these filters · ${label}.`;
+  $('inventory').removeAttribute?.('aria-busy');
   $('empty').textContent=emptyText;
   $('page').textContent=rows.length ? `Showing ${offset+1}–${offset+rows.length} of ${totalRows} ${unit} · ${label}` : `No ${unit} match these filters · ${label}.`;
   $('previous').disabled=offset===0;
@@ -238,10 +254,19 @@ async function refresh(force=false) {
   controls();
   const key=JSON.stringify([library,view,filters[view],offset,search,status.count,status.checked,status.state,status.unresolved_errors]);
   if (force || view==='candidates' || key!==lastKey) {
-    const page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}`);
+    // The book list is slow on a large catalog: a request already on its way for this exact list paints
+    // itself, so polls never restart it; only a newer request for the list replaces it.
+    if(!force && listPending===context){acknowledgeRestart(current);return true;}
+    const ticket=++listTicket;listPending=context;
+    if(context!==paintedContext)showListLoading();
+    const groupQuery=requestView==='candidates' && requestFilter==='output_attention' && attentionGroup!=='all'?`&group=${attentionGroup}`:'';
+    let page;
+    try{page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`);}
+    finally{if(ticket===listTicket)listPending='';}
     // A book list requested before Retry was answered predates it and would repaint the old state.
-    if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
-    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;renderRows(force);
+    if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
+    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;
+    const changed=context!==paintedContext;paintedContext=context;renderRows(force || changed);
   }
   acknowledgeRestart(current);
   return true;
@@ -261,7 +286,14 @@ $('start').addEventListener('click',()=>action('/api/scan/start',{library:$('lib
 $('resume').addEventListener('click',()=>action('/api/scan/resume',{library:$('library').value}));
 $('stop').addEventListener('click',()=>action('/api/scan/stop',{library:state.active_library}));
 let searchTimer=null;
-function listContext(){return JSON.stringify([$('library').value,view,filters[view],offset,search,$('search').value]);}
+function listContext(){return JSON.stringify([$('library').value,view,filters[view],offset,search,$('search').value,filters[view]==='output_attention'?attentionGroup:'all']);}
+// While a different list is on its way, the old rows are not shown as the new filter's result.
+function showListLoading(){
+  const label=filterOptions[view].find(item=>item[0]===filters[view])?.[1] || '';
+  $('inventory').replaceChildren();rowRetries.clear();$('inventory').setAttribute?.('aria-busy','true');
+  const text=`Loading ${label}${filters[view]==='output_attention' && attentionGroup!=='all'?' · '+attentionLabels[attentionGroup]:''}…`;
+  $('empty').textContent=text;$('empty').hidden=false;$('page').textContent=text;$('previous').disabled=true;$('next').disabled=true;
+}
 function cancelSearchRefresh(){if(searchTimer!==null)clearTimeout(searchTimer);searchTimer=null;}
 function updateList(resetPage=true){
   cancelSearchRefresh();search=$('search').value;if(resetPage)offset=0;lastKey=null;
@@ -270,8 +302,9 @@ function updateList(resetPage=true){
 }
 $('library').addEventListener('change',()=>{cancelSearchRefresh();viewControls();return updateList();});
 $('view').addEventListener('change',()=>{cancelSearchRefresh();view=$('view').value;viewControls();return updateList();});
-$('filter').addEventListener('change',()=>{filters[view]=$('filter').value;return updateList();});
-$('clear-filters').addEventListener('click',()=>{$('search').value='';filters[view]='all';viewControls();return updateList();});
+function resetStrip(){retryAllRun=null;retryAllConfirm=null;stripNote='';}
+$('filter').addEventListener('change',()=>{filters[view]=$('filter').value;attentionGroup='all';resetStrip();return updateList();});
+$('clear-filters').addEventListener('click',()=>{$('search').value='';filters[view]='all';attentionGroup='all';resetStrip();viewControls();return updateList();});
 $('error-shortcut').addEventListener('click',()=>{$('search').value='';filters[view]='errors';viewControls();return updateList();});
 $('search').addEventListener('input',()=>{cancelSearchRefresh();++refreshSequence;if(!$('search').value)return updateList();searchTimer=setTimeout(()=>{searchTimer=null;updateList();},250);});
 $('search-form').addEventListener('submit',event=>{event.preventDefault();return updateList();});
@@ -383,7 +416,7 @@ function renderActivities(list,jobs){
   visible.forEach((row,index)=>{
     let view=activityRows.get(row.kind);if(!view){view=activityRow(row.kind);activityRows.set(row.kind,view);}
     if(holder.children[index]!==view.item)holder.insertBefore(view.item,holder.children[index] || null);
-    const key=[row.step,row.subject,row.step_started_at].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
+    const key=[row.step,row.step==='researching'?'':row.subject,row.step_started_at].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
     view.row=row;updateActivity(view,Date.now());
   });
   writeText($('jobs-more'),extra>0?`+${extra} more running`:'');$('jobs-more').hidden=!(extra>0);
@@ -399,19 +432,22 @@ function updateActivity(view,now){
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
-  if(determinate){const value=Math.min(99,Math.floor(row.done/row.total*100));if(view.bar.value!==value)view.bar.value=value;}
+  const fraction=typeof row.fraction==='number' && row.fraction>=0 && row.fraction<=1?row.fraction:row.done/row.total;
+  if(determinate){const value=Math.min(99,Math.floor(fraction*100));if(view.bar.value!==value)view.bar.value=value;}
   else if(view.bar.hasAttribute?.('value')!==false)view.bar.removeAttribute('value');
   view.bar.setAttribute('aria-label',label+(subject?': '+subject:''));view.bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
   // Elapsed counts the current step from its start; it freezes while paused or needing attention.
   const started=Number.isFinite(row.step_started_at)?row.step_started_at:now;
   if(running)view.frozen=null;else if(view.frozen===null)view.frozen=now;
   const elapsed=Math.max(0,((view.frozen ?? now)-started)/1000);
-  if(determinate && running){view.samples.push([now,row.done]);while(view.samples.length>1 && now-view.samples[0][0]>30000)view.samples.shift();}
-  if(!(determinate && running) || elapsed<10 || row.done/row.total<0.05)view.eta='';
+  // ETA from the measured rate over the last 30 s (samples only when the data changed), once trustworthy.
+  if(determinate && running && (!view.samples.length || view.samples[view.samples.length-1][1]!==fraction))view.samples.push([now,fraction]);
+  while(view.samples.length>2 && now-view.samples[1][0]>30000)view.samples.shift();
+  if(!(determinate && running) || elapsed<10 || fraction<0.05)view.eta='';
   else if(now-view.etaAt>=5000 && view.samples.length>1){
     const [t0,d0]=view.samples[0],[t1,d1]=view.samples[view.samples.length-1],rate=(d1-d0)/((t1-t0)/1000);
     view.etaAt=now;
-    if(rate>0){const left=(row.total-row.done)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
+    if(rate>0){const left=(1-fraction)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
   }
   writeText(view.time,clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));
 }
@@ -466,18 +502,41 @@ async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmit
 // controls() on every poll; pending and result text belong to one book (candidate id + job id).
 const retryReady='Check this book again and queue its audiobook job.';
 function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;return job && typeof job.job_id==='string'?JSON.stringify([row.id,job.job_id]):'';}
+// Repair (Attention spec section 2) is the same control with another label, tooltip and endpoint.
+const rowActions={retry:{kind:'retry',label:'Retry',pending:'Retrying…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
+  repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'}};
+function rowAction(row){
+  const job=row?.kind==='candidate'?row.creation?.job:null;if(!job)return null;
+  // A damaged book shows Repair and never Retry (Retry would fail again on the same damage).
+  // Once accepted, the request waits for its turn: the button gives way to the queued text (no second press).
+  if(readmissionOf(row)?.queued_next===true)return null;
+  const [kind,data]=attentionOf(row)?.group==='repair'?['repair',job.repair]:['retry',job.retry];
+  return data && typeof data==='object' && typeof data.allowed==='boolean'?{...rowActions[kind],data}:null;
+}
+// Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
+function readmissionOf(row){const job=row?.creation?.job,value=job?.readmission || job?.attention?.readmission;return value && typeof value==='object'?value:null;}
+function queuedNextText(value){
+  const running=!!state?.audiobook_jobs?.current_job_id,position=Number.isInteger(value?.position) && value.position>0?value.position:1,ahead=(running?1:0)+position-1;
+  return ahead===0?'Queued — runs next':ahead===1 && running?'Queued — runs after the current book':`Queued — runs after ${ahead.toLocaleString()} books`;
+}
+function queuedNext(row,result){
+  const job={...row.creation.job,readmission:{accepted:true,queued_next:true,position:result.position,kind:result.kind}};delete job.retry;delete job.repair;
+  return {...row,creation:{...row.creation,job}};
+}
+function bulkRun(){const run=state?.audiobook_jobs?.retry_all;return run && typeof run==='object' && typeof run.id==='string'?run:null;}
+function bulkRunning(){return bulkRun()?.state==='running';}
 function updateRetry(){
   const block=$('retry-block'),button=$('retry-job'),note=$('retry-note');if(!block || !button || !note)return;
-  const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,retry=job?.retry;
+  const row=selectedRow,key=retryKey(row),action=key?rowAction(row):null,retry=action?.data;
   if(retryResult && retryResult.key!==key)retryResult=null;
-  const pending=!!key && retryPending?.key===key;
-  const shown=pending || (!!key && !!retry && typeof retry==='object' && typeof retry.allowed==='boolean');
+  const pending=!!key && retryPending?.key===key,copy=pending?rowActions[retryPending.kind]:action;
+  const shown=pending || !!action;
   block.hidden=!shown;
   if(!shown){if(note.textContent)note.textContent='';note.hidden=true;return;}
-  const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending?'busy':retry.allowed===true?'ready':'unavailable';
-  const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:'Retry is unavailable. Refresh and check again.';
-  const title={offline:'Local server unavailable.',pending:'Checking this book…',busy:'Another operation is in progress.',unavailable:reason,ready:retryReady}[mode];
-  const label=mode==='pending'?'Retrying…':'Retry',result=mode!=='pending' && retryResult;
+  const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning()?'busy':retry.allowed===true?'ready':'unavailable';
+  const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
+  const title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
+  const label=mode==='pending'?copy.pending:copy.label,result=mode!=='pending' && retryResult;
   const text=result?retryResult.text:mode==='ready'?'':title;
   if(button.textContent!==label)button.textContent=label;
   if(button.title!==title)button.title=title;
@@ -488,19 +547,54 @@ function updateRetry(){
   if(note.textContent!==text)note.textContent=text;
   note.hidden=!text;note.classList.toggle('retry-refused',!!result);
 }
-function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
-async function retryJob(){
-  const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null;
-  if(!key || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || job.retry?.allowed!==true || $('retry-job').disabled)return;
-  retryPending={key};retryResult=null;busy=true;controls();
+function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
+async function retryFromRow(row){
+  // Select without scrolling, then the same request as the details-panel Retry.
+  if(selectedPath!==row.path)select(row,true);
+  const index=rows.findIndex(item=>item.path===row.path);
+  await retryJob({row:true,path:row.path,index});
+}
+function retryMode(row){
+  const key=retryKey(row),retry=key?rowAction(row)?.data:null;
+  if(ended || recoveryDisconnected)return 'offline';
+  if(key && retryPending?.key===key)return 'pending';
+  if(busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning())return 'busy';
+  return retry?.allowed===true?'ready':'unavailable';
+}
+function updateRowRetries(){
+  for(const entry of rowRetries.values()){
+    const row=entry.row,attention=attentionText(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
+    const copy=retryPending?.key===key?rowActions[retryPending.kind]:action || rowActions.retry;
+    let hint=attention?attention.hint:'',warn=!!attention?.warn;
+    if(mode==='unavailable' && typeof retry?.reason==='string' && retry.reason)hint=retry.reason;
+    if(mode==='pending')hint=copy.note;
+    if(retryResult && retryResult.key===key && mode!=='pending'){hint=retryResult.text;warn=true;}
+    if(entry.hint.textContent!==hint)entry.hint.textContent=hint;
+    entry.hint.classList.toggle('retry-refused',warn);
+    if(!entry.button)continue;
+    const label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
+    if(entry.button.textContent!==label)entry.button.textContent=label;
+    if(entry.button.title!==title)entry.button.title=title;
+    entry.button.setAttribute('aria-label',label+': '+(row.title_clue || row.review?.title || 'Book'));
+    if(mode==='pending')entry.button.setAttribute('aria-disabled','true');else entry.button.removeAttribute('aria-disabled');
+    entry.button.disabled=mode!=='ready' && mode!=='pending';
+  }
+}
+async function retryJob(origin=null){
+  const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
+  if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || action.data.allowed!==true || $('retry-job').disabled)return;
+  retryPending={key,kind:action.kind};retryResult=null;busy=true;controls();
   let succeeded=false;
-  try{await request('/api/audiobook/retry',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id});succeeded=true;}
-  catch(error){retryResult={key,text:error.httpStatus?(error.message || 'Retry was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);else if(error.httpStatus===409)retryEpoch++;}
+  let answer=null;
+  try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id});succeeded=true;}
+  catch(error){retryResult={key,text:error.httpStatus?(error.message || action.refused):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);else if(error.httpStatus===409)retryEpoch++;}
+  // The book leaves this filter: the strip keeps a line saying what Repair will patch.
+  if(succeeded && action.kind==='repair' && filters[view]==='output_attention')stripNote='Repair queued: '+damageHint(attentionOf(row));
   const focused=document.activeElement===$('retry-job');
   retryPending=null;busy=false;
   if(succeeded){
     // The server requeued the job: show it as queued now, and ignore book lists requested before this answer.
-    retryEpoch++;const queued=queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
+    retryEpoch++;const queued=answer?.queued_next===true?queuedNext(row,answer):queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
     // The block leaves the page: focus moves to the panel heading, never into the automatic result.
     if(focused && retryKey(selectedRow)===key)$('details-heading').focus?.({preventScroll:true});
     if(selectedRow?.path===row.path)select(queued,false);
@@ -508,7 +602,79 @@ async function retryJob(){
   controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();
+  if(origin?.row && succeeded){
+    // The rebuilt list may no longer hold the book: its row, else the row now at that index, else the filter.
+    const rowsNow=$('inventory').children,same=[...rowsNow].find(tr=>tr.dataset?.path===origin.path);
+    (same || rowsNow[Math.min(origin.index,rowsNow.length-1)] || $('filter')).focus?.({preventScroll:true});
+  }
+  return succeeded;
 }
+// Retry all (Attention spec section 6): the server's whole Can retry group, not the visible page,
+// after an inline confirmation. The server runs one book at a time; its count arrives with each poll.
+function openRetryAll(){
+  const counts=state?.audiobook_jobs?.attention_counts || {},count=Number.isInteger(counts.retry)?counts.retry:0,queued=state?.audiobook_jobs?.queued;
+  if(count<2 || bulkRunning() || busy || ended || recoveryDisconnected)return;
+  retryAllConfirm={count,queued:Number.isInteger(queued) && queued>0?queued:0};stripNote='';renderAttentionGroups();
+  $('retry-all-cancel').focus?.({preventScroll:true});
+}
+function closeRetryAll(){if(!retryAllConfirm)return;retryAllConfirm=null;renderAttentionGroups();$('retry-all').focus?.({preventScroll:true});}
+async function startRetryAll(){
+  if(!retryAllConfirm || bulkRunning() || busy || ended || recoveryDisconnected)return;
+  retryAllConfirm=null;busy=true;stripNote='';controls();
+  try{
+    const result=await request('/api/audiobook/retry-all',{library:'Audiobooks'}),run=result?.retry_all;
+    if(run && typeof run.id==='string'){
+      retryAllRun={id:run.id,ended:false};state={...state,audiobook_jobs:{...(state?.audiobook_jobs || {}),retry_all:run}};
+      stripNote=`Retrying ${Number(run.total).toLocaleString()} books.`;
+    }
+  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry all was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
+  finally{busy=false;}
+  controls();$('retry-all-status').focus?.({preventScroll:true});
+}
+function finishRetryAll(run){
+  // Once per run: the end line stays until the group or filter changes; the list reloads and focus returns to the group.
+  retryAllRun.ended=true;const queued=Number(run.queued)||0,total=Number(run.total)||0;
+  const next=Number(run.next)||0,after=next?` ${next===queued?'They run':`${next.toLocaleString()} of them run`} right after the current book, one at a time.`:'';
+  stripNote=run.state==='done'?`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}${total>queued?` ${(total-queued).toLocaleString()} could not be retried.`:''}`:`Stopped. Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}`;
+  setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();if(!$('attention-groups').hidden)$('group-retry').focus?.({preventScroll:true});},0);
+}
+const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',other:'Other',unsupported:'M4B not supported'};
+const attentionKeys=['all','retry','repair','other','unsupported'];
+function renderAttentionGroups(){
+  const shown=view==='candidates' && filters[view]==='output_attention',strip=$('attention-groups');strip.hidden=!shown;if(!shown)return;
+  const counts=state?.audiobook_jobs?.attention_counts || {},value=key=>Number.isInteger(counts[key])?counts[key]:0,total=value('retry')+value('repair')+value('other')+value('unsupported');
+  for(const key of attentionKeys){
+    const button=$('group-'+key),count=key==='all'?total:value(key),text=`${attentionLabels[key]} · ${count.toLocaleString()}`;
+    if(button.textContent!==text)button.textContent=text;
+    button.setAttribute('aria-pressed',String(attentionGroup===key));
+    if(key==='all')button.title=`Show all ${total.toLocaleString()} books that need attention.`;
+  }
+  const run=bulkRun(),running=run?.state==='running';
+  if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
+  const all=$('retry-all'),confirm=retryAllConfirm,allLabel=`Retry all (${value('retry').toLocaleString()})`;
+  all.hidden=attentionGroup!=='retry' || value('retry')<2 || !!confirm;
+  if(all.textContent!==allLabel)all.textContent=allLabel;
+  all.title=`Check these ${value('retry').toLocaleString()} books again and queue each audiobook job.`;
+  all.disabled=running || busy || ended || recoveryDisconnected;
+  // The confirmation keeps the count it opened with; polls never rebuild it.
+  $('retry-all-confirm').hidden=!confirm || attentionGroup!=='retry';
+  if(confirm){
+    const question=`Queue ${confirm.count.toLocaleString()} books to be checked again? They run one at a time, right after the current book.`,go=`Queue ${confirm.count.toLocaleString()} books`;
+    if($('retry-all-question').textContent!==question)$('retry-all-question').textContent=question;
+    if($('retry-all-go').textContent!==go)$('retry-all-go').textContent=go;
+    $('retry-all-go').disabled=running || busy || ended || recoveryDisconnected;
+  }
+  // The live region announces only the start and the end; the running count sits outside it.
+  const count=running?`${Number(run.done).toLocaleString()} of ${Number(run.total).toLocaleString()}`:'';
+  if($('retry-all-status').textContent!==stripNote)$('retry-all-status').textContent=stripNote;
+  if($('retry-all-count').textContent!==count)$('retry-all-count').textContent=count;
+  $('retry-all-line').hidden=!stripNote && !count;
+}
+for(const key of attentionKeys)$('group-'+key).addEventListener('click',()=>{if(attentionGroup===key)return;attentionGroup=key;resetStrip();renderAttentionGroups();return updateList();});
+$('retry-all').addEventListener('click',()=>{if($('retry-all').disabled)return;openRetryAll();});
+$('retry-all-go').addEventListener('click',()=>{if($('retry-all-go').disabled)return;return startRetryAll();});
+$('retry-all-cancel').addEventListener('click',()=>closeRetryAll());
+$('retry-all-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetryAll();}});
 $('retry-job').addEventListener('click',()=>{if($('retry-job').getAttribute?.('aria-disabled')==='true' || retryPending)return;retryJob();});
 $('recovery-cancel').addEventListener('click',()=>closeRecoveryDialog());
 $('recovery-confirm').addEventListener('click',deleteRecoveryCopies);
@@ -604,7 +770,38 @@ function recordingFacts(row){
   related.forEach((item,index)=>{facts['Related recording '+(index+1)]=[item.title,item.edition?'Edition: '+item.edition:'',item.narrator?'Narrator: '+item.narrator:'',item.language?'Recording language: '+item.language:''].filter(Boolean).join(' · ');});
   return facts;
 }
+const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],space:['Stopped — not enough disk space','Free up disk space, then retry.'],repair:['Damaged — can repair',''],
+  unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','Select the row to read why.']};
+function attentionOf(row){const job=row?.creation?.job;return job?.state==='Output needs attention' && job.attention && typeof job.attention.group==='string'?job.attention:null;}
+function attentionText(row){
+  const a=attentionOf(row);if(!a)return null;
+  const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':'other',[status,hint]=attentionCopy[kind];
+  const readmission=readmissionOf(row);
+  if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
+  if(readmission?.accepted===false && typeof readmission.reason==='string' && readmission.reason)return {status,hint:(readmission.kind==='repair'?'Repair':'Retry')+' was refused: '+readmission.reason,warn:true};
+  return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint};
+}
+// What is wrong, then what Repair does; and, once queued or done, what it patched. Keyed by the patch kind.
+const damageCopy={
+  dangling_chapter_reference:{hint:'The chapter list points to a missing part. Repair removes that pointer.',patch:()=>'Removed a chapter-list pointer to a missing part.'},
+  mdat_tail_overrun:{hint:'The file claims a few bytes past its end. Repair adds them; no audio is missing.',patch:item=>Number.isInteger(item.padding) && item.padding>0?`Added ${item.padding.toLocaleString()} missing bytes at the end of the file. No audio was missing.`:'Added the missing bytes at the end of the file. No audio was missing.'},
+  truncated_final_frames:{hint:item=>missingSeconds(item)?`The last ${missingSeconds(item)} s of audio is missing. Repair fills it with silence.`:'The end of the audio is missing. Repair fills it with silence.',
+    patch:item=>missingSeconds(item)?`Filled the missing last ${missingSeconds(item)} s with silence.`:'Filled the missing end of the audio with silence.'}};
+function missingSeconds(item){const ticks=item?.replaced_ticks,scale=item?.timescale;return Number.isInteger(ticks) && Number.isInteger(scale) && ticks>0 && scale>0?(ticks/scale).toLocaleString(undefined,{maximumFractionDigits:2}):'';}
+const damageFallback={hint:'The app found damage it can patch. Repair fixes it.',patch:()=>'Patched damage the app found.'};
+function damageHint(attention){const items=Array.isArray(attention?.damage)?attention.damage:[];return [...new Set(items.map(item=>{const hint=(damageCopy[item?.kind] || damageFallback).hint;return typeof hint==='function'?hint(item):hint;}))].join(' ') || damageFallback.hint;}
+function patchCopy(item){return (damageCopy[item?.kind] || damageFallback).patch(item && typeof item==='object'?item:{});}
+function repairedText(repaired){
+  const patched=Array.isArray(repaired?.patched)?repaired.patched:[];if(!patched.length)return '';
+  return (repaired.applied===true?'Repaired: ':'Repair queued: ')+patchCopy(patched[0])+(patched.length>1?` +${patched.length-1} more`:'');
+}
+function technicalText(row){
+  const job=row?.creation?.job || {},details=(attentionOf(row)?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
+  return 'Technical detail: '+(job.reason || 'Unavailable')+(details.length?' — '+details.join(' '):'');
+}
 function candidateStatus(row){
+  const attention=attentionText(row);if(attention)return attention.status;
+  const readmission=readmissionOf(row);if(readmission?.queued_next===true)return queuedNextText(readmission);
   const creation=row.creation?.status || '',status=row.status || '',automatic=row.automatic,job=row.creation?.job;
   // A job that needs attention leads with its own reason, so the status names what was blocked.
   const jobReason=job?.state==='Output needs attention' && typeof job.reason==='string'?job.reason:'';
@@ -626,12 +823,18 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
   setText('automatic-result-status',candidateStatus(row));
+  const attention=attentionText(row);setText('automatic-result-hint',attention?attention.hint:'');$('automatic-result-hint').hidden=!attention;
+  // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
+  const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
+  setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;
+  const technical=attention?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'';
+  setText('automatic-technical',technical);$('automatic-technical').hidden=!technical;
   $('automatic-reasons').replaceChildren();for(const reason of automatic?.reasons || [])$('automatic-reasons').append(node('li',reason));$('automatic-reasons').hidden=!automatic?.reasons?.length;
   $('automatic-result-help').hidden=automatic?.state!=='Held';
   setText('automatic-attempt',automatic?.attempted_utc?'Last attempt: '+recoveryDate(automatic.attempted_utc):'No automatic research attempt recorded.');
