@@ -41,9 +41,30 @@ class ClosingConnection(sqlite3.Connection):
         finally:
             self.close()
 
+_ENSURED=set();_ENSURED_LOCK=threading.Lock()
+
+def _catalog_identity(database):
+    """(path, volume, file index) of an existing catalog file; None when it cannot be read."""
+    try:
+        value=os.stat(database)
+        return (os.path.normcase(os.path.abspath(str(database))),value.st_dev,value.st_ino)
+    except (OSError,TypeError,ValueError):return None
+
 def connect(database, timeout=10):
     connection = sqlite3.connect(database, timeout=timeout, factory=ClosingConnection)
     connection.row_factory = sqlite3.Row
+    # The book list and status open hundreds of connections per read; WAL mode and the base tables are
+    # persistent, so they are ensured once per catalog file (a replaced file has a new identity).
+    identity=_catalog_identity(database)
+    if identity is not None and identity in _ENSURED:
+        try:
+            connection.execute('PRAGMA busy_timeout='+str(int(timeout*1000)))
+            # The schema is read for any statement anyway; a missing base table falls back to the full setup.
+            if connection.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('jobs','queue','files','scan_outcomes')").fetchone()[0]==4:
+                return connection
+        except BaseException:
+            connection.close()
+            raise
     try:
         connection.execute('PRAGMA journal_mode=WAL')
         connection.execute('PRAGMA busy_timeout='+str(int(timeout*1000)))
@@ -63,6 +84,9 @@ def connect(database, timeout=10):
     except BaseException:
         connection.close()
         raise
+    identity=_catalog_identity(database)
+    if identity is not None:
+        with _ENSURED_LOCK:_ENSURED.add(identity)
     return connection
 
 def inside(path, root):

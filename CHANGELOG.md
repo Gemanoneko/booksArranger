@@ -6,6 +6,7 @@
 
 - A book no longer needs tens of GB of free space to convert. Before, every track was turned into a full uncompressed WAV copy of the audio and all of them were kept until encoding, so a 1.3 GB, 22-hour book ("The Lost Symbol") asked for 62.7 GB. The audio is now decoded straight into the encoder, so the working space needed is about twice the size of the book's source files. Every byte given to the encoder is still checked against an independent full decode of the sources, and the finished audiobook is still verified before any original is touched. Measured on a 1-hour, 20-track book: peak working space went from 1.39 GB to 116 MB, and conversion time from 146 s to 74 s.
 - The book list loads much faster on a large library. On a 4,000-book test catalog: "Output needs attention" took 1.1 s instead of 7.4 s, "All candidates" 1.5 s instead of 6.5 s, and Held, Queued, Ready and Approved about 0.1 s instead of 2 to 10 s. While a different list is loading, the table says "Loading …" instead of showing the old list under the new filter.
+- Idle app no longer re-scans the catalog: indexed recovery lookups, page-scoped lists and quiet status; filter changes show Loading at once.
 
 ### Added
 

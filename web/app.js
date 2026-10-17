@@ -231,10 +231,27 @@ function acknowledgeRestart(current){
   else if(automatic?.state==='Idle' && !automatic.run_id)message('Books Arranger restarted.');
 }
 
+// One book-list request; it paints itself if it is still the newest request for the list on screen.
+function loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,forceRender){
+  const ticket=++listTicket;listPending=context;
+  if(context!==paintedContext)showListLoading();
+  const groupQuery=requestView==='candidates' && requestFilter==='output_attention' && attentionGroup!=='all'?`&group=${attentionGroup}`:'';
+  return request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`).then(page=>{
+    // A book list requested before Retry was answered predates it and would repaint the old state.
+    if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
+    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
+    const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
+    return true;
+  }).finally(()=>{if(ticket===listTicket)listPending='';});
+}
 async function refresh(force=false) {
   if (ended) return false;
   const sequence=++refreshSequence;
   const library=$('library').value,context=listContext(),requestView=view,requestFilter=filters[view],requestOffset=offset,requestSearch=search,epoch=retryEpoch;
+  // A list change (filter, group, page, search, view, library) shows its loading text and asks for its list at
+  // once, beside the status read: neither waits for /api/state (v0.16.7 QA: up to 11 s behind a slow status).
+  const early=force?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
+  early?.catch(()=>{});
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext()) return false;
   state=current;
@@ -253,20 +270,15 @@ async function refresh(force=false) {
   }
   controls();
   const key=JSON.stringify([library,view,filters[view],offset,search,status.count,status.checked,status.state,status.unresolved_errors]);
-  if (force || view==='candidates' || key!==lastKey) {
+  if (early) {
+    if(!await early)return false;
+    lastKey=key;
+  } else if (view==='candidates' || key!==lastKey) {
     // The book list is slow on a large catalog: a request already on its way for this exact list paints
     // itself, so polls never restart it; only a newer request for the list replaces it.
-    if(!force && listPending===context){acknowledgeRestart(current);return true;}
-    const ticket=++listTicket;listPending=context;
-    if(context!==paintedContext)showListLoading();
-    const groupQuery=requestView==='candidates' && requestFilter==='output_attention' && attentionGroup!=='all'?`&group=${attentionGroup}`:'';
-    let page;
-    try{page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`);}
-    finally{if(ticket===listTicket)listPending='';}
-    // A book list requested before Retry was answered predates it and would repaint the old state.
-    if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
-    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;
-    const changed=context!==paintedContext;paintedContext=context;renderRows(force || changed);
+    if(listPending===context){acknowledgeRestart(current);return true;}
+    if(!await loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,false))return false;
+    lastKey=key;
   }
   acknowledgeRestart(current);
   return true;

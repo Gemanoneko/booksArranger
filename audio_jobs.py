@@ -89,11 +89,34 @@ RETRY_ALL_RUNNING = 'Retry all is already running.'
 RETRY_ALL_NONE = 'No books can be retried right now.'
 
 
+# Finished repair checks by (job id, manifest hash, preservation module sha256), filled from the catalog's
+# m4b_repair_checks table and by the background checker: a check runs once per job and module, not per launch.
+REPAIR_CHECKS = {}
+_REPAIR_CHECKS_LOCK = threading.Lock()
+
+
+def repair_check_key(row):
+    """The key a repair check stays valid for; None if the module cannot be read."""
+    try:
+        import m4b_repair
+        return (row['job_id'], row['manifest_hash'], m4b_repair._MODULE_SHA256)
+    except Exception:
+        return None
+
+
+def remember_repair_check(key, result):
+    with _REPAIR_CHECKS_LOCK:
+        if len(REPAIR_CHECKS) >= 4096:
+            REPAIR_CHECKS.clear()
+        REPAIR_CHECKS[key] = dict(result)
+
+
 def _m4b_fields(row):
     """(repair field, M4B retry eligibility) of a raw needs-attention row. No I/O; display only, never raises.
 
-    repair: m4b_repair.classify (None, unchecked, or the cached check). retry: failed_m4b_retry.eligible,
-    a reason this version can now preserve (its REASONS), re-admitted as new, proven work.
+    repair: m4b_repair.classify (None, unchecked, or the cached check), or a remembered finished check.
+    retry: failed_m4b_retry.eligible, a reason this version can now preserve (its REASONS), re-admitted as
+    new, proven work.
     """
     try:
         import failed_m4b_retry
@@ -102,6 +125,11 @@ def _m4b_fields(row):
         return None, False
     try:
         repair = m4b_repair.classify(row)
+        if repair == {'state': 'unchecked'}:
+            with _REPAIR_CHECKS_LOCK:
+                found = REPAIR_CHECKS.get(repair_check_key(row))
+            if found:
+                repair = dict(found)
     except Exception:
         repair = None
     try:
@@ -185,6 +213,9 @@ class AudioJobs:
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
             db.execute('CREATE TABLE IF NOT EXISTS audio_repair_admissions(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
+            # Status reads look jobs up by state and a book's newest job by candidate; both scanned every manifest.
+            db.execute('CREATE INDEX IF NOT EXISTS audio_jobs_state ON audio_jobs(state)')
+            db.execute("CREATE INDEX IF NOT EXISTS audio_jobs_candidate ON audio_jobs(json_extract(manifest,'$.candidate_id'),created,job_id)")
         self._recover()
 
     def _db(self):
@@ -446,10 +477,16 @@ class AudioJobs:
             return {'retryable':True,'retry_at':now+3600,'requeued':True}
 
     @staticmethod
-    def _newest_jobs(db):
-        """{candidate id: newest job id}, in one pass (E6 for many rows at once)."""
+    def _newest_jobs(db, candidates=None):
+        """{candidate id: newest job id}, in one pass (E6 for many rows at once); candidates limits it to those
+        books through the candidate index instead of reading every manifest."""
         newest = {}
-        for job_id, candidate in db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs ORDER BY created, job_id"):
+        if candidates is None:
+            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs ORDER BY created, job_id")
+        else:
+            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IN (SELECT value FROM json_each(?)) ORDER BY created, job_id",
+                               (json.dumps(sorted(str(c) for c in candidates if c is not None)),))
+        for job_id, candidate in found:
             newest[candidate] = job_id
         return newest
 
@@ -514,7 +551,13 @@ class AudioJobs:
             return {}
         with self._db() as db:
             rows = [dict(r) for r in db.execute(query, tuple(job_ids or ()))]
-            latest = self._newest_jobs(db) if rows else {}
+            wanted = set()
+            for row in rows:
+                try:
+                    wanted.add(json.loads(row['manifest']).get('candidate_id'))
+                except (TypeError, ValueError, AttributeError):
+                    pass
+            latest = self._newest_jobs(db, wanted) if rows else {}
             cleaned = {r[0] for r in db.execute("SELECT job_id FROM source_cleanup")} if rows and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_cleanup'").fetchone() else set()
             shapes = {row['job_id']: self._retry_shape(db, row, latest) for row in rows}
             import m4b_readmission

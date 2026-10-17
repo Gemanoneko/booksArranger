@@ -199,6 +199,12 @@ class CandidateReviewService:
     ATTENTION_ORDER={'retry':0,'repair':1,'other':2,'unsupported':3}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
+        """One page of the book list; replacement relations are read once for the page, not once per lookup."""
+        snapshot=getattr(getattr(self.jobs,'replacements',None),'snapshot',None) if self.jobs else None
+        if snapshot is None:return self._page(limit,offset,search,status,group)
+        with snapshot():return self._page(limit,offset,search,status,group)
+
+    def _page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list.
 
         Speed (v0.16.7): job, ready, held and attention filters are decided per candidate id first, so
@@ -286,7 +292,8 @@ class CandidateReviewService:
             # Per-book extras for the shown page only.
             shown=[self.page_local.jobs[r['id']] for r in chosen if r['id'] in self.page_local.jobs]
             if shown and self.jobs and hasattr(self.jobs,'cleanup'):
-                for job in shown:job['cleanup']=self.jobs.cleanup.status(job['job_id'])
+                statuses=self.jobs.cleanup_statuses([job['job_id'] for job in shown]) if hasattr(self.jobs,'cleanup_statuses') else {job['job_id']:self.jobs.cleanup.status(job['job_id']) for job in shown}
+                for job in shown:job['cleanup']=statuses[job['job_id']]
             waiting=[job['job_id'] for job in shown if job['state']=='Output needs attention']
             if waiting and hasattr(self.jobs,'attention_summary'):
                 details=self.jobs.attention_summary(waiting)

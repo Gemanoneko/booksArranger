@@ -175,6 +175,16 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(get('inventory').children.length,0,'the old list is not shown as the new result');assert.equal(get('page').textContent,'Loading All candidates…');assert.equal(get('empty').hidden,false);
   document.activeElement=null;pendingList({ok:true,json:async()=>({rows:[other],total:1})});await changing;
   assert.equal(get('inventory').children.length,1);assert.match(get('page').textContent,/All candidates/);inventoryOverride=null;
+  // QA v0.16.7: a slow status read never delays the loading text, the list request or its rows.
+  let stateGate;const stateWait=new Promise(resolve=>{stateGate=resolve;}),listFetch=context.fetch;
+  context.fetch=async(route,options)=>{if(route.startsWith('/api/state'))await stateWait;return listFetch(route,options);};
+  let listGate;inventoryOverride=()=>new Promise(resolve=>{listGate=resolve;});
+  const beforeSlow=calls.length;get('filter').value='output_attention';const slowChange=get('filter').handlers.change();await tick();
+  assert.match(get('page').textContent,/^Loading Output needs attention/,'loading shows at once');
+  assert.ok(calls.slice(beforeSlow).some(call=>call.route.startsWith('/api/inventory')),'the list is asked for while the status read is pending');
+  listGate({ok:true,json:async()=>({rows:[retry],total:1})});await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(get('inventory').children.length,1,'the rows paint before the status answers');
+  stateGate();await slowChange;context.fetch=listFetch;inventoryOverride=null;
 
   // 3c: whole files in the detail, the bar by fraction. 3d: research keeps one ETA history across books.
   context.fixture={audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'conversion',kind:'conversion',subject:'B',step:'preparing',step_index:1,step_count:4,done:2,total:4,fraction:0.63,unit:'files',indeterminate:false,state:'running',step_started_at:Date.now()-20000}]};

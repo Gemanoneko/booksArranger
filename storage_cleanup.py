@@ -37,6 +37,10 @@ class StorageCleanup:
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_directories(job_id TEXT,path TEXT,identity TEXT,ancestry TEXT,state TEXT,reason TEXT,updated TEXT,PRIMARY KEY(job_id,path))')
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_files(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER, facts TEXT, state TEXT, updated TEXT)')
+            # Recovery status reads these per book on every status read and book-list page; without an index
+            # each lookup scanned the whole table (about 1.6 GB read per status on the real catalog).
+            db.execute('CREATE INDEX IF NOT EXISTS storage_cleanup_files_job ON storage_cleanup_files(job_id,kind)')
+            db.execute('CREATE INDEX IF NOT EXISTS storage_cleanup_preserved_job ON storage_cleanup_preserved(job_id)')
 
     @staticmethod
     def _cas(db, table, expected, target):

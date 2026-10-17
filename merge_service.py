@@ -31,6 +31,9 @@ import groups
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
 STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
 STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
+QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
+# the bound only refreshes what can change without a commit (files removed by hand outside the app).
+_QUIET_LOCK=threading.Lock()
 
 
 class StatusUnavailable(RuntimeError):
@@ -240,13 +243,79 @@ class MergeService:
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted}
 
     def status_snapshot(self,max_age=STATUS_MAX_AGE):
-        """Polling routes only: concurrent readers share one state() computation, reused briefly. Controls keep fresh state()."""
-        return self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(self.state,max_age)
+        """Polling routes only: concurrent readers share one state() computation, reused briefly. Controls keep fresh state().
+
+        While the app is quiet (nothing runs, no catalog commit since), the last answer is reused for up to
+        QUIET_MAX_AGE: an idle window no longer re-reads the catalog every second.
+        """
+        token=self._quiet_token(True)
+        with _QUIET_LOCK:
+            kept=self.__dict__.get('_quiet_state')
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:return copy.deepcopy(kept[2])
+        started,value=self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(lambda:(self._quiet_token(),self.state()),max_age)
+        if token is not None and started==token:
+            with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value))
+        return value
+
+    def cached_page(self,limit,offset,search,status,group=None):
+        """The book list for polling: a quiet app reuses the identical page (see status_snapshot)."""
+        key=(limit,offset,search,status,group);token=self._quiet_token(True)
+        with _QUIET_LOCK:
+            kept=self.__dict__.get('_quiet_pages',{}).get(key)
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:return copy.deepcopy(kept[2])
+        value=self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status)
+        if token is not None and self._quiet_token()==token:
+            with _QUIET_LOCK:
+                pages=self.__dict__.setdefault('_quiet_pages',{})
+                if len(pages)>=16:pages.clear()
+                pages[key]=(token,time.monotonic(),copy.deepcopy(value))
+        return value
+
+    def cleanup_statuses(self,job_ids):
+        """Book list: each shown book's cleanup status, reused from the last status computation while it is under
+        5 s old or the app has stayed quiet since (one status costs about 30 ms per book on the real catalog)."""
+        kept=self.__dict__.get('_cleanup_kept')
+        age=time.monotonic()-kept[0] if kept else -1
+        if kept and (0<=age<5.0 or 0<=age<QUIET_MAX_AGE and kept[1] is not None and kept[1]==self._quiet_token()):
+            return {job_id:copy.deepcopy(kept[2].get(job_id)) for job_id in job_ids}
+        return {job_id:self.cleanup.status(job_id) for job_id in job_ids}
+
+    def _busy(self):
+        """Anything in this app that changes polling answers without a catalog commit is running."""
+        jobs=getattr(self,'jobs',None);cleanup=getattr(self,'cleanup',None)
+        # Not here: the published-book check (its progress is part of the quiet token, so its status refreshes
+        # once per checked book) and the M4B repair checks (their classes show when the pass ends, which
+        # invalidates the status; they are saved, so a pass runs once per job, not per launch).
+        threads=(getattr(jobs,'_thread',None),getattr(cleanup,'thread',None),
+                 getattr(getattr(self,'automatic',None),'thread',None),getattr(getattr(self,'inventory',None),'worker',None),
+                 getattr(getattr(self,'publications',None),'_thread',None),
+                 self.__dict__.get('_retry_all_thread'))
+        return bool(any(thread is not None and thread.is_alive() for thread in threads) or getattr(jobs,'_resuming',False)
+                    or getattr(cleanup,'current',None) or getattr(self,'_post_current',None) or getattr(self,'draining',False))
+
+    def _quiet_token(self,create=False):
+        """Equal between two reads only if nothing ran and no catalog commit happened between them (PRAGMA
+        data_version on one idle monitor connection, plus a counter every control bumps); None while busy.
+        Only the polling entry points open the monitor (create=True); until then every answer is fresh."""
+        try:
+            if self._busy():return None
+            database=self.inventory.database
+            with _QUIET_LOCK:
+                monitor=self.__dict__.get('_monitor')
+                if monitor is None:
+                    if not create:return None
+                    monitor=self._monitor=sqlite3.connect(database,timeout=1,check_same_thread=False)
+                version=monitor.execute('PRAGMA data_version').fetchone()[0]
+            check=json.dumps(getattr(self.jobs,'_check_progress',None),sort_keys=True,default=str)
+            return (version,self.__dict__.get('_quiet_generation',0),check)
+        except Exception:return None
 
     def invalidate_status(self):
         """A control ran: the next polling read recomputes instead of reusing a pre-control answer."""
         shared=self.__dict__.get('_status_shared')
         if shared is not None:shared.invalidate()
+        with _QUIET_LOCK:
+            self._quiet_generation=self.__dict__.get('_quiet_generation',0)+1;self._quiet_state=None;self._quiet_pages={}
 
     def state(self):
         snapshot=getattr(getattr(self,'replacements',None),'snapshot',None)
@@ -271,8 +340,9 @@ class MergeService:
         # then starts the next book; a cleanup thread resumes the converter before it exits.
         # Workers are sampled BEFORE the slow durable read too, so a cleanup that ends mid-read
         # (its marker cleared, its row still read as pending) is never reported Paused (v0.16.2).
-        worker=self._worker_active()
+        worker=self._worker_active();token=self._quiet_token();started=time.monotonic()
         value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
+        self._cleanup_kept=(started,token,{item['job_id']:item for item in cleanups})  # the book list reuses these
         raw_jobs=value['jobs']
         if hasattr(self,'replacements'):
             visible,completed=self.replacements.projected(value['jobs'],value['current_job_id'])
@@ -323,7 +393,7 @@ class MergeService:
             attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason','')}
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self.progress_books(raw_jobs,cleanups,storage,folders)
-        self._converted_cache=(time.monotonic(),set(totals.get('converted_ids') or ()))
+        self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
         counts={'retry':0,'repair':0,'other':0,'unsupported':0}
         for item in self.attention_summary(retry=False).values():counts[item['group']]+=1
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
@@ -335,10 +405,13 @@ class MergeService:
             'published_check':value.get('published_check'),'attention_counts':counts,'attention_row':attention_row}
 
     def converted_ids(self,max_age=5.0):
-        """Converted candidate ids, reused from the last status computation when fresh (the book list asks every poll)."""
+        """Converted candidate ids, reused from the last status computation when fresh, or while the app has stayed
+        quiet since it (the book list asks on every change; recomputing costs seconds on the real catalog)."""
         cached=getattr(self,'_converted_cache',None)
-        if cached and 0<=time.monotonic()-cached[0]<max_age:return set(cached[1])
-        value=set(self.progress_books()['converted_ids']);self._converted_cache=(time.monotonic(),value);return set(value)
+        age=time.monotonic()-cached[0] if cached else -1
+        if cached and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and len(cached)>2 and cached[2] is not None and cached[2]==self._quiet_token()):return set(cached[1])
+        token=self._quiet_token();started=time.monotonic()
+        value=set(self.progress_books()['converted_ids']);self._converted_cache=(started,value,token);return set(value)
 
     def pause(self):
         # During a desktop Quit drain the current book finishes; nothing is interrupted. No status is
@@ -686,6 +759,7 @@ class MergeService:
         """Group, cause and Retry data per job that needs attention (audio_jobs.attention_summary)."""
         clear=getattr(getattr(self,'working',None),'admission_clear',None)
         if not hasattr(self.jobs,'attention_summary'):return {}
+        if getattr(getattr(self,'inventory',None),'database',None):self._load_repair_checks()
         summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
         unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
         if unchecked:self._check_repairs(unchecked)
@@ -697,6 +771,7 @@ class MergeService:
         A check reads only the source's box headers and movie box, read-only; the next status read shows
         the result. It never repairs anything: Repair runs only when the user presses it.
         """
+        self._load_repair_checks()
         with _REPAIR_LOCK:
             pending=self.__dict__.setdefault('_repair_pending',[]);skipped=self.__dict__.setdefault('_repair_skipped',set())
             pending.extend(job_id for job_id in job_ids if job_id not in pending and job_id not in skipped)
@@ -706,18 +781,53 @@ class MergeService:
             self._repair_thread=threading.Thread(target=self._repair_check_work,args=(stop,),name='books-repair-check',daemon=True)
             self._repair_thread.start()
 
+    def _load_repair_checks(self):
+        """Once per app run: finished checks saved by earlier runs (m4b_repair_checks), so a launch does not
+        re-parse every M4B movie box (about 3 CPU-minutes on the real catalog, which slowed every request)."""
+        if self.__dict__.get('_repair_checks_loaded'):return
+        self._repair_checks_loaded=True
+        from audio_jobs import remember_repair_check
+        try:
+            with connect(self.inventory.database) as db:
+                db.execute('CREATE TABLE IF NOT EXISTS m4b_repair_checks(job_id TEXT PRIMARY KEY,manifest_hash TEXT NOT NULL,module_sha256 TEXT NOT NULL,result TEXT NOT NULL,checked TEXT NOT NULL)')
+                for row in db.execute('SELECT job_id,manifest_hash,module_sha256,result FROM m4b_repair_checks'):
+                    result=json.loads(row['result'])
+                    if isinstance(result,dict) and result.get('state') in ('intact','refused','repairable'):remember_repair_check((row['job_id'],row['manifest_hash'],row['module_sha256']),result)
+        except (sqlite3.Error,ValueError,TypeError,AttributeError):pass  # display only: the checker runs again
+
+    def _save_repair_checks(self,found):
+        """One write at the end of a pass, so the pass itself never invalidates the quiet status."""
+        if not found:return
+        try:
+            with connect(self.inventory.database) as db:
+                checked=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+                db.executemany('INSERT OR REPLACE INTO m4b_repair_checks VALUES(?,?,?,?,?)',[(key[0],key[1],key[2],json.dumps(result,ensure_ascii=False),checked) for key,result in found])
+        except (sqlite3.Error,TypeError,ValueError):pass
+
     def _repair_check_work(self,stop):
         import m4b_repair
+        from audio_jobs import REPAIR_CHECKS,repair_check_key,remember_repair_check
+        found=[]
         while True:
             with _REPAIR_LOCK:
                 if stop.is_set() or not self._repair_pending:
-                    self._repair_running=False;return
+                    self._repair_running=False
+                    break
                 job_id=self._repair_pending.pop(0)
             try:
                 rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
-                if rows and m4b_repair.classify(rows[0])=={'state':'unchecked'}:m4b_repair.check(rows[0],stop)
+                key=repair_check_key(rows[0]) if rows else None
+                if rows and key and key not in REPAIR_CHECKS and m4b_repair.classify(rows[0])=={'state':'unchecked'}:
+                    started=time.monotonic();result=m4b_repair.check(rows[0],stop)
+                    if isinstance(result,dict) and result.get('state') in ('intact','refused','repairable') and not str(result.get('reason','')).startswith('Source unavailable'):
+                        remember_repair_check(key,result);found.append((key,result))
+                    # The parse is pure Python: rest as long as it ran (at most 2 s), so requests keep most of the interpreter.
+                    stop.wait(min(2.0,time.monotonic()-started))
             except Exception:
                 with _REPAIR_LOCK:self._repair_skipped.add(job_id)  # stays unchecked; never re-read in a loop
+        self._save_repair_checks(found)
+        if not stop.is_set():self.invalidate_status()  # the new classes show on the next poll
+
 
     def _space_ready(self,manifest):
         """A full-disk failure can be retried once the working drive has room for a conservative bound
@@ -1399,6 +1509,9 @@ class MergeService:
         self.jobs.close()
         if hasattr(self,'publications'):self.publications.close()
         self.cleanup.close()
+        with _QUIET_LOCK:
+            monitor=self.__dict__.pop('_monitor',None)
+        if monitor is not None:monitor.close()
 
     @staticmethod
     def file_id(library,path):

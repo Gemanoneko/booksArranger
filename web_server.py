@@ -1,6 +1,8 @@
 """Loopback-only browser interface for inventory, reviewed metadata and audiobook jobs."""
 import contextlib
 import argparse
+import copy
+import time
 import json
 import os
 from pathlib import Path
@@ -13,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from catalog_owner import BASE, catalog_lock
-from merge_service import StatusUnavailable
+from merge_service import QUIET_MAX_AGE, StatusUnavailable
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 
@@ -199,15 +201,28 @@ class BrowserServer(ThreadingHTTPServer):
         if invalidate:invalidate()
 
     def state(self, library, cached=False):
-        """cached=True is for polling reads only; restart/update fences and control replies stay fresh."""
+        """cached=True is for polling reads only; restart/update fences and control replies stay fresh.
+
+        While the app is quiet (merge_service.status_snapshot), a poll also reuses the library and automatic
+        status: together they read about 100 MB of the real catalog per poll.
+        """
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
+        quiet=getattr(self.merge,'_quiet_token',None) if cached else None
+        token=quiet() if callable(quiet) else None
         jobs=self.merge.status_snapshot() if cached and hasattr(self.merge,'status_snapshot') else self.merge.state()
-        automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
+        key=(library,active,self.closing,self.active_library,json.dumps(jobs,sort_keys=True,default=str))
+        kept=self.__dict__.get('_quiet_parts')
+        if token is not None and kept and kept[0]==(token,key) and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:
+            status,automatic=copy.deepcopy(kept[2])
+        else:
+            status=self.inventory.status(library)
+            automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
+            if token is not None and quiet()==token:self._quiet_parts=((token,key),time.monotonic(),copy.deepcopy((status,automatic)))
         return self.health() | {'library': library, 'root': self.inventory.roots[library],
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
-            'status': self.inventory.status(library), 'audiobook_jobs': jobs,
+            'status': status, 'audiobook_jobs': jobs,
             'automatic_processing': automatic,
             'activities': activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
                                      self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))}
@@ -324,7 +339,9 @@ class Handler(BaseHTTPRequestHandler):
                         if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
                         group=query.get('group') or None
                         if group is not None and group not in {'all','retry','repair','other','unsupported'}:raise ValueError('Unknown attention group')
-                        result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)
+                        pager=getattr(self.server.merge,'cached_page',None)  # a quiet app reuses the identical page
+                        if callable(pager):result=pager(100,int(offset),search,selected_status,group)
+                        else:result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)
                         self.response(200,result | {'offset':int(offset),'page_size':100})
                         return
                     result = self.server.inventory.rows(library,100,int(offset),search,selected_status,page=True)
