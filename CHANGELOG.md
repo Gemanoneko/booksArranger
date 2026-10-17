@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.16.7] - 2026-10-17
+
+### Changed
+
+- A book no longer needs tens of GB of free space to convert. Before, every track was turned into a full uncompressed WAV copy of the audio and all of them were kept until encoding, so a 1.3 GB, 22-hour book ("The Lost Symbol") asked for 62.7 GB. The audio is now decoded straight into the encoder, so the working space needed is about twice the size of the book's source files. Every byte given to the encoder is still checked against an independent full decode of the sources, and the finished audiobook is still verified before any original is touched. Measured on a 1-hour, 20-track book: peak working space went from 1.39 GB to 116 MB, and conversion time from 146 s to 74 s.
+- The book list loads much faster on a large library. On a 4,000-book test catalog: "Output needs attention" took 1.1 s instead of 7.4 s, "All candidates" 1.5 s instead of 6.5 s, and Held, Queued, Ready and Approved about 0.1 s instead of 2 to 10 s. While a different list is loading, the table says "Loading …" instead of showing the old list under the new filter.
+
+### Added
+
+- Books that need attention now say what to do. Each row shows a short status ("Stopped — ready to retry", "Stopped — not enough disk space", "Damaged — can repair", "Can't convert — M4B not supported" or "Stopped — see details") and a one-line hint. The technical reason is shown when you point at the status and in the book's details.
+- Retry is now in the list row too, and also works for a book that stopped because the catalog was busy or the disk was full (once enough space is free). Every Retry checks the book again before queueing it.
+- Existing M4B books that stopped for a reason this version now handles can be retried. Retry first proves the book can be kept byte-for-byte, then queues it as new work; the stopped attempt is kept as history.
+- Retry and Repair of these M4B books work even while another audiobook is being created. The book runs right after the current one, ahead of the normal queue, in the order you pressed, and its row says so ("Queued — runs after the current book", or after how many books). If the check before it runs refuses it, the row shows why and Retry or Repair can be pressed again. "Retry all" queues them the same way.
+- Repair for M4B files with a broken chapter pointer, an audio container that claims a few bytes past the end of the file, or a cut-off end (at most the last second of audio, replaced with silence of the same length; every other audio frame is unchanged and checked). It runs only when you press Repair, never on its own. The row says what is wrong and what Repair does, and afterwards the row and the details panel record exactly what was patched. Repair only reads the original files.
+- While "Output needs attention" is selected, buttons above the list group the books by reason (Can retry, Can repair, Other, M4B not supported), with live counts. "Retry all" asks you to confirm, then retries every book in the "Can retry" group (the whole group, not just the page shown), one at a time, and reports how many were queued.
+
+### Fixed
+
+- Existing M4B books written by Audiobook Builder/QuickTime 7, Chapter and Verse, fre:ac (Nero tags) and iTunes-style taggers are now kept byte-for-byte instead of stopping for review.
+- A book without its own cover no longer fails "Preservation changed decoder, packets or presentation" when the approved cover is added.
+- Very long existing M4B books with large chunk tables (up to 524,288 chunks) are now kept byte-for-byte instead of stopping with "Table count/extent".
+- The research progress row moves again. Before, it could stay at the same count while the book being researched changed many times, because it read a progress record that was saved only now and then.
+- A cleanup that stopped and needs attention is shown as a needs-attention row, instead of appearing as running work between two books.
+- Copying source files now shows whole files ("2 of 17 files") instead of fractions.
+- The estimate of time left appears once it is reliable. The research row's timer no longer restarts with every book, and the list no longer delays the progress updates.
+
 ## [v0.16.6] - 2026-10-17
 
 ### Added
