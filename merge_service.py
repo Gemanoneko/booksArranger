@@ -388,6 +388,10 @@ class MergeService:
         self._manual_recovery=(job_id,confirmation);self._retention_wake.set()
         return {'started':True,'job_id':job_id}
 
+    def start_published_check(self):
+        """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover)."""
+        self.jobs.start_published_check()
+
     def start_retention(self,admission):
         if self._retention_thread:return
         def work():

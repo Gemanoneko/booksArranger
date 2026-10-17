@@ -62,6 +62,9 @@ class AudioJobs:
         self.on_working_hold = None
         self.on_space_hold = None
         self._progress = {}
+        # Startup re-verification of published outputs runs after construction (start_published_check).
+        self._verify_stop = threading.Event()
+        self._verifier = None
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
             db.execute('CREATE TABLE IF NOT EXISTS audio_repair_admissions(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
@@ -101,23 +104,69 @@ class AudioJobs:
             raise ValueError("Output checks did not pass")
 
     def _recover(self):
-        for row in self._rows():
-            state = row["state"]
-            if state == "completed" or (state == "running" and row["stage"] == "publishing"):
-                if state=='completed' and self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:
-                    continue # Exact authorized former-output retirement; preserve immutable history.
-                journal = json.loads(row["journal"])
-                record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
-                try:
-                    self._check_output(record)
-                    if record["job_id"] != row["job_id"]:
-                        raise ValueError("Output job identity mismatch")
-                    if state!='completed' or json.loads(row['output'] or '{}')!=record:
-                        self._update(row["job_id"], state="completed", stage="completed", output=json.dumps(record), reason="")
-                except Exception as exc:
-                    self._update(row["job_id"], state="needs attention", reason=str(exc) or type(exc).__name__)
-            elif state == "running":
+        """Construction settles only rows a crash left running.
+
+        Completed rows are not hashed here: re-reading every published book over
+        the library share kept the engine from answering health past the desktop's
+        3-minute start window. start_published_check() runs that same check after
+        startup, and resume() repeats it before any new work.
+        """
+        for row in self._rows("SELECT * FROM audio_jobs WHERE state='running' ORDER BY created, job_id"):
+            if row["stage"] == "publishing":
+                change = self._settle(row)
+                if change:
+                    self._update(row["job_id"], **change)
+            else:
                 self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+
+    def _settle(self, row):
+        """Exact recorded-output check for one completed or publishing row; returns its row change, if any."""
+        journal = json.loads(row["journal"])
+        record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
+        try:
+            self._check_output(record)
+            if record["job_id"] != row["job_id"]:
+                raise ValueError("Output job identity mismatch")
+            if row["state"] != 'completed' or json.loads(row['output'] or '{}') != record:
+                return {"state": "completed", "stage": "completed", "output": json.dumps(record), "reason": ""}
+            return None
+        except Exception as exc:
+            return {"state": "needs attention", "reason": str(exc) or type(exc).__name__}
+
+    def start_published_check(self):
+        """Re-verify every completed row's published output in the background, once, after startup.
+
+        It yields to resume() (which runs the same check itself before any new
+        work) and to close(), and changes a row only if that row is still exactly
+        what it read. It never starts or touches pending work.
+        """
+        with self._lock:
+            if self._closed or self._verifier is not None or self._verify_stop.is_set():
+                return
+            self._verifier = threading.Thread(target=self._verify_published, name="BooksArrangerPublishedCheck", daemon=True)
+            self._verifier.start()
+
+    def _verify_published(self):
+        try:
+            rows = self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
+        except sqlite3.Error:
+            return  # resume() still verifies before any new work
+        for row in rows:
+            if self._verify_stop.is_set():
+                return
+            try:
+                if self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:
+                    continue  # Exact authorized former-output retirement; preserve immutable history.
+                change = self._settle(row)
+                if not change:
+                    continue
+                with self._lock:
+                    if self._verify_stop.is_set():
+                        return
+                    if self._rows("SELECT * FROM audio_jobs WHERE job_id=?", (row["job_id"],)) == [row]:
+                        self._update(row["job_id"], **change)
+            except Exception:
+                continue  # resume() repeats this exact check before any new work
 
     def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
@@ -240,6 +289,7 @@ class AudioJobs:
         with self._lock:
             if self._closed:
                 raise RuntimeError("Queue is closed")
+            self._verify_stop.set()  # This resume runs the published-output check itself.
             if self._thread and self._thread.is_alive():
                 return self.status()
             for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed'"):
@@ -268,11 +318,16 @@ class AudioJobs:
         with self._lock:
             self._closed = True
             self._stop.set()
+            self._verify_stop.set()
             worker = self._thread
+            verifier = self._verifier
         if worker and worker is not threading.current_thread():
             worker.join(timeout)
             if worker.is_alive():
                 raise TimeoutError("Owned runner has not stopped; queue is still pausing")
+        if verifier and verifier is not threading.current_thread():
+            # Read-only until its locked stop check, so a file still being hashed never writes after this.
+            verifier.join(min(timeout, 5))
 
     def status(self):
         rows = self._rows()

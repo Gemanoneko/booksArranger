@@ -59,6 +59,8 @@ class BrowserServer(ThreadingHTTPServer):
                 merge_factory = MergeService
             self.merge = merge_factory(inventory, Path(inventory.database).parent / 'merge-cache')
             if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
+            # Published-book hashing reads every finished book from the library share; it must not delay health.
+            if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
         except BaseException:
             super().server_close()
             raise
