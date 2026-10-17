@@ -10,7 +10,7 @@ import zipfile
 import sys
 
 # Caller must load this module only under its bootstrap/source lease.
-from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, kernel, FileInfo
+from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, kernel, FileInfo, ordinary
 import ctypes
 from ctypes import wintypes
 
@@ -334,6 +334,26 @@ def _json_metadata(path):
     except (ValueError,UnicodeError) as error:raise BoundaryError('Corrupt metadata preserved') from error
 
 
+def _owned_build_location(tree,recorded):
+    """A recorded owned-build location, resolved inside this checkout.
+
+    Producer metadata records absolute paths, so moving the checkout (git worktree move) changes
+    them while every file keeps its native identity. A recorded path inside this checkout is used
+    as recorded. Any other path is resolved only by its exact tail after build-cache/builds, inside
+    this checkout; nothing outside the checkout is ever opened. Each file found there must still
+    match its native receipt (volume, file id, timestamp, attributes, size, SHA-256), so a copy or
+    substitute at the resolved location is refused exactly as before.
+    """
+    from native_io import ordinary
+    value=ordinary(recorded)
+    if value.is_relative_to(tree.root):return tree.child(value)
+    parts=[part.casefold() for part in value.parts]
+    for index in range(len(parts)-2,0,-1):
+        if parts[index:index+2]==['build-cache','builds']:
+            return tree.child(tree.root.joinpath('build-cache','builds',*value.parts[index+2:]))
+    raise BoundaryError('Build path escapes owned checkout')
+
+
 class PriorBuild:
     """Verified old producer receipt retained while a new build is prepared."""
     def __init__(self,tree):
@@ -349,14 +369,16 @@ class PriorBuild:
         try:
             identity=str(uuid.UUID(m['build_id']))
             if identity!=m['build_id'] or p['build_id']!=identity or m['schema']!='books-desktop-artifacts-v1' or p['schema']!='books-runtime-pointer-v1' or m['unpacked']!='builds/'+identity+'/win-unpacked' or m['payload']['verified'] is not True or m['payload']['installer_equivalent'] is not True:raise ValueError('schema')
-            self.runtime=tree.child(p['root'])
+            self.runtime=_owned_build_location(tree,p['root'])
             relative=self.runtime.relative_to(root/'build-cache'/'builds')
             if len(relative.parts)!=2 or relative.parts[1]!='runtime' or str(uuid.UUID(relative.parts[0]))!=relative.parts[0]:raise ValueError('runtime ownership')
             self.unpacked=root/'dist'/'builds'/identity/'win-unpacked'
             producer=self.runtime.parent/'producer-receipt.json'
             self.producer_plan=capture_metadata(tree,producer);self.producer=_json_metadata(producer)
             r=self.producer
-            if r['schema']!='books-build-producer-v1' or r['build_id']!=identity or r['owned_root']!=str(self.runtime.parent) or r['source_head']!=m['source_head']:raise ValueError('producer')
+            # The producer and the pointer must name the same owned build, compared exactly as recorded
+            # (both were written by one build at one location); the physical place is self.runtime.
+            if r['schema']!='books-build-producer-v1' or r['build_id']!=identity or r['owned_root']!=str(ordinary(p['root']).parent) or r['source_head']!=m['source_head']:raise ValueError('producer')
             _receipt_equal(self.plans['manifest']['receipt'],r['manifest_receipt'])
             _receipt_equal(self.plans['pointer']['receipt'],r['pointer_receipt'])
             self.verify()

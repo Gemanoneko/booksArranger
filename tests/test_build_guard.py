@@ -203,6 +203,36 @@ class PriorBundleTests(unittest.TestCase):
             with self.assertRaises(BoundaryError):PriorBuild(guard)
         self.assertEqual((outside/'keep').read_bytes(),b'outside');self.assertEqual(list(outside.iterdir()),[outside/'keep'])
         self.assertTrue((root/'dist'/'release-artifacts.json').exists())
+    def test_moved_checkout_validates_prior_build_by_native_identity(self):
+        # git worktree move: every recorded absolute path changes, every file keeps its native identity.
+        root=self.fixture();old_runtime,old_output=self.initial(root)
+        moved=root.with_name(str(uuid.uuid4()));os.rename(root,moved)
+        recorded=json.loads((moved/'build-cache'/'runtime-pointer.json').read_text())['root']
+        self.assertFalse(Path(recorded).is_relative_to(moved),'positive control: the pointer still names the old location')
+        with BuildTree(moved) as guard:
+            prior=PriorBuild(guard);prior.verify()
+            self.assertEqual(prior.runtime,moved/'build-cache'/'builds'/old_runtime.parent.name/'runtime')
+        self.assertEqual(list((moved/'dist').glob('*.previous-*')),[])
+    def test_copied_checkout_is_refused_by_native_identity(self):
+        import shutil
+        root=self.fixture();self.initial(root)
+        with BuildTree(root) as guard:PriorBuild(guard)  # positive control: the original location validates
+        copied=root.with_name(str(uuid.uuid4()));shutil.copytree(root,copied)
+        before=(copied/'build-cache'/'runtime-pointer.json').read_bytes()
+        with BuildTree(copied) as guard:
+            with self.assertRaises(BoundaryError):PriorBuild(guard)
+        self.assertEqual((copied/'build-cache'/'runtime-pointer.json').read_bytes(),before)
+        self.assertEqual(list((copied/'dist').glob('*.previous-*')),[])
+    def test_recorded_location_resolves_only_inside_this_checkout(self):
+        from build_fs_guard import _owned_build_location
+        root=self.fixture();build=str(uuid.uuid4());inside=root/'build-cache'/'builds'/build/'runtime'
+        with BuildTree(root) as guard:
+            self.assertEqual(_owned_build_location(guard,str(inside)),inside)
+            self.assertEqual(_owned_build_location(guard,'D:\\Elsewhere\\old\\build-cache\\builds\\'+build+'\\runtime'),inside)
+            self.assertEqual(_owned_build_location(guard,'C:\\x\\Build-Cache\\BUILDS\\'+build+'\\runtime'),inside)
+            for bad in ('D:\\Elsewhere\\runtime','D:\\old\\build-cache\\builds\\..\\..\\escape','relative\\build-cache\\builds\\'+build,
+                        '\\\\?\\C:\\old\\build-cache\\builds\\'+build,'D:\\old\\build-cache\\builds\\'+build+'\\runtime:stream'):
+                with self.subTest(bad=bad),self.assertRaises(BoundaryError):_owned_build_location(guard,bad)
     def test_payload_ads_refuses_and_preserves_stream(self):
         root=self.fixture();runtime,output=self.initial(root);ads=Path(str(output/'win-unpacked'/'app.exe')+':unknown');ads.write_bytes(b'unknown data')
         with BuildTree(root) as guard:
