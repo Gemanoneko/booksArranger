@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.16.6] - 2026-10-17
+
+### Added
+
+- The Audiobook jobs panel now shows one progress row for each running activity: converting a book, removing originals or temporary files, checking finished books, and scanning or researching. Each row says what is happening now, shows real progress where it can be measured (files, MB or GB, audio time, or books), and counts the elapsed time, with an estimate of the time left once it is reliable.
+- Conversion is shown as four steps, each with its own bar and step text: checking and copying the source files, normalizing the audio, encoding, and verifying and copying the audiobook to the library. Before, everything before encoding showed as "Checking source files" with a bar that never moved, sometimes for 20 minutes or more.
+- Steps whose amount cannot be known show a moving bar instead of an empty one. Paused rows freeze and say "Paused"; a row that needs attention shows the reason. Pause and Resume now sit above the rows, so they never move.
+
+### Fixed
+
+- After Retry was accepted, the book could keep showing "Needs attention" with Retry still available, and a second press said "This book changed. Refresh and try again." The book now shows as queued at once, and a book list requested before Retry was answered can no longer bring back the old state.
+- The message for a Retry pressed on an out-of-date view no longer names a Refresh action that does not exist. It now reads "This book's status changed. Check the updated status above."
+
 ## [v0.16.5] - 2026-10-17
 
 ### Added
