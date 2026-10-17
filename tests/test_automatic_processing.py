@@ -8,6 +8,8 @@ from scanner import Inventory,connect
 from source_identity import source_gate,clues,filename_identity
 from public_research import PublicClient,PublicResearch,ResearchWait,allowed_url,parse_page,credited_pair,strict_json,APP_LIMIT_REASON,LEGACY_APP_LIMIT_REASON,SOURCE_PAUSE_REASON
 from automatic_processing import AutomaticProcessing
+from audio_jobs import AudioJobs
+from merge_service import MergeService
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'automatic-processing-2026-10-10'/'test-fixtures';AREA.mkdir(parents=True,exist_ok=True)
 
@@ -565,5 +567,167 @@ class AutoTests(unittest.TestCase):
             auto.start();state=self.wait_auto(auto)
         refresh.assert_not_called();lookup.assert_not_called();merge.approve_automatic.assert_not_called()
         self.assertEqual(auto.candidate(original)['reasons'],['Manual draft retained']);self.assertEqual(state['state'],'Paused')
+    def between_books_run(self,admit):
+        """Research admits 'A Book' (admit) and leaves 'B Book' deferred, so the run reaches the wait for queued books."""
+        lookup=lambda current,*_:{'reasons':[],'work':WORK,'review':{},'sources':[]} if current['title_clue']=='A Book' else {'reasons':['Uncertain']}
+        auto,merge,inv=self.fake_merge(lookup)
+        (self.base/'audio'/'John Writer – B Book.mp3').write_bytes(b'private second fixture');inv.reader=lambda p,k,s:json.loads(row(p,filename_identity(p)['title'])['metadata'])
+        fx=BetweenBooks(self.base);self.addCleanup(fx.release)
+        merge.state=fx.merge.state;merge.approve_automatic=Mock(side_effect=lambda row,result,stop,client:(admit(fx),(row,'fixture-job'))[1])
+        user_stop=threading.Event();pauses=[]
+        def pause():
+            pauses.append('user stop' if user_stop.is_set() else 'no stop request');return fx.merge.pause()
+        merge.pause=pause
+        return auto,fx,user_stop,pauses
+    def test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book(self):
+        # v0.16.1 live: research exhausted, the run waits for queued books. One book's originals finish
+        # moving to recovery, the next book starts, and a status read straddling that gap said Paused:
+        # the run paused itself and stopped the just-started book. Every step below waits on an Event.
+        auto,fx,user_stop,pauses=self.between_books_run(lambda fx:fx.start())
+        original=auto.stop_event.wait;waits=[]
+        def wait(delay):
+            if fx.thread is None:return original(delay) # Discovery: the converter has no work yet.
+            if delay>=1:user_stop.set();auto.stop_event.set();return True # The later retry wait: Sergei's Stop.
+            waits.append(delay)
+            if len(waits)==1:fx.removing.wait(5);fx.straddle.set() # The next queue read straddles the cleanup's end.
+            elif len(waits)==2:fx.started.wait(5);fx.wake.set();fx.thread.join(5) # Book 2 then finishes normally.
+            return False
+        with patch.object(auto.stop_event,'wait',side_effect=wait):auto.start();state=self.wait_auto(auto,stop_when_held=False)
+        self.assertTrue(fx.started.is_set(),'the next book started after the cleanup')
+        self.assertEqual(fx.outcome,'completed','the just-started book was stopped by a between-books state')
+        self.assertEqual(pauses[:1],['user stop'],'the run paused the queue without a stop request')
+        self.assertEqual(state['state'],'Paused');self.assertGreaterEqual(len(waits),2)
+    def test_stalled_queue_with_no_worker_still_pauses_the_run(self):
+        # Safety kept: queued work that no converter or cleanup worker will pick up still ends the wait.
+        auto,fx,user_stop,pauses=self.between_books_run(lambda fx:fx.admit())
+        original=auto.stop_event.wait
+        def wait(delay):
+            if delay>=1:user_stop.set();auto.stop_event.set();return True
+            return original(delay)
+        with patch.object(auto.stop_event,'wait',side_effect=wait):auto.start();state=self.wait_auto(auto,stop_when_held=False)
+        self.assertIsNone(fx.thread);self.assertFalse(user_stop.is_set())
+        self.assertEqual(pauses[:1],['no stop request']);self.assertEqual(state['state'],'Paused');self.assertEqual(state['reason'],'Paused — pending work saved')
+        self.assertEqual(fx.merge.state()['state'],'Paused')
+
+
+class BetweenBooks:
+    """The v0.16.1 between-books sequence around the real MergeService._after_completed and _state.
+
+    A real AudioJobs ledger answers the converter state; fx.thread stands in for its worker. Book 1 is
+    converted; its inline source cleanup sets and clears cleanup.current around cleanup.run, then book 2
+    starts. Only that cleanup run and the next book are fakes, and every step waits on an Event.
+    """
+    def __init__(self,folder,jobs=('book-1','book-2'),hold_enrolment=False):
+        self.queue=AudioJobs(Path(folder)/'between-books-queue.sqlite3',Mock(),Mock(),Mock());self.stop=self.queue._stop
+        self.jobs=jobs;self.next_book=len(jobs)>1;self.thread=None;self.outcome=None;self.lock=threading.Lock();self.rows={}
+        self.enrolled,self.hold_enrolment=threading.Event(),threading.Event()
+        if not hold_enrolment:self.hold_enrolment.set()
+        self.removing,self.finish_removal,self.cleared,self.gap=threading.Event(),threading.Event(),threading.Event(),threading.Event();self.gap.set()
+        self.started,self.wake,self.straddle=threading.Event(),threading.Event(),threading.Event()
+        merge=MergeService.__new__(MergeService);merge.jobs=self.queue;merge._post_current=None
+        merge.cleanup=SimpleNamespace(current=None,thread=None,stop=self.stop,status=self.cleanup_status,run=self.run,pause=self.pause_cleanup,_set=Mock())
+        merge.storage_cleanup=SimpleNamespace(status=lambda:[],folder_status=lambda:[]);merge.working=SimpleNamespace(discharge_published=Mock())
+        merge._prune_working=Mock();merge.enroll_cleanup=self.enroll;merge._prune_completed=self.pruned
+        merge.progress_books=lambda *args:{'approved':0,'converted':0,'converted_ids':set()}
+        pause_jobs=self.queue.pause
+        def pause():
+            result=pause_jobs();self.wake.set();return result
+        self.queue.pause=pause;self.merge=merge
+    def admit(self):
+        for index,job_id in enumerate(self.jobs):
+            state,stage=('completed','completed') if index==0 else ('pending','queued');created='2026-10-17T04:01:0'+str(index)
+            manifest=json.dumps({'cleanup_policy':{'enabled':True},'metadata':{'title':job_id}})
+            with self.queue._db() as db:db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?)',(job_id,manifest,'',state,stage,None,'{}',None,'',created,created))
+    def start(self):
+        self.admit();self.thread=threading.Thread(target=self.work,name='between-books-converter');self.queue._thread=self.thread;self.thread.start()
+    def work(self):
+        self.merge._after_completed(self.jobs[0]) # Real code: cleanup.current is set, cleanup.run, then cleared.
+        if not self.next_book or self.stop.is_set():return # audio_jobs._work checks Stop before the next book.
+        self.queue._update(self.jobs[1],state='running',stage='checking sources');self.started.set();self.wake.wait(10)
+        if self.stop.is_set():self.queue._update(self.jobs[1],state='pending',stage='queued');self.outcome='interrupted'
+        else:self.queue._update(self.jobs[1],state='completed',stage='completed');self.outcome='completed'
+    def set_cleanup(self,id,job_id,state):
+        with self.lock:self.rows[id]={'id':id,'job_id':job_id,'state':state,'status':'Fixture cleanup '+state,'removed':0,'total':2,'reason':''}
+    def enroll(self,job_id):
+        self.set_cleanup('cleanup-1',job_id,'waiting');self.enrolled.set();self.hold_enrolment.wait(10)
+        return {'cleanup_id':'cleanup-1'}
+    def run(self,id):
+        job_id=self.rows[id]['job_id'];self.set_cleanup(id,job_id,'checking');self.set_cleanup(id,job_id,'removing');self.removing.set()
+        self.finish_removal.wait(10);self.set_cleanup(id,job_id,'paused' if self.stop.is_set() else 'completed')
+    def pruned(self,job_id):
+        self.cleared.set();self.gap.wait(10) # _after_completed cleared cleanup.current before this call.
+    def pause_cleanup(self):
+        self.stop.set();self.finish_removal.set()
+    def cleanup_status(self):
+        with self.lock:rows=[dict(r) for r in self.rows.values()]
+        if self.straddle.is_set() and any(r['state']=='removing' for r in rows):
+            # This read saw 'removing'. The cleanup now ends, and the next book starts (or the
+            # converter exits after the last book), before _state looks at the in-memory marker.
+            self.straddle.clear();self.finish_removal.set();self.cleared.wait(10)
+            if self.next_book:self.started.wait(10)
+            else:self.thread.join(10)
+        return rows
+    def release(self):
+        for event in (self.hold_enrolment,self.finish_removal,self.gap,self.wake):event.set()
+        if self.thread:self.thread.join(10)
+
+
+class BetweenBooksStateTests(unittest.TestCase):
+    """v0.16.2: the queue state never reads Paused between two books while their worker is alive."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.fixtures=[]
+    def tearDown(self):
+        for fx in self.fixtures:fx.release()
+        self.temp.cleanup()
+    def fixture(self,**options):
+        fx=BetweenBooks(self.temp.name,**options);self.fixtures.append(fx);return fx
+    def test_cleanup_ending_during_a_status_read_is_not_a_pause(self):
+        fx=self.fixture();fx.start();self.assertTrue(fx.removing.wait(5))
+        fx.straddle.set();state=fx.merge.state()
+        self.assertTrue(fx.started.is_set(),'the read straddled the end of the cleanup and the start of book 2')
+        self.assertEqual(state['state'],'Running')
+        fx.wake.set();fx.thread.join(5);self.assertEqual(fx.outcome,'completed')
+    def test_cleanup_enrolled_before_its_marker_is_set_is_not_a_pause(self):
+        fx=self.fixture(hold_enrolment=True);fx.start();self.assertTrue(fx.enrolled.wait(5))
+        self.assertIsNone(fx.merge.cleanup.current);self.assertEqual(fx.rows['cleanup-1']['state'],'waiting')
+        self.assertEqual(fx.merge.state()['state'],'Running')
+    def test_last_book_cleanup_ending_during_a_status_read_is_not_a_pause(self):
+        fx=self.fixture(jobs=('book-1',));fx.start();self.assertTrue(fx.removing.wait(5))
+        fx.straddle.set();state=fx.merge.state()
+        self.assertFalse(fx.thread.is_alive(),'the converter exited during the read')
+        self.assertEqual(state['state'],'Running')
+        self.assertEqual(fx.merge.state()['state'],'Completed')
+    def test_cleanup_worker_handing_back_to_the_converter_is_not_a_pause(self):
+        # CleanupJobs._work runs on_completed, then after_drain resumes the converter, from its own thread.
+        fx=self.fixture();fx.admit();fx.set_cleanup('cleanup-1','book-1','completed')
+        handing,release=threading.Event(),threading.Event()
+        worker=threading.Thread(target=lambda:(handing.set(),release.wait(10)));fx.merge.cleanup.thread=worker;worker.start()
+        try:
+            self.assertTrue(handing.wait(5));self.assertEqual(fx.merge.state()['state'],'Running')
+        finally:release.set();worker.join(5)
+        self.assertEqual(fx.merge.state()['state'],'Paused','queued work with no worker alive still reads Paused')
+    def test_cleanup_resumed_during_a_status_read_reads_running(self):
+        # Kept from v0.16.1: the after-read check still sees a worker that a Resume started mid-read.
+        fx=self.fixture();fx.admit();fx.set_cleanup('cleanup-1','book-1','paused');release=threading.Event()
+        worker=threading.Thread(target=lambda:release.wait(10));read=fx.cleanup_status
+        def resumed_mid_read():
+            rows=read();fx.merge.cleanup.thread=worker;worker.start();return rows
+        fx.merge.cleanup.status=resumed_mid_read
+        try:self.assertEqual(fx.merge.state()['state'],'Running')
+        finally:release.set();worker.join(5)
+        fx.merge.cleanup.status=read;self.assertEqual(fx.merge.state()['state'],'Paused')
+    def test_pause_during_cleanup_reads_pausing_until_the_converter_exits(self):
+        fx=self.fixture();fx.gap.clear();fx.start();self.assertTrue(fx.removing.wait(5))
+        fx.merge.pause();self.assertTrue(fx.cleared.wait(5))
+        self.assertTrue(fx.thread.is_alive());self.assertIsNone(fx.merge.cleanup.current)
+        self.assertEqual(fx.merge.state()['state'],'Pausing')
+        fx.gap.set();fx.thread.join(5)
+        self.assertFalse(fx.started.is_set());self.assertEqual(fx.rows['cleanup-1']['state'],'paused')
+        self.assertEqual(fx.merge.state()['state'],'Paused')
+    def test_pause_during_the_next_book_still_stops_it(self):
+        fx=self.fixture();fx.start();self.assertTrue(fx.removing.wait(5))
+        fx.finish_removal.set();self.assertTrue(fx.started.wait(5));self.assertEqual(fx.merge.state()['state'],'Running')
+        fx.merge.pause();fx.thread.join(5)
+        self.assertEqual(fx.outcome,'interrupted');self.assertEqual(fx.merge.state()['state'],'Paused')
 
 if __name__=='__main__':unittest.main()

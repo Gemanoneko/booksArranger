@@ -194,7 +194,20 @@ class MergeService:
         if snapshot is None:return self._state()
         with snapshot():return self._state()
 
+    def _worker_active(self):
+        """A book's inline cleanup holds the marker, or the cleanup or converter worker is alive.
+
+        The cleanup thread is checked before the converter: it starts the converter before it exits.
+        """
+        cleanup=getattr(self.cleanup,'thread',None);jobs=getattr(self.jobs,'_thread',None)
+        return bool(getattr(self.cleanup,'current',None) or (cleanup and cleanup.is_alive()) or (jobs and jobs.is_alive()))
+
     def _state(self):
+        # Between two books the converter thread runs the finished book's cleanup inline and
+        # then starts the next book; a cleanup thread resumes the converter before it exits.
+        # Workers are sampled BEFORE the slow durable read too, so a cleanup that ends mid-read
+        # (its marker cleared, its row still read as pending) is never reported Paused (v0.16.2).
+        worker=self._worker_active()
         value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
         raw_jobs=value['jobs']
         if hasattr(self,'replacements'):
@@ -208,10 +221,11 @@ class MergeService:
         if not current and (active or post):
             id=active['job_id'] if active else post[0]
             current=next((j for j in value['jobs'] if j['job_id']==id),None)
+        worker=worker or self._worker_active() # The pre-v0.16.2 after-read check, kept: a worker resumed mid-read.
         if pending and not value['current_job_id']:
-            alive=bool(self.cleanup.thread and self.cleanup.thread.is_alive())
-            value['state']='Pausing' if (self.cleanup.current or alive) and self.cleanup.stop.is_set() else 'Running' if self.cleanup.current or alive else 'Paused'
+            value['state']='Pausing' if worker and self.cleanup.stop.is_set() else 'Running' if worker else 'Paused'
             value['queued']+=len(pending)
+        elif value['state']=='Paused' and worker:value['state']='Pausing' if self.cleanup.stop.is_set() else 'Running'
         errors=[c for c in cleanups if c['state']=='needs_attention']+[r for r in storage if r['state']=='needs_attention']
         if hasattr(self,'replacements'):
             for relation in self.replacements.rows():
