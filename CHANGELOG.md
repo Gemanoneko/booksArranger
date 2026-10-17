@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.16.2] - 2026-10-17
+
+### Fixed
+
+- Automatic processing no longer pauses itself between two books. When research had run out of new matches and the run was waiting for queued books, a status check made just as one book's originals finished moving to recovery could briefly read "Paused". The run then paused everything, stopped the book that had just started, and recorded "Paused — pending work saved" with no one asking. Overnight conversion stopped this way after 21 books. The queue now reads "Paused" only when no conversion or cleanup work is still running. Stop, Pause, Quit, a full disk and a working-file problem still pause the run as before.
+
 ## [v0.16.1] - 2026-10-17
 
 v0.16.0 was never released; its changes ship in this version.
