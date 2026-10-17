@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.16.5] - 2026-10-17
+
+### Added
+
+- Retry for an audiobook job that was stopped before it started. Leftover working files from an earlier attempt could block a book: it showed "Output needs attention" and nothing could run it again. The selected book's details now show a **Retry** button under Automatic result. While the files are still there, Retry is unavailable and says why; once they are gone, it turns on within a moment. Retry checks the book again and puts the same job back in the queue, and its saved review and source files are checked again before any work starts. Like every queued book, a retried book removes its included originals after a verified audiobook, keeping 24-hour recovery copies.
+
+### Fixed
+
+- A source cleanup that stopped because the catalog was busy no longer stays stuck in "needs attention". At startup it becomes "paused", and the next **Start automatic processing** or **Resume audiobook jobs** finishes it. The recovery copies, the remaining originals and the finished audiobook are all checked again in full before anything more is removed, and the 24-hour recovery period starts when the cleanup finishes. This also finishes the two cleanups stuck on 2026-10-15 and 2026-10-17. The same Start or Resume also re-checks the books held for extra download markers. After updating, press Start or Resume once: while a cleanup is paused, the next app update cannot install and expired recovery copies are kept.
+- A busy catalog during source cleanup now retries automatically after 5 seconds and again after 15 seconds, then pauses the cleanup instead of marking it "needs attention". Pause, Stop and Quit cut the wait short.
+- A book whose audiobook job needs attention now shows the job's own reason instead of "Audiobook job already exists; inspect its current status".
+
+### Changed
+
+- "Retry available after …" on a held book now reads "Automatic retry after …", so it is not confused with the new Retry button.
+
 ## [v0.16.4] - 2026-10-17
 
 ### Fixed
