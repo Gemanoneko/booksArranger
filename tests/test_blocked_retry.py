@@ -320,7 +320,7 @@ class CopyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertLessEqual(len(text),90);self.assertTrue(text[0].isupper());self.assertTrue(text.endswith('.'))
                 self.assertLessEqual(text.count('. '),1,'at most two sentences')
-                for term in ('job id','manifest','ownership','disposal','previously','no longer','legacy','receipt'):self.assertNotIn(term,text.lower())
+                for term in ('job id','manifest','ownership','disposal','previously','no longer','legacy','receipt','refresh'):self.assertNotIn(term,text.lower())
 
 
 if __name__=='__main__':unittest.main()

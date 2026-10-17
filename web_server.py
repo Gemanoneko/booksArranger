@@ -33,6 +33,77 @@ def version():
     except OSError:
         return 'prototype'
 
+CLEANUP_STEPS = {'recovery copies', 'originals', 'temporary', 'folders', 'former outputs', 'verifying replacement', 'retiring former outputs'}
+# Conversion steps as the four steps shown to the user (Step N of 4); measured sub-steps share their step.
+CONVERSION_STEPS = {'checking sources': 1, 'preparing': 1, 'source copies': 1, 'checking audio': 2, 'matching format': 2, 'normalizing': 2,
+                    'joined audio': 2, 'creating': 3, 'encoding': 3, 'checking': 4, 'copying': 4, 'publishing': 4}
+ACTIVITY_STATES = {'Running': 'running', 'Pausing': 'pausing', 'Paused': 'paused', 'Needs attention': 'attention'}
+ACTIVITY_ORDER = {'conversion': 0, 'cleanup': 1, 'identity': 2, 'scan': 3}
+
+
+def _measure(source, unit=None):
+    """done/total/unit (+item/items) when they form a real measurement; otherwise indeterminate."""
+    done = source.get('completed') if isinstance(source, dict) else None
+    total = source.get('total') if isinstance(source, dict) else None
+    if type(done) not in (int, float) or type(total) not in (int, float) or not total > 0 or not 0 <= done <= total:
+        return {'indeterminate': True}
+    value = {'done': done, 'total': total, 'unit': source.get('unit') or unit, 'indeterminate': False}
+    if type(source.get('item')) is int and type(source.get('items')) is int and 1 <= source['item'] <= source['items']:
+        value.update(item=source['item'], items=source['items'])
+    return value
+
+
+def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None):
+    """Every running activity as one row (ProgressRows spec): what it is doing now and, where measurable, how far.
+
+    One row per kind, in the spec's fixed order: conversion, originals cleanup (and the temporary
+    files after it), the finished-book identity check, and scan or research. step_started_at is
+    exact where the work records it, else when this server first saw the step (started_at memo).
+    Labels and step text are the UI's, except the research step, which is the research's own text.
+    """
+    import time
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    memo = started_at if started_at is not None else {}
+    rows = []
+    jobs = jobs if isinstance(jobs, dict) else {}
+    progress = jobs.get('progress')
+    if jobs.get('current_title') and isinstance(progress, dict) and progress.get('phase'):
+        step = progress['phase']
+        kind = 'cleanup' if step in CLEANUP_STEPS else 'conversion'
+        unit = {'encoding': 'seconds', 'originals': 'files', 'recovery copies': 'files'}.get(step)
+        row = {'id': kind, 'kind': kind, 'subject': jobs['current_title'], 'step': step,
+               'state': ACTIVITY_STATES.get(jobs.get('state'), 'running'), 'reason': progress.get('reason', '')} | _measure(progress, unit)
+        if kind == 'conversion':
+            row.update(step_index=CONVERSION_STEPS.get(step, 1), step_count=4)
+        if type(progress.get('started')) is int:
+            row['step_started_at'] = progress['started']
+        rows.append(row)
+    check = jobs.get('published_check')
+    if isinstance(check, dict):
+        row = {'id': 'identity', 'kind': 'identity', 'subject': '', 'step': 'identity', 'state': 'running'} | _measure(check, 'books')
+        if type(check.get('started')) is int:
+            row['step_started_at'] = check['started']
+        rows.append(row)
+    if scan_library and isinstance(scan, dict):
+        checked, pending = scan.get('checked'), scan.get('pending')
+        measured = _measure({'completed': checked, 'total': checked + pending}, 'files') if type(checked) is int and type(pending) is int else {'indeterminate': True}
+        rows.append({'id': 'scan', 'kind': 'scan', 'subject': scan_library, 'step': 'scanning', 'step_text': scan.get('current') or '', 'state': 'running'} | measured)
+    elif isinstance(automatic, dict) and automatic.get('state') in ('Running', 'Stopping') and automatic.get('phase') == 'research':
+        current = automatic.get('current') if isinstance(automatic.get('current'), dict) else {}
+        text = ' - '.join(part for part in (current.get('source'), current.get('stage')) if isinstance(part, str) and part)
+        rows.append({'id': 'scan', 'kind': 'scan', 'subject': current.get('title', '') if isinstance(current.get('title'), str) else '', 'step': 'researching',
+                     'step_text': text, 'state': 'pausing' if automatic['state'] == 'Stopping' else 'running'} | _measure(automatic.get('research_pass'), 'books'))
+    seen = set()
+    for row in rows:
+        key = (row['id'], row['step'], row['subject'])
+        seen.add(key)
+        if 'step_started_at' not in row:
+            row['step_started_at'] = memo.setdefault(key, now_ms)
+    for key in [key for key in memo if key not in seen]:
+        del memo[key]
+    return sorted(rows, key=lambda row: ACTIVITY_ORDER[row['kind']])
+
+
 class BrowserServer(ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
@@ -129,7 +200,9 @@ class BrowserServer(ThreadingHTTPServer):
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
             'status': self.inventory.status(library), 'audiobook_jobs': jobs,
-            'automatic_processing': automatic}
+            'automatic_processing': automatic,
+            'activities': activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
+                                     self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))}
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'

@@ -13,10 +13,18 @@ from sqlite_retry import transaction
 
 
 STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
+# Measured progress a running attempt may report, per journal stage: step -> unit. Not journaled.
+MEASURED = {"checking sources": {"preparing": "files", "source copies": "bytes", "checking audio": "seconds",
+                                 "matching format": "seconds", "normalizing": "seconds", "joined audio": "seconds"},
+            "creating": {"encoding": "seconds"}, "copying": {"publishing": "bytes"}}
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _epoch_ms():
+    return int(time.time() * 1000)
 
 
 def _failure_details(error, stage, now=None):
@@ -39,8 +47,9 @@ class RetryRefused(ValueError):
 
 # Retry copy shown in the app: one fact, then the fix.
 RETRY_FILES_PRESENT = 'Working files from an earlier attempt are still present. Retry after they are cleared.'
-RETRY_BOOK_CHANGED = 'This book changed. Refresh and try again.'
-RETRY_JOB_CHANGED = 'This job changed. Refresh and try again.'
+# Retry pressed on an outdated view (for example, the job was already queued); the panel updates itself.
+RETRY_BOOK_CHANGED = "This book's status changed. Check the updated status above."
+RETRY_JOB_CHANGED = RETRY_BOOK_CHANGED
 RETRY_REVIEW_CHANGED = "The book's review or source files changed. Review the book again."
 RETRY_CLOSING = 'Books Arranger is closing. Retry after it restarts.'
 RETRY_SCANNING = 'Scanning is running. Retry when it stops.'
@@ -93,6 +102,8 @@ class AudioJobs:
         self.output_current = None
         self.verify_pace = None
         self._resuming = False
+        # Books checked of total while a finished-book check runs (after launch, or at Start); None otherwise.
+        self._check_progress = None
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
             db.execute('CREATE TABLE IF NOT EXISTS audio_repair_admissions(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
@@ -204,9 +215,21 @@ class AudioJobs:
             rows = self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
         except sqlite3.Error:
             return  # resume() still verifies before any new work
-        for row in rows:
+        try:
+            self._verify_rows(rows)
+        finally:
+            with self._lock:
+                if self._check_progress and self._check_progress['kind'] == 'background':
+                    self._check_progress = None
+
+    def _verify_rows(self, rows):
+        for index, row in enumerate(rows):
             if self._verify_stop.is_set():
                 return
+            with self._lock:
+                if not self._resuming:
+                    started = self._check_progress['started'] if self._check_progress and self._check_progress['kind'] == 'background' else _epoch_ms()
+                    self._check_progress = {'kind': 'background', 'completed': index, 'total': len(rows), 'started': started}
             try:
                 change = self._settle(row, True, self._verify_stop, self.verify_pace)
                 if not change:
@@ -304,6 +327,13 @@ class AudioJobs:
                     db.execute('UPDATE candidate_context SET data=? WHERE id=? AND revision=?',(json.dumps(approved,ensure_ascii=False,allow_nan=False),id,revision))
                 db.execute("INSERT INTO audio_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)", (frozen["job_id"], encoded, digest, "pending", "queued", None, "{}", None, "", timestamp, timestamp))
             return frozen["job_id"]
+
+    def _step_started(self, job_id, attempt, phase):
+        """Caller holds the lock. When this step began: kept while the same step reports again."""
+        prior = self._progress.get(job_id) or {}
+        if prior.get('attempt_id') == attempt and prior.get('phase') == phase and type(prior.get('started')) is int:
+            return prior['started']
+        return _epoch_ms()
 
     def _archive_attempt(self, row, now=None):
         if not row.get('attempt_id'):
@@ -453,9 +483,13 @@ class AudioJobs:
         try:
             changes = []
             try:
-                for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id"):
+                rows = self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
+                for index, row in enumerate(rows):
                     if stop.is_set():
                         return self.status()
+                    with self._lock:
+                        started = self._check_progress['started'] if self._check_progress and self._check_progress['kind'] == 'start' else _epoch_ms()
+                        self._check_progress = {'kind': 'start', 'completed': index, 'total': len(rows), 'started': started}
                     change = self._settle(row, True, stop)
                     if change:
                         changes.append((row, change))
@@ -470,6 +504,7 @@ class AudioJobs:
         finally:
             with self._lock:
                 self._resuming = False
+                self._check_progress = None
         return self.status()
 
     def pause(self):
@@ -509,7 +544,9 @@ class AudioJobs:
             elif row["state"] == "running": current = row
         running = bool(self._thread and self._thread.is_alive())
         state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if counts["queued"] else "Needs attention" if counts["failed"] else "Completed"
-        return {"state": state, **counts, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
+        with self._lock:
+            check = copy.deepcopy(self._check_progress)
+        return {"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
 
     def has_unfinished(self):
         """Same answer as scanning status()['jobs'] for pending/running rows, without loading every manifest."""
@@ -540,22 +577,26 @@ class AudioJobs:
                 return  # No new attempt or source copy exists before admission.
             attempt = str(uuid.uuid4())
             journal = {"attempt_id": attempt, "history": []}
-            with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources"}
+            with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources","started":_epoch_ms()}
             self._update(job_id, state="running", stage="checking sources", attempt_id=attempt, journal=json.dumps(journal), reason="")
             def checkpoint(stage, details=None):
                 if stage == "checking_sources": stage = "checking sources"
                 if stage not in STAGES:
                     raise ValueError("Unsupported job stage: " + str(stage))
                 if isinstance(details,dict) and 'progress' in details:
-                    measured=details['progress']
-                    if stage!='creating' or not isinstance(measured,dict) or measured.get('phase')!='encoding':
+                    measured=details['progress'];units=MEASURED.get(stage,{})
+                    if not isinstance(measured,dict) or measured.get('phase') not in units or measured.get('unit',units.get(measured.get('phase')))!=units[measured['phase']]:
                         raise ValueError('Unsupported progress measurement')
                     done,total=measured.get('completed'),measured.get('total')
                     if type(done) not in (int,float) or type(total) not in (int,float) or not math.isfinite(done) or not math.isfinite(total) or total<=0 or not 0<=done<=total:
                         raise ValueError('Invalid progress denominator')
-                    with self._lock:self._progress[job_id]={'attempt_id':attempt,**measured}
+                    if ('item' in measured or 'items' in measured) and not (type(measured.get('item')) is int and type(measured.get('items')) is int and 1<=measured['item']<=measured['items']):
+                        raise ValueError('Invalid progress item')
+                    measured={key:measured[key] for key in ('phase','completed','total','unit','item','items') if key in measured}
+                    measured['unit']=units[measured['phase']]
+                    with self._lock:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
                     return
-                with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage}
+                with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
                 entry = {"stage": stage, "at": _now(), "details": details}
                 if stage == "publishing":
                     if self._stop.is_set(): raise InterruptedError("Paused before publication")

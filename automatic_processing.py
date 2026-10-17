@@ -186,7 +186,15 @@ class AutomaticProcessing:
         return {'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
                 'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
-                'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None}
+                'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None,'research_pass':self._research_pass(run)}
+    @staticmethod
+    def _research_pass(run):
+        """Books researched of this pass's list, from the saved checkpoint; None outside research."""
+        if not run or run['phase']!='research':return None
+        try:checkpoint=json.loads(run['checkpoint'] or '{}')
+        except (TypeError,ValueError):return None
+        done=len(set(checkpoint.get('done',[])));left=len(set(checkpoint.get('pending',[]))|set(checkpoint.get('deferred',[])))
+        return {'completed':done,'total':done+left} if done+left else None
     def start(self,*,server_closing=False):
         with self.lock:
             if server_closing:raise ValueError('The local server is stopping or stopped. Start is unavailable.')

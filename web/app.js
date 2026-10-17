@@ -15,7 +15,7 @@ const selectedBooks=new Map(),coverObjects=[];
 let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 let recoveryPanel=null,recoveryConfirmation=null,recoverySubmitting=false,recoveryDisconnected=false;
-let retryPending=null,retryResult=null,retryDone=null;
+let retryPending=null,retryResult=null,retryEpoch=0;
 const pendingFolders=new Set(),folderMessages=new Map();
 
 function routingControls() {
@@ -216,7 +216,7 @@ function acknowledgeRestart(current){
 async function refresh(force=false) {
   if (ended) return false;
   const sequence=++refreshSequence;
-  const library=$('library').value,context=listContext(),requestView=view,requestFilter=filters[view],requestOffset=offset,requestSearch=search;
+  const library=$('library').value,context=listContext(),requestView=view,requestFilter=filters[view],requestOffset=offset,requestSearch=search,epoch=retryEpoch;
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext()) return false;
   state=current;
@@ -237,7 +237,8 @@ async function refresh(force=false) {
   const key=JSON.stringify([library,view,filters[view],offset,search,status.count,status.checked,status.state,status.unresolved_errors]);
   if (force || view==='candidates' || key!==lastKey) {
     const page=await request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}`);
-    if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext()) return false;
+    // A book list requested before Retry was answered predates it and would repaint the old state.
+    if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (offset+rows.length);lastKey=key;renderRows(force);
   }
   acknowledgeRestart(current);
@@ -327,33 +328,90 @@ function renderJobs(){
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · '));
-  const p=jobs.progress,active=Boolean(jobs.current_title&&p),bar=$('jobs-progress');
-  $('book-progress').hidden=!active;$('jobs-idle').hidden=active;
-  if(active){
-    text('jobs-book','Current book: '+jobs.current_title);
-    const labels={'checking sources':'Checking source files',creating:'Converting audiobook',encoding:'Converting audiobook',checking:'Verifying audiobook',copying:'Verifying audiobook',publishing:'Verifying audiobook',originals:'Removing originals',temporary:'Removing temporary recovery and working files',folders:'Removing empty source folders'};
-    let label=labels[p.phase] || 'Checking source files',measure='',value=null;
-    const measured=Number.isFinite(p.completed)&&Number.isFinite(p.total)&&p.total>0&&p.completed>=0&&p.completed<=p.total;
-    if(p.phase==='encoding'&&measured){
-      if(p.completed===p.total)label='Finalizing conversion';
-      else {value=p.completed/p.total*100;measure=' — '+Math.floor(value)+'%';}
-    }else if(p.phase==='originals'&&measured){
-      value=p.completed/p.total*100;measure=' — '+p.completed+' of '+p.total;
-      if(p.completed===p.total){label='Removing temporary recovery and working files';measure='';value=null;}
-    }
-    if(jobs.state==='Pausing')label='Pausing — '+label;
-    else if(jobs.state==='Paused')label='Paused — '+label;
-    else if(jobs.state==='Needs attention')label='Needs attention — '+(p.reason || label);
-    text('jobs-phase-label',label);text('jobs-measure',measure);
-    if(value===null)bar.removeAttribute('value');else bar.value=value;
-    bar.setAttribute('aria-valuetext',label+measure);
-    bar.classList.toggle('progress-stopped',jobs.state==='Paused'||jobs.state==='Needs attention');
-  }else {bar.removeAttribute('value');bar.removeAttribute('aria-valuetext');}
+  renderActivities(Array.isArray(state.activities)?state.activities:[],jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
   const help=cleanup?'Pausing source cleanup finishes the current file. Resume continues its saved progress. Scanning has separate stop and resume controls. An interrupted conversion restarts; completed outputs stay in place.':'An interrupted conversion restarts; completed outputs stay in place. Scanning has separate stop and resume controls.';
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Empty source folders retained: safe automatic removal is unavailable on this drive.':''));
+}
+// Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
+const activityOrder=['conversion','cleanup','identity','scan'],activityRows=new Map();let activityTimer=null;
+const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
+const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing empty source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
+function activityLabel(row){
+  if(row.kind==='conversion')return 'Converting';
+  if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
+  if(row.kind==='identity')return 'Checking finished books';
+  return row.step==='researching'?'Researching books':'Scanning files';
+}
+function activityStep(row,finishing){
+  let step;
+  if(row.kind==='conversion'){const name=finishing && row.step==='encoding'?'Finalizing conversion':conversionSteps[row.step] || 'Working';step=Number.isInteger(row.step_index) && Number.isInteger(row.step_count)?`Step ${row.step_index} of ${row.step_count} - ${name}`:name;}
+  else if(row.kind==='cleanup')step=cleanupSteps[row.step] || 'Working';
+  else if(row.kind==='identity')step='Checking identity';
+  else step=typeof row.step_text==='string' && row.step_text?row.step_text:'Working';
+  if(row.state==='attention')return 'Needs attention - '+(row.reason || step);
+  if(row.state==='paused')return 'Paused - '+step;
+  if(row.state==='pausing')return 'Pausing - '+step;
+  return step;
+}
+function clockText(seconds,withHours){seconds=Math.max(0,Math.floor(seconds));const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60),s=String(seconds%60).padStart(2,'0');return withHours || h?`${h}:${String(m).padStart(2,'0')}:${s}`:`${m}:${s}`;}
+function byteText(done,total){const units=['B','KB','MB','GB','TB'];let index=0;while(index<units.length-1 && total>=1024**(index+1))index++;const scale=1024**index,format=value=>{const scaled=value/scale;return scaled.toLocaleString(undefined,{maximumFractionDigits:scaled<10 && index?1:0,minimumFractionDigits:0});};return `${format(done)} of ${format(total)} ${units[index]}`;}
+function activityDetail(row,finishing){
+  if(row.indeterminate || finishing || !(row.total>0))return '';
+  const done=row.done,total=row.total,whole=value=>Math.floor(value).toLocaleString();
+  if(row.unit==='files' || row.unit==='books'){const noun=row.unit==='files'?'file':'book';return `${whole(done)} of ${whole(total)} ${noun}${total===1?'':'s'}`;}
+  if(row.unit==='bytes')return byteText(done,total);
+  if(row.unit==='seconds'){const hours=total>=3600;return `${clockText(done,hours)} of ${clockText(total,hours)} audio`;}
+  return Math.floor(done/total*100)+'%';
+}
+function activityRow(kind){
+  const item=node('li','','activity-row'),first=node('div','','activity-line activity-first'),head=node('span','','activity-head'),label=node('span','','activity-label'),subject=node('span','','activity-subject'),detail=node('span','','activity-detail'),bar=node('progress'),last=node('div','','activity-line'),step=node('span','','activity-step'),time=node('span','','activity-time');
+  item.dataset.kind=kind;bar.max=100;detail.setAttribute('aria-live','off');time.setAttribute('aria-live','off');step.setAttribute('aria-live','polite');
+  head.append(label,subject);first.append(head,detail);last.append(step,time);item.append(first,bar,last);
+  return {item,label,subject,detail,bar,step,time,samples:[],eta:'',etaAt:0,frozen:null,key:''};
+}
+function writeText(element,value){if(element.textContent!==value)element.textContent=value;}
+function renderActivities(list,jobs){
+  const rows=list.filter(row=>row && activityOrder.includes(row.kind)).sort((a,b)=>activityOrder.indexOf(a.kind)-activityOrder.indexOf(b.kind));
+  const shown=[],seen=new Set();for(const row of rows){if(seen.has(row.kind))continue;seen.add(row.kind);shown.push(row);}
+  const visible=shown.slice(0,4),extra=rows.length-visible.length,holder=$('jobs-rows');
+  for(const [kind,view] of activityRows)if(!visible.some(row=>row.kind===kind)){view.item.parentElement?.removeChild(view.item);activityRows.delete(kind);}
+  visible.forEach((row,index)=>{
+    let view=activityRows.get(row.kind);if(!view){view=activityRow(row.kind);activityRows.set(row.kind,view);}
+    if(holder.children[index]!==view.item)holder.insertBefore(view.item,holder.children[index] || null);
+    const key=[row.step,row.subject,row.step_started_at].join('\u001f');if(view.key!==key){view.key=key;view.samples=[];view.eta='';view.etaAt=0;}
+    view.row=row;updateActivity(view,Date.now());
+  });
+  writeText($('jobs-more'),extra>0?`+${extra} more running`:'');$('jobs-more').hidden=!(extra>0);
+  const idle=visible.length?'':['Paused','paused'].includes(jobs?.state)?'Paused. Resume continues pending books.':'Nothing running';
+  writeText($('jobs-idle'),idle);$('jobs-idle').hidden=!idle;
+  if(visible.length && activityTimer===null && typeof setInterval==='function')activityTimer=setInterval(()=>{const now=Date.now();for(const view of activityRows.values())updateActivity(view,now);},1000);
+  if(!visible.length && activityTimer!==null && typeof clearInterval==='function'){clearInterval(activityTimer);activityTimer=null;}
+}
+function updateActivity(view,now){
+  const row=view.row,running=row.state==='running' || row.state==='pausing',measured=!row.indeterminate && row.total>0 && row.done>=0 && row.done<=row.total;
+  const finishing=measured && running && row.done>=row.total,determinate=measured && !finishing;
+  const label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=activityDetail(row,finishing);
+  writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
+  writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
+  view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
+  if(determinate){const value=Math.min(99,Math.floor(row.done/row.total*100));if(view.bar.value!==value)view.bar.value=value;}
+  else if(view.bar.hasAttribute?.('value')!==false)view.bar.removeAttribute('value');
+  view.bar.setAttribute('aria-label',label+(subject?': '+subject:''));view.bar.setAttribute('aria-valuetext',[step,detail].filter(Boolean).join(', '));
+  // Elapsed counts the current step from its start; it freezes while paused or needing attention.
+  const started=Number.isFinite(row.step_started_at)?row.step_started_at:now;
+  if(running)view.frozen=null;else if(view.frozen===null)view.frozen=now;
+  const elapsed=Math.max(0,((view.frozen ?? now)-started)/1000);
+  if(determinate && running){view.samples.push([now,row.done]);while(view.samples.length>1 && now-view.samples[0][0]>30000)view.samples.shift();}
+  if(!(determinate && running) || elapsed<10 || row.done/row.total<0.05)view.eta='';
+  else if(now-view.etaAt>=5000 && view.samples.length>1){
+    const [t0,d0]=view.samples[0],[t1,d1]=view.samples[view.samples.length-1],rate=(d1-d0)/((t1-t0)/1000);
+    view.etaAt=now;
+    if(rate>0){const left=(row.total-row.done)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
+  }
+  writeText(view.time,clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));
 }
 async function candidateRequest(route,extra={}){if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){message(error.message);}finally{busy=false;controls();}}
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
@@ -410,9 +468,8 @@ function updateRetry(){
   const block=$('retry-block'),button=$('retry-job'),note=$('retry-note');if(!block || !button || !note)return;
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,retry=job?.retry;
   if(retryResult && retryResult.key!==key)retryResult=null;
-  if(retryDone && (retryDone.key!==key || retryDone.job!==job))retryDone=null;
   const pending=!!key && retryPending?.key===key;
-  const shown=pending || (!!key && !retryDone && !!retry && typeof retry==='object' && typeof retry.allowed==='boolean');
+  const shown=pending || (!!key && !!retry && typeof retry==='object' && typeof retry.allowed==='boolean');
   block.hidden=!shown;
   if(!shown){if(note.textContent)note.textContent='';note.hidden=true;return;}
   const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending?'busy':retry.allowed===true?'ready':'unavailable';
@@ -429,19 +486,22 @@ function updateRetry(){
   if(note.textContent!==text)note.textContent=text;
   note.hidden=!text;note.classList.toggle('retry-refused',!!result);
 }
+function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
 async function retryJob(){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null;
   if(!key || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || job.retry?.allowed!==true || $('retry-job').disabled)return;
   retryPending={key};retryResult=null;busy=true;controls();
   let succeeded=false;
   try{await request('/api/audiobook/retry',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id});succeeded=true;}
-  catch(error){retryResult={key,text:error.httpStatus?(error.message || 'Retry was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);}
+  catch(error){retryResult={key,text:error.httpStatus?(error.message || 'Retry was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);else if(error.httpStatus===409)retryEpoch++;}
   const focused=document.activeElement===$('retry-job');
   retryPending=null;busy=false;
   if(succeeded){
-    retryDone={key,job}; // Hidden until fresh data for this job arrives.
+    // The server requeued the job: show it as queued now, and ignore book lists requested before this answer.
+    retryEpoch++;const queued=queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
     // The block leaves the page: focus moves to the panel heading, never into the automatic result.
     if(focused && retryKey(selectedRow)===key)$('details-heading').focus?.({preventScroll:true});
+    if(selectedRow?.path===row.path)select(queued,false);
   }
   controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}

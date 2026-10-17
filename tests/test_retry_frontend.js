@@ -28,10 +28,10 @@ get('candidate-members').parentElement=new Element();get('manual-review').append
 get('automatic-result').append(get('automatic-result-status'),get('automatic-reasons'),get('retry-block'),get('automatic-sources'));get('retry-block').append(get('retry-job'),get('retry-note'));
 const document={activeElement:null,getElementById:get,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:tag=>new Element(tag)};
 const calls=[];let backend={version:'fixture',root:'fixture-root',genres:[],status:{state:'idle',count:0,checked:0,reused:0,pending:0,errors:0},active_library:null,automatic_processing:{state:'Idle',phase:'discovery',can_start:true,can_stop:false,research:{researching:0,waiting:0,held:0},current:null,reason:'',run_id:null},audiobook_jobs:{state:'Needs attention',queued:0,failed:1,approved_total:0,converted_total:0}};
-let inventoryRows=[],retryOverride=null;
+let inventoryRows=[],retryOverride=null,inventoryOverride=null;
 async function fixtureFetch(route,options){calls.push({route,options});const data=options.body?JSON.parse(options.body):undefined;
   if(route==='/api/audiobook/retry'){if(retryOverride)return retryOverride(data);return {ok:true,status:202,json:async()=>({job_id:data.job_id,requeued:true})};}
-  let result={};if(route.startsWith('/api/state'))result=backend;else if(route.startsWith('/api/inventory'))result={rows:inventoryRows,total:inventoryRows.length};else if(route==='/api/inspect')result={inspector:{sections:[],source_directories:[]}};
+  if(route.startsWith('/api/inventory') && inventoryOverride)return inventoryOverride();let result={};if(route.startsWith('/api/state'))result=backend;else if(route.startsWith('/api/inventory'))result={rows:inventoryRows,total:inventoryRows.length};else if(route==='/api/inspect')result={inspector:{sections:[],source_directories:[]}};
   return {ok:true,json:async()=>result};}
 const context=vm.createContext({document,console,URL,Intl,Date,JSON,location:{origin:'http://127.0.0.1:5210'},setTimeout:()=>0,clearTimeout(){},fetch:fixtureFetch});
 const app=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8').replace(/controls\(\);\s*viewControls\(\);poll\(\);\s*$/,'');vm.runInContext(app,context);
@@ -89,7 +89,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.equal(run('busy'),false);
 
   // State 8, refused: the server's message verbatim, warning style; the button follows fresh data.
-  const refused='This book changed. Refresh and try again.';retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});
+  const refused="This book's status changed. Check the updated status above.";retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});
   show(row);document.activeElement=button;inventoryRows=[blocked({},{retry:{allowed:false,reason:NOT_YET}})];await run('retryJob()');
   assert.equal(note.textContent,refused);assert.equal(note.hidden,false);assert.equal(note.classList.contains('retry-refused'),true);
   assert.equal(button.disabled,true);assert.equal(button.title,NOT_YET);assert.notEqual(document.activeElement,get('details-heading'));assert.equal(get('message').textContent,'');
@@ -115,6 +115,21 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.equal(get('automatic-result-status').textContent,'Needs attention — A newer saved reason');
   const link=new Element('fixture-link');get('automatic-sources').append(link);document.activeElement=link;context.fixture=blocked({},{reason:'Hidden while reading sources'});run('rows=[fixture];select(fixture,false)');
   assert.equal(get('automatic-result-status').textContent,'Needs attention — A newer saved reason');document.activeElement=null;
+
+  // v0.16.6: after 202 the panel shows the requeued job at once, and no book list requested before the answer repaints it.
+  retryOverride=null;show(row);inventoryRows=[row];let fresh;inventoryOverride=()=>new Promise(resolve=>{fresh=resolve;});document.activeElement=button;
+  const accepted=run('retryJob()');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(get('automatic-result-status').textContent,'Queued','queued before any book list arrives');assert.equal(block.hidden,true);
+  assert.equal(run('rows.find(item=>item.path==="cand-a").creation.job.state'),'Queued','the list no longer holds the needs-attention copy');
+  fresh({ok:true,json:async()=>({rows:[queued(row)],total:1})});inventoryOverride=null;await accepted;assert.equal(get('automatic-result-status').textContent,'Queued');
+  // The guard itself: a book list requested before Retry was answered is dropped even if it is the latest request.
+  show(row);inventoryRows=[row];let old;inventoryOverride=()=>new Promise(resolve=>{old=resolve;});const pending=run('refresh(true)');await new Promise(resolve=>setImmediate(resolve));
+  context.fixture=queued(row);run('retryEpoch++;rows=[fixture];select(fixture,false)');old({ok:true,json:async()=>({rows:[row],total:1})});inventoryOverride=null;
+  assert.equal(await pending,false);assert.equal(get('automatic-result-status').textContent,'Queued');
+  show(queued(row));inventoryRows=[row];assert.equal(await run('refresh(true)'),true,'positive control: a list requested after the answer is painted');assert.match(get('automatic-result-status').textContent,/^Needs attention/);
+  // A 409 also asks for a fresh book list, and its message names no missing action.
+  retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});show(row);inventoryRows=[row];const sentBefore=calls.length;const epoch=run('retryEpoch');await run('retryJob()');
+  assert.equal(run('retryEpoch'),epoch+1);assert.ok(calls.slice(sentBefore).some(call=>call.route.startsWith('/api/inventory')));assert.doesNotMatch(note.textContent,/Refresh/);retryOverride=null;
 
   // C2: the automatic wait no longer says "Retry".
   context.fixture={...blocked({creation:{status:'Needs metadata review',can_create:false,reasons:[]},status:''}),automatic:{state:'Waiting for source',reasons:[],sources:[],retry_at:1896901200}};run('automaticResultKey=null;renderAutomaticResult(fixture)');

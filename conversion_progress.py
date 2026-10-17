@@ -45,6 +45,9 @@ def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,mod
 
 def phase_progress(phase,measurement=None):
     result={'phase':phase}
-    if measurement and measurement.get('phase')=='encoding':
-        result.update(phase='encoding',completed=measurement['completed'],total=measurement['total'])
+    if not isinstance(measurement,dict):return result
+    if all(key in measurement for key in ('phase','completed','total')):
+        # A measured step inside this journal stage (encoding, normalizing, copying to the library, ...).
+        result.update({key:measurement[key] for key in ('phase','completed','total','unit','item','items','started') if key in measurement})
+    elif measurement.get('phase')==phase and 'started' in measurement:result['started']=measurement['started']
     return result

@@ -83,6 +83,7 @@ class CleanupJobs:
     def __init__(self,database,recovery_root,guard,review_boundary):
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
         self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
+        self.checked={}  # cleanup id -> originals checked so far while its recovery copies are checked (in memory)
         self.after_drain=None;self.on_completed=None
         # Quit (a drain) does not set stop; the owner supplies it so Quit also cuts a retry wait short.
         self.interrupt=lambda:False
@@ -238,6 +239,7 @@ class CleanupJobs:
                 'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':success,
                 'needs_attention':'Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'}
             result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
+                'checked':self.checked.get(row['id'],0) if state=='checking' else None,
                 'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':current_bytes,
                 'recovery_location':str(self.root/row['id']) if current_bytes else '', 'temporary_cleanup':temporary,
                 'preserved_evidence_count':evidence_count,'restore_available':bool(members) and all(Path(m['backup']).is_file() for m in members),'reason':reason})
@@ -304,6 +306,7 @@ class CleanupJobs:
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
             for index,source in enumerate(manifest['sources']):
+                self.checked[id]=index
                 path=ordinary(source['path']);backup=recovery/(f'{index:05d}'+path.suffix.lower())
                 prior=self._rows('SELECT * FROM cleanup_members WHERE cleanup_id=? AND path=?',(id,str(path)))
                 member=prior[0] if prior else None
@@ -345,6 +348,7 @@ class CleanupJobs:
                 with connect(self.database) as db:db.execute("UPDATE cleanup_members SET state='backup_verified',backup_facts=? WHERE cleanup_id=? AND path=?",(packed(backup_handle.facts()),id,str(path)))
                 held.append((source,original,facts))
             # All recovery copies are durable and protected BEFORE the first dispose.
+            self.checked.pop(id,None)
             self._set(id,'removing')
             for source,original,facts in held:
                 if self.stop.is_set():self._set(id,'paused');return

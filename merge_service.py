@@ -290,7 +290,7 @@ class MergeService:
         if errors and value['state']=='Completed':value['state']='Needs attention'
         progress=None
         if active:
-            progress={'phase':'originals','completed':active.get('removed',0),'total':active.get('total',0)} if active['state'] in ('removing','pausing','paused') else {'phase':'checking sources'}
+            progress={'phase':'originals','completed':active.get('removed',0),'total':active.get('total',0)} if active['state'] in ('removing','pausing','paused') else {'phase':'recovery copies','completed':active.get('checked') or 0,'total':active.get('total',0)} if active['state']=='checking' and active.get('total') else {'phase':'recovery copies'}
         elif post:progress={'phase':post[1]}
         elif current:progress=phase_progress(current['stage'],current.get('progress'))
         elif errors:
@@ -310,7 +310,8 @@ class MergeService:
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
-            'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False}
+            'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
+            'published_check':value.get('published_check')}
 
     def pause(self):
         # During a desktop Quit drain the current book finishes; nothing is interrupted. No status is
@@ -1022,7 +1023,7 @@ class MergeService:
                 checkpoint('publishing',copy.deepcopy(record))
             else:checkpoint(stage,details)
         with ProtectedFiles([output]):
-            publish(output,manifest,validation,stop,journal,lambda:self._guard(manifest),self._review_boundary())
+            publish(output,manifest,validation,stop,journal,lambda:self._guard(manifest),self._review_boundary(),report=lambda value:checkpoint('copying',{'progress':value}))
         self._register(record['final_path'],manifest['job_id'],'output',record['sha256'],record['size'])
         return record
 
