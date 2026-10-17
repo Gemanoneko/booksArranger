@@ -1,0 +1,6 @@
+{
+  "schema": "books-desktop-acceptance-v1",
+  "version": "0.16.7",
+  "qa": "Docs/BooksArranger_QA_v0.16.7_2026-10-17.md",
+  "review": "Docs/BooksArranger_CodeReview_v0.16.7_2026-10-17.md"
+}

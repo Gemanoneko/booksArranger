@@ -1,18 +1,68 @@
-# Books Arranger v0.16.7 lean packaged smoke, copy of the real catalog, real Audiobooks root (read-only) — 2026-10-17
+# Books Arranger v0.16.7 lean packaged smoke, copy of the real catalog, real Audiobooks root (read-only) — 2026-10-17, updated for the perf rebuild
 
 Author: Futaba.
 
-**Verdict:** NO-GO
+**Verdict:** GO
 
-Pattern alerts: 1.
+Pattern alerts: 1 closed, 1 new watch item.
+1. **CLOSED, verified on the rebuild: `/api/state` slow or 503 after launch** (third build in a row on the first build). On the rebuild the page made 348 `/api/state` calls over about 6 minutes: **348 answered 200, 0 answered 503**, so no 503 streak. Duration p50 4 ms, p95 187 ms, max 3,961 ms (one call, see item 2). `/api/inventory`: 346 calls, 346 answered 200, p50 100 ms, p95 295 ms, max 4,239 ms. The first build had 35 non-200 in 134 polls and 2.3 to 4.0 s per call. Disposition: **fix**, shipped in 0534492, verified here.
+2. **NEW, open, watch item: the start is still slower than the steady state.** (a) The first list painted **36.2 s** after launch (first build: 62.9 to 65.2 s). (b) For the first 3.3 minutes the app's process tree read **66 to 85 MB per 20 s** (about 3.5 to 4 MB/s) with the window idle, then a burst (132 MB and 318 MB in two samples at 3.4 to 3.7 min), then **1.1, 1.1, 2.6 and 1.1 MB per 20 s** from 4.0 to 5.0 min. (c) The only slow calls of the whole run, one `/api/state` at 3,961 ms and one `/api/inventory` at 4,239 ms (both answered 200), came at about 200 s of polling, the same moment as that burst. Cause not investigated; one launch only. Disposition proposed: **defer** (Minor), watch in the live check; Jane to confirm. Owner: Ender.
+
+**Why GO.** Against the criteria Jane set for the rebuild: **list time** from a change of Status or group to the finished list was at most **0.88 s** in all 8 measured changes (limit about 3 s), and the **loading text appeared within 2 to 5 ms** every time, so the first build's late loading text is fixed; **no 503 streak** (0 of 348); **idle reads near 0** by 4 to 5 minutes (1.1 to 2.6 MB per 20 s; the first build read 5.4 GB per 20 s and never went quiet). Checks 1, 3 and 4 pass again. What is left is item 2, a Minor.
+
+Release source commit: 053449281df7e18ae077f6ebca954431ac350d50
+Release artifact manifest SHA256: d173abd97453f02b86e706cdc18b16a0b37b70970ad13f2bebc825a9240a6da6
+
+**Artifact covered (rebuild):** `dist/builds/3673b625-9169-48dc-8950-0c32dec75612/Books-Arranger-Setup-0.16.7.exe` in the electron-m1 worktree. SHA256 `54b1d82d38cecaad05fe23b5323c42bb25c045d281dcc050ef89c02a53ac0eb5`, recomputed by me, equals the brief.
+
+Binding checks, made myself: worktree HEAD `053449281df7e18ae077f6ebca954431ac350d50` equals `source_head` in `dist/release-artifacts.json`; the SHA256 of that manifest, recomputed by me, equals the manifest line above; the manifest says version 0.16.7, `payload.verified` true, build id `3673b625-9169-48dc-8950-0c32dec75612`, 223 payload files. The installer extracted with 7za to a private folder; **223 of 223 payload files match the manifest, mismatch `[]`**. `git status` in the worktree was empty when I checked (before this edit); it now lists a modified code-review document that is not mine.
+
+**First build (superseded, not covered by this verdict):** installer in `dist/builds/d6836509-e229-4cf7-94e2-c26f7b7d8fe1/`, source commit 0e95a41494963a37aa9e9607a40bfc7b9a2479a1; its NO-GO record is kept in full below.
+
+## Rebuild: results per check (artifact 3673b625, commit 0534492)
+
+Run on 2026-10-17 23:11 to 23:18 UTC, one launch of about 6.5 minutes. Setup as before: payload extracted to a private folder, a **fresh copy** of the real catalog (497,655,808 bytes, copy SHA256 `35f534f2a368abdb6231fc3f4b824ce2694d2a2a03e2b9a51a397961ef9714b5`, `quick_check` ok), private port 5213, private profile, debug port 19227, Audiobooks root = the real `Z:\Audiobooks` (read-only use), Podcasts and Ebooks private and empty. This copy is newer than the first build's (Sergei's catalog moved on), so the numbers below are not book-for-book comparable: 116 books are "Audiobook Ready" now (89 then) and the attention total is 135 (131 then).
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Version v0.16.7, Paused, responsive, Quit clean | **PASS.** `/api/health` says 0.16.7, `recovery_active` false, first answer 9.5 s after launch; window badge "v0.16.7"; "Automatic processing: Paused"; jobs line "116 converted out of 479 approved books · Paused · 225 queued · 138 need attention". Responsive: after the first list every poll was fast (see the call statistics). **Quit:** one real renderer mouse press on "Quit Books Arranger" (hit-tested first); shell exit code 0 **0.84 s** after the click; afterwards the Books Arranger and python process sets equal the pre-launch ones, nothing listens on 5213 or 19227, 0 `etilqs` files. Sergei's app kept listening on 5210 (PID 67772); I sent it no request. |
+| 2 | Status "Output needs attention": fast list, loading text, group counts | **PASS.** Three cycles, Audiobook Ready to Output needs attention and back, window settled (first list painted 36.2 s after launch, then a 5-minute wait). Table below. All 8 changes finished in 0.88 s or less; loading text 2 to 5 ms. Strip at the first read: "All · 135", "Can retry · 132", "Can repair · 2", "Other · 0", "M4B not supported · 1" (first build: 131, 128, 1 then 2, 0, 2 then 1). `/api/state` read at the end gives the same counts: retry 132, repair 2, other 0, unsupported 1. The header says 138 need attention against 135 in the strip, the same kind of gap as before (134 against 131); not investigated. |
+| 3 | Visual: hints plain, Retry/Repair present, no overlaps, Retry all count | **PASS.** Screenshots `group-retry.png` and `group-repair.png`. Can retry (100 of 132 on the page): 99 "Stopped — ready to retry" / "Safe to retry now.", 1 "Stopped — not enough disk space" / "Free up disk space, then retry."; all 100 rows have **Retry**, View metadata and Source folders. Can repair (2 rows): "Damaged — can repair" with the two plain hints (chapter list points to a missing part; file claims a few bytes past its end, no audio missing); both have **Repair**. **"Retry all (132)"** shows in the Can retry view only, enabled, matches the "Can retry · 132" button. 0 overlapping cells, buttons or strip controls; every hint and button inside its cell; 0 clipped cells; 0 px horizontal overflow; element-at-point test on 20, 21 and 11 controls: none covered; no jargon-pattern hits. In the screenshot "Stopped — ready to retry" now wraps onto two lines because the list has its own scroll bar; cosmetic. I clicked no Retry, Repair or Retry all. |
+| 4 | Progress-rows area renders | **PASS.** Panel visible; status line; Pause disabled, Resume enabled; one saved paused cleanup row in a 61 px rows area; 0 overlaps. "Nothing running" not seen (the copy carries that saved row). |
+
+**The 3 filter cycles** (time from the change to the first sign of change / to the finished list; the page's own calls in brackets, offset and duration):
+
+| Cycle | To "Output needs attention": loading text / list | Back to "Audiobook Ready": loading text / list |
+|---|---|---|
+| 1 | 3 ms / 875 ms (state 200 10 ms; inventory 200 850 ms) | 5 ms / 216 ms (inventory 105 ms; state 105 ms) |
+| 2 | 3 ms / 109 ms (state 53 ms; inventory 53 ms) | 2 ms / 217 ms (inventory 109 ms; state 109 ms) |
+| 3 | 2 ms / 108 ms (inventory 43 ms; state 43 ms) | 2 ms / 115 ms (inventory 79 ms; state 79 ms) |
+
+Group buttons: "Can retry": loading text 2 ms, 100 rows of 132 at **764 ms** (inventory 650 ms); "Can repair": loading text 2 ms, 2 rows at **324 ms** (inventory 310 ms). First build for comparison: list 3.6 to 13.2 s, loading text 1.8 to 11.0 s, back 11.4 to 14.6 s.
+
+**Idle read rate** (the app's 7-process tree, bytes read per 20 s, window open on Audiobook Ready, nothing clicked), samples every 20 s from the first list: minutes 0.3 to 3.0: 66 to 85 MB each; 3.4: 132 MB; 3.7: 318 MB; **4.0: 1.1 MB; 4.4: 1.1 MB; 4.7: 2.6 MB; 5.0: 1.1 MB**. Over the whole 6.5 minutes: 3.2 GB read, 283 MB written (first build: 505.7 GB read and 9.8 GB written in 31 minutes). The "converted" count stayed at 116 throughout. As before, I did not split the reads by drive or file, and I took no SMB counters and no real-data fingerprint, so I cannot prove zero writes to `Z:`; I clicked nothing that starts work.
+
+**Call statistics for the whole run** (every `/api/state` and `/api/inventory` call the page made, about 346 s of polling, roughly one pair per second): `/api/state` 348 calls, **348 x 200, 0 x 503**, p50 4 ms, p95 187 ms, max 3,961 ms; `/api/inventory` 346 calls, 346 x 200, p50 100 ms, p95 295 ms, max 4,239 ms; longest run of non-200 answers: 0.
+
+## Rebuild: not covered, method, evidence
+
+- **Not covered:** the "Nothing running" text and any running row; anything that starts work (Start, Resume, Pause, Retry, Retry all, Repair were never clicked, and Retry all's confirmation step was not opened); the "Other" group (count 0) and the "M4B not supported" list; widths below the 1266 x 823 default window; hide-to-tray; the NSIS installer and the tray menu's own Quit; page 2 of the lists; light theme. One launch only, so item 2 of the pattern alerts rests on one sample.
+- **Method:** as in the first build's section below. Status select and group buttons were driven by script (value plus change event, `click()` on `#group-retry` and `#group-repair`); Quit was a real mouse press. The harness has no code path that clicks a mutating control. Sergei's v0.16.6 was running during the catalog copy, so recipe condition C1 could not hold; the real file's size and modification time were identical before and after the `cp` and its `-wal` was 0 bytes; `quick_check` on the copy is `ok`; no process of mine opened the real catalog and no `-wal`, `-shm`, lock, instance or recovery file was copied. No SMB counters, no real-data fingerprint. I did not clean up, as briefed.
+- **Evidence**, under `C:/Users/AnGeLZzZ/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/3c1cc2ef-43a9-4b2a-b1fa-8a242d8fded6/scratchpad/shared/ba-v0167-qa2/`: `evidence/result5.json` (15 settle samples, the cycle and group timings, all 694 page calls, process sets, quit), `evidence/progress5.log`, `evidence/group-retry.png`, `evidence/group-repair.png`, shell logs; tools `tools/smoke4.mjs` and `tools/io.py`; catalog copy in `data/`, payload in `payload/`. The first build's evidence is in the sibling `ba-v0167-qa/` folder.
+
+## Record of the first build (0e95a41), superseded by the rebuild above
+
+Everything below is the report as filed on the first build. Its verdict was NO-GO; its pins were `0e95a41494963a37aa9e9607a40bfc7b9a2479a1` and manifest `5a53f11e158b41b325e2e37911cd74cf67323f49d2091fd865b678d2a0635f8a`. The numbers below are not the rebuild's.
+
+Pattern alerts as filed on the first build: 1.
 1. **`/api/state` is slow or answers 503 early after launch, third build in a row (v0.16.6 first build and rebuild, now v0.16.7), and it now has a visible effect.** Six of six calls I made in the first minute after launch (two per run, three runs) returned **503 after 4.06 to 4.15 s**. Later calls: 503 at 4,019 ms (run 1), 200 at 2,780 ms (run 2), 200 at 1,728 ms (run 3). `/api/health` was 3 to 51 ms every time. In the 28-minute run 4 it did not go away: 35 of 134 polls returned 503 and the successful ones took 2.3 to 4.0 s. In the window this gates the list: the filter and group handlers call `refresh(true)`, which waits for `/api/state` before it shows "Loading…" (see Finding 1). Earlier reports logged this as "two samples, watch it". Disposition proposed: **fix** (owner Ender; the "no feedback" half is UX-shaped, so Judy sees it too). Jane to confirm the disposition.
 
 **Why NO-GO, in one line.** Checks 1, 3 and 4 passed and everything on screen is correct. **Check 2 failed on time, and a 28-minute re-measure on the same build did not fix it.** Run 3 (window settled, 63 s after launch): changing Status to "Output needs attention" took **17.3 s** to show the new list, loading text at 10.2 s. Run 4 (same build and copy, relaunched and watched for 28 minutes, then 3 filter changes): the list took **3.6 s, 13.2 s and 4.3 s** (median 4.3 s), loading text at **1.8 s, 11.0 s and 2.5 s**; going back to "Audiobook Ready" took **14.6 s, 12.9 s and 11.4 s**. No cycle met "about 3 s". Severity **Major**, not a Blocker: the feature works, it is slow, and the loading text waits behind `/api/state`. The engine never went quiet, so I could not reach the "first-launch work finished" state the re-measure was meant to test (see "Re-measure"); Jane can still overrule on that ground.
 
-Release source commit: 0e95a41494963a37aa9e9607a40bfc7b9a2479a1
-Release artifact manifest SHA256: 5a53f11e158b41b325e2e37911cd74cf67323f49d2091fd865b678d2a0635f8a
+First build, source commit: 0e95a41494963a37aa9e9607a40bfc7b9a2479a1
+First build, manifest SHA256: 5a53f11e158b41b325e2e37911cd74cf67323f49d2091fd865b678d2a0635f8a
 
-**Artifact covered:** `dist/builds/d6836509-e229-4cf7-94e2-c26f7b7d8fe1/Books-Arranger-Setup-0.16.7.exe` in the electron-m1 worktree. SHA256 `8514d776223b0ffc9081c5fe9cb0fcf0ea272f73ac9a06e6d715bd377095c3a2`, recomputed by me, equals the brief.
+**Artifact covered (first build):** `dist/builds/d6836509-e229-4cf7-94e2-c26f7b7d8fe1/Books-Arranger-Setup-0.16.7.exe` in the electron-m1 worktree. SHA256 `8514d776223b0ffc9081c5fe9cb0fcf0ea272f73ac9a06e6d715bd377095c3a2`, recomputed by me, equals the brief.
 
 Binding checks, made myself: worktree HEAD `0e95a41494963a37aa9e9607a40bfc7b9a2479a1` equals `source_head` in `dist/release-artifacts.json`; the SHA256 of that manifest, recomputed by me, equals the manifest line above; the manifest says version 0.16.7, `payload.verified` true, build id `d6836509-e229-4cf7-94e2-c26f7b7d8fe1`, 223 payload files. The installer extracted with 7za to a private folder; **223 of 223 payload files match the manifest, mismatch `[]`**. `git status` in the worktree was empty when I looked (before this report was added).
 

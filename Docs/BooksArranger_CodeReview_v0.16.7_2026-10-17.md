@@ -8,16 +8,20 @@ Date: 2026-10-17
 Tool: Books Arranger
 Release: v0.16.7
 Status: FINAL; lean red-team pass focused on data safety (brief items 1-5); dimensions 4, 7 and 8 read lightly
-Commit range: 56c7532221f42b755ed4c30080d2dae790fa28ac..0e95a41494963a37aa9e9607a40bfc7b9a2479a1
+Updated: 2026-10-18, focused delta review of the rebuild after Futaba's NO-GO (see "Delta review" below)
+Commit range: 56c7532221f42b755ed4c30080d2dae790fa28ac..053449281df7e18ae077f6ebca954431ac350d50
   56c7532 = v0.16.6 tag (its report cleared 9e1664ff..7619d12; 56c7532 is docs only)
   c654593 feat: M4B support, repair, retry-next and bounded working space
   0e95a41 chore: release v0.16.7 (package.json, package-lock.json, CHANGELOG in one commit)
-Files changed: 34 files, +3593 / -348 (code only, excluding Docs/ and tests/: 21 files, +1630 / -266)
+  c0e3475 docs: record v0.16.7 review and NO-GO QA of 0e95a41
+  0534492 perf: stop idle catalog rescans; fast status and book list
+Files changed: 56c7532..0e95a41 34 files, +3593 / -348 (code only, excluding Docs/ and tests/: 21 files, +1630 / -266); 0e95a41..0534492 15 files, +720 / -42
 Stand-down dimensions: none
-Release source commit: 0e95a41494963a37aa9e9607a40bfc7b9a2479a1
-Release artifact manifest SHA256: 5a53f11e158b41b325e2e37911cd74cf67323f49d2091fd865b678d2a0635f8a
-Release installer: dist/builds/d6836509-e229-4cf7-94e2-c26f7b7d8fe1/Books-Arranger-Setup-0.16.7.exe
-Release installer SHA256: 8514d776223b0ffc9081c5fe9cb0fcf0ea272f73ac9a06e6d715bd377095c3a2
+Release source commit: 053449281df7e18ae077f6ebca954431ac350d50
+Release artifact manifest SHA256: d173abd97453f02b86e706cdc18b16a0b37b70970ad13f2bebc825a9240a6da6
+Release installer: dist/builds/3673b625-9169-48dc-8950-0c32dec75612/Books-Arranger-Setup-0.16.7.exe
+Release installer SHA256: 54b1d82d38cecaad05fe23b5323c42bb25c045d281dcc050ef89c02a53ac0eb5
+Superseded binding (void): build d6836509-e229-4cf7-94e2-c26f7b7d8fe1, installer 8514d776…c3a2, manifest 5a53f11e…5f8a, source 0e95a41
 ```
 
 ## Summary
@@ -86,6 +90,52 @@ Evidence I gathered myself:
    - `_retry_shape` still refuses anything with `publication_intent`, any replacement or repair child, superseded jobs, and an E7 history mismatch.
    - E8 (working files absent) and the space check are re-run when Retry is pressed.
    - The worker's own `check_working_space` still applies the exact requirement before any copy.
+
+## Delta review: 0e95a41..0534492 (rebuild after QA NO-GO)
+
+This was a focused pass with few tool calls. It covered all 9 non-test code files in 0534492 (c0e3475 is docs only). The answers to release questions 1-5 above are unchanged: this delta touches no conversion, verification, publication or cleanup code.
+
+Evidence I gathered myself:
+- The new installer hashes to `54b1d82d…eb5`.
+- `dist/release-artifacts.json` hashes to `d173abd9…6da6` and names `source_head` 0534492.
+- All packaged `resources/backend/*.py` and `web/` files have the same content as HEAD 0534492.
+- The 7 delta-relevant suites (quiet_status, review_backend, attention_actions, attention_repair, storage_cleanup, status_snapshot, blocked_retry; 106 cases) passed 5 of 6 runs. The other run had 1 error that I could not reproduce or identify (D2).
+
+**Indexes and schema setup on the live catalog: safe.**
+- All four indexes are `CREATE INDEX IF NOT EXISTS` and change no data:
+  - `audio_jobs(state)`;
+  - the expression index `audio_jobs(json_extract(manifest,'$.candidate_id'),created,job_id)`;
+  - `storage_cleanup_files(job_id,kind)`;
+  - `storage_cleanup_preserved(job_id)`, created after its table (`storage_cleanup.py:36` before `:43`).
+- On the first 0.16.7 launch each index is built once at startup, before the worker or server can write. The build is a single atomic DDL statement: if it is interrupted it rolls back and is retried on the next launch.
+- The expression index adds no new failure mode. Every manifest is written by `json.dumps`, and the existing E6 query already applies `json_extract` to every row.
+- `scanner.connect`'s once-per-file fast path (`scanner.py:385-410`) skips only persistent setup: WAL mode and four `CREATE TABLE IF NOT EXISTS`. It still sets the per-connection `busy_timeout`. If any base table is missing, it falls back to the full setup. A replaced catalog file has a new (path, volume, file index) identity, so it gets the full setup again.
+
+**A stale cached status or list cannot drive a safety decision.**
+- The quiet reuse covers `status_snapshot`, `cached_page`, `converted_ids`, `cleanup_statuses` and `server.state(cached=True)`. Only polling and display call these, plus the desktop shell's busy facts.
+- The quiet token is `None` whenever any worker, cleanup, scan, automatic, publication or Retry-all thread runs, or while resuming or draining. Otherwise it is (`PRAGMA data_version` on a dedicated read-only monitor connection, a control generation, published-check progress).
+  - Any commit by another connection changes the token.
+  - Every control bumps the generation through `invalidate_status`.
+  - Every value is stored under the token taken before it was computed, and stored only if that token is still current afterwards.
+- Every control still decides on fresh reads:
+  - Retry: E1-E10 plus the row CAS.
+  - Repair: re-diagnosis under file holds, then the `enqueue` CAS.
+  - Retry all: a fresh summary, then re-checks per book.
+  - Create and queue: a fresh `build_manifest`.
+  - Recovery delete: a fresh `_recovery_idle()`.
+- Restart and update fences use `cached=False`.
+- `_newest_jobs(db, candidates)` returns the same newest job per book as the full scan, and `retry_admission_hold` still runs its own uncached E6 query.
+- `replacements.snapshot()` around the page is a thread-local, read-only relation cache, not a lock.
+
+**Repair classification cache: display only.**
+- Results are persisted in `m4b_repair_checks`, keyed by (job id, manifest hash, preservation module SHA256). "Source unavailable" results are excluded.
+- They decide only the group and badge shown. Repair itself re-diagnoses the source under holds, and `confirm()` binds the applied repair to the approved one.
+- The end-of-pass write and `invalidate_status` do not loop: checked rows stop being "unchecked".
+- This largely resolves the earlier repair-check performance Minor (4). It now runs once per job and module, not once per launch, and rests after each parse. The CPU-only parse still has no stop check.
+
+**No regression found.** Delta findings:
+- **D1** `audio_jobs.py:216` [Minor] Because of the new expression index, any tool that writes `audio_jobs` must have SQLite's JSON functions. The bundled runtime does, and so does a rollback to 0.16.6. Recorded so that external catalog tools are not surprised.
+- **D2** tests [Minor] 1 error in 6 runs of the delta-relevant suites; I could not reproduce or identify it. `check-desktop` fails its gate on any error, so a flaky case can block a build for nothing. Find it and make it deterministic.
 
 ## Rubric
 
@@ -159,7 +209,7 @@ Proof rigor stays high and every relaxation is exact. The recurring weak spot is
 ## Verdict
 
 - Total Critical: 0
-- Total Major: 1
-- Total Minor: 8
+- Total Major: 1 (F1, unchanged by the delta)
+- Total Minor: 9 open (the 8 from c654593, less the repair-check performance one that 0534492 largely resolved, plus D1 and D2)
 
 **Verdict:** RELEASE CLEAR
