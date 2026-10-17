@@ -203,9 +203,12 @@ class CandidateReviewService:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
         self.page_local.jobs={}
         if self.jobs and hasattr(self.jobs,'jobs'):
+            # Retry data (creation.job.retry) for jobs refused before any attempt started, once per page.
+            retry=self.jobs.retry_statuses() if hasattr(self.jobs,'retry_statuses') else {}
             for job in self.jobs.jobs.status()['jobs']:
                 state={'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason']}
+                if job['job_id'] in retry:self.page_local.jobs[job['manifest']['candidate_id']]['retry']=retry[job['job_id']]
                 self.page_local.jobs[job['manifest']['candidate_id']]['cleanup_policy']=job['manifest'].get('cleanup_policy',{'enabled':False})
                 if hasattr(self.jobs,'cleanup'):self.page_local.jobs[job['manifest']['candidate_id']]['cleanup']=self.jobs.cleanup.status(job['job_id'])
         converted=self.jobs.progress_books()['converted_ids'] if self.jobs and hasattr(self.jobs,'progress_books') else set()

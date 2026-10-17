@@ -23,6 +23,7 @@ patterns.push('test_zone_identifier.py');
 patterns.push('test_status_snapshot.py');
 patterns.push('test_startup_published_check.py');
 patterns.push('test_replacement_jobs.py');
+patterns.push('test_cleanup_resume.py','test_blocked_retry.py');
 const code="import sys,unittest,json;sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();[s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p)) for p in json.loads(sys.argv[2])];print('Integrated Python cases:',s.countTestCases(),flush=True);r=unittest.TextTestRunner(verbosity=2).run(s);sys.exit(not r.wasSuccessful() or bool(r.skipped))";
 const pythonOutput=run(python,['-I','-B','-c',code,root,JSON.stringify(patterns)]);
 const pythonCount=Number(/^Integrated Python cases: (\d+)$/m.exec(pythonOutput)?.[1]);

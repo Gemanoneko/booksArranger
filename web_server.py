@@ -329,6 +329,15 @@ class Handler(BaseHTTPRequestHandler):
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
         reviews=self.server.merge.reviews
+        if path=='/api/audiobook/retry':
+            self.shape(data,{'library','id','revision','job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id'])
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.retry_blocked_job(library,id,revision,job_id)
+            except RetryRefused as error:
+                self.fail(409,str(error));return  # Nothing changed; the message is shown as written.
+            self.response(202,result);return
         if path=='/api/audiobook/replace':
             self.shape(data,{'library','id','revision','parent_job_id'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
@@ -426,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -461,6 +470,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path in merge_routes:
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
+                    if path=='/api/audiobook/retry' and self.server.scan_active():
+                        from audio_jobs import RETRY_SCANNING
+                        self.fail(409,RETRY_SCANNING);return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':
                     self.fail(404,'No such Books Arranger control');return

@@ -33,6 +33,20 @@ def _failure_details(error, stage, now=None):
     return details
 
 
+class RetryRefused(ValueError):
+    """A Retry request that changed nothing. Its message is shown to the user exactly as written."""
+
+
+# Retry copy shown in the app: one fact, then the fix.
+RETRY_FILES_PRESENT = 'Working files from an earlier attempt are still present. Retry after they are cleared.'
+RETRY_BOOK_CHANGED = 'This book changed. Refresh and try again.'
+RETRY_JOB_CHANGED = 'This job changed. Refresh and try again.'
+RETRY_REVIEW_CHANGED = "The book's review or source files changed. Review the book again."
+RETRY_CLOSING = 'Books Arranger is closing. Retry after it restarts.'
+RETRY_SCANNING = 'Scanning is running. Retry when it stops.'
+RETRY_QUEUED = 'Queued again by Retry.'
+
+
 class _Any:
     """is_set() over several events: any one stops a cooperative check."""
     def __init__(self, *events):
@@ -322,6 +336,103 @@ class AudioJobs:
             self._archive_attempt(row,now)
             self._update(job_id,state='pending',stage='queued',reason='Retrying verified pre-publication I/O failure; prior attempt retained')
             return {'retryable':True,'retry_at':now+3600,'requeued':True}
+
+    def _retry_shape(self, db, row):
+        """The frozen manifest when this row was refused before any attempt started (Retry rules E1-E7), else None.
+
+        Only the admission hold in _work writes 'needs attention' with no output, no publication
+        intent and no recorded failure; every runtime failure records one. Structural, never the
+        reason text. Runtime failures stay with retry_failed and the M4B repair.
+        """
+        if row['state'] != 'needs attention' or row['output'] is not None:
+            return None  # E1, E2
+        try:
+            journal = json.loads(row['journal']); manifest = json.loads(row['manifest'])
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(journal, dict) or not isinstance(manifest, dict):
+            return None
+        if 'publication_intent' in journal or 'failure' in journal:
+            return None  # E2, E3
+        if hashlib.sha256(row['manifest'].encode('utf-8')).hexdigest() != row['manifest_hash'] or manifest.get('job_id') != row['job_id']:
+            return None  # E4
+        if manifest.get('replacement_id') or manifest.get('m4b_repair'):
+            return None  # E5
+        if db.execute('SELECT 1 FROM audio_repair_admissions WHERE parent_job_id=? OR child_job_id=?', (row['job_id'], row['job_id'])).fetchone():
+            return None  # E5
+        latest = db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone()
+        if not latest or latest[0] != row['job_id']:
+            return None  # E6
+        if row['attempt_id'] and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_failure_history'").fetchone():
+            prior = db.execute('SELECT record FROM audio_failure_history WHERE job_id=? AND attempt_id=?', (row['job_id'], row['attempt_id'])).fetchone()
+            if prior is not None and prior[0] != row['journal']:
+                return None  # E7: the worker's archive step would refuse and hold the queue again
+        return manifest
+
+    def retry_statuses(self, admission_clear, job_id=None):
+        """{job_id: {'allowed', 'reason'}} for jobs refused before any attempt started; absent means hidden.
+
+        One catalog read, then one read-only admission check (E8) per such job. It never runs the
+        revision guard and never reads media, so it is cheap enough for every poll.
+        """
+        query = "SELECT * FROM audio_jobs WHERE state='needs attention' AND output IS NULL" + (" AND job_id=?" if job_id else "") + " ORDER BY created, job_id"
+        with self._db() as db:
+            shaped = [row for row in (dict(r) for r in db.execute(query, (job_id,) if job_id else ())) if self._retry_shape(db, row) is not None]
+        statuses = {}
+        for row in shaped:
+            try:
+                admission_clear(copy.deepcopy(row))
+                statuses[row['job_id']] = {'allowed': True, 'reason': ''}
+            except Exception:
+                statuses[row['job_id']] = {'allowed': False, 'reason': RETRY_FILES_PRESENT}
+        return statuses
+
+    def retry_admission_hold(self, job_id, candidate_id, revision, admission_clear):
+        """Retry: requeue the same job, refused before any attempt started, once that refusal has cleared.
+
+        Rules E1-E10, then a compare-and-set on the whole row as read. The frozen manifest, job id,
+        attempt id and journal are kept, so the worker's own admission runs again and archives the
+        old journal before a new attempt. The revision guard re-reads the book's sources, so it runs
+        outside the queue lock (Pause and the running book stay responsive); the compare-and-set
+        refuses if anything changed meanwhile. Otherwise raises RetryRefused with nothing changed.
+        """
+        def refuse_if_closing():
+            if self._closed or self._drain.is_set():
+                raise RetryRefused(RETRY_CLOSING)
+        with self._lock:
+            refuse_if_closing()
+            rows = self._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job_id,))
+            if not rows:
+                raise RetryRefused(RETRY_BOOK_CHANGED)
+            row = rows[0]
+            with self._db() as db:
+                manifest = self._retry_shape(db, row)  # E1-E7
+                group = None
+                if manifest is not None and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_groups'").fetchone():
+                    group = db.execute('SELECT revision FROM book_groups WHERE id=?', (candidate_id,)).fetchone()
+            # E9: the book and revision on screen are this job's, and still current.
+            if manifest is None or manifest.get('candidate_id') != candidate_id or manifest.get('candidate_revision') != revision or group is None or group[0] != revision:
+                raise RetryRefused(RETRY_BOOK_CHANGED)
+        try:
+            admission_clear(copy.deepcopy(row))  # E8
+        except Exception:
+            raise RetryRefused(RETRY_FILES_PRESENT) from None
+        try:
+            current = self.revision_guard(copy.deepcopy(manifest)) is True  # E10
+        except Exception:
+            current = False
+        if not current:
+            raise RetryRefused(RETRY_REVIEW_CHANGED)
+        with self._lock:
+            refuse_if_closing()
+            with self._db() as db:
+                changed = db.execute(
+                    "UPDATE audio_jobs SET state='pending', stage='queued', reason=?, updated=? WHERE job_id=? AND state='needs attention' AND output IS NULL"
+                    " AND attempt_id IS ? AND journal=? AND manifest=? AND manifest_hash=? AND reason=? AND stage=? AND updated=?",
+                    (RETRY_QUEUED, _now(), job_id, row['attempt_id'], row['journal'], row['manifest'], row['manifest_hash'], row['reason'], row['stage'], row['updated'])).rowcount
+            if changed != 1:
+                raise RetryRefused(RETRY_JOB_CHANGED)
+        return {'job_id': job_id, 'requeued': True}
 
     def resume(self):
         """Re-check every published book, then start the worker.

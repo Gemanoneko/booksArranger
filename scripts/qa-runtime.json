@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "python": {
-    "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/electron-2026-10-13/worktree/build-cache/runtime/python/python.exe",
+    "path": "C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1/build-cache/runtime/python/python.exe",
     "sha256": "434b361fe0c5960d404974feed493db47f2603a1ace2574312104fbed0182c6f"
   },
   "ffmpeg": {
-    "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/electron-2026-10-13/worktree/build-cache/runtime/ffmpeg",
+    "root": "C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1/build-cache/runtime/ffmpeg",
     "files": {
       "ffmpeg.exe": {
         "sha256": "a3bf949b1262ec9893bd80b681ec6001ba028bc7c8a4885e23c8df5b0ce95b1a",

@@ -15,3 +15,5 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 #metadata-inspector summary{min-height:32px;padding:4px 0;cursor:pointer}
 
 .desktop-status,.desktop-update{padding:16px;margin:16px 0;font-size:15px;overflow-wrap:anywhere}.desktop-status h2,.desktop-update h2{font-size:19px}.desktop-update .toolbar{gap:10px;flex-wrap:wrap}.desktop-update button{min-height:32px}
+
+#retry-block{margin:8px 0}#retry-job{min-height:32px;min-width:96px}#retry-job[aria-disabled=true],#retry-job[aria-disabled=true]:hover,#retry-job[aria-disabled=true]:active{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}#retry-note.retry-refused{color:var(--warning)}

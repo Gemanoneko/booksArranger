@@ -582,8 +582,8 @@ class WorkingLifecycle:
                 self._file_state(entry,'removed' if entry['state']=='disposition_set' else 'absent_after_intent')
             self._set_attempt(self._attempt(attempt['job_id'],attempt['attempt_id']),state='retired' if all_removed else 'published_held',reason='' if all_removed else 'Published generated-file cleanup has remaining obligations')
 
-    def admit(self, row):
-        """No new source/derived copy until registered prior cleanup debt clears."""
+    def _legacy_prior(self, row):
+        """A prior attempt with no ownership receipt (legacy) must have left its folder absent or empty."""
         prior_id=row.get('attempt_id')
         if prior_id and not self._rows('SELECT 1 FROM working_attempts WHERE job_id=? AND attempt_id=?',(row['job_id'],prior_id)):
             if str(uuid.UUID(prior_id))!=prior_id:raise BoundaryError('Prior working attempt identity is invalid')
@@ -592,6 +592,21 @@ class WorkingLifecycle:
                 with DirectoryBoundary(self.stage_root.anchor,prior_stage), os.scandir(prior_stage) as members:
                     if next(members,None) is not None:
                         raise BoundaryError('Legacy attempt still contains working inputs; exact retirement review required before another snapshot')
+        return prior_id
+
+    def admission_clear(self, row):
+        """Read-only Retry pre-check of what admit() requires; it retires and writes nothing.
+
+        Raises when a legacy prior folder still holds files or any receipt-owned attempt of the
+        job is not yet retired.
+        """
+        self._legacy_prior(row)
+        if self._rows("SELECT 1 FROM working_attempts WHERE job_id=? AND state!='retired' LIMIT 1",(row['job_id'],)):
+            raise BoundaryError('Prior working attempt is not retired')
+
+    def admit(self, row):
+        """No new source/derived copy until registered prior cleanup debt clears."""
+        prior_id=self._legacy_prior(row)
         for attempt in self._rows("SELECT * FROM working_attempts WHERE job_id=? AND (state!='retired' OR attempt_id=?) ORDER BY updated", (row['job_id'],prior_id)):
             self.retire(attempt['job_id'], attempt['attempt_id'])
             if self._attempt(attempt['job_id'], attempt['attempt_id'])['state'] != 'retired':

@@ -146,6 +146,8 @@ class MergeService:
         self.jobs.postprocessing=self._finish_replacement
         self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary)
         self.cleanup.stop=self.jobs._stop
+        # Pause and Stop set the shared stop; a Quit drain does not, so it is checked separately.
+        self.cleanup.interrupt=lambda:self.draining or self.jobs._drain.is_set()
         self.jobs.after_completed=self._after_completed
         self.cleanup.after_drain=lambda:self.jobs.resume()
         from storage_cleanup import StorageCleanup
@@ -525,9 +527,10 @@ class MergeService:
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
-                self.cleanup.run(id)
+                self.cleanup.run_with_retry(id)
             except Exception as error:
-                if 'id' in locals():self.cleanup._set(id,'needs_attention',str(error))
+                # A busy catalog pauses the cleanup (the next Start or Resume continues it); anything else needs attention.
+                if 'id' in locals():self.cleanup.hold(id,error)
                 else:self._enrollment_attention(row,error)
             finally:self.cleanup.current=None
         self._prune_completed(job_id)
@@ -621,7 +624,32 @@ class MergeService:
         if not jobs: return None
         job = jobs[-1]
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
-        return {'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+        value={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+        if job['state']=='needs attention':
+            retry=self.retry_statuses(job['job_id']).get(job['job_id'])
+            if retry is not None:value['retry']=retry
+        return value
+
+    def retry_statuses(self,job_id=None):
+        """Retry data for audiobook jobs refused before any attempt started; the UI reads creation.job.retry."""
+        working=getattr(self,'working',None)
+        if working is None:return {}
+        return self.jobs.retry_statuses(working.admission_clear,job_id)
+
+    @operation
+    def retry_blocked_job(self,library,identity,revision,job_id):
+        """Retry button: requeue one audiobook job whose start was refused, once that refusal has cleared.
+
+        It requeues the same job row (audio_jobs.retry_admission_hold); the worker's own admission
+        and revision checks run again before any work. RetryRefused means nothing changed.
+        """
+        from audio_jobs import RetryRefused,RETRY_CLOSING,RETRY_SCANNING
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(RETRY_SCANNING)
+        if self.draining:raise RetryRefused(RETRY_CLOSING)
+        with self._review_boundary():
+            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear)
+        return result|{'audiobook_jobs':self.resume()}
 
     def current_audiobook(self,identity):
         if not hasattr(self,'publications'):return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}

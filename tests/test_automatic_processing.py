@@ -625,7 +625,7 @@ class BetweenBooks:
         self.removing,self.finish_removal,self.cleared,self.gap=threading.Event(),threading.Event(),threading.Event(),threading.Event();self.gap.set()
         self.started,self.wake,self.straddle=threading.Event(),threading.Event(),threading.Event()
         merge=MergeService.__new__(MergeService);merge.jobs=self.queue;merge._post_current=None
-        merge.cleanup=SimpleNamespace(current=None,thread=None,stop=self.stop,status=self.cleanup_status,run=self.run,pause=self.pause_cleanup,_set=Mock())
+        merge.cleanup=SimpleNamespace(current=None,thread=None,stop=self.stop,status=self.cleanup_status,run=self.run,run_with_retry=self.run,pause=self.pause_cleanup,_set=Mock(),hold=Mock())
         merge.storage_cleanup=SimpleNamespace(status=lambda:[],folder_status=lambda:[]);merge.working=SimpleNamespace(discharge_published=Mock())
         merge._prune_working=Mock();merge.enroll_cleanup=self.enroll;merge._prune_completed=self.pruned
         merge.progress_books=lambda *args:{'approved':0,'converted':0,'converted_ids':set()}

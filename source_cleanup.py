@@ -10,13 +10,34 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import stat
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
 from scanner import connect
+from sqlite_retry import transaction
 from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, ordinary, publish_no_replace
+
+# SQLite's fixed text for SQLITE_BUSY. Before v0.16.5 a cleanup that hit a busy catalog stored it as
+# its reason; startup turns exactly that legacy shape into a paused cleanup (CleanupJobs.__init__).
+LEGACY_BUSY='database is locked'
+# Seconds to wait before the second and third attempt of a cleanup run that hit a busy catalog.
+RETRY_WAITS=(5,15)
+
+
+def catalog_busy(error):
+    """Typed SQLITE_BUSY or SQLITE_LOCKED, any extended code. Never inferred from the message."""
+    code=getattr(error,'sqlite_errorcode',None) if isinstance(error,sqlite3.OperationalError) else None
+    return type(code) is int and code>=0 and (code&255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED)
+
+
+def busy_cause(error,attempt=None):
+    name=getattr(error,'sqlite_errorname',None)
+    if not isinstance(name,str) or not name:name='SQLITE_BUSY' if (error.sqlite_errorcode&255)==sqlite3.SQLITE_BUSY else 'SQLITE_LOCKED'
+    return 'catalog busy ('+name+')'+(f', attempt {attempt}' if attempt else '')
 
 
 def regular_evidence(path):
@@ -34,6 +55,8 @@ def setup(db):
     db.execute('CREATE TABLE IF NOT EXISTS recovery_completion(cleanup_id TEXT PRIMARY KEY,job_id TEXT UNIQUE,completed_at TEXT NOT NULL)')
     db.execute('CREATE TABLE IF NOT EXISTS source_retirements(root TEXT,path TEXT,cleanup_id TEXT,job_id TEXT,source_hash TEXT,size INTEGER,modified TEXT,state TEXT,PRIMARY KEY(root,path,cleanup_id))')
     db.execute('CREATE TABLE IF NOT EXISTS source_zone_marker_intents(cleanup_id TEXT,path TEXT,marker_sha256 TEXT,receipt TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(cleanup_id,path,marker_sha256))')
+    # Append-only evidence: a paused cleanup carries an empty reason, so why it paused is kept here.
+    db.execute('CREATE TABLE IF NOT EXISTS source_cleanup_holds(cleanup_id TEXT,at TEXT,prior_state TEXT,prior_reason TEXT,cause TEXT,PRIMARY KEY(cleanup_id,at))')
 
 def single_stream(path):
     """Reject ADS rather than silently discard filesystem data in recovery."""
@@ -61,10 +84,90 @@ class CleanupJobs:
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
         self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
         self.after_drain=None;self.on_completed=None
+        # Quit (a drain) does not set stop; the owner supplies it so Quit also cuts a retry wait short.
+        self.interrupt=lambda:False
         with DirectoryBoundary(self.root.anchor,self.root,create=True) as boundary:self.root_identity=boundary.identities
         with connect(self.database) as db:
             setup(db)
             db.execute("UPDATE source_cleanup SET state='paused' WHERE state IN ('checking','removing','pausing')")
+            self._reclassify_legacy_busy(db)
+    @staticmethod
+    def _reclassify_legacy_busy(db):
+        """Startup, database only: no file is opened and no work starts.
+
+        A cleanup that stopped on a busy catalog before v0.16.5 kept the bare SQLite text as a
+        needs-attention reason, and nothing resumed it. Exactly that shape (a real enrollment of a
+        completed book, no restore started) becomes an ordinary paused cleanup; the next Start or
+        Resume finishes it through run(), which re-verifies everything.
+        """
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return
+        for row in db.execute("SELECT id,job_id,intent FROM source_cleanup WHERE state='needs_attention' AND reason=?",(LEGACY_BUSY,)).fetchall():
+            try:intent=json.loads(row['intent'])
+            except (TypeError,ValueError):continue
+            if not isinstance(intent,dict) or intent.get('id')!=row['id'] or intent.get('job_id')!=row['job_id']:continue
+            if not intent.get('binding') or not intent.get('recovery_identity'):continue  # enrollment-attention rows
+            job=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+            if not job or job['state']!='completed':continue
+            if db.execute("SELECT 1 FROM cleanup_members WHERE cleanup_id=? AND (state IN ('restore_intended','restored') OR COALESCE(restore_intent,'')!='') LIMIT 1",(row['id'],)).fetchone():continue
+            now=stamp()
+            if db.execute("UPDATE source_cleanup SET state='paused',reason='',updated=? WHERE id=? AND state='needs_attention' AND reason=?",(now,row['id'],LEGACY_BUSY)).rowcount==1:
+                db.execute('INSERT OR IGNORE INTO source_cleanup_holds VALUES(?,?,?,?,?)',(row['id'],now,'needs_attention',LEGACY_BUSY,'legacy catalog busy'))
+    def hold(self,id,error,attempt=None,record=True):
+        """The single place a failed cleanup records its state; returns that state.
+
+        A typed busy or locked catalog is not a verdict on the files: the cleanup pauses with an empty
+        reason, so the next Start or Resume continues it from its durable progress, and the cause is
+        kept in source_cleanup_holds. Any other failure needs attention with its reason, as before.
+        The write is a replay-safe database update, so a busy catalog here is retried, not raised.
+        """
+        busy=catalog_busy(error)
+        state,reason=('paused','') if busy else ('needs_attention',str(error) or type(error).__name__)
+        cause=busy_cause(error,attempt) if busy and record else None
+        def write(db):
+            prior=db.execute('SELECT state,reason FROM source_cleanup WHERE id=?',(id,)).fetchone()
+            if prior is None:return
+            now=stamp()
+            db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,now,id))
+            if cause:db.execute('INSERT OR IGNORE INTO source_cleanup_holds VALUES(?,?,?,?,?)',(id,now,prior['state'],prior['reason'],cause))
+        transaction(self.database,write)
+        return state
+    def _note_busy(self,id,error,attempt,wait):
+        """Evidence for a busy attempt that will be retried; the cleanup's own state is unchanged.
+
+        Returns whether the record was written. Pause and Stop also cut short its own busy retries.
+        """
+        def write(db):
+            prior=db.execute('SELECT state,reason FROM source_cleanup WHERE id=?',(id,)).fetchone()
+            if prior is not None:db.execute('INSERT OR IGNORE INTO source_cleanup_holds VALUES(?,?,?,?,?)',(id,stamp(),prior['state'],prior['reason'],busy_cause(error,attempt)+f'; retry in {wait} s'))
+        try:
+            transaction(self.database,write,stop=self.stop);return True
+        except (sqlite3.Error,InterruptedError):return False  # Evidence only; the retry and the final hold() still run.
+    def _retry_wait(self,seconds):
+        """Wait before another attempt. True when Pause, Stop or Quit cut the wait short."""
+        deadline=time.monotonic()+seconds
+        while not (self.stop.is_set() or self.interrupt()):
+            left=deadline-time.monotonic()
+            if left<=0:return False
+            self.stop.wait(min(left,.1))
+        return True
+    def run_with_retry(self,id):
+        """run(id); a typed busy or locked catalog waits 5 s, then 15 s, and runs again (three attempts in all).
+
+        Each attempt is a full run() from durable state, exactly what a manual Resume does, so no
+        file operation or state step is added or skipped. Every failure is recorded through hold():
+        busy pauses, anything else needs attention, and an interrupted wait pauses.
+        """
+        for attempt in range(1,len(RETRY_WAITS)+2):
+            try:
+                self.run(id);return
+            except Exception as error:
+                if not catalog_busy(error):
+                    self.hold(id,error);return
+                if attempt>len(RETRY_WAITS):
+                    self.hold(id,error,attempt);return
+                wait=RETRY_WAITS[attempt-1];noted=self._note_busy(id,error,attempt,wait)
+                if self._retry_wait(wait):
+                    self.hold(id,error,attempt,record=not noted);return
     def _rows(self,sql,params=()):
         with connect(self.database) as db:return [dict(r) for r in db.execute(sql,params)]
     def _set(self,id,state,reason=''):
@@ -168,9 +271,9 @@ class CleanupJobs:
             if self.stop.is_set():break
             self.current=row['id']
             try:
-                self.run(row['id'])
+                self.run_with_retry(row['id'])
                 if self.on_completed and self.status(row['job_id'])['state']=='completed':self.on_completed(row['job_id'])
-            except Exception as error:self._set(row['id'],'needs_attention',str(error) or type(error).__name__)
+            except Exception as error:self.hold(row['id'],error)
             finally:self.current=None
         if follow_audio and not self.stop.is_set() and self.after_drain:self.after_drain()
     @staticmethod

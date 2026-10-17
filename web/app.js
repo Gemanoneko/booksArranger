@@ -15,6 +15,7 @@ const selectedBooks=new Map(),coverObjects=[];
 let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 let recoveryPanel=null,recoveryConfirmation=null,recoverySubmitting=false,recoveryDisconnected=false;
+let retryPending=null,retryResult=null,retryDone=null;
 const pendingFolders=new Set(),folderMessages=new Map();
 
 function routingControls() {
@@ -79,7 +80,7 @@ async function request(route, data) {
 }
 function message(value='') { $('message').textContent=value; }
 function controls() {
-  updateRecovery();
+  updateRecovery();updateRetry();
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
   $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
@@ -401,6 +402,52 @@ function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath
 function closeRecoveryDialog(restore=true){if(!recoveryConfirmation)return;const initiating=recoveryConfirmation.button;recoveryConfirmation=null;$('recovery-dialog').close?.();if(restore && initiating && initiating===recoveryPanel?.button){if(!initiating.disabled)initiating.focus?.({preventScroll:true});else{recoveryPanel.reason.setAttribute('tabindex','-1');recoveryPanel.reason.focus?.({preventScroll:true});}}}
 function openRecoveryDialog(){if(recoveryReason() || recoveryConfirmation)return;const scope=recoveryScope(selectedRow),r=selectedRow.cleanup.recovery;recoveryConfirmation={scope:{...scope},path:selectedPath,button:recoveryPanel.button};$('recovery-dialog-book').textContent=`${selectedRow.review?.title || selectedRow.title_clue || 'Book'} — ${selectedRow.review?.canonical_author || 'Author unavailable'}`;$('recovery-dialog-size').textContent=`${scope.count} original tracks · ${recoverySpace(scope.bytes)} on C:`;$('recovery-dialog-location').textContent=r.location || 'Unavailable';$('recovery-dialog').showModal?.();$('recovery-cancel').focus?.();}
 async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmitting)return;const saved=recoveryConfirmation;if(recoveryReason() || selectedPath!==saved.path || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(saved.scope)){closeRecoveryDialog();if(recoveryPanel)recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';return;}closeRecoveryDialog();recoverySubmitting=true;updateRecovery();const panel=recoveryPanel;panel.status.textContent='Deleting recovery copies…';try{await request('/api/audiobook/recovery/delete',saved.scope);await refresh(true);if(panel===recoveryPanel)panel.status.textContent='Recovery deletion request completed.';}catch(error){if(panel===recoveryPanel)panel.status.textContent=error.httpStatus===409?'Recovery copies changed. Review the updated details and try again.':error.message;if(!error.httpStatus)refreshFailed(error);}finally{recoverySubmitting=false;updateRecovery();}}
+// Retry for an audiobook job refused before it started. One static button, updated in place from
+// controls() on every poll; pending and result text belong to one book (candidate id + job id).
+const retryReady='Check this book again and queue its audiobook job.';
+function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;return job && typeof job.job_id==='string'?JSON.stringify([row.id,job.job_id]):'';}
+function updateRetry(){
+  const block=$('retry-block'),button=$('retry-job'),note=$('retry-note');if(!block || !button || !note)return;
+  const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,retry=job?.retry;
+  if(retryResult && retryResult.key!==key)retryResult=null;
+  if(retryDone && (retryDone.key!==key || retryDone.job!==job))retryDone=null;
+  const pending=!!key && retryPending?.key===key;
+  const shown=pending || (!!key && !retryDone && !!retry && typeof retry==='object' && typeof retry.allowed==='boolean');
+  block.hidden=!shown;
+  if(!shown){if(note.textContent)note.textContent='';note.hidden=true;return;}
+  const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending?'busy':retry.allowed===true?'ready':'unavailable';
+  const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:'Retry is unavailable. Refresh and check again.';
+  const title={offline:'Local server unavailable.',pending:'Checking this book…',busy:'Another operation is in progress.',unavailable:reason,ready:retryReady}[mode];
+  const label=mode==='pending'?'Retrying…':'Retry',result=mode!=='pending' && retryResult;
+  const text=result?retryResult.text:mode==='ready'?'':title;
+  if(button.textContent!==label)button.textContent=label;
+  if(button.title!==title)button.title=title;
+  button.setAttribute('aria-label',label+': '+(row.review?.title || row.title_clue || 'Book'));
+  // Pending keeps keyboard focus: aria-disabled with a disabled look, never the disabled attribute.
+  if(mode==='pending')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  button.disabled=mode!=='ready' && mode!=='pending';
+  if(note.textContent!==text)note.textContent=text;
+  note.hidden=!text;note.classList.toggle('retry-refused',!!result);
+}
+async function retryJob(){
+  const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null;
+  if(!key || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || job.retry?.allowed!==true || $('retry-job').disabled)return;
+  retryPending={key};retryResult=null;busy=true;controls();
+  let succeeded=false;
+  try{await request('/api/audiobook/retry',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id});succeeded=true;}
+  catch(error){retryResult={key,text:error.httpStatus?(error.message || 'Retry was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);}
+  const focused=document.activeElement===$('retry-job');
+  retryPending=null;busy=false;
+  if(succeeded){
+    retryDone={key,job}; // Hidden until fresh data for this job arrives.
+    // The block leaves the page: focus moves to the panel heading, never into the automatic result.
+    if(focused && retryKey(selectedRow)===key)$('details-heading').focus?.({preventScroll:true});
+  }
+  controls();
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();
+}
+$('retry-job').addEventListener('click',()=>{if($('retry-job').getAttribute?.('aria-disabled')==='true' || retryPending)return;retryJob();});
 $('recovery-cancel').addEventListener('click',()=>closeRecoveryDialog());
 $('recovery-confirm').addEventListener('click',deleteRecoveryCopies);
 $('recovery-dialog').addEventListener('cancel',event=>{event.preventDefault();closeRecoveryDialog();});
@@ -496,8 +543,10 @@ function recordingFacts(row){
   return facts;
 }
 function candidateStatus(row){
-  const creation=row.creation?.status || '',status=row.status || '',automatic=row.automatic;
-  const cleanup=row.cleanup || {},reason=(automatic?.reasons || [])[0] || (row.creation?.reasons || [])[0] || cleanup.reason || '';
+  const creation=row.creation?.status || '',status=row.status || '',automatic=row.automatic,job=row.creation?.job;
+  // A job that needs attention leads with its own reason, so the status names what was blocked.
+  const jobReason=job?.state==='Output needs attention' && typeof job.reason==='string'?job.reason:'';
+  const cleanup=row.cleanup || {},reason=jobReason || (automatic?.reasons || [])[0] || (row.creation?.reasons || [])[0] || cleanup.reason || '';
   const facts=[creation,status,cleanup.state || '',cleanup.temporary_cleanup || ''].join(' ');
   if(/failed|attention|error/i.test(facts) || automatic?.state==='Needs attention')return 'Needs attention'+(reason?' — '+reason:'');
   if(/changed/i.test(status))return 'Candidate changed';
@@ -515,16 +564,17 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
-  if($('automatic-result').contains?.(document.activeElement))return;
+  // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
+  if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
   setText('automatic-result-status',candidateStatus(row));
   $('automatic-reasons').replaceChildren();for(const reason of automatic?.reasons || [])$('automatic-reasons').append(node('li',reason));$('automatic-reasons').hidden=!automatic?.reasons?.length;
   $('automatic-result-help').hidden=automatic?.state!=='Held';
   setText('automatic-attempt',automatic?.attempted_utc?'Last attempt: '+recoveryDate(automatic.attempted_utc):'No automatic research attempt recorded.');
   const run=state?.automatic_processing,automaticContinuation=run?.state==='Running' && typeof run.automatic_retry_enabled==='boolean';
-  const retry=retryDate(automatic?.retry_at);setText('automatic-retry',retry?'Retry available after '+retry+(automaticContinuation?'':'; Start to continue'):'');$('automatic-retry').hidden=!retry;
+  const retry=retryDate(automatic?.retry_at);setText('automatic-retry',retry?'Automatic retry after '+retry+(automaticContinuation?'':'; Start to continue'):'');$('automatic-retry').hidden=!retry;
   const wait=automatic?.wait,source=typeof wait?.source==='string'?wait.source:'';
   const waitText=wait?{app_limit:source?'App request limit reached for '+source:'App metadata request limit reached',source_pause:source?source+' requested a pause':'Metadata source requested a pause',source_unavailable:source?source+' unavailable':'Metadata source unavailable'}[wait.kind]:'';
   if(waitText){$('automatic-reasons').append(node('li',waitText));$('automatic-reasons').hidden=false;}
