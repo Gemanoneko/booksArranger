@@ -40,17 +40,17 @@ class ReplacementRetirement:
         return h.hexdigest()
 
     @contextlib.contextmanager
-    def _current(self,relation,historical=False):
+    def _current(self,relation,historical=False,stop=None):
         record=json.loads(relation['current_output_json']);path=ordinary(record['final_path'])
         if not path.is_relative_to(self.library) or path.suffix.lower()!='.m4b':raise BoundaryError('Current replacement is outside the audiobook library')
         with DirectoryBoundary(self.library,path.parent) as boundary,VerifiedFile(path) as file:
-            if [list(v) for v in boundary.identities]!=[list(v) for v in record['parent_identity']] or file.facts()['links']!=1 or file.facts()['size']!=record['size'] or self._hash(file,None if historical else self.stop)!=record['sha256']:
+            if [list(v) for v in boundary.identities]!=[list(v) for v in record['parent_identity']] or file.facts()['links']!=1 or file.facts()['size']!=record['size'] or self._hash(file,stop if historical else self.stop)!=record['sha256']:
                 raise BoundaryError('Current replacement changed; former outputs retained')
             if self.guard(relation,historical=historical) is not True:raise BoundaryError('Replacement approval or publication changed')
             yield file
 
     @contextlib.contextmanager
-    def _recovery(self,relation,row,historical=False):
+    def _recovery(self,relation,row,historical=False,stop=None):
         recovery=json.loads(row['recovery_json']);path=ordinary(recovery['path']);expected=self.root/relation['id']
         proof=json.loads(row['provenance_json']);approval=json.loads(relation['approval_json'])
         expected_path=expected/(hashlib.sha256(row['original_path'].encode('utf-8')).hexdigest()+'.m4b')
@@ -58,7 +58,7 @@ class ReplacementRetirement:
                 path!=expected_path or recovery.get('sha256')!=proof['sha256'] or recovery.get('size')!=proof['size'] or
                 recovery.get('copy_pending') is True or recovery.get('facts',{}).get('size')!=proof['size']):raise BoundaryError('Former-output recovery correspondence changed')
         with DirectoryBoundary(self.root,expected) as boundary,VerifiedFile(path,writable=not historical) as file:
-            if boundary.identities!=[tuple(v) for v in recovery['ancestry']] or file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,None if historical else self.stop)!=recovery['sha256']:
+            if boundary.identities!=[tuple(v) for v in recovery['ancestry']] or file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,stop if historical else self.stop)!=recovery['sha256']:
                 raise BoundaryError('Former-output recovery changed; no old output disposition allowed')
             if not historical:file.flush()
             single_stream(path)
@@ -180,8 +180,12 @@ class ReplacementRetirement:
                 raise
             finally:self.current=None
 
-    def historical_retired(self,parent_row):
-        """Known base absence is valid history even during partial retirement."""
+    def historical_retired(self,parent_row,stop=None):
+        """Known base absence is valid history even during partial retirement.
+
+        stop (optional) lets a routine caller interrupt the read-only hashing; an
+        interruption is raised, never reported as "not history".
+        """
         try:
             relation=self.store.get(parent=parent_row['job_id'])
             if not relation or relation['state'] not in {'retiring','completed'} or digest(parent_row)!=relation['parent_record_sha256']:return False
@@ -190,5 +194,6 @@ class ReplacementRetirement:
             if not row or row['state'] not in {'retirement_intended','removed'}:return False
             proof=json.loads(row['provenance_json'])
             if proof['sha256']!=parent_output['sha256'] or proof['size']!=parent_output['size']:return False
-            with self.former_guard(relation,parent_row),self._current(relation,historical=True),self._recovery(relation,row,historical=True):return self._absent(path)
+            with self.former_guard(relation,parent_row),self._current(relation,historical=True,stop=stop),self._recovery(relation,row,historical=True,stop=stop):return self._absent(path)
+        except InterruptedError:raise
         except (ValueError,OSError,KeyError):return False

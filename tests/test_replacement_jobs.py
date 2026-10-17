@@ -303,6 +303,9 @@ class ReplacementTests(unittest.TestCase):
         with DirectoryBoundary(self.retire.root.anchor,destination,create=True) as boundary,VerifiedFile(self.old[0],delete=True) as original:
             row=self.retire._copy(relation,row,original,proof,destination,boundary);self.store.file_transition(row,'retirement_intended');self.store.transition(relation,'retiring');original.dispose()
         self.stop.set();self.assertTrue(self.retire.historical_retired(self.parent_row));self.assertTrue(self.stop.is_set())
+        # A routine caller's own stop interrupts the read-only proof; it is raised, never "not history".
+        routine=threading.Event();routine.set()
+        with self.assertRaises(InterruptedError):self.retire.historical_retired(self.parent_row,stop=routine)
 
     def test_swapped_valid_other_recovery_is_refused_before_old_disposition(self):
         relation=self.publish();destination=self.retire.root/relation['id'];rows=self.store.files(relation['id']);copied=[]
@@ -450,7 +453,7 @@ class ReplacementTests(unittest.TestCase):
 
     def test_merge_resume_drains_completed_paused_postprocessing_without_reencode(self):
         relation=self.publish();self.stop.set();self.queue._stop=self.stop;self.queue.pending_postprocessing=self.service._pending_replacement_postprocessing
-        self.service.jobs=self.queue;self.service._no_scan=lambda:None;self.service._prune_completed=lambda _:None
+        self.service.jobs=self.queue;self.service._no_scan=lambda:None;self.service._prune_completed=lambda _,**__:None
         self.service.cleanup=SimpleNamespace(thread=None,_rows=lambda *_:[])
         self.queue.postprocessing=lambda _:self.retire.run(self.store.get(new_job=self.new_id))
         self.queue.historical_retirement=self.retire.historical_retired;self.queue.runner=lambda *_:self.fail('Completed replacement must not reencode')

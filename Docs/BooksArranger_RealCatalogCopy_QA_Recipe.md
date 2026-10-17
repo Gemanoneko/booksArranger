@@ -24,11 +24,19 @@ At idle nothing opens, lists, writes, renames or deletes anything on `Z:` or `Y:
 
 **Note for Futaba:** those `Z:` checks reach the NAS. If the NAS is asleep, the first computations wait for it to spin up, so early poll times (and a possible `503 Status is still updating` on `/api/state`) can reflect the NAS, not the engine. Record whether the NAS was asleep; judge latency on the samples after the first minute, and report any 503 with its time.
 
-The safety therefore rests on four conditions. If any one fails, STOP:
+**Correction 2026-10-17 (v0.16.3 QA, Futaba Finding 3): use the real `Z:\Audiobooks` as the Audiobooks root.** With private roots every check of a finished book returns at once (its recorded library root differs from the configured one), so a run with private roots never reads a published book and cannot test startup, the background check, Start or the Ready count. From v0.16.4 on, the Audiobooks root is the real `Z:\Audiobooks`; Podcasts and Ebooks stay private and empty. What that requires:
+
+- **The NAS is read, never written, and the reads are real load.** On the first launch of a fresh copy the engine hashes every finished book once (about the total size of the finished books: 26.3 GiB on 2026-10-17), paced to at most 32 MiB/s, so about 14 minutes; later launches of the same copy only compare file identities (metadata). The window's book list also opens each visible finished book read-only. Expect `/api/state` latency to include NAS metadata time.
+- **`Z:` must be mapped, awake and reachable under the same drive letter** the catalog records. If it is not, the books show as not current and the run proves nothing; STOP and report.
+- **Writes to `Z:` are now possible through a mistaken click** (the configured root is real), so C3 is the only barrier: be strict. Prove no writes with C5.
+- **Sergei's app must stay stopped** (C1) for the whole run, not only while copying: two engines reading the same NAS distort every latency number.
+
+The safety therefore rests on five conditions. If any one fails, STOP:
 - **C1** — the real app is not running while you copy (otherwise the copy can miss committed pages) and stays stopped throughout.
-- **C2** — private library roots via `--roots-json`. This keeps scans off `Z:` and makes accidental library actions refuse, because every catalog path is outside the configured roots. It does not stop the read-only folder checks above.
+- **C2** — library roots via `--roots-json`: Audiobooks = the real `Z:\Audiobooks`, Podcasts and Ebooks private and empty (see the correction above). Scans still start only on a click.
 - **C3** — **no mutating clicks** (list in §5).
 - **C4** — the real data folder fingerprint is identical before and after (§4 and §7). That is the proof, not this argument.
+- **C5** — every finished book on `Z:` (size, modification time) and its folder listing are identical before and after, and the SMB client shows 0 bytes written to the share for the whole run.
 
 ## 2. Preconditions
 
@@ -54,8 +62,8 @@ mkdir -p "$QA/data/merge-cache/covers" "$QA/roots/Audiobooks" "$QA/roots/Podcast
 cp --preserve=timestamps "$REAL/inventory.sqlite3" "$QA/data/"
 find "$REAL/merge-cache/covers" -maxdepth 1 -type f \( -name '*.png' -o -name '*.jpg' \) -exec cp --preserve=timestamps {} "$QA/data/merge-cache/covers/" \;
 sha256sum "$REAL/inventory.sqlite3" "$QA/data/inventory.sqlite3"     # must match
-"$PY" -I -B -c "import json,os,sys;r=sys.argv[1];json.dump({k:os.path.join(r,'roots',k) for k in ('Audiobooks','Podcasts','Ebooks')},open(sys.argv[2],'w'))" "$(cygpath -w "$QA")" "$QA/roots.json"
-cat "$QA/roots.json"     # three absolute Windows paths under $QA\roots
+"$PY" -I -B -c "import json,os,sys;r=sys.argv[1];json.dump({'Audiobooks':r'Z:\\Audiobooks',**{k:os.path.join(r,'roots',k) for k in ('Podcasts','Ebooks')}},open(sys.argv[2],'w'))" "$(cygpath -w "$QA")" "$QA/roots.json"
+cat "$QA/roots.json"     # Audiobooks is the real Z:\Audiobooks; Podcasts and Ebooks under $QA\roots
 ```
 
 Copy **only** these. Never copy `web-instance*.json`, `inventory.sqlite3.lock`, `source-recovery`, `merge-cache/audio-staging`, `replacement-recovery` or `chapter-repairs`.
@@ -109,7 +117,7 @@ APPDATA="$(cygpath -w "$QA/appdata")" LOCALAPPDATA="$(cygpath -w "$QA/localappda
 ```
 
 - `--data-dir` skips first-run Setup and opens the copy. `--shell-profile` keeps away from the real profile; its `desktop-settings.json` points at the real data folder, so never omit this flag. Port 5212 keeps 5210 free. `TEMP` keeps SQLite temp files inside `$QA/temp`, where they are counted.
-- Expected in the window: version label for the build under test, "Automatic processing: Paused" (saved run after restart), audiobook jobs Paused with 194 queued, and **0 approved books**. Zero approved is expected: the private roots hide the catalog's `Z:` groups.
+- Expected in the window: version label for the build under test, "Automatic processing: Paused" (saved run after restart), audiobook jobs Paused with the saved queue, and the approved books visible (the real Audiobooks root shows the catalog's `Z:` groups). On the first launch of a fresh copy the converted ("Audiobook Ready") count rises as the background check verifies each finished book; on later launches of the same copy it is complete at once.
 
 **Do NOT click:** Start/Stop automatic processing, Pause/Resume audiobook jobs, scan Start/Resume/Stop, Delete recovery copies, any Restore/cleanup control, Open folder/View folder, Check for updates/Download update/Restart to update, any candidate approve/queue/review/save control, or the Browse/Setup screen (it must not appear; if it does, Quit and STOP).
 

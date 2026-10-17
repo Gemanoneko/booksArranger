@@ -36,6 +36,48 @@ class StatusUnavailable(RuntimeError):
     """Another thread's status computation did not finish within STATUS_WAIT; the poll reports status unavailable."""
 
 
+# Background re-verification of finished books shares one read budget, so the
+# library share keeps answering status and inventory metadata while it runs.
+VERIFY_RATE=32*1024*1024
+
+
+class Pacer:
+    """One shared read budget (bytes per second) for background verification readers."""
+    def __init__(self,rate,clock=time.monotonic,sleep=time.sleep):
+        self.rate=rate;self._clock=clock;self._sleep=sleep;self._lock=threading.Lock();self._next=None
+
+    def __call__(self,size,stop=None):
+        with self._lock:
+            now=self._clock();start=max(now,self._next if self._next is not None else now)
+            self._next=start+size/self.rate;wait=start-now
+        while wait>0:
+            if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            step=min(wait,.1);self._sleep(step);wait-=step
+        if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+
+
+class _Flag:
+    """is_set() over a live condition, for cooperative stops that are not one Event."""
+    def __init__(self,check):self.is_set=check
+
+
+def verify_digest(path,stop=None,pace=None):
+    """Full SHA-256 of a published book; stop interrupts between 1 MiB blocks, pace limits background reads."""
+    value=hashlib.sha256()
+    with open(path,'rb') as stream:
+        while block:=stream.read(1024*1024):
+            if stop is not None and stop.is_set():raise InterruptedError('Published-book check stopped')
+            if pace is not None:pace(len(block),stop)
+            value.update(block)
+    return value.hexdigest()
+
+
+def file_identity(path):
+    """Native identity of a published file: volume, file id, size, modification time."""
+    stat=os.stat(path)
+    return [stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns]
+
+
 class SharedSnapshot:
     """Single-flight read: concurrent callers wait for one computation, then reuse it until max_age after it started.
 
@@ -90,10 +132,15 @@ class MergeService:
         self.reviews = CandidateReviewService(inventory, self.cache_dir / 'covers')
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER)')
+            # Last full verification of each published book (path, sha) and the file identity it had then.
+            db.execute('CREATE TABLE IF NOT EXISTS verified_outputs(path TEXT, sha256 TEXT, job_id TEXT, identity TEXT, verified TEXT, PRIMARY KEY(path, sha256))')
+        self._pacer=Pacer(VERIFY_RATE)
         self.replacements=Replacements(inventory.database)
-        self.publications=CurrentAudiobooks(inventory.roots['Audiobooks'],self.cache_dir.parent/'chapter-repairs',self.replacements)
+        self.publications=CurrentAudiobooks(inventory.roots['Audiobooks'],self.cache_dir.parent/'chapter-repairs',self.replacements,
+                                            verified=self._publication_current,remember=self._publication_verified,pace=self._pacer)
         self.retirement=ReplacementRetirement(self.replacements,self.cache_dir.parent/'replacement-recovery',inventory.roots['Audiobooks'],threading.Event(),self._replacement_guard,self.publications.protect_former)
         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
+        self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
         self.retirement.stop=self.jobs._stop
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
         self.jobs.postprocessing=self._finish_replacement
@@ -117,8 +164,13 @@ class MergeService:
         self.automatic=AutomaticProcessing(self)
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
+        known=self._known_identities()
         for job in self.jobs.status()['jobs']:
             if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
+            if job['state']=='completed':
+                # Ready/converted counts compare the live file with its last full verification, from the first status.
+                identity=known.get(self._identity_key(job['output']['final_path'],job['output']['sha256']))
+                if identity:self._validated_outputs[job['job_id']]=tuple(identity)
             if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
                 # A crash after durable audio success but before enrollment does
                 # not turn its explicit frozen policy into a historical sweep.
@@ -259,13 +311,14 @@ class MergeService:
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False}
 
     def pause(self):
-        # During a desktop Quit drain the current book finishes; nothing is interrupted.
-        if self.draining:return self.state()
+        # During a desktop Quit drain the current book finishes; nothing is interrupted. No status is
+        # computed for the Quit request: it must answer within seconds whatever the engine is doing.
+        if self.draining:return None
         self.cleanup.pause();self.jobs.pause();return self.state()
 
     def drain(self):
-        """Desktop Quit: finish the current book and its cleanup, start nothing new."""
-        self.draining=True;self.jobs.drain();return self.state()
+        """Desktop Quit: finish the current book and its cleanup, start nothing new (no status answer)."""
+        self.draining=True;self.jobs.drain()
 
     def drained(self):
         jobs=bool(self.jobs._thread and self.jobs._thread.is_alive())
@@ -279,8 +332,12 @@ class MergeService:
         if self.jobs._thread and self.jobs._thread.is_alive():return self.state()
         if self.cleanup.thread and self.cleanup.thread.is_alive():return self.state()
         self.jobs._stop.clear()
-        for job in self.jobs.status()['jobs']:
-            if job['state']=='completed':self._prune_completed(job['job_id'])
+        stop=_Flag(lambda:self.jobs._stop.is_set() or self.draining)
+        try:
+            for job in self.jobs.status()['jobs']:
+                if stop.is_set():return self.state()  # Pause or Quit during Start wins; nothing new starts.
+                if job['state']=='completed':self._prune_completed(job['job_id'],stop=stop)
+        except InterruptedError:return self.state()
         pending=self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
         historical=[c['id'] for c in pending if json.loads(c['intent']).get('historical')]
         if historical:self.cleanup.resume(historical,follow_audio=False)
@@ -438,13 +495,13 @@ class MergeService:
             self.storage_cleanup._diagnose(job_id,output_hash,error)
         finally:self._post_current=None
 
-    def _prune_completed(self,job_id,source_completed=False):
+    def _prune_completed(self,job_id,source_completed=False,stop=None):
         if source_completed:self.working.schedule_published(job_id)
         if hasattr(self,'replacements'):
             relation=self.replacements.get(parent=job_id)
             if relation and relation['state'] in {'retiring','completed'}:
                 with connect(self.inventory.database) as db:parent=self.replacements.raw_job(db,job_id)
-                if self.retirement.historical_retired(parent):return
+                if self.retirement.historical_retired(parent,stop=stop):return
         self._prune_working(job_id)
         self.recovery.sync()
         receipt=self.cleanup.status(job_id)
@@ -941,7 +998,8 @@ class MergeService:
         self._register(record['final_path'],manifest['job_id'],'output',record['sha256'],record['size'])
         return record
 
-    def _output_valid(self, record):
+    def _output_valid(self, record, stop=None, pace=None):
+        """Full check: exact recorded bytes. A stop is raised, never reported as invalid."""
         try:
             root=ordinary(record['root']); final=ordinary(record['final_path'])
             if os.path.normcase(str(root)) != os.path.normcase(self.inventory.roots['Audiobooks']):return False
@@ -950,12 +1008,70 @@ class MergeService:
                 if record.get('parent_identity')!=[list(i) for i in boundary.identities]:
                     # In-memory records contain tuples, persisted JSON contains lists.
                     if record.get('parent_identity')!=boundary.identities:return False
-                valid=fingerprint(final)['size']==record['size'] and digest(final)==record['sha256']
+                valid=fingerprint(final)['size']==record['size'] and verify_digest(final,stop,pace)==record['sha256']
                 if valid:
-                    stat=final.stat()
-                    self._validated_outputs[record['job_id']]=(stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime_ns)
+                    identity=file_identity(final)
+                    self._validated_outputs[record['job_id']]=tuple(identity)
+                    self._remember_identity(record,identity)
                 return valid
+        except InterruptedError:raise
         except (ValueError,OSError,KeyError):return False
+
+    def _output_current(self, record, stop=None, pace=None):
+        """Routine check (startup, Start): a book whose file identity is unchanged since its last full
+        verification is current; anything else is hashed in full, interruptibly. Removing originals,
+        recovery copies or working files still hashes the book in full first."""
+        try:
+            if self._identity_current(record):return True
+        except (ValueError,OSError,KeyError):pass
+        return self._output_valid(record,stop,pace)
+
+    def _identity_current(self, record):
+        root=ordinary(record['root']); final=ordinary(record['final_path'])
+        if os.path.normcase(str(root)) != os.path.normcase(self.inventory.roots['Audiobooks']):return False
+        if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE,AUTOMATIC_PROFILE}:return False
+        known=self._known_identity(final,record['sha256'])
+        if not known or known[2]!=record['size']:return False
+        with DirectoryBoundary(root,final.parent) as boundary:
+            if record.get('parent_identity')!=[list(i) for i in boundary.identities] and record.get('parent_identity')!=boundary.identities:return False
+            identity=file_identity(final)
+        if identity!=known:return False
+        self._validated_outputs[record['job_id']]=tuple(identity)
+        return True
+
+    @staticmethod
+    def _identity_key(path,sha256):
+        return (os.path.normcase(str(ordinary(path))),sha256)
+
+    def _known_identities(self):
+        try:
+            with connect(self.inventory.database) as db:
+                return {(path,sha):json.loads(identity) for path,sha,identity in db.execute('SELECT path,sha256,identity FROM verified_outputs')}
+        except (sqlite3.Error,ValueError):return {}
+
+    def _known_identity(self,path,sha256):
+        try:
+            with connect(self.inventory.database) as db:
+                row=db.execute('SELECT identity FROM verified_outputs WHERE path=? AND sha256=?',self._identity_key(path,sha256)).fetchone()
+            return json.loads(row[0]) if row else None
+        except (sqlite3.Error,ValueError,OSError):return None
+
+    def _remember_identity(self,record,identity):
+        try:
+            with connect(self.inventory.database) as db:
+                db.execute('INSERT OR REPLACE INTO verified_outputs VALUES(?,?,?,?,?)',
+                           (*self._identity_key(record['final_path'],record['sha256']),record.get('job_id',''),json.dumps(identity),
+                            time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())))
+        except (sqlite3.Error,ValueError,OSError):pass  # Not remembered: the next routine check hashes it again.
+
+    def _publication_current(self,record):
+        """Current-audiobook view: the protected publication's file identity equals its last full verification."""
+        known=self._known_identity(record['final_path'],record['sha256'])
+        return bool(known) and known[2]==record['size'] and file_identity(ordinary(record['final_path']))==known
+
+    def _publication_verified(self,record):
+        try:self._remember_identity(record,file_identity(ordinary(record['final_path'])))
+        except OSError:pass
 
     def close(self):
         if hasattr(self,'automatic'):self.automatic.close()

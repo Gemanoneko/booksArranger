@@ -33,6 +33,32 @@ class DesktopControl:
     def _automatic(self):
         return getattr(self.server.merge, 'automatic', None)
 
+    STATUS_ANSWER = 4.0  # seconds; the shell gives each desktop status request 5 s, Quit included
+
+    def _bounded_state(self):
+        """Desktop status answers within STATUS_ANSWER whatever the engine is doing.
+
+        A slow state computation keeps running in its helper thread (and is shared by the next poll
+        through the status snapshot); this request reports "unavailable" instead of making the shell's
+        Quit time out.
+        """
+        from merge_service import StatusUnavailable
+        box = {}
+
+        def compute():
+            try:
+                box['value'] = self.server.state('Audiobooks', cached=True)
+            except BaseException as error:
+                box['error'] = error
+        worker = threading.Thread(target=compute, name='books-desktop-status', daemon=True)
+        worker.start()
+        worker.join(self.STATUS_ANSWER)
+        if worker.is_alive():
+            raise StatusUnavailable('Status computation is still running')
+        if 'error' in box:
+            raise box['error']
+        return box['value']
+
     def busy(self, snapshot=None):
         """Derive busy facts from the caller's state snapshot; compute one only when none is supplied."""
         if snapshot is not None and isinstance(snapshot.get('audiobook_jobs'), dict):
@@ -57,7 +83,7 @@ class DesktopControl:
         from merge_service import StatusUnavailable
         unavailable = False
         try:
-            snapshot = self.server.state('Audiobooks', cached=True)
+            snapshot = self._bounded_state()
         except StatusUnavailable:
             # A slow computation is still running: answer "unknown" now rather than wait again.
             # Phase stays readable, so Quit and its watch keep working.

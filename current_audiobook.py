@@ -11,8 +11,11 @@ from native_io import DirectoryBoundary, VerifiedFile, ordinary, BoundaryError
 from replacement_jobs import packed, digest
 
 class CurrentAudiobooks:
-    def __init__(self,library,repairs,replacements):
+    def __init__(self,library,repairs,replacements,verified=None,remember=None,pace=None):
         self.library=ordinary(library);self.repairs=ordinary(repairs);self.replacements=replacements
+        # Optional persisted verification: verified(record) answers from the last full hash when the
+        # file identity is unchanged; remember(record) records a new full hash; pace(n, stop) limits reads.
+        self.verified=verified;self.remember=remember;self.pace=pace
         self._lock=threading.RLock();self._cache={};self._pending=set();self._work=queue.Queue(maxsize=32)
         self._stop=threading.Event();self._thread=None
 
@@ -147,10 +150,12 @@ class CurrentAudiobooks:
                     h=hashlib.sha256()
                     for block in file.chunks():
                         if self._stop.is_set():raise InterruptedError('Current audiobook verification stopped')
+                        if self.pace is not None:self.pace(len(block),self._stop)
                         if time.monotonic()-started>600:raise TimeoutError('Current audiobook verification exceeded its bound')
                         h.update(block)
                     if h.hexdigest()!=publication['record']['sha256']:raise BoundaryError('Current audiobook bytes differ from its completed publication')
                     error=''
+                    if self.remember is not None:self.remember(publication['record'])
             except Exception as failure:error=str(failure) or type(failure).__name__
             finally:
                 with self._lock:self._pending.discard(key);self._cache[key]=error
@@ -162,6 +167,11 @@ class CurrentAudiobooks:
             if publication is None:return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}
             with self.protected(publication) as (_,key):
                 with self._lock:known=key in self._cache;error=self._cache.get(key)
+                if not known and self.verified is not None:
+                    try:current=self.verified(publication['record']) is True
+                    except (ValueError,OSError,KeyError):current=False
+                    if current:
+                        with self._lock:self._cache[key]='';known=True;error=''
                 if not known:
                     self._enqueue(publication,key)
                     return {'state':'verifying','reason':'Verifying the recorded audiobook','identity':key}

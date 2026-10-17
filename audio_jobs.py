@@ -33,6 +33,15 @@ def _failure_details(error, stage, now=None):
     return details
 
 
+class _Any:
+    """is_set() over several events: any one stops a cooperative check."""
+    def __init__(self, *events):
+        self.events = events
+
+    def is_set(self):
+        return any(event.is_set() for event in self.events)
+
+
 class AudioJobs:
     """Single-owner queue; do not instantiate twice for the same database.
 
@@ -65,6 +74,11 @@ class AudioJobs:
         # Startup re-verification of published outputs runs after construction (start_published_check).
         self._verify_stop = threading.Event()
         self._verifier = None
+        # Optional routine check output_current(record, stop, pace): unchanged verified file identity, else a
+        # full interruptible hash. Without it, routine checks use output_validator (always a full check).
+        self.output_current = None
+        self.verify_pace = None
+        self._resuming = False
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
             db.execute('CREATE TABLE IF NOT EXISTS audio_repair_admissions(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
@@ -84,10 +98,21 @@ class AudioJobs:
         with self._db() as db:
             db.execute("UPDATE audio_jobs SET " + ",".join(key + "=?" for key in fields) + " WHERE job_id=?", (*fields.values(), job_id))
 
-    def _check_output(self, record):
+    def _check_output(self, record, routine=False, stop=None, pace=None):
         self._validate_record(record)
-        if self.output_validator(copy.deepcopy(record)) is not True:
+        if routine and self.output_current is not None:
+            valid = self.output_current(copy.deepcopy(record), stop, pace)
+        else:
+            valid = self.output_validator(copy.deepcopy(record))
+        if valid is not True:
             raise ValueError("Recorded output is missing, changed, or failed validation")
+
+    def _historical(self, row, stop=None):
+        if not self.historical_retirement:
+            return False
+        if stop is None:
+            return self.historical_retirement(copy.deepcopy(row)) is True
+        return self.historical_retirement(copy.deepcopy(row), stop=stop) is True
 
     @staticmethod
     def _validate_record(record):
@@ -119,19 +144,33 @@ class AudioJobs:
             else:
                 self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
 
-    def _settle(self, row):
-        """Exact recorded-output check for one completed or publishing row; returns its row change, if any."""
+    def _settle(self, row, routine=False, stop=None, pace=None):
+        """Recorded-output check for one completed or publishing row; returns its row change, if any.
+
+        routine=True (startup re-check, Start) uses the cheap identity check when available and treats
+        an exact authorized former-output retirement as history. A stop is raised, never a verdict.
+        """
         journal = json.loads(row["journal"])
         record = json.loads(row["output"]) if row["output"] else journal.get("publication_intent")
         try:
-            self._check_output(record)
+            self._check_output(record, routine, stop, pace)
             if record["job_id"] != row["job_id"]:
                 raise ValueError("Output job identity mismatch")
             if row["state"] != 'completed' or json.loads(row['output'] or '{}') != record:
                 return {"state": "completed", "stage": "completed", "output": json.dumps(record), "reason": ""}
             return None
+        except InterruptedError:
+            raise
         except Exception as exc:
+            if routine and row["state"] == "completed" and self._historical(row, stop):
+                return None  # Exact authorized former-output retirement; preserve immutable history.
             return {"state": "needs attention", "reason": str(exc) or type(exc).__name__}
+
+    def _apply_unchanged(self, changes):
+        """Caller holds the lock. A row changes only if it is still exactly what was checked."""
+        for row, change in changes:
+            if self._rows("SELECT * FROM audio_jobs WHERE job_id=?", (row["job_id"],)) == [row]:
+                self._update(row["job_id"], **change)
 
     def start_published_check(self):
         """Re-verify every completed row's published output in the background, once, after startup.
@@ -155,16 +194,15 @@ class AudioJobs:
             if self._verify_stop.is_set():
                 return
             try:
-                if self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:
-                    continue  # Exact authorized former-output retirement; preserve immutable history.
-                change = self._settle(row)
+                change = self._settle(row, True, self._verify_stop, self.verify_pace)
                 if not change:
                     continue
                 with self._lock:
                     if self._verify_stop.is_set():
                         return
-                    if self._rows("SELECT * FROM audio_jobs WHERE job_id=?", (row["job_id"],)) == [row]:
-                        self._update(row["job_id"], **change)
+                    self._apply_unchanged([(row, change)])
+            except InterruptedError:
+                return  # resume() or close() took over; nothing is written after a stop.
             except Exception:
                 continue  # resume() repeats this exact check before any new work
 
@@ -286,21 +324,41 @@ class AudioJobs:
             return {'retryable':True,'retry_at':now+3600,'requeued':True}
 
     def resume(self):
+        """Re-check every published book, then start the worker.
+
+        The check holds no lock, so Pause, Quit and status answer at once; either one during the check
+        wins and nothing starts. Unchanged books pass on their verified file identity; any other book is
+        hashed in full before the worker starts.
+        """
         with self._lock:
             if self._closed:
                 raise RuntimeError("Queue is closed")
             self._verify_stop.set()  # This resume runs the published-output check itself.
-            if self._thread and self._thread.is_alive():
+            if self._thread and self._thread.is_alive() or self._resuming:
                 return self.status()
-            for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed'"):
-                if self.historical_retirement and self.historical_retirement(copy.deepcopy(row)) is True:continue
-                try:
-                    self._check_output(json.loads(row["output"]))
-                except Exception as exc:
-                    self._update(row["job_id"], state="needs attention", reason=str(exc) or type(exc).__name__)
+            self._resuming = True
             self._stop.clear()
-            self._thread = threading.Thread(target=self._work, name="BooksArrangerAudioJobs", daemon=False)
-            self._thread.start()
+            stop = _Any(self._stop, self._drain)
+        try:
+            changes = []
+            try:
+                for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id"):
+                    if stop.is_set():
+                        return self.status()
+                    change = self._settle(row, True, stop)
+                    if change:
+                        changes.append((row, change))
+            except InterruptedError:
+                return self.status()
+            with self._lock:
+                if self._closed or stop.is_set() or self._thread and self._thread.is_alive():
+                    return self.status()
+                self._apply_unchanged(changes)
+                self._thread = threading.Thread(target=self._work, name="BooksArrangerAudioJobs", daemon=False)
+                self._thread.start()
+        finally:
+            with self._lock:
+                self._resuming = False
         return self.status()
 
     def pause(self):
