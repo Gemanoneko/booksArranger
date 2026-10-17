@@ -594,7 +594,11 @@ class AudioJobs:
                         raise ValueError('Invalid progress item')
                     measured={key:measured[key] for key in ('phase','completed','total','unit','item','items') if key in measured}
                     measured['unit']=units[measured['phase']]
-                    with self._lock:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
+                    # Never wait for the queue lock: it can be held across catalog I/O (busy timeout), and an
+                    # FFmpeg drain thread blocked here fails the attempt. A dropped progress tick is harmless.
+                    if not self._lock.acquire(blocking=False):return
+                    try:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
+                    finally:self._lock.release()
                     return
                 with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
                 entry = {"stage": stage, "at": _now(), "details": details}

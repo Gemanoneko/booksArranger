@@ -12,6 +12,8 @@
 
 - After Retry was accepted, the book could keep showing "Needs attention" with Retry still available, and a second press said "This book changed. Refresh and try again." The book now shows as queued at once, and a book list requested before Retry was answered can no longer bring back the old state.
 - The message for a Retry pressed on an out-of-date view no longer names a Refresh action that does not exist. It now reads "This book's status changed. Check the updated status above."
+- Progress updates can no longer stall or fail a conversion. While the catalog was busy, a progress update could wait for the job queue long enough to fail the book.
+- The version badge now shows the engine version only. It no longer switches between "Engine v…" and "v… · local prototype".
 
 ## [v0.16.5] - 2026-10-17
 

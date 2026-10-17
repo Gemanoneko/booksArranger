@@ -79,6 +79,8 @@ async function request(route, data) {
   return result;
 }
 function message(value='') { $('message').textContent=value; }
+// The only writer of #version: the engine's own version, as reported by its state.
+function renderVersion(){const value=typeof state?.version==='string' && state.version?'v'+state.version:'';if($('version').textContent!==value)$('version').textContent=value;$('version').hidden=!value;}
 function controls() {
   updateRecovery();updateRetry();
   const active = state?.active_library;
@@ -221,7 +223,7 @@ async function refresh(force=false) {
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext()) return false;
   state=current;
   renderJobs();renderAutomatic();renewManualDraft();
-  $('version').textContent=`v${state.version} · local prototype`;
+  renderVersion();
   $('root').textContent=`Source: ${state.root}`;
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;

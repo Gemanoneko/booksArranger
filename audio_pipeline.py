@@ -40,7 +40,8 @@ class StepProgress:
         self.sent=now
         value={'phase':self.phase,'completed':min(self.total,max(0.0,float(completed))),'total':self.total,'unit':self.unit}
         if self.items:value.update(item=max(1,min(self.items,int(item or 1))),items=self.items)
-        self.report(value)
+        try:self.report(value)
+        except Exception:pass  # Progress display only: a failed report never fails the step.
 
 
 class PcmSeconds:
@@ -48,8 +49,10 @@ class PcmSeconds:
     def __init__(self,inner,rate,channels,width,on_seconds):
         self.inner=inner;self.per_second=rate*channels*width;self.on_seconds=on_seconds;self.bytes=0
     def feed(self,raw):
-        self.inner.feed(raw);self.bytes+=len(raw)
-        if self.on_seconds is not None and self.per_second>0:self.on_seconds(self.bytes/self.per_second)
+        self.inner.feed(raw);self.bytes+=len(raw)  # The proof itself still raises.
+        if self.on_seconds is not None and self.per_second>0:
+            try:self.on_seconds(self.bytes/self.per_second)
+            except Exception:pass  # Progress display only.
 
 def fingerprint(path):
     with open(path,'rb') as stream:item=os.fstat(stream.fileno())
@@ -151,7 +154,8 @@ class EncodingProgress:
             except (ValueError,OverflowError):continue
             if seconds<0:continue
             seconds=min(self.total,max(self.last,seconds));self.last=seconds
-            self.callback({'phase':'encoding','completed':seconds,'total':self.total})
+            try:self.callback({'phase':'encoding','completed':seconds,'total':self.total})
+            except Exception:pass  # Progress display only: it never fails the media operation.
 
 def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telemetry=None):
     """Owned child cancellation; bounded diagnostics and transient encoding pipe."""

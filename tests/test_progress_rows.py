@@ -133,6 +133,46 @@ class RealConversionTests(unittest.TestCase):
         self.assertAlmostEqual(final['normalizing']['total'],4,delta=.2)
 
 
+class LockedQueueTests(RealConversionTests):
+    """Senua m1: a progress report never waits for the queue lock, so a held lock cannot fail a conversion step."""
+    def test_every_step_reports_valid_monotonic_measurements(self):pass  # Covered once above.
+    def test_normalize_completes_while_the_queue_lock_is_held(self):
+        paths=[self.media('01.mp3','libmp3lame',22050,1),self.media('02.flac','flac',48000,2)]
+        cover=self.root/'cover.png';cover.write_bytes(PNG)
+        sources=[{'path':str(p),**fingerprint(p),'fingerprint':fingerprint(p),'sha256':digest(p),'metadata':{'tags':{}}} for p in paths]
+        manifest={'job_id':str(uuid.uuid4()),'candidate_id':str(uuid.uuid4()),'candidate_revision':1,'root':str(self.root/'library'),'destination':str(self.root/'library'/'Book'/'Book.m4b'),
+                  'profile':AUTOMATIC_PROFILE,'encoding_policy':freeze_automatic_policy(sources),'sources':sources,'cover':{'path':str(cover),'sha256':digest(cover)},
+                  'comments':'','chapters':[],'metadata':{'title':'Private Book','canonical_author':'Verified Author'},'evidence':{}}
+        queue=None;held=threading.Event();release=threading.Event();waits=[]
+        def holder():
+            with queue._lock:held.set();release.wait(6)  # longer than run_owned's 3 s drain join
+        def runner(frozen,stop,checkpoint):
+            def progress(stage,info):
+                value=(info or {}).get('progress') or {}
+                # The m1 case: the lock is taken while an FFmpeg drain thread (not the worker) is reporting.
+                if value.get('phase')=='normalizing' and threading.current_thread().name=='BooksArrangerEncodingProgress' and not held.is_set():
+                    threading.Thread(target=holder,daemon=True).start();held.wait(5)
+                    threading.Timer(4,release.set).start()
+                started=time.monotonic();checkpoint(STAGES[stage],info);waits.append((value.get('phase'),time.monotonic()-started,threading.current_thread().name))
+            create_private(frozen,self.root/'stage',stop,progress);raise Done()
+        queue=AudioJobs(self.root/'catalog.sqlite3',runner,lambda m:True,lambda r:True);self.addCleanup(queue.close)
+        original=StepProgress.update  # Unthrottled, so the FFmpeg drain threads report while the lock is held.
+        with patch.object(StepProgress,'update',lambda step,completed,item=None,force=False:original(step,completed,item,True)):
+            queue.enqueue(manifest);queue.resume()
+            deadline=time.monotonic()+240
+            while queue._thread and queue._thread.is_alive() and time.monotonic()<deadline:time.sleep(.05)
+        release.set();row=queue._rows()[0];failure=json.loads(row['journal']).get('failure',{})
+        self.assertTrue(held.is_set(),'positive control: the lock really was held during normalizing')
+        self.assertEqual(failure.get('exception_class'),'Done',row['reason'])
+        drained=[seconds for phase,seconds,thread in waits if phase in ('normalizing','joined audio','checking audio') and thread!=queue._thread.name]
+        self.assertTrue(drained,'reports came from FFmpeg drain threads');self.assertLess(max(drained),.5,'no drain-thread report waited for the lock')
+    def test_failing_reporter_never_fails_a_step(self):
+        def broken(value):raise RuntimeError('display failed')
+        step=StepProgress(broken,'normalizing',10,'seconds',1);step.update(5,force=True)
+        meter=PcmSeconds(type('Inner',(),{'feed':lambda self,raw:None})(),1,1,1,broken);meter.feed(b'ab')
+        audio_pipeline.EncodingProgress(10,broken).feed(b'out_time_us=1000000'+bytes([10]))
+
+
 class PublishedCheckTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup)
@@ -201,6 +241,8 @@ class ActivityRowTests(unittest.TestCase):
         run={'phase':'research','checkpoint':json.dumps({'done':['a','b'],'pending':['c'],'deferred':['d','c']})}
         self.assertEqual(AutomaticProcessing._research_pass(run),{'completed':2,'total':4})
         self.assertIsNone(AutomaticProcessing._research_pass({'phase':'discovery','checkpoint':'{}'}));self.assertIsNone(AutomaticProcessing._research_pass(None))
+        for raw in ('[1,2]','{"done":[[1]],"pending":{"a":1}}','not json',None,'{"done":"abc"}'):
+            self.assertIn(AutomaticProcessing._research_pass({'phase':'research','checkpoint':raw}),(None,{'completed':0,'total':0}),raw)
 
 
 if __name__=='__main__':unittest.main()

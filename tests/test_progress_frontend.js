@@ -110,5 +110,10 @@ assert.ok(html.indexOf('id="pause-jobs"')<html.indexOf('id="jobs-rows"'),'Pause/
 assert.match(html,/<ul id="jobs-rows" aria-label="Running activities"><\/ul><p id="jobs-idle" class="field-help">Nothing running<\/p>/);
 for(const rule of [/#jobs-activity\{min-height:136px\}/,/\.activity-row progress:indeterminate\{[^}]*animation:activity-slide 1\.4s linear infinite\}/,/\.activity-row\.paused progress:indeterminate\{animation:none/,/\.activity-row\.attention progress::-webkit-progress-value\{background:var\(--warning\)\}/,/@media\(prefers-reduced-motion:reduce\)\{\.activity-row progress:indeterminate\{animation:none;background:repeating-linear-gradient/,/@keyframes activity-slide/])assert.match(css,rule);
 
+// One writer for #version: the engine version, never 'local prototype' (the desktop layer no longer writes it).
+run("state={version:'0.16.6'};renderVersion()");assert.equal(get('version').textContent,'v0.16.6');assert.equal(get('version').hidden,false);
+run('state={};renderVersion()');assert.equal(get('version').hidden,true);
+const desktopUi=fs.readFileSync(path.join(__dirname,'../web/desktop-ui.js'),'utf8'),appSource=fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8');
+assert.doesNotMatch(desktopUi,/#version/);assert.match(appSource,/\$\('version'\)\.textContent=value/);assert.doesNotMatch(appSource+html,/local prototype/i);assert.match(html,/<span id="version" class="badge" hidden><\/span>/);
 const options=run('filterOptions.candidates');const index=options.findIndex(x=>x[0]==='converted');assert.equal(options[index][1],'Audiobook Ready');assert.equal(index,0);
 console.log('PASS progress rows: measured and indeterminate steps, detail formats, fixed order, overflow, paused/attention/idle, elapsed and ETA, page contract');

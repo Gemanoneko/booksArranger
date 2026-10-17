@@ -190,11 +190,15 @@ class AutomaticProcessing:
     @staticmethod
     def _research_pass(run):
         """Books researched of this pass's list, from the saved checkpoint; None outside research."""
-        if not run or run['phase']!='research':return None
-        try:checkpoint=json.loads(run['checkpoint'] or '{}')
-        except (TypeError,ValueError):return None
-        done=len(set(checkpoint.get('done',[])));left=len(set(checkpoint.get('pending',[]))|set(checkpoint.get('deferred',[])))
-        return {'completed':done,'total':done+left} if done+left else None
+        # Display only, read on every poll and by the restart fence: any unexpected shape gives None, never an error.
+        try:
+            if not run or run['phase']!='research':return None
+            checkpoint=json.loads(run['checkpoint'] or '{}')
+            if not isinstance(checkpoint,dict):return None
+            ids=lambda key:{item for item in checkpoint.get(key) or [] if isinstance(item,str)} if isinstance(checkpoint.get(key) or [],list) else set()
+            done=len(ids('done'));left=len(ids('pending')|ids('deferred'))
+            return {'completed':done,'total':done+left} if done+left else None
+        except Exception:return None
     def start(self,*,server_closing=False):
         with self.lock:
             if server_closing:raise ValueError('The local server is stopping or stopped. Start is unavailable.')

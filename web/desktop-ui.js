@@ -9,7 +9,7 @@
  const check=button('Check for updates',()=>api.checkUpdates());const download=button('Download update',()=>api.downloadUpdate());const restart=button('Restart to update',()=>api.installUpdate());
  function showError(error){text.textContent=String(error.message||error);}
  const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job'];
- function render(value){if(value.engineVersion)document.querySelector('#version').textContent='Engine v'+value.engineVersion;
+ function render(value){
   const desktop=value.desktop||{};const quitting=value.quit!=='none'||(desktop.phase&&desktop.phase!=='running');
   panel.hidden=!quitting;phase.textContent=desktop.error||({finishing:'Finishing the current book and cleanup…',parking:'Parking pending work…',updating:'Parking the idle engine for update…',blocked:'Quit blocked; ownership remains held.'}[desktop.phase]||'Waiting for the engine checkpoint…');
   if(quitting){for(const id of mutating){const node=document.getElementById(id);if(node)node.disabled=true;}document.querySelector('#review-form button[type=submit]')?.setAttribute('disabled','');}
