@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.16.3] - 2026-10-17
+
+### Fixed
+
+- Books Arranger starts again on a catalog with many finished books. At startup the engine re-read and hashed every finished audiobook from the library share before it answered the window, which took about 2.3 minutes with 30 books and more than 4 minutes with 60. The window gives the engine 3 minutes, so it showed "Books Arranger could not start". The engine now answers right away and runs the same check in the background; a changed or missing book is still marked "needs attention", and Start still re-checks every finished book before any new work begins.
+
 ## [v0.16.2] - 2026-10-17
 
 ### Fixed
