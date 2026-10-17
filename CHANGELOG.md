@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.16.4] - 2026-10-17
+
+### Fixed
+
+- Quit now works at any time, including in the first minutes after launch. The background check of finished books in v0.16.3 could keep the engine too busy to answer the window's Quit, which then failed with "The engine did not confirm a safe Quit". The window's status request now always answers within a few seconds, a Quit request does no slow work before it is accepted, and the check stops within moments when the app quits.
+- Finished books are no longer re-read from the library share in full at every launch and every Start. Each book's file identity (volume, file id, size, modification time) is recorded when the book is fully checked; later routine checks compare that identity instead of hashing the whole book again. A book whose identity changed is still hashed in full, and removing originals, recovery copies or working files still checks the book in full first. On the first launch after updating, the one-time full check runs in the background at a limited read speed so the window stays responsive.
+- Start no longer holds the queue while it re-checks finished books. Pause and Quit answer at once during that check, and either one stops it before any new book begins.
+- The "Audiobook Ready" count no longer reads 0 after launch: it uses each book's last full check from the start.
+
 ## [v0.16.3] - 2026-10-17
 
 ### Fixed
