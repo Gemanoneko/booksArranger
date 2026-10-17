@@ -1,20 +1,41 @@
-# Books Arranger v0.16.6 lean packaged QA on a copy of the real catalog, private empty roots — 2026-10-17
+# Books Arranger v0.16.6 lean packaged QA on a copy of the real catalog, private empty roots — 2026-10-17 (updated for the rebuild at 7619d12)
 
 Author: Futaba.
 
 **Verdict:** GO
 
-Pattern alerts: 1.
-1. The stale "local prototype" version label is still open (seventh build in a row: v0.16.0 to v0.16.6), and this run found its cause. In the shown window the label flipped between two texts across three reads: "v0.16.6 · local prototype" about 12 s after launch, "Engine v0.16.6" about 4 s later, then "v0.16.6 · local prototype" again about 10 s after that. Two code paths write the same element: `web/app.js` line 224 (`v${state.version} · local prototype`, on every state render) and `web/desktop-ui.js` line 12 (`'Engine v'+value.engineVersion`, on every shell status render). Whichever ran last wins. The engine itself reports 0.16.6 (`/api/health`). Disposition: defer (Minor, wording only), for Jane to confirm. Owner: Ender, Judy if the copy needs a decision.
+Pattern alerts: 2 (1 closed by the rebuild, 1 new).
+1. **CLOSED on the rebuild (7619d12), verified.** On the first build (c823724) the stale "local prototype" version label was still open (seventh build in a row: v0.16.0 to v0.16.6), and that run found its cause. In the shown window the label flipped between two texts across three reads: "v0.16.6 · local prototype" about 12 s after launch, "Engine v0.16.6" about 4 s later, then "v0.16.6 · local prototype" again about 10 s after that. Two code paths write the same element: `web/app.js` line 224 (`v${state.version} · local prototype`, on every state render) and `web/desktop-ui.js` line 12 (`'Engine v'+value.engineVersion`, on every shell status render). Whichever ran last wins. The engine itself reports 0.16.6 (`/api/health`). Disposition on the first build: defer (Minor, wording only). Disposition now: fix, shipped in 7619d12 and confirmed on the rebuilt artifact (see Rebuild section).
+2. **New, open: the second `/api/state` call is slow after launch, on two builds in a row.** First build: 220 ms then 4,482 ms. Rebuild: 1,305 ms then 3,741 ms. Both second calls are under the recipe's 5.0 s max but far above `/api/health` (8 ms). Two samples per build, so this is a pattern to watch, not a proven defect. Disposition: defer, watch in the live check, for Jane to confirm. Owner: Ender.
+
+**Rebuild update.** This report now covers the rebuilt artifact below. The first build's results (c823724, build 7c105c0c) are kept as the record and are marked as such; the Rebuild section lists what I repeated. The verdict, the commit line and the manifest line apply to the rebuild.
 
 **Why GO, and what the GO does not cover.** Checks 1 and 3 passed. Check 2 passed on layout and overlap, but **I did not see the "Nothing running" idle line**: this catalog copy carries a saved, paused source-cleanup row, so the rows area was never empty (details below). I also never saw a running row, because I clicked nothing that starts work. That is the live check you said you will do afterwards.
 
-**Artifact covered:** `dist/builds/7c105c0c-e0dc-4dbf-9530-3a9dccd90e9d/Books-Arranger-Setup-0.16.6.exe` in the electron-m1 worktree, SHA256 `073f15f4dc1f1613bd756370f2bea159b19177e0215185155f70baaabbe2f004` (recomputed by me, matches the brief).
+**Artifact covered (rebuild):** `dist/builds/bcc7c6fd-56ad-4c26-bb5f-d04264ff79e0/Books-Arranger-Setup-0.16.6.exe` in the electron-m1 worktree, SHA256 `d6727de6a42d34ad76c462b80f46ff3889ae3f398011d96dc38f167967df68fc` (recomputed by me, matches the brief).
 
-Release source commit: c823724a2f6fa83cf3f8d874568019178462700b
-Release artifact manifest SHA256: e45899b533b30a8b693a2d1116566de4ad3d1746fcd73a4384f272b69f3e6f1c
+**First build (superseded, not covered by this verdict):** `dist/builds/7c105c0c-e0dc-4dbf-9530-3a9dccd90e9d/Books-Arranger-Setup-0.16.6.exe`, SHA256 `073f15f4dc1f1613bd756370f2bea159b19177e0215185155f70baaabbe2f004`, source commit c823724. Its checks below were run on that build.
 
-Binding checks I made myself: worktree HEAD equals the source commit above and equals `source_head` in `dist/release-artifacts.json`; I recomputed the SHA256 of `dist/release-artifacts.json` and it equals the manifest line above; the manifest says version 0.16.6, `payload.verified` true, build id `7c105c0c-e0dc-4dbf-9530-3a9dccd90e9d`. All 219 payload files extracted from the installer with 7za match the manifest (`mismatch []`). The worktree had no uncommitted changes when I looked (before this report).
+Release source commit: 7619d12f6ba9fdb99202f48786155fdab92ef031
+Release artifact manifest SHA256: 08ddf425efa16cb7b7ac71285a1d64ce5fc992b4ff0889ff809be432f0bb24d4
+
+Binding checks on the rebuild, made myself: worktree HEAD is 7619d12f6ba9fdb99202f48786155fdab92ef031 and equals `source_head` in `dist/release-artifacts.json`; I recomputed the SHA256 of `dist/release-artifacts.json` and it equals the manifest line above; the manifest says version 0.16.6, `payload.verified` true, build id `bcc7c6fd-56ad-4c26-bb5f-d04264ff79e0`. I recomputed the installer SHA256 and it equals the artifact line above. All 219 payload files extracted from the installer with 7za match the manifest (219 ok, mismatch [], missing [], extra 0). `git status` in the worktree was empty when I looked (before this report edit).
+
+First build (c823724), for the record: HEAD, `source_head` and the recomputed manifest SHA256 (`e45899b533b30a8b693a2d1116566de4ad3d1746fcd73a4384f272b69f3e6f1c`) all agreed at the time; 219 of 219 payload files matched; clean tree.
+
+## Rebuild: lean smoke repeated on artifact bcc7c6fd (commit 7619d12) — 2026-10-17
+
+Same recipe, same private setup (private port 5212, debug port 19224, profile, APPDATA, LOCALAPPDATA, TEMP, empty roots, the catalog copy from the first run; never the real Z:, no Start, Resume, Pause or Retry). New payload extracted to `payload2/`, new harness copy `tools/smoke2.mjs` (adds a version-label sampler and a top-of-window screenshot). Launched 17:02:26 UTC; `/api/health` answered 1.7 s later (version 0.16.6, `recovery_active` false); panel shown 5.8 s after launch.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Version badge shows "v0.16.6", no "local prototype" | **PASS.** 13 reads of the version element between 5.8 s and about 26 s after launch (9 timed samples 2.5 s apart, three layout reads, one final read): every one read exactly "v0.16.6". In the 10 text-level reads (9 samples + final) "local prototype" appears nowhere in the page text or the page HTML and "Engine v" appears nowhere. The first build flipped between two texts in three reads. `top.png` shows the badge top right, "v0.16.6". Source check: grep of `web/app.js` and `web/desktop-ui.js` finds neither "local prototype" nor "Engine v" any more; the fix commit is "single version badge writer". |
+| 2 | Layout as before | **PASS, same limits as the first build.** Window 1266 x 823. Pause/Resume toolbar 40 px high, ends at 1008, above the rows area at 1016 (136 px high, the 2-row reservation); help lines below; 0 overlaps on every visible part of the panel in all three reads; 0 px horizontal overflow; Pause disabled, Resume enabled (Paused); the panel is 383 px high in all three reads. Offsets inside the panel match the first build to within 1 px (heading +29, status +69, toolbar +100, rows +148; first build +28, +69, +99, +147). One difference, not diagnosed: the panel sits about 71 px lower on the page (top at 868, the section above ends at 853, gap 15 px) than in the first run (797); nothing overlapped. **Idle line still not seen**: the copy still carries the saved paused cleanup row ("Removing originals: Самая страшная книга 2022, 22 of 22 files, Paused - Removing original files, 0:00 elapsed"), so "Nothing running" was not exercised. No second "Checking finished books" row appeared this time. |
+| 3 | Quit exits cleanly | **PASS.** One real renderer mouse press on "Quit Books Arranger" (private debug port, no global input) at 17:03:06.47 UTC; my shell process exited with code 0 at 17:03:08.98 UTC, **2.51 s after the click**. Before the click: shell 38724, three Electron children, two engine python processes (58280 owns the 5212 listener), one conhost. After: none of those PIDs exist, no listener on 5212 or 19224, 0 `etilqs` files in the private temp folder. Sergei's app (v0.16.5, listener 5210, PID 39108) was listening before and after; I sent it no request. |
+
+Responsiveness: `/api/health` 8 ms and 8 ms; `/api/state` 200 both times, **1,305 ms then 3,741 ms** (pattern alert 2). "need attention" read 193 at every read, the value the first run left in the copy, so first-build finding 3 is neither confirmed nor refuted. The copy is the one the first run already used (its saved state persisted), so its SHA256 no longer equals the real catalog and I did not re-run `quick_check`; the real catalog was not touched.
+
+Not re-covered on the rebuild: everything listed under "Not covered" below still applies (idle and running texts, widths below 560 px, one-time hash, second launch, hide-to-tray, NSIS installer, tray menu Quit, anything that starts work). The fix commit also says progress updates no longer wait on the queue lock; I started no work, so that part is not exercised here. Left on disk, not cleaned, as briefed: `C:/Users/AnGeLZzZ/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/3c1cc2ef-43a9-4b2a-b1fa-8a242d8fded6/scratchpad/shared/ba-v0166-qa/payload2/` and `/evidence2/` (`result.json`, `top.png`, `panel.png`, shell logs) plus `tools/smoke2.mjs`.
 
 ## Result per check
 
@@ -28,8 +49,8 @@ The only control I used in the window was Quit Books Arranger. I clicked no Star
 
 ## Findings
 
-1. **Minor, carried over (pattern alert 1). Stale and flipping version label.** See above. Status: open. Disposition: defer.
-2. **Informational. `/api/state` 4.5 s on one of two samples.** See check 1. Not enough samples to call it a defect; worth a look in the live check.
+1. **Minor, carried over (pattern alert 1). Stale and flipping version label.** See above. Status: **CLOSED on the rebuild (7619d12), verified over 13 reads.** Disposition: fix (shipped). On the first build: open, defer.
+2. **Informational, now pattern alert 2. `/api/state` second call slow: 4.5 s (first build), 3.7 s (rebuild).** See check 1 and the Rebuild section. Not enough samples to call it a defect; worth a look in the live check.
 3. **Informational. "need attention" went 133 to 193 within about 15 s** while the "Checking finished books" row ran (24 of 75 books). Most likely an effect of the private empty library roots on a copy (finished books are not found under the configured root, so they read as needing attention); I did not investigate. It happened on the copy only. If the live run on the real root shows the count moving after launch, that is worth reporting.
 4. **Informational, for Judy and Ender. Paused row shows "0:00 elapsed" and a nearly full bar** for a cleanup at 22 of 22 files that is paused. The spec says elapsed "freezes when paused"; after a restart there may simply be no start time to count from. Not investigated.
 5. **Informational. Coverage gap on the idle text and running rows.** See above. Not a product finding.
