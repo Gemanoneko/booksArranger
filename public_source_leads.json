@@ -1,5 +1,11 @@
 [
   {
+    "title": "Призраки белых ночей",
+    "authors": ["Лена Обухова", "Наталья Тимошенко"],
+    "series_urls": ["https://www.goodreads.com/series/249925"],
+    "basis": "Makoto 2026-10-18 provider-series discovery citation only. No series name or ordinal is preapproved: the client must independently bind the exact Goodreads search book id/title/all authors to the page's explicit entry. Original sequence differs from the shortened commercial reissue sequence."
+  },
+  {
     "work_id": "fantlab:668099",
     "urls": [
       "https://ast.ru/book/samaya-strashnaya-kniga-zona-uzhasa-828515/"

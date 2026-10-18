@@ -3,9 +3,10 @@ politely paced and cached); FantLab's cycle is the fallback, counted from the cy
 works accepted; Goodreads wins when both answer; the source is recorded on the metadata.
 Private fixture pages shaped like the real ones; no network."""
 import json,tempfile,unittest,urllib.error,urllib.parse
+from html import escape
 from pathlib import Path
 import public_research
-from public_research import PublicClient,PublicResearch,goodreads_book,goodreads_results,host_policy
+from public_research import PublicClient,PublicResearch,goodreads_book,goodreads_results,goodreads_series,host_policy
 from standing_metadata import validate_policy
 from test_local_identity import AREA,SERGEI,candidate,catalogue
 
@@ -31,15 +32,29 @@ def book_page(book,title,names,series=None,position='10'):
 
 TITLE='Призраки белых ночей';AUTHORS='Лена Обухова, Наталья Тимошенко'
 
+def series_page(position='10',shown_position='10',primary='Наталья Тимошенко',book='55108791'):
+    """Reduced fixture of the captured real SeriesHeader/SeriesList props shape.
+
+    Two independent chunks deliberately make list index different from the explicit position.
+    """
+    def component(kind,data):return '<div data-react-class="ReactComponents.%s" data-react-props="%s"></div>'%(kind,escape(json.dumps(data,ensure_ascii=False),quote=True))
+    item={'book':{'bookId':book,'bookUrl':'/book/show/'+book,'title':TITLE+' (Нормальное аномальное, #'+shown_position+')','bookTitleBare':TITLE,'author':{'name':primary}}}
+    first=[{'book':{'bookId':str(i),'bookUrl':'/book/show/'+str(i),'title':'Earlier '+str(i),'bookTitleBare':'Earlier '+str(i),'author':{'name':'Лена Обухова'}}} for i in (1,2)]
+    return ('<html><link rel="canonical" href="https://www.goodreads.com/series/249925">'+
+            component('SeriesHeader',{'title':'Нормальное аномальное Series'})+
+            component('SeriesList',{'series':first,'seriesHeaders':['Book 1','Book 2']})+
+            component('SeriesList',{'series':[item],'seriesHeaders':['Book '+position]})+'</html>').encode()
+
 class Sources:
     """Private Goodreads and FantLab answers; every request is recorded."""
     def __init__(self):
-        self.calls=[];self.closed=set();self.goodreads_search=search_page();self.goodreads_books={};self.fantlab=[];self.extended={}
+        self.calls=[];self.closed=set();self.goodreads_search=search_page();self.goodreads_books={};self.goodreads_series={};self.fantlab=[];self.extended={}
     def fetch(self,url,*_):
         self.calls.append(url);parsed=urllib.parse.urlsplit(url)
         if parsed.hostname in self.closed:raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         if parsed.hostname=='www.goodreads.com':
             if parsed.path=='/search':return self.goodreads_search
+            if parsed.path.startswith('/series/'):return self.goodreads_series[parsed.path]
             return self.goodreads_books[parsed.path.rsplit('/',1)[1]]
         if parsed.hostname=='api.fantlab.ru':
             if parsed.path=='/search-works':return json.dumps(self.fantlab).encode()
@@ -82,6 +97,41 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(goodreads_book(b'<html>no record</html>','7'))
 
 class SeriesTests(Base):
+    def cited(self):
+        self.research.leads=[{'title':TITLE,'authors':['Лена Обухова','Наталья Тимошенко'],'series_urls':['https://www.goodreads.com/series/249925']}]
+        self.sources.goodreads_search=search_page(('55108791',TITLE+' (Нормальное аномальное, #10)',['Наталья Тимошенко','Лена Обухова']),
+                                                  ('220837262',TITLE,['Лена Обухова','Наталья Тимошенко']))
+        self.sources.goodreads_series['/series/249925']=series_page()
+
+    def test_cited_series_joins_all_author_search_identity_to_explicit_second_chunk_position(self):
+        self.cited();result={'sources':[]}
+        found=self.research._series_goodreads(TITLE,AUTHORS,self.stop,{'remaining':6},result)
+        self.assertEqual((found['name'],found['number'],found['book_id']),('Нормальное аномальное','10','55108791'))
+        self.assertEqual([urllib.parse.urlsplit(url).path for url in self.sources.calls],['/search','/series/249925'])
+        self.assertEqual([r['fields'] for r in result['sources']],[['title','authors'],['series','number']])
+        self.assertTrue(all(r['sha256'] for r in result['sources']))
+        count=len(self.sources.calls);self.research._series_goodreads(TITLE,AUTHORS,self.stop,{'remaining':6},{'sources':[]})
+        self.assertEqual(len(self.sources.calls),count,'both responses reused under the normal client cache')
+
+    def test_series_entry_cannot_replace_missing_coauthor_identity_or_infer_position(self):
+        self.cited();self.sources.goodreads_search=search_page(('55108791',TITLE+' (Нормальное аномальное, #10)',['Наталья Тимошенко']))
+        self.assertIsNone(self.research._series_goodreads(TITLE,AUTHORS,self.stop,{'remaining':6},{'sources':[]}))
+        self.assertEqual(len(self.sources.calls),1,'partial search authors cannot authorize series-page matching')
+        for raw in (series_page(position='9'),series_page(position='1-3'),series_page(primary='Different Author'),series_page(book='8')):
+            self.assertIsNone(goodreads_series(raw,'https://www.goodreads.com/series/249925','55108791',TITLE,AUTHORS))
+        self.assertIsNone(goodreads_series(series_page(),'https://www.goodreads.com/series/8','55108791',TITLE,AUTHORS),'canonical URL must bind the exact page')
+
+    def test_cited_series_obeys_shared_host_pause_without_another_provider_route(self):
+        self.cited()
+        # Prime only search, then pause the same existing host before the uncached series request.
+        url='https://www.goodreads.com/search?'+urllib.parse.urlencode({'q':TITLE+' Лена Обухова','search_type':'books'})
+        self.client.read(url,self.stop,{'remaining':1})
+        from scanner import connect
+        with connect(self.client.database) as db:db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',('www.goodreads.com',self.now[0]+3600,'Public source presented a human check; no bypass attempted'))
+        before=len(self.sources.calls)
+        with self.assertRaises(public_research.ResearchWait):self.research._series_goodreads(TITLE,AUTHORS,self.stop,{'remaining':6},{'sources':[]})
+        self.assertEqual(len(self.sources.calls),before,'no alternate client, book-page retry or host-pause bypass')
+
     def test_goodreads_is_the_series_source_and_wins_over_fantlab(self):
         self.goodreads();fantlab_cycle(self.sources)
         found=self.gap()

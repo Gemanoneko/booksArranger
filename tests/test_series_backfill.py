@@ -170,8 +170,10 @@ class BackfillTests(unittest.TestCase):
         backfill=lib.backfill(found=None);backfill.run_pass();self.assertEqual(lib.state(backfill)[0],'none');self.assert_unchanged(backfill)
         lib2=Library(Path(self.temp.name)/'second');merge=lib2.merge();merge.jobs._thread=SimpleNamespace(is_alive=lambda:True)
         backfill=lib2.backfill(merge);backfill.run_pass()
-        self.assertIsNone(lib2.state(backfill),'file changes wait while a book converts; nothing is recorded');self.assertEqual(sha(lib2.path),lib2.original);self.assertEqual(lib2.temps(),[])
-        merge.jobs._thread=None;backfill.run_pass();self.assertEqual(lib2.state(backfill)[0],'done','and run once the queue is idle')
+        self.assertEqual(lib2.state(backfill)[0],'deferred','the wait and verified lookup are durable');self.assertEqual(sha(lib2.path),lib2.original);self.assertEqual(lib2.temps(),[])
+        entry=backfill.entry(lib2.job_id);self.assertEqual(entry['record']['found']['number'],'10')
+        merge.jobs._thread=None;backfill.clock=lambda:entry['record']['next_attempt']+1
+        backfill.run_pass();self.assertEqual(lib2.state(backfill)[0],'done','and run once the queue is idle')
 
     def test_restarts_at_every_step_finish_or_leave_it_unchanged(self):
         lib=self.lib
@@ -194,7 +196,7 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual(lib.state(backfill)[0],'renamed','a busy catalog waits: the book keeps its renamed state')
         self.assertTrue(lib.target.exists() and lib.path.exists());self.assertEqual(json.loads(lib.row()['output'])['final_path'],str(lib.path),'still the former record, still valid')
         self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))
-        restarted=lib.backfill();restarted.run_pass()
+        restarted=lib.backfill();restarted.clock=lambda:backfill.entry(lib.job_id)['record']['next_attempt']+1;restarted.run_pass()
         self.assertEqual(lib.state(restarted)[0],'done');self.assertFalse(lib.path.exists())
         self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))
         # A catalog refusal preserves both full copies for inspection; deleting a
@@ -304,5 +306,128 @@ class BackfillTests(unittest.TestCase):
         from web_server import activities
         rows=activities({'series_update':{'title':TITLE,'done':3,'total':38,'step':'updating'}},None,None,None,{},now_ms=1)
         self.assertEqual([(r['kind'],r['subject'],r['done'],r['total'],r['unit']) for r in rows],[('series',TITLE,3,38,'books')])
+
+class SchedulingTests(unittest.TestCase):
+    """Actual SQLite scheduler with private no-media jobs; no network or library paths."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup)
+        self.base=Path(self.temp.name);self.db=self.base/'catalog.sqlite3';self.now=[1000.0]
+        with connect(self.db) as db:
+            db.execute('CREATE TABLE audio_jobs(job_id TEXT,manifest TEXT,output TEXT,state TEXT,created TEXT,updated TEXT)')
+            for index,title in enumerate(('Old standalone','Later matching book')):
+                manifest={'candidate_id':str(index),'metadata':{'title':title,'canonical_author':'Exact Author','series':''}}
+                db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?,?)',(str(index),json.dumps(manifest),'{}','completed',str(index),str(index)))
+        merge=SimpleNamespace(inventory=SimpleNamespace(database=self.db),stage_root=self.base/'stage')
+        self.backfill=SeriesBackfill(merge,research=SimpleNamespace(),clock=lambda:self.now[0]);self.backfill.unsafe=lambda *_:''
+
+    def test_fantlab_wait_does_not_block_later_goodreads_and_due_time_survives_restart(self):
+        from public_research import ResearchWait
+        calls=[]
+        def goodreads(title,*args):
+            calls.append(('goodreads',title))
+            return {'provider':'goodreads','name':'Verified series','number':'10','source_url':'https://www.goodreads.com/series/1'} if title.startswith('Later') else None
+        def fantlab(title,*args):
+            calls.append(('fantlab',title));raise ResearchWait('api.fantlab.ru','Hourly allowance reached',1600,'app_limit','host')
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab)
+        applied=[]
+        self.backfill.apply=lambda job,found:(applied.append((job,found)),self.backfill._set(job,'done'))
+        self.backfill.run_pass()
+        self.assertEqual([job for job,_ in applied],['1']);self.assertEqual(calls,[('goodreads','Old standalone'),('fantlab','Old standalone'),('goodreads','Later matching book')])
+        entry=self.backfill.entry('0');self.assertEqual(entry['state'],'deferred');self.assertEqual(entry['record']['next_attempt'],1600)
+        self.assertEqual(entry['record']['waits'][0]['source'],'api.fantlab.ru');self.assertIn('Hourly allowance',entry['reason'])
+        restarted=SeriesBackfill(self.backfill.merge,research=self.backfill.research,clock=lambda:self.now[0])
+        self.assertEqual(restarted.candidates(),[],'future deferred book stays asleep after process restart')
+        self.now[0]=1601;self.assertEqual([row['job_id'] for row in restarted.candidates()],['0'])
+        self.assertEqual(self.backfill._next_wait(),30,'minimum wait prevents a hot loop')
+
+    def test_idle_wait_keeps_found_receipts_without_researching_the_same_book_again(self):
+        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        self.backfill.lookup=Mock(return_value=found)
+        def busy(*_):raise series_backfill.Later('Conversion is running',1060)
+        self.backfill.apply=busy;self.backfill.run_pass()
+        self.assertEqual(self.backfill.lookup.call_count,2)
+        self.assertEqual(self.backfill.entry('0')['record']['found']['receipts'],found['receipts'])
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2,'no repeated lookups before due')
+        self.now[0]=1061;self.backfill.apply=lambda job,value:self.backfill._set(job,'done',record={'used':value})
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2,'ready findings are reused after the idle wait')
+        self.assertEqual(self.backfill.entry('1')['state'],'done')
+
+    def test_repeated_busy_deferrals_do_not_renew_evidence_freshness(self):
+        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        self.backfill.lookup=Mock(return_value=found)
+        def busy(*_):raise series_backfill.Later('Conversion is running',self.now[0]+60)
+        self.backfill.apply=busy;self.backfill.run_pass();original_at=self.backfill.entry('0')['record']['found_at']
+        for day in range(1,8):
+            self.now[0]=1000+day*86400;self.backfill.run_pass()
+            self.assertEqual(self.backfill.entry('0')['record']['found_at'],original_at)
+            self.assertEqual(self.backfill.lookup.call_count,2,'idle postponement must reuse, not redate, the bounded finding')
+        self.now[0]=1000+8*86400;self.backfill.run_pass()
+        self.assertEqual(self.backfill.lookup.call_count,4,'evidence older than seven days requires fresh provider lookup for both books')
+
+    def test_old_cached_or_malformed_receipt_does_not_gain_a_fresh_seven_days(self):
+        found={'provider':'goodreads','name':'S','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        self.now[0]=1000+6*86400;self.backfill.lookup=Mock(return_value=found)
+        def busy(*_):raise series_backfill.Later('Conversion is running',self.now[0]+60)
+        self.backfill.apply=busy;self.backfill.run_pass()
+        self.assertEqual(self.backfill.entry('0')['record']['found_at'],1000,'age is tied to cached provider retrieval')
+        self.now[0]=1000+7*86400+1;self.backfill.run_pass()
+        self.assertEqual(self.backfill.lookup.call_count,4,'cache nearing expiry was not granted a new seven-day window')
+        self.assertEqual(self.backfill._finding_time({'receipts':[{'retrieved_utc':'broken'}]},self.now[0]),0)
+        self.assertEqual(self.backfill._finding_time({'receipts':[{}]},self.now[0]),0)
+        self.assertEqual(self.backfill._finding_time({'receipts':[{'sha256':'bad','retrieved_utc':'1970-01-01T00:16:40Z'}]},self.now[0]),0)
+
+    def test_exhausted_first_candidate_budget_does_not_block_independent_cached_book(self):
+        from public_research import ResearchWait
+        budgets=[]
+        def goodreads(title,author,stop,budget,result):
+            budgets.append(budget)
+            if title.startswith('Old'):
+                budget['remaining']=0
+                raise ResearchWait('www.goodreads.com','Candidate request bound reached',1600,'app_limit','candidate')
+            # A cached response spends no reservation and remains usable while
+            # another candidate exhausted its own six-request allowance.
+            return {'provider':'goodreads','name':'Cached original sequence','number':'10','source_url':'https://www.goodreads.com/series/1'}
+        def fantlab(title,author,partial,stop,budget,result):
+            self.assertEqual(budget['remaining'],0)
+            raise ResearchWait('api.fantlab.ru','Candidate request bound reached',1600,'app_limit','candidate')
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab)
+        self.backfill.apply=lambda job,value:self.backfill._set(job,'done',record={'found':value})
+        self.backfill.run_pass()
+        self.assertEqual(self.backfill.entry('0')['state'],'deferred');self.assertEqual(self.backfill.entry('1')['state'],'done')
+        self.assertIsNot(budgets[0],budgets[1]);self.assertEqual(budgets[1]['remaining'],6)
+
+    def test_verified_no_series_is_final_but_changed_binding_cannot_reuse_an_idle_finding(self):
+        self.backfill.lookup=Mock(return_value=None);self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2)
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2,'verified no-series answers are not hot-researched')
+        for job in ('0','1'):self.assertEqual(self.backfill.entry(job)['state'],'none')
+        manifest=json.loads(self.backfill._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',('0',))[0]['manifest'])
+        found={'provider':'goodreads','name':'Old finding','number':'10','source_url':'https://www.goodreads.com/series/1'}
+        self.backfill._defer('0',series_backfill.Later('idle',1060),found,manifest=manifest)
+        manifest['metadata']['title']='Changed title'
+        with connect(self.db) as db:db.execute('UPDATE audio_jobs SET manifest=? WHERE job_id=?',(json.dumps(manifest),'0'))
+        self.now[0]=1061;self.backfill.run_pass()
+        self.assertEqual(self.backfill.lookup.call_count,3,'changed manifest must be researched again')
+        self.assertEqual(self.backfill.lookup.call_args[0][0]['metadata']['title'],'Changed title')
+
+    def test_aged_preferred_sequence_is_not_overwritten_by_conflicting_fallback(self):
+        manifest=json.loads(self.backfill._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',('0',))[0]['manifest'])
+        preferred={'provider':'goodreads','name':'Original sequence','number':'10','source_url':'https://www.goodreads.com/series/1','receipts':[{'sha256':'a'*64,'retrieved_utc':'1970-01-01T00:16:40Z'}]}
+        self.backfill._defer('0',series_backfill.Later('idle',1060),preferred,manifest=manifest)
+        self.now[0]=1000+8*86400
+        self.backfill.lookup=Mock(return_value={'provider':'fantlab','name':'Reissue sequence','number':'9','source_url':'https://fantlab.ru/work1'})
+        self.backfill.apply=Mock();self.backfill.run_pass()
+        entry=self.backfill.entry('0');self.assertEqual(entry['state'],'held');self.assertIn('conflicts',entry['reason'])
+        self.assertEqual(entry['record']['found'],preferred,'preferred proof is retained for review')
+        self.assertNotIn('0',[call.args[0] for call in self.backfill.apply.call_args_list])
+
+    def test_deferral_preserves_recovery_checkpoint_and_unrelated_job_rows(self):
+        record={'root':str(self.base),'old_identity':[1,2,3],'new_identity':[1,2,4],
+                'old_sha256':'a'*64,'new_sha256':'b'*64,'parent_identity':[['parent',1,2,3]],'removal_intended':True}
+        self.backfill._set('0','cataloged',record=record)
+        before=self.backfill._rows('SELECT * FROM audio_jobs')
+        self.backfill._defer('0',series_backfill.Later('Catalog busy',1060))
+        entry=self.backfill.entry('0');self.assertEqual(entry['state'],'cataloged')
+        for key,value in record.items():self.assertEqual(entry['record'][key],value)
+        self.assertEqual(self.backfill._rows('SELECT * FROM audio_jobs'),before)
 
 if __name__=='__main__':unittest.main()

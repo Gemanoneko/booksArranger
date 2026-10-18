@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.17.0] - 2026-10-18
+
+### Added
+
+- Goodreads series-page evidence: an explicit numbered entry can supply series order when an independently fetched search result matches the exact title, every credited author and immutable book id. Citation-only source leads preserve the original «Нормальное аномальное» sequence for «Призраки белых ночей» #10. Normal provider pacing, quotas, cache and human-check holds remain unchanged.
+
+### Fixed
+
+- A provider wait now defers only its book, with a saved reason and next-attempt time, so other eligible books continue fairly. Verified findings can wait for genuine conversion/cleanup/scan idle without renewing their original evidence age; stale or invalid proofs require fresh research. Existing exact-file recovery and disposal checks remain required.
+
 ## [v0.16.12] - 2026-10-18
 
 ### Added

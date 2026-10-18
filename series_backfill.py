@@ -20,6 +20,7 @@ Any doubt leaves the published file as it is and records why. File changes wait 
 """
 import copy
 from contextlib import contextmanager
+from datetime import datetime
 import hashlib
 import sqlite3
 import json
@@ -47,6 +48,10 @@ class Held(ValueError):
 
 class Later(Exception):
     """Not now (a conversion, a scan, a source pause or an unfinished cleanup); the next pass tries again."""
+    def __init__(self, reason, retry_at=None, waits=None):
+        super().__init__(reason)
+        self.retry_at = retry_at
+        self.waits = waits or []
 
 
 def _stamp():
@@ -84,10 +89,11 @@ def sha256(path, stop):
 
 
 class SeriesBackfill:
-    def __init__(self, merge, research=None, stage=None):
+    def __init__(self, merge, research=None, stage=None, clock=time.time):
         self.merge = merge
         self.database = merge.inventory.database
         self.research = research
+        self.clock = clock
         self.stage = Path(stage) if stage else Path(merge.stage_root).parent / 'series-backfill'
         self.stop = threading.Event()
         self.wake = threading.Event()
@@ -122,8 +128,15 @@ class SeriesBackfill:
                 pass  # display only; every book records its own reason
             finally:
                 self.progress = None
-            self.wake.wait(PASS_WAIT)
+            self.wake.wait(self._next_wait())
             self.wake.clear()
+
+    def _next_wait(self):
+        """Due deferrals get another pass without a hot loop or renewed provider allowance."""
+        due = [json.loads(row['record']).get('next_attempt') for row in
+               self._rows("SELECT record FROM series_backfill WHERE state NOT IN (%s)" % ','.join('?' * len(FINAL)), FINAL)]
+        due = [value for value in due if isinstance(value, (int, float))]
+        return max(30, min(PASS_WAIT, min(due) - self.clock())) if due else PASS_WAIT
 
     def status(self):
         """The progress row: {'title', 'done', 'total', 'step'} while a pass works on a book, else None."""
@@ -153,7 +166,7 @@ class SeriesBackfill:
     # ------------------------------------------------------------------ pass
     def candidates(self):
         """Finished books (the newest job of each book) without a series and without a final record."""
-        finished = {r['job_id'] for r in self._rows('SELECT job_id,state FROM series_backfill') if r['state'] in FINAL}
+        entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,record FROM series_backfill')}
         newest = {}
         for row in self._rows("SELECT job_id,json_extract(manifest,'$.candidate_id') AS candidate FROM audio_jobs ORDER BY created,job_id"):
             newest[row['candidate']] = row['job_id']
@@ -161,12 +174,52 @@ class SeriesBackfill:
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='completed' AND output IS NOT NULL ORDER BY updated,job_id"):
             manifest = json.loads(row['manifest'])
             review = manifest.get('metadata') or {}
-            if row['job_id'] in finished or newest.get(manifest.get('candidate_id')) != row['job_id']:
+            entry = entries.get(row['job_id'])
+            record = json.loads(entry['record']) if entry else {}
+            if entry and (entry['state'] in FINAL + ACTIVE or record.get('next_attempt', 0) > self.clock()) \
+                    or newest.get(manifest.get('candidate_id')) != row['job_id']:
                 continue
             if review.get('series') or not review.get('title') or not review.get('canonical_author'):
                 continue
             result.append(row)
-        return result
+        # Unvisited books go first; one slow oldest candidate cannot monopolize a pass.
+        return sorted(result, key=lambda row: json.loads(entries[row['job_id']]['record']).get('last_attempt', 0)
+                      if row['job_id'] in entries else 0)
+
+    def _defer(self, job_id, wait, found=None, state='deferred', manifest=None):
+        entry = self.entry(job_id)
+        record = dict(entry['record']) if entry else {}
+        if state == 'deferred' and entry and entry['state'] in ACTIVE:
+            state = entry['state']  # Never replace a crash-recovery checkpoint with a lookup state.
+        now = self.clock()
+        record.update(last_attempt=now, next_attempt=max(now + 60, wait.retry_at or now + PASS_WAIT),
+                      waits=wait.waits, deferrals=record.get('deferrals', 0) + 1)
+        if found:
+            binding = encoded(manifest)[1] if manifest is not None else None
+            found_at = self._finding_time(found, now)
+            if record.get('found') == found and record.get('found_binding') == binding:
+                found_at = min(record.get('found_at', 0), found_at)
+            record['found'] = found
+            record['found_binding'] = binding
+            record['found_at'] = found_at  # Waiting for idle does not renew source-evidence age.
+        self._set(job_id, state, str(wait), record)
+
+    @staticmethod
+    def _finding_time(found, now):
+        """The oldest actual receipt, not the time an old cache entry was observed."""
+        times = []
+        for receipt in found.get('receipts') or []:
+            try:
+                digest = receipt['sha256']
+                if not isinstance(digest, str) or len(digest) != 64 or set(digest) - set('0123456789abcdef'):
+                    return 0
+                parsed = datetime.fromisoformat(receipt['retrieved_utc'].replace('Z', '+00:00'))
+                if parsed.tzinfo is None or parsed.timestamp() > now + 60:
+                    return 0
+                times.append(parsed.timestamp())
+            except (KeyError, TypeError, ValueError, AttributeError):
+                return 0
+        return min([now, *times]) if times else 0
 
     def run_pass(self):
         try:
@@ -178,10 +231,14 @@ class SeriesBackfill:
         if self.research is None:
             return
         for row in self._rows('SELECT job_id FROM series_backfill WHERE state IN (%s)' % ','.join('?' * len(ACTIVE)), ACTIVE):
+            entry = self.entry(row['job_id'])
+            if entry['record'].get('next_attempt', 0) > self.clock():
+                continue
             try:
+                self._idle()
                 self.resume(row['job_id'])
-            except Later:
-                return
+            except Later as wait:
+                self._defer(row['job_id'], wait, state=entry['state'])
         books = self.candidates()
         jobs = self.merge.jobs.status()['jobs'] if books and getattr(self.merge, 'publications', None) is not None else None
         for index, row in enumerate(books):
@@ -190,21 +247,38 @@ class SeriesBackfill:
             manifest = json.loads(row['manifest'])
             title = manifest['metadata']['title']
             self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'looking up'}
+            found = None
             try:
                 reason = self.unsafe(row, jobs)
                 if reason:
                     self._set(row['job_id'], 'skipped', reason)
                     continue
-                found = self.lookup(manifest)
+                entry = self.entry(row['job_id'])
+                prior = entry['record'] if entry else {}
+                found = prior.get('found') if prior.get('found_binding') == encoded(manifest)[1] and prior.get('found_at', 0) > 0 \
+                    and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 else None
+                found = found or self.lookup(manifest)
+                preferred = prior.get('found') or {}
+                if found and prior.get('found_binding') == encoded(manifest)[1] and preferred.get('provider') == 'goodreads' \
+                        and (found['name'], found['number']) != (preferred.get('name'), preferred.get('number')):
+                    raise Held('The new series answer conflicts with the retained Goodreads sequence; copies kept')
                 if not found:
                     self._set(row['job_id'], 'none', 'No series found on Goodreads or FantLab')
                     continue
                 self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'updating'}
                 self.apply(row['job_id'], found)
-            except Later:
-                return  # a source pause or the book queue: the next pass continues here
+            except Later as wait:
+                self._defer(row['job_id'], wait, found, manifest=manifest)
+                continue
             except InterruptedError:
                 return
+            except Held as held:
+                entry = self.entry(row['job_id'])
+                evidence = dict(entry['record']) if entry else {}
+                evidence['last_attempt'] = self.clock()
+                self._set(row['job_id'], 'held', str(held), evidence)
+            except Exception as error:
+                self._defer(row['job_id'], Later('Series lookup could not finish: ' + (str(error) or type(error).__name__)), found, manifest=manifest)
 
     # ------------------------------------------------------------------ checks
     def unsafe(self, row, jobs=None):
@@ -242,27 +316,38 @@ class SeriesBackfill:
 
     def lookup(self, manifest):
         from public_research import ResearchWait
+        from public_work_identity import EvidenceConflict
         review = manifest['metadata']
         result = {'sources': []}
         budget = {'remaining': 6}
-        try:
-            found = self.research._series_goodreads(review['title'], review['canonical_author'], self.stop, budget, result)
-            if not found:
-                found = self.research._series_fantlab(review['title'], review['canonical_author'], False, self.stop, budget, result)
-        except ResearchWait as wait:
-            raise Later(str(wait)) from None
-        except (ValueError, TypeError, KeyError, AttributeError):
-            return None
-        return dict(found, receipts=result['sources']) if found else None
+        waits = []
+        for provider, args in (('_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                               ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result))):
+            try:
+                found = getattr(self.research, provider)(*args)
+                if found:
+                    return dict(found, receipts=result['sources'], deferred_sources=waits)
+            except ResearchWait as wait:
+                waits.append({'source': wait.source, 'reason': wait.reason, 'retry_at': wait.retry_at,
+                              'kind': wait.kind, 'scope': wait.scope})
+            except EvidenceConflict as error:
+                raise Held('Series sources need review: ' + str(error)) from None
+            except (ValueError, TypeError, KeyError, AttributeError) as error:
+                waits.append({'source': provider.removeprefix('_series_'), 'reason': str(error) or type(error).__name__,
+                              'retry_at': self.clock() + PASS_WAIT, 'kind': 'unverified_response', 'scope': 'candidate'})
+        if waits:
+            raise Later('; '.join(item['source'] + ': ' + item['reason'] for item in waits),
+                        min(item['retry_at'] for item in waits), waits)
+        return None
 
     def _idle(self):
         """File changes wait for the book queue, a cleanup and a scan; series lookups do not."""
         merge = self.merge
         jobs = merge.jobs
         if jobs._thread and jobs._thread.is_alive() or merge.cleanup.thread and merge.cleanup.thread.is_alive() or merge.cleanup.current:
-            raise Later('A book is being converted or cleaned up')
+            raise Later('A book is being converted or cleaned up', self.clock() + 60)
         if merge.inventory.worker and merge.inventory.worker.is_alive():
-            raise Later('A library scan is running')
+            raise Later('A library scan is running', self.clock() + 60)
 
     # ------------------------------------------------------------------ the update
     def apply(self, job_id, found):
@@ -278,7 +363,8 @@ class SeriesBackfill:
         root = ordinary(manifest['root'])
         current = propose('', str(root), 'audiobook', {}, manifest['metadata'], automatic_facts=facts)
         record = {'series': found['name'], 'number': found['number'], 'provider': found['provider'], 'source_url': found['source_url'],
-                  'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size']}
+                  'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
+                  'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', [])}
         try:
             if not current.get('path') or os.path.normcase(current['path']) != os.path.normcase(str(old)):
                 raise Held("The audiobook's name does not follow the app's naming; left as it is")
@@ -495,7 +581,8 @@ class SeriesBackfill:
             review = record['review']
             manifest['metadata'] = dict(manifest['metadata'], series=review['series'], number=review['number'])
             manifest['destination'] = str(new)
-            source = {'provider': record['provider'], 'url': record['source_url'], 'backfilled': _stamp()}
+            source = {'provider': record['provider'], 'url': record['source_url'], 'backfilled': _stamp(),
+                      'evidence': record.get('research_receipts', []), 'deferred_sources': record.get('deferred_sources', [])}
             if isinstance(manifest.get('metadata_facts'), dict):
                 manifest['metadata_facts'] = dict(manifest['metadata_facts'], series_state='verified', series_source=source)
             text, digest = encoded(manifest)

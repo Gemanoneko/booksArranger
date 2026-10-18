@@ -932,10 +932,36 @@ class PublicResearch:
         people. The book page's own record then decides; a position that is not one whole number
         ("1-3", "0.5", blank) is no position. At most two requests, paced and cached by the client."""
         from local_identity import title_key
+        from public_work_identity import EvidenceConflict
         people=_people(author)
         url='https://www.goodreads.com/search?'+urllib.parse.urlencode({'q':title+' '+(people[0] if people else author),'search_type':'books'})
+        search=goodreads_results(self.client.read(url,stop,budget))[:10]
+        # A citation is discovery only. Search must independently bind this work
+        # to its exact book id and every author before a series entry can decide.
+        identities=[]
+        for book_id,shown,names in search:
+            match=GOODREADS_SERIES.match(shown)
+            bare=match[1] if match else shown
+            if title_key(bare)==title_key(title) and _same_people(author,names) \
+                    and _same_people(', '.join(names),_people(author)) and book_id not in identities:
+                identities.append(book_id)
+        if identities:
+            for lead in self.leads:
+                if not isinstance(lead,dict) or title_key(lead.get('title',''))!=title_key(title) \
+                        or not _same_people(author,lead.get('authors') or []):continue
+                for citation in (lead.get('series_urls') or [])[:2]:
+                    if not isinstance(citation,str) or not re.fullmatch(r'https://www\.goodreads\.com/series/[1-9]\d{0,11}',citation):continue
+                    raw=self.client.read(citation,stop,budget)
+                    matches=[value for book_id in identities if (value:=goodreads_series(raw,citation,book_id,title,author))]
+                    if len(matches)>1:raise EvidenceConflict('Goodreads series entries disagree on the exact edition identity')
+                    if len(matches)==1:
+                        found=matches[0]
+                        self._gap_receipt(url,result,url,['title','authors'])
+                        self._gap_receipt(citation,result,citation,['series','number'])
+                        result['sources'][-1]['identity_basis']='Exact Goodreads search book id, title and all authors joined to the explicit series entry'
+                        return found
         leads=[]
-        for book_id,shown,names in goodreads_results(self.client.read(url,stop,budget))[:10]:
+        for book_id,shown,names in search:
             match=GOODREADS_SERIES.match(shown)
             if match and title_key(match[1])==title_key(title) and _same_people(author,names) and book_id not in leads:leads.append(book_id)
         if not leads:return None  # Goodreads lists no series for this book
@@ -1090,7 +1116,7 @@ class PublicResearch:
         return found
 
 SERIES_WHY={
-    'goodreads':'Series and position from the Goodreads book page matching the locally agreed title and author (Sergei 2026-10-18: Goodreads is the series source).',
+    'goodreads':'Series and position from the Goodreads book record or explicit series entry, joined to the exact book id, title and all locally agreed authors (Sergei 2026-10-18: Goodreads is the series source).',
     'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).'}
 
 def series_source(series):
@@ -1124,6 +1150,47 @@ def goodreads_book(raw,book_id):
         series=[(text(state[item['series']['__ref']].get('title')),text(item.get('userPosition'))) for item in book.get('bookSeries') or [] if isinstance(item,dict) and item.get('series')]
         return text(book.get('title')),[name for name in names if name],series
     except (KeyError,TypeError,AttributeError):return None
+
+def goodreads_series(raw,url,book_id,title,author):
+    """Provider-owned explicit position, joined to an independently bound search book id.
+
+    The series UI often shows only a primary coauthor. It may confirm that one
+    known person, but never substitutes series-level credits for book authors.
+    The caller must establish every author on the same search result book id.
+    """
+    from local_identity import title_key
+    class Props(HTMLParser):
+        def __init__(self):super().__init__(convert_charrefs=True);self.headers=[];self.lists=[];self.canonical=[]
+        def handle_starttag(self,tag,attrs):
+            a=dict(attrs)
+            if tag=='link' and a.get('rel')=='canonical':self.canonical.append(a.get('href'))
+            kind=a.get('data-react-class')
+            if kind in ('ReactComponents.SeriesHeader','ReactComponents.SeriesList'):
+                data=strict_json(a.get('data-react-props','').encode('utf-8'))
+                (self.headers if kind.endswith('SeriesHeader') else self.lists).append(data)
+    try:
+        page=Props();page.feed(raw.decode('utf-8','strict'))
+        if page.canonical!=[url] or len(page.headers)!=1:return None
+        name=text(page.headers[0]['title']).removesuffix(' Series')
+        if not name:return None
+        found=[]
+        for data in page.lists:
+            books,positions=data['series'],data['seriesHeaders']
+            if not isinstance(books,list) or not isinstance(positions,list) or len(books)!=len(positions):return None
+            for entry,position in zip(books,positions):
+                book=entry.get('book',{})
+                if str(book.get('bookId'))!=str(book_id):continue
+                number=re.fullmatch(r'Book ([1-9]\d{0,3})',position) if isinstance(position,str) else None
+                shown=GOODREADS_SERIES.match(text(book.get('title')))
+                if not number or not shown or shown[3]!=number[1] or title_key(shown[2])!=title_key(name):return None
+                if title_key(book.get('bookTitleBare'))!=title_key(title) or title_key(shown[1])!=title_key(title):return None
+                if not re.fullmatch(r'/book/show/'+re.escape(str(book_id))+r'(?:[.-][^/?#]+)?',str(book.get('bookUrl',''))):return None
+                primary=text((book.get('author') or {}).get('name'))
+                if not primary or not any(_same_people(person,[primary]) for person in _people(author)):return None
+                found.append({'provider':'goodreads','name':name,'number':number[1],'source_url':url,
+                              'book_id':str(book_id),'position_basis':'explicit_series_header_and_matching_book_title'})
+        return found[0] if len(found)==1 else None
+    except (ValueError,UnicodeError,KeyError,TypeError,AttributeError):return None
 
 def _people(value):
     """The people in a credit such as "Лена Обухова, Наталья Тимошенко"."""
