@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.16.8] - 2026-10-18
+
+### Changed
+
+- Backups end when the audiobook is verified (Sergei, 2026-10-18). As soon as a converted book is verified, its recovery copies are deleted, and so are the recovery copies of former outputs a replacement retired. The 24-hour window is gone, and books waiting in the queue or converting no longer hold the deletion back. On the first start, every existing set whose book is verified is deleted the same way. Each deletion verifies the audiobook in full first, and a copy that is already gone is recorded rather than reported as an error. Only a missing or unverified audiobook, or a copy that changed, keeps the files; those are flagged with the reason.
+- Retry and Repair now answer at once, even while a book converts, and every retried or repaired book runs right after the current one, including a book that stopped because the catalog was busy. The row and the panel show a disabled "Queued" button with "Queued — runs after the current book" (or how many books first). If the press gets no answer in time, the page checks the book on the server and shows "Queued" when the press went through, instead of an error.
+
+### Fixed
+
+- Status and the book list stay fast while a book converts. Before, every poll re-read every recovery set and checked every source folder on the library share, which took 5 to 7 seconds per poll and led to "Status is still updating" and "Local server unavailable". Measured on a copy of the real catalog with a one-hour book converting: status 5.8 s to 0.5 s, the Ready list 5.6 s to 0.3 s, and switching attention groups 5.4 s to 0.4 s (median). A busy status reply is no longer treated as a lost connection.
+- Quit: once the engine has finished its work and closed, the app now always exits, and a second Quit ends the app when the engine no longer answers. Before, the app could stay running with no window.
+- A cleanup held by "Download marker native identity differs" finishes on its own. The library share reports its own file number for a file's download marker, so the check now compares only what is reliable; each original is still proven by its full content hash.
+- A cleanup that needs attention shows "On hold — reason" with no progress bar, instead of a bar that looked like it was moving.
+- Books whose backups are kept now appear in "Output needs attention" under "Original changed" or "Audiobook problem", with a "Keep files" button that stops flagging the book and deletes nothing. Empty reason groups are hidden, except All and Can retry. The Jobs panel's "need attention" count now matches the All count.
+- A download marker with unexpected contents no longer holds a cleanup: its exact bytes are saved in the cleanup receipt. Empty source folders the app cannot remove safely on this drive stay in place and no longer show a note or hold anything. A folder job that stopped on a busy catalog runs again, and one whose folder is already gone is marked done.
 ## [v0.16.7] - 2026-10-17
 
 ### Changed
