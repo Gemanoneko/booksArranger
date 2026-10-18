@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.16.9] - 2026-10-18
+
+### Fixed
+
+- A book could stop under "Other" with "Source changed — review required" even though its files had not changed ("Cabal"). The library share sometimes reports a different internal file number for the same file, and the check compared that number. Now the file size, modification time and full content decide, and the file number no longer counts. A book stopped this way shows under "Can retry", and the files are checked again before it runs.
+- An M4B whose chapter pictures point to the file itself ("Orphans of the Sky") is no longer refused. It shows under "Can retry".
+- An M4B whose audio container declares a slightly smaller size than the audio it holds ("Темные воды") shows under "Can repair". Repair corrects only that size field; every audio byte stays in place.
+
 ## [v0.16.8] - 2026-10-18
 
 ### Changed
