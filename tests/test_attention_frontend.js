@@ -58,11 +58,14 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   // Row Retry: one request, pending hint, then the book is queued; focus lands back in the list.
   let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});inventoryRows=[space,unsupported,other,repair];const sent=calls.length;
   actionButtons(trs[0])[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(trs[0]).children[0].textContent,'Checking this book…');assert.equal(actionButtons(trs[0])[0].textContent,'Retrying…');
+  assert.equal(statusCell(trs[0]).children[0].textContent,'Checking this book…');assert.equal(actionButtons(trs[0])[0].textContent,'Checking…');
   actionButtons(trs[0])[0].handlers.click({stopPropagation(){}});
   answer({ok:true,status:202,json:async()=>({requeued:true})});await new Promise(resolve=>setTimeout(resolve,20));
   const posts=calls.slice(sent).filter(call=>call.route==='/api/audiobook/retry');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].options.body).job_id,'job-a');
-  assert.equal(get('inventory').children.length,4);assert.equal(document.activeElement,get('inventory').children[0],'the row now at that index');
+  // v0.16.12: the book stays where it was, disabled "Queued", and keeps focus; it never lands on a neighbour's Retry.
+  assert.equal(get('inventory').children.length,5);assert.equal(get('inventory').children[0].dataset.path,'cand-a');assert.equal(document.activeElement,get('inventory').children[0]);
+  assert.equal(actionButtons(get('inventory').children[0])[0].textContent,'Queued');assert.equal(actionButtons(get('inventory').children[0])[0].disabled,true);
+  assert.equal(get('retry-all-status').textContent,'Title a queued — runs next','a note in place says which book was queued');
   retryOverride=null;
 
   // Queue next (M4B): accepted while a book converts; the row and panel say when it runs, with no button to press twice.
@@ -171,7 +174,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   get('filter').value='all';await get('filter').handlers.change();assert.equal(run('attentionGroup'),'all');assert.equal(get('attention-groups').hidden,true);assert.equal(run('stripNote'),'');
   run('filters.candidates="output_attention";viewControls()');
 
-  // Details panel: the hint under the status and the technical detail as the last line.
+  // Details panel: the hint under the status and the technical detail as the last line (a fresh view: no remembered press).
+  run("pressed.clear()");
   context.fixture=retry;run('automaticResultKey=null;renderAutomaticResult(fixture)');
   assert.equal(get('automatic-result-hint').textContent,'Safe to retry now.');assert.equal(get('automatic-result-hint').hidden,false);
   assert.equal(get('automatic-technical').textContent,'Technical detail: raw reason a');assert.equal(get('automatic-repaired').hidden,true);

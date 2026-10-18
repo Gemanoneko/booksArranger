@@ -465,7 +465,11 @@ class Inventory:
     def candidates(self,label,limit=100,offset=0,search='',status='all',ids=None):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
         with self.group_lock,connect(self.database) as connection:
-            connection.execute('BEGIN IMMEDIATE')
+            # v0.16.12: a plain read when the stored groups are current, so the page (11-13 s on the live catalog)
+            # no longer holds the write lock every other write waited behind, a Retry press included.
+            connection.execute('BEGIN')
+            if not groups.current(connection,self.roots[label]):
+                connection.execute('ROLLBACK');connection.execute('BEGIN IMMEDIATE')  # the groups are rebuilt: that writes
             current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(self.roots[label],)).fetchone()
             pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(self.roots[label],)).fetchone()[0]
             return groups.page(connection,self.roots[label],limit,offset,search,status,

@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+import unittest.mock
 import zipfile
 
 from metadata import ScanStopped, propose, read_metadata, safe_name
@@ -41,6 +42,38 @@ class InventoryTests(unittest.TestCase):
         inventory.worker.join(timeout=10)
         self.assertFalse(inventory.worker.is_alive(), 'fixture scan exceeded its deadline')
         self.assertNotEqual(inventory.status(label)['state'], 'failed', inventory.last_error)
+
+    def test_book_list_reads_without_the_write_lock_once_groups_are_current(self):
+        # v0.16.12 (live): a book list (11-13 s on the real catalog) held the write lock, so every write, a Retry
+        # press included, waited behind it. Now only a list that rebuilds the groups takes it.
+        import groups,sqlite3
+        self.file('audio/Author/Book/01.mp3');inventory=Inventory(self.database,self.roots,self.reader);self.run_scan(inventory)
+        inventory.candidates('Audiobooks')  # the first list after a scan rebuilds the groups (writes)
+        with connect(self.database) as db:self.assertTrue(groups.current(db,self.roots['Audiobooks']))
+        inside=threading.Event();release=threading.Event();real=groups.page
+        def slow(*args,**kwargs):inside.set();release.wait(10);return real(*args,**kwargs)
+        results=[]
+        with unittest.mock.patch.object(groups,'page',slow):
+            reader=threading.Thread(target=lambda:results.append(inventory.candidates('Audiobooks')));reader.start()
+            try:
+                self.assertTrue(inside.wait(5))
+                writer=connect(self.database,timeout=.5)
+                try:writer.execute('BEGIN IMMEDIATE');writer.execute('CREATE TABLE IF NOT EXISTS probe_write(x)');writer.commit()
+                finally:writer.close()
+            finally:release.set();reader.join(10)
+        self.assertEqual(len(results),1)
+        # Positive control: when the groups must be rebuilt, the list takes the write lock as before.
+        with connect(self.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
+        with connect(self.database) as db:self.assertFalse(groups.current(db,self.roots['Audiobooks']))
+        inside.clear();release.clear()
+        with unittest.mock.patch.object(groups,'page',slow):
+            reader=threading.Thread(target=lambda:inventory.candidates('Audiobooks'));reader.start()
+            try:
+                self.assertTrue(inside.wait(5));writer=connect(self.database,timeout=.2)
+                try:
+                    with self.assertRaises(sqlite3.OperationalError):writer.execute('BEGIN IMMEDIATE')
+                finally:writer.close()
+            finally:release.set();reader.join(10)
 
     def test_source_preservation_incremental_changes_and_deletion(self):
         first = self.file('audio/Unsorted/Book/01.mp3')

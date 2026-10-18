@@ -194,6 +194,8 @@ class MergeService:
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
+        from series_backfill import SeriesBackfill
+        self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         known=self._known_identities()
@@ -447,7 +449,8 @@ class MergeService:
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'published_check':value.get('published_check'),'attention_counts':counts,'attention_row':attention_row}
+            'published_check':value.get('published_check'),'attention_counts':counts,'attention_row':attention_row,
+            'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
 
     def converted_ids(self,max_age=5.0):
         """Converted candidate ids, reused from the last status computation when fresh, or while the app has stayed
@@ -644,6 +647,8 @@ class MergeService:
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
+        backfill=self.__dict__.get('series_backfill')
+        if backfill is not None:backfill.start()
 
     def _purge_recovery_now(self,job_id):
         """Right after a book's source cleanup: its recovery copies go at once (the purge verifies the output in
@@ -1059,13 +1064,16 @@ class MergeService:
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(RETRY_SCANNING)
         if self.draining:raise RetryRefused(RETRY_CLOSING)
+        repeat=self._already_accepted(job_id,identity)
+        if repeat is not None:return repeat
         if self._m4b_parent(job_id,identity,revision,failed_m4b_retry.eligible) is not None:
             # An M4B failure this version can preserve: accepted at once, even while a book converts. The worker
             # admits it right after that book through the proof route (m4b_readmission); a refusal is per book.
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
-        with self._review_boundary():
-            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
+        # v0.16.12: no review lock here. It is held while the start-of-book check re-reads a whole book, so a
+        # press could wait past the page's timeout; the worker's own admission re-checks the review anyway.
+        result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
         queued=self._queue_next_same(job_id);self._resume_later()
         return result|queued
 
@@ -1096,31 +1104,47 @@ class MergeService:
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(REPAIR_SCANNING)
         if self.draining:raise RetryRefused(REPAIR_CLOSING)
+        repeat=self._already_accepted(job_id,identity)
+        if repeat is not None:return repeat
         if self._m4b_parent(job_id,identity,revision,m4b_repair.eligible) is None:
             # A Repair job that stopped only on the revision guard (v0.16.10) runs again as itself, with the repair
             # it was admitted with (audio_jobs._retry_shape); anything else is refused, nothing changed.
             rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
             binding=json.loads(rows[0]['manifest']).get('m4b_repair') if rows else None
             if not isinstance(binding,dict) or binding.get('user_requested') is not True:raise RetryRefused(RETRY_BOOK_CHANGED)
-            with self._review_boundary():
-                result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
+            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
             queued=self._queue_next_same(job_id,'repair');self._resume_later()
             return result|queued
         result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
         return {'job_id':job_id,'requeued':False,**result}
 
+    def _already_accepted(self,job_id,identity):
+        """A repeated Retry/Repair press for a book already accepted (v0.16.12): the same answer, and nothing new
+        is queued or reordered. None when this press is the first one."""
+        import m4b_readmission
+        rows=self.jobs._rows('SELECT state,manifest FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows or json.loads(rows[0]['manifest']).get('candidate_id')!=identity:return None
+        with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
+        if value and value.get('queued_next'):return {'job_id':job_id,'requeued':False,**value}
+        if rows[0]['state'] in ('pending','running'):return {'job_id':job_id,'requeued':True,'accepted':True,'queued_next':False}
+        return None
+
     def _queue_next_same(self,job_id,kind='retry'):
         """A requeued failed job (the same row) runs right after the current book, in click order, like an M4B
         Retry: one entry in the queue-next ledger, already admitted, whose child is the job itself."""
         import m4b_readmission
-        try:
-            with self.jobs._db() as db:
-                m4b_readmission.ensure(db);db.execute('BEGIN IMMEDIATE')
-                seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
-                stamp=time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())
-                db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(job_id,kind,seq,'admitted',job_id,json.dumps({'reason':'Requeued by '+kind.capitalize()}),stamp,stamp))
-                return m4b_readmission.describe(db,job_id) or {}
-        except sqlite3.Error:return {}  # still requeued; it runs in normal queue order
+        from sqlite_retry import transaction
+        def write(db):
+            m4b_readmission.ensure(db)
+            prior=db.execute('SELECT state,child_job_id FROM m4b_readmissions WHERE parent_job_id=?',(job_id,)).fetchone()
+            if prior and prior[0]=='admitted' and prior[1]==job_id:return m4b_readmission.describe(db,job_id) or {}  # keeps its place
+            seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
+            stamp=time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())
+            db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(job_id,kind,seq,'admitted',job_id,json.dumps({'reason':'Requeued by '+kind.capitalize()}),stamp,stamp))
+            return m4b_readmission.describe(db,job_id) or {}
+        # A busy catalog is retried (v0.16.12): every accepted Retry reports its place after the current book.
+        try:return transaction(self.jobs.database,write)
+        except sqlite3.Error:return {'accepted':True,'queued_next':False}  # still requeued; it runs in normal queue order
 
     def _resume_later(self):
         """Start the queue after a control without making the control wait for it (resume may first re-check
@@ -1742,6 +1766,8 @@ class MergeService:
         except OSError:pass
 
     def close(self):
+        backfill=self.__dict__.get('series_backfill')
+        if backfill is not None:backfill.close()
         for name in ('_repair_stop','_retry_all_stop'):
             event=self.__dict__.get(name)
             if event:event.set()

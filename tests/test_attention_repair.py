@@ -151,7 +151,7 @@ class RetryRouteTests(Base):
         self.assertEqual({key:result[key] for key in ('job_id','requeued','accepted','queued_next','position','kind','state')},
                          {'job_id':job_id,'requeued':False,'accepted':True,'queued_next':True,'position':1,'kind':'retry','state':'queued'})
         self.assertNotIn('audiobook_jobs',result,'no status computed in the reply');self.assertEqual(again['position'],1,'a second press keeps its place');self.assertEqual(second['position'],2)
-        self.assertEqual(s._resume_later.call_count,3);s.resume.assert_not_called()
+        self.assertEqual(s._resume_later.call_count,2,'a repeat press changes nothing (v0.16.12)');s.resume.assert_not_called()
         # Between books the worker admits the head request through the unchanged proof route, then runs its child next.
         calls=[]
         def admit(service,parent,now,in_worker=False):calls.append((parent['job_id'],in_worker));return {'requeued':True,'job_id':self.child(json.loads(parent['manifest']))}

@@ -77,18 +77,21 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   // States 7 and 2 -> 1: Retrying keeps focus, one request only, success hides the block and focuses the heading.
   let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});get('message').textContent='';
   show(row);document.activeElement=button;const sent=calls.length;const retrying=run('retryJob()');
-  assert.equal(button.textContent,'Retrying…');assert.equal(button.getAttribute('aria-disabled'),'true');assert.equal(button.disabled,false,'pending keeps keyboard focus');
-  assert.equal(button.title,'Checking this book…');assert.equal(note.textContent,'Checking this book…');assert.equal(button.getAttribute('aria-label'),'Retrying…: Вечный зов');
+  assert.equal(button.textContent,'Checking…');assert.equal(button.getAttribute('aria-disabled'),'true');assert.equal(button.disabled,false,'pending keeps keyboard focus');
+  assert.equal(button.title,'Checking this book…');assert.equal(note.textContent,'Checking this book…');assert.equal(button.getAttribute('aria-label'),'Checking…: Вечный зов');
   button.handlers.click();await run('retryJob()');
   const posts=calls.slice(sent).filter(call=>call.route==='/api/audiobook/retry');assert.equal(posts.length,1,'double activation sends one request');
   assert.deepEqual(JSON.parse(posts[0].options.body),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a'});assert.equal(posts[0].options.headers['X-Books-Token'],'fixture-token');
   assert.equal(document.activeElement,button);
   inventoryRows=[queued(row)];answer({ok:true,status:202,json:async()=>({job_id:'job-a',requeued:true})});await retrying;
-  assert.equal(block.hidden,true);assert.equal(document.activeElement,get('details-heading'),'focus moves to the panel heading');
-  assert.equal(get('automatic-result-status').textContent,'Queued');assert.equal(get('message').textContent,'','feedback never uses the top-of-page message');
+  // v0.16.12: accepted means a disabled "Queued", never an enabled Retry again, whatever an older list says.
+  assert.equal(block.hidden,false);assert.equal(button.textContent,'Queued');assert.equal(button.disabled,true);
+  assert.equal(document.activeElement,get('details-heading'),'focus moves to the panel heading');
+  assert.equal(get('automatic-result-status').textContent,'Queued — runs next');assert.equal(get('message').textContent,'','feedback never uses the top-of-page message');
   assert.equal(run('busy'),false);
 
   // State 8, refused: the server's message verbatim, warning style; the button follows fresh data.
+  run("pressed.clear()");  // v0.16.12: the accepted press above is remembered; this scenario starts fresh
   const refused="This book's status changed. Check the updated status above.";retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});
   show(row);document.activeElement=button;inventoryRows=[blocked({},{retry:{allowed:false,reason:NOT_YET}})];await run('retryJob()');
   assert.equal(note.textContent,refused);assert.equal(note.hidden,false);assert.equal(note.classList.contains('retry-refused'),true);
@@ -117,16 +120,23 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.equal(get('automatic-result-status').textContent,'Needs attention — A newer saved reason');document.activeElement=null;
 
   // v0.16.6: after 202 the panel shows the requeued job at once, and no book list requested before the answer repaints it.
-  retryOverride=null;show(row);inventoryRows=[row];let fresh;inventoryOverride=()=>new Promise(resolve=>{fresh=resolve;});document.activeElement=button;
+  run("pressed.clear()");retryOverride=null;show(row);inventoryRows=[row];let fresh;inventoryOverride=()=>new Promise(resolve=>{fresh=resolve;});document.activeElement=button;
   const accepted=run('retryJob()');await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(get('automatic-result-status').textContent,'Queued','queued before any book list arrives');assert.equal(block.hidden,true);
+  assert.equal(get('automatic-result-status').textContent,'Queued — runs next','queued before any book list arrives');
+  assert.equal(block.hidden,false);assert.equal(button.textContent,'Queued');assert.equal(button.disabled,true,'never an enabled Retry again');
   assert.equal(run('rows.find(item=>item.path==="cand-a").creation.job.state'),'Queued','the list no longer holds the needs-attention copy');
-  fresh({ok:true,json:async()=>({rows:[queued(row)],total:1})});inventoryOverride=null;await accepted;assert.equal(get('automatic-result-status').textContent,'Queued');
+  fresh({ok:true,json:async()=>({rows:[queued(row)],total:1})});inventoryOverride=null;await accepted;assert.equal(get('automatic-result-status').textContent,'Queued — runs next');
+  // v0.16.12: a list from before the press landed (the needs-attention copy) never repaints it as an enabled Retry.
+  show(row);assert.equal(get('automatic-result-status').textContent,'Queued — runs next');assert.equal(button.textContent,'Queued');assert.equal(button.disabled,true);
+  context.fixture=row;run('rows=[fixture];renderRows(true);controls()');const stale=get('inventory').children[0].children[5].children[0].children[0];
+  assert.equal(stale.textContent,'Queued');assert.equal(stale.disabled,true);
+  // Only the server's explicit answer replaces it: here, its own queue-next record says the book already ran.
+  const ran=blocked({},{readmission:{accepted:true,queued_next:false,kind:'retry',state:'admitted'}});show(ran);assert.equal(button.textContent,'Retry');assert.equal(button.disabled,false);
   // The guard itself: a book list requested before Retry was answered is dropped even if it is the latest request.
   show(row);inventoryRows=[row];let old;inventoryOverride=()=>new Promise(resolve=>{old=resolve;});const pending=run('refresh(true)');await new Promise(resolve=>setImmediate(resolve));
   context.fixture=queued(row);run('retryEpoch++;rows=[fixture];select(fixture,false)');old({ok:true,json:async()=>({rows:[row],total:1})});inventoryOverride=null;
-  assert.equal(await pending,false);assert.equal(get('automatic-result-status').textContent,'Queued');
-  show(queued(row));inventoryRows=[row];assert.equal(await run('refresh(true)'),true,'positive control: a list requested after the answer is painted');assert.match(get('automatic-result-status').textContent,/^Needs attention/);
+  assert.equal(await pending,false);assert.match(get('automatic-result-status').textContent,/^Queued/);
+  run("pressed.clear()");show(queued(row));inventoryRows=[row];assert.equal(await run('refresh(true)'),true,'positive control: a list requested after the answer is painted');assert.match(get('automatic-result-status').textContent,/^Needs attention/);
   // A 409 also asks for a fresh book list, and its message names no missing action.
   retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});show(row);inventoryRows=[row];const sentBefore=calls.length;const epoch=run('retryEpoch');await run('retryJob()');
   assert.equal(run('retryEpoch'),epoch+1);assert.ok(calls.slice(sentBefore).some(call=>call.route.startsWith('/api/inventory')));assert.doesNotMatch(note.textContent,/Refresh/);retryOverride=null;

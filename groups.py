@@ -1,5 +1,6 @@
 """Persistent provisional audiobook groups assembled from catalog evidence only."""
 import hashlib
+import sqlite3
 import json
 from pathlib import Path
 import re
@@ -301,6 +302,14 @@ def build(rows,protected=None,chaptered=frozenset()):
                     group['title_clue']=filename_identity(group['members'][0]['filename'])['title']
                 output[selected_scope]=group
     return output
+
+def current(connection,root):
+    """True when the stored groups match the catalog revision, so page() and sync() write nothing. Read-only."""
+    try:
+        revision=connection.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()
+        saved=connection.execute('SELECT revision FROM book_group_sync WHERE root=?',(root,)).fetchone()
+    except sqlite3.OperationalError:return False  # not set up yet: the first page sets it up
+    return bool(revision and saved and saved[0]==revision[0])
 
 def sync(connection,root):
     setup(connection)

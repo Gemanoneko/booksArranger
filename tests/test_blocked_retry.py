@@ -235,6 +235,27 @@ class ServiceTests(Base):
         self.assertNotIn('audiobook_jobs',result);s._resume_later.assert_called_once_with();s.resume.assert_not_called()
         self.assertNotIn('retry',s.candidate_status(manifest['candidate_id']))
 
+    def test_repeated_presses_are_one_request_answered_alike_and_never_wait_on_the_review_lock(self):
+        # v0.16.12 (Sergei, live): every Retry reports its place; a repeated press changes nothing and is not refused;
+        # the press never waits for the review lock (held while a book's sources are re-read).
+        job_id,_,_=self.q.blocked(leftover=False);s=self.service();manifest=json.loads(self.q.row(job_id)['manifest'])
+        held=threading.Event();release=threading.Event()
+        def hold():
+            with s.reviews.lock,s.inventory.group_lock:held.set();release.wait(10)
+        holder=threading.Thread(target=hold);holder.start();self.assertTrue(held.wait(5))
+        try:
+            started=time.monotonic();first=s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)
+            self.assertLess(time.monotonic()-started,3,'accepted at once while the review lock is held')
+        finally:release.set();holder.join(10)
+        again=s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)
+        self.assertEqual((first['queued_next'],first['position']),(True,1));self.assertEqual((again['accepted'],again['queued_next'],again['position']),(True,True,1))
+        with connect(self.q.db) as db:
+            ledger=[tuple(r) for r in db.execute('SELECT parent_job_id,seq,state,child_job_id FROM m4b_readmissions')]
+            jobs=db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0]
+        self.assertEqual(len(ledger),1,'one queue entry');self.assertEqual(jobs,1,'no duplicate job')
+        self.assertEqual(s._resume_later.call_count,1,'the repeat starts nothing')
+        self.assertEqual(self.q.row(job_id)['state'],'pending')
+
     def test_operation_refuses_while_scanning_or_quitting_without_resuming(self):
         job_id,_,_=self.q.blocked(leftover=False);s=self.service();manifest=json.loads(self.q.row(job_id)['manifest'])
         s.inventory.worker=SimpleNamespace(is_alive=lambda:True)

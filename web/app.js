@@ -16,6 +16,9 @@ let inspectorIdentity=null,inspectSequence=0;
 const inspectorObjects=[];
 let recoveryPanel=null,recoveryConfirmation=null,recoverySubmitting=false,recoveryDisconnected=false;
 let retryPending=null,retryResult=null,retryEpoch=0;
+// v0.16.12: a Retry/Repair press the server accepted (or may have) is remembered per book, so a list read from
+// before it never repaints the book as an enabled Retry; only the server's own state or refusal replaces it.
+const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedConfirm=null,retrySelectedRun=false;
 let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='';
 const rowRetries=new Map();
 const pendingFolders=new Set(),folderMessages=new Map();
@@ -108,6 +111,7 @@ function controls() {
   if($('add-chapters'))$('add-chapters').disabled=busy || ended || recoveryDisconnected || !selectedRow?.creation?.chapters_available;
   for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
   if($('queue-books'))$('queue-books').disabled=busy || ended || recoveryDisconnected || !rows.some(readyForQueue);
+  if($('retry-selected'))renderRetrySelected();
   if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
   if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !state?.audiobook_jobs?.queued || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
 }
@@ -194,6 +198,8 @@ function renderRows(force=false) {
       if(row.kind==='candidate' && index===3){
         const attention=attentionText(row);
         if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null});}
+        // A book waiting its turn after Retry keeps its disabled "Queued" button (v0.16.12).
+        else if(readmissionOf(row)?.queued_next===true){const hint=node('p',QUEUED_HINT,'field-help attention-hint');td.append(hint);rowRetries.set(row.path,{row,hint,button:null});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
@@ -246,6 +252,8 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
+    if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
+    else if(heldRow && !rows.some(item=>item.path===heldRow.path))rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);
     const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
     return true;
   }).finally(()=>{if(ticket===listTicket)listPending='';});
@@ -381,7 +389,7 @@ async function inspectorCover(cover,holder,sequence){const caption=node('p',cove
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
-function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));$('batch-count').textContent=`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
+function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));$('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retrySelectable().length} can be retried or repaired`:`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
@@ -395,13 +403,14 @@ function renderJobs(){
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Empty source folders retained: safe automatic removal is unavailable on this drive.':''));
 }
 // Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
-const activityOrder=['conversion','cleanup','identity','scan'],activityRows=new Map();let activityTimer=null;
+const activityOrder=['conversion','cleanup','identity','series','scan'],activityRows=new Map();let activityTimer=null;
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing empty source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 function activityLabel(row){
   if(row.kind==='conversion')return 'Converting';
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
   if(row.kind==='identity')return 'Checking finished books';
+  if(row.kind==='series')return 'Updating series';
   return row.step==='researching'?'Researching books':'Scanning files';
 }
 function activityStep(row,finishing){
@@ -409,6 +418,7 @@ function activityStep(row,finishing){
   if(row.kind==='conversion'){const name=finishing && row.step==='encoding'?'Finalizing conversion':conversionSteps[row.step] || 'Working';step=Number.isInteger(row.step_index) && Number.isInteger(row.step_count)?`Step ${row.step_index} of ${row.step_count} - ${name}`:name;}
   else if(row.kind==='cleanup')step=cleanupSteps[row.step] || 'Working';
   else if(row.kind==='identity')step='Checking identity';
+  else if(row.kind==='series')step=row.step==='series updating'?'Writing the series into the audiobook':'Looking up the series';
   else step=typeof row.step_text==='string' && row.step_text?row.step_text:'Working';
   // A held row is not progressing (v0.16.8): it says so, with no bar, count or clock.
   if(row.state==='attention')return 'On hold — '+(row.reason || step);
@@ -530,7 +540,7 @@ async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmit
 const retryReady='Check this book again and queue its audiobook job.';
 function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;return job && typeof job.job_id==='string'?JSON.stringify([row.id,job.job_id]):'';}
 // Repair (Attention spec section 2) is the same control with another label, tooltip and endpoint.
-const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',ready:'',endpoint:null,refused:''},retry:{kind:'retry',label:'Retry',pending:'Retrying…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
+const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',ready:'',endpoint:null,refused:''},retry:{kind:'retry',label:'Retry',pending:'Checking…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
   repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'},
   // Keep files (spec section 3): the kept recovery copies stop being flagged. Nothing is deleted, no job runs.
   keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's files and stop flagging it. Nothing is deleted.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'}};
@@ -542,11 +552,24 @@ function rowAction(row){
   // Once accepted, the request waits for its turn: the button reads "Queued" and cannot be pressed again.
   const queued=readmissionOf(row);
   if(queued?.queued_next===true)return {...rowActions.queued,data:{allowed:false,reason:queuedNextText(queued)}};
+  if(!queued && pressedFor(row)?.state==='checking' && retryPending?.key!==retryKey(row))return {...rowActions.queued,label:'Checking…',pending:'Checking…',data:{allowed:false,reason:'Checking whether the press went through…'}};
   const attention=attentionOf(row),[kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair'?['repair',job.repair]:['retry',job.retry];
   return data && typeof data==='object' && typeof data.allowed==='boolean'?{...rowActions[kind],data}:null;
 }
 // Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
-function readmissionOf(row){const job=row?.creation?.job,value=job?.readmission || job?.attention?.readmission;return value && typeof value==='object'?value:null;}
+function readmissionOf(row){
+  const job=row?.creation?.job,value=job?.readmission || job?.attention?.readmission;
+  if(value && typeof value==='object')return value;
+  const memory=pressedFor(row);
+  return memory?.state==='queued'?{accepted:true,queued_next:true,position:memory.position,kind:memory.kind,remembered:true}:null;
+}
+const QUEUED_HINT='The book is checked again before it runs.';
+function pressedFor(row){
+  const key=retryKey(row),memory=key?pressed.get(key):null;if(!memory)return null;
+  if(Date.now()-memory.at>PRESS_MEMORY){pressed.delete(key);return null;}
+  return memory;
+}
+function remember(key,state,kind,position){if(kind==='retry' || kind==='repair')pressed.set(key,{state,kind,at:Date.now(),position:Number.isInteger(position) && position>0?position:1});}
 function queuedNextText(value){
   const running=!!state?.audiobook_jobs?.current_job_id,position=Number.isInteger(value?.position) && value.position>0?value.position:1,ahead=(running?1:0)+position-1;
   return ahead===0?'Queued — runs next':ahead===1 && running?'Queued — runs after the current book':`Queued — runs after ${ahead.toLocaleString()} books`;
@@ -598,7 +621,7 @@ function updateRowRetries(){
   for(const entry of rowRetries.values()){
     const row=entry.row,attention=attentionText(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
     const copy=retryPending?.key===key?rowActions[retryPending.kind]:action || rowActions.retry;
-    let hint=attention?attention.hint:'',warn=!!attention?.warn;
+    let hint=attention?attention.hint:readmissionOf(row)?.queued_next===true?QUEUED_HINT:'',warn=!!attention?.warn;
     if(mode==='unavailable' && action?.kind!=='queued' && typeof retry?.reason==='string' && retry.reason)hint=retry.reason;
     if(mode==='pending')hint=retryPending?.checking?'Checking…':copy.note;
     if(!attention && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
@@ -636,28 +659,34 @@ async function pressLanded(row,jobId){
 async function retryJob(origin=null){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
   if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || action.data.allowed!==true || $('retry-job').disabled)return;
-  retryPending={key,kind:action.kind};retryResult=null;busy=true;controls();
+  retryPending={key,kind:action.kind};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
   let succeeded=false;
   let answer=null;
   try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);succeeded=true;}
   catch(error){
-    if(error.httpStatus){retryResult={key,text:error.message || action.refused};if(error.httpStatus===409)retryEpoch++;}
+    if(error.httpStatus){pressed.delete(key);retryResult={key,text:error.message || action.refused};if(error.httpStatus===409)retryEpoch++;}
     else{
       // No reply in time: the press may still have landed. Check the book's queued state on the server
       // before saying anything; never show a scary error and re-enable a button for a request that worked.
       retryPending={key,kind:action.kind,checking:true};controls();
       const landed=await pressLanded(row,job.job_id);
       if(landed){succeeded=true;answer=landed;}
-      else retryResult={key,text:landed===false?action.label+' did not go through. Try again.':'Connection interrupted. Check the status above before trying again.'};
+      else if(landed===false){pressed.delete(key);retryResult={key,text:action.label+' did not go through. Try again.'};}
+      else retryResult={key,text:'Connection interrupted. Check the status above before trying again.'};  // stays "Checking…": the press may have landed
     }
   }
+  if(succeeded)remember(key,'queued',action.kind,answer?.position);
   // The book leaves this filter: the strip keeps a line saying what Repair will patch.
   if(succeeded && action.kind==='repair' && filters[view]==='output_attention')stripNote='Repair queued: '+damageHint(attentionOf(row));
+  // v0.16.12: a note in place says which book was queued and when it runs.
+  else if(succeeded && action.kind==='retry')stripNote=`${row.title_clue || row.review?.title || 'The book'} queued — ${queuedNextText({position:answer?.position}).replace(/^Queued — /,'')}`;
   const focused=document.activeElement===$('retry-job');
   retryPending=null;busy=false;
   if(succeeded){
     // The server requeued the job: show it as queued now, and ignore book lists requested before this answer.
     retryEpoch++;const queued=action.kind==='keep'?keptByChoice(row):answer?.queued_next===true?queuedNext(row,answer):queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
+    // The book stays where it was, showing Queued, until the list changes: it never vanishes under the pointer.
+    if(action.kind!=='keep')heldRow={path:row.path,index:origin?.index ?? rows.findIndex(item=>item.path===row.path),context:listContext(),row:queued,until:Date.now()+PRESS_MEMORY};
     const entry=action.kind==='keep'?rowRetries.get(row.path):null;if(entry)entry.row=queued;
     // The block leaves the page: focus moves to the panel heading, never into the automatic result.
     if(focused && retryKey(selectedRow)===key)$('details-heading').focus?.({preventScroll:true});
@@ -667,9 +696,9 @@ async function retryJob(origin=null){
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();
   if(origin?.row && succeeded){
-    // The rebuilt list may no longer hold the book: its row, else the row now at that index, else the filter.
+    // Focus stays on the book that was pressed; it never lands on a neighbour's Retry (v0.16.12).
     const rowsNow=$('inventory').children,same=[...rowsNow].find(tr=>tr.dataset?.path===origin.path);
-    (same || rowsNow[Math.min(origin.index,rowsNow.length-1)] || $('filter')).focus?.({preventScroll:true});
+    (same || (!$('attention-groups').hidden && stripNote?$('retry-all-status'):$('filter'))).focus?.({preventScroll:true});
   }
   return succeeded;
 }
@@ -750,6 +779,53 @@ function renderAttentionGroups(){
 }
 for(const key of attentionKeys)$('group-'+key).addEventListener('click',()=>{if(attentionGroup===key)return;attentionGroup=key;resetStrip();renderAttentionGroups();return updateList();});
 $('retry-all').addEventListener('click',()=>{if($('retry-all').disabled)return;openRetryAll();});
+// Retry selected (v0.16.12): in Output needs attention, the selected books that can be retried or repaired, one
+// press each through the same queued-next path as Retry, after one confirmation (as Retry all).
+function attentionSelection(){return view==='candidates' && filters[view]==='output_attention';}
+function retrySelectable(){
+  return rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id)).map(row=>({row,action:rowAction(row)}))
+    .filter(item=>item.action && (item.action.kind==='retry' || item.action.kind==='repair') && item.action.data?.allowed===true);
+}
+function renderRetrySelected(){
+  const shown=attentionSelection(),button=$('retry-selected'),count=shown?retrySelectable().length:0,confirm=retrySelectedConfirm;
+  $('queue-books').hidden=shown;button.hidden=!shown || !!confirm;
+  const label=`Retry selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
+  button.title=count?`Check these ${count.toLocaleString()} selected books again and queue each one, right after the current book.`:'Select books that can be retried or repaired.';
+  button.disabled=!count || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning() || retrySelectedRun;
+  const help=shown?'Only selected books that can be retried or repaired are queued.':'Only ready selected revisions are queued. Candidates needing review remain selected.';
+  if($('batch-help').textContent!==help)$('batch-help').textContent=help;
+  $('retry-selected-confirm').hidden=!shown || !confirm;
+  if(confirm){
+    const question=`Queue ${confirm.items.length.toLocaleString()} selected books to be checked again? They run one at a time, right after the current book.`,go=`Queue ${confirm.items.length.toLocaleString()} books`;
+    if($('retry-selected-question').textContent!==question)$('retry-selected-question').textContent=question;
+    if($('retry-selected-go').textContent!==go)$('retry-selected-go').textContent=go;
+    $('retry-selected-go').disabled=busy || ended || recoveryDisconnected || retrySelectedRun;
+  }
+}
+function closeRetrySelected(){if(!retrySelectedConfirm)return;retrySelectedConfirm=null;controls();$('retry-selected').focus?.({preventScroll:true});}
+async function startRetrySelected(){
+  const confirm=retrySelectedConfirm;if(!confirm || retrySelectedRun || busy || ended || recoveryDisconnected)return;
+  retrySelectedConfirm=null;retrySelectedRun=true;busy=true;controls();
+  let queued=0;const refused=[];
+  for(const {row,action} of confirm.items){
+    if(ended || recoveryDisconnected)break;
+    const key=retryKey(row);remember(key,'checking',action.kind);controls();
+    try{const answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id},PRESS_TIMEOUT);remember(key,'queued',action.kind,answer?.position);queued++;}
+    catch(error){if(error.httpStatus){pressed.delete(key);refused.push(error.message);}}  // no reply: stays "Checking…" until the server shows it
+  }
+  retrySelectedRun=false;busy=false;retryEpoch++;
+  const total=confirm.items.length,text=`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}. They run one at a time, right after the current book.`+(refused.length?` ${refused.length.toLocaleString()} could not be retried.`:'');
+  $('retry-selected-status').textContent=text;controls();
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();$('retry-selected-status').focus?.({preventScroll:true});
+}
+$('retry-selected').addEventListener('click',()=>{
+  if($('retry-selected').disabled)return;const items=retrySelectable();if(!items.length)return;
+  retrySelectedConfirm={items};$('retry-selected-status').textContent='';controls();$('retry-selected-cancel').focus?.({preventScroll:true});
+});
+$('retry-selected-go').addEventListener('click',()=>{if($('retry-selected-go').disabled)return;return startRetrySelected();});
+$('retry-selected-cancel').addEventListener('click',()=>closeRetrySelected());
+$('retry-selected-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetrySelected();}});
 $('retry-all-go').addEventListener('click',()=>{if($('retry-all-go').disabled)return;return startRetryAll();});
 $('retry-all-cancel').addEventListener('click',()=>closeRetryAll());
 $('retry-all-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetryAll();}});
