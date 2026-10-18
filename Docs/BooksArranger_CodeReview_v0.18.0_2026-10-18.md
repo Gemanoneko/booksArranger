@@ -1,17 +1,17 @@
-# Code Review — Books Arranger v0.18.0
+# Code Review РІР‚вЂќ Books Arranger v0.18.0
 
 ## Header
 
 Reviewer: Senua (Code Reviewer)
 Date: 2026-10-18
 Release: v0.18.0
-Commit range: e028fc04c4b30ee26b6960f90948526205acb3ac..902d3128943544ec07772fa489e94b9559ca126d
-Files changed: 19 files, +1348 / -18 (git diff --stat, including prior release documentation)
-Release source commit: 902d3128943544ec07772fa489e94b9559ca126d
-Release artifact manifest SHA256: b52be300dd46351d5ca9bb72913df6185298e5ddc32483e714696770654b9940
-Release installer: dist/builds/817dc432-53b9-4834-b280-cb266a742482/Books-Arranger-Setup-0.18.0.exe
-Release installer SHA256: 60a92a45905a5aa35b8d28272648b892139a434ab83236ed6157afeea195e98d
-Product digest: d501ac3e506e20750435c5f45d2308c2d59694e92a368d54b7e96f1816c7bbba
+Commit range: e028fc04c4b30ee26b6960f90948526205acb3ac..adef2118ecac4d7c3202e364bbd7c5423fd7baf7
+Files changed: 22 files, +1527 / -18 (git diff --stat, including prior release documentation)
+Release source commit: adef2118ecac4d7c3202e364bbd7c5423fd7baf7
+Release artifact manifest SHA256: 8f3e4b2e39e2a3dddb33b47415af2e444e0009c6bc621fd38890810233a5714b
+Release installer: dist/builds/bc7ac95d-e228-45ca-b87a-61363b8b1494/Books-Arranger-Setup-0.18.0.exe
+Release installer SHA256: 20784d8607b4c58d3496a9c29cb5ea62230ebc59883789c8a9bf9c4b18cd211f
+Product digest: 097a32594b1132c5dc85c908441fcb5f48f908b362e6a113da52d8af9cbf83ea
 Stand-down dimensions: none.
 
 ## Summary
@@ -64,7 +64,7 @@ Closed before release: the Critical mutable SQLite leaf/root write-redirection g
 
 Independently checked actual module/payload equivalence:
 
-- openlibrary_index.py: 9e3d9e57c44e77f16f51b9e795522bb121a2f1247cedf5dd63a3d56a8344ec07
+- openlibrary_index.py: 6dbb31b2805fc72502620295fc8f6d79ae5fe6e7d273d020c9e73fb6efa99a87
 - series_evidence.py: c8709ab2f09aa9ac348f14fc899b0519ac6eadd950954231175cc85d6b818c5d
 - series_backfill.py: 9a45580075ed56d856d95bd66438d35bc35bcd81c049f365b3ca92c5486ee2e1
 - public_research.py: a9f4750c437ae1e98c61b07843f9a72c65bf452932a1beb81472b6b126c722c0
@@ -72,13 +72,13 @@ Independently checked actual module/payload equivalence:
 
 ## Limits and execution evidence
 
-The metadata research request and completed-name works/authors are distinct from the still-downloading editions file. Small owned fixture runs independently survived integrity/identity/coverage/hash checks; R2 fixture owner reported normal closure, no force/timeout and zero descendants. Initial real attempts refused unsupported streams and sparse identity safely; later slices retained checkpoints normally. At report writing the real index build/resume is pending; this report does not assert activation or complete local lookup coverage. Later activation evidence may be appended without changing the artifact binding.
+The metadata research request and completed-name works/authors are distinct from the still-downloading editions file. Small owned fixture runs independently survived integrity/identity/coverage/hash checks; R2 fixture owner reported normal closure, no force/timeout and zero descendants. Initial real attempts refused unsupported streams and sparse identity safely; later slices retained checkpoints normally. The completed activation and truthful held coverage are recorded below; editions remain pending and no global coverage is claimed.
 
 No canonical handoff receipt is asserted: the previously denied receipt-read route was not rerouted. This construction verdict does not replace Futaba's packaged behavior verdict or claim independent replay of live audiobook originals.
 
 ## Exact packaged smoke source/pins review
 
-Newly reconstructed fixed qa-v0180 helper, not claimed to restore older bytes. Owner SHA256 a10ee03c8569600ba1288d9691582eca817225469e6ab0a480009cc8eb46c9b0; helper SHA256 d905f2f7befbbe3ddc5a7c1505bde76e0a6c7f5ee675ef43574c379ac9520a89; exact pins SHA256 aac65fa630e33f88516a1629df3642058c12912385d9c10231edc8c847449170. Senua independently checked all 327 pins with zero mismatches and authorized one exact smoke under ordinary guard evaluation.
+Newly reconstructed fixed qa-v0180 helper, not claimed to restore older bytes. Owner SHA256 a10ee03c8569600ba1288d9691582eca817225469e6ab0a480009cc8eb46c9b0; helper SHA256 d905f2f7befbbe3ddc5a7c1505bde76e0a6c7f5ee675ef43574c379ac9520a89; exact pins SHA256 252b4191229ec8322f01bd50f86cbed6686518e2f21f6ecf759aef29b09438f5. Senua independently checked all 327 replacement pins with zero mismatches and authorized one exact replacement smoke under ordinary guard evaluation. Previous prepublication payload/evidence/pins were retained in history-superseded-prepublication; their clearance is superseded.
 
 Scope is fresh private empty catalog/profile/environment folders and three explicit private roots, version/status/renderer/normal bound Quit only; hidden/inactive launch and no bare-PID/name kill. Existing canonical runOwned ownership and held pre/post input hashes are used; successful acceptance requires closed ownership, zero descendants, no force/timeout/overflow/truncation. Canonical ownership-before-release semantics are inherited from the unchanged reviewed route; the JavaScript bootstrap timer cannot preempt synchronous input reads, so total deadline also depends on host/canonical behavior. Source/pins clearance is not a smoke execution result or global route enrollment. All session scratch/evidence remains retained under the standing exception.
 
@@ -89,3 +89,9 @@ Scope is fresh private empty catalog/profile/environment folders and three expli
 - Open Minor: 0
 
 **Verdict:** RELEASE CLEAR
+
+## Completed real local-index proof and reporting correction
+
+The earlier pending observation is superseded by `shared/research/ol-import-actual-r3-verification.json`, read by Senua. The completed index SHA256 is 239ea63175ff732f59d60e6324ec0de67787eaf819843b6d886617921775c3bb; independent evidence matches registry, immutable completion receipt, native identity and SQLite integrity. Coverage is 241 requested titles, 218 eligible titles and 23 held titles, with 451 works, 427 authors and zero editions. Both official compressed sources passed full authentication and EOF/CRC; recorded Zone.Identifier streams remained separate and untouched. Held and outside-coverage lookups remain nondecisive. Eligibility is coverage for identity/discovery, not proof of narrative order or a claim that every same-title work has the same author. Editions remain pending and were not read.
+
+After successful activation, the old CLI print failed to encode an indexed non-CP1251 character. The reviewed two-file correction only escapes reporting JSON; canonical index/receipt serialization, tokens, bytes and activation are unchanged. Its actual runpy CLI regression forces CP1251, round-trips BjР“В¶rk through ASCII JSON and compares the unchanged Unicode lookup/receipt; 18 index cases reportedly passed in 2.224 seconds. No large-source import replay is required. The initial prepublication installer/manifest is superseded; final replacement artifact binding is recorded in the header after independent verification.
