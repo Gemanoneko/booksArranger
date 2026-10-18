@@ -8,17 +8,55 @@ Date: 2026-10-18
 Tool: Books Arranger
 Release: v0.16.8
 Status: FINAL; red-team pass focused on deletion safety (brief items 1-6); dimensions 4, 7 and 8 read lightly
-Commit range: 1e15943..65a1d144d743ef9c4c83f1759b86fd93dfb53bcd
+Updated: 2026-10-18, fix-delta review of the rebuild with F1-F3 fixed (see "Fix delta review" below)
+Commit range: 1e15943..af3a38d04c78eed2bfbe468144352fd3bdc66afb
   1e15943 docs: record v0.16.7 review and QA verdicts for 0534492 (docs only; the v0.16.7 report cleared 56c7532..0534492)
   74a78f9 feat: delete backups after verification; fast status under load; queue-next retries; kept-file groups
   65a1d14 chore: release v0.16.8 (package.json, package-lock.json, CHANGELOG in one commit)
-Files changed: 42 files, +1275 / -258
+  d00d6e9 docs: record v0.16.8 review and QA of 65a1d14
+  af3a38d fix: keep-files is permanent; keep reason persists; recovery-purge tests in gate
+Files changed: 1e15943..65a1d14 42 files, +1275 / -258; 65a1d14..af3a38d 11 files, +365 / -32
 Stand-down dimensions: none
-Release source commit: 65a1d144d743ef9c4c83f1759b86fd93dfb53bcd
-Release artifact manifest SHA256: 029546ade7b7d150efe5b0026399d1b1ea23149cd006f04c8dac8138021d9563
-Release installer: dist/builds/6e8105c1-4d56-45be-a75d-65abf9c0aa49/Books-Arranger-Setup-0.16.8.exe
-Release installer SHA256: c01dcde42ca03ecc4d5d80110bf280bf00f8bb4cd31d72f7ae1e55fc6fc08b3f
+Release source commit: af3a38d04c78eed2bfbe468144352fd3bdc66afb
+Release artifact manifest SHA256: d7d75936943c32264208a5bbd45491ad78a1197aed50fd84ca183594064d129a
+Release installer: dist/builds/f418bbcd-aa3f-40ed-a4a9-46d9490acf8c/Books-Arranger-Setup-0.16.8.exe
+Release installer SHA256: e2f57b011c7c825f68e4407ea78b031f02449e00475d5177f51ba85e1a39aced
+Superseded binding (void): build 6e8105c1-4d56-45be-a75d-65abf9c0aa49, installer c01dcde4…8b3f, manifest 029546ad…9563, source 65a1d14
 ```
+
+## Fix delta review: 65a1d14..af3a38d
+
+This pass covered all code in af3a38d (d00d6e9 is docs only).
+
+Evidence I gathered myself:
+- The installer hashes to `e2f57b01…aced`.
+- `dist/release-artifacts.json` hashes to `d7d75936…129a` and names version 0.16.8 and `source_head` af3a38d.
+- All 51 packaged backend and `web/` files have the same content as HEAD.
+- Six deletion suites (recovery_retention, backup_rule, storage_cleanup, replacement_jobs, cleanup_resume, attention_actions; 124 cases) ran green twice, with 0 skipped.
+
+**F1 resolved.** Both automatic callers now record `kept_reason(error)`: the sweep (`merge_service.py:633`) and `_purge_recovery_now` (`:659`). The Audiobook missing / not verified prefix therefore survives, and `kept_files()` sees case (B).
+
+**F2 resolved: Keep files is permanent, by Sergei's decision. No automatic path can delete a kept book's recovery copies or originals.**
+- **The sweep.**
+  - `recovery_retention.due()` leaves out every job id in `kept_files`.
+  - `purge()` returns before anything else when `actor=='automatic'` and the book is kept.
+  - The only other actor is the manual "Delete recovery copies", which is Sergei acting again, as decided.
+- **`_purge_recovery_now`.** It checks `recovery.kept(job_id)` itself, and then `purge` checks again.
+- **Replacement recovery.** Relations whose `replacement_job_id` is kept are skipped.
+- **Held source cleanups.** `_finish_held_cleanups` skips kept jobs. The unselected `cleanup.resume()` at start cannot reach a kept book either:
+  - its marker reasons are never kept-eligible, because (A) requires "Original bytes differ";
+  - a (B) recovery set exists only after the cleanup has completed;
+  - (A) rows are never auto-resumed.
+- **`storage_cleanup.run`.** No production caller passes `include_recovery=True`, so it never touches recovery copies.
+- **Fails closed.** An unreadable `kept_files` raises before any deletion in `due()`, `kept()` and `purge()`. The replacement and held-cleanup passes skip the whole pass.
+
+**F3 resolved.**
+- `test_recovery_retention.py` is now in the `check-desktop` gate.
+- The shutdown test interrupts between the two deletions and asserts that interruption happened (a positive control). Count 1 after the interruption, then a resumed `deleted`.
+- The new `KeptFilesTests` exercise F1 and F2 on real fixtures.
+
+New finding:
+- `merge_service.py:486`, `:727`, `:736`, `:616` [Minor] The working and temporary-copy paths do not consult `kept_files`: `_prune_completed` on every start, `_prune_working`, `storage_cleanup.run` without recovery, and `working.reconcile`. For a kept (B) book whose audiobook later verifies again, any working or staged copies still left from an earlier failed temporary cleanup would be deleted. They are redundant copies of the same reviewed hashes held in the kept recovery set, and each deletion still requires the full output verification, so nothing unique is lost. Still, the CHANGELOG's "no later automatic deletion touches that book's files" is broader than the code.
 
 ## Summary
 
@@ -140,9 +178,9 @@ Evidence I gathered myself:
 ## Verdict
 
 - Total Critical: 0
-- Total Major: 3 (F1, F2, F3)
-- Total Minor: 8
+- Total Major: 0 open (F1, F2 and F3 resolved in af3a38d)
+- Total Minor: 9 (the 8 from 74a78f9 plus the working-copy finding in the fix delta)
 
 **Verdict:** RELEASE CLEAR
 
-No Critical: no deletion path fires without a full output verification and a per-file content proof, and every failure mode found keeps files rather than deleting them. Before release, I recommend that Ender fix F1 and F3 and that Sergei rule on F2: should "Keep files" exempt a set from the rule?
+No Critical: no deletion path fires without a full output verification and a per-file content proof, and every failure mode found keeps files rather than deleting them. At af3a38d, F1-F3 are resolved, and no automatic purge can delete a kept book's recovery copies or originals.
