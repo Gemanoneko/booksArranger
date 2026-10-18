@@ -153,14 +153,17 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.match(css,/#retry-note\.retry-refused\{color:var\(--warning\)\}/);
 
   // The desktop layer disables Retry during Quit (state 6); a running window leaves it alone (positive control).
-  async function desktop(status){
+  async function desktop(status,id='retry-job'){
     const dnodes=new Map(),dget=id=>{if(!dnodes.has(id))dnodes.set(id,new Element(id));return dnodes.get(id);};
     const ddoc={getElementById:dget,querySelector:selector=>({'header':dget('header'),'#shutdown':dget('shutdown'),'#version':dget('version')})[selector] || null,createElement:tag=>new Element(tag)};
     const api={status:async()=>status,quit:async()=>({}),checkUpdates:async()=>({}),downloadUpdate:async()=>({}),installUpdate:async()=>({}),onStatus(){}};
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/desktop-ui.js'),'utf8'),vm.createContext({window:{booksDesktop:api},document:ddoc,setInterval:()=>0,console}));
-    await new Promise(resolve=>setImmediate(resolve));return dget('retry-job');
+    await new Promise(resolve=>setImmediate(resolve));return dget(id);
   }
   assert.equal((await desktop({quit:'requested',desktop:{phase:'finishing'},update:{phase:'idle'}})).disabled,true);
   assert.equal((await desktop({quit:'none',desktop:{phase:'running'},update:{phase:'idle'}})).disabled,false);
+  assert.equal((await desktop({quit:'none',desktop:{phase:'unavailable',idle:false},update:{phase:'idle'}})).disabled,false,'a slow desktop status read must not disable Retry between book-list polls');
+  assert.equal((await desktop({quit:'none',desktop:{phase:'unavailable',idle:false},update:{phase:'idle'}},'retry-all')).disabled,false,'a slow desktop status read must not disable Retry all');
+  assert.equal((await desktop({quit:'none',desktop:{phase:'finishing'},update:{phase:'idle'}},'retry-all')).disabled,true,'actual finish-then-quit still disables Retry all');
   console.log('PASS retry block states, C1 job reason, C2 wording, request/feedback/focus, book scoping, desktop Quit');
 })().catch(error=>{console.error(error);process.exitCode=1;});

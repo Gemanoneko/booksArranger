@@ -153,7 +153,16 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(get('retry-all-go').textContent,'Queue 121 books','polls never rebuild the confirmation');
   get('retry-all-confirm').handlers.keydown({key:'Escape',preventDefault(){}});
   assert.equal(get('retry-all-confirm').hidden,true);assert.equal(get('retry-all').hidden,false);assert.equal(document.activeElement,get('retry-all'));assert.equal(posted('/api/audiobook/retry-all').length,0);
+  // A state poll begun before acceptance must not erase the new bulk run when
+  // its delayed answer arrives (the old answer contains no retry_all field).
+  const preBulkState=JSON.parse(JSON.stringify(backend)),preBulkFetch=context.fetch;let releasePreBulk;
+  const preBulkGate=new Promise(resolve=>{releasePreBulk=resolve;});
+  context.fetch=async(route,options)=>route.startsWith('/api/state')?(await preBulkGate,{ok:true,json:async()=>preBulkState}):preBulkFetch(route,options);
+  const preBulkPoll=run('refresh()');await tick();
   get('retry-all').handlers.click();await get('retry-all-go').handlers.click();
+  releasePreBulk();await preBulkPoll;context.fetch=preBulkFetch;
+  assert.equal(run('bulkRunning()'),true,'a stale status poll must not erase the accepted Retry all run');
+  assert.equal(get('retry-all').disabled,true,'Retry all stays disabled while its accepted run is active');
   assert.equal(posted('/api/audiobook/retry-all').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/retry-all')[0].options.body),{library:'Audiobooks'});
   assert.equal(get('retry-all-status').textContent,'Retrying 121 books.');assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<span id="retry-all-status" role="status" tabindex="-1"><\/span><span id="retry-all-count" aria-hidden="true"><\/span>/,'the running count sits outside the live region');
   // While it runs: the count outside the live region, every action disabled.

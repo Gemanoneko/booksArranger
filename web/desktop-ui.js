@@ -10,7 +10,7 @@
  function showError(error){text.textContent=String(error.message||error);}
  const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job','retry-all','retry-all-go'];
  function render(value){
-  const desktop=value.desktop||{};const quitting=value.quit!=='none'||(desktop.phase&&desktop.phase!=='running');
+  const desktop=value.desktop||{};const quitting=value.quit!=='none'||['finishing','parking','updating','blocked'].includes(desktop.phase);
   panel.hidden=!quitting;phase.textContent=desktop.error||({finishing:'Finishing the current book and cleanup…',parking:'Parking pending work…',updating:'Parking the idle engine for update…',blocked:'Quit blocked; ownership remains held.'}[desktop.phase]||'Waiting for the engine checkpoint…');
   if(quitting){for(const id of mutating){const node=document.getElementById(id);if(node)node.disabled=true;}document.querySelector('#review-form button[type=submit]')?.setAttribute('disabled','');}
   const u=value.update||{phase:'idle'};check.disabled=quitting||['checking','downloading','installing'].includes(u.phase);download.hidden=u.phase!=='available';restart.hidden=!u.ready||quitting;restart.disabled=!desktop.idle;restart.title=desktop.idle?'Restart to update':'Wait until scanning, research, publication, cleanup and recovery are idle';

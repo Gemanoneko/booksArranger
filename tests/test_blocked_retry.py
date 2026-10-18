@@ -235,6 +235,29 @@ class ServiceTests(Base):
         self.assertNotIn('audiobook_jobs',result);s._resume_later.assert_called_once_with();s.resume.assert_not_called()
         self.assertNotIn('retry',s.candidate_status(manifest['candidate_id']))
 
+    def test_real_single_and_bulk_enqueue_remain_queued_across_polls_during_current_book(self):
+        first,_,_=self.q.blocked(leftover=False);second,_,_=self.q.blocked(leftover=False)
+        current=self.q.jobs.enqueue(self.q.manifest());self.q.release.clear();self.q.jobs.resume()
+        deadline=time.monotonic()+5
+        while not self.q.runs and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual(self.q.runs[0][0],current)
+        s=self.service()
+        s.attention_summary=lambda retry=False:self.q.jobs.attention_summary(self.q.life.admission_clear)
+        m=json.loads(self.q.row(first)['manifest']);answer=s.retry_blocked_job('Audiobooks',m['candidate_id'],1,first)
+        self.assertTrue(answer['queued_next']);self.assertEqual(answer['position'],1)
+        bulk=s.retry_all();s._retry_all_thread.join(5);self.assertFalse(s._retry_all_thread.is_alive())
+        self.assertEqual((s._retry_all_run['queued'],s._retry_all_run['refused']),(1,0))
+        for _ in range(10):
+            for index,job in enumerate((first,second),1):
+                manifest=json.loads(self.q.row(job)['manifest']);status=s.candidate_status(manifest['candidate_id'])
+                self.assertEqual(status['readmission']['queued_next'],True)
+                self.assertEqual(status['readmission']['position'],index)
+                self.assertNotIn('retry',status,'accepted requests cannot become retryable on a fresh poll')
+        self.assertEqual(len(self.q.runs),1,'the current book remains the only running attempt')
+        with connect(self.q.db) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM m4b_readmissions').fetchone()[0],2)
+        self.assertEqual(s.retry_blocked_job('Audiobooks',m['candidate_id'],1,first)['position'],1)
+
     def test_repeated_presses_are_one_request_answered_alike_and_never_wait_on_the_review_lock(self):
         # v0.16.12 (Sergei, live): every Retry reports its place; a repeated press changes nothing and is not refused;
         # the press never waits for the review lock (held while a book's sources are re-read).

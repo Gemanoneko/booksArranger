@@ -267,7 +267,7 @@ async function refresh(force=false) {
   const early=force?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
   early?.catch(()=>{});
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
-  if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext()) return false;
+  if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
   state=current;
   renderJobs();renderAutomatic();renewManualDraft();
   renderVersion();
@@ -717,6 +717,7 @@ async function startRetryAll(){
   try{
     const result=await request('/api/audiobook/retry-all',{library:'Audiobooks'}),run=result?.retry_all;
     if(run && typeof run.id==='string'){
+      retryEpoch++; // Drop state/list polls begun before this bulk request was accepted.
       retryAllRun={id:run.id,ended:false};state={...state,audiobook_jobs:{...(state?.audiobook_jobs || {}),retry_all:run}};
       stripNote=`Retrying ${Number(run.total).toLocaleString()} books.`;
     }
