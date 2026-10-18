@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.16.10] - 2026-10-18
+
+### Fixed
+
+- Every book started by Retry or Repair stopped at once with "Source changed — review required", so none of them ever finished. Five books were affected: "Cabal", "Storm of the Century", "Призраки белых ночей", "Пасынки Вселенной" and "Темные воды". Before a book starts, the app compares the job with the reviewed book. Retry and Repair add their own repair details to the job, and that comparison treated those details as a change. Now only what the review decides is compared. Every source file's content is still checked in full, and the repair details are checked when the book runs.
+- A book stopped this way shows Retry, or Repair for a repaired book, and runs again as the same job, with the same approved repair.
+- The 0.16.9 file-number change stays, but it was not what stopped "Cabal".
+
 ## [v0.16.9] - 2026-10-18
 
 ### Fixed
