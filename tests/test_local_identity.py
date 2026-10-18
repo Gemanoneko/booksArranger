@@ -126,6 +126,7 @@ class Catalog:
         if parsed.hostname=='www.wikidata.org':return json.dumps({'search':[]}).encode()
         if parsed.hostname=='openlibrary.org':return json.dumps({'docs':self.openlibrary}).encode()
         if parsed.hostname in ('www.googleapis.com','itunes.apple.com'):return b'{"items":[],"results":[]}'
+        if parsed.hostname=='www.goodreads.com':return b'<html><body>No results.</body></html>'  # the series gap (v0.16.11)
         raise AssertionError('Identity research must not run for local agreement: '+url)
 
 class GapSearchTests(unittest.TestCase):
@@ -147,7 +148,7 @@ class GapSearchTests(unittest.TestCase):
         self.assertEqual(result['review']['original_language'],'Unknown');self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
         self.assertEqual(result['metadata_facts']['title_basis'],'local_agreement');self.assertTrue(result['work']['id'].startswith('local:'))
         hosts={urllib.parse.urlsplit(u).hostname for u in self.catalog.calls}
-        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org'},self.catalog.calls)
+        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org','www.goodreads.com'},self.catalog.calls)
         self.assertIsNone(result['wait']);self.assertIn(result['gap_wait']['source'],('api.fantlab.ru','www.wikidata.org'))
         self.assertEqual(result['sources'][0]['kind'],'local_agreement');self.assertTrue(result['sources'][0]['verified_identity'])
         local=[e for e in result['evidence'] if e['source_url']=='']

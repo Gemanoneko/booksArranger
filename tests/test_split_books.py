@@ -285,7 +285,7 @@ class SplitAdmissionTests(unittest.TestCase):
         self.assertTrue(final.is_file());self.assertEqual(final.suffix,'.m4b');self.assertEqual(final.name,'Чужак - King Stephen.m4b')
         self.assertEqual(output['validation']['encoding']['mode'],'normalize');self.assertEqual(len(output['validation']['chapters']),2)
         self.assertEqual(len(job['manifest']['sources']),2)
-        self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'deleted')  # v0.16.8: deleted once verified
     def test_parts_with_their_own_chapters_are_held(self):
         self.build(chapters=True)
         with self.assertRaises(ValueError) as raised:self.service.approve_automatic(self.row,self.result,threading.Event(),self.client)

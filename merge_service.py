@@ -636,6 +636,7 @@ class MergeService:
                         if manual:self._manual_recovery=None
                         self._purge_replacement_recoveries()
                         self._finish_held_cleanups()
+                        self._finish_temporary_cleanups()
                 except ValueError:pass # Busy/closing admission defers; never purges while scanning.
                 for id in published_revisits:
                     try:self.working.schedule_published(id)
@@ -687,6 +688,28 @@ class MergeService:
             self._purge_tried.update(held)  # one attempt per run; a real failure is recorded with its reason
             self.cleanup.resume(held,follow_audio=False)
         self._settle_folder_jobs()
+
+    def _finish_temporary_cleanups(self):
+        """A finished book whose temporary-file cleanup has no record, or stopped before it started or on a busy
+        catalog, gets it here between sweeps, once per run (v0.16.11, "Storm of the Century": the step after its
+        source cleanup ended without a record, and nothing tried again while the queue kept running). The same
+        cleanup as after a book (_prune_completed, without the recovery purge the sweep does itself); a failure
+        is recorded with its reason."""
+        storage=getattr(self,'storage_cleanup',None)
+        if storage is None or not hasattr(storage,'status'):return
+        stored={row['job_id']:row for row in storage.status()}
+        posting=self.__dict__.get('_post_jobs',set())
+        for row in self.jobs._rows("SELECT job_id FROM audio_jobs WHERE state='completed' ORDER BY updated,job_id"):
+            job_id=row['job_id'];prior=stored.get(job_id)
+            if prior and not (prior['state']=='needs_attention' and (prior['output_hash']=='' or catalog_busy_text(prior['reason']))):continue
+            if job_id in posting or ('temporary',job_id) in self._purge_tried:continue
+            receipt=self.cleanup.status(job_id)
+            if receipt and receipt['state']!='completed':continue  # its source cleanup comes first
+            self._purge_tried.add(('temporary',job_id))
+            try:
+                with self.operation_lock:self._prune_completed(job_id,stop=_Flag(lambda:self._retention_stop.is_set()))
+            except InterruptedError:return
+            except Exception as error:storage._diagnose(job_id,'',error)
 
     FOLDER_ALREADY_GONE='Source-folder ancestor is missing without verified removal intent'
 
@@ -742,6 +765,12 @@ class MergeService:
         finally:self._post_current=None
 
     def _after_completed(self,job_id):
+        # The book's own post-processing: the retention sweep leaves it alone meanwhile (_finish_temporary_cleanups).
+        posting=self.__dict__.setdefault('_post_jobs',set());posting.add(job_id)
+        try:self._after_completed_work(job_id)
+        finally:posting.discard(job_id)
+
+    def _after_completed_work(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
         row=next(j for j in self.jobs.status()['jobs'] if j['job_id']==job_id)
         self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
@@ -756,7 +785,13 @@ class MergeService:
                 if 'id' in locals():self.cleanup.hold(id,error)
                 else:self._enrollment_attention(row,error)
             finally:self.cleanup.current=None
-        self._prune_completed(job_id)
+        try:self._prune_completed(job_id)
+        except InterruptedError:raise
+        except Exception as error:
+            # v0.16.11 ("Storm of the Century"): an error here used to vanish in the worker, leaving no temporary
+            # cleanup record, so the book read "pending" with no reason. It is recorded with its reason now,
+            # and the retention sweep tries the cleanup again.
+            self.storage_cleanup._diagnose(job_id,'',error)
         if hasattr(self,'replacements') and self.replacements.get(new_job=job_id):self._finish_replacement(job_id)
 
     def _replacement_guard(self,relation,historical=False):

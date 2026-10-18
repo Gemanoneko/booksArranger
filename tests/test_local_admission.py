@@ -35,13 +35,13 @@ class LocalAdmissionTests(unittest.TestCase):
         self.assertEqual(result['reasons'],[],result);return row,result
     def test_local_agreement_reaches_verified_ready_with_sources_retired_and_recovery_retained(self):
         row,result=self.research()
-        self.assertTrue(all('fantlab' in u or 'wikidata' in u for u in self.calls),self.calls)
+        self.assertTrue(all('fantlab' in u or 'wikidata' in u or 'goodreads' in u for u in self.calls),self.calls)  # goodreads: the series gap (v0.16.11)
         fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['job_id'],job_id);self.assertEqual(job['state'],'completed',job)
         self.assertTrue(job['output']['validation']['passed']);self.assertTrue(Path(job['output']['final_path']).is_file())
         # Ruling 3: an English spelling exists locally (folder "Rollins James"), surname first.
         self.assertEqual(Path(job['output']['final_path']).name,'Око Бога - Rollins James.m4b')
-        self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'deleted')  # v0.16.8: deleted once verified
         facts=job['manifest']['metadata_facts'];self.assertEqual(facts['identity_basis'],'local_agreement');self.assertEqual(facts['local_agreement']['author']['state'],'yellow')
         local=[e for e in job['manifest']['evidence']['metadata_fields'] if e['source_url']=='']
         self.assertEqual({e['field'] for e in local},{'title','authors'});self.assertTrue(all(e['verification']=='local agreement' for e in local))

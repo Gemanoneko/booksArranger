@@ -1,5 +1,5 @@
 """Tiny exact native recovery fixtures; controlled clocks, no production paths."""
-import contextlib,json,sys,threading,time,unittest
+import contextlib,json,sqlite3,sys,threading,time,unittest
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -152,6 +152,45 @@ class KeptFilesTests(unittest.TestCase):
         # Sergei acting again: his own Delete recovery copies still removes them.
         status=self.retention.status(self.job_id)
         self.assertEqual(self.retention.purge(self.job_id,'manual',{k:status[k] for k in ('token','count','bytes')})['state'],'deleted')
+
+class TemporaryCleanupTests(unittest.TestCase):
+    """v0.16.11 "Storm of the Century": a finished book whose temporary-file cleanup has no record (it read
+    "pending" with no reason, and nothing tried again while the queue ran) is finished by the retention
+    sweep, once per run; a failure shows its reason. Real fixtures: ledger, source cleanup, staging files."""
+    setUp=fixture.RetentionTests.setUp
+    tearDown=fixture.RetentionTests.tearDown
+    retire=fixture.RetentionTests.retire
+    def merge(self):
+        s=MergeService.__new__(MergeService);s.storage_cleanup=self.storage;s.cleanup=self.source;s.jobs=self.queue
+        s.recovery=RecoveryRetention(self.storage);s.inventory=SimpleNamespace(worker=None,database=self.db)
+        s.operation_lock=threading.RLock();s._purge_tried=set();s._retention_stop=threading.Event();s._post_current=None
+        s.working=SimpleNamespace(schedule_published=lambda job_id:None,discharge_published=lambda *a,**k:None)
+        return s
+    def temporary(self):status=self.source.status(self.job_id);return status['temporary_cleanup'],status['reason']
+    def test_a_cleanup_without_a_record_is_finished_by_the_sweep_once(self):
+        self.retire();s=self.merge()
+        self.assertEqual((self.temporary(),self.storage.status()),(('pending',''),[]),'the live shape');self.assertTrue(any(self.stage.iterdir()))
+        s._post_jobs={self.job_id};s._finish_temporary_cleanups()
+        self.assertEqual(self.temporary(),('pending',''),'never while the worker is still finishing that book')
+        s._post_jobs=set();s._finish_temporary_cleanups()
+        self.assertEqual(self.temporary()[0],'completed');self.assertEqual(list(self.stage.iterdir()),[]);self.assertTrue(Path(self.output['final_path']).exists())
+        with patch.object(MergeService,'_prune_completed',side_effect=AssertionError('a finished cleanup is never run again')):
+            s._finish_temporary_cleanups();self.merge()._finish_temporary_cleanups()
+    def test_a_failure_shows_its_reason_and_the_next_run_finishes_it(self):
+        self.retire();s=self.merge()
+        with patch.object(MergeService,'_prune_completed',side_effect=ValueError('Catalog read failed')):
+            s._finish_temporary_cleanups();s._finish_temporary_cleanups()
+        self.assertEqual(self.temporary(),('needs_attention','Catalog read failed'))
+        self.assertIn('Catalog read failed',self.source.status(self.job_id)['status'])
+        self.merge()._finish_temporary_cleanups()  # the next app run tries once more
+        self.assertEqual(self.temporary()[0],'completed')
+    def test_an_error_after_a_book_is_recorded_not_lost(self):
+        self.retire();s=self.merge();s._prune_working=lambda job_id:None
+        s.jobs=SimpleNamespace(status=lambda:{'jobs':[{'job_id':self.job_id,'manifest':{'cleanup_policy':{'enabled':False}}}]})
+        with patch.object(MergeService,'_prune_completed',side_effect=sqlite3.OperationalError('database is locked')):s._after_completed(self.job_id)
+        self.assertEqual(self.temporary(),('needs_attention','database is locked'));self.assertEqual(s._post_jobs,set())
+        s.jobs=self.queue;s._finish_temporary_cleanups()  # a busy catalog is tried again by the sweep
+        self.assertEqual(self.temporary()[0],'completed')
 
 class AdmissionTests(unittest.TestCase):
     def setUp(self):

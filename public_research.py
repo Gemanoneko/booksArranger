@@ -36,7 +36,9 @@ APP_HOST_WINDOW=3600
 #  www.googleapis.com (Books): no published anonymous number; Google's documented
 #    courtesy quota is about 1,000/day, so 40/hour keeps under it.
 #  api.fantlab.ru, Wikimedia and DuckDuckGo publish no numeric limit: unchanged 100/hour.
-HOST_POLICY={'openlibrary.org':(1800,1.1),'itunes.apple.com':(900,3.5),'www.googleapis.com':(40,1.1),'html.duckduckgo.com':(APP_HOST_REQUESTS,3)}
+#  www.goodreads.com (series pages, Sergei 2026-10-18): no API; read politely, one request every
+#    5 s at most and 120 per hour, cached for 7 days like every response.
+HOST_POLICY={'openlibrary.org':(1800,1.1),'itunes.apple.com':(900,3.5),'www.googleapis.com':(40,1.1),'html.duckduckgo.com':(APP_HOST_REQUESTS,3),'www.goodreads.com':(120,5.0)}
 def host_policy(host):return HOST_POLICY.get(host,(APP_HOST_REQUESTS,1.1))
 # Identify the app with a public contact, as Open Library and Wikimedia ask; no e-mail is sent.
 USER_AGENT='BooksArranger/automatic-public-research (+https://github.com/Gemanoneko/booksArranger)'
@@ -52,7 +54,7 @@ CHALLENGE_MARKERS=(b'anomaly.js',b'bots use duckduckgo',b'verify you are human',
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
 CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS
-HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com'}
+HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com','www.goodreads.com'}
 # Research stages: a candidate can progress only when every stage it needs has an open source.
 STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.googleapis.com','itunes.apple.com'},
     'discovery':{'html.duckduckgo.com','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'},'credit':CREDIT_HOSTS|{'fantlab.ru'}}
@@ -715,6 +717,14 @@ class PublicResearch:
             reasons.append('Collection components and source order need positive evidence')
         from standing_metadata import build_policy
         series=data.get('verified_series') or {}
+        if not reasons and not _tagged_series(row) and canonical_title and canonical_author:
+            # Series is optional: a source that is unavailable or unsure never holds the book.
+            try:
+                found=self._series_goodreads(canonical_title,canonical_author,stop,budget,result)
+                if not found and not series:
+                    found=self._series_fantlab(canonical_title,canonical_author,False,stop,budget,result,data if type(data.get('work_id')) is int else None)
+                if found:series=found
+            except (ResearchWait,ValueError,TypeError,KeyError,AttributeError):pass
         work['verified_series']=series
         review,facts,policy_reasons=build_policy(row,work,canonical_title,author_names,english_verified=english_verified,series=series.get('name',''),number=series.get('number',''))
         reasons.extend(policy_reasons)
@@ -728,6 +738,7 @@ class PublicResearch:
         if review['series']:
             values.update(series=review['series'],number=review['number'])
             primary_fact_sources.update(series=series['source_url'],number=series['source_url'])
+            facts['series_source']=series_source(series)
         for field,value in values.items():
             result['evidence'].append({'field':field,'cited_value':value,'source_url':primary_fact_sources.get(field,source_url),'retrieved_utc':_stamp(),'reviewer_actor':'assistant','reviewer_identity':'Books Arranger public evidence '+VERSION,'basis':basis})
         if english_verified:
@@ -858,9 +869,10 @@ class PublicResearch:
             evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
         if review['series']:
             url=series.get('source_url','')
-            why=('Series and position from the catalog record matching the locally agreed title and author.' if url else
+            why=(SERIES_WHY.get(series.get('provider'),'Series and position from the catalog record matching the locally agreed title and author.') if url else
                 'Embedded series tags repeated in the folder/file name: '+described('series')+'; '+described('number')+'.')
             evidence('series',review['series'],url,why);evidence('number',review['number'],url,why)
+            facts['series_source']=series_source(series)
         result.update(review=review,metadata_facts=facts)
         result['reasons']=list(dict.fromkeys(reasons))
         # Only a missing required field (full author name) waits for a source; optional gaps never do.
@@ -881,11 +893,19 @@ class PublicResearch:
             progress('FantLab','Filling missing original title')
             catalog=attempt('fantlab',lambda:self._gap_fantlab(title,author,partial,stop,budget,result))
             if catalog:found['catalog']=catalog
-        if 'series' in gaps or 'original_title' in gaps and not found.get('catalog'):
+        if 'series' in gaps:
+            # Sergei 2026-10-18: Goodreads is the series source; FantLab's cycle only when Goodreads has none.
+            progress('Goodreads','Filling missing series position')
+            series=attempt('goodreads',lambda:self._series_goodreads(title,author,stop,budget,result))
+            if not series:
+                progress('FantLab','Filling missing series position')
+                series=attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
+            if series:found['series']=series
+        if 'series' in gaps and not found.get('series') or 'original_title' in gaps and not found.get('catalog'):
             progress('Wikidata','Filling missing series position')
             entry=attempt('wikidata',lambda:self._gap_wikidata(title,author,partial,stop,budget,result))
             if entry:
-                if entry.get('series') and 'series' in gaps:found['series']=entry['series']
+                if entry.get('series') and 'series' in gaps and not found.get('series'):found['series']=entry['series']
                 if not found.get('catalog') and entry.get('language'):found['catalog']=entry
         if 'author_full' in gaps and not found.get('catalog'):
             for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
@@ -896,10 +916,71 @@ class PublicResearch:
         if 'original_title' in gaps and not found.get('catalog'):unfilled.append('original_title')
         if 'series' in gaps and not found.get('series'):unfilled.append('series')
         if 'author_full' in gaps and not (found.get('author_full') or found.get('catalog')):unfilled.append('author_full')
-        serves={'fantlab':{'original_title','author_full'},'wikidata':{'original_title','series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
+        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
+        goodreads_waited='goodreads' in found['closed']
         found['closed']=[source for source in found['closed'] if serves[source]&set(unfilled)]
+        # Goodreads decides the series: a fallback answer still waits a little for it (gap deferral).
+        if goodreads_waited and (found.get('series') or {}).get('provider')!='goodreads' and 'goodreads' not in found['closed']:found['closed'].append('goodreads')
         found['unfilled']=unfilled
         return found
+
+    # ------------------------------------------------------------ series (Sergei 2026-10-18)
+
+    def _series_goodreads(self,title,author,stop,budget,result):
+        """Series name and number from the Goodreads book page, or None. The search page is a lead only: a
+        result whose title, without its "(Series, #N)", is this title and whose credits are this book's
+        people. The book page's own record then decides; a position that is not one whole number
+        ("1-3", "0.5", blank) is no position. At most two requests, paced and cached by the client."""
+        from local_identity import title_key
+        people=_people(author)
+        url='https://www.goodreads.com/search?'+urllib.parse.urlencode({'q':title+' '+(people[0] if people else author),'search_type':'books'})
+        leads=[]
+        for book_id,shown,names in goodreads_results(self.client.read(url,stop,budget))[:10]:
+            match=GOODREADS_SERIES.match(shown)
+            if match and title_key(match[1])==title_key(title) and _same_people(author,names) and book_id not in leads:leads.append(book_id)
+        if not leads:return None  # Goodreads lists no series for this book
+        page='https://www.goodreads.com/book/show/'+leads[0]
+        found=goodreads_book(self.client.read(page,stop,budget),leads[0])
+        if not found:return None
+        shown,names,series=found
+        if title_key(shown)!=title_key(title) or not _same_people(author,names) or not series:return None
+        name,position=series[0]
+        if not name or not re.fullmatch(r'[1-9]\d{0,3}',position):return None
+        self._gap_receipt(page,result,page,['series','number'])
+        return {'provider':'goodreads','name':name,'number':position,'source_url':page}
+
+    def _series_fantlab(self,title,author,partial,stop,budget,result,work=None):
+        """Fallback: the innermost FantLab cycle holding the work, or None. FantLab gives no number, so the
+        position is counted in the cycle's own order among its works of the same kind; works FantLab marks
+        as extras ("plus") are not numbered. Co-written works are accepted when every credited person
+        matches. work: the already verified extended record (catalog path), else it is searched."""
+        from local_identity import title_key
+        if work is None:
+            url='https://api.fantlab.ru/search-works?'+urllib.parse.urlencode({'q':title,'onlymatches':1})
+            records=self.client.json(url,stop,budget)
+            if not isinstance(records,list):raise ValueError('Malformed catalog search')
+            ids=[]
+            for record in records[:5]:
+                if not isinstance(record,dict) or type(record.get('work_id')) is not int or not 0<record['work_id']<10**10:continue
+                if title_key(title) not in {title_key(v) for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v}:continue
+                if not _same_people(author,_people(record.get('all_autor_rusname'))+_people(record.get('all_autor_name')),partial):continue
+                if record['work_id'] not in ids:ids.append(record['work_id'])
+            if len(ids)!=1:return None
+            work=self.client.json('https://api.fantlab.ru/work/'+str(ids[0])+'/extended',stop,budget)
+            if not isinstance(work,dict) or work.get('work_id')!=ids[0]:raise ValueError('Catalog work changed')
+        chains=(work.get('parents') or {}).get('cycles') or []
+        cycles=[chain[-1] for chain in chains if isinstance(chain,list) and chain and isinstance(chain[-1],dict) and chain[-1].get('work_type_id')==4 and type(chain[-1].get('work_id')) is int]
+        if len(cycles)!=1:return None  # no cycle, or several unrelated ones
+        api='https://api.fantlab.ru/work/'+str(cycles[0]['work_id'])+'/extended'
+        cycle=self.client.json(api,stop,budget)
+        if not isinstance(cycle,dict) or not isinstance(cycle.get('children'),list):raise ValueError('Malformed catalog cycle')
+        numbered=[c for c in cycle['children'] if isinstance(c,dict) and c.get('deep')==1 and c.get('work_type_id')==work.get('work_type_id') and not c.get('plus')]
+        position=next((index for index,child in enumerate(numbered,1) if child.get('work_id')==work['work_id']),None)
+        name=text(cycles[0].get('work_name'))
+        if not position or not name:return None
+        citation='https://fantlab.ru/work'+str(cycles[0]['work_id'])
+        self._gap_receipt(api,result,citation,['series','number'])
+        return {'provider':'fantlab','name':name,'number':str(position),'source_url':citation}
 
     def _gap_receipt(self,url,result,citation,fields):
         result['sources'].append(self.client.receipt(url)|{'url':citation,'api_url':url,'kind':'catalog_gap','verified_identity':False,'fields':fields})
@@ -1007,6 +1088,55 @@ class PublicResearch:
         found=self._full_name(title,author,candidates,None)
         if found:self._gap_receipt(url,result,found['source_url'],['author'])
         return found
+
+SERIES_WHY={
+    'goodreads':'Series and position from the Goodreads book page matching the locally agreed title and author (Sergei 2026-10-18: Goodreads is the series source).',
+    'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).'}
+
+def series_source(series):
+    """Where the series and number came from, recorded on the metadata facts."""
+    url=series.get('source_url','')
+    return {'provider':series.get('provider') or ('wikidata' if 'wikidata.org' in url else 'local' if not url else 'catalog'),'url':url}
+
+GOODREADS_SERIES=re.compile(r'^(.*\S)\s*\(([^()]*\S),\s*#([^()]*)\)\s*$')
+
+def goodreads_results(raw):
+    """Search result rows (book id, title as shown, credited names). Leads only; the book page decides."""
+    from html import unescape
+    rows=[]
+    for block in raw.decode('utf-8','replace').split('itemtype="http://schema.org/Book"')[1:]:
+        link=re.search(r'class="bookTitle"[^>]*href="/book/show/(\d{1,12})[^"]*"[^>]*>\s*<span[^>]*>([^<]*)</span>',block)
+        if not link:continue
+        names=[text(unescape(name)) for name in re.findall(r'class="authorName"[^>]*>\s*<span itemprop="name">([^<]*)</span>',block)]
+        rows.append((link[1],text(unescape(link[2])),[name for name in names if name]))
+    return rows
+
+def goodreads_book(raw,book_id):
+    """(title, credited names, [(series title, position)]) from the book page's own embedded record, or None."""
+    found=re.search(rb'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',raw,re.S)
+    if not found:return None
+    try:
+        state=strict_json(found[1])['props']['pageProps']['apolloState']
+        book=state[state['ROOT_QUERY']['getBookByLegacyId({"legacyId":"%s"})'%book_id]['__ref']]
+        if str(book.get('legacyId'))!=str(book_id):return None
+        edges=[book.get('primaryContributorEdge')]+list(book.get('secondaryContributorEdges') or [])
+        names=[text(state[edge['node']['__ref']].get('name')) for edge in edges if isinstance(edge,dict) and edge.get('role','Author')=='Author' and edge.get('node')]
+        series=[(text(state[item['series']['__ref']].get('title')),text(item.get('userPosition'))) for item in book.get('bookSeries') or [] if isinstance(item,dict) and item.get('series')]
+        return text(book.get('title')),[name for name in names if name],series
+    except (KeyError,TypeError,AttributeError):return None
+
+def _people(value):
+    """The people in a credit such as "Лена Обухова, Наталья Тимошенко"."""
+    return [name for name in (text(part) for part in re.split(r'\s*(?:[,;&]|\sи\s|\sand\s)\s*',str(value or ''))) if name]
+
+def _same_people(local,others,partial=False):
+    """Every locally credited person is one of the source's credited people (any script or word order)."""
+    names=_people(local)
+    return bool(names) and all(any(_name_matches(name,other,partial) for other in others) for name in names)
+
+def _tagged_series(row):
+    """The sources carry their own series tags (source_gate compares them with the verified series)."""
+    return any(text({k.casefold():v for k,v in m.get('metadata',{}).get('tags',{}).items()}.get(key)) for m in row.get('members',[]) for key in ('series','series-part','series_part'))
 
 def _name_matches(local,other,partial=False):
     """Same person in any script or word order; a surname-only local name may match a full one."""

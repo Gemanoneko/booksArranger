@@ -1,0 +1,143 @@
+"""v0.16.11 series research (Sergei 2026-10-18): Goodreads is the series source (its book page, no API,
+politely paced and cached); FantLab's cycle is the fallback, counted from the cycle order, co-written
+works accepted; Goodreads wins when both answer; the source is recorded on the metadata.
+Private fixture pages shaped like the real ones; no network."""
+import json,tempfile,unittest,urllib.error,urllib.parse
+from pathlib import Path
+import public_research
+from public_research import PublicClient,PublicResearch,goodreads_book,goodreads_results,host_policy
+from standing_metadata import validate_policy
+from test_local_identity import AREA,SERGEI,candidate,catalogue
+
+def search_page(*rows):
+    """rows: (book id, title as shown, [names])."""
+    blocks=''.join('<tr itemscope itemtype="http://schema.org/Book"><td><a class="bookTitle" itemprop="url" href="/book/show/%s?from_search=true&amp;rank=1">\n'
+                   "<span itemprop='name' role='heading' aria-level='4'>%s</span></a><br>%s</td></tr>"%(
+                   book,title,''.join('<a class="authorName" itemprop="url" href="https://www.goodreads.com/author/show/1._"><span itemprop="name">%s</span></a>'%n for n in names))
+                   for book,title,names in rows)
+    return ('<html><body><table class="tableList">%s</table></body></html>'%blocks).encode()
+
+def book_page(book,title,names,series=None,position='10'):
+    state={'ROOT_QUERY':{'getBookByLegacyId({"legacyId":"%s"})'%book:{'__ref':'Book:b'}},
+           'Book:b':{'__typename':'Book','legacyId':int(book),'title':title,
+                     'primaryContributorEdge':{'node':{'__ref':'Contributor:0'},'role':'Author'},
+                     'secondaryContributorEdges':[{'node':{'__ref':'Contributor:%d'%i},'role':'Author'} for i in range(1,len(names))]+[{'node':{'__ref':'Contributor:x'},'role':'Translator'}],
+                     'bookSeries':[{'userPosition':position,'series':{'__ref':'Series:s'}}] if series else []},
+           'Series:s':{'__typename':'Series','title':series or '','webUrl':'https://www.goodreads.com/series/1'},
+           'Contributor:x':{'name':'Not An Author'}}
+    for index,name in enumerate(names):state['Contributor:%d'%index]={'__typename':'Contributor','name':name}
+    data={'props':{'pageProps':{'apolloState':state}}}
+    return ('<html><script id="__NEXT_DATA__" type="application/json">%s</script></html>'%json.dumps(data,ensure_ascii=False)).encode()
+
+TITLE='Призраки белых ночей';AUTHORS='Лена Обухова, Наталья Тимошенко'
+
+class Sources:
+    """Private Goodreads and FantLab answers; every request is recorded."""
+    def __init__(self):
+        self.calls=[];self.closed=set();self.goodreads_search=search_page();self.goodreads_books={};self.fantlab=[];self.extended={}
+    def fetch(self,url,*_):
+        self.calls.append(url);parsed=urllib.parse.urlsplit(url)
+        if parsed.hostname in self.closed:raise urllib.error.HTTPError(url,503,'private fixture',{},None)
+        if parsed.hostname=='www.goodreads.com':
+            if parsed.path=='/search':return self.goodreads_search
+            return self.goodreads_books[parsed.path.rsplit('/',1)[1]]
+        if parsed.hostname=='api.fantlab.ru':
+            if parsed.path=='/search-works':return json.dumps(self.fantlab).encode()
+            return json.dumps(self.extended[parsed.path]).encode()
+        if parsed.hostname=='www.wikidata.org':return json.dumps({'search':[]}).encode()
+        return b'{"items":[],"results":[],"docs":[]}'
+    def hosts(self):return [urllib.parse.urlsplit(u).hostname for u in self.calls]
+
+def fantlab_cycle(sources,position_extra=True):
+    """FantLab: the work in an inner cycle of an outer cycle; one unnumbered extra ("plus") comes before it."""
+    sources.fantlab=[{'work_id':1073600,'name':'','rusname':TITLE,'all_autor_name':'','all_autor_rusname':'Наталья Тимошенко, Лена Обухова'}]
+    sources.extended['/work/1073600/extended']={'work_id':1073600,'work_name':TITLE,'work_type_id':1,'authors':[{'type':'autor','name':'Наталья Тимошенко'},{'type':'autor','name':'Лена Обухова'}],
+        'parents':{'cycles':[[{'work_id':1209707,'work_name':'Секретное досье','work_type_id':4},{'work_id':1006801,'work_name':'Секретное досье. Мистические романы','work_type_id':4}]],'digest':[]}}
+    children=[{'work_id':1,'work_type_id':1,'deep':1},{'work_id':2,'work_type_id':1,'deep':1,'plus':1 if position_extra else None},{'work_id':3,'work_type_id':5,'deep':1},
+              {'work_id':4,'work_type_id':1,'deep':2},{'work_id':1073600,'work_type_id':1,'deep':1}]
+    sources.extended['/work/1006801/extended']={'work_id':1006801,'children':children}
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);self.now=[100000.0]
+        self.sources=Sources();self.client=PublicClient(self.base/'catalog.sqlite3',fetch=self.sources.fetch,clock=lambda:self.now[0])
+        class ClockStop:
+            def is_set(_self):return False
+            def wait(_self,seconds):self.now[0]+=seconds;return False
+        self.stop=ClockStop();self.research=PublicResearch(self.client,leads=[])
+    def gap(self,author=AUTHORS):
+        local={'gaps':['series'],'fields':{'author':{'partial':False}}}
+        return self.research._gap_fill(local,TITLE,author,self.stop,{'remaining':12},[],lambda *_:None,{'sources':[]})
+    def goodreads(self,series='Нормальное аномальное',position='10',shown=None):
+        self.sources.goodreads_search=search_page(('55108791',shown or TITLE+' (%s, #%s)'%(series,position),['Наталья Тимошенко','Лена Обухова']),
+                                                  ('220837262',TITLE,['Лена Обухова','Наталья Тимошенко']))
+        self.sources.goodreads_books['55108791']=book_page('55108791',TITLE,['Наталья Тимошенко','Лена Обухова'],series,position)
+
+class ParserTests(unittest.TestCase):
+    def test_search_rows_and_the_book_record(self):
+        rows=goodreads_results(search_page(('7','A &amp; B (S, #2)',['Ann One','Bob Two'])))
+        self.assertEqual(rows,[('7','A & B (S, #2)',['Ann One','Bob Two'])])
+        self.assertEqual(goodreads_book(book_page('7','A',['Ann One','Bob Two'],'S','2'),'7'),('A',['Ann One','Bob Two'],[('S','2')]),'translators are not credited people')
+        self.assertIsNone(goodreads_book(book_page('7','A',['Ann One'],'S'),'8'),'another book id is not this page')
+        self.assertIsNone(goodreads_book(b'<html>no record</html>','7'))
+
+class SeriesTests(Base):
+    def test_goodreads_is_the_series_source_and_wins_over_fantlab(self):
+        self.goodreads();fantlab_cycle(self.sources)
+        found=self.gap()
+        self.assertEqual(found['series'],{'provider':'goodreads','name':'Нормальное аномальное','number':'10','source_url':'https://www.goodreads.com/book/show/55108791'})
+        self.assertNotIn('/work/1006801/extended',[urllib.parse.urlsplit(u).path for u in self.sources.calls],'FantLab is not asked when Goodreads answers')
+        self.assertEqual(self.sources.hosts().count('www.goodreads.com'),2,'one search and one book page')
+        # Cached: the same book again asks nobody.
+        before=len(self.sources.calls);self.assertEqual(self.gap()['series']['number'],'10');self.assertEqual(len(self.sources.calls),before)
+
+    def test_fantlab_cycle_is_the_fallback_counted_from_its_order(self):
+        self.sources.goodreads_search=search_page(('220837262',TITLE,['Лена Обухова','Наталья Тимошенко']))  # Goodreads lists no series
+        fantlab_cycle(self.sources)
+        found=self.gap()
+        # Numbered: work 1 and this one; the extra (plus), a story (another kind) and a nested work are not counted.
+        self.assertEqual(found['series'],{'provider':'fantlab','name':'Секретное досье. Мистические романы','number':'2','source_url':'https://fantlab.ru/work1006801'})
+        self.assertNotIn('/book/show/220837262',[urllib.parse.urlsplit(u).path for u in self.sources.calls],'no book page without a series lead')
+
+    def test_unclear_goodreads_positions_and_other_people_are_not_used(self):
+        fantlab_cycle(self.sources,position_extra=False)
+        self.goodreads(position='1-3')
+        self.assertEqual(self.gap()['series']['provider'],'fantlab','a range is no single position')
+        self.setUp();fantlab_cycle(self.sources,position_extra=False)
+        self.sources.goodreads_search=search_page(('9',TITLE+' (Other, #4)',['Somebody Else']))
+        found=self.gap();self.assertEqual((found['series']['provider'],found['series']['number']),('fantlab','3'))
+        self.assertNotIn('/book/show/9',[urllib.parse.urlsplit(u).path for u in self.sources.calls])
+        # One of two credited people missing from FantLab's credit: no series at all.
+        self.setUp();fantlab_cycle(self.sources);self.sources.fantlab[0]['all_autor_rusname']='Наталья Тимошенко'
+        self.assertNotIn('series',self.gap())
+
+    def test_goodreads_unavailable_uses_fantlab_and_still_waits_a_little_for_goodreads(self):
+        self.sources.closed={'www.goodreads.com'};fantlab_cycle(self.sources)
+        found=self.gap()
+        self.assertEqual(found['series']['provider'],'fantlab');self.assertIn('goodreads',found['closed'],'the book may wait for Goodreads (gap deferral)')
+
+    def test_goodreads_is_read_politely(self):
+        requests,spacing=host_policy('www.goodreads.com')
+        self.assertLessEqual(requests,120);self.assertGreaterEqual(spacing,3.0,'at most one request every few seconds')
+        self.assertIn('BooksArranger',public_research.USER_AGENT);self.assertIn('www.goodreads.com',public_research.HOSTS)
+        self.goodreads();start=self.now[0];self.gap()
+        self.assertGreaterEqual(self.now[0]-start,spacing,'the second request waited for the spacing')
+
+class LookupTests(Base):
+    """End to end through the local-agreement lookup: the series, its number and its recorded source."""
+    def test_local_agreement_gets_the_goodreads_series_with_its_source(self):
+        title,author='Око Бога','James Rollins'
+        self.sources.goodreads_search=search_page(('42','%s (Отряд Сигма, #8)'%title,[author]))
+        self.sources.goodreads_books['42']=book_page('42',title,[author],'Отряд Сигма','8')
+        row=catalogue(self.client.database,self.base,candidate(self.base,SERGEI))
+        result=self.research.lookup(row,str(self.base),self.stop)
+        self.assertEqual(result['reasons'],[],result)
+        self.assertEqual((result['review']['series'],result['review']['number']),('Отряд Сигма','8'))
+        facts=result['metadata_facts'];self.assertEqual(facts['series_state'],'verified')
+        self.assertEqual(facts['series_source'],{'provider':'goodreads','url':'https://www.goodreads.com/book/show/42'})
+        cited=[e for e in result['evidence'] if e['field'] in ('series','number')]
+        self.assertEqual({e['source_url'] for e in cited},{'https://www.goodreads.com/book/show/42'});self.assertIn('Goodreads',cited[0]['basis'])
+        validate_policy(row,result['review'],facts)
+        self.assertTrue(any(s.get('url')=='https://www.goodreads.com/book/show/42' for s in result['sources']),'a receipt for the fetched page')
+
+if __name__=='__main__':unittest.main()
