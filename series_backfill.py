@@ -19,6 +19,7 @@ their pacing and cache). When one is found and the book can be changed safely:
 Any doubt leaves the published file as it is and records why. File changes wait while a book converts.
 """
 import copy
+from contextlib import contextmanager
 import hashlib
 import sqlite3
 import json
@@ -27,7 +28,7 @@ import threading
 import time
 from pathlib import Path
 
-from native_io import DirectoryBoundary, ordinary
+from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, ordinary, publish_no_replace
 from scanner import connect
 
 TABLE = ('CREATE TABLE IF NOT EXISTS series_backfill(job_id TEXT PRIMARY KEY,state TEXT NOT NULL,reason TEXT NOT NULL,'
@@ -291,9 +292,14 @@ class SeriesBackfill:
                 raise Held('The series name is not a valid audiobook name')
             temp = old.parent / (TEMP_PREFIX + job_id + '.m4b')
             record.update(new_path=str(new), temp=str(temp), review=review)
-            self._set(job_id, 'writing', '', record)
-            self._own_temporary(job_id, temp)
-            self._write(job_id, manifest, output, old, temp, review, record)
+            record.update(root=str(root), parent_identity=output['parent_identity'])
+            with self._boundary(record), VerifiedFile(old) as original:
+                if original.facts()['size'] != output['size'] or original.sha256() != output['sha256']:
+                    raise Held('The published audiobook changed since it was verified; left as it is')
+                record['old_identity'] = original.facts()['identity']
+                self._set(job_id, 'writing', '', record)
+                self._own_temporary(job_id, temp)
+                self._write(job_id, manifest, output, old, temp, review, record)
         except Held as held:
             self._discard_temp(job_id, record)
             self._set(job_id, 'held', str(held), record)
@@ -333,6 +339,10 @@ class SeriesBackfill:
         self.check_tags(before, after, review)
         stat = temp.stat()
         record.update(new_sha256=sha256(temp, self.stop), new_size=stat.st_size, new_mtime=stat.st_mtime_ns)
+        with VerifiedFile(temp) as written:
+            if written.facts()['size'] != record['new_size'] or written.sha256() != record['new_sha256']:
+                raise Held('The new file changed during verification; the audiobook is unchanged')
+            record['new_identity'] = written.facts()['identity']
         self._set(job_id, 'written', '', record)
 
     @staticmethod
@@ -366,6 +376,37 @@ class SeriesBackfill:
             self._discard_temp(job_id, record)
             self._set(job_id, 'pending', '', record)
             return
+        try:
+            with self._boundary(record) as boundary:
+                self._resume_protected(job_id, record, state, temp, new, old, boundary)
+        except (BoundaryError, OSError, Held, KeyError) as error:
+            self._set(job_id, 'held', 'Series recovery could not verify the files; remaining copies kept: ' + str(error), record)
+
+    @contextmanager
+    def _boundary(self, record):
+        """Rebind persisted ordinary ancestry; legacy unbound recovery records fail closed."""
+        root = ordinary(record['root'])
+        old, new, temp = (ordinary(record[key]) for key in ('old_path', 'new_path', 'temp'))
+        if old == new or old.parent != new.parent or old.parent != temp.parent or temp in (old, new):
+            raise Held('The recorded series paths do not share their original parent')
+        with DirectoryBoundary(root, old.parent) as boundary:
+            if [list(item) for item in boundary.identities] != record['parent_identity']:
+                raise Held('The audiobook parent identity changed')
+            yield boundary
+
+    @contextmanager
+    def _protected(self, path, record, kind, delete=False):
+        """Hash the exact held file object, never accepting time/size as a byte proof."""
+        with VerifiedFile(path, delete=delete) as handle:
+            facts = handle.facts()
+            if facts['identity'] != record[kind + '_identity'] or facts['size'] != record[kind + '_size'] \
+                    or handle.sha256() != record[kind + '_sha256']:
+                raise Held('The ' + kind + ' file no longer matches its verified identity and bytes')
+            if delete and facts['links'] != 1:
+                raise Held('The former file has another filesystem alias; kept')
+            yield handle
+
+    def _resume_protected(self, job_id, record, state, temp, new, old, boundary):
         if state == 'written':
             if temp.exists() and not new.exists():
                 if not self._proven(temp, record):
@@ -373,7 +414,10 @@ class SeriesBackfill:
                     self._set(job_id, 'held', 'The new file changed before it was renamed; the audiobook is unchanged', record)
                     return
                 try:
-                    os.rename(temp, new)  # same volume; never replaces an existing file
+                    def same_identity(facts):
+                        if facts['identity'] != record['new_identity']:
+                            raise Held('The verified temporary identity changed')
+                    publish_no_replace(temp, new, boundary, record['new_sha256'], record['new_size'], same_identity)
                 except FileExistsError:
                     self._discard_temp(job_id, record)
                     self._set(job_id, 'held', 'A file with the series name already exists: ' + new.name, record)
@@ -394,38 +438,43 @@ class SeriesBackfill:
                 return
             self._set(job_id, 'renamed', '', record)
             state = 'renamed'
-        if state == 'renamed':
-            try:
-                self.catalog(job_id, record)
-            except sqlite3.Error as error:
-                raise Later('The catalog is busy: ' + str(error)) from None  # still 'renamed': the next pass records it
-            except Exception as error:
-                # Not recorded: the new file goes again (it is ours and proven), so the library is as it was.
-                if new.exists() and new.stat().st_size == record['new_size'] and sha256(new, self.stop) == record['new_sha256']:
-                    os.unlink(new)
-                self._forget_temporary(job_id, temp)
-                self._set(job_id, 'held', 'The catalog could not record the series; the audiobook is unchanged: ' + (str(error) or type(error).__name__), record)
-                return
-            state = 'cataloged'
-        if state == 'cataloged':
-            try:
+        if state not in ('renamed', 'cataloged'):
+            return
+        # Every recovery entry point proves and protects the replacement through
+        # catalog commit and exact-handle old-file disposal. No pathname unlink.
+        with self._protected(new, record, 'new'):
+            if state == 'renamed':
+                try:
+                    self.catalog(job_id, record)
+                except sqlite3.Error as error:
+                    raise Later('The catalog is busy: ' + str(error)) from None
+                except Exception as error:
+                    # Preserve both copies on a catalog refusal: no rollback may
+                    # remove the only playable copy if the original changed.
+                    self._set(job_id, 'held', 'The catalog could not record the series; copies kept: ' + (str(error) or type(error).__name__), record)
+                    return
+            if old.exists():
+                with self._protected(old, record, 'old', delete=True) as former:
+                    if record['old_identity'] == record['new_identity']:
+                        raise Held('The old and new names identify the same file')
+                    boundary.revalidate()
+                    record['removal_intended'] = True
+                    self._set(job_id, 'cataloged', '', record)
+                    former.dispose()
                 if old.exists():
-                    if old.stat().st_size != record['old_size']:
-                        self._set(job_id, 'held', 'The book now has its series; the former file changed, so it was kept: ' + old.name, record)
-                        return
-                    os.unlink(old)
-            except OSError as error:
-                self._set(job_id, 'cataloged', 'The former file could not be removed yet: ' + str(error), record)
-                return  # the book already reads as updated; the next pass removes the former file
+                    raise Held('Former-file disposition has not completed; copies kept')
+            elif not record.get('removal_intended'):
+                raise Held('The former file is missing without a removal receipt')
             self._forget_temporary(job_id, temp)
             self._set(job_id, 'done', '', record)
 
     def _proven(self, path, record):
-        """The proven new file: same size and time as written, or else the same bytes."""
-        stat = path.stat()
-        if stat.st_size != record['new_size']:
+        """The proven new file: its exact native identity and complete held hash."""
+        try:
+            with self._protected(path, record, 'new'):
+                return True
+        except (BoundaryError, OSError, Held, KeyError):
             return False
-        return stat.st_mtime_ns == record.get('new_mtime') or sha256(path, self.stop) == record['new_sha256']
 
     def catalog(self, job_id, record):
         """Step 4, one transaction: the book reads as verified at once, at its new path."""

@@ -153,7 +153,7 @@ class BackfillTests(unittest.TestCase):
 
     def test_a_failed_move_leaves_the_book_as_it_is(self):
         lib=self.lib;backfill=lib.backfill()
-        with patch.object(series_backfill.os,'rename',side_effect=PermissionError(13,'Access is denied')):backfill.run_pass()
+        with patch.object(series_backfill,'publish_no_replace',side_effect=PermissionError(13,'Access is denied')):backfill.run_pass()
         state,reason=lib.state(backfill);self.assertEqual(state,'held');self.assertIn('could not be renamed',reason)
         self.assert_unchanged(backfill)
 
@@ -197,10 +197,91 @@ class BackfillTests(unittest.TestCase):
         restarted=lib.backfill();restarted.run_pass()
         self.assertEqual(lib.state(restarted)[0],'done');self.assertFalse(lib.path.exists())
         self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))
-        # A catalog refusal (the book changed meanwhile) puts the library back as it was: the new file goes.
+        # A catalog refusal preserves both full copies for inspection; deleting a
+        # replacement here could lose the only playable file if the old changed.
         lib2=Library(Path(self.temp.name)/'second');backfill=lib2.backfill()
         with patch.object(series_backfill.SeriesBackfill,'catalog',side_effect=series_backfill.Held('The book changed meanwhile')):backfill.run_pass()
-        state,reason=lib2.state(backfill);self.assertEqual(state,'held');self.assertIn('The book changed meanwhile',reason);self.assert_unchanged_lib(lib2)
+        state,reason=lib2.state(backfill);self.assertEqual(state,'held');self.assertIn('The book changed meanwhile',reason)
+        self.assertEqual(sha(lib2.path),lib2.original);self.assertTrue(lib2.target.exists());self.assertEqual(lib2.temps(),[])
+
+    def park(self,state):
+        """Leave a real proven two-second audiobook at a chosen crash checkpoint."""
+        lib=self.lib;backfill=lib.backfill()
+        if state=='renamed':
+            with patch.object(SeriesBackfill,'catalog',side_effect=sqlite3.OperationalError('busy')):backfill.run_pass()
+        else:
+            real=SeriesBackfill.catalog
+            def committed(self,job_id,record):
+                real(self,job_id,record)
+                raise sqlite3.OperationalError('crash after catalog commit')
+            with patch.object(SeriesBackfill,'catalog',committed):backfill.run_pass()
+        self.assertEqual(lib.state(backfill)[0],state)
+        self.assertTrue(lib.path.exists() and lib.target.exists())
+        return backfill
+
+    def test_recovery_missing_replacement_preserves_original_at_both_checkpoints(self):
+        for state in ('renamed','cataloged'):
+            with self.subTest(state=state):
+                # Each subcase has its own catalog and real audiobook.
+                self.lib=Library(Path(self.temp.name)/state)
+                lib=self.lib;backfill=self.park(state);lib.target.unlink()
+                lib.backfill().resume(lib.job_id)
+                self.assertEqual(lib.state(backfill)[0],'held');self.assertEqual(sha(lib.path),lib.original)
+
+    def test_recovery_same_size_corrupt_replacement_with_restored_time_preserves_original(self):
+        for state in ('renamed','cataloged'):
+            with self.subTest(state=state):
+                self.lib=Library(Path(self.temp.name)/state)
+                lib=self.lib;backfill=self.park(state);stat=lib.target.stat()
+                data=bytearray(lib.target.read_bytes());data[-20]^=1;lib.target.write_bytes(data)
+                os.utime(lib.target,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+                lib.backfill().resume(lib.job_id)
+                self.assertEqual(lib.state(backfill)[0],'held');self.assertEqual(sha(lib.path),lib.original)
+                self.assertTrue(lib.target.exists(),'uncertain changed replacement is retained')
+
+    def test_same_size_changed_old_is_never_deleted(self):
+        lib=self.lib;backfill=self.park('cataloged')
+        data=bytearray(lib.path.read_bytes());data[-20]^=1;lib.path.write_bytes(data);changed=sha(lib.path)
+        lib.backfill().resume(lib.job_id)
+        self.assertEqual(lib.state(backfill)[0],'held');self.assertEqual(sha(lib.path),changed)
+        self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))
+
+    def test_identical_bytes_at_replaced_old_identity_are_kept(self):
+        lib=self.lib;backfill=self.park('cataloged');data=lib.path.read_bytes()
+        # Keep the former identity alive so the filesystem cannot recycle it.
+        lib.path.rename(lib.path.with_suffix('.saved'));lib.path.write_bytes(data)
+        lib.backfill().resume(lib.job_id)
+        self.assertEqual(lib.state(backfill)[0],'held');self.assertEqual(sha(lib.path),lib.original)
+        self.assertTrue(lib.target.exists())
+
+    def test_cataloged_recovery_finishes_with_proven_replacement(self):
+        lib=self.lib;backfill=self.park('cataloged');digest=sha(lib.target)
+        lib.backfill().resume(lib.job_id)
+        self.assertEqual(lib.state(backfill),('done',''));self.assertFalse(lib.path.exists())
+        self.assertEqual(sha(lib.target),digest)
+
+    def test_disposition_crash_recovery_keeps_proven_replacement(self):
+        lib=self.lib;backfill=self.park('cataloged');real=backfill._set
+        def crash(job_id,state,*args,**kwargs):
+            if state=='done':raise RuntimeError('crash after exact disposal')
+            return real(job_id,state,*args,**kwargs)
+        with patch.object(backfill,'_set',crash),self.assertRaises(RuntimeError):backfill.resume(lib.job_id)
+        self.assertFalse(lib.path.exists());self.assertTrue(lib.target.exists())
+        lib.backfill().resume(lib.job_id);self.assertEqual(lib.state(backfill),('done',''))
+
+    def test_replacement_and_ancestry_remain_protected_during_old_disposal(self):
+        lib=self.lib;backfill=self.park('cataloged');real=series_backfill.VerifiedFile.dispose;blocked=[]
+        def dispose(handle):
+            for action in (lambda:lib.target.unlink(),lambda:lib.target.write_bytes(b'changed'),
+                           lambda:lib.path.rename(lib.path.with_suffix('.swapped')),
+                           lambda:lib.path.parent.rename(lib.path.parent.with_name('swapped-parent'))):
+                try:action()
+                except OSError:blocked.append(True)
+                else:self.fail('A held replacement/original/ancestor was mutable during disposition')
+            return real(handle)
+        with patch.object(series_backfill.VerifiedFile,'dispose',dispose):backfill.resume(lib.job_id)
+        self.assertEqual(blocked,[True]*4);self.assertEqual(lib.state(backfill),('done',''))
+        self.assertTrue(lib.merge()._output_valid(json.loads(lib.row()['output'])))
 
     def assert_unchanged_lib(self,lib):
         self.assertEqual(sha(lib.path),lib.original);self.assertFalse(lib.target.exists());self.assertEqual(lib.temps(),[])
