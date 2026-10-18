@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.18.0] - 2026-10-18
+
+### Added
+
+- Independent series fallbacks after Goodreads and FantLab: strict referenced Wikidata narrative-series statements, Wikipedia revision/reference discovery, and a supported Penguin Random House primary-book schema. Exact title, all authors, work identity and explicit order remain required; provider quotas, cache and holds stay shared and unchanged.
+- Bounded local Open Library indexing for authenticated downloaded authors/works and, once complete, editions. Imports verify whole inputs through gzip EOF/CRC, preserve reference integrity and checkpoints, and activate a validated SQLite generation atomically. Partial Editions downloads remain unavailable; edition series strings are discovery, never automatic reading-order proof.
+
+### Fixed
+
+- Previously negative series results can be researched again when the accepted local-index generation changes, while completed, held and recovery records retain their safeguards and preferred Goodreads evidence.
+
 ## [v0.17.0] - 2026-10-18
 
 ### Added

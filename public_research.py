@@ -39,6 +39,7 @@ APP_HOST_WINDOW=3600
 #  www.goodreads.com (series pages, Sergei 2026-10-18): no API; read politely, one request every
 #    5 s at most and 120 per hour, cached for 7 days like every response.
 HOST_POLICY={'openlibrary.org':(1800,1.1),'itunes.apple.com':(900,3.5),'www.googleapis.com':(40,1.1),'html.duckduckgo.com':(APP_HOST_REQUESTS,3),'www.goodreads.com':(120,5.0)}
+WIKIMEDIA_HOSTS={'www.wikidata.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
 def host_policy(host):return HOST_POLICY.get(host,(APP_HOST_REQUESTS,1.1))
 # Identify the app with a public contact, as Open Library and Wikimedia ask; no e-mail is sent.
 USER_AGENT='BooksArranger/automatic-public-research (+https://github.com/Gemanoneko/booksArranger)'
@@ -54,13 +55,13 @@ CHALLENGE_MARKERS=(b'anomaly.js',b'bots use duckduckgo',b'verify you are human',
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
 CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS
-HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com','www.goodreads.com'}
+HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com','www.goodreads.com','archive.org'}
 # Research stages: a candidate can progress only when every stage it needs has an open source.
 STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.googleapis.com','itunes.apple.com'},
     'discovery':{'html.duckduckgo.com','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'},'credit':CREDIT_HOSTS|{'fantlab.ru'}}
 
 # 18: local agreement identity and gap-only search; older results get one fresh pass.
-RESEARCH_VERSION='standing-19-v1'
+RESEARCH_VERSION='standing-20-v1'
 
 class ChallengeDetected(ValueError):pass
 
@@ -79,6 +80,11 @@ def allowed_url(url):
         if p.scheme!='https' or p.hostname not in HOSTS or p.username or p.password or p.port not in (None,443) or p.fragment:raise ValueError()
     except ValueError:raise ValueError('Unsupported public evidence URL') from None
     if p.hostname=='t.me' and not p.path.startswith('/s/'):raise ValueError('Only public creator post pages are admitted')
+    if p.hostname=='archive.org':
+        match=re.fullmatch(r'/metadata/ol_dump_(20\d{2}-\d{2}-\d{2})',p.path)
+        if not match or p.query or p.port or p.netloc!='archive.org':raise ValueError('Only the dated official Open Library metadata manifest is admitted')
+        try:dt.date.fromisoformat(match[1])
+        except ValueError:raise ValueError('Invalid dump snapshot date') from None
     return url
 
 DNS_CODE="import json,socket,sys; print(json.dumps(socket.getaddrinfo(sys.argv[1],443,type=socket.SOCK_STREAM)))"
@@ -293,6 +299,18 @@ class PublicClient:
         bound=host_policy(host)[0]
         # If old/in-flight reservations exceed the bound, enough must expire first.
         return reservations[len(reservations)-bound]['at']+APP_HOST_WINDOW if len(reservations)>=bound else now
+    def _wikimedia_ready(self,db,now):
+        """One provider across sites, including reservations made by older versions."""
+        hosts=sorted(WIKIMEDIA_HOSTS);marks=','.join('?'*len(hosts))
+        reservations=[r['at'] for r in db.execute('SELECT at FROM public_research_requests WHERE host IN ('+marks+') AND at>? ORDER BY at',(*hosts,now-APP_HOST_WINDOW))]
+        ready=now
+        if reservations:ready=max(ready,reservations[-1]+6.1)
+        if len(reservations)>=100:ready=max(ready,reservations[-100]+APP_HOST_WINDOW)
+        minute=[at for at in reservations if at>now-60]
+        if len(minute)>=10:ready=max(ready,minute[-10]+60)
+        holds=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host IN ('+marks+') AND next_at>? AND reason!="" ORDER BY next_at DESC LIMIT 1',(*hosts,now)).fetchone()
+        if holds:raise ResearchWait('www.wikidata.org',holds['reason'],holds['next_at'],'source_pause' if holds['reason'] in PAUSE_REASONS else 'source_unavailable','host')
+        return ready
     def retry_wait(self,wait):
         """Recalculate only our known local host bound, never an external pause."""
         value=dict(wait or {});host=value.get('source')
@@ -330,6 +348,10 @@ class PublicClient:
                 delay=max(0,(wait['next_at'] if wait else 0)-now)
                 if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
                 ready=self._host_ready(db,host,now)
+                if host in WIKIMEDIA_HOSTS:
+                    family_ready=self._wikimedia_ready(db,now)
+                    if family_ready-now>7:raise ResearchWait(host,APP_LIMIT_REASON,family_ready,'app_limit','provider')
+                    delay=max(delay,family_ready-now)
                 if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
                 db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
                 db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+host_policy(host)[1],''))
@@ -385,7 +407,7 @@ class PublicClient:
         """Fetched article revisions/references are leads, never work or recording proof."""
         if not isinstance(query,str) or not query.strip() or len(query)>500:raise ValueError('Invalid research query')
         host='ru.wikipedia.org' if re.search('[А-Яа-яЁё]',query) else ('ja.wikipedia.org' if re.search('[\u3040-\u30ff\u3400-\u9fff]',query) else 'en.wikipedia.org')
-        url='https://'+host+'/w/api.php?'+urllib.parse.urlencode({'action':'query','generator':'search','gsrsearch':query,'gsrnamespace':0,'gsrlimit':2,'prop':'extlinks|langlinks|revisions','ellimit':10,'lllimit':5,'rvprop':'ids','format':'json','formatversion':2})
+        url='https://'+host+'/w/api.php?'+urllib.parse.urlencode({'action':'query','generator':'search','gsrsearch':query,'gsrnamespace':0,'gsrlimit':2,'prop':'extlinks|langlinks|revisions','ellimit':10,'lllimit':5,'rvprop':'ids','format':'json','formatversion':2,'maxlag':5})
         data=self.json(url,stop,budget)
         if not isinstance(data,dict) or 'error' in data:raise ValueError('Wikipedia discovery unavailable')
         pages=data.get('query',{}).get('pages',[])
@@ -420,7 +442,13 @@ class PublicResearch:
     # Sergei decision 2026-10-12. Tests of the Internet research path switch this off
     # explicitly so they keep exercising that path with locally agreeing fixtures.
     local_agreement=True
-    def __init__(self,client,leads=None):self.client=client;self.leads=source_leads() if leads is None else leads
+    def __init__(self,client,leads=None,local_index=None):
+        from pathlib import Path
+        self.client=client;self.leads=source_leads() if leads is None else leads
+        self.local_index=Path(local_index) if local_index is not None else Path(client.database).parent/'openlibrary-index'
+    def local_generation(self):
+        from openlibrary_index import generation
+        return generation(self.local_index)
     def _independent_catalog(self,candidates,stop,budget,waits,progress,result):
         """Try independent work entities even when FantLab has exhausted its own budget."""
         from public_work_identity import ids,names,wikidata_work,openlibrary_matches,EvidenceConflict
@@ -901,12 +929,19 @@ class PublicResearch:
                 progress('FantLab','Filling missing series position')
                 series=attempt('fantlab',lambda:self._series_fantlab(title,author,partial,stop,budget,result))
             if series:found['series']=series
-        if 'series' in gaps and not found.get('series') or 'original_title' in gaps and not found.get('catalog'):
-            progress('Wikidata','Filling missing series position')
+        if 'original_title' in gaps and not found.get('catalog'):
+            progress('Wikidata','Filling missing original-work facts')
             entry=attempt('wikidata',lambda:self._gap_wikidata(title,author,partial,stop,budget,result))
             if entry:
-                if entry.get('series') and 'series' in gaps and not found.get('series'):found['series']=entry['series']
+                # Old broad catalog proposals are not series-order proof. The
+                # referenced series-only adapter below owns that separate gap.
                 if not found.get('catalog') and entry.get('language'):found['catalog']=entry
+        if 'series' in gaps and not found.get('series'):
+            series=attempt('wikidata',lambda:self._series_wikidata(title,author,stop,budget,result))
+            if series:found['series']=series
+            if not series:
+                series=attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result))
+                if series:found['series']=series
         if 'author_full' in gaps and not found.get('catalog'):
             for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
                 progress({'openlibrary':'Open Library','googlebooks':'Google Books','itunes':'iTunes'}[source],'Filling missing full author name')
@@ -916,7 +951,7 @@ class PublicResearch:
         if 'original_title' in gaps and not found.get('catalog'):unfilled.append('original_title')
         if 'series' in gaps and not found.get('series'):unfilled.append('series')
         if 'author_full' in gaps and not (found.get('author_full') or found.get('catalog')):unfilled.append('author_full')
-        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
+        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'publisher':{'series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
         goodreads_waited='goodreads' in found['closed']
         found['closed']=[source for source in found['closed'] if serves[source]&set(unfilled)]
         # Goodreads decides the series: a fallback answer still waits a little for it (gap deferral).
@@ -925,6 +960,80 @@ class PublicResearch:
         return found
 
     # ------------------------------------------------------------ series (Sergei 2026-10-18)
+
+    def _series_wikidata(self,title,author,stop,budget,result):
+        from local_identity import title_key
+        from public_work_identity import ids,names
+        from series_evidence import wikidata_series
+        language='ru' if re.search('[А-Яа-яЁё]',title) else 'en'
+        search='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':title,'language':language,'uselang':language,'type':'item','limit':5,'format':'json','maxlag':5})
+        data=self.client.json(search,stop,budget)
+        values=list(dict.fromkeys(r.get('id') for r in data.get('search',[])[:5] if isinstance(r,dict) and re.fullmatch(r'Q[1-9]\d{0,11}',str(r.get('id')))))
+        if not values:return None
+        receipts=[]
+        def entities(keys):
+            if not keys or len(keys)>40:raise ValueError('Series relationship bound')
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(keys),'props':'labels|aliases|claims|info','languages':'en|ru|ja','format':'json','maxlag':5})
+            data=self.client.json(url,stop,budget)
+            if not isinstance(data,dict) or not isinstance(data.get('entities'),dict):raise ValueError('Malformed series entities')
+            records={key:e for key,e in data['entities'].items() if key in keys and isinstance(e,dict) and e.get('id')==key}
+            receipts.append(url);return records
+        works=entities(values)
+        exact=[w for w in works.values() if title_key(title) in {title_key(v) for v in names(w)}]
+        keys=list(dict.fromkeys(id for w in exact for prop in ('P50','P179') for id in ids(w,prop)))
+        related=entities(keys) if keys else {}
+        matches=[value for work in exact if (value:=wikidata_series(work,related,title,author,title_key,_same_people))]
+        if len(matches)>1:raise ValueError('Ambiguous series work identities')
+        if not matches:return None
+        found=matches[0]
+        for url in receipts:self._gap_receipt(url,result,found['source_url'],['title','authors','series','number'])
+        return found
+
+    def _series_publisher(self,title,author,stop,budget,result):
+        from local_identity import title_key
+        from series_evidence import prh_series
+        urls=[]
+        from openlibrary_index import lookup
+        local=lookup(self.local_index,title)
+        result['local_openlibrary']={'status':local['status'],'purpose':'identity and primary-page discovery; edition series is not narrative order'}
+        local_match=None
+        if local['status']=='covered':
+            import itertools
+            people=_people(author);matches=[]
+            for work in local['works']:
+                authors=work['authors']
+                if not 0<len(authors)==len(people)<=6:continue
+                if any(all(any(_same_people(person,[alias]) for alias in entry['names']) for person,entry in zip(people,order)) for order in itertools.permutations(authors)):matches.append(work)
+            if len(matches)==1:
+                local_match=matches[0];urls.extend(local_match['links'])
+                result['local_openlibrary']['work_id']=local_match['id']
+        for lead in self.leads:
+            if title_key(lead.get('title',''))==title_key(title) and _same_people(author,lead.get('authors') or []):
+                urls.extend(lead.get('publisher_urls') or [])
+        urls=[url for url in urls if re.fullmatch(r'https://www\.penguinrandomhouse\.com/books/[1-9]\d{0,11}/[a-z0-9-]+/',str(url))]
+        if not urls:
+            # Wikipedia's fetched revision/reference bridge is discovery only. Its
+            # text, infobox or list positions do not authorize an ordinal here.
+            wiki_wait=None
+            try:
+                wiki=self.client.wikipedia('"'+title+'" '+author,stop,budget)
+                result['sources'].extend(wiki['sources']);urls.extend(wiki['leads'])
+            except ResearchWait as wait:wiki_wait=wait
+            if not urls:
+                try:urls.extend(self.client.discover('"'+title+'" '+author+' publisher',stop,budget))
+                except ResearchWait:
+                    if wiki_wait:raise wiki_wait
+                    raise
+            if not urls and wiki_wait:raise wiki_wait
+        for url in list(dict.fromkeys(urls))[:2]:
+            if not re.fullmatch(r'https://www\.penguinrandomhouse\.com/books/[1-9]\d{0,11}/[a-z0-9-]+/',str(url)):continue
+            raw=self.client.read(url,stop,budget)
+            found=prh_series(raw,url,title,author,title_key,_same_people)
+            if found:
+                self._gap_receipt(url,result,url,['title','authors','series','number'])
+                if local_match:found['local_identity']={'work':local_match,'index_sha256':local['receipt']['sha256'],'source_manifest':local['receipt']['source_manifest']}
+                return found
+        return None
 
     def _series_goodreads(self,title,author,stop,budget,result):
         """Series name and number from the Goodreads book page, or None. The search page is a lead only: a
@@ -1081,6 +1190,19 @@ class PublicResearch:
         return {'name':name,'source_url':citation}
 
     def _gap_openlibrary(self,title,author,stop,budget,result):
+        from openlibrary_index import lookup
+        local=lookup(self.local_index,title)
+        result['local_openlibrary']={'status':local['status'],'purpose':'work/author identity only; not narrative order'}
+        if local['status']=='covered':
+            candidates=[]
+            for record in local['works']:
+                if len(record['authors'])==1:
+                    for name in record['authors'][0]['names']:
+                        candidates.append((record['title'],[name],'https://openlibrary.org'+record['id']))
+            found=self._full_name(title,author,candidates,lambda item:item)
+            if found:
+                found['local_index_receipt']=local['receipt'];result['local_openlibrary']['matched']=found
+                return found
         url='https://openlibrary.org/search.json?'+urllib.parse.urlencode({'title':title,'author':author,'limit':5,'fields':'key,title,author_name'})
         data=self.client.json(url,stop,budget);docs=data.get('docs') if isinstance(data,dict) else None
         if not isinstance(docs,list):raise ValueError('Malformed catalog search')

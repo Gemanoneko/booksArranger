@@ -29,6 +29,7 @@ patterns.push('test_attention_actions.py','test_review_backend.py','test_attenti
 patterns.push('test_recovery_retention.py');  // the recovery-purge module's own suite (Senua v0.16.8 F3)
 patterns.push('test_series_research.py','test_local_identity.py');  // v0.16.11 series research
 patterns.push('test_series_backfill.py','test_quicktime_chapters.py','test_inventory.py');  // v0.16.12 series backfill, list reads
+patterns.push('test_series_fallbacks.py','test_openlibrary_index.py','test_public_work_identity.py');  // v0.18 source/ordinal, shared quotas, authenticated sparse imports
 const code="import sys,unittest,json;sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();[s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p)) for p in json.loads(sys.argv[2])];print('Integrated Python cases:',s.countTestCases(),flush=True);r=unittest.TextTestRunner(verbosity=2).run(s);sys.exit(not r.wasSuccessful() or bool(r.skipped))";
 const pythonOutput=run(python,['-I','-B','-c',code,root,JSON.stringify(patterns)]);
 const pythonCount=Number(/^Integrated Python cases: (\d+)$/m.exec(pythonOutput)?.[1]);

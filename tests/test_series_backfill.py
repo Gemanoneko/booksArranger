@@ -72,7 +72,7 @@ class Library:
 
     def backfill(self,merge=None,found=('Нормальное аномальное','10')):
         research=SimpleNamespace(_series_goodreads=lambda *a:{'provider':'goodreads','name':found[0],'number':found[1],'source_url':'https://www.goodreads.com/book/show/55108791'} if found else None,
-                                 _series_fantlab=lambda *a:None)
+                                 _series_fantlab=lambda *a:None,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
         return SeriesBackfill(merge or self.merge(),research=research,stage=self.base/'proof-stage')
 
     def row(self):
@@ -308,6 +308,18 @@ class BackfillTests(unittest.TestCase):
         self.assertEqual([(r['kind'],r['subject'],r['done'],r['total'],r['unit']) for r in rows],[('series',TITLE,3,38,'books')])
 
 class SchedulingTests(unittest.TestCase):
+    def test_negative_research_retries_once_after_policy_or_local_generation_changes(self):
+        generation=[None];self.backfill.research=SimpleNamespace(local_generation=lambda:generation[0])
+        self.backfill.lookup=Mock(return_value=None)
+        self.backfill._set('0','none',record={})
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2,'legacy negatives get the new sources once')
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,2,'pending local index is not a hot retry')
+        generation[0]='a'*64;self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,4,'activation reopens each previously pending negative once')
+        self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,4)
+        generation[0]=None;self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,4,'temporarily unavailable registry does not masquerade as new data')
+        generation[0]='b'*64;self.backfill.run_pass();self.assertEqual(self.backfill.lookup.call_count,6,'new corrected/expanded coverage gets one fair pass')
+        for state in ('done','held','skipped'):
+            self.backfill._set('0',state,record={});self.assertNotIn('0',[row['job_id'] for row in self.backfill.candidates()])
     """Actual SQLite scheduler with private no-media jobs; no network or library paths."""
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup)
@@ -328,7 +340,7 @@ class SchedulingTests(unittest.TestCase):
             return {'provider':'goodreads','name':'Verified series','number':'10','source_url':'https://www.goodreads.com/series/1'} if title.startswith('Later') else None
         def fantlab(title,*args):
             calls.append(('fantlab',title));raise ResearchWait('api.fantlab.ru','Hourly allowance reached',1600,'app_limit','host')
-        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab)
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
         applied=[]
         self.backfill.apply=lambda job,found:(applied.append((job,found)),self.backfill._set(job,'done'))
         self.backfill.run_pass()
@@ -390,7 +402,7 @@ class SchedulingTests(unittest.TestCase):
         def fantlab(title,author,partial,stop,budget,result):
             self.assertEqual(budget['remaining'],0)
             raise ResearchWait('api.fantlab.ru','Candidate request bound reached',1600,'app_limit','candidate')
-        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab)
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
         self.backfill.apply=lambda job,value:self.backfill._set(job,'done',record={'found':value})
         self.backfill.run_pass()
         self.assertEqual(self.backfill.entry('0')['state'],'deferred');self.assertEqual(self.backfill.entry('1')['state'],'done')

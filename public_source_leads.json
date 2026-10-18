@@ -1,5 +1,11 @@
 [
   {
+    "title": "The Subtle Knife",
+    "authors": ["Philip Pullman"],
+    "publisher_urls": ["https://www.penguinrandomhouse.com/books/136455/his-dark-materials-the-subtle-knife-book-2-by-philip-pullman/"],
+    "basis": "Primary publisher discovery citation only, fetched with the existing shared PublicClient on 2026-10-18. No series or ordinal is preapproved; the exact current Book identity, explicit position and scoped narrative grouping must pass the publisher adapter."
+  },
+  {
     "title": "Призраки белых ночей",
     "authors": ["Лена Обухова", "Наталья Тимошенко"],
     "series_urls": ["https://www.goodreads.com/series/249925"],

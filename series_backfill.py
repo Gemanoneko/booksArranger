@@ -36,6 +36,7 @@ TABLE = ('CREATE TABLE IF NOT EXISTS series_backfill(job_id TEXT PRIMARY KEY,sta
          'record TEXT NOT NULL,updated TEXT NOT NULL)')
 FINAL = ('none', 'done', 'skipped', 'held')
 ACTIVE = ('writing', 'written', 'renamed', 'cataloged')
+LOOKUP_POLICY = 'series-fallbacks-20-v1'
 ALBUM, GROUPING, SORT_ALBUM, TRACK = b'\xa9alb', b'\xa9grp', b'soal', b'trkn'
 PASS_WAIT = 600
 START_DELAY = 120  # after startup: the published check and the queue come first
@@ -167,6 +168,7 @@ class SeriesBackfill:
     def candidates(self):
         """Finished books (the newest job of each book) without a series and without a final record."""
         entries = {r['job_id']: r for r in self._rows('SELECT job_id,state,record FROM series_backfill')}
+        generation = self._local_generation()
         newest = {}
         for row in self._rows("SELECT job_id,json_extract(manifest,'$.candidate_id') AS candidate FROM audio_jobs ORDER BY created,job_id"):
             newest[row['candidate']] = row['job_id']
@@ -176,7 +178,10 @@ class SeriesBackfill:
             review = manifest.get('metadata') or {}
             entry = entries.get(row['job_id'])
             record = json.loads(entry['record']) if entry else {}
-            if entry and (entry['state'] in FINAL + ACTIVE or record.get('next_attempt', 0) > self.clock()) \
+            final = entry and entry['state'] in FINAL
+            if entry and entry['state'] == 'none':
+                final = record.get('lookup_policy') == LOOKUP_POLICY and (generation is None or record.get('local_generation') == generation)
+            if entry and (final or entry['state'] in ACTIVE or record.get('next_attempt', 0) > self.clock()) \
                     or newest.get(manifest.get('candidate_id')) != row['job_id']:
                 continue
             if review.get('series') or not review.get('title') or not review.get('canonical_author'):
@@ -185,6 +190,10 @@ class SeriesBackfill:
         # Unvisited books go first; one slow oldest candidate cannot monopolize a pass.
         return sorted(result, key=lambda row: json.loads(entries[row['job_id']]['record']).get('last_attempt', 0)
                       if row['job_id'] in entries else 0)
+
+    def _local_generation(self):
+        function = getattr(self.research, 'local_generation', None)
+        return function() if callable(function) else None
 
     def _defer(self, job_id, wait, found=None, state='deferred', manifest=None):
         entry = self.entry(job_id)
@@ -255,6 +264,7 @@ class SeriesBackfill:
                     continue
                 entry = self.entry(row['job_id'])
                 prior = entry['record'] if entry else {}
+                lookup_generation = self._local_generation()
                 found = prior.get('found') if prior.get('found_binding') == encoded(manifest)[1] and prior.get('found_at', 0) > 0 \
                     and 0 <= self.clock() - prior.get('found_at', 0) <= 7 * 86400 else None
                 found = found or self.lookup(manifest)
@@ -263,7 +273,8 @@ class SeriesBackfill:
                         and (found['name'], found['number']) != (preferred.get('name'), preferred.get('number')):
                     raise Held('The new series answer conflicts with the retained Goodreads sequence; copies kept')
                 if not found:
-                    self._set(row['job_id'], 'none', 'No series found on Goodreads or FantLab')
+                    self._set(row['job_id'], 'none', 'No verified narrative series found in the supported sources',
+                              dict(prior, lookup_policy=LOOKUP_POLICY, local_generation=lookup_generation, last_attempt=self.clock()))
                     continue
                 self.progress = {'title': title, 'done': index, 'total': len(books), 'step': 'updating'}
                 self.apply(row['job_id'], found)
@@ -322,7 +333,9 @@ class SeriesBackfill:
         budget = {'remaining': 6}
         waits = []
         for provider, args in (('_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
-                               ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result))):
+                               ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result)),
+                               ('_series_wikidata', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                               ('_series_publisher', (review['title'], review['canonical_author'], self.stop, budget, result))):
             try:
                 found = getattr(self.research, provider)(*args)
                 if found:
@@ -364,7 +377,8 @@ class SeriesBackfill:
         current = propose('', str(root), 'audiobook', {}, manifest['metadata'], automatic_facts=facts)
         record = {'series': found['name'], 'number': found['number'], 'provider': found['provider'], 'source_url': found['source_url'],
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
-                  'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', [])}
+                  'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
+                  'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
         try:
             if not current.get('path') or os.path.normcase(current['path']) != os.path.normcase(str(old)):
                 raise Held("The audiobook's name does not follow the app's naming; left as it is")
