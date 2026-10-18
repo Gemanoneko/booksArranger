@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.16.12] - 2026-10-18
+
+### Added
+
+- Series for books already published (Sergei, 2026-10-18). A background pass looks up the series of each finished book that has none: Goodreads first, then FantLab, with the same pacing and cache as research. It starts two minutes after the app opens, never holds up a conversion, and picks up where it stopped after a restart. When a series is found, the album, grouping, sort-album and track-number tags are rewritten. Every other byte, including all audio and chapters, is copied exactly, and that is proven before anything is replaced: the media and sample tables are byte-identical, the compressed audio and its decoder settings match, the chapters, cover and other tags are unchanged, and the new tags read back correctly. The book is then renamed on the same drive to the name a newly converted book in that series gets ("Series - NN - Title - Author.m4b"), never over an existing file. The catalog records the new file at once, so the book still reads as verified, and the old file is removed; no copy is kept. If anything is in doubt, the book is left exactly as it was and the reason is recorded. While it works, a progress row reads "Updating series: <title>" with "N of M books".
+
+### Fixed
+
+- Retry in Output needs attention (Sergei, live on v0.16.11). A pressed Retry briefly came back as an enabled "Retry". The press could wait behind a slow book-list read, and when the book left the list, focus jumped to the next book's Retry. Now:
+  - the button shows "Checking…" while the request is in flight, then a disabled "Queued", and only an explicit refusal from the server, with its reason, brings back Retry;
+  - an older list never repaints it, and the book stays in place with a note "<title> queued — runs after the current book";
+  - focus stays on that book;
+  - a repeated press changes nothing on the server;
+  - a press no longer waits for the review lock;
+  - a book-list read no longer holds the catalog's write lock while it builds the page.
+- "Retry selected (N)" replaces "Queue selected books" in Output needs attention. It queues the selected books that can be retried or repaired, after one confirmation, one at a time right after the current book. The selection count there reads "N can be retried or repaired" instead of "need review".
+
 ## [v0.16.11] - 2026-10-18
 
 ### Added
