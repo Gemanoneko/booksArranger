@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.16.11] - 2026-10-18
+
+### Added
+
+- Series research (Sergei, 2026-10-18). When a book has no series in its own tags, research reads its Goodreads book page for the series name and number. Requests are slow on purpose: at most one every 5 seconds and 120 an hour, each page cached for 7 days, and an unavailable Goodreads never holds a book. When Goodreads lists no series, FantLab's cycle is used instead; its number is counted from the cycle's order, and books with two authors are accepted. When both have a number, Goodreads wins. The source is recorded with the book's metadata.
+
+### Fixed
+
+- "Storm of the Century": its temporary working files showed cleanup "pending" with no reason. The step after its source cleanup ended without leaving any record, and nothing tried again while the queue kept running. Now such an error is recorded with its reason, and the background cleanup finishes any finished book whose temporary-file cleanup has no record, once per run.
+
 ## [v0.16.10] - 2026-10-18
 
 ### Fixed
