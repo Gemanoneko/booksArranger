@@ -53,21 +53,40 @@ class SweepTests(unittest.TestCase):
         with running(s):
             self.assertTrue(done.wait(10)); s._retention_wake.set(); s._retention_wake.set()
         self.assertEqual(calls, ['job-a'], 'never retried in a loop')
-        s.recovery._set.assert_called_once_with('job-a', 'needs_attention', 'Completed output bytes changed; copies retained')
+        # Senua F1: the reason keeps its prefix, so the book shows under "Audiobook problem".
+        s.recovery._set.assert_called_once_with('job-a', 'needs_attention', AUDIOBOOK_UNVERIFIED + 'Completed output bytes changed; copies retained')
 
 
 class HeldCleanupTests(unittest.TestCase):
     def test_marker_held_cleanups_finish_on_their_own_once(self):
-        s = service(); s.jobs._thread = None; s._purge_tried = set()
-        s.cleanup._rows = lambda *args: [{'id': 'c1', 'reason': 'Download marker native identity differs'},
-                                         {'id': 'c2', 'reason': 'Unknown download marker contents preserved'},
-                                         {'id': 'c3', 'reason': 'Download marker native identity differs'}]
+        s = service(); s.jobs._thread = None; s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
+        s.cleanup._rows = lambda *args: [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'},
+                                         {'id': 'c2', 'job_id': 'j2', 'reason': 'Unknown download marker contents preserved'},
+                                         {'id': 'c3', 'job_id': 'j3', 'reason': 'Download marker native identity differs'}]
         s._finish_held_cleanups(); s._finish_held_cleanups()
         s.cleanup.resume.assert_called_once_with(['c1', 'c2', 'c3'], follow_audio=False)
 
+    def test_a_kept_book_is_never_resumed_and_an_unreadable_record_resumes_nothing(self):
+        rows = [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'},
+                {'id': 'c2', 'job_id': 'j2', 'reason': 'Download marker native identity differs'}]
+        s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
+        s._kept_by_choice = lambda job_ids: {'j2'}
+        s._finish_held_cleanups(); s.cleanup.resume.assert_called_once_with(['c1'], follow_audio=False)
+        s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
+        s._kept_by_choice = Mock(side_effect=sqlite3.OperationalError('database is locked'))
+        s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()
+
+    def test_replacement_recoveries_of_a_kept_book_stay(self):
+        s = service(); s._purge_tried = set(); s.retirement = SimpleNamespace(purge_recoveries=Mock(return_value=0))
+        s.replacements = SimpleNamespace(rows=lambda: [{'id': 'r1', 'state': 'completed', 'replacement_job_id': 'j1'},
+                                                       {'id': 'r2', 'state': 'completed', 'replacement_job_id': 'j2'}])
+        s._kept_by_choice = lambda job_ids: {'j2'}
+        s._purge_replacement_recoveries()
+        self.assertEqual([call.args[0]['id'] for call in s.retirement.purge_recoveries.call_args_list], ['r1'])
+
     def test_they_wait_while_a_book_converts(self):
-        s = service(); s._purge_tried = set()
-        s.cleanup._rows = lambda *args: [{'id': 'c1', 'reason': 'Download marker native identity differs'}]
+        s = service(); s._purge_tried = set(); s._kept_by_choice = lambda job_ids: set()
+        s.cleanup._rows = lambda *args: [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'}]
         s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()
 
 

@@ -88,6 +88,9 @@ const frozen=row.time;run(`updateActivity(activityRows.get('conversion'),${NOW+6
 rows=render({state:'Needs attention'},[conversion({state:'attention',reason:'Exact source changed'})]);row=parts(rows[0]);
 assert.equal(row.step,'On hold — Exact source changed');assert.equal(rows[0].classList.contains('attention'),true);assert.equal(rows[0].classList.contains('paused'),false);
 assert.equal(row.bar.hidden,true,'a held row never shows a progressing bar');assert.equal(row.detail,'','no file count on a held row');
+assert.equal(row.time,'','no elapsed clock on a held row');assert.equal(rows[0].children[2].children[1].hidden,true);
+run(`updateActivity(activityRows.get('conversion'),${NOW+60000})`);assert.equal(parts(rows[0]).time,'','the timer tick never brings it back');
+rows=render({state:'Running'},[conversion()]);assert.match(parts(rows[0]).time,/elapsed/,'positive control: a running row keeps its clock');assert.equal(rows[0].children[2].children[1].hidden,false);
 assert.equal(parts(render({state:'Pausing'},[conversion({state:'pausing'})])[0]).step,'Pausing - Step 3 of 4 - Encoding audio');
 
 // Idle: "Nothing running"; paused with no rows: how to continue.

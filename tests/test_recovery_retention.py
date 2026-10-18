@@ -64,13 +64,13 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(done['state'],'deleted');self.assertEqual(done['actor'],'manual')
         with connect(self.db) as db:self.assertEqual(db.execute('SELECT state FROM storage_cleanup_files WHERE path=?',(str(hit[0]),)).fetchone()[0],'absent_after_intent')
     def test_cooperative_shutdown_resumes_partial_exact_purge(self):
-        self.ready();calls=[]
+        self.ready();calls=[];copies=list((self.source.root/self.cleanup_id).iterdir());self.assertEqual(len(copies),2)
         def stop():
-            calls.append(1)
-            if len(calls)==3:raise InterruptedError('closing')
+            # Closing arrives between the two deletions (the purge checks the guard before each file).
+            if not calls and sum(path.exists() for path in copies)==1:calls.append(1);raise InterruptedError('closing')
         self.retention.guard=stop
         with self.assertRaises(InterruptedError):self.retention.purge(self.job_id,'manual')
-        self.assertEqual(self.retention.due(),[self.job_id]);self.assertEqual(self.retention.status(self.job_id)['count'],1)
+        self.assertEqual(calls,[1],'positive control: the purge stopped mid-set');self.assertEqual(self.retention.due(),[self.job_id]);self.assertEqual(self.retention.status(self.job_id)['count'],1)
         self.retention.guard=lambda:None
         self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted')
     def test_already_missing_copy_is_recorded_not_an_error(self):
@@ -100,11 +100,64 @@ class RecoveryTests(unittest.TestCase):
         first=self.ready();done=self.retention.purge(self.job_id,'manual',{k:first[k] for k in ('token','count','bytes')})
         self.assertEqual(done['state'],'deleted');self.assertEqual(done['actor'],'manual')
 
+class KeptFilesTests(unittest.TestCase):
+    """Senua v0.16.8 F1 and F2 on real fixtures: a purge that keeps a set because the audiobook is missing or not
+    verified shows as "Audiobook problem", and Keep files is permanent: no later automatic purge deletes the set,
+    even once the audiobook verifies again. Only Sergei's own Delete recovery copies removes it."""
+    setUp=fixture.RetentionTests.setUp
+    tearDown=fixture.RetentionTests.tearDown
+    retire=fixture.RetentionTests.retire
+    ready=RecoveryTests.ready
+    def merge(self):
+        s=MergeService.__new__(MergeService);s.recovery=self.retention;s._post_current=None;s.jobs=self.queue
+        s.inventory=SimpleNamespace(worker=None,database=self.db);s.invalidate_status=Mock()
+        return s
+    def held(self,damage):
+        self.ready();s=self.merge();final=Path(self.output['final_path']);raw=final.read_bytes();damage(final)
+        s._purge_recovery_now(self.job_id)
+        return s,final,raw
+    def test_missing_audiobook_shows_as_audiobook_problem(self):
+        s,final,raw=self.held(lambda final:final.unlink())
+        row=self.retention._rows('SELECT state,reason FROM recovery_retention WHERE job_id=?',(self.job_id,))[0]
+        self.assertEqual(row['state'],'needs_attention');self.assertTrue(row['reason'].startswith('Audiobook missing: '),row['reason'])
+        kept=s.kept_files()[self.job_id];self.assertEqual((kept['group'],kept['cause']),('audiobook','missing'))
+        self.assertEqual(kept['keep'],{'allowed':True,'reason':''});self.assertEqual(self.retention.status(self.job_id)['count'],2,'nothing deleted')
+    def test_unverified_audiobook_shows_as_audiobook_problem(self):
+        s,final,raw=self.held(lambda final:final.write_bytes(b'changed'))
+        kept=s.kept_files()[self.job_id];self.assertEqual((kept['group'],kept['cause']),('audiobook','unverified'))
+        self.assertEqual(self.retention.status(self.job_id)['count'],2)
+    def test_keep_files_is_permanent_until_sergei_acts(self):
+        s,final,raw=self.held(lambda final:final.rename(final.with_suffix('.away')))
+        self.assertEqual(s.keep_files('Audiobooks',self.candidate,1,self.job_id),{'job_id':self.job_id,'kept':True})
+        final.with_suffix('.away').rename(final);self.assertEqual(final.read_bytes(),raw,'the audiobook is back and verifies again')
+        copies=sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir());self.assertEqual(len(copies),2)
+        # Every automatic path leaves the kept set alone: the startup sweep's list, the after-conversion purge,
+        # an automatic purge call itself, and the sweep loop.
+        self.assertEqual(self.retention.due(),[])
+        s._purge_recovery_now(self.job_id)
+        self.assertEqual(self.retention.purge(self.job_id,'automatic')['count'],2)
+        import test_backup_rule
+        loop=test_backup_rule.service();loop.recovery=self.retention;loop.inventory=SimpleNamespace(worker=None,database=self.db);loop.jobs._thread=None
+        passed=threading.Event();due=self.retention.due
+        self.retention.due=lambda:(passed.set(),due())[1]
+        try:
+            with test_backup_rule.running(loop):self.assertTrue(passed.wait(10));loop._retention_wake.set();time.sleep(.2)
+        finally:del self.retention.due
+        self.assertEqual(sorted(path.read_bytes() for path in (self.source.root/self.cleanup_id).iterdir()),copies,'kept files survive a verified audiobook')
+        self.assertTrue(self.retention.kept(self.job_id));self.assertNotIn(self.job_id,s.kept_files(),'no longer flagged')
+        # Positive control: the same set without the Keep files record would be purged now.
+        with connect(self.db) as db:db.execute('DELETE FROM kept_files')
+        self.assertEqual(self.retention.due(),[self.job_id])
+        with connect(self.db) as db:db.execute('INSERT INTO kept_files VALUES(?,?)',(self.job_id,'2026-10-18T00:00:00+00:00'))
+        # Sergei acting again: his own Delete recovery copies still removes them.
+        status=self.retention.status(self.job_id)
+        self.assertEqual(self.retention.purge(self.job_id,'manual',{k:status[k] for k in ('token','count','bytes')})['state'],'deleted')
+
 class AdmissionTests(unittest.TestCase):
     def setUp(self):
         self.service=MergeService.__new__(MergeService);s=self.service
         s.operation_lock=threading.RLock();s.inventory=SimpleNamespace(worker=None);s._retention_stop=threading.Event();s._retention_wake=threading.Event();s._manual_recovery=None;s._post_current=None
-        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[]);s.working=SimpleNamespace(reconcile=lambda **kwargs:None);s.storage_cleanup=None
+        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[]);s.working=SimpleNamespace(reconcile=lambda **kwargs:None,schedule_published=lambda job_id:None);s.storage_cleanup=None
         s.recovery=SimpleNamespace(status=lambda id:{'eligible':True,'token':'a'*64,'count':2,'bytes':4096,'reason':''})
     def test_manual_duplicate_stale_and_busy_no_action(self):
         s=self.service

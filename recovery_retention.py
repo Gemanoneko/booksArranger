@@ -4,6 +4,9 @@ Sergei, 2026-10-18: once the converted audiobook is verified and each original's
 checked, the app removes all backups of that book. The 24-hour window is gone: a new set's deadline is its
 completion time, and sets recorded with the former 24-hour deadline are purged too. Purge verifies the
 output in full first; a missing or unverified output keeps the copies, flagged with the reason.
+
+"Keep files" is permanent (Sergei, 2026-10-18): a book recorded in kept_files is left out of every automatic
+purge until Sergei acts on it again; the manual "Delete recovery copies" is such an action.
 """
 import contextlib
 import hashlib
@@ -34,6 +37,14 @@ def kept_reason(error):
     if isinstance(error,FileNotFoundError) or 'cannot find' in text.lower() or 'Completed output destination changed' in text:return AUDIOBOOK_MISSING+text
     if 'Completed output' in text or 'Retention output identity changed' in text:return AUDIOBOOK_UNVERIFIED+text
     return text
+
+KEPT_FILES_TABLE='CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)'
+
+def kept_by_choice(db,job_ids=None):
+    """Job ids whose files Sergei chose to keep. Read-only: the table exists once Keep files was pressed."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kept_files'").fetchone():return set()
+    if job_ids is None:return {row[0] for row in db.execute('SELECT job_id FROM kept_files')}
+    return {row[0] for row in db.execute('SELECT job_id FROM kept_files WHERE job_id IN (SELECT value FROM json_each(?))',(json.dumps(list(job_ids)),))}
 
 class RecoveryRetention:
     def __init__(self,storage,clock=utc,guard=None):
@@ -94,9 +105,17 @@ class RecoveryRetention:
         return row|{'state':state,'reason':reason,'eligible':eligible,'count':None if uncertain else count,'bytes':None if uncertain else size,'location':str(self.storage.recovery_root/row['cleanup_id']), 'token':token,'total':len(members),'removed':removed}
 
     def due(self):
-        """Every set not yet deleted: retained, partly deleted, or held. Purge decides; there is no waiting."""
+        """Every set not yet deleted: retained, partly deleted, or held. Purge decides; there is no waiting.
+        A book whose files Sergei chose to keep is never due."""
         # A set without a recorded completion cannot prove its deadline: it stays, flagged.
-        return [row['job_id'] for row in self._rows("SELECT job_id FROM recovery_retention WHERE state IN ('retained','deleting','needs_attention') AND completed_at<>'' ORDER BY completed_at,job_id")]
+        with connect(self.database) as db:
+            kept=kept_by_choice(db)
+            rows=db.execute("SELECT job_id FROM recovery_retention WHERE state IN ('retained','deleting','needs_attention') AND completed_at<>'' ORDER BY completed_at,job_id").fetchall()
+        return [row['job_id'] for row in rows if row['job_id'] not in kept]
+
+    def kept(self,job_id):
+        """True once Sergei pressed Keep files for this book: no automatic purge touches it."""
+        with connect(self.database) as db:return job_id in kept_by_choice(db,[job_id])
 
     def _set(self,job_id,state,reason='',actor=None):
         with connect(self.database) as db:
@@ -107,6 +126,7 @@ class RecoveryRetention:
     def purge(self,job_id,actor='automatic',confirmation=None):
         persisted=self._rows('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,))
         if persisted and persisted[0]['state']=='deleted':return self.status(job_id)  # idempotent: never twice
+        if actor=='automatic' and self.kept(job_id):return self.status(job_id)  # Keep files: kept until Sergei acts again
         status=self.status(job_id)
         if confirmation is not None and any(status.get(k)!=confirmation.get(k) for k in ('token','count','bytes')):raise ValueError('Recovery copies changed. Review the updated details and try again.')
         if not persisted:raise BoundaryError(status.get('reason') or 'Recovery copies are not eligible')

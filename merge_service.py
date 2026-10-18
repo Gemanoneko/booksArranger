@@ -605,6 +605,7 @@ class MergeService:
         self.jobs.start_published_check()
 
     def start_retention(self,admission):
+        from recovery_retention import kept_reason
         if self._retention_thread:return
         def work():
             while not self._retention_stop.is_set():
@@ -629,7 +630,7 @@ class MergeService:
                                 except InterruptedError:pass # Keep the durable partial purge resumable at startup.
                                 except Exception as error:
                                     # Kept and flagged (missing or unverified output, changed copy); tried once per run.
-                                    self._purge_tried.add(id);self.recovery._set(id,'needs_attention',str(error))
+                                    self._purge_tried.add(id);self.recovery._set(id,'needs_attention',kept_reason(error))
                                 finally:self._post_current=None
                         if manual:self._manual_recovery=None
                         self._purge_replacement_recoveries()
@@ -645,22 +646,27 @@ class MergeService:
     def _purge_recovery_now(self,job_id):
         """Right after a book's source cleanup: its recovery copies go at once (the purge verifies the output in
         full first; anything else keeps them, flagged). Runs on the converter thread between books."""
+        from recovery_retention import kept_reason
         try:
             self.recovery.sync()
             if not self.recovery._rows("SELECT 1 FROM recovery_retention WHERE job_id=? AND state IN ('retained','deleting','needs_attention')",(job_id,)):return
+            if self.recovery.kept(job_id):return  # Keep files: kept until Sergei acts again
             self._post_current=(job_id,'temporary')
             with _PURGE_LOCK:self.recovery.purge(job_id,'automatic')
         except InterruptedError:pass  # resumed by the next sweep
         except Exception as error:
-            try:self.recovery._set(job_id,'needs_attention',str(error))
+            try:self.recovery._set(job_id,'needs_attention',kept_reason(error))  # keeps the Audiobook missing/not verified prefix
             except Exception:pass
         finally:self._post_current=None
 
     def _purge_replacement_recoveries(self):
         """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
         if not hasattr(self,'replacements'):return
-        for relation in self.replacements.rows():
-            if relation['state']!='completed' or relation['id'] in self._purge_tried:continue
+        relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and relation['id'] not in self._purge_tried]
+        try:kept=self._kept_by_choice([relation['replacement_job_id'] for relation in relations]) if relations else set()
+        except (sqlite3.Error,AttributeError):return  # the Keep files record is unreadable: nothing is purged this pass
+        for relation in relations:
+            if relation['replacement_job_id'] in kept:continue  # Keep files: kept until Sergei acts again
             try:
                 with self.operation_lock:self.retirement.purge_recoveries(relation)
             except InterruptedError:return
@@ -672,7 +678,10 @@ class MergeService:
         """Source cleanups held only by marker metadata finish on their own (Sergei, 2026-10-18): the cleanup
         re-proves each original's content against the reviewed hash and the output before removing anything."""
         if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
-        held=[row['id'] for row in self.cleanup._rows("SELECT id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.HELD_FOR_METADATA and row['id'] not in self._purge_tried]
+        rows=[row for row in self.cleanup._rows("SELECT id,job_id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.HELD_FOR_METADATA and row['id'] not in self._purge_tried]
+        try:kept=self._kept_by_choice([row['job_id'] for row in rows]) if rows else set()
+        except (sqlite3.Error,AttributeError):kept=None  # the Keep files record is unreadable: nothing resumes this pass
+        held=[] if kept is None else [row['id'] for row in rows if row['job_id'] not in kept]  # Keep files: kept until Sergei acts again
         if held:
             self._purge_tried.update(held)  # one attempt per run; a real failure is recorded with its reason
             self.cleanup.resume(held,follow_audio=False)
@@ -883,14 +892,12 @@ class MergeService:
         (B) 'audiobook', the purge found the audiobook missing or not verified. A book marked kept is left
         out. Keep files is offered; Check again and Convert again are not built (they need a replace-after-
         verify flow and, for (B), the recovery copies as the only source)."""
-        from recovery_retention import AUDIOBOOK_MISSING,AUDIOBOOK_UNVERIFIED
+        from recovery_retention import AUDIOBOOK_MISSING,AUDIOBOOK_UNVERIFIED,kept_by_choice
         database=getattr(getattr(self,'inventory',None),'database',None)
         if not database:return {}
         try:
             with connect(database) as db:
-                # Read-only on the status path: the table exists only once Keep files was pressed.
-                exists=db.execute("SELECT 1 FROM sqlite_master WHERE name='kept_files'").fetchone()
-                kept={row[0] for row in db.execute('SELECT job_id FROM kept_files')} if exists else set()
+                kept=kept_by_choice(db)  # read-only on the status path
                 found={}
                 if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_cleanup'").fetchone():
                     for job_id,reason in db.execute("SELECT job_id,reason FROM source_cleanup WHERE state='needs_attention'"):
@@ -906,22 +913,26 @@ class MergeService:
 
     def kept_by_choice(self,job_ids):
         """Job ids whose files Sergei chose to keep (for the row and panel line)."""
-        try:
-            with connect(self.inventory.database) as db:
-                if not db.execute("SELECT 1 FROM sqlite_master WHERE name='kept_files'").fetchone():return set()
-                return {row[0] for row in db.execute('SELECT job_id FROM kept_files WHERE job_id IN (SELECT value FROM json_each(?))',(json.dumps(list(job_ids)),))}
+        try:return self._kept_by_choice(job_ids)
         except (sqlite3.Error,AttributeError):return set()
 
+    def _kept_by_choice(self,job_ids):
+        """The purge guard reads it without a fallback: an unreadable catalog keeps everything."""
+        from recovery_retention import kept_by_choice
+        with connect(self.inventory.database) as db:return kept_by_choice(db,job_ids)
+
     def keep_files(self,library,identity,revision,job_id):
-        """Keep files: this book's kept files stop being flagged. Nothing is deleted and no job is queued."""
+        """Keep files: this book's kept files stop being flagged and no automatic purge touches them again
+        (recovery_retention.kept_by_choice). Nothing is deleted and no job is queued."""
         from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        from recovery_retention import KEPT_FILES_TABLE
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         entry=self.kept_files([job_id]).get(job_id)
         rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
         manifest=json.loads(rows[0]['manifest']) if rows else {}
         if not entry or manifest.get('candidate_id')!=identity:raise RetryRefused(RETRY_BOOK_CHANGED)
         with connect(self.inventory.database) as db:
-            db.execute('CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)')
+            db.execute(KEPT_FILES_TABLE)
             db.execute('INSERT OR IGNORE INTO kept_files VALUES(?,?)',(job_id,time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())))
         self.invalidate_status()
         return {'job_id':job_id,'kept':True}

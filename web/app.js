@@ -475,7 +475,8 @@ function updateActivity(view,now){
     view.etaAt=now;
     if(rate>0){const left=(1-fraction)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
   }
-  writeText(view.time,clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));
+  // A held row is not running: no elapsed clock (Futaba, v0.16.8).
+  writeText(view.time,held?'':clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=held;
 }
 async function candidateRequest(route,extra={}){if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){message(error.message);}finally{busy=false;controls();}}
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
