@@ -435,4 +435,6 @@ if __name__=='__main__':
     args=parser.parse_args()
     manifest=json.loads(Path(args.manifest).read_text(encoding='utf-8'))
     if args.include_editions:manifest['sources']['editions']=manifest['pending_editions']
-    print(_json(import_slice(manifest,json.loads(Path(args.targets).read_text(encoding='utf-8')),args.directory,seconds=args.seconds)))
+    # Console code pages may not encode every retained title. Escape only the
+    # reporting transport; index/receipt serialization and Unicode stay intact.
+    print(json.dumps(import_slice(manifest,json.loads(Path(args.targets).read_text(encoding='utf-8')),args.directory,seconds=args.seconds),ensure_ascii=True,sort_keys=True,separators=(',',':')))

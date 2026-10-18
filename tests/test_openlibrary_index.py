@@ -56,6 +56,23 @@ class IndexTests(unittest.TestCase):
         found=lookup(self.index,'A Book');self.assertEqual(found['status'],'covered');self.assertEqual(found['works'][0]['authors'][0]['names'],['John Writer','J. Writer'])
         self.assertEqual(lookup(self.index,'Another Book')['status'],'outside_coverage')
         self.assertEqual(lookup(self.index,'A Book')['works'][0]['editions'],[])
+    def test_cli_reports_unicode_ready_on_legacy_windows_stdout(self):
+        import io,runpy,sys
+        from unittest.mock import patch
+        self.work['title']='Björk';self.replace_dump('works',[self.work])
+        manifest=self.root/'manifest.json';manifest.write_text(json.dumps(self.manifest),encoding='utf-8')
+        targets=self.root/'targets.json';targets.write_text(json.dumps(['Björk']),encoding='utf-8')
+        with self.assertRaises(UnicodeEncodeError):'Björk'.encode('cp1251')
+        raw=io.BytesIO();stdout=io.TextIOWrapper(raw,encoding='cp1251')
+        argv=['openlibrary_index.py','--manifest',str(manifest),'--targets',str(targets),'--directory',str(self.index)]
+        with patch.object(sys,'argv',argv),patch.object(sys,'stdout',stdout):
+            runpy.run_path(str(Path(__file__).resolve().parents[1]/'openlibrary_index.py'),run_name='__main__')
+        stdout.flush();reported=json.loads(raw.getvalue().decode('ascii'))
+        self.assertEqual(reported['status'],'ready');self.assertIn('björk',reported['receipt']['targets'])
+        found=lookup(self.index,'Björk');self.assertEqual(found['status'],'covered');self.assertEqual(found['works'][0]['title'],'Björk')
+        self.assertEqual(reported['receipt'],found['receipt'])
+        from openlibrary_index import _json
+        self.assertEqual(_json({'title':'Björk'}),'{"title":"Björk"}')
     def test_changed_same_size_source_cannot_mix_with_retained_prefix(self):
         self.build(max_records=1);path=Path(self.manifest['sources']['works']['path']);data=bytearray(path.read_bytes());data[15]^=1;path.write_bytes(data)
         with self.assertRaisesRegex(ValueError,'checksum'):self.build()
