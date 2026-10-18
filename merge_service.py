@@ -31,6 +31,8 @@ import groups
 INITIAL_CLEANUP_JOBS={'0b6fedcc-2d95-46a9-a4a3-4192da37ff72','dc4874af-e132-47cd-93ab-85e5b0fbeea7'}
 STATUS_MAX_AGE=1.0 # Seconds after a status computation STARTED during which polling readers may reuse it.
 STATUS_WAIT=4.0 # Seconds a reader waits on another thread's computation; below the desktop shell's 5 s request timeout.
+STALE_WAIT=0.5 # Seconds a poll waits for a newer status when an earlier answer exists; then it gets that answer.
+CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused per catalog version while no cleanup runs.
 QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
 _QUIET_LOCK=threading.Lock()
@@ -89,32 +91,51 @@ class SharedSnapshot:
     catalog cannot accumulate one expensive computation per poll. invalidate()
     (after every control) drops the remembered answer and detaches a running
     computation: its result is never cached and no later reader joins it.
+
+    The computation runs on its own thread. While it runs, a reader gets the last good answer after
+    STALE_WAIT instead of "still updating" (v0.16.8: under load half of the polls answered 503 and the
+    page showed "Local server unavailable"). Only with no answer yet, or right after a control, does a
+    reader wait the full bound for a fresh one.
     """
     def __init__(self,clock=time.monotonic,wait=STATUS_WAIT):
         self._lock=threading.Lock();self._clock=clock;self._wait=wait;self._value=None;self._at=None;self._flight=None;self._generation=0
+        self._last=None  # (value, generation, started) of the newest finished computation
 
     def invalidate(self):
         with self._lock:self._generation+=1;self._value=None;self._at=None;self._flight=None
 
+    def _run(self,flight,compute):
+        try:flight['value']=compute()
+        except BaseException as error:flight['error']=error
+        finally:
+            with self._lock:
+                if flight['error'] is None:
+                    if flight['generation']==self._generation:self._value,self._at=flight['value'],flight['started']
+                    if self._last is None or flight['started']>=self._last[2]:self._last=(flight['value'],flight['generation'],flight['started'])
+                if self._flight is flight:self._flight=None
+            flight['done'].set()
+
     def get(self,compute,max_age):
         with self._lock:
             if self._at is not None and 0<=self._clock()-self._at<max_age:return copy.deepcopy(self._value)
-            flight=self._flight;owner=flight is None
-            if owner:flight=self._flight={'done':threading.Event(),'value':None,'error':None,'generation':self._generation,'started':self._clock()}
-        if owner:
-            try:flight['value']=compute()
-            except BaseException as error:flight['error']=error
-            finally:
-                with self._lock:
-                    if flight['error'] is None and flight['generation']==self._generation:self._value,self._at=flight['value'],flight['started']
-                    if self._flight is flight:self._flight=None
-                flight['done'].set()
-        elif not flight['done'].wait(self._wait):raise StatusUnavailable('Status computation is still running')
+            flight=self._flight
+            if flight is None:
+                flight=self._flight={'done':threading.Event(),'value':None,'error':None,'generation':self._generation,'started':self._clock()}
+                threading.Thread(target=self._run,args=(flight,compute),name='books-status',daemon=True).start()
+            last=self._last;current=self._generation
+        bound=self._wait if last is None or last[1]!=current else min(self._wait,STALE_WAIT)
+        if not flight['done'].wait(bound):
+            if last is not None:return copy.deepcopy(last[0])
+            raise StatusUnavailable('Status computation is still running')
         if flight['error'] is not None:raise flight['error']
         return copy.deepcopy(flight['value'])
 
 _BULK_LOCK=threading.Lock()    # Retry all: its run record and thread
 _REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker thread
+_PURGE_LOCK=threading.RLock()  # one recovery purge at a time (the converter's and the sweep's never overlap)
+
+def catalog_busy_text(reason):
+    return 'database is locked' in (reason or '') or 'database is busy' in (reason or '')
 
 def operation(method):
     @functools.wraps(method)
@@ -293,21 +314,41 @@ class MergeService:
         return bool(any(thread is not None and thread.is_alive() for thread in threads) or getattr(jobs,'_resuming',False)
                     or getattr(cleanup,'current',None) or getattr(self,'_post_current',None) or getattr(self,'draining',False))
 
+    def _catalog_version(self,create=False):
+        """(PRAGMA data_version on one idle monitor connection, control counter): equal between two reads only
+        if no catalog commit and no control happened between them. None until a poll opens the monitor."""
+        try:
+            with _QUIET_LOCK:
+                monitor=self.__dict__.get('_monitor')
+                if monitor is None:
+                    if not create:return None
+                    monitor=self._monitor=sqlite3.connect(self.inventory.database,timeout=1,check_same_thread=False)
+                return (monitor.execute('PRAGMA data_version').fetchone()[0],self.__dict__.get('_quiet_generation',0))
+        except Exception:return None
+
+    def _catalog_cached(self,name,compute):
+        """Catalog facts that change with a commit or with cleanup work, not with a book's progress (cleanup,
+        storage and folder status, the Ready totals): reused for up to CATALOG_MAX_AGE per catalog version while
+        no cleanup work runs. A poll during conversion no longer re-reads every recovery set and checks every
+        source folder on the library share, which under conversion load took seconds (v0.16.8 item 1)."""
+        version=self._catalog_version();cleanup=getattr(self,'cleanup',None);thread=getattr(cleanup,'thread',None)
+        settled=version is not None and not getattr(cleanup,'current',None) and not (thread and thread.is_alive()) and not getattr(self,'_post_current',None)
+        kept=self.__dict__.setdefault('_catalog_kept',{}).get(name)
+        if settled and kept and kept[0]==version and 0<=time.monotonic()-kept[1]<CATALOG_MAX_AGE:return copy.deepcopy(kept[2])
+        value=compute()
+        if settled and self._catalog_version()==version:self._catalog_kept[name]=(version,time.monotonic(),copy.deepcopy(value))
+        return value
+
     def _quiet_token(self,create=False):
         """Equal between two reads only if nothing ran and no catalog commit happened between them (PRAGMA
         data_version on one idle monitor connection, plus a counter every control bumps); None while busy.
         Only the polling entry points open the monitor (create=True); until then every answer is fresh."""
         try:
             if self._busy():return None
-            database=self.inventory.database
-            with _QUIET_LOCK:
-                monitor=self.__dict__.get('_monitor')
-                if monitor is None:
-                    if not create:return None
-                    monitor=self._monitor=sqlite3.connect(database,timeout=1,check_same_thread=False)
-                version=monitor.execute('PRAGMA data_version').fetchone()[0]
+            version=self._catalog_version(create)
+            if version is None:return None
             check=json.dumps(getattr(self.jobs,'_check_progress',None),sort_keys=True,default=str)
-            return (version,self.__dict__.get('_quiet_generation',0),check)
+            return (*version,check)
         except Exception:return None
 
     def invalidate_status(self):
@@ -341,7 +382,9 @@ class MergeService:
         # Workers are sampled BEFORE the slow durable read too, so a cleanup that ends mid-read
         # (its marker cleared, its row still read as pending) is never reported Paused (v0.16.2).
         worker=self._worker_active();token=self._quiet_token();started=time.monotonic()
-        value=self.jobs.status();cleanups=self.cleanup.status();storage=self.storage_cleanup.status();folders=self.storage_cleanup.folder_status()
+        value=self.jobs.status()
+        cleanups=self._catalog_cached('cleanups',self.cleanup.status);storage=self._catalog_cached('storage',self.storage_cleanup.status)
+        folders=self._catalog_cached('folders',self.storage_cleanup.folder_status)
         self._cleanup_kept=(started,token,{item['job_id']:item for item in cleanups})  # the book list reuses these
         raw_jobs=value['jobs']
         if hasattr(self,'replacements'):
@@ -365,7 +408,8 @@ class MergeService:
             for relation in self.replacements.rows():
                 failure=json.loads(relation['failure_json'] or '{}')
                 if failure and failure.get('type')!='InterruptedError':errors.append({'job_id':relation['replacement_job_id'],'state':'needs_attention','reason':failure.get('message','Replacement postprocessing needs attention'),'replacement':True})
-        folder_notes=[r['reason'] for r in folders if r['state'] in ('needs_attention','unsupported') and r.get('reason')]
+        # Empty-folder housekeeping holds nothing and is never attention (Sergei, 2026-10-18).
+        folder_notes=[]
         value['failed']+=len(errors)
         if errors and value['state']=='Completed':value['state']='Needs attention'
         progress=None
@@ -392,9 +436,9 @@ class MergeService:
             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
             attention_row={'title':held['manifest']['metadata'].get('title','') if held else '','phase':phase,'reason':error.get('reason','')}
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
-        totals=self.progress_books(raw_jobs,cleanups,storage,folders)
+        totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
-        counts={'retry':0,'repair':0,'other':0,'unsupported':0}
+        counts={'retry':0,'repair':0,'changed':0,'audiobook':0,'other':0,'unsupported':0}
         for item in self.attention_summary(retry=False).values():counts[item['group']]+=1
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
@@ -522,13 +566,12 @@ class MergeService:
         if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
 
     def _recovery_idle(self):
+        """Recovery copies may be deleted now. v0.16.8 (Sergei, 2026-10-18): a book being converted or queued
+        never holds them back any more; only a scan, closing, or a source cleanup removing originals right
+        now (its own copies are what it writes) waits."""
         self._no_scan()
         if self._retention_stop.is_set():raise ValueError('Recovery cleanup is closing')
-        if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for audiobook work to become idle')
-        unfinished=getattr(self.jobs,'has_unfinished',None)
-        # Runs once per cleanup row on every status poll: an indexed existence check, not a full job load.
-        if unfinished() if unfinished else any(j['state'] in ('pending','running') for j in self.jobs.status()['jobs']):raise ValueError('Resolve queued audiobook work before deleting recovery copies')
-        if self.cleanup.current or self._post_current or any(c['state'] in ('waiting','checking','removing','pausing','paused') for c in self.cleanup._rows('SELECT state FROM source_cleanup')):raise ValueError('Wait for source cleanup to finish')
+        if self.cleanup.current or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for source cleanup to finish')
 
     def recovery_status(self,job_id):
         value=self.recovery.status(job_id)
@@ -573,25 +616,83 @@ class MergeService:
                 except (InterruptedError,ValueError):pass
                 try:
                     with admission():
-                        with self.operation_lock:
-                            self._recovery_idle()
-                            manual=self._manual_recovery
-                            selected=[manual[0]] if manual else self.recovery.due()
-                            for id in selected:
+                        self._recovery_idle()
+                        manual=self._manual_recovery
+                        selected=[manual[0]] if manual else [id for id in self.recovery.due() if id not in self._purge_tried]
+                        for id in selected:
+                            # One set at a time under the operation lock, so controls interleave between sets.
+                            with self.operation_lock,_PURGE_LOCK:
                                 self._recovery_idle();self._post_current=(id,'temporary')
                                 try:
                                     self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
                                     published_revisits.append(id)
                                 except InterruptedError:pass # Keep the durable partial purge resumable at startup.
-                                except Exception as error:self.recovery._set(id,'needs_attention',str(error)) # Preserve failed/stale sets and report their reason.
+                                except Exception as error:
+                                    # Kept and flagged (missing or unverified output, changed copy); tried once per run.
+                                    self._purge_tried.add(id);self.recovery._set(id,'needs_attention',str(error))
                                 finally:self._post_current=None
-                            if manual:self._manual_recovery=None
+                        if manual:self._manual_recovery=None
+                        self._purge_replacement_recoveries()
+                        self._finish_held_cleanups()
                 except ValueError:pass # Busy/closing admission defers; never purges while scanning.
                 for id in published_revisits:
                     try:self.working.schedule_published(id)
                     except (InterruptedError,ValueError,OSError):pass
                 self._retention_wake.wait(60);self._retention_wake.clear()
+        self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
+
+    def _purge_recovery_now(self,job_id):
+        """Right after a book's source cleanup: its recovery copies go at once (the purge verifies the output in
+        full first; anything else keeps them, flagged). Runs on the converter thread between books."""
+        try:
+            self.recovery.sync()
+            if not self.recovery._rows("SELECT 1 FROM recovery_retention WHERE job_id=? AND state IN ('retained','deleting','needs_attention')",(job_id,)):return
+            self._post_current=(job_id,'temporary')
+            with _PURGE_LOCK:self.recovery.purge(job_id,'automatic')
+        except InterruptedError:pass  # resumed by the next sweep
+        except Exception as error:
+            try:self.recovery._set(job_id,'needs_attention',str(error))
+            except Exception:pass
+        finally:self._post_current=None
+
+    def _purge_replacement_recoveries(self):
+        """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
+        if not hasattr(self,'replacements'):return
+        for relation in self.replacements.rows():
+            if relation['state']!='completed' or relation['id'] in self._purge_tried:continue
+            try:
+                with self.operation_lock:self.retirement.purge_recoveries(relation)
+            except InterruptedError:return
+            except Exception:self._purge_tried.add(relation['id'])  # kept; the relation's records say why
+
+    HELD_FOR_METADATA=('Download marker native identity differs','Unknown download marker contents preserved')
+
+    def _finish_held_cleanups(self):
+        """Source cleanups held only by marker metadata finish on their own (Sergei, 2026-10-18): the cleanup
+        re-proves each original's content against the reviewed hash and the output before removing anything."""
+        if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
+        held=[row['id'] for row in self.cleanup._rows("SELECT id,reason FROM source_cleanup WHERE state='needs_attention'") if row['reason'] in self.HELD_FOR_METADATA and row['id'] not in self._purge_tried]
+        if held:
+            self._purge_tried.update(held)  # one attempt per run; a real failure is recorded with its reason
+            self.cleanup.resume(held,follow_audio=False)
+        self._settle_folder_jobs()
+
+    FOLDER_ALREADY_GONE='Source-folder ancestor is missing without verified removal intent'
+
+    def _settle_folder_jobs(self):
+        """Empty source folders are housekeeping, not backups: none holds anything (Sergei, 2026-10-18).
+        A folder job that stopped on a busy catalog runs again; one whose folder is already gone is complete."""
+        storage=getattr(self,'storage_cleanup',None)
+        if storage is None or not hasattr(storage,'folder_status'):return
+        for row in storage.folder_status():
+            if row['state']!='needs_attention' or ('folder',row['job_id']) in self._purge_tried:continue
+            self._purge_tried.add(('folder',row['job_id']))
+            if row['reason']==self.FOLDER_ALREADY_GONE:storage._folder_set(row['job_id'],row['output_hash'],'completed','Source folder was already gone')
+            elif catalog_busy_text(row['reason']):
+                try:
+                    with self.operation_lock:storage.run_folders(row['job_id'])
+                except Exception:pass  # stays as housekeeping; it holds nothing
 
     def _prune_working(self,job_id):
         output_hash=''
@@ -616,6 +717,8 @@ class MergeService:
                 if self.retirement.historical_retired(parent,stop=stop):return
         self._prune_working(job_id)
         self.recovery.sync()
+        # Between books (not during Start's re-check of every finished book, which the sweep covers).
+        if stop is None and (source_completed or (self.cleanup.status(job_id) or {}).get('state')=='completed'):self._purge_recovery_now(job_id)
         receipt=self.cleanup.status(job_id)
         if receipt and receipt['state']!='completed':return
         prior=next((r for r in self.storage_cleanup.status() if r['job_id']==job_id),None)
@@ -747,6 +850,11 @@ class MergeService:
         if readmission:value['readmission']=readmission  # queued_next + position, or the refusal reason
         repaired=repair_record(job)
         if repaired:value['repaired']=repaired
+        if job['state']=='completed':
+            kept=self.kept_files([job['job_id']]).get(job['job_id'])
+            if kept:
+                value['attention']={key:item for key,item in kept.items() if key!='keep'};value['keep']=kept['keep']
+            elif job['job_id'] in self.kept_by_choice([job['job_id']]):value['kept']=True
         return value
 
     def retry_statuses(self,job_id=None):
@@ -763,7 +871,60 @@ class MergeService:
         summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
         unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
         if unchecked:self._check_repairs(unchecked)
+        for job_id,item in self.kept_files(job_ids).items():
+            if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
+
+    KEPT_CHANGED=('Original bytes differ from reviewed sources',)  # a content mismatch: keep-case (A)
+
+    def kept_files(self,job_ids=None):
+        """Completed books whose files the 0.16.8 rule keeps, as attention entries (Judy's spec section 3):
+        (A) 'changed', an original's content no longer matches what was checked (its source cleanup held);
+        (B) 'audiobook', the purge found the audiobook missing or not verified. A book marked kept is left
+        out. Keep files is offered; Check again and Convert again are not built (they need a replace-after-
+        verify flow and, for (B), the recovery copies as the only source)."""
+        from recovery_retention import AUDIOBOOK_MISSING,AUDIOBOOK_UNVERIFIED
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return {}
+        try:
+            with connect(database) as db:
+                # Read-only on the status path: the table exists only once Keep files was pressed.
+                exists=db.execute("SELECT 1 FROM sqlite_master WHERE name='kept_files'").fetchone()
+                kept={row[0] for row in db.execute('SELECT job_id FROM kept_files')} if exists else set()
+                found={}
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_cleanup'").fetchone():
+                    for job_id,reason in db.execute("SELECT job_id,reason FROM source_cleanup WHERE state='needs_attention'"):
+                        if reason in self.KEPT_CHANGED:found[job_id]={'group':'changed','cause':None,'reason':reason}
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_retention'").fetchone():
+                    for job_id,reason in db.execute("SELECT job_id,reason FROM recovery_retention WHERE state='needs_attention'"):
+                        for prefix,cause in ((AUDIOBOOK_MISSING,'missing'),(AUDIOBOOK_UNVERIFIED,'unverified')):
+                            if (reason or '').startswith(prefix):found[job_id]={'group':'audiobook','cause':cause,'reason':reason[len(prefix):]}
+        except sqlite3.Error:return {}
+        wanted=set(job_ids) if job_ids is not None else None
+        return {job_id:item|{'originals_untouched':False,'keep':{'allowed':True,'reason':''}} for job_id,item in found.items()
+                if job_id not in kept and (wanted is None or job_id in wanted)}
+
+    def kept_by_choice(self,job_ids):
+        """Job ids whose files Sergei chose to keep (for the row and panel line)."""
+        try:
+            with connect(self.inventory.database) as db:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE name='kept_files'").fetchone():return set()
+                return {row[0] for row in db.execute('SELECT job_id FROM kept_files WHERE job_id IN (SELECT value FROM json_each(?))',(json.dumps(list(job_ids)),))}
+        except (sqlite3.Error,AttributeError):return set()
+
+    def keep_files(self,library,identity,revision,job_id):
+        """Keep files: this book's kept files stop being flagged. Nothing is deleted and no job is queued."""
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        entry=self.kept_files([job_id]).get(job_id)
+        rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
+        manifest=json.loads(rows[0]['manifest']) if rows else {}
+        if not entry or manifest.get('candidate_id')!=identity:raise RetryRefused(RETRY_BOOK_CHANGED)
+        with connect(self.inventory.database) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)')
+            db.execute('INSERT OR IGNORE INTO kept_files VALUES(?,?)',(job_id,time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())))
+        self.invalidate_status()
+        return {'job_id':job_id,'kept':True}
 
     def _check_repairs(self,job_ids):
         """Classify unchecked M4B rows for Repair (m4b_repair.check), one at a time, off the request thread.
@@ -838,12 +999,13 @@ class MergeService:
             return shutil.disk_usage(self.stage_root if self.stage_root.exists() else self.stage_root.parent).free>=needed
         except (KeyError,TypeError,ValueError,OSError):return False
 
-    @operation
     def retry_blocked_job(self,library,identity,revision,job_id):
         """Retry button: requeue one audiobook job whose start was refused, once that refusal has cleared.
 
-        It requeues the same job row (audio_jobs.retry_admission_hold); the worker's own admission
-        and revision checks run again before any work. RetryRefused means nothing changed.
+        It requeues the same job row (audio_jobs.retry_admission_hold) and puts it next, right after the
+        current book (v0.16.8: every Retry and Repair runs next). The worker's own admission and revision
+        checks run again before any work, so the press itself is fast: no operation lock, no source read and
+        no status computation in the reply. RetryRefused means nothing changed.
         """
         import failed_m4b_retry
         from audio_jobs import RetryRefused,RETRY_CLOSING,RETRY_SCANNING,RETRY_WORKER_BUSY
@@ -853,11 +1015,12 @@ class MergeService:
         if self._m4b_parent(job_id,identity,revision,failed_m4b_retry.eligible) is not None:
             # An M4B failure this version can preserve: accepted at once, even while a book converts. The worker
             # admits it right after that book through the proof route (m4b_readmission); a refusal is per book.
-            result=self._request_m4b_readmission(job_id,'retry')
-            return {'job_id':job_id,'requeued':False,**result,'audiobook_jobs':self.resume()}
+            result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
+            return {'job_id':job_id,'requeued':False,**result}
         with self._review_boundary():
-            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready)
-        return result|{'audiobook_jobs':self.resume()}
+            result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
+        queued=self._queue_next_same(job_id);self._resume_later()
+        return result|queued
 
     def _m4b_parent(self,job_id,identity,revision,check):
         """The raw failed row when check(row) holds (M4B retry or repair eligibility), else None.
@@ -875,7 +1038,6 @@ class MergeService:
             raise RetryRefused(RETRY_BOOK_CHANGED)
         return rows[0]
 
-    @operation
     def repair_blocked_job(self,library,identity,revision,job_id):
         """Repair button: the same request rules as Retry; the request is accepted at once and the worker runs
         it right after the current book (_repair_damaged_m4b re-diagnoses the source under file holds and admits
@@ -888,8 +1050,34 @@ class MergeService:
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(REPAIR_SCANNING)
         if self.draining:raise RetryRefused(REPAIR_CLOSING)
         if self._m4b_parent(job_id,identity,revision,m4b_repair.eligible) is None:raise RetryRefused(RETRY_BOOK_CHANGED)
-        result=self._request_m4b_readmission(job_id,'repair')  # runs right after the current book
-        return {'job_id':job_id,'requeued':False,**result,'audiobook_jobs':self.resume()}
+        result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
+        return {'job_id':job_id,'requeued':False,**result}
+
+    def _queue_next_same(self,job_id):
+        """A requeued failed job (the same row) runs right after the current book, in click order, like an M4B
+        Retry: one entry in the queue-next ledger, already admitted, whose child is the job itself."""
+        import m4b_readmission
+        try:
+            with self.jobs._db() as db:
+                m4b_readmission.ensure(db);db.execute('BEGIN IMMEDIATE')
+                seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
+                stamp=time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())
+                db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(job_id,'retry',seq,'admitted',job_id,json.dumps({'reason':'Requeued by Retry'}),stamp,stamp))
+                return m4b_readmission.describe(db,job_id) or {}
+        except sqlite3.Error:return {}  # still requeued; it runs in normal queue order
+
+    def _resume_later(self):
+        """Start the queue after a control without making the control wait for it (resume may first re-check
+        published books). One pending start at a time."""
+        with _BULK_LOCK:
+            if self.__dict__.get('_resume_pending'):return
+            self._resume_pending=True
+        def start():
+            try:self.resume()
+            except Exception:pass  # the next Start or Retry starts it; the request was already recorded
+            finally:
+                with _BULK_LOCK:self._resume_pending=False
+        threading.Thread(target=start,name='books-resume-after-control',daemon=True).start()
 
     def retry_all(self):
         """Retry all: every book in the Can retry group (the server's group, not a page), one at a time.
@@ -948,8 +1136,8 @@ class MergeService:
                 if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),failed_m4b_retry.eligible) is not None:
                     return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
                 with self._review_boundary():
-                    self.jobs.retry_admission_hold(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),self.working.admission_clear,self._space_ready)
-                return 'queued'
+                    self.jobs.retry_admission_hold(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),self.working.admission_clear,self._space_ready,review=False)
+                return 'next' if self._queue_next_same(job_id).get('queued_next') else 'queued'
             except RetryRefused:return None
 
     def current_audiobook(self,identity,jobs=None):

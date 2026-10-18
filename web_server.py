@@ -338,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
                     if view=='candidates':
                         if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
                         group=query.get('group') or None
-                        if group is not None and group not in {'all','retry','repair','other','unsupported'}:raise ValueError('Unknown attention group')
+                        if group is not None and group not in {'all','retry','repair','changed','audiobook','other','unsupported'}:raise ValueError('Unknown attention group')
                         pager=getattr(self.server.merge,'cached_page',None)  # a quiet app reuses the identical page
                         if callable(pager):result=pager(100,int(offset),search,selected_status,group)
                         else:result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)
@@ -448,6 +448,16 @@ class Handler(BaseHTTPRequestHandler):
             except RetryRefused as error:
                 self.fail(409,str(error));return
             self.response(202,result);return
+        if path=='/api/audiobook/keep':
+            # Keep files: the kept files stop being flagged; nothing is deleted.
+            self.shape(data,{'library','id','revision','job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id'])
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.keep_files(library,id,revision,job_id)
+            except RetryRefused as error:
+                self.fail(409,str(error));return
+            self.response(202,result);return
         if path=='/api/audiobook/retry-all':
             # Retry all: the whole Can retry group, server side; progress arrives in the status payload.
             self.shape(data,{'library'})
@@ -554,7 +564,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

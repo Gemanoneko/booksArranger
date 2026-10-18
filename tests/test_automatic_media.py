@@ -51,7 +51,7 @@ class AutomaticMediaTests(unittest.TestCase):
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['job_id'],job_id);self.assertEqual(job['state'],'completed',job)
         self.assertEqual(len(job['manifest']['chapters']),2);self.assertEqual(job['manifest']['cleanup_policy']['recovery_retention_hours'],24)
         self.assertTrue(all(not p.exists() for p in self.sources));self.assertTrue(Path(job['output']['final_path']).is_file())
-        cleanup=self.service.cleanup.status(job_id);self.assertEqual(cleanup['state'],'completed');self.assertEqual(cleanup['recovery']['state'],'retained')
+        cleanup=self.service.cleanup.status(job_id);self.assertEqual(cleanup['state'],'completed');self.assertEqual(cleanup['recovery']['state'],'deleted','v0.16.8: deleted once the output is verified')
         status=self.service.state();self.assertEqual((status['converted_total'],status['approved_total']),(1,1));self.assertEqual(self.service.reviews.page(status='converted')['total'],1)
         self.assertTrue(self.service.reviews._context(fresh)['automatic_approval']);self.assertFalse(self.service.reviews._context(fresh).get('automatic_pending'))
         self.assertTrue(self.service._output_valid(job['output']))
@@ -64,7 +64,7 @@ class AutomaticMediaTests(unittest.TestCase):
         fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),client);self.wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertTrue(job['output']['validation']['passed']);self.assertTrue(Path(job['output']['final_path']).is_file())
-        self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'deleted')  # v0.16.8: no 24 h retention
         ready=self.service.reviews.page(status='converted');self.assertEqual(ready['total'],1);self.assertTrue(ready['rows'][0]['audiobook_ready'])
         self.assertTrue(self.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
         self.assertTrue(all(not source.exists() for source in self.sources));self.assertEqual(self.service.state()['converted_total'],1)

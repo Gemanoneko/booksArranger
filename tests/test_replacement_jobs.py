@@ -15,7 +15,7 @@ from unittest.mock import patch
 from audio_jobs import AudioJobs
 from current_audiobook import CurrentAudiobooks
 from merge_service import MergeService
-from native_io import DirectoryBoundary,VerifiedFile
+from native_io import BoundaryError,DirectoryBoundary,VerifiedFile
 from replacement_jobs import Replacements,packed,digest,now
 from replacement_retirement import ReplacementRetirement
 from scanner import connect
@@ -174,6 +174,24 @@ class ReplacementTests(unittest.TestCase):
             from datetime import datetime
             self.assertGreaterEqual((datetime.fromisoformat(recovery['expire_after'])-datetime.fromisoformat(recovery['retired_at'])).total_seconds(),86400)
         with connect(self.db) as db:self.assertEqual(self.store.raw_job(db,self.parent_id),self.parent_row)
+
+    def test_recovery_copies_go_once_the_replacement_is_verified_and_history_still_holds(self):
+        # v0.16.8 (Sergei, 2026-10-18): all backups of a verified book are removed, replacement-recovery too.
+        relation=self.retire.run(self.publish());rows=self.store.files(relation['id'])
+        copies=[Path(json.loads(r['recovery_json'])['path']) for r in rows];self.assertTrue(all(p.exists() for p in copies))
+        copies[0].unlink()  # already gone: recorded, never an error
+        expected=sum(json.loads(r['recovery_json'])['size'] for r in rows[1:])
+        self.assertEqual(self.retire.purge_recoveries(relation),expected)
+        self.assertFalse(any(p.exists() for p in copies));self.assertFalse((self.retire.root/relation['id']).exists())
+        for row in self.store.files(relation['id']):
+            recovery=json.loads(row['recovery_json']);self.assertEqual(row['state'],'removed');self.assertTrue(recovery['purged_at'])
+        self.assertEqual(self.retire.purge_recoveries(relation),0,'a rerun removes nothing twice')
+        self.assertTrue(self.retire.historical_retired(self.parent_row),'the former book stays history, not a held book')
+
+    def test_changed_replacement_keeps_its_former_output_copies(self):
+        relation=self.retire.run(self.publish());self.final.write_bytes(b'changed')
+        with self.assertRaises(BoundaryError):self.retire.purge_recoveries(relation)
+        self.assertTrue(all(Path(json.loads(r['recovery_json'])['path']).exists() for r in self.store.files(relation['id'])))
 
     def test_changed_source_blocks_all_old_disposition(self):
         relation=self.publish();Path(self.sources[0]['path']).write_bytes(b'changed source')

@@ -79,14 +79,20 @@ def remove_marker(path,validate,persist):
         if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot protect exact download marker')
         try:
             info=FileInfo()
-            if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or (info.volume,info.index_high,info.index_low)!=(original.info.volume,original.info.index_high,original.info.index_low) or info.links!=1 or info.attributes&(0x400|0x10):
+            # The stream was opened by the held base file's own name. A library share reports a separate file
+            # index for a named stream (seen on Z:, 2026-10-18: base 10420294, stream 10420328), so only the
+            # volume, links and attributes are compared; the base file's content is proven by its full hash
+            # before and after (validate). Sergei, 2026-10-18: marker metadata alone never holds a cleanup.
+            if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.volume!=original.info.volume or info.links!=1 or info.attributes&(0x400|0x10):
                 raise BoundaryError('Download marker native identity differs')
             actual=(info.size_high<<32)|info.size_low
             if actual!=size:raise BoundaryError('Download marker changed during inspection')
             kernel.ReadFile.argtypes=[W.HANDLE,ctypes.c_void_p,W.DWORD,ctypes.POINTER(W.DWORD),ctypes.c_void_p];kernel.ReadFile.restype=W.BOOL
             buffer=ctypes.create_string_buffer(MAX_MARKER+1);count=W.DWORD()
             if not kernel.ReadFile(handle,buffer,len(buffer),ctypes.byref(count),None) or count.value!=size:raise BoundaryError('Cannot read bounded download marker')
-            raw=buffer.raw[:count.value];_known_marker(raw)
+            # Any bounded content of this exact marker stream is metadata: its bytes go into the durable
+            # receipt below, so nothing is lost (Sergei, 2026-10-18: marker contents never hold a cleanup).
+            raw=buffer.raw[:count.value]
             if streams(path)!=found:raise BoundaryError('Filesystem streams changed; original retained')
             validate(original)
             persist({'schema':'books-zone-identifier-removal-v1','path':str(path),'identity':original.facts()['identity'],

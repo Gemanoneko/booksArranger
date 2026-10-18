@@ -11,14 +11,14 @@ harness+=String.raw`
  const recovery={state:'retained',eligible:true,reason:'',count:2,bytes:2048,location:'C:/registered/recovery/book',completed_at:'2026-10-10T10:00:00Z',expires_at:'2026-10-11T10:00:00Z',token:'verified-identity',total:2,removed:0};
  context.recoveryRow={...row,creation:{...row.creation,status:'Converted',job_id:'completed-job',cleanup_policy:{enabled:true}},cleanup:{state:'completed',removed:2,total:2,recovery}};
  run('select(recoveryRow,true)');
- assert.match(get('output-policy-notice').textContent,/24 hours after source cleanup completes/);
- assert.match(get('output-summary').textContent,/Originals removed; recovery copies kept until/);
+ assert.match(get('output-policy-notice').textContent,/removes the included originals and their backup copies/);
+ assert.match(get('output-summary').textContent,/Originals removed; deleting recovery copies/);
  context.createdInspector={sections:[{kind:'created',heading:'Created audiobook',facts:[]}],source_directories:[]};
  run('renderInspector(createdInspector,recoveryRow,inspectSequence)');
  const button=run('recoveryPanel.button');assert.equal(button.disabled,false);
  assert.equal(run('recoveryScope({...recoveryRow,creation:{job:{job_id:"actual-completed-job"}}}).job_id'),'actual-completed-job');
  run('select({...recoveryRow,cleanup:{...recoveryRow.cleanup,recovery:{...recoveryRow.cleanup.recovery,eligible:false,reason:"Wait for source cleanup to finish"}}},false)');
- assert.equal(button.disabled,true);assert.match(run('recoveryPanel.values.Status.value.textContent'),/retained; waiting for the app to become idle/);assert.equal(run('recoveryPanel.values.Status.value.textContent').includes('needs attention'),false);
+ assert.equal(button.disabled,true);assert.match(run('recoveryPanel.values.Status.value.textContent'),/waiting to be deleted/);assert.equal(run('recoveryPanel.values.Status.value.textContent').includes('needs attention'),false);
  run('select(recoveryRow,false)');
  assert.equal(run('recoveryPanel.values["Space on C:"].value.textContent'),'2.05 KB (2,048 bytes)');
  button.handlers.click();assert.equal(get('recovery-dialog').open,true);assert.equal(document.activeElement,get('recovery-cancel'));
@@ -31,7 +31,7 @@ harness+=String.raw`
  assert.equal(run('recoveryPanel.button'),button,'polling preserves action node and focus');
  run('select(recoveryRow,false)');button.handlers.click();run('refreshFailed(new Error("offline"))');assert.equal(get('recovery-dialog').open,false);assert.equal(button.disabled,true);assert.match(run('recoveryPanel.reason.textContent'),/server unavailable/);
  run('clearConnectionNotice()');assert.equal(button.disabled,false);
- run('select({...recoveryRow,cleanup:{...recoveryRow.cleanup,recovery:{...recoveryRow.cleanup.recovery,expires_at:"2000-01-01T00:00:00Z"}}},false)');assert.equal(run('recoveryPanel.values.Status.value.textContent'),'Expired; waiting for automatic cleanup');assert.equal(button.disabled,false,'expired eligible copies remain manually deletable');
+ run('select({...recoveryRow,cleanup:{...recoveryRow.cleanup,recovery:{...recoveryRow.cleanup.recovery,expires_at:"2000-01-01T00:00:00Z"}}},false)');assert.equal(run('recoveryPanel.values.Status.value.textContent'),'Deleting after the audiobook check');assert.equal(button.disabled,false,'expired eligible copies remain manually deletable');
  const fixedDeadline=run('recoveryPanel.values["Automatic deletion"].value.textContent');run('updateRecovery();updateRecovery()');assert.equal(run('recoveryPanel.values["Automatic deletion"].value.textContent'),fixedDeadline,'polling never extends expiry');
  run('select({...recoveryRow,cleanup:{...recoveryRow.cleanup,recovery:{...recoveryRow.cleanup.recovery,state:"needs_attention",eligible:false,reason:"Registered backup changed",count:null,bytes:null}}},false)');assert.equal(button.disabled,true);assert.equal(run('recoveryPanel.values["Space on C:"].value.textContent'),'Unavailable');assert.match(run('recoveryPanel.values.Status.value.textContent'),/Registered backup changed/);
  run('select({...recoveryRow,cleanup:{...recoveryRow.cleanup,recovery:{...recoveryRow.cleanup.recovery,state:"deleting",eligible:false,removed:1,total:2}}},false)');assert.match(run('recoveryPanel.values.Status.value.textContent'),/Deleting recovery copies: 1 of 2/);

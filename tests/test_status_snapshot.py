@@ -139,13 +139,14 @@ class MergeStatusTests(unittest.TestCase):
         merge.cleanup = SimpleNamespace(thread=None, current=None, _rows=Mock(return_value=[]))
         return merge
 
-    def test_recovery_idle_uses_the_existence_check_not_a_full_job_load(self):
-        busy = self.recovery_merge(True)
-        with self.assertRaisesRegex(ValueError, 'queued'): busy._recovery_idle()
-        busy.jobs.status.assert_not_called()
-        idle = self.recovery_merge(False)
-        idle._recovery_idle()
-        idle.jobs.status.assert_not_called(); idle.cleanup._rows.assert_called_once()
+    def test_recovery_idle_never_waits_for_queued_or_running_books(self):
+        # v0.16.8 (Sergei, 2026-10-18): a verified book's copies go at once; queued or converting work no
+        # longer holds them, and the check reads no job at all. Only a source cleanup in progress waits.
+        busy = self.recovery_merge(True); busy.jobs._thread = SimpleNamespace(is_alive=lambda: True)
+        busy._recovery_idle()
+        busy.jobs.status.assert_not_called(); busy.jobs.has_unfinished.assert_not_called()
+        busy.cleanup.current = 'cleanup-1'
+        with self.assertRaisesRegex(ValueError, 'source cleanup'): busy._recovery_idle()
 
     def test_has_unfinished_matches_the_full_status_scan(self):
         with tempfile.TemporaryDirectory(dir=AREA) as folder:

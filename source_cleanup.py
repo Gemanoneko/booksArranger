@@ -250,7 +250,7 @@ class CleanupJobs:
                 if recovery['state']!='unavailable':item['restore_available']=item['restore_available'] and recovery['state']=='retained'
                 item['restore_available']=item['restore_available'] and all(Path(m['path']).parent.is_dir() for m in self._rows('SELECT path FROM cleanup_members WHERE cleanup_id=?',(item['id'],)))
                 if item['state']=='completed':
-                    if recovery['state']=='retained':item['status']='Originals removed; recovery copies kept until '+recovery['expires_at']
+                    if recovery['state']=='retained':item['status']='Originals removed; deleting recovery copies'
                     elif recovery['state']=='deleting':item['status']='Originals removed; deleting recovery copies'
                     elif recovery['state']=='needs_attention':item['status']='Originals removed; recovery cleanup needs attention: '+recovery['reason']
                     elif recovery['state']=='deleted':item['status']='Originals removed; recovery copies deleted'
@@ -268,7 +268,7 @@ class CleanupJobs:
             self.thread.join(30)
             if self.thread.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
     def _work(self,selected=None,follow_audio=True):
-        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason=?) ORDER BY created",('Additional filesystem streams require review; original retained',)):
+        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (?,?,?)) ORDER BY created",('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')):
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
             self.current=row['id']

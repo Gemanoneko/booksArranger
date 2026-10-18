@@ -34,7 +34,7 @@ class StandingAdmissionTests(unittest.TestCase):
         job=next(j for j in self.f.service.jobs.status()['jobs'] if j['job_id']==job_id)
         self.assertEqual(job['state'],'completed',job);self.assertEqual(job['output']['validation']['encoding']['mode'],'copy')
         self.assertEqual([c['title'] for c in job['manifest']['source_chapters']],['First','Second']);self.assertGreater(job['output']['validation']['native_pcm_evidence']['sample_count'],0)
-        self.assertFalse(source.exists());self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        self.assertFalse(source.exists());self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'deleted')
         self.assertEqual(self.f.service.reviews.page(status='converted')['total'],1);self.assertTrue(self.f.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
     def test_fan_constituents_to_real_ready_and_unknown_staging_content_preserved(self):
         self.replace_sources();sources=[]
@@ -49,7 +49,7 @@ class StandingAdmissionTests(unittest.TestCase):
         fresh,job_id=self.f.service.approve_automatic(row,result,threading.Event(),self.f.client);self.f.wait()
         job=next(j for j in self.f.service.jobs.status()['jobs'] if j['job_id']==job_id);self.assertEqual(job['state'],'completed',job)
         self.assertEqual(job['manifest']['metadata_facts']['collection']['component_count'],2);self.assertEqual(result['metadata_facts']['cover']['kind'],'neutral')
-        self.assertTrue(all(not s.exists() for s in sources));self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'retained')
+        self.assertTrue(all(not s.exists() for s in sources));self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'deleted')
         ready=self.f.service.reviews.page(status='converted');self.assertEqual(ready['total'],1);self.assertTrue(ready['rows'][0]['audiobook_ready'])
     def test_unknown_staging_audio_is_never_admitted_by_wav_extension(self):
         row,result=self.f.result();original=self.f.service.storage_cleanup.run;unknown=[]

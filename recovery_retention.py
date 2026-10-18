@@ -1,4 +1,10 @@
-"""Bounded 24-hour retention of registered original-track recovery sets."""
+"""Original-track recovery sets: deleted as soon as the book's output is verified (v0.16.8).
+
+Sergei, 2026-10-18: once the converted audiobook is verified and each original's content matched what was
+checked, the app removes all backups of that book. The 24-hour window is gone: a new set's deadline is its
+completion time, and sets recorded with the former 24-hour deadline are purged too. Purge verifies the
+output in full first; a missing or unverified output keeps the copies, flagged with the reason.
+"""
 import contextlib
 import hashlib
 import json
@@ -9,13 +15,25 @@ from scanner import connect
 from source_cleanup import packed
 from native_io import BoundaryError, DirectoryBoundary, ordinary
 
-HOURS=24
+HOURS=0         # deadline for new sets: purged as soon as the output is verified
+LEGACY_HOURS=24 # deadline recorded by 0.16.7 and earlier; still a valid immutable deadline
 
 def utc():return datetime.now(timezone.utc)
 def moment(value):
     parsed=datetime.fromisoformat(value)
     if parsed.tzinfo is None:raise ValueError('Recovery completion time has no timezone')
     return parsed.astimezone(timezone.utc)
+
+AUDIOBOOK_MISSING='Audiobook missing: '
+AUDIOBOOK_UNVERIFIED='Audiobook not verified: '
+
+def kept_reason(error):
+    """The reason a purge kept a set. A missing or unverified audiobook is the 0.16.8 keep-case (B), told
+    apart by a fixed prefix so the attention groups never parse English messages."""
+    text=str(error) or type(error).__name__
+    if isinstance(error,FileNotFoundError) or 'cannot find' in text.lower() or 'Completed output destination changed' in text:return AUDIOBOOK_MISSING+text
+    if 'Completed output' in text or 'Retention output identity changed' in text:return AUDIOBOOK_UNVERIFIED+text
+    return text
 
 class RecoveryRetention:
     def __init__(self,storage,clock=utc,guard=None):
@@ -76,12 +94,9 @@ class RecoveryRetention:
         return row|{'state':state,'reason':reason,'eligible':eligible,'count':None if uncertain else count,'bytes':None if uncertain else size,'location':str(self.storage.recovery_root/row['cleanup_id']), 'token':token,'total':len(members),'removed':removed}
 
     def due(self):
-        result=[]
-        for row in self._rows("SELECT * FROM recovery_retention WHERE state IN ('retained','deleting')"):
-            try:
-                if row['state']=='deleting' or self.clock()>=moment(row['expires_at']):result.append(row['job_id'])
-            except (ValueError,TypeError):pass
-        return result
+        """Every set not yet deleted: retained, partly deleted, or held. Purge decides; there is no waiting."""
+        # A set without a recorded completion cannot prove its deadline: it stays, flagged.
+        return [row['job_id'] for row in self._rows("SELECT job_id FROM recovery_retention WHERE state IN ('retained','deleting','needs_attention') AND completed_at<>'' ORDER BY completed_at,job_id")]
 
     def _set(self,job_id,state,reason='',actor=None):
         with connect(self.database) as db:
@@ -90,38 +105,51 @@ class RecoveryRetention:
             if state=='deleted':db.execute('UPDATE recovery_retention SET deleted_at=? WHERE job_id=?',(self.clock().isoformat(),job_id))
 
     def purge(self,job_id,actor='automatic',confirmation=None):
-        status=self.status(job_id)
-        if status['state']=='deleted':return status
-        if confirmation is not None and any(status.get(k)!=confirmation.get(k) for k in ('token','count','bytes')):raise ValueError('Recovery copies changed. Review the updated details and try again.')
         persisted=self._rows('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,))
-        reconciling=bool(persisted and persisted[0]['state']=='deleting')
-        if status['state'] not in ('retained','deleting') and not reconciling:raise BoundaryError(status.get('reason') or 'Recovery copies are not eligible')
-        if actor=='automatic' and not reconciling and self.clock()<moment(status['expires_at']):return status
-        row=self._rows('SELECT * FROM recovery_retention WHERE job_id=?',(job_id,))[0]
+        if persisted and persisted[0]['state']=='deleted':return self.status(job_id)  # idempotent: never twice
+        status=self.status(job_id)
+        if confirmation is not None and any(status.get(k)!=confirmation.get(k) for k in ('token','count','bytes')):raise ValueError('Recovery copies changed. Review the updated details and try again.')
+        if not persisted:raise BoundaryError(status.get('reason') or 'Recovery copies are not eligible')
+        # No deadline and no idle wait: the full output verification below is the gate. A set held only
+        # because a copy is already gone is purged too; a missing copy is recorded, never an error.
+        row=persisted[0]
         try:
             with self.storage.protected_output(job_id,guard=self.guard) as (manifest,output),contextlib.ExitStack() as stack:
                 if output['sha256']!=row['output_hash']:raise BoundaryError('Retention output identity changed')
                 events=self._rows('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['cleanup_id'],))
-                if not events or events[0]['completed_at']!=row['completed_at'] or (moment(row['completed_at'])+timedelta(hours=HOURS)).isoformat()!=row['expires_at']:raise BoundaryError('Immutable recovery completion deadline changed')
+                deadlines={(moment(row['completed_at'])+timedelta(hours=hours)).isoformat() for hours in (HOURS,LEGACY_HOURS)} if events else set()
+                if not events or events[0]['completed_at']!=row['completed_at'] or row['expires_at'] not in deadlines:raise BoundaryError('Immutable recovery completion deadline changed')
                 cleanup,members=self.storage._source_safety(stack,job_id,manifest,output)
                 if not cleanup or cleanup['id']!=row['cleanup_id']:raise BoundaryError('Recovery cleanup identity changed')
                 location=ordinary(self.storage.recovery_root/cleanup['id'])
-                stack.enter_context(DirectoryBoundary(self.storage.recovery_root.anchor,location))
-                names={Path(r['backup']).name for r in members}
-                if any(p.name not in names for p in location.iterdir()):raise BoundaryError('Unknown recovery content preserved')
+                present=True
+                try:location.lstat()
+                except FileNotFoundError:present=False  # every copy is already gone: recorded below
+                if present:
+                    stack.enter_context(DirectoryBoundary(self.storage.recovery_root.anchor,location))
+                    names={Path(r['backup']).name for r in members}
+                    if any(p.name not in names for p in location.iterdir()):raise BoundaryError('Unknown recovery content preserved')
                 prepared=[]
                 for source in manifest['sources']:
                     member=next(r for r in members if r['path']==source['path']);path=ordinary(member['backup'])
-                    if path.parent!=location or not member['backup_facts']:raise BoundaryError('Recovery native correspondence is unavailable')
-                    item=self.storage._prepare(stack,job_id,'recovery',path,self.storage.recovery_root,(source['sha256'],source['size'],source['modified']))
+                    if path.parent!=location:raise BoundaryError('Recovery native correspondence is unavailable')
+                    expected=(source['sha256'],source['size'],source['modified'])
+                    try:path.lstat()
+                    except FileNotFoundError:
+                        self.storage.record_absent(job_id,'recovery',path,expected);continue  # already gone
+                    # Content proof in _prepare (full hash against the reviewed original) is what allows the
+                    # removal; the recorded native identity, when there is one, must still match.
+                    item=self.storage._prepare(stack,job_id,'recovery',path,self.storage.recovery_root,expected)
                     if item:
-                        if item[1].facts()!=json.loads(member['backup_facts']):raise BoundaryError('Recovery native identity changed; replacement preserved')
+                        if member['backup_facts'] and item[1].facts()!=json.loads(member['backup_facts']):raise BoundaryError('Recovery native identity changed; replacement preserved')
                         prepared.append(item)
                 self._set(job_id,'deleting',actor=row['actor'] or actor)
                 self.storage._dispose(prepared,guard=self.guard)
-            self._set(job_id,'deleted')
+            self._set(job_id,'deleted',actor=row['actor'] or actor)
+            try:location.rmdir()  # the emptied set folder; anything left in it stays
+            except OSError:pass
         except InterruptedError:
             raise # Cooperative shutdown preserves deleting intent for restart reconciliation.
         except Exception as error:
-            self._set(job_id,'needs_attention',str(error));raise
+            self._set(job_id,'needs_attention',kept_reason(error));raise
         return self.status(job_id)

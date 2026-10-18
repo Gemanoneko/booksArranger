@@ -193,6 +193,14 @@ class Replacements:
         transaction(self.database,lambda db:self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
         return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
 
+    def file_purged(self,expected,recovery):
+        """A removed former output's recovery copy was deleted (or found gone) after the replacement was
+        verified: the record keeps state 'removed' and gains purged_at; history no longer needs the copy."""
+        if expected['state']!='removed':raise ValueError('Only a retired former output has a recovery copy to purge')
+        changes={'recovery_json':packed(recovery),'updated':now()}
+        transaction(self.database,lambda db:self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
+        return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
+
     def copy_intent(self,expected,recovery):
         if expected['state']!='waiting' or expected['recovery_json']:raise ValueError('Recovery copy intent already exists')
         changes={'recovery_json':packed(recovery),'updated':now()}

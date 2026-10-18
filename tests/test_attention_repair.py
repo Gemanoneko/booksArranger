@@ -65,7 +65,7 @@ class Base(unittest.TestCase):
         s.inventory=SimpleNamespace(worker=None,database=self.l.db,group_lock=threading.RLock());s.reviews=SimpleNamespace(lock=threading.RLock())
         s.working=SimpleNamespace(admission_clear=lambda row:None);s.stage_root=self.l.base/'staging';s.stage_root.mkdir(exist_ok=True)
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None);s.automatic=SimpleNamespace(stop_event=threading.Event())
-        s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'})
+        s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'});s._resume_later=Mock()
         return s
 
     def summary(self,service=None):return (service or self.service()).attention_summary()
@@ -111,6 +111,7 @@ class ClassificationTests(Base):
         with patch.object(MergeService,'_check_repairs',REAL_CHECK),patch.object(m4b_repair,'check',side_effect=lambda row,stop=None:(seen.append(row['job_id']),real(row,stop))[1]):
             s.attention_summary();deadline=time.monotonic()+10
             while s.__dict__.get('_repair_running') and time.monotonic()<deadline:time.sleep(.02)
+            s._repair_thread.join(10)  # the flag clears before the worker's last catalog write; wait for that write too
         self.assertEqual(seen,[job_id]);self.assertEqual(m4b_repair.classify(self.l.row(job_id))['state'],'refused','the fixture source is no M4B movie')
         s.attention_summary();self.assertEqual(self.checks.call_count,1,'a checked row is never read again')
 
@@ -130,7 +131,7 @@ class ClassificationTests(Base):
         self.assertIsNone(repair_record({'manifest':{'m4b_repair':{'schema':failed_m4b_retry.SCHEMA}}}),'a preserved-M4B retry child is no repair')
         silence={'schema':m4b_repair.SCHEMA,'note':'n','repairs':[{'kind':'truncated_final_frames','track_id':1,'first_frame':9,'frames':1,'replaced_ticks':1024,'timescale':44100,'silent_frame':'00c80007','description':'d'}]}
         self.assertEqual(repair_record({'manifest':{'m4b_repair':silence}})['patched'],[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100}],'the amount the panel shows')
-        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'other':2,'unsupported':3})
+        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'changed':2,'audiobook':3,'other':4,'unsupported':5},'spec section 6 order')
 
 
 class RetryRouteTests(Base):
@@ -149,8 +150,8 @@ class RetryRouteTests(Base):
         finally:self.l.jobs._thread=None
         self.assertEqual({key:result[key] for key in ('job_id','requeued','accepted','queued_next','position','kind','state')},
                          {'job_id':job_id,'requeued':False,'accepted':True,'queued_next':True,'position':1,'kind':'retry','state':'queued'})
-        self.assertEqual(result['audiobook_jobs'],{'state':'Running'});self.assertEqual(again['position'],1,'a second press keeps its place');self.assertEqual(second['position'],2)
-        self.assertEqual(s.resume.call_count,3)
+        self.assertNotIn('audiobook_jobs',result,'no status computed in the reply');self.assertEqual(again['position'],1,'a second press keeps its place');self.assertEqual(second['position'],2)
+        self.assertEqual(s._resume_later.call_count,3);s.resume.assert_not_called()
         # Between books the worker admits the head request through the unchanged proof route, then runs its child next.
         calls=[]
         def admit(service,parent,now,in_worker=False):calls.append((parent['job_id'],in_worker));return {'requeued':True,'job_id':self.child(json.loads(parent['manifest']))}
@@ -247,7 +248,7 @@ class RepairAdmissionTests(Base):
         try:result=self.s.repair_blocked_job('Audiobooks',identity,1,self.job_id)
         finally:self.l.jobs._thread=None
         self.assertEqual((result['accepted'],result['queued_next'],result['position'],result['kind'],result['requeued']),(True,True,1,'repair',False),'accepted while a book converts')
-        self.assertEqual(result['audiobook_jobs'],{'state':'Running'});self.assertEqual(self.children(),[],'nothing is admitted on the request thread')
+        self.assertNotIn('audiobook_jobs',result);self.assertEqual(self.children(),[],'nothing is admitted on the request thread')
         # Between books the worker re-diagnoses and admits the child, which runs next.
         child=self.s._next_m4b_readmission()
         [row]=self.children();self.assertEqual(child,row['job_id']);self.assertEqual(m4b_repair.approved_repairs(json.loads(row['manifest'])),{'dangling_chapter_reference'})
@@ -307,6 +308,17 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.call(self.body|{'extra':1},path='/api/audiobook/repair')[0],400)
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         self.assertEqual(self.call(self.body,path='/api/audiobook/repair')[:2],(409,{'error':REPAIR_SCANNING}))
+
+    def test_keep_route(self):
+        # v0.16.8 Keep files: same request shape and answers as Retry; nothing is queued or deleted.
+        self.merge.keep_files=Mock(return_value={'job_id':self.body['job_id'],'kept':True})
+        status,body,_=self.call(self.body,path='/api/audiobook/keep');self.assertEqual((status,body['kept']),(202,True))
+        self.merge.keep_files.assert_called_once_with('Audiobooks',self.body['id'],4,self.body['job_id'])
+        self.merge.keep_files.side_effect=RetryRefused("This book's status changed. Check the updated status above.")
+        self.assertEqual(self.call(self.body,path='/api/audiobook/keep')[:2],(409,{'error':"This book's status changed. Check the updated status above."}))
+        self.assertEqual(self.call(self.body|{'extra':1},path='/api/audiobook/keep')[0],400)
+        self.assertEqual(self.call(self.body,token=False,path='/api/audiobook/keep')[0],403)
+        self.assertEqual(self.merge.keep_files.call_count,2,'refused shapes and tokens never reach the service')
 
     def test_retry_all_route(self):
         self.merge.retry_all=Mock(return_value={'id':'r','state':'running','total':3,'done':0,'queued':0,'refused':0})

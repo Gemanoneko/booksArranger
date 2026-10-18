@@ -379,12 +379,23 @@ async function requestQuit({ confirmed }) {
   watchQuit();
 }
 
-// HTTP failure never proves a safe checkpoint. The native host remains alive.
+// HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
+// own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
+const { createQuitWatch, outcomeOf } = require('./quit-watch');
+async function engineGoneExit() {
+  // Tell the host the shell is done, give it a moment to report the engine's exit, then leave.
+  try { if (state.backend && !state.backendExited) state.backend.stdin.end(); } catch { /* host gone */ }
+  const deadline = Date.now() + 5000;
+  while (!state.backendExited && Date.now() < deadline) await sleep(200);
+  finishExit(state.backendExited && state.backend?.exitCode !== 0 ? 1 : 0);
+}
 async function watchQuit() {
+  const watch = createQuitWatch();
   while (!state.backendExited && state.quit === 'requested') {
     await sleep(1000);
     try {
       const status = await desktopStatus.get({ timeout: 3000, maxAge: 0 });
+      watch.observe('reply');
       refreshTray('Books Arranger — ' + status.phase);
       if (status.phase === 'blocked') {
         state.quit = 'none';
@@ -392,7 +403,10 @@ async function watchQuit() {
         reportError('Books Arranger is still running', status.error || 'A worker has not reached its safe checkpoint. Try Quit again.');
         return;
       }
-    } catch { refreshTray('Books Arranger — waiting for engine checkpoint'); }
+    } catch (error) {
+      if (watch.observe(outcomeOf(error))) return engineGoneExit();
+      refreshTray('Books Arranger — waiting for engine checkpoint');
+    }
   }
 }
 
@@ -412,8 +426,13 @@ function finishExit(code) {
   app.exit(code);
 }
 
+async function repeatQuit() {
+  // A second --quit while a Quit is under way: if the engine no longer answers at all, it is gone.
+  try { await request('GET', '/api/health', { timeout: 2000 }); }
+  catch (error) { if (outcomeOf(error) === 'refused') return engineGoneExit(); }
+}
 function handleCommand(args) {
-  if (flag(args, 'quit')) requestQuit({ confirmed: true });
+  if (flag(args, 'quit')) { if (state.quit === 'requested') repeatQuit(); else requestQuit({ confirmed: true }); }
   else if (flag(args, 'close-window')) { if (state.win && !state.win.isDestroyed()) state.win.close(); }
   else showWindow();
 }

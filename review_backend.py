@@ -196,7 +196,7 @@ class CandidateReviewService:
         row['cleanup']=job.get('cleanup') if job else None
         return row
 
-    ATTENTION_ORDER={'retry':0,'repair':1,'other':2,'unsupported':3}
+    ATTENTION_ORDER={'retry':0,'repair':1,'changed':2,'audiobook':3,'other':4,'unsupported':5}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
@@ -216,7 +216,7 @@ class CandidateReviewService:
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
         if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review'):raise ValueError('Unknown candidate status')
-        if group not in (None,'all','retry','repair','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
+        if group not in (None,'all','retry','repair','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
@@ -246,7 +246,7 @@ class CandidateReviewService:
             jobs=self.page_local.jobs
             if status=='jobs':ids={cid for cid,job in jobs.items() if job['state'] in ('Queued','Creating')}
             elif status=='created':ids={cid for cid,job in jobs.items() if job['state']=='Audiobook created'}
-            elif status=='output_attention':ids={cid for cid,job in jobs.items() if job['state']=='Output needs attention' and group in (None,'all',group_of(cid))}
+            elif status=='output_attention':ids={cid for cid,job in jobs.items() if (job['state']=='Output needs attention' or job['job_id'] in attention) and group in (None,'all',group_of(cid))}
             elif status=='converted':ids=set(converted)
             elif status in ('approved','ready'):ids={cid for cid in self.page_local.contexts if approved_context(cid)}
             elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if item['state']=='Held'}
@@ -274,7 +274,7 @@ class CandidateReviewService:
             if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
             if status=='converted':return row['id'] in converted
             if status=='created':return bool(job and job['state']=='Audiobook created')
-            if status=='output_attention':return bool(job and job['state']=='Output needs attention' and group in (None,'all',group_of(row['id'])))
+            if status=='output_attention':return bool(job and (job['state']=='Output needs attention' or job['job_id'] in attention) and group in (None,'all',group_of(row['id'])))
             if status=='ready':
                 included=ctx.get('included',[])
                 if not approved or job or not ctx.get('source_coverage_confirmed') or not ctx.get('order_confirmed') or not ctx.get('source_hashes') or not included or row.get('conflicts') or not row.get('preview',{}).get('path'):return False
@@ -294,7 +294,7 @@ class CandidateReviewService:
             if shown and self.jobs and hasattr(self.jobs,'cleanup'):
                 statuses=self.jobs.cleanup_statuses([job['job_id'] for job in shown]) if hasattr(self.jobs,'cleanup_statuses') else {job['job_id']:self.jobs.cleanup.status(job['job_id']) for job in shown}
                 for job in shown:job['cleanup']=statuses[job['job_id']]
-            waiting=[job['job_id'] for job in shown if job['state']=='Output needs attention']
+            waiting=[job['job_id'] for job in shown if job['state'] in ('Output needs attention','Audiobook created')]
             if waiting and hasattr(self.jobs,'attention_summary'):
                 details=self.jobs.attention_summary(waiting)
                 for job in shown:
@@ -303,7 +303,13 @@ class CandidateReviewService:
                         if 'retry' in item:job['retry']=item.pop('retry')
                         if 'repair' in item:job['repair']=item.pop('repair')
                         if 'readmission' in item:job['readmission']=item.pop('readmission')
+                        if 'keep' in item:job['keep']=item.pop('keep')
                         job['attention']=item
+            created=[job['job_id'] for job in shown if job['state']=='Audiobook created' and 'attention' not in job]
+            if created and hasattr(self.jobs,'kept_by_choice'):
+                kept=self.jobs.kept_by_choice(created)
+                for job in shown:
+                    if job['job_id'] in kept:job['kept']=True
             queued=[job['job_id'] for job in shown if job['state']=='Queued']
             if queued and hasattr(self.jobs,'readmission_status'):
                 # A Retry/Repair child waiting to run right after the current book: its place, after any refresh.

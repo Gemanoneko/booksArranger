@@ -222,7 +222,7 @@ class ServiceTests(Base):
         s=MergeService.__new__(MergeService);s.jobs=self.q.jobs;s.working=self.q.life;s.operation_lock=threading.RLock()
         s.inventory=SimpleNamespace(worker=None,group_lock=threading.RLock());s.reviews=SimpleNamespace(lock=threading.RLock())
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None)
-        s.resume=Mock(return_value={'state':'Running','queued':1})
+        s.resume=Mock(return_value={'state':'Running','queued':1});s._resume_later=Mock()
         return s
 
     def test_operation_requeues_and_resumes(self):
@@ -230,7 +230,9 @@ class ServiceTests(Base):
         status=s.candidate_status(manifest['candidate_id']);self.assertEqual(status['retry'],{'allowed':True,'reason':''})
         self.assertEqual(status['state'],'Output needs attention');self.assertTrue(status['reason'].startswith('Working cleanup requires attention'))
         result=s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)
-        self.assertEqual(result,{'job_id':job_id,'requeued':True,'audiobook_jobs':{'state':'Running','queued':1}});s.resume.assert_called_once_with()
+        # v0.16.8: the press answers at once (no status in the reply), the job runs next, the queue starts on its own thread.
+        self.assertEqual({key:result[key] for key in ('job_id','requeued','queued_next','position','kind')},{'job_id':job_id,'requeued':True,'queued_next':True,'position':1,'kind':'retry'})
+        self.assertNotIn('audiobook_jobs',result);s._resume_later.assert_called_once_with();s.resume.assert_not_called()
         self.assertNotIn('retry',s.candidate_status(manifest['candidate_id']))
 
     def test_operation_refuses_while_scanning_or_quitting_without_resuming(self):

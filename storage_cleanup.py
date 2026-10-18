@@ -204,6 +204,21 @@ class StorageCleanup:
         self._receipts[str(path)]=old
         return path, handle, ancestry
 
+    def record_absent(self, job_id, kind, path, expected):
+        """A recorded copy that is already gone (removed outside the app, or by an interrupted earlier
+        purge): a terminal receipt, so the set can close and a rerun skips it. Never touches a file."""
+        target = {'path': str(path), 'job_id': job_id, 'kind': kind, 'sha256': expected[0], 'size': expected[1],
+                  'facts': packed({'absent': True}), 'state': 'absent_after_intent', 'updated': stamp()}
+        def insert(db):
+            current = db.execute('SELECT * FROM storage_cleanup_files WHERE path=?', (str(path),)).fetchone()
+            if current:
+                current = dict(current)
+                if current['job_id'] != job_id or current['kind'] != kind:raise BoundaryError('Copy receipt belongs to other work')
+                if current['state'] in TERMINAL:return current
+                return self._cas(db, 'storage_cleanup_files', current, dict(current, state='absent_after_intent', updated=stamp()))
+            return self._cas(db, 'storage_cleanup_files', None, target)
+        return transaction(self.database, insert)
+
     def _file_state(self, path, state):
         expected=self._receipts.get(str(path))
         if not expected:raise BoundaryError('No held cleanup receipt provenance')

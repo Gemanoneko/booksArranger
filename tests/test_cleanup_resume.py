@@ -212,7 +212,9 @@ class ResumeTests(Base):
         self.assertGreaterEqual(datetime.fromisoformat(completed),start)
         retention=RecoveryRetention(b.storage);status=retention.status(b.job_id)
         self.assertEqual(status['state'],'retained')
-        self.assertEqual(datetime.fromisoformat(status['expires_at']),datetime.fromisoformat(completed)+timedelta(hours=24))
+        # v0.16.8 (Sergei, 2026-10-18): no 24-hour window; the set is due as soon as the output is verified.
+        self.assertEqual(datetime.fromisoformat(status['expires_at']),datetime.fromisoformat(completed))
+        self.assertEqual(retention.due(),[b.job_id])
         self.assertTrue(all(b.backup(i).is_file() for i in range(3)))
 
     def test_changed_recovery_copy_refuses_before_any_removal(self):
@@ -395,7 +397,9 @@ class InlineAndStartTests(Base):
         self.assertEqual(b.row()['state'],'completed')
         self.assertEqual(list(b.stage.iterdir()),[],'staging snapshots and generated files are retired')
         self.assertTrue((b.job/'ownership.json').is_file())
-        self.assertTrue(all(b.backup(i).is_file() for i in range(3)),'24 h recovery copies are kept')
+        # v0.16.8: the book's output is verified, so its recovery copies are deleted at once, recorded as deleted.
+        self.assertFalse(any(b.backup(i).exists() for i in range(3)),'recovery copies are deleted right after verification')
+        with connect(b.db) as db:self.assertEqual(db.execute('SELECT state FROM recovery_retention WHERE job_id=?',(b.job_id,)).fetchone()[0],'deleted')
         with connect(b.db) as db:self.assertEqual(db.execute('SELECT state FROM storage_cleanup_jobs WHERE job_id=?',(b.job_id,)).fetchone()[0],'completed')
 
     def test_merge_service_wires_pause_and_quit_into_the_retry_wait(self):

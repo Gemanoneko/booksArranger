@@ -22,13 +22,36 @@ TOKEN_VARIABLE = 'BOOKS_ARRANGER_DESKTOP_TOKEN'
 class DesktopControl:
     """Quit drain: the book in progress finishes, nothing new starts, then the process exits."""
 
-    def __init__(self, server):
+    # After a successful shutdown (every worker reached its checkpoint and the server closed) the process
+    # must end. A thread left behind kept it alive, so its native host never exited and the shell waited
+    # forever with no window (v0.16.8 item 2). The desktop main arms this; tests leave it off.
+    EXIT_AFTER = 20.0
+
+    def __init__(self, server, exit_bound=None, exit_process=None):
         self.server = server
         self.lock = threading.Lock()
         self.phase = 'running'
         self.requested_at = None
         self.error = ''
         self.thread = None
+        self.exit_bound = exit_bound
+        self.exit_process = exit_process or os._exit
+
+    def _bound_exit(self):
+        """Shutdown succeeded: if this process is still alive after exit_bound, report what kept it and end it."""
+        if self.exit_bound is None:
+            return None
+        def watchdog():
+            time.sleep(self.exit_bound)
+            lingering = [thread.name for thread in threading.enumerate() if not thread.daemon and thread is not threading.main_thread()]
+            try:
+                print('Books Arranger engine exit forced after a completed shutdown; still running: ' + (', '.join(lingering) or 'main thread'), file=sys.stderr, flush=True)
+            except Exception:
+                pass
+            self.exit_process(0)
+        thread = threading.Thread(target=watchdog, name='books-exit-bound', daemon=True)
+        thread.start()
+        return thread
 
     def _automatic(self):
         return getattr(self.server.merge, 'automatic', None)
@@ -153,6 +176,7 @@ class DesktopControl:
             return False  # A failed close is not authority to release ownership.
         with self.lock:
             self.phase = 'exiting'
+        self._bound_exit()
         return True
 
     def prepare_update(self):
@@ -344,7 +368,7 @@ def main(argv=None):
 
     def ready(server):
         server.RequestHandlerClass = handler_class(web_server.Handler, token)
-        server.desktop = DesktopControl(server)
+        server.desktop = DesktopControl(server, exit_bound=DesktopControl.EXIT_AFTER)
         threading.Thread(target=watch_shell, args=(server.desktop,), name='books-desktop-shell', daemon=True).start()
 
     def startup_guard(database, roots, port):

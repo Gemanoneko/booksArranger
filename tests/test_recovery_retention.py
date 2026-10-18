@@ -21,16 +21,23 @@ class RecoveryTests(unittest.TestCase):
         self.initial=self.retention.status(self.job_id)
         self.now=moment(self.initial['completed_at']);self.retention.clock=lambda:self.now
         return self.initial
-    def test_24h_boundary_restart_and_stage_independence(self):
+    def test_no_24h_window_purge_at_once_and_rerun_is_a_no_op(self):
+        # v0.16.8 (Sergei, 2026-10-18): due as soon as the output is verified; the purge verifies it in full.
         first=self.ready();self.assertEqual(first['count'],2);self.assertEqual(first['bytes'],4096)
         self.assertEqual(self.storage.status()[0]['state'],'completed');self.assertEqual(list(self.stage.iterdir()),[])
-        self.now+=timedelta(hours=24,microseconds=-1);self.assertEqual(self.retention.due(),[])
-        self.retention.purge(self.job_id);self.assertEqual(self.retention.status(self.job_id)['count'],2)
-        again=RecoveryRetention(self.storage,clock=lambda:self.now);self.assertEqual(again.status(self.job_id)['expires_at'],first['expires_at'])
-        self.now+=timedelta(microseconds=1);self.assertEqual(again.due(),[self.job_id])
-        done=again.purge(self.job_id);self.assertEqual(done['state'],'deleted');self.assertEqual(done['bytes'],0);self.assertEqual(done['actor'],'automatic')
-        self.assertEqual(again.purge(self.job_id),done)
-        self.assertTrue(Path(self.output['final_path']).exists())
+        self.assertEqual(first['expires_at'],first['completed_at']);self.assertEqual(self.retention.due(),[self.job_id])
+        done=self.retention.purge(self.job_id);self.assertEqual(done['state'],'deleted');self.assertEqual(done['bytes'],0);self.assertEqual(done['actor'],'automatic')
+        self.assertFalse((self.source.root/self.cleanup_id).exists(),'the emptied set folder is removed')
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('a closed set is never re-verified')):
+            again=RecoveryRetention(self.storage,clock=lambda:self.now);self.assertEqual(again.purge(self.job_id)['state'],'deleted')
+        self.assertEqual(again.due(),[],'nothing left to purge');self.assertTrue(Path(self.output['final_path']).exists())
+    def test_legacy_24h_deadline_is_purged_too(self):
+        self.ready()
+        with connect(self.db) as db:
+            completed=db.execute('SELECT completed_at FROM recovery_retention WHERE job_id=?',(self.job_id,)).fetchone()[0]
+            db.execute('UPDATE recovery_retention SET expires_at=? WHERE job_id=?',((moment(completed)+timedelta(hours=24)).isoformat(),self.job_id))
+        self.assertEqual(self.retention.due(),[self.job_id],'a set still inside its old 24 h window is due')
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted')
     def test_manual_scope_and_foreign_identity_are_preserved(self):
         first=self.ready();scope={k:first[k] for k in ('token','count','bytes')}
         with self.assertRaisesRegex(ValueError,'changed'):self.retention.purge(self.job_id,'manual',dict(scope,bytes=0))
@@ -66,9 +73,17 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.retention.due(),[self.job_id]);self.assertEqual(self.retention.status(self.job_id)['count'],1)
         self.retention.guard=lambda:None
         self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted')
-    def test_unknown_absence_and_uncertain_legacy_age_preserve(self):
+    def test_already_missing_copy_is_recorded_not_an_error(self):
         self.ready();path=next((self.source.root/self.cleanup_id).iterdir());path.unlink()
-        with self.assertRaises(BoundaryError):self.retention.purge(self.job_id,'manual')
+        done=self.retention.purge(self.job_id)
+        self.assertEqual((done['state'],done['reason'],done['removed'],done['total']),('deleted','',2,2))
+        with connect(self.db) as db:
+            receipt=db.execute('SELECT state FROM storage_cleanup_files WHERE path=?',(str(path),)).fetchone()[0]
+            states=[r[0] for r in db.execute("SELECT state FROM recovery_retention")]
+        self.assertEqual(receipt,'absent_after_intent');self.assertEqual(states,['deleted'],'no held or attention row')
+        self.assertEqual(self.retention.purge(self.job_id)['state'],'deleted','a rerun never errors on the missing file')
+    def test_uncertain_legacy_age_preserve(self):
+        self.ready()
         with connect(self.db) as db:
             db.execute('DELETE FROM recovery_retention');db.execute('DELETE FROM recovery_completion')
         legacy=RecoveryRetention(self.storage);self.assertEqual(legacy.due(),[]);self.assertFalse(legacy.status(self.job_id)['eligible'])
@@ -89,14 +104,16 @@ class AdmissionTests(unittest.TestCase):
     def setUp(self):
         self.service=MergeService.__new__(MergeService);s=self.service
         s.operation_lock=threading.RLock();s.inventory=SimpleNamespace(worker=None);s._retention_stop=threading.Event();s._retention_wake=threading.Event();s._manual_recovery=None;s._post_current=None
-        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[])
+        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[]);s.working=SimpleNamespace(reconcile=lambda **kwargs:None);s.storage_cleanup=None
         s.recovery=SimpleNamespace(status=lambda id:{'eligible':True,'token':'a'*64,'count':2,'bytes':4096,'reason':''})
     def test_manual_duplicate_stale_and_busy_no_action(self):
         s=self.service
         with self.assertRaisesRegex(ValueError,'changed'):s.delete_recovery('job','b'*64,2,4096)
         s.jobs.status=lambda:{'jobs':[{'state':'pending'}]}
-        with self.assertRaisesRegex(ValueError,'queued'):s.delete_recovery('job','a'*64,2,4096)
-        s.jobs.status=lambda:{'jobs':[]};s.delete_recovery('job','a'*64,2,4096)
+        s.delete_recovery('job','a'*64,2,4096)  # v0.16.8: queued books no longer hold recovery deletion
+        s._manual_recovery=None;s.cleanup.current='busy-cleanup'
+        with self.assertRaisesRegex(ValueError,'source cleanup'):s.delete_recovery('job','a'*64,2,4096)
+        s.cleanup.current=None;s.jobs.status=lambda:{'jobs':[]};s.delete_recovery('job','a'*64,2,4096)
         with self.assertRaisesRegex(ValueError,'queued'):s.delete_recovery('job','a'*64,2,4096)
 
     def test_idle_startup_worker_and_shutdown_and_scan_admission(self):

@@ -71,11 +71,16 @@ function refreshFailed(error){
   renderAutomatic();renderJobs();controls();
 }
 
-async function request(route, data) {
+async function request(route, data, timeoutMs=0) {
   const options = {headers:{'X-Books-Token':token}, credentials:'same-origin', cache:'no-store'};
   if (data !== undefined && recoveryDisconnected)throw Error('Connection interrupted. Wait for the local server to reconnect.');
   if (data !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(data); }
-  const response = await fetch(route, options);
+  // An optional bound: a request with no reply by then ends like a lost connection (no httpStatus).
+  const controller=timeoutMs && typeof AbortController==='function'?new AbortController():null;
+  if(controller)options.signal=controller.signal;
+  const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+  let response;
+  try{response = await fetch(route, options);}finally{if(timer)clearTimeout(timer);}
   const result = await response.json();
   if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;throw error;}
   return result;
@@ -190,6 +195,7 @@ function renderRows(force=false) {
         const attention=attentionText(row);
         if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
+        else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
       }
       tr.append(td); }
@@ -289,7 +295,13 @@ async function poll() {
     polling=true;
     const library=$('library').value,sequence=refreshSequence+1;
     try { if(await refresh())clearConnectionNotice(); }
-    catch(error) { if(sequence===refreshSequence && library===$('library').value)refreshFailed(error); }
+    catch(error) {
+      if(sequence===refreshSequence && library===$('library').value){
+        // v0.16.8: a busy engine answered 503 "still updating" under load and the page declared the server
+        // unavailable, disabling Retry. A reply means the server is there: retry on the next poll.
+        if(error.httpStatus!==503)refreshFailed(error);
+      }
+    }
     finally { polling=false; }
   }
   if (!ended) timer=setTimeout(poll,800);
@@ -374,7 +386,7 @@ function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
-  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${jobs.failed || 0} need attention`].filter(Boolean).join(' · '));
+  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
   renderActivities(Array.isArray(state.activities)?state.activities:[],jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -398,7 +410,8 @@ function activityStep(row,finishing){
   else if(row.kind==='cleanup')step=cleanupSteps[row.step] || 'Working';
   else if(row.kind==='identity')step='Checking identity';
   else step=typeof row.step_text==='string' && row.step_text?row.step_text:'Working';
-  if(row.state==='attention')return 'Needs attention - '+(row.reason || step);
+  // A held row is not progressing (v0.16.8): it says so, with no bar, count or clock.
+  if(row.state==='attention')return 'On hold — '+(row.reason || step);
   if(row.state==='paused')return 'Paused - '+step;
   if(row.state==='pausing')return 'Pausing - '+step;
   return step;
@@ -440,7 +453,8 @@ function renderActivities(list,jobs){
 function updateActivity(view,now){
   const row=view.row,running=row.state==='running' || row.state==='pausing',measured=!row.indeterminate && row.total>0 && row.done>=0 && row.done<=row.total;
   const finishing=measured && running && row.done>=row.total,determinate=measured && !finishing;
-  const label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=activityDetail(row,finishing);
+  const held=row.state==='attention',label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=held?'':activityDetail(row,finishing);
+  view.bar.hidden=held;
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
@@ -481,11 +495,11 @@ function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';
   $('chapters-control').hidden=!creation.chapters_available;$('add-chapters').disabled=!creation.chapters_available || busy;$('chapters-help').textContent=creation.chapters_available?"Preserves source track names when available. Unnamed tracks use Track 01, Track 02, and so on. These markers may differ from the book's written chapters.":creation.chapters_description || 'Chapter boundaries unavailable.';
   $('output-status').textContent=candidateStatus(row);$('output-path').textContent=creation.destination || 'No reviewed destination yet.';
   $('output-summary').textContent=[creation.format || 'M4B audiobook',`Included files: ${trackDraft.included.length}`,`Duration: ${typeof creation.duration_seconds==='number'?creation.duration_seconds.toFixed(2)+' s':'Total duration incomplete'}`,`Title: ${row.review?.title || 'Needs review'}`,`Artist: ${row.review?.canonical_author || 'Needs author review'}`,`Series: ${row.metadata_facts?.series_state==='omitted_unknown'?'Not established':row.review?.series || 'Series not established'}${row.metadata_facts?.series_state==='omitted_unknown'?'':row.review?.number?' / '+row.review.number:''}`,`Reader / comments: ${row.tag_preview?.narrator || row.review?.narrator || 'Unknown optional narrator'}`,`Comments: ${JSON.stringify(row.tag_preview?.comment_fields || [])}`,`Cover: ${provenanceFacts(row).Cover || row.selected_cover?.source_label || 'Artwork not established'}`,chapterSummary(row),...Object.entries({...provenanceFacts(row),...recordingFacts(row)}).filter(([label])=>!['Series','Cover'].includes(label)).map(([label,value])=>label+': '+value),...cleanupFacts(row)].join('\n');
-  const cleanupPolicy=creation.cleanup_policy?.enabled===true,recordedRemoval=verifiedCount(row.cleanup?.removed)>0;$('output-policy-notice').textContent=recordedRemoval && !cleanupPolicy?(row.cleanup.status || 'Source cleanup needs attention: review the saved removal progress.'):cleanupPolicy?'Creates one audiobook, verifies it, then removes the included originals. Recovery copies are kept for 24 hours after source cleanup completes, then deleted automatically while the app is running.':'Creates one new audiobook. Your source files stay in place.';$('create-audiobook').title=cleanupPolicy?'Create and verify this audiobook, then remove its included originals. Recovery copies expire 24 hours after successful source cleanup.':'Create and check one M4B from this reviewed book. Keep the source files.';
+  const cleanupPolicy=creation.cleanup_policy?.enabled===true,recordedRemoval=verifiedCount(row.cleanup?.removed)>0;$('output-policy-notice').textContent=recordedRemoval && !cleanupPolicy?(row.cleanup.status || 'Source cleanup needs attention: review the saved removal progress.'):cleanupPolicy?'Creates one audiobook, verifies it, then removes the included originals and their backup copies.':'Creates one new audiobook. Your source files stay in place.';$('create-audiobook').title=cleanupPolicy?'Create and verify this audiobook, then remove its included originals and their backup copies.':'Create and check one M4B from this reviewed book. Keep the source files.';
   $('output-reasons').textContent=[...(creation.reasons || []),dirty?'Save metadata edits before creating.':'',trackDirty?'Save track review before creating.':''].filter(Boolean).join(' · ');$('output-device').textContent=creation.device || 'Apple Books sync not checked';
 }
 function verifiedCount(value){return Number.isSafeInteger(value) && value>=0?value:null;}
-function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; recovery copies kept until '+recoveryDate(receipt.recovery.expires_at);if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals after audiobook verification; recovery copies expire after 24 hours':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts;}
+function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; deleting recovery copies';if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals and their backup copies after audiobook verification':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts;}
 function chapterSummary(row){if(row.creation?.job)return row.creation.chapters_description || 'Chapter markers: see saved job plan';return $('add-chapters').checked && row.creation?.chapters_available?`Chapter markers: ${trackDraft.included.length} — one per included source track`:'Chapter markers: none';}
 function updateChapterSummary(){if(!trackDraft || selectedRow?.kind!=='candidate')return;$('output-summary').textContent=$('output-summary').textContent.replace(/^Chapter markers:.*$/m,chapterSummary(selectedRow));}
 function plannedChapter(member,key){if(!$('add-chapters').checked)return 'Chapter markers disabled';if(!trackDraft.included.includes(key))return 'Excluded from output — no chapter marker';if(member.chapter_name_source==='source' && member.chapter_name)return 'Source chapter name: '+member.chapter_name;const position=trackDraft.order.filter(id=>trackDraft.included.includes(id)).indexOf(key)+1;const number=Number.isInteger(member.chapter_number) && member.chapter_number>=0?member.chapter_number:position;return 'Generated chapter label: Track '+String(number).padStart(Math.max(2,String(trackDraft.included.length).length),'0');}
@@ -504,7 +518,7 @@ function recoveryDate(value){if(!value)return 'Unavailable';const date=new Date(
 function recoverySpace(value){return verifiedCount(value)===null?'Unavailable':`${(value/(value>0 && value<1000000?1000:1000000)).toLocaleString('en-US',{maximumFractionDigits:2})} ${value>0 && value<1000000?'KB':'MB'} (${value.toLocaleString('en-US')} bytes)`;}
 function recoveryScope(row){const r=row?.cleanup?.recovery;return r?{job_id:row.creation?.job_id || row.creation?.job?.job_id || row.creation?.job?.id,token:r.token,count:r.count,bytes:r.bytes}:null;}
 function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoverySubmitting || busy)return 'Another operation is in progress';if(!r)return 'Recovery details unavailable';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
-function recoveryStatus(r){if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies retained; waiting for the app to become idle. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');const deadline=new Date(r.expires_at).getTime();return Number.isFinite(deadline) && deadline<=Date.now()?'Expired; waiting for automatic cleanup':'Available until '+recoveryDate(r.expires_at);}
+function recoveryStatus(r){if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies waiting to be deleted. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');return 'Deleting after the audiobook check';}
 function makeRecoveryPanel(){const panel=node('section','','recovery-copies'),facts=node('dl'),values={};panel.append(node('h2','Recovery copies'));for(const key of ['Status','Original tracks backed up','Space on C:','Recovery location','Automatic deletion']){const label=node('dt',key),value=node('dd');facts.append(label,value);values[key]={label,value};}panel.append(facts);const help=node('p',"Deleting these copies permanently removes the app's backup of the original tracks. The finished audiobook stays in place.",'field-help');help.id='recovery-loss-help';const expiry=node('p','Automatic deletion happens while the app is running; overdue copies are checked when it starts.','field-help');const button=node('button','Delete recovery copies…','quiet');button.type='button';button.title='Permanently delete the verified recovery copies for this book. Keep the finished audiobook.';button.setAttribute('aria-describedby','recovery-loss-help recovery-reason');const reason=node('p','','field-help');reason.id='recovery-reason';const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');panel.append(help,expiry,button,reason,status);recoveryPanel={panel,values,expiry,button,reason,status,path:selectedPath};button.addEventListener('click',openRecoveryDialog);updateRecovery();return panel;}
 function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath)return;const r=selectedRow?.cleanup?.recovery;if(!r){recoveryPanel.panel.hidden=true;closeRecoveryDialog();return;}recoveryPanel.panel.hidden=false;const v=recoveryPanel.values;v.Status.value.textContent=recoveryStatus(r);v['Original tracks backed up'].value.textContent=verifiedCount(r.count)===null?'Unavailable':r.count.toLocaleString('en-US');v['Space on C:'].value.textContent=recoverySpace(r.bytes);v['Recovery location'].label.textContent=r.state==='deleted'?'Former recovery location':'Recovery location';v['Recovery location'].value.textContent=r.location || 'Unavailable';v['Recovery location'].value.className='path';v['Automatic deletion'].value.textContent=r.state==='deleted'?(r.expires_at?'Completed':'Not applicable — copies already deleted'):recoveryDate(r.expires_at);recoveryPanel.expiry.hidden=r.state==='deleted';const reason=recoveryReason();recoveryPanel.button.disabled=!!reason;recoveryPanel.reason.textContent=reason;if(recoveryConfirmation && !recoverySubmitting && (reason || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(recoveryConfirmation.scope))){closeRecoveryDialog();recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';}}
 function closeRecoveryDialog(restore=true){if(!recoveryConfirmation)return;const initiating=recoveryConfirmation.button;recoveryConfirmation=null;$('recovery-dialog').close?.();if(restore && initiating && initiating===recoveryPanel?.button){if(!initiating.disabled)initiating.focus?.({preventScroll:true});else{recoveryPanel.reason.setAttribute('tabindex','-1');recoveryPanel.reason.focus?.({preventScroll:true});}}}
@@ -515,14 +529,19 @@ async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmit
 const retryReady='Check this book again and queue its audiobook job.';
 function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;return job && typeof job.job_id==='string'?JSON.stringify([row.id,job.job_id]):'';}
 // Repair (Attention spec section 2) is the same control with another label, tooltip and endpoint.
-const rowActions={retry:{kind:'retry',label:'Retry',pending:'Retrying…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
-  repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'}};
+const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',ready:'',endpoint:null,refused:''},retry:{kind:'retry',label:'Retry',pending:'Retrying…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
+  repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'},
+  // Keep files (spec section 3): the kept recovery copies stop being flagged. Nothing is deleted, no job runs.
+  keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's files and stop flagging it. Nothing is deleted.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'}};
+const KEPT_HINT='Files kept at your choice.';
+function keptGroup(attention){return attention?.group==='changed' || attention?.group==='audiobook';}
 function rowAction(row){
   const job=row?.kind==='candidate'?row.creation?.job:null;if(!job)return null;
   // A damaged book shows Repair and never Retry (Retry would fail again on the same damage).
-  // Once accepted, the request waits for its turn: the button gives way to the queued text (no second press).
-  if(readmissionOf(row)?.queued_next===true)return null;
-  const [kind,data]=attentionOf(row)?.group==='repair'?['repair',job.repair]:['retry',job.retry];
+  // Once accepted, the request waits for its turn: the button reads "Queued" and cannot be pressed again.
+  const queued=readmissionOf(row);
+  if(queued?.queued_next===true)return {...rowActions.queued,data:{allowed:false,reason:queuedNextText(queued)}};
+  const attention=attentionOf(row),[kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair'?['repair',job.repair]:['retry',job.retry];
   return data && typeof data==='object' && typeof data.allowed==='boolean'?{...rowActions[kind],data}:null;
 }
 // Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
@@ -547,7 +566,7 @@ function updateRetry(){
   if(!shown){if(note.textContent)note.textContent='';note.hidden=true;return;}
   const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning()?'busy':retry.allowed===true?'ready':'unavailable';
   const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
-  const title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
+  const title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
   const label=mode==='pending'?copy.pending:copy.label,result=mode!=='pending' && retryResult;
   const text=result?retryResult.text:mode==='ready'?'':title;
   if(button.textContent!==label)button.textContent=label;
@@ -559,6 +578,7 @@ function updateRetry(){
   if(note.textContent!==text)note.textContent=text;
   note.hidden=!text;note.classList.toggle('retry-refused',!!result);
 }
+function keptByChoice(row){const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
 async function retryFromRow(row){
   // Select without scrolling, then the same request as the details-panel Retry.
@@ -578,12 +598,14 @@ function updateRowRetries(){
     const row=entry.row,attention=attentionText(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
     const copy=retryPending?.key===key?rowActions[retryPending.kind]:action || rowActions.retry;
     let hint=attention?attention.hint:'',warn=!!attention?.warn;
-    if(mode==='unavailable' && typeof retry?.reason==='string' && retry.reason)hint=retry.reason;
-    if(mode==='pending')hint=copy.note;
+    if(mode==='unavailable' && action?.kind!=='queued' && typeof retry?.reason==='string' && retry.reason)hint=retry.reason;
+    if(mode==='pending')hint=retryPending?.checking?'Checking…':copy.note;
+    if(!attention && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
     if(retryResult && retryResult.key===key && mode!=='pending'){hint=retryResult.text;warn=true;}
     if(entry.hint.textContent!==hint)entry.hint.textContent=hint;
     entry.hint.classList.toggle('retry-refused',warn);
     if(!entry.button)continue;
+    entry.button.hidden=!action && mode!=='pending';if(entry.button.hidden)continue;
     const label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
     if(entry.button.textContent!==label)entry.button.textContent=label;
     if(entry.button.title!==title)entry.button.title=title;
@@ -592,21 +614,50 @@ function updateRowRetries(){
     entry.button.disabled=mode!=='ready' && mode!=='pending';
   }
 }
+const PRESS_TIMEOUT=15000;
+// After a press with no reply: re-read the book from the server. Returns its queued state (it landed),
+// false (the server answered and the book is not queued) or null (still no answer).
+async function pressLanded(row,jobId){
+  for(let attempt=0;attempt<3 && !ended;attempt++){
+    try{
+      const page=await request(`/api/inventory?library=Audiobooks&offset=0&search=${encodeURIComponent(row.title_clue || '')}&view=candidates&status=all`);
+      const fresh=(page.rows || []).find(item=>item.id===row.id);if(!fresh)return false;
+      const job=fresh.creation?.job || {},queued=job.readmission || job.attention?.readmission;
+      if(job.kept===true)return {kept:true};
+      if(queued?.queued_next===true)return {...queued,queued_next:true};
+      if(job.job_id && (job.job_id!==jobId || job.state==='Queued' || job.state==='Creating'))return {queued_next:false,requeued:true};
+      return false;
+    }catch(error){if(error.httpStatus && error.httpStatus!==503)return false;}
+    await new Promise(resolve=>setTimeout(resolve,1500));
+  }
+  return null;
+}
 async function retryJob(origin=null){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
   if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || action.data.allowed!==true || $('retry-job').disabled)return;
   retryPending={key,kind:action.kind};retryResult=null;busy=true;controls();
   let succeeded=false;
   let answer=null;
-  try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id});succeeded=true;}
-  catch(error){retryResult={key,text:error.httpStatus?(error.message || action.refused):'Connection interrupted. Check the status above before trying again.'};if(!error.httpStatus)refreshFailed(error);else if(error.httpStatus===409)retryEpoch++;}
+  try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);succeeded=true;}
+  catch(error){
+    if(error.httpStatus){retryResult={key,text:error.message || action.refused};if(error.httpStatus===409)retryEpoch++;}
+    else{
+      // No reply in time: the press may still have landed. Check the book's queued state on the server
+      // before saying anything; never show a scary error and re-enable a button for a request that worked.
+      retryPending={key,kind:action.kind,checking:true};controls();
+      const landed=await pressLanded(row,job.job_id);
+      if(landed){succeeded=true;answer=landed;}
+      else retryResult={key,text:landed===false?action.label+' did not go through. Try again.':'Connection interrupted. Check the status above before trying again.'};
+    }
+  }
   // The book leaves this filter: the strip keeps a line saying what Repair will patch.
   if(succeeded && action.kind==='repair' && filters[view]==='output_attention')stripNote='Repair queued: '+damageHint(attentionOf(row));
   const focused=document.activeElement===$('retry-job');
   retryPending=null;busy=false;
   if(succeeded){
     // The server requeued the job: show it as queued now, and ignore book lists requested before this answer.
-    retryEpoch++;const queued=answer?.queued_next===true?queuedNext(row,answer):queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
+    retryEpoch++;const queued=action.kind==='keep'?keptByChoice(row):answer?.queued_next===true?queuedNext(row,answer):queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);
+    const entry=action.kind==='keep'?rowRetries.get(row.path):null;if(entry)entry.row=queued;
     // The block leaves the page: focus moves to the panel heading, never into the automatic result.
     if(focused && retryKey(selectedRow)===key)$('details-heading').focus?.({preventScroll:true});
     if(selectedRow?.path===row.path)select(queued,false);
@@ -650,16 +701,30 @@ function finishRetryAll(run){
   stripNote=run.state==='done'?`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}${total>queued?` ${(total-queued).toLocaleString()} could not be retried.`:''}`:`Stopped. Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}`;
   setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();if(!$('attention-groups').hidden)$('group-retry').focus?.({preventScroll:true});},0);
 }
-const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',other:'Other',unsupported:'M4B not supported'};
-const attentionKeys=['all','retry','repair','other','unsupported'];
+const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
+const attentionKeys=['all','retry','repair','changed','audiobook','other','unsupported'];
+function attentionTotal(jobs){
+  const counts=jobs?.attention_counts;
+  if(!counts || typeof counts!=='object')return jobs?.failed || 0;
+  return attentionKeys.slice(1).reduce((sum,key)=>sum+(Number.isInteger(counts[key])?counts[key]:0),0);
+}
 function renderAttentionGroups(){
   const shown=view==='candidates' && filters[view]==='output_attention',strip=$('attention-groups');strip.hidden=!shown;if(!shown)return;
-  const counts=state?.audiobook_jobs?.attention_counts || {},value=key=>Number.isInteger(counts[key])?counts[key]:0,total=value('retry')+value('repair')+value('other')+value('unsupported');
+  const counts=state?.audiobook_jobs?.attention_counts || {},value=key=>Number.isInteger(counts[key])?counts[key]:0,total=attentionTotal({attention_counts:counts});
+  const active=globalThis.document?.activeElement;
+  if(attentionGroup!=='all' && attentionGroup!=='retry' && counts[attentionGroup]===0){
+    // The selected group emptied: back to All, and focus moves there if it was in the strip or lost.
+    const lost=!active || active===globalThis.document?.body || strip.contains?.(active);
+    attentionGroup='all';resetStrip();
+    setTimeout(()=>{updateList();if(lost)$('group-all').focus?.({preventScroll:true});},0);
+  }
   for(const key of attentionKeys){
     const button=$('group-'+key),count=key==='all'?total:value(key),text=`${attentionLabels[key]} · ${count.toLocaleString()}`;
     if(button.textContent!==text)button.textContent=text;
     button.setAttribute('aria-pressed',String(attentionGroup===key));
     if(key==='all')button.title=`Show all ${total.toLocaleString()} books that need attention.`;
+    // A group at zero is hidden, except All and Can retry; it stays while selected or focused.
+    button.hidden=key!=='all' && key!=='retry' && value(key)===0 && attentionGroup!==key && active!==button;
   }
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
@@ -783,11 +848,14 @@ function recordingFacts(row){
   return facts;
 }
 const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],space:['Stopped — not enough disk space','Free up disk space, then retry.'],repair:['Damaged — can repair',''],
-  unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','Select the row to read why.']};
-function attentionOf(row){const job=row?.creation?.job;return job?.state==='Output needs attention' && job.attention && typeof job.attention.group==='string'?job.attention:null;}
+  unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','Select the row to read why.'],
+  changed:['Original changed since checked','Recovery copies are kept until you decide.'],missing:['Audiobook missing','Recovery copies are kept until you decide.'],
+  unverified:['Audiobook not verified','Recovery copies are kept until you decide.']};
+// A stopped job, or a completed book whose recovery copies the 0.16.8 rule keeps (changed or audiobook).
+function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
 function attentionText(row){
   const a=attentionOf(row);if(!a)return null;
-  const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':'other',[status,hint]=attentionCopy[kind];
+  const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
   if(readmission?.accepted===false && typeof readmission.reason==='string' && readmission.reason)return {status,hint:(readmission.kind==='repair'?'Repair':'Retry')+' was refused: '+readmission.reason,warn:true};
@@ -808,8 +876,9 @@ function repairedText(repaired){
   return (repaired.applied===true?'Repaired: ':'Repair queued: ')+patchCopy(patched[0])+(patched.length>1?` +${patched.length-1} more`:'');
 }
 function technicalText(row){
-  const job=row?.creation?.job || {},details=(attentionOf(row)?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
-  return 'Technical detail: '+(job.reason || 'Unavailable')+(details.length?' — '+details.join(' '):'');
+  const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
+  const raw=keptGroup(attention) && typeof attention.reason==='string' && attention.reason?attention.reason:job.reason;
+  return 'Technical detail: '+(raw || 'Unavailable')+(details.length?' — '+details.join(' '):'');
 }
 function candidateStatus(row){
   const attention=attentionText(row);if(attention)return attention.status;
@@ -835,13 +904,14 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
   setText('automatic-result-status',candidateStatus(row));
-  const attention=attentionText(row);setText('automatic-result-hint',attention?attention.hint:'');$('automatic-result-hint').hidden=!attention;
+  const attention=attentionText(row),kept=!attention && row.creation?.job?.kept===true;
+  setText('automatic-result-hint',attention?attention.hint:kept?'You chose to keep these files.':'');$('automatic-result-hint').hidden=!attention && !kept;
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
   setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;

@@ -96,11 +96,11 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   // Selecting another book clears this book's note.
   show(blocked({id:'cand-b',path:'cand-b'},{job_id:'job-b'}));assert.equal(note.textContent,'');assert.equal(note.hidden,true);
 
-  // State 9, connection lost: the connection notice appears and the note says to check before trying again.
+  // State 9 (v0.16.8), no reply: the server is asked whether the press landed; here it did not, so the button
+  // comes back with a plain message and no connection alarm.
   retryOverride=async()=>{throw new TypeError('Failed to fetch');};show(row);inventoryRows=[row];await run('retryJob()');
-  assert.equal(note.textContent,'Connection interrupted. Check the status above before trying again.');assert.equal(get('connection-notice').hidden,false);
-  assert.equal(button.disabled,true);assert.equal(button.title,'Local server unavailable.');
-  run('clearConnectionNotice()');assert.equal(button.disabled,false);assert.equal(note.textContent,'Connection interrupted. Check the status above before trying again.');
+  assert.equal(note.textContent,'Retry did not go through. Try again.');assert.equal(run('recoveryDisconnected'),false);
+  assert.equal(button.disabled,false);
 
   // Click, then switch book: the other book shows Busy, never Retrying, and no stale note arrives later.
   let late;retryOverride=()=>new Promise(resolve=>{late=resolve;});show(row);inventoryRows=[row];document.activeElement=button;const switching=run('retryJob()');

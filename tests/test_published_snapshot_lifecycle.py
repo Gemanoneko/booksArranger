@@ -254,7 +254,7 @@ class PublishedSnapshotTests(unittest.TestCase):
         attempt,stage,_=self.published(enrolled=True);retention=self.retire_original()
         retention.clock=lambda:datetime.now(timezone.utc)+timedelta(hours=25)
         retention.purge(self.job_id)
-        (self.cleanup.root/self.cleanup_id).rmdir()
+        self.assertFalse((self.cleanup.root/self.cleanup_id).exists(),'v0.16.8: the purge removes the emptied set folder')
         self.discharge()
         self.assertEqual(list(stage.iterdir()),[])
         self.assertEqual(self.life._attempt(self.job_id,attempt)['state'],'retired')

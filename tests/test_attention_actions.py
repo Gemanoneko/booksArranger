@@ -158,6 +158,27 @@ class BookListTests(unittest.TestCase):
         self.assertEqual(self.service.page(status='output_attention',group='all')['total'],3)
         for bad in (('all','retry'),('output_attention','nope')):
             with self.assertRaises(ValueError):self.service.page(status=bad[0],group=bad[1])
+    def test_kept_files_books_are_listed_until_kept(self):
+        # v0.16.8: a completed book whose recovery copies the backup rule keeps joins the filter in its group.
+        self.jobs[3].update(state='completed',stage='done')
+        base=self.service.jobs.attention_summary.side_effect;kept=set()
+        def summary(job_ids=None,retry=True):
+            values=base(job_ids,retry)
+            if 'job-Delta' not in kept and (job_ids is None or 'job-Delta' in job_ids):
+                values['job-Delta']={'group':'changed','cause':None,'reason':'Original bytes differ from reviewed sources','originals_untouched':False}
+                if retry:values['job-Delta']['keep']={'allowed':True,'reason':''}
+            return values
+        self.service.jobs.attention_summary.side_effect=summary
+        self.service.jobs.kept_by_choice=lambda job_ids:{job_id for job_id in job_ids if job_id in kept}
+        page=self.service.page(status='output_attention')
+        self.assertEqual([r['creation']['job']['attention']['group'] for r in page['rows']],['retry','changed','other','unsupported'],'spec order')
+        delta=page['rows'][1]['creation']['job']
+        self.assertEqual((delta['state'],delta['keep']),('Audiobook created',{'allowed':True,'reason':''}));self.assertNotIn('kept',delta)
+        self.assertEqual(self.names(self.service.page(status='output_attention',group='changed')),['Delta'])
+        kept.add('job-Delta')
+        self.assertEqual(self.service.page(status='output_attention')['total'],3,'a kept book leaves the filter')
+        delta=next(r for r in self.service.page(status='all')['rows'] if r['title_clue']=='Delta')['creation']['job']
+        self.assertTrue(delta['kept']);self.assertNotIn('attention',delta);self.assertNotIn('keep',delta)
     def test_job_filters_load_jobs_once_and_render_only_matches(self):
         import groups
         rendered=[];original=groups.render

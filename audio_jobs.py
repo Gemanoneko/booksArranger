@@ -612,7 +612,7 @@ class AudioJobs:
         summary = self.attention_summary(admission_clear, space_ready, [job_id] if job_id else None)
         return {key: value['retry'] for key, value in summary.items() if 'retry' in value}
 
-    def retry_admission_hold(self, job_id, candidate_id, revision, admission_clear, space_ready=None):
+    def retry_admission_hold(self, job_id, candidate_id, revision, admission_clear, space_ready=None, review=True):
         """Retry: requeue the same job, refused before any attempt started, once that refusal has cleared.
 
         Rules E1-E10, then a compare-and-set on the whole row as read. The frozen manifest, job id,
@@ -642,8 +642,10 @@ class AudioJobs:
         allowed, reason = self._retry_allowed(row, cause, manifest, admission_clear, space_ready)  # E8, re-checked now
         if not allowed:
             raise RetryRefused(reason)
+        # E10 re-reads the book's sources. review=False (a press, v0.16.8) leaves it to the worker's own
+        # admission, which runs it again before any work; the press answers at once.
         try:
-            current = self.revision_guard(copy.deepcopy(manifest)) is True  # E10
+            current = not review or self.revision_guard(copy.deepcopy(manifest)) is True  # E10
         except Exception:
             current = False
         if not current:

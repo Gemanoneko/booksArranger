@@ -1,6 +1,8 @@
 """Retire only three approved former outputs after a verified current successor.
 
-Recovery is separate from source-retention storage and is never purged here.
+Recovery copies of the retired outputs are deleted once the replacement is verified (purge_recoveries,
+v0.16.8, Sergei 2026-10-18). A purged copy is recorded (purged_at); history is then proven from the
+records, the verified replacement and the former output's absence.
 """
 import contextlib
 import hashlib
@@ -180,6 +182,33 @@ class ReplacementRetirement:
                 raise
             finally:self.current=None
 
+    def purge_recoveries(self,relation):
+        """Delete the recovery copies of a completed replacement's retired outputs, after verifying the current
+        replacement in full. Each copy must still be the recorded one (identity and full hash); an already
+        missing copy is recorded as purged. Idempotent: a purged record is skipped."""
+        if relation['state']!='completed':return 0
+        rows=[r for r in self.store.files(relation['id']) if r['state']=='removed' and not json.loads(r['recovery_json'] or '{}').get('purged_at')]
+        if not rows:return 0
+        freed=0
+        with self.lock,self._current(relation,historical=True,stop=self.stop):
+            for row in rows:
+                self._stop();recovery=json.loads(row['recovery_json']);path=ordinary(recovery['path']);expected=self.root/relation['id']
+                if path.parent!=expected:raise BoundaryError('Former-output recovery is outside its owned folder')
+                try:path.lstat();present=True
+                except FileNotFoundError:present=False
+                if present:
+                    with DirectoryBoundary(self.root,expected),VerifiedFile(path,delete=True) as file:
+                        if file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,self.stop)!=recovery['sha256']:
+                            raise BoundaryError('Former-output recovery changed; preserved')
+                        file.dispose();freed+=recovery['size']
+                    try:path.lstat()
+                    except FileNotFoundError:pass
+                    else:raise BoundaryError('Recovery copy disposition did not remove its name')
+                self.store.file_purged(row,dict(recovery,purged_at=now(),purged_bytes=recovery['size'] if present else 0))
+            try:expected.rmdir()
+            except OSError:pass
+        return freed
+
     def historical_retired(self,parent_row,stop=None):
         """Known base absence is valid history even during partial retirement.
 
@@ -194,6 +223,8 @@ class ReplacementRetirement:
             if not row or row['state'] not in {'retirement_intended','removed'}:return False
             proof=json.loads(row['provenance_json'])
             if proof['sha256']!=parent_output['sha256'] or proof['size']!=parent_output['size']:return False
+            if json.loads(row['recovery_json'] or '{}').get('purged_at'):
+                with self.former_guard(relation,parent_row),self._current(relation,historical=True,stop=stop):return self._absent(path)
             with self.former_guard(relation,parent_row),self._current(relation,historical=True,stop=stop),self._recovery(relation,row,historical=True,stop=stop):return self._absent(path)
         except InterruptedError:raise
         except (ValueError,OSError,KeyError):return False

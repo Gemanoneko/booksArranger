@@ -27,6 +27,31 @@ class ZoneIdentifierTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(self.receipts[0]['marker_bytes_base64']),MARKER)
         with VerifiedFile(self.path) as held:self.assertEqual(held.facts()['identity'],self.identity)
         self.assertFalse(self.remove());self.assertEqual(len(self.receipts),1)
+    @contextlib.contextmanager
+    def shifted_stream_identity(self,field,delta):
+        # Only the handle opened on the named stream reports a shifted identity, as the share does.
+        real_create=zone.kernel.CreateFileW;real_info=zone.kernel.GetFileInformationByHandle;opened=set();seen=[]
+        def create(name,*args):
+            handle=real_create(name,*args)
+            if str(name).endswith(':Zone.Identifier'):opened.add(handle)
+            return handle
+        def info(handle,ref):
+            ok=real_info(handle,ref)
+            if handle in opened:setattr(ref._obj,field,getattr(ref._obj,field)+delta);seen.append(handle)
+            return ok
+        with patch.object(zone.kernel,'CreateFileW',create),patch.object(zone.kernel,'GetFileInformationByHandle',info):yield
+        self.assertTrue(seen,'the stream handle was inspected')
+    def test_share_reporting_its_own_stream_index_does_not_hold_the_cleanup(self):
+        # v0.16.8 root cause (Z:, 2026-10-18): the library share gives a named stream its own file index
+        # (base 10420294, stream 10420328). Content is proven by the full hash; the marker metadata alone
+        # must not hold the cleanup (Sergei, 2026-10-18).
+        self.marker()
+        with self.shifted_stream_identity('index_low',34):self.assertTrue(self.remove())
+        self.assertEqual(zone.streams(self.path),[('::$DATA',self.path.stat().st_size)]);self.assertEqual(self.path.read_bytes(),b'original audio bytes'*1024)
+    def test_a_stream_on_another_volume_is_still_refused(self):
+        self.marker()
+        with self.shifted_stream_identity('volume',1),self.assertRaisesRegex(BoundaryError,'native identity differs'):self.remove()
+        self.assertIn((':Zone.Identifier:$DATA',len(MARKER)),zone.streams(self.path))
     def test_unknown_stream_preserves_both_marker_and_unknown_bytes(self):
         self.marker()
         with open(str(self.path)+':Unresolved','wb') as stream:stream.write(b'unique evidence')
@@ -34,13 +59,16 @@ class ZoneIdentifierTests(unittest.TestCase):
         with open(str(self.path)+':Unresolved','rb') as stream:self.assertEqual(stream.read(),b'unique evidence')
         with open(str(self.path)+':Zone.Identifier','rb') as stream:self.assertEqual(stream.read(),MARKER)
         self.assertEqual(self.receipts,[])
-    def test_malformed_or_oversized_marker_preserved(self):
-        for raw in (b'not a download marker',b'[ZoneTransfer]\nZoneId=3\nUnknown=secret',b'x'*8193):
+    def test_unknown_marker_contents_are_kept_in_the_receipt_and_oversized_preserved(self):
+        # v0.16.8 (Sergei, 2026-10-18): marker contents never hold a cleanup; the exact bytes go into the receipt.
+        for raw in (b'not a download marker',b'[ZoneTransfer]\nZoneId=3\nUnknown=secret'):
             with self.subTest(size=len(raw)):
-                self.marker(raw)
-                with self.assertRaises(BoundaryError):self.remove()
-                with open(str(self.path)+':Zone.Identifier','rb') as stream:self.assertEqual(stream.read(),raw)
-        self.assertEqual(self.receipts,[])
+                self.marker(raw);self.assertTrue(self.remove())
+                self.assertEqual(base64.b64decode(self.receipts[-1]['marker_bytes_base64']),raw);self.assertEqual(self.path.read_bytes(),b'original audio bytes'*1024)
+        self.marker(b'x'*8193)
+        with self.assertRaises(BoundaryError):self.remove()
+        with open(str(self.path)+':Zone.Identifier','rb') as stream:self.assertEqual(stream.read(),b'x'*8193)
+        self.assertEqual(len(self.receipts),2)
     def test_marker_intent_failure_never_disposes_stream(self):
         self.marker()
         def failed(receipt):raise OSError('durable intent failed')

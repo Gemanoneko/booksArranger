@@ -15,8 +15,9 @@ function damaged(name,damage=[DANGLING]){return attentionRow(name,'repair',{},{a
 function statusCell(tr){return tr.children[4];}
 function actionButtons(tr){return tr.children[5].children[0].children;}
 const posted=route=>calls.filter(call=>call.route===route);
-let repairOverride=null,retryAllOverride=null;const baseFetch=context.fetch;
+let repairOverride=null,retryAllOverride=null,stateOverride503=false;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{
+  if(stateOverride503 && route.startsWith('/api/state')){calls.push({route,options});return {ok:false,status:503,json:async()=>({error:'Status is still updating; retrying'})};}
   if(route==='/api/audiobook/repair'){calls.push({route,options});const data=JSON.parse(options.body);return repairOverride?repairOverride(data):{ok:true,status:202,json:async()=>({requeued:true,job_id:'child-'+data.job_id})};}
   if(route==='/api/audiobook/retry-all'){calls.push({route,options});return retryAllOverride?retryAllOverride(JSON.parse(options.body)):{ok:true,status:202,json:async()=>({retry_all:{id:'run-1',state:'running',total:121,done:0,queued:0,refused:0}})};}
   return baseFetch(route,options);
@@ -76,7 +77,9 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   let m4bRow=get('inventory').children[0];
   assert.equal(statusCell(m4bRow).textContent,'Queued — runs after the current book');assert.equal(statusCell(m4bRow).children[0].textContent,'The book is checked again before it runs.');
   assert.ok(![...actionButtons(m4bRow)].some(button=>/^Retry/.test(button.textContent)),'no button to press twice');
-  assert.equal(get('automatic-result-status').textContent,'Queued — runs after the current book');assert.equal(get('retry-block').hidden,true);
+  assert.equal(get('automatic-result-status').textContent,'Queued — runs after the current book');
+  assert.equal(get('retry-block').hidden,false);assert.equal(get('retry-job').textContent,'Queued');assert.equal(get('retry-job').disabled,true,'a queued book cannot be pressed again');
+  assert.equal(actionButtons(m4bRow)[0].textContent,'Queued');assert.equal(actionButtons(m4bRow)[0].disabled,true);
   get('filter').value='all';await get('filter').handlers.change();
   assert.equal(statusCell(get('inventory').children[0]).textContent,'Queued — runs after the current book','the state survives a filter change and list refresh');
   run('filters.candidates="output_attention";viewControls()');
@@ -90,6 +93,18 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(actionButtons(m4bRow)[0].textContent,'Retry');
   // A queued child outside the attention list says the same.
   assert.equal(status(blocked({status:'Queued',creation:{status:'Queued',reasons:[],job:{job_id:'child-m',state:'Queued',stage:'queued',reason:'',readmission:{accepted:true,queued_next:true,position:2,kind:'repair',state:'admitted'}}}})),'Queued — runs after 2 books');
+  // v0.16.8: the press got no reply but it landed: the page asks the server and shows Queued, never an error.
+  const timedOut=attentionRow('t','retry',{},{attention:{group:'retry',cause:null,originals_untouched:true}});
+  const timedOutQueued={...timedOut,creation:{...timedOut.creation,job:{...timedOut.creation.job,readmission:{accepted:true,queued_next:true,position:2,kind:'retry',state:'admitted'}}}};
+  context.fixture=[timedOut];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
+  retryOverride=async()=>{throw new TypeError('Failed to fetch');};inventoryRows=[timedOutQueued];
+  context.setTimeout=setTimeout;actionButtons(get('inventory').children[0])[0].handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,40));
+  const landedRow=get('inventory').children[0];
+  assert.equal(statusCell(landedRow).textContent,'Queued — runs after 2 books');assert.equal(actionButtons(landedRow)[0].textContent,'Queued');assert.equal(actionButtons(landedRow)[0].disabled,true);
+  assert.equal(run('recoveryDisconnected'),false,'no connection alarm for a press that landed');
+  // A busy status read (503) is not a lost connection: Retry stays available.
+  // poll() schedules the next poll: keep the harness's inert timer for it, so the script can exit.
+  const liveTimeout=context.setTimeout;context.setTimeout=()=>0;stateOverride503=true;await run('poll()');stateOverride503=false;context.setTimeout=liveTimeout;assert.equal(run('recoveryDisconnected'),false);
   retryOverride=null;context.fixture=[space,unsupported,other,repair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');inventoryRows=[space,unsupported,other,repair];
 
   // Row Repair: its own endpoint and pending copy; a refusal shows the server message in the hint.
@@ -192,6 +207,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   const researchStart=Date.now()-60000,researching=(title,done)=>({audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'scan',kind:'scan',subject:title,step:'researching',step_text:'x',done,total:100,unit:'books',indeterminate:false,state:'running',step_started_at:researchStart}]});
   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
+  context.setTimeout=()=>0;  // nothing scheduled after the checks keeps the process alive
   console.log('PASS attention classes, row hints, Retry and Repair, queued next, repaired record, group strip, server Retry all with confirmation, details lines, list loading and request discipline, whole files and research history');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
