@@ -35,6 +35,10 @@ class CauseTests(unittest.TestCase):
         self.assertEqual(failure_cause({'reason':'[Errno 28] Insufficient working space; need 62699883954 bytes before snapshotting; originals retained'},old),'space')
         self.assertIsNone(failure_cause({'reason':'[Errno 13] Permission denied'},old));self.assertIsNone(failure_cause(*self.failed(OSError(errno.EACCES,'denied'))))
         self.assertIsNone(failure_cause({'reason':'x'},{'failure':{'exception_class':'ValidationError'}}));self.assertIsNone(failure_cause({'reason':'x'},{}))
+        # v0.16.9: the worker's own revision-guard refusal, exactly; the copy step's "...: path" refusal is not it.
+        self.assertEqual(failure_cause(*self.failed(ValueError('Source changed — review required'))),'source')
+        self.assertIsNone(failure_cause(*self.failed(ValueError('Source changed — review required: Z:/book/01.mp3'))))
+        self.assertIsNone(failure_cause({'reason':'Source changed — review required'},{'failure':{'exception_class':'ValidationError'}}))
 
 
 class Base(unittest.TestCase):
@@ -69,8 +73,23 @@ class RetryResolvableTests(Base):
         free['ok']=True
         self.assertEqual(self.q.jobs.retry_statuses(self.q.life.admission_clear,space_ready=ready)[job_id]['allowed'],True)
         self.assertEqual(self.q.jobs.retry_admission_hold(job_id,manifest['candidate_id'],1,self.q.life.admission_clear,ready)['requeued'],True)
+    def test_source_guard_refusal_is_retryable_and_the_worker_checks_again(self):
+        # v0.16.9 ("Cabal"): the guard refused on a shifted file ID with identical bytes. Retry requeues the same
+        # job; the worker runs the guard again before any work, so a real change stops again, nothing run.
+        job_id,attempt=self.failed_job(ValueError('Source changed — review required'))
+        self.assertEqual(self.q.statuses(),{job_id:{'allowed':True,'reason':''}})
+        self.q.guard=lambda manifest:False;before=self.q.row(job_id)
+        with self.assertRaises(RetryRefused):self.q.retry(job_id)  # a press that runs the guard (E10) refuses a real change
+        self.assertEqual(self.q.row(job_id),before)
+        manifest=json.loads(before['manifest'])  # the app's press (review=False) leaves the guard to the worker
+        self.assertEqual(self.q.jobs.retry_admission_hold(job_id,manifest['candidate_id'],1,self.q.life.admission_clear,review=False)['requeued'],True)
+        self.q.jobs.resume();self.q.wait()
+        row=self.q.row(job_id);self.assertEqual((row['state'],row['reason']),('needs attention','Source changed — review required'));self.assertEqual(self.q.runs,[],'the runner never started')
+        self.q.jobs._stop.clear();self.q.guard=lambda manifest:True
+        self.assertEqual(self.q.retry(job_id)['requeued'],True);self.q.jobs.resume();self.q.wait()
+        self.assertEqual(self.q.runs[0][0],job_id,'with matching content the book runs')
     def test_other_failures_stay_ineligible(self):
-        for error in (audio_jobs.RetryRefused('x'),ValueError('Source changed — review required'),OSError(errno.EACCES,'denied'),sqlite3.OperationalError('disk I/O error')):
+        for error in (audio_jobs.RetryRefused('x'),ValueError('Source changed — review required: Z:/book/01.mp3'),OSError(errno.EACCES,'denied'),sqlite3.OperationalError('disk I/O error')):
             with self.subTest(error=repr(error)):
                 job_id,_=self.failed_job(error,reason='legacy')
                 self.assertNotIn(job_id,self.q.statuses())
@@ -85,14 +104,15 @@ class AttentionGroupTests(Base):
         m4b=self.q.manifest();m4b['sources'][0]['path']=str(self.q.base/'library'/'book.m4b')
         unsupported,_=self.failed_job(audio_jobs.RetryRefused('M4B preservation requires review: Unsupported structural box'),manifest=m4b)
         self.q.jobs._update(unsupported,journal=json.dumps({'attempt_id':None,'history':[],'failure':{'exception_class':'ValidationError','retryable':False,'stage':'checking'}}))
-        other,_=self.failed_job(ValueError('Source changed — review required'))
+        other,_=self.failed_job(ValueError('Runner completion does not match durable publication intent'))
+        source,_=self.failed_job(ValueError('Source changed — review required'))
         with connect(self.q.db) as db:
             db.execute('CREATE TABLE IF NOT EXISTS source_cleanup(id TEXT PRIMARY KEY,job_id TEXT UNIQUE,intent TEXT NOT NULL,state TEXT NOT NULL,reason TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL)')
             db.execute("INSERT INTO source_cleanup VALUES('c',?,'{}','needs_attention','x','','')",(other,))
         summary=self.q.jobs.attention_summary(self.q.life.admission_clear,lambda manifest:True)
-        self.assertEqual({k:(v['group'],v['cause']) for k,v in summary.items()},{hold:('retry','files'),busy:('retry','busy'),space:('retry','space'),unsupported:('unsupported',None),other:('other',None)})
+        self.assertEqual({k:(v['group'],v['cause']) for k,v in summary.items()},{hold:('retry','files'),busy:('retry','busy'),space:('retry','space'),source:('retry','source'),unsupported:('unsupported',None),other:('other',None)})
         self.assertTrue(summary[unsupported]['originals_untouched']);self.assertFalse(summary[other]['originals_untouched'],'a cleanup row exists')
-        self.assertEqual({k for k,v in summary.items() if 'retry' in v},{hold,busy,space})
+        self.assertEqual({k for k,v in summary.items() if 'retry' in v},{hold,busy,space,source})
         counts=self.q.jobs.attention_summary(retry=False);self.assertFalse(any('retry' in v for v in counts.values()),'counts never run the E8 checks')
         self.assertEqual(self.q.jobs.attention_summary(job_ids=[busy],retry=False).keys(),{busy});self.assertEqual(self.q.jobs.attention_summary(job_ids=[]),{})
 

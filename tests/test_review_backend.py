@@ -112,6 +112,26 @@ class ReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Source changed'):
             self.service.build_manifest('Audiobooks',row['id'],row['revision'])
 
+    def test_shifted_file_ids_with_identical_content_are_not_a_change(self):
+        # v0.16.9 ("Cabal"): the share reported other file IDs later; the bytes match the frozen hash exactly.
+        row=self.ready();before=self.service.build_manifest('Audiobooks',row['id'],row['revision'])
+        with connect(self.inventory.database) as db:
+            data=db.execute('SELECT data FROM candidate_context WHERE id=?',(row['id'],)).fetchone()[0]
+            ctx=json.loads(data)
+            for saved in ctx['source_hashes'].values():saved['dev']+=1;saved['ino']+=7
+            db.execute('UPDATE candidate_context SET data=? WHERE id=?',(json.dumps(ctx),row['id']))
+        fresh=self.service.enrich(self.service._row('Audiobooks',row['id'],row['revision']))
+        self.assertTrue(fresh['creation']['can_create'],fresh['creation']['reasons']);self.assertNotIn('Source changed — review required',fresh['creation']['reasons'])
+        after=self.service.build_manifest('Audiobooks',row['id'],row['revision'])
+        self.assertEqual({k:v for k,v in after.items() if k!='job_id'},{k:v for k,v in before.items() if k!='job_id'},'the frozen manifest is the same, so the job guard passes')
+        # The content still decides: same size and time with other bytes, or another size, is a change.
+        path=self.sources[0];stat=path.stat();data=path.read_bytes()
+        path.write_bytes(b'X'+data[1:]);os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+        with self.assertRaisesRegex(ValueError,'Source changed'):self.service.build_manifest('Audiobooks',row['id'],row['revision'])
+        path.write_bytes(data+b'longer')
+        with self.assertRaisesRegex(ValueError,'Source changed'):self.service.build_manifest('Audiobooks',row['id'],row['revision'])
+        self.assertIn('Source changed — review required',self.service.enrich(self.service._row('Audiobooks',row['id'],row['revision']))['creation']['reasons'])
+
     def test_single_existing_m4b_never_ready_for_concatenation(self):
         for path in self.sources:path.unlink()
         new=self.sources[0].with_suffix('.m4b');new.write_bytes(b'private existing audiobook')

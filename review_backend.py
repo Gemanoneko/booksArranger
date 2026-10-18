@@ -28,6 +28,10 @@ def digest(path):
         for block in iter(lambda:source.read(1024*1024),b''):result.update(block)
     return result.hexdigest()
 def identity(stat): return (stat.st_size,stat.st_mtime_ns,stat.st_dev,stat.st_ino)
+# Across time, only size and modification time screen a reviewed source; its content hash decides. Windows file
+# IDs are not stable on the library's SMB share (the same cause as the 0.16.8 Zone.Identifier fix), so a source
+# whose recorded file ID shifted but whose bytes match is unchanged. Same-moment checks still use identity().
+def unchanged_screen(stat,saved):return (stat.st_size,stat.st_mtime_ns)==(saved['size'],int(saved['modified']))
 def source_hash(path,expected,stop=None):
     if stop and stop.is_set():raise InterruptedError('Automatic source hashing paused')
     result=hashlib.sha256()
@@ -134,7 +138,7 @@ class CandidateReviewService:
                     key=member_key(m['path'])
                     if key not in included:continue
                     saved=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
-                    if identity(stat)!=(saved['size'],int(saved['modified']),saved['dev'],saved['ino']):track_ok=False;source_changed=True;break
+                    if not unchanged_screen(stat,saved):track_ok=False;source_changed=True;break
             except (OSError,KeyError,ValueError):track_ok=False;source_changed=True
         reasons=[]
         if source_changed:reasons.append('Source changed — review required')
@@ -571,7 +575,7 @@ class CandidateReviewService:
             for key in row['track_order']:
                 if key not in row['included']:continue
                 m=members[key];stored=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
-                if identity(stat)!=(stored['size'],int(stored['modified']),stored['dev'],stored['ino']) or (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
+                if not unchanged_screen(stat,stored) or (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
                 sources.append({'path':m['path'],'size':stored['size'],'modified':stored['modified'],'sha256':stored['sha256'],'fingerprint':{'size':stored['size'],'modified':stored['modified']},'metadata':m['metadata']})
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']

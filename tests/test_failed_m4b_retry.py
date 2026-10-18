@@ -115,7 +115,8 @@ class RepairAdmissionTests(unittest.TestCase):
     def test_writer_family_and_coverless_failures_are_eligible_but_other_reviews_are_not(self):
         for reason in ('M4B preservation requires review: Unsupported/ambiguous brand',
                        'M4B preservation requires review: Unsupported structural box',
-                       'Preservation changed decoder, packets or presentation'):
+                       'Preservation changed decoder, packets or presentation',
+                       'M4B preservation requires review: Table count/extent'):
             self.assertTrue(eligible(self.parent|{'reason':reason}),reason)
         for reason in ('M4B preservation requires review: Top-level extent invalid',
                        'M4B preservation requires review: Unresolved chapter reference',

@@ -35,7 +35,8 @@ SELF_REFERENCE=bytes((0,0,0,1))
 REPAIR_DANGLING_CHAPTER='dangling_chapter_reference'
 REPAIR_TAIL_OVERRUN='mdat_tail_overrun'
 REPAIR_TRUNCATED_FRAMES='truncated_final_frames'
-REPAIRS=frozenset({REPAIR_DANGLING_CHAPTER,REPAIR_TAIL_OVERRUN,REPAIR_TRUNCATED_FRAMES})
+REPAIR_MDAT_UNDERSTATED='mdat_size_understated'
+REPAIRS=frozenset({REPAIR_DANGLING_CHAPTER,REPAIR_TAIL_OVERRUN,REPAIR_TRUNCATED_FRAMES,REPAIR_MDAT_UNDERSTATED})
 MAX_TAIL_PAD=4096
 # Silence repair bounds: the file may end at most 64 KiB early, and the frames that reach past
 # EOF (only the final audio frames, AAC-LC 1024-sample, mono/stereo) may total at most 1 second.
@@ -111,9 +112,10 @@ def dref(minf,handler):
     dinf=one(minf,b'dinf');parts=boxes(dinf.payload);profile(parts,{b'dref'})
     data=one(parts,b'dref').payload;full(data)
     refs=boxes(data[8:]);need(u32(data,4)==1 and len(refs)==1,'Data reference profile')
-    # QuickTime chapter text tracks say "this file" with an empty self alias ('alis', flags 1);
-    # same meaning as 'url ' flags 1. Any alias record, other flags or an audio alias is refused.
-    kinds=(b'url ',b'alis') if handler==b'text' else (b'url ',)
+    # QuickTime chapter text and chapter image tracks say "this file" with an empty self alias
+    # ('alis', flags 1); same meaning as 'url ' flags 1. Any alias record, other flags or an audio
+    # alias is refused.
+    kinds=(b'url ',b'alis') if handler in (b'text',b'vide') else (b'url ',)
     need(refs[0].kind in kinds and refs[0].payload==SELF_REFERENCE,'External/reference data refused')
 
 def sample_description(payload,handler):
@@ -387,6 +389,7 @@ class Plan:
     tail_padding:int=0
     repairs:tuple=()
     appended_media:bytes=b''
+    header_patches:tuple=()
 
 def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     """repair names the damage kinds the user approved; each applies only to its exact shape.
@@ -395,18 +398,33 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     and no sample of any track uses them. Zero bytes complete the declared extent.
     REPAIR_DANGLING_CHAPTER: the audio track's single chap list names track IDs absent from
     the movie. Only those IDs are dropped; every other track byte is unchanged.
+    REPAIR_MDAT_UNDERSTATED: at most MAX_TRUNCATED_TAIL bytes after the final mdat are not a box
+    and are exactly the final audio frames' bytes up to EOF. Only that mdat's 32-bit size field is
+    corrected; every sample byte stays at its offset.
     REPAIR_TRUNCATED_FRAMES: the final mdat ends at most MAX_TRUNCATED_TAIL bytes early inside
     the last audio frames only (AAC-LC, at most MAX_SILENCE_SECONDS). Those frames become silent
     frames in an appended mdat; every intact frame keeps its bytes, offset and timing.
     """
     need(type(source_size) is int and 0<source_size<2**63,'Source size')
     need(isinstance(repair,(set,frozenset)) and repair<=REPAIRS,'Unknown repair')
-    at=0;top=[];movie=None;extents=[];header_reads=0;padding=0;repairs=[];declared_end=None
+    at=0;top=[];movie=None;extents=[];header_reads=0;padding=0;repairs=[];declared_end=None;understated=None;last_mdat=None;patches=()
     def read(offset,count):
         nonlocal header_reads
         need(0<=offset<=source_size and 0<=count<=MAX_MOOV and offset+count<=source_size and header_reads+count<=MAX_MOOV+65536,'Metadata read bound')
         data=read_at(offset,count);need(isinstance(data,bytes) and len(data)==count,'Short protected read');header_reads+=count;return data
+    def is_box(at):
+        if source_size-at<8:return False
+        head=read(at,8);size=u32(head,0);kind=head[4:8]
+        if size==1:
+            if source_size-at<16:return False
+            size=int.from_bytes(read(at+8,8),'big');header=16
+        else:header=8
+        return size>=header and at+size<=source_size and kind in {b'ftyp',b'moov',b'mdat',b'free',b'skip',b'wide'}
     while at<source_size:
+        if REPAIR_MDAT_UNDERSTATED in repair and top and top[-1]==b'mdat' and source_size-at<=MAX_TRUNCATED_TAIL and not is_box(at):
+            # Repair shape only: what follows the final mdat is not a box. The sample check below
+            # must prove those bytes are exactly the final audio frames, up to EOF.
+            understated=(last_mdat[0],last_mdat[1],at);extents[-1]=(extents[-1][0],source_size);break
         need(len(top)<128,'Top-level box count');head=read(at,8);size=u32(head,0);kind=head[4:8];header=8
         need(size!=0,'EOF-sized box unsupported')
         if size==1:size=int.from_bytes(read(at+8,8),'big');header=16
@@ -430,7 +448,7 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
             need(p in EXACT_FTYP or brands<=BRANDS and p[:4] in MAJOR_BRANDS,'Unsupported/ambiguous brand')
         elif kind==b'moov':
             need(movie is None and size<=MAX_MOOV,'Multiple/oversized movie');movie=Box(kind,at,size,header,read(at,size))
-        elif kind==b'mdat':extents.append((at+header,at+size))
+        elif kind==b'mdat':extents.append((at+header,at+size));last_mdat=(at,header)
         top.append(kind);at+=size
     need(top.count(b'ftyp')==1 and movie is not None and extents and top[-1]!=b'wide','Required top-level boxes/wide successor')
     parts=boxes(movie.payload);profile(parts,{b'mvhd',b'trak',b'udta'});clock(one(parts,b'mvhd').payload)
@@ -446,6 +464,15 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     audio=[t for t in tracks if t['handler']==b'soun'];need(len(audio)==1,'Exactly one audio track required')
     audio=audio[0];expected=[b.raw for b in track_boxes];output_movie=movie;media=b''
     index=next(i for i,t in enumerate(tracks) if t is audio)
+    if understated:
+        start,header,declared=understated
+        need(header==8 and source_size-start<2**32,'Size repair needs a 32-bit audio container header')
+        tail=sorted(span for span in audio['spans'] if span[1]>declared)
+        need(tail and tail[0][0]<=declared and tail[-1][1]==source_size and all(a[1]==b[0] for a,b in zip(tail,tail[1:])),'Bytes after the audio container are not exactly the final audio frames')
+        need(all(span[1]<=declared for t in tracks if t is not audio for span in t['spans']),'Chapter samples lie past the audio container')
+        patches=((start,struct.pack('>I',source_size-start)),)
+        repairs.append({'kind':REPAIR_MDAT_UNDERSTATED,'mdat_offset':start,'declared_bytes':declared-start,'actual_bytes':source_size-start,'understated_by':source_size-declared,
+            'description':f'The audio container\'s size field ended {source_size-declared} bytes before the file does; the final audio frames sit in those bytes. Only that size field was corrected; all audio is unchanged.'})
     if padding and not any(t['cut'] for t in tracks):
         need(REPAIR_TAIL_OVERRUN in repair and padding<=MAX_TAIL_PAD,'Top-level extent invalid')
         repairs.append({'kind':REPAIR_TAIL_OVERRUN,'declared_bytes':declared_end-overrun_start,'present_bytes':source_size-overrun_start,'padding':padding,
@@ -480,17 +507,26 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     # chapter reference is the only permitted difference and was rebuilt exactly above.
     need([b.raw for b in boxes(appended[16:] if appended[:4]==b'\0\0\0\1' else appended[8:]) if b.kind==b'trak']==expected,'Track bytes changed')
     return Plan(source_size,movie.start,movie.size,hashlib.sha256(movie.raw).hexdigest(),appended,
-        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media)
+        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media,patches)
+
+def _patches(source_plan):
+    """In-place header edits: the old moov's type becomes free, plus approved repair size fields."""
+    return ((source_plan.movie_offset+4,b'free'),)+tuple(source_plan.header_patches)
+
+def _patched(block,offset,patches):
+    for at,data in patches:
+        start=max(offset,at);end=min(offset+len(block),at+len(data))
+        if start<end:block=block[:start-offset]+data[start-at:end-at]+block[end-offset:]
+    return block
 
 def stream_candidate(source_plan,read_at,write,stopped=lambda:False):
     """Copy to caller-owned private sink. No source writes or path operations."""
-    source_hash=hashlib.sha256();candidate_hash=hashlib.sha256();offset=0;patch=source_plan.movie_offset+4
+    source_hash=hashlib.sha256();candidate_hash=hashlib.sha256();offset=0;patches=_patches(source_plan)
     while offset<source_plan.source_size:
         if stopped():raise InterruptedError('Metadata preservation paused; source unchanged')
         count=min(1024*1024,source_plan.source_size-offset);block=read_at(offset,count)
         need(isinstance(block,bytes) and len(block)==count,'Short immutable stream read');source_hash.update(block)
-        start=max(offset,patch);end=min(offset+count,patch+4)
-        if start<end:block=block[:start-offset]+b'free'[start-patch:end-patch]+block[end-offset:]
+        block=_patched(block,offset,patches)
         write(block);candidate_hash.update(block);offset+=count
     if stopped():raise InterruptedError('Metadata preservation paused; source unchanged')
     if source_plan.tail_padding:
@@ -510,16 +546,14 @@ def verify_candidate(source_plan, source_read, candidate_size, candidate_read, s
     """
     need(candidate_size==source_plan.source_size+source_plan.tail_padding+len(source_plan.appended_media)+len(source_plan.appended_movie),'Candidate extent changed')
     offset=0;source_hash=hashlib.sha256();output_hash=hashlib.sha256()
-    patch=source_plan.movie_offset+4
+    patches=_patches(source_plan)
     while offset<source_plan.source_size:
         if stopped():raise InterruptedError('Preservation verification paused')
         count=min(1024*1024,source_plan.source_size-offset)
         original=source_read(offset,count);actual=candidate_read(offset,count)
         need(isinstance(original,bytes) and isinstance(actual,bytes) and len(original)==count and len(actual)==count,'Short verification read')
         source_hash.update(original);output_hash.update(actual)
-        start=max(offset,patch);end=min(offset+count,patch+4)
-        expected=original
-        if start<end:expected=original[:start-offset]+b'free'[start-patch:end-patch]+original[end-offset:]
+        expected=_patched(original,offset,patches)
         need(actual==expected,'Candidate changed retained source bytes')
         offset+=count
     if source_plan.tail_padding:

@@ -14,6 +14,8 @@ REASONS={
     'M4B preservation requires review: Unsupported structural box',
     # Coverless sources: the movie start now excludes the added attached cover (0.16.7).
     'Preservation changed decoder, packets or presentation',
+    # Refused by the old 262,144-chunk cap (raised in 0.16.7); admission still requires plan().
+    'M4B preservation requires review: Table count/extent',
 }
 SCHEMA='m4b-metadata-preservation-v1'
 

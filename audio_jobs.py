@@ -43,8 +43,11 @@ def _failure_details(error, stage, now=None):
     return details
 
 
+REVISION_GUARD_REFUSAL = "Source changed — review required"  # the worker's own guard, before any work is published
+
+
 def failure_cause(row, journal):
-    """'busy' or 'space' when a recorded pre-publication failure is one a Retry can resolve; otherwise None.
+    """'busy', 'space' or 'source' when a recorded pre-publication failure is one a Retry can resolve; otherwise None.
 
     Typed where the record is typed (sqlite_errorcode, errno). Older records carry no code, so two
     exact, fixed shapes are accepted: SQLite's own SQLITE_BUSY text as the whole reason of an untyped
@@ -63,6 +66,11 @@ def failure_cause(row, journal):
     if kind == 'OSError':
         if number == errno.ENOSPC or number is None and str(row.get('reason') or '').startswith('[Errno 28] '):
             return 'space'
+    # The worker's revision guard refused before publication (v0.16.9, "Cabal"): until 0.16.9 a shifted file ID
+    # on the library share failed it with identical bytes. A Retry is safe: the worker runs the guard again
+    # before any work, so a source whose content really changed stops again with the same reason.
+    if kind == 'ValueError' and row.get('reason') == REVISION_GUARD_REFUSAL:
+        return 'source'
     return None
 
 
@@ -807,7 +815,7 @@ class AudioJobs:
                 if stage == "publishing":
                     if self._stop.is_set(): raise InterruptedError("Paused before publication")
                     if self.revision_guard(copy.deepcopy(manifest)) is not True:
-                        raise ValueError("Source changed — review required")
+                        raise ValueError(REVISION_GUARD_REFUSAL)
                     self._validate_record(details)
                     if details["job_id"] != job_id: raise ValueError("Publication job identity mismatch")
                     journal["publication_intent"] = copy.deepcopy(details)
@@ -816,7 +824,7 @@ class AudioJobs:
             try:
                 try:
                     if self.revision_guard(copy.deepcopy(manifest)) is not True:
-                        raise ValueError("Source changed — review required")
+                        raise ValueError(REVISION_GUARD_REFUSAL)
                     if self._stop.is_set(): raise InterruptedError("Paused before starting book")
                     runner_manifest = copy.deepcopy(manifest)
                     runner_manifest["attempt_id"] = attempt

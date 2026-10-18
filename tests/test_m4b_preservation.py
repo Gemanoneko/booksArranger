@@ -276,6 +276,10 @@ class WriterFamilyAllowanceTests(unittest.TestCase):
     def test_quicktime_self_alias_on_chapter_text_preserved(self):
         source=change_movie(TEXT_SOURCE(),lambda p:edit(p,DREF_PATH,lambda d:d[:8]+atom(b'alis',b'\0\0\0\1'),where=is_text))
         p,_,_=self.transform(source);self.assertEqual([t['handler'] for t in p.tracks],[b'soun',b'text'])
+    def test_quicktime_self_alias_on_chapter_image_and_text_preserved(self):
+        both=lambda box:handler_of(box) in (b'text',b'vide')
+        source=change_movie(add_chapter_graph(fixture()),lambda p:edit(p,DREF_PATH,lambda d:d[:8]+atom(b'alis',b'\0\0\0\1'),where=both))
+        p,_,_=self.transform(source);self.assertEqual(sorted(t['handler'] for t in p.tracks),[b'soun',b'text',b'vide'])
     def test_alias_on_audio_or_alias_not_self_refused(self):
         self.refuse(fixture().replace(b'url \0\0\0\1',b'alis\0\0\0\1',1))
         self.refuse(change_movie(TEXT_SOURCE(),lambda p:edit(p,DREF_PATH,lambda d:d[:8]+atom(b'alis',b'\0\0\0\0'),where=is_text)))
@@ -564,5 +568,37 @@ class SilenceRepairDecodeTests(unittest.TestCase):
                 self.assertEqual(pcm['sample_count'],reference.bytes//(channels*8))  # same length as the undamaged recording
                 with self.assertRaisesRegex(Refused,'Source damage differs'):
                     m4b_repair.prove_silenced_tail(full,output,p,self.root,self.stop,1.5,encoding,evidence=audio_pipeline.copied_audio_evidence,run=audio_pipeline.run_owned)
+
+
+def understate(source,missing):
+    """Shrink the final mdat's size field by `missing`: its last bytes now follow the declared end."""
+    top=unpack(source);mdat=top[b'mdat'];data=bytearray(source)
+    struct.pack_into('>I',data,len(source)-mdat.size,mdat.size-missing);return bytes(data)
+
+class UnderstatedContainerTests(unittest.TestCase):
+    """A final mdat whose size field stops short of the audio it holds: only that field is corrected."""
+    plan_for=DamageRepairTests.plan_for;produce=DamageRepairTests.produce
+    REPAIR=frozenset({'mdat_size_understated'})
+    def test_refused_unless_requested(self):
+        source=understate(fixture(),5)
+        for repair in (frozenset(),{'mdat_tail_overrun','truncated_final_frames','dangling_chapter_reference'}):
+            with self.assertRaises(Refused):self.plan_for(source,repair)
+    def test_only_the_size_field_changes_and_every_original_byte_stays(self):
+        original=fixture();source=understate(original,5);p,candidate=self.produce(source,self.REPAIR)
+        record=p.repairs[0];self.assertEqual((record['kind'],record['understated_by']),('mdat_size_understated',5))
+        self.assertEqual(candidate[:len(source)],original[:p.movie_offset+4]+b'free'+original[p.movie_offset+8:])
+        self.assertEqual(candidate[len(source):],p.appended_movie)
+        self.assertEqual([b.kind for b in boxes(candidate)],[b'ftyp',b'free',b'mdat',b'moov'])
+    def test_verifier_rejects_an_uncorrected_size_field(self):
+        source=understate(fixture(),5);p,candidate=self.produce(source,self.REPAIR)
+        start=p.header_patches[0][0];broken=candidate[:start]+source[start:start+4]+candidate[start+4:]
+        with self.assertRaisesRegex(Refused,'retained source bytes'):verify_candidate(p,lambda a,n:source[a:a+n],len(broken),lambda a,n:broken[a:a+n])
+    def test_unreferenced_trailing_bytes_or_chapter_samples_past_the_container_refused(self):
+        with self.assertRaisesRegex(Refused,'not exactly the final audio frames'):self.plan_for(fixture()+b'JUNKJUNKJUNK',self.REPAIR)
+        with self.assertRaises(Refused):self.plan_for(understate(TEXT_SOURCE(),len(b'chapter')),self.REPAIR)
+    def test_diagnosis_names_the_size_repair(self):
+        import m4b_repair
+        source=understate(fixture(),5);diagnosis=m4b_repair.diagnose(len(source),lambda a,n:source[a:a+n])
+        self.assertEqual((diagnosis['state'],[r['kind'] for r in diagnosis['repairs']]),('repairable',['mdat_size_understated']))
 
 if __name__=='__main__':unittest.main()
