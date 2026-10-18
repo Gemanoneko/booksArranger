@@ -296,6 +296,71 @@ class RetryAllTests(Base):
         self.assertEqual(str(caught.exception),RETRY_SCANNING)
 
 
+class RevisionGuardTests(Base):
+    """v0.16.10: a real Retry child and a real Repair child, admitted by the real proof routes, run through the real
+    worker and the real revision guard (MergeService._guard). Until 0.16.10 the guard compared the job-only
+    m4b_repair binding with the review's rebuild, so every such job stopped with "Source changed — review required"
+    before any work. The review rebuild is the unchanged reviewed manifest (what build_manifest returns when nothing
+    changed); a changed one must still stop the job."""
+    def setUp(self):
+        super().setUp()
+        self.retry_parent,self.retry_manifest=self.l.failed(source=fixture(),name='retry')
+        self.repair_parent,self.repair_manifest=self.l.failed(REFUSED,dangling(TEXT_SOURCE(),[3,2]),name='repair')
+        self.s=self.service();self.s.reviews.build_manifest=self.rebuild;self.edited=set()
+        self.ran=[];self.l.jobs.runner=self.runner;self.l.jobs.revision_guard=self.s._guard
+
+    def rebuild(self,library,identity,revision,allow_existing_job=False,stop=None):
+        frozen=next(m for m in (self.retry_manifest,self.repair_manifest) if m['candidate_id']==identity)
+        fresh=copy.deepcopy(frozen);fresh['job_id']=str(uuid.uuid4())
+        if identity in self.edited:fresh['metadata']['title']='Edited after admission'
+        return fresh
+
+    def runner(self,manifest,stop,checkpoint):
+        self.ran.append(manifest['job_id']);raise ValueError('Fixture stops once the guard let it start')
+
+    def children(self):
+        retry=self.s._retry_preserved_m4b(self.l.row(self.retry_parent),100,in_worker=True)
+        repair=self.s._repair_damaged_m4b(self.l.row(self.repair_parent),100,in_worker=True)
+        self.assertTrue(retry['requeued'],retry);self.assertTrue(repair['requeued'],repair)
+        for child in (retry['job_id'],repair['job_id']):self.assertIn('m4b_repair',json.loads(self.l.row(child)['manifest']),'a real child carries its binding')
+        return retry['job_id'],repair['job_id']
+
+    def work(self):
+        self.l.jobs._stop.clear();self.l.jobs.resume();deadline=time.monotonic()+20
+        while self.l.jobs._thread and self.l.jobs._thread.is_alive():
+            if time.monotonic()>deadline:raise AssertionError('worker did not stop')
+            time.sleep(.02)
+
+    def test_retry_and_repair_children_pass_the_guard_and_start(self):
+        retry,repair=self.children();self.work()
+        self.assertEqual(sorted(self.ran),sorted([retry,repair]),'both children started: the guard passed')
+        for child in (retry,repair):self.assertEqual(self.l.row(child)['reason'],'Fixture stops once the guard let it start')
+
+    def test_a_review_changed_after_admission_still_stops_the_child(self):
+        retry,repair=self.children();self.edited.add(self.retry_manifest['candidate_id']);self.work()
+        self.assertEqual(self.ran,[repair],'positive control: the guard still compares the review')
+        self.assertEqual((self.l.row(retry)['state'],self.l.row(retry)['reason']),('needs attention','Source changed — review required'))
+
+    def test_children_stopped_by_the_old_guard_show_retry_and_repair_and_run(self):
+        retry,repair=self.children()
+        self.l.jobs.revision_guard=lambda manifest:False;self.work()  # the 0.16.9 guard refused every child
+        for child in (retry,repair):self.assertEqual((self.l.row(child)['state'],self.l.row(child)['reason']),('needs attention','Source changed — review required'))
+        summary=self.s.attention_summary()
+        self.assertEqual((summary[retry]['group'],summary[retry]['retry']),('retry',{'allowed':True,'reason':''}))
+        self.assertEqual((summary[repair]['group'],summary[repair]['repair']),('repair',{'allowed':True,'reason':''}))
+        self.assertEqual([item['kind'] for item in summary[repair]['damage']],['dangling_chapter_reference'],'the approved repair, from its own binding')
+        self.assertNotIn(self.retry_parent,summary);self.assertNotIn(self.repair_parent,summary)
+        before=self.count()
+        with self.assertRaises(RetryRefused):self.s.repair_blocked_job('Audiobooks',self.retry_manifest['candidate_id'],1,retry)  # Repair is only for a repair job
+        self.assertTrue(self.s.retry_blocked_job('Audiobooks',self.retry_manifest['candidate_id'],1,retry)['queued_next'])
+        self.assertTrue(self.s.repair_blocked_job('Audiobooks',self.repair_manifest['candidate_id'],1,repair)['queued_next'])
+        self.assertEqual(self.count(),before,'requeued as themselves: no new job');self.assertEqual(json.loads(self.l.row(repair)['manifest'])['m4b_repair']['repairs'][0]['kind'],'dangling_chapter_reference')
+        self.l.jobs.revision_guard=self.s._guard;self.work()
+        self.assertEqual(sorted(self.ran),sorted([retry,repair]))
+
+    def count(self):return self.l.count()
+
+
 class HTTPTests(unittest.TestCase):
     setUp=test_blocked_retry.HTTPTests.setUp;call=test_blocked_retry.HTTPTests.call
 

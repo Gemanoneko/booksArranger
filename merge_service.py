@@ -132,6 +132,7 @@ class SharedSnapshot:
 
 _BULK_LOCK=threading.Lock()    # Retry all: its run record and thread
 _REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker thread
+JOB_ONLY_FIELDS=('job_id','attempt_id','m4b_repair')  # never produced by the review's build_manifest
 _PURGE_LOCK=threading.RLock()  # one recovery purge at a time (the converter's and the sweep's never overlap)
 
 def catalog_busy_text(reason):
@@ -1060,11 +1061,20 @@ class MergeService:
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(REPAIR_SCANNING)
         if self.draining:raise RetryRefused(REPAIR_CLOSING)
-        if self._m4b_parent(job_id,identity,revision,m4b_repair.eligible) is None:raise RetryRefused(RETRY_BOOK_CHANGED)
+        if self._m4b_parent(job_id,identity,revision,m4b_repair.eligible) is None:
+            # A Repair job that stopped only on the revision guard (v0.16.10) runs again as itself, with the repair
+            # it was admitted with (audio_jobs._retry_shape); anything else is refused, nothing changed.
+            rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
+            binding=json.loads(rows[0]['manifest']).get('m4b_repair') if rows else None
+            if not isinstance(binding,dict) or binding.get('user_requested') is not True:raise RetryRefused(RETRY_BOOK_CHANGED)
+            with self._review_boundary():
+                result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
+            queued=self._queue_next_same(job_id,'repair');self._resume_later()
+            return result|queued
         result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
         return {'job_id':job_id,'requeued':False,**result}
 
-    def _queue_next_same(self,job_id):
+    def _queue_next_same(self,job_id,kind='retry'):
         """A requeued failed job (the same row) runs right after the current book, in click order, like an M4B
         Retry: one entry in the queue-next ledger, already admitted, whose child is the job itself."""
         import m4b_readmission
@@ -1073,7 +1083,7 @@ class MergeService:
                 m4b_readmission.ensure(db);db.execute('BEGIN IMMEDIATE')
                 seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
                 stamp=time.strftime('%Y-%m-%dT%H:%M:%S+00:00',time.gmtime())
-                db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(job_id,'retry',seq,'admitted',job_id,json.dumps({'reason':'Requeued by Retry'}),stamp,stamp))
+                db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(job_id,kind,seq,'admitted',job_id,json.dumps({'reason':'Requeued by '+kind.capitalize()}),stamp,stamp))
                 return m4b_readmission.describe(db,job_id) or {}
         except sqlite3.Error:return {}  # still requeued; it runs in normal queue order
 
@@ -1592,7 +1602,10 @@ class MergeService:
                 frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
                 return json.loads(raw['manifest'])==frozen and self._replacement_guard(relation)
             current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True)
-            def frozen(value):return {k:v for k,v in value.items() if k not in ('job_id','attempt_id')}
+            # Only what the review decides is compared. The queue and the Retry/Repair admission add job-only fields
+            # (JOB_ONLY_FIELDS); until 0.16.10 the m4b_repair binding made every Retry/Repair job fail here. The
+            # rebuild still re-hashes every source, and the repair binding is validated when the job runs.
+            def frozen(value):return {k:v for k,v in value.items() if k not in JOB_ONLY_FIELDS}
             return frozen(current)==frozen(manifest)
         except (ValueError,OSError,KeyError):return False
 

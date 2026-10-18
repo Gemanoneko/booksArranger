@@ -519,9 +519,14 @@ class AudioJobs:
             return None
         if hashlib.sha256(row['manifest'].encode('utf-8')).hexdigest() != row['manifest_hash'] or manifest.get('job_id') != row['job_id']:
             return None  # E4
-        if manifest.get('replacement_id') or manifest.get('m4b_repair'):
+        # E5: no replacement and no Retry/Repair child, except (v0.16.10) a child whose only failure was the
+        # revision guard: until 0.16.10 that guard refused every child for its job-only m4b_repair field. It
+        # requeues as itself, keeping the repair it was admitted with; a parent with a child never does.
+        child = bool(manifest.get('m4b_repair'))
+        if manifest.get('replacement_id') or child and failure_cause(row, journal) != 'source':
             return None  # E5
-        if db.execute('SELECT 1 FROM audio_repair_admissions WHERE parent_job_id=? OR child_job_id=?', (row['job_id'], row['job_id'])).fetchone():
+        if db.execute('SELECT 1 FROM audio_repair_admissions WHERE parent_job_id=?' + ('' if child else ' OR child_job_id=?'),
+                      (row['job_id'],) if child else (row['job_id'], row['job_id'])).fetchone():
             return None  # E5
         newest = latest.get(manifest.get('candidate_id')) if latest is not None else (lambda found: found[0] if found else None)(db.execute(
             "SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone())
@@ -584,8 +589,12 @@ class AudioJobs:
             single_m4b = isinstance(sources, list) and len(sources) == 1 and str(sources[0].get('path', '')).lower().endswith(('.m4b', '.m4a'))
             cause = failure_cause(row, journal) if isinstance(journal, dict) and 'failure' in journal else 'files'
             failure = journal.get('failure') if isinstance(journal, dict) else None
+            binding = manifest.get('m4b_repair') if isinstance(manifest, dict) else None
+            repair_child = shapes[row['job_id']] is not None and isinstance(binding, dict) and binding.get('user_requested') is True
             if repair and repair.get('state') == 'repairable':
                 group, cause = 'repair', None
+            elif repair_child:
+                group, cause, repair = 'repair', None, {'repairs': binding.get('repairs') or []}  # Repair again, as itself
             elif shapes[row['job_id']] is not None:
                 group = 'retry'
             elif m4b_retry:
