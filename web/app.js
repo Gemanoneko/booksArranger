@@ -829,7 +829,10 @@ const PASS_PENDING={conversion:'Audiobook conversion is running, so automatic pr
 // sections 1.2 and 3.4). The server's pass answer chooses the sentence.
 function restartNote(kind,answer){
   const lead={startover:'Started over.',release:'Review discarded.',combined:'Started over. Review discarded.'}[kind],pass=answer?.pass,find=' Find it under Status: Started over.';
-  const held=kind==='startover' && answer?.outcome==='manual_draft'?' Automatic processing will then hold this book because it has a saved review; Let the app handle it appears once it is held.':'';
+  // The button is promised only when the server expects it (follow-up 4, section 2: a single M4B, a saved review, no
+  // editing lease); a multi-file or leased book never gets it, so the sentence ends at "…because it has a saved review."
+  const release=answer?.row?.restart?.release_expected===true;
+  const held=kind==='startover' && answer?.outcome==='manual_draft'?' Automatic processing will then hold this book because it has a saved review'+(release?'; Let the app handle it appears once it is held.':'.'):'';
   if(pass?.action==='blocked')return {text:`${kind==='release'?'Review discarded':kind==='combined'?'Started over. Review discarded':'Started over'}, but automatic processing did not start.${pass.reason?' '+pass.reason:''}`,warn:true};
   if(pass?.action==='running' && pass.visit==='next_run')return {text:`${lead} Automatic processing is running but has already passed this book. Press Start automatic processing above after it finishes.`+(kind==='release'?'':held+find),warn:true};
   const middle=pass?.action==='started'?'Automatic processing has started. It scans the library first, so this may take a while.':pass?.action==='continued'?'Automatic processing continued where it paused.':
