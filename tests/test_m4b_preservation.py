@@ -601,4 +601,100 @@ class UnderstatedContainerTests(unittest.TestCase):
         source=understate(fixture(),5);diagnosis=m4b_repair.diagnose(len(source),lambda a,n:source[a:a+n])
         self.assertEqual((diagnosis['state'],[r['kind'] for r in diagnosis['repairs']]),('repairable',['mdat_size_understated']))
 
+
+# 2026-10-19 (Sergei): four exact shapes seen in nine refused library books, built here from synthetic
+# bytes. Each near-miss test first proves the exact shape passes (positive control), so it fails when
+# its rule is removed as well as when the rule is widened.
+IODS_FAAC=bytes.fromhex('00000018696f6473000000001080808007004fffffffffff')
+IODS_AUDIO_PROFILE=bytes.fromhex('00000018696f6473000000001080808007004fffff0fffff')
+EMPTY_NAME=bytes.fromhex('0000001075647461000000086e616d65')
+
+def with_iods(source,*descriptors):
+    return change_movie(source,lambda p:b''.join(b.raw+(b''.join(descriptors) if b.kind==b'mvhd' else b'') for b in boxes(p)))
+
+def with_track_udta(source,udta):
+    return change_movie(source,lambda p:edit(p,[b'trak'],lambda t:t+udta))
+
+def with_items(source,*items):
+    return change_movie(source,lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m[:4]+nested(m[4:],b'ilst',lambda i:i+b''.join(items)))))
+
+def blank_child(size):return struct.pack('>I',size)+bytes(size-4)
+def value(kind,dtype,payload):return atom(b'data',struct.pack('>II',dtype,0)+payload)
+# Унылый незнакомец: seven items whose only child is blank (sizes as observed).
+BLANK_ONLY=[atom(b'cpil',blank_child(17)),atom(b'pgap',blank_child(17)),atom(b'tmpo',blank_child(18)),atom(b'\xa9too',blank_child(32)),
+            atom(b'----',blank_child(180)),atom(b'----',blank_child(111)),atom(b'----',blank_child(154))]
+# The four Звонок books: one blank child, then one valid data box (sizes as observed; values synthetic).
+ALBUM_ARTIST=value(b'aART',1,b'Synthetic album artist 25');GROUPING=value(b'\xa9grp',1,b'Synthetic 12');TRACK=value(b'trkn',0,struct.pack('>HHHH',0,1,1,0))
+BLANK_PLUS_DATA=[atom(b'aART',blank_child(41)+ALBUM_ARTIST),atom(b'\xa9grp',blank_child(28)+GROUPING),atom(b'trkn',blank_child(24)+TRACK)]
+
+def ilst_items(candidate):
+    moov=boxes(unpack(candidate)[b'moov'].payload);udta=next(b for b in moov if b.kind==b'udta')
+    meta=next(b for b in boxes(udta.payload) if b.kind==b'meta');ilst=next(b for b in boxes(meta.payload[4:]) if b.kind==b'ilst')
+    return boxes(ilst.payload)
+
+class ObservedWriterShapeTests(unittest.TestCase):
+    transform=M4BPreservationTests.transform
+    def accepted(self,source):
+        p,candidate,receipt=self.transform(source)
+        read=lambda a,n:source[a:a+n]
+        self.assertTrue(verify_candidate(p,read,len(candidate),lambda a,n:candidate[a:a+n])['all_retained_bytes_verified'],'existing output verification unchanged')
+        return p,candidate,receipt
+    def refused(self,source,reason):
+        with self.assertRaisesRegex(Refused,reason):plan(len(source),lambda a,n:source[a:a+n],{'title':'Approved'})
+
+    # Rule 1: moov/iods, the observed 24-byte form with no track reference, copied unchanged.
+    def test_observed_iods_forms_copied_unchanged(self):
+        for descriptor in (IODS_FAAC,IODS_AUDIO_PROFILE):
+            _,candidate,_=self.accepted(with_iods(fixture(),descriptor))
+            self.assertIn(descriptor,[b.raw for b in boxes(unpack(candidate)[b'moov'].payload)])
+    def test_iods_near_misses_refused(self):
+        self.accepted(with_iods(fixture(),IODS_FAAC))  # positive control
+        track_reference=bytes.fromhex('0000001e696f647300000000108080800d004fffffffffff0e0400000001')  # ES_ID_Inc naming track 1
+        url=IODS_FAAC[:17]+bytes.fromhex('006f')+IODS_FAAC[19:]  # URL flag set
+        versioned=IODS_FAAC[:8]+b'\1'+IODS_FAAC[9:]
+        for descriptor in (track_reference,url,versioned):
+            self.refused(with_iods(fixture(),descriptor),'Unsupported object descriptor')
+        self.refused(with_iods(fixture(),IODS_FAAC,IODS_FAAC),'Missing/duplicate')
+
+    # Rule 2: track udta holding a single empty name, copied unchanged.
+    def test_track_udta_with_one_empty_name_copied_unchanged(self):
+        _,candidate,_=self.accepted(with_track_udta(fixture(),EMPTY_NAME))
+        trak=next(b for b in boxes(unpack(candidate)[b'moov'].payload) if b.kind==b'trak')
+        self.assertEqual([b.raw for b in boxes(trak.payload) if b.kind==b'udta'],[EMPTY_NAME])
+    def test_track_udta_near_misses_refused(self):
+        self.accepted(with_track_udta(fixture(),EMPTY_NAME))  # positive control
+        for udta in (atom(b'udta',atom(b'name',b'x')),atom(b'udta',atom(b'name',b'')*2),atom(b'udta',atom(b'name',b'')+atom(b'meta',bytes(4))),atom(b'udta',b'')):
+            self.refused(with_track_udta(fixture(),udta),'Unsupported track-local user data')
+
+    # Rule 3: an item whose only child is blank is dropped whole, and the drop is recorded.
+    def test_items_with_only_a_blank_child_dropped_and_recorded(self):
+        p,candidate,receipt=self.accepted(with_items(fixture(),*BLANK_ONLY))
+        self.assertEqual([b.kind for b in ilst_items(candidate)],[b'sonm',b'\xa9nam'],'only real items remain; audio bytes were checked above')
+        expected=[{'item':name,'removed':'item','bytes':size} for name,size in (('cpil',25),('pgap',25),('tmpo',26),('©too',40),('----',188),('----',119),('----',162))]
+        self.assertEqual(list(p.metadata_dropped),expected);self.assertEqual(receipt['metadata_dropped'],expected)
+        from failed_m4b_retry import profile_proof
+        self.assertEqual(profile_proof(p,'b'*64)['metadata_dropped'],expected,'the admission proof records it too')
+    def test_blank_only_near_misses_refused(self):
+        self.accepted(with_items(fixture(),atom(b'cpil',blank_child(17))))  # positive control
+        not_blank=atom(b'cpil',struct.pack('>I',17)+bytes(12)+b'\1')
+        typed=atom(b'cpil',struct.pack('>I',17)+b'zzzz'+bytes(9))  # zero bytes but a non-zero type
+        self.refused(with_items(fixture(),not_blank),'Unsupported structural box')
+        self.refused(with_items(fixture(),typed),'Unsupported structural box')
+        self.refused(with_items(fixture(),atom(b'cpil',blank_child(17)+blank_child(17))),'Blank metadata child beside other content')
+
+    # Rule 4: blank children beside exactly one valid data box are dropped; the item keeps that data box.
+    def test_blank_children_beside_one_data_box_dropped_and_recorded(self):
+        p,candidate,receipt=self.accepted(with_items(fixture(),*BLANK_PLUS_DATA))
+        found={b.kind:b.raw for b in ilst_items(candidate)}
+        self.assertEqual((found[b'aART'],found[b'\xa9grp'],found[b'trkn']),(atom(b'aART',ALBUM_ARTIST),atom(b'\xa9grp',GROUPING),atom(b'trkn',TRACK)))
+        expected=[{'item':name,'removed':'blank_children','count':1,'bytes':size} for name,size in (('aART',41),('©grp',28),('trkn',24))]
+        self.assertEqual(list(p.metadata_dropped),expected);self.assertEqual(receipt['metadata_dropped'],expected)
+    def test_blank_children_near_misses_refused(self):
+        self.accepted(with_items(fixture(),atom(b'aART',blank_child(41)+ALBUM_ARTIST)))  # positive control
+        mixes=[blank_child(41)+ALBUM_ARTIST+ALBUM_ARTIST,  # two data boxes
+               blank_child(41)+atom(b'mean',bytes(4)+b'com.apple.iTunes')+atom(b'name',bytes(4)+b'x')+ALBUM_ARTIST,
+               blank_child(41)+atom(b'data',b'\1'+bytes(7)+b'v'),  # data version 1
+               blank_child(41)+atom(b'data',bytes(4))]  # no type/locale
+        for mix in mixes:self.refused(with_items(fixture(),atom(b'aART',mix)),'Blank metadata child beside other content')
+
 if __name__=='__main__':unittest.main()

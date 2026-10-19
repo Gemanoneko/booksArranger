@@ -2,7 +2,8 @@
 
 No decoder, remuxer, filesystem opening or publication occurs here. Every original
 track and mdat byte remains at its original offset. Only approved Apple metadata
-items change; the prior moov becomes same-extent free and a new moov is appended.
+items change, and blank metadata is dropped in two exact shapes (clean_items, recorded in
+the receipt); the prior moov becomes same-extent free and a new moov is appended.
 
 Writer-family allowances are exact observed shapes, never wider tolerances. Damage
 repair is a separate explicit mode (plan(repair=...)): the caller names each repair
@@ -31,6 +32,14 @@ ZERO_BRAND=bytes(4)
 EXACT_FTYP={b'M4A\0'+bytes(4)+b'3gp5'+b'isom'}
 # QuickTime "media is in this file" data reference: version 0, flags 1, no alias record.
 SELF_REFERENCE=bytes((0,0,0,1))
+# MPEG-4 initial object descriptor (moov/iods), the one observed form: 24 bytes, full box version 0
+# flags 0, one MP4_IOD descriptor (tag 0x10, 4-byte length 7) naming object descriptor 1 with no URL
+# and no inline-profile flag, then its five profile-level bytes. Seven bytes leave no room for an
+# ES_ID_Inc, so this form references no track. Copied unchanged; any other iods is refused.
+IODS_FORM=bytes.fromhex('00000018'+'696f6473'+'00000000'+'10'+'80808007'+'004f')
+IODS_PROFILE_BYTES=5
+# Track user data holding a single empty 'name' (FAAC 1.28): nothing to change. Copied unchanged.
+EMPTY_TRACK_NAME=bytes.fromhex('00000010'+'75647461'+'00000008'+'6e616d65')
 # Damage repairs (explicit, user-requested only). See plan(repair=...).
 REPAIR_DANGLING_CHAPTER='dangling_chapter_reference'
 REPAIR_TAIL_OVERRUN='mdat_tail_overrun'
@@ -260,8 +269,9 @@ def validate_track(box,mdat_extents,chunk_budget,eof=None):
         for ref in refsbox:
             need(0<len(ref.payload)<=4*MAX_TRACKS and len(ref.payload)%4==0,'Chapter reference size')
             refs.extend(u32(ref.payload,i) for i in range(0,len(ref.payload),4))
-    # Track-local user data has no allowed mutable field in this profile.
-    need(one(parts,b'udta',True) is None,'Unsupported track-local user data')
+    # Track-local user data has no allowed mutable field in this profile; only the exact empty-name
+    # shape is kept, byte for byte (the whole trak is compared after the rewrite).
+    local=one(parts,b'udta',True);need(local is None or local.raw==EMPTY_TRACK_NAME,'Unsupported track-local user data')
     return {'id':identity,'handler':handler,'codec':codec,'chap':refs,'chap_boxes':chap_boxes,'samples':samples,'spans':spans,'cut':cut,'sha256':hashlib.sha256(box.raw).hexdigest()}
 
 def silence_final_frames(box,track,media_offset):
@@ -349,7 +359,39 @@ def approved_items(tags,cover):
         need(dtype is not None,'Artwork format');result[b'covr']=build(b'covr',build(b'data',struct.pack('>II',dtype,0)+cover))
     need(result,'No approved metadata changes');return result
 
+def blank(box):
+    """A blank box: its size field is intact and every byte after it, the type included, is zero."""
+    return box.header==8 and not any(box.raw[4:])
+
+def plain_data(box):
+    """One Apple metadata value box: 'data', version 0, then its type and locale (8 bytes) and value."""
+    return box.kind==b'data' and box.header==8 and len(box.payload)>=8 and box.payload[0]==0
+
+def clean_items(found):
+    """(items, dropped) for the ilst children: blank metadata is dropped in exactly two shapes.
+
+    An item whose only child is blank says nothing: the whole item is dropped. An item holding blank
+    children beside exactly one valid data box keeps that data box alone. Any other mix is refused.
+    Every removal is reported, so the job's receipt records it.
+    """
+    items=[];dropped=[]
+    for item in found:
+        sub=boxes(item.payload);blanks=[b for b in sub if blank(b)]
+        if blanks:
+            name=item.kind.decode('latin-1')
+            if len(sub)==1:
+                dropped.append({'item':name,'removed':'item','bytes':item.size});continue
+            kept=[b for b in sub if not blank(b)]
+            need(len(kept)==1 and plain_data(kept[0]),'Blank metadata child beside other content')
+            raw=repack(item,kept[0].raw);item=Box(item.kind,item.start,len(raw),item.header,raw);sub=kept
+            dropped.append({'item':name,'removed':'blank_children','count':len(blanks),'bytes':sum(b.size for b in blanks)})
+        profile(sub,{b'data',b'mean',b'name'})
+        need(all(len(b.payload)>=4 for b in sub),'Metadata item format')
+        items.append(item)
+    return items,dropped
+
 def rewrite_metadata(movie,tags,cover):
+    """(new movie bytes, dropped blank metadata) for the approved tags and cover."""
     desired=approved_items(tags,cover);parts=boxes(movie.payload);udta=one(parts,b'udta',True)
     # 'tags' is Nero's private tag store (meta values, cvrx cover copy, one tseg per chapter);
     # it is kept verbatim like chpl.
@@ -362,10 +404,8 @@ def rewrite_metadata(movie,tags,cover):
     hd=one(mp,b'hdlr',True)
     if hd:full(hd.payload);need(len(hd.payload)>=24 and hd.payload[8:12]==b'mdir','Metadata handler profile')
     else:hd=Box(b'hdlr',0,0,8,build(b'hdlr',bytes(8)+b'mdir'+bytes(12)))
-    ilst=one(mp,b'ilst',True);items=boxes(ilst.payload) if ilst else [];need(len(items)<=4096,'Metadata item bound')
-    for item in items:
-        sub=boxes(item.payload);profile(sub,{b'data',b'mean',b'name'})
-        need(all(len(b.payload)>=4 for b in sub),'Metadata item format')
+    ilst=one(mp,b'ilst',True);found=boxes(ilst.payload) if ilst else [];need(len(found)<=4096,'Metadata item bound')
+    items,dropped=clean_items(found)
     for key in desired:need(sum(i.kind==key for i in items)<=1,'Duplicate approved metadata item')
     rewritten=b''.join(desired.pop(i.kind) if i.kind in desired else i.raw for i in items)+b''.join(desired.values())
     newilst=repack(ilst,rewritten) if ilst else build(b'ilst',rewritten)
@@ -375,7 +415,7 @@ def rewrite_metadata(movie,tags,cover):
     newmeta=build(b'meta',bytes(4)+metadata_children,meta.header==16 if meta else False)
     newudta=build(b'udta',b''.join(newmeta if i.kind==b'meta' else i.raw for i in up)+(newmeta if meta is None else b''),udta.header==16 if udta else False)
     payload=b''.join(newudta if i.kind==b'udta' else i.raw for i in parts)+(newudta if udta is None else b'')
-    return repack(movie,payload)
+    return repack(movie,payload),dropped
 
 @dataclass(frozen=True)
 class Plan:
@@ -390,6 +430,7 @@ class Plan:
     repairs:tuple=()
     appended_media:bytes=b''
     header_patches:tuple=()
+    metadata_dropped:tuple=()
 
 def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     """repair names the damage kinds the user approved; each applies only to its exact shape.
@@ -451,7 +492,9 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
         elif kind==b'mdat':extents.append((at+header,at+size));last_mdat=(at,header)
         top.append(kind);at+=size
     need(top.count(b'ftyp')==1 and movie is not None and extents and top[-1]!=b'wide','Required top-level boxes/wide successor')
-    parts=boxes(movie.payload);profile(parts,{b'mvhd',b'trak',b'udta'});clock(one(parts,b'mvhd').payload)
+    parts=boxes(movie.payload);profile(parts,{b'mvhd',b'trak',b'udta',b'iods'});clock(one(parts,b'mvhd').payload)
+    descriptor=one(parts,b'iods',True)
+    need(descriptor is None or descriptor.header==8 and len(descriptor.raw)==len(IODS_FORM)+IODS_PROFILE_BYTES and descriptor.raw.startswith(IODS_FORM),'Unsupported object descriptor')
     track_boxes=[b for b in parts if b.kind==b'trak'];need(0<len(track_boxes)<=MAX_TRACKS,'Track count')
     tracks=[];remaining_chunks=MAX_CHUNKS
     # Only the silence repair lets chunks reach the declared (missing) tail, and it names every
@@ -502,12 +545,12 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     need(all(t['handler']==b'soun' or t['id'] in referenced for t in tracks),'Unreferenced chapter/video track')
     spans=sorted(span for t in tracks for span in t['spans'])
     need(all(left[1]<=right[0] for left,right in zip(spans,spans[1:])),'Overlapping sample payload')
-    appended=rewrite_metadata(output_movie,tags,cover)
+    appended,dropped=rewrite_metadata(output_movie,tags,cover)
     # The entire trak bytes, not rounded timestamps, establish preservation; a repaired
     # chapter reference is the only permitted difference and was rebuilt exactly above.
     need([b.raw for b in boxes(appended[16:] if appended[:4]==b'\0\0\0\1' else appended[8:]) if b.kind==b'trak']==expected,'Track bytes changed')
     return Plan(source_size,movie.start,movie.size,hashlib.sha256(movie.raw).hexdigest(),appended,
-        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media,patches)
+        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media,patches,tuple(dropped))
 
 def _patches(source_plan):
     """In-place header edits: the old moov's type becomes free, plus approved repair size fields."""
@@ -536,6 +579,8 @@ def stream_candidate(source_plan,read_at,write,stopped=lambda:False):
     receipt={'schema':'m4b-metadata-preservation-v1','source_sha256':source_hash.hexdigest(),'sha256':candidate_hash.hexdigest(),'size':source_plan.source_size+source_plan.tail_padding+len(source_plan.appended_media)+len(source_plan.appended_movie),'old_moov_offset':source_plan.movie_offset,'old_moov_size':source_plan.movie_size,'old_moov_sha256':source_plan.movie_sha256,'appended_moov_sha256':hashlib.sha256(source_plan.appended_movie).hexdigest(),'track_sha256':[t['sha256'] for t in source_plan.tracks],'source_offsets_preserved':True,'fast_start_preserved':False,'pcm_verified':False}
     if source_plan.repairs:receipt.update(tail_padding=source_plan.tail_padding,repairs=[dict(r) for r in source_plan.repairs],
         appended_media_sha256=hashlib.sha256(source_plan.appended_media).hexdigest() if source_plan.appended_media else None)
+    # Blank metadata the plan dropped (clean_items): kept in the job's validation with this receipt.
+    if source_plan.metadata_dropped:receipt['metadata_dropped']=[dict(r) for r in source_plan.metadata_dropped]
     return receipt
 
 def verify_candidate(source_plan, source_read, candidate_size, candidate_read, stopped=lambda:False):

@@ -24,9 +24,13 @@ def profile_proof(profile,module_sha256):
     tracks=[{'id':track['id'],'handler':track['handler'].decode('ascii'),
              'codec':track['codec'].decode('ascii'),'chap':list(track['chap']),
              'samples':track['samples'],'sha256':track['sha256']} for track in profile.tracks]
-    return {'schema':SCHEMA,'module_sha256':module_sha256,
-            'movie_sha256':profile.movie_sha256,'tracks':tracks,
-            'profile_only_not_pcm_verification':True}
+    proof={'schema':SCHEMA,'module_sha256':module_sha256,
+           'movie_sha256':profile.movie_sha256,'tracks':tracks,
+           'profile_only_not_pcm_verification':True}
+    # Blank metadata the plan drops is part of what the admitted child will change.
+    dropped=getattr(profile,'metadata_dropped',())
+    if dropped:proof['metadata_dropped']=[dict(item) for item in dropped]
+    return proof
 
 def eligible(row):
     if row.get('reason') not in REASONS:return False
