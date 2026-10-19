@@ -217,7 +217,8 @@ class BrowserServer(ThreadingHTTPServer):
         jobs=self.merge.status_snapshot() if cached and hasattr(self.merge,'status_snapshot') else self.merge.state()
         key=(library,active,self.closing,self.active_library,json.dumps(jobs,sort_keys=True,default=str))
         kept=self.__dict__.get('_quiet_parts')
-        if token is not None and kept and kept[0]==(token,key) and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:
+        bound=self.merge.quiet_max_age() if hasattr(self.merge,'quiet_max_age') else QUIET_MAX_AGE
+        if token is not None and kept and kept[0]==(token,key) and 0<=time.monotonic()-kept[1]<bound:
             status,automatic=copy.deepcopy(kept[2])
         else:
             status=self.inventory.status(library)
@@ -450,6 +451,16 @@ class Handler(BaseHTTPRequestHandler):
             except RetryRefused as error:
                 self.refused(error,id);return
             self.response(202,result|{'automatic_processing':self.automatic_status()});return
+        if path=='/api/audiobook/clear-working':
+            # Clear working files: verified disposal of an earlier attempt's leftovers; originals are never touched.
+            self.shape(data,{'library','id','revision','job_id'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id'])
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.clear_working_files(library,id,revision,job_id)
+            except RetryRefused as error:
+                self.refused(error,id);return
+            self.response(202,result);return
         if path=='/api/audiobook/release':
             # "Let the app handle it": discard the held book's saved review and let automatic processing take it.
             self.shape(data,{'library','id','revision'})
@@ -497,6 +508,7 @@ class Handler(BaseHTTPRequestHandler):
             from audio_jobs import RetryRefused
             try:result=self.server.merge.retry_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
+                if getattr(error,'cause',None):self.refused(error);return  # Retry's clear-first did not finish: typed
                 self.fail(409,str(error));return  # Nothing changed; the message is shown as written.
             self.response(202,result);return
         if path=='/api/audiobook/repair':
@@ -507,6 +519,7 @@ class Handler(BaseHTTPRequestHandler):
             from audio_jobs import RetryRefused
             try:result=self.server.merge.repair_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
+                if getattr(error,'cause',None):self.refused(error);return
                 self.fail(409,str(error));return
             self.response(202,result);return
         if path=='/api/audiobook/keep':
@@ -626,7 +639,8 @@ class Handler(BaseHTTPRequestHandler):
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
-                         '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start'}
+                         '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
+                         '/api/audiobook/clear-working'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

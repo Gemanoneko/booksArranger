@@ -35,6 +35,10 @@ STALE_WAIT=0.5 # Seconds a poll waits for a newer status when an earlier answer 
 CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused per catalog version while no cleanup runs.
 QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
+WORKING_MAX_AGE=30.0 # The same bound while any listed row carries leftover working files: files removed outside the app
+# show within a minute, not five (RefusedRetry follow-up 2, section 2.6).
+WORKING_RECHECK=20.0 # Seconds a classified working folder is reused while its listing is unchanged (it stats the originals).
+CHECK_REFRESH=10.0 # Seconds between status refreshes while the M4B check pass finishes checks (follow-up 2, section 3).
 _QUIET_LOCK=threading.Lock()
 
 
@@ -134,6 +138,16 @@ _BULK_LOCK=threading.Lock()    # Retry all: its run record and thread
 _REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker thread
 JOB_ONLY_FIELDS=('job_id','attempt_id','m4b_repair')  # never produced by the review's build_manifest
 _PURGE_LOCK=threading.RLock()  # one recovery purge at a time (the converter's and the sweep's never overlap)
+_WORKING_LOCK=threading.Lock()  # the working-folder classification cache and the folders whose clear failed
+
+def attention_counts(summary):
+    """(counts per attention group, Can retry books whose leftover working files Retry clears first) for the strip and
+    the Retry all dialog (RefusedRetry follow-up 2, section 2.4: k is the server's, read when the dialog opens)."""
+    counts={'retry':0,'repair':0,'checking':0,'changed':0,'audiobook':0,'other':0,'unsupported':0};cleanable=0
+    for item in summary.values():
+        counts[item['group']]+=1
+        if item['group']=='retry' and isinstance(item.get('working'),dict) and item['working'].get('state')=='cleanable':cleanable+=1
+    return counts,cleanable
 
 def catalog_busy_text(reason):
     return 'database is locked' in (reason or '') or 'database is busy' in (reason or '')
@@ -187,6 +201,7 @@ class MergeService:
         self.jobs.next_priority=self._next_m4b_readmission
         self.jobs.m4b_working_clear=self._m4b_working_clear  # live check for a Retry refused on working files
         self.jobs.repair_check_failed=self._repair_check_failed  # a dry run that cannot finish reads "can't open", never "checking"
+        self.jobs.working_state=self._working_state  # leftover working files: cleanable or blocked, live (follow-up 2)
         try:
             # Once per catalog: v0.18.0 plain-text Retry/Repair refusals become typed records (RefusedRetry spec).
             import m4b_readmission
@@ -283,7 +298,7 @@ class MergeService:
         token=self._quiet_token(True)
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_state')
-            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:return copy.deepcopy(kept[2])
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
         started,value=self.__dict__.setdefault('_status_shared',SharedSnapshot()).get(lambda:(self._quiet_token(),self.state()),max_age)
         if token is not None and started==token:
             with _QUIET_LOCK:self._quiet_state=(token,time.monotonic(),copy.deepcopy(value))
@@ -294,7 +309,7 @@ class MergeService:
         key=(limit,offset,search,status,group);token=self._quiet_token(True)
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_pages',{}).get(key)
-            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<QUIET_MAX_AGE:return copy.deepcopy(kept[2])
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
         value=self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status)
         if token is not None and self._quiet_token()==token:
             with _QUIET_LOCK:
@@ -302,6 +317,11 @@ class MergeService:
                 if len(pages)>=16:pages.clear()
                 pages[key]=(token,time.monotonic(),copy.deepcopy(value))
         return value
+
+    def quiet_max_age(self):
+        """How long a quiet poll may reuse its answer: QUIET_MAX_AGE, or WORKING_MAX_AGE while the last status listed a row
+        with leftover working files (they can go without a catalog commit, removed outside the app)."""
+        return WORKING_MAX_AGE if self.__dict__.get('_working_listed') else QUIET_MAX_AGE
 
     def cleanup_statuses(self,job_ids):
         """Book list: each shown book's cleanup status, reused from the last status computation while it is under
@@ -449,15 +469,14 @@ class MergeService:
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
-        counts={'retry':0,'repair':0,'checking':0,'changed':0,'audiobook':0,'other':0,'unsupported':0}
-        for item in self.attention_summary(retry=False).values():counts[item['group']]+=1
+        counts,cleanable=attention_counts(self.attention_summary(retry=False))
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'published_check':value.get('published_check'),'attention_counts':counts,'attention_row':attention_row,
+            'published_check':value.get('published_check'),'attention_counts':counts,'working_cleanable':cleanable,'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
 
     def converted_ids(self,max_age=5.0):
@@ -937,8 +956,9 @@ class MergeService:
         stage=getattr(self,'stage_root',None)
         for job_id,item in summary.items():
             refusal=item.get('readmission')
-            if stage is not None and isinstance(refusal,dict) and refusal.get('state')=='refused' and refusal.get('cause')=='working_files' and refusal.get('stale') is not True:
-                item['working_folder']=os.path.abspath(stage/job_id)
+            if stage is not None and (isinstance(item.get('working'),dict) or isinstance(refusal,dict) and refusal.get('state')=='refused' and refusal.get('cause')=='working_files' and refusal.get('stale') is not True):
+                item['working_folder']=os.path.abspath(stage/job_id)  # Technical detail only
+        if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) for item in summary.values())
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
@@ -1257,8 +1277,13 @@ class MergeService:
     def _repair_check_work(self,stop):
         import m4b_repair
         from audio_jobs import REPAIR_CHECKS,repair_check_key,remember_repair_check
-        found=[]
+        found=[];saved=0;refreshed=time.monotonic();finished=0
         while True:
+            # Futaba's Minor 1: the Checking count and each row follow finished checks within CHECK_REFRESH seconds, one
+            # status refresh per interval and only when a check finished since the last one (the pass end stays the last).
+            if finished and time.monotonic()-refreshed>=CHECK_REFRESH and not stop.is_set():
+                self._save_repair_checks(found[saved:]);saved=len(found);finished=0;refreshed=time.monotonic()
+                self.invalidate_status()
             with _REPAIR_LOCK:
                 if stop.is_set() or not self._repair_pending:
                     self._repair_running=False
@@ -1268,7 +1293,7 @@ class MergeService:
                 rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
                 key=repair_check_key(rows[0]) if rows else None
                 if rows and key and key not in REPAIR_CHECKS and m4b_repair.classify(rows[0])=={'state':'unchecked'}:
-                    started=time.monotonic();result=m4b_repair.check(rows[0],stop)
+                    started=time.monotonic();result=m4b_repair.check(rows[0],stop);finished+=1
                     if isinstance(result,dict) and result.get('state') in ('intact','refused','repairable') and not str(result.get('reason','')).startswith('Source unavailable'):
                         remember_repair_check(key,result);found.append((key,result))
                         with _REPAIR_LOCK:self.__dict__.setdefault('_repair_failed',{}).pop(job_id,None)
@@ -1283,7 +1308,7 @@ class MergeService:
                 with _REPAIR_LOCK:
                     self._repair_skipped.add(job_id)
                     self.__dict__.setdefault('_repair_failed',{})[job_id]=('Source check failed: '+type(error).__name__+': '+str(error))[:500]
-        self._save_repair_checks(found)
+        self._save_repair_checks(found[saved:])
         if not stop.is_set():self.invalidate_status()  # the new classes show on the next poll
 
     def _repair_check_failed(self,job_id):
@@ -1319,10 +1344,12 @@ class MergeService:
             # An M4B failure this version can preserve: accepted at once, even while a book converts. The worker
             # admits it right after that book through the proof route (m4b_readmission); a refusal is per book.
             self._m4b_refusal_gate(job_id)
+            self._clear_first(job_id,'retry')
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
         # v0.16.12: no review lock here. It is held while the start-of-book check re-reads a whole book, so a
         # press could wait past the page's timeout; the worker's own admission re-checks the review anyway.
+        self._clear_first(job_id,'retry')
         result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
         queued=self._queue_next_same(job_id);self._resume_later()
         return result|queued
@@ -1362,10 +1389,12 @@ class MergeService:
             rows=self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,))
             binding=json.loads(rows[0]['manifest']).get('m4b_repair') if rows else None
             if not isinstance(binding,dict) or binding.get('user_requested') is not True:raise RetryRefused(RETRY_BOOK_CHANGED)
+            self._clear_first(job_id,'repair')
             result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
             queued=self._queue_next_same(job_id,'repair');self._resume_later()
             return result|queued
         self._m4b_refusal_gate(job_id,'repair')
+        self._clear_first(job_id,'repair')
         result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
         return {'job_id':job_id,'requeued':False,**result}
 
@@ -1375,14 +1404,15 @@ class MergeService:
         view is refused and queues nothing; 'wait' only once the working files are gone; 'user' always. A stale
         refusal (the deciding code changed) does not block: one attempt per book per build."""
         import m4b_readmission
-        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,files_present
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
         with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
-        if value and value.get('state')=='refused' and value.get('stale') is not True:
+        # A working-files record no longer decides (follow-up 2, section 2.2): the live state of the files does.
+        if value and value.get('state')=='refused' and value.get('stale') is not True and value.get('cause')!='working_files':
             if value.get('fix')=='user':return
-            if value.get('fix')=='wait':
-                if self._m4b_working_clear(job_id):return
-                raise RetryRefused(files_present(value.get('kind')))
             raise RetryRefused(RETRY_BOOK_CHANGED)
+        # Files the app cannot clear stop the row (no Retry, no Repair): a press from an outdated view changes nothing.
+        stops=self.attention_summary([job_id],retry=False).get(job_id,{}).get('working')
+        if isinstance(stops,dict) and stops.get('stops'):raise RetryRefused(RETRY_BOOK_CHANGED)
         # No current refusal: a Retry still needs a source this build's read-only dry run did not refuse, and a finished
         # check (a pending row offers no Retry; one that could not open the source does, and the press reads it).
         if kind=='retry' and self._m4b_precheck(job_id) in ('refused','pending'):raise RetryRefused(RETRY_BOOK_CHANGED)
@@ -1496,7 +1526,9 @@ class MergeService:
             try:
                 if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),failed_m4b_retry.eligible) is not None:
                     self._m4b_refusal_gate(job_id)
+                    self._clear_first(job_id,'retry')
                     return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
+                self._clear_first(job_id,'retry')
                 with self._review_boundary():
                     self.jobs.retry_admission_hold(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),self.working.admission_clear,self._space_ready,review=False)
                 return 'next' if self._queue_next_same(job_id).get('queued_next') else 'queued'
@@ -1766,6 +1798,217 @@ class MergeService:
                 if attempt.is_dir() and any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):return False
             return True
         except OSError:return False
+
+    def _blocked_working(self,reason,cause=None):
+        value={'state':'blocked','bytes':None,'reason':str(reason)[:500]}
+        if cause:value['cause']=cause
+        return value
+
+    def _working_listing(self,job_id):
+        """(listing, has ownership record) of the job's working folder without opening any file: [(attempt folder name,
+        [(file name, regular file, size)])] for each attempt folder holding files; a link, junction or unknown item
+        anywhere is a ValueError (blocked, never followed). ([], False) when there is no folder."""
+        stage=self.stage_root;job_root=stage/job_id
+        if not os.path.lexists(job_root):return [],False
+        for path in (stage,job_root):
+            if os.path.islink(path) or os.path.isjunction(path):raise ValueError('The working folder is a link; the app does not follow links')
+        listing=[];marker=False
+        with os.scandir(job_root) as entries:
+            for entry in entries:
+                if entry.name=='ownership.json' and entry.is_file(follow_symlinks=False) and not entry.is_symlink():marker=True;continue
+                if entry.is_symlink() or os.path.isjunction(entry.path) or not entry.is_dir(follow_symlinks=False):
+                    raise ValueError('An item the app did not create is in the working folder: '+entry.name)
+                with os.scandir(entry.path) as names:
+                    files=sorted((item.name,item.is_file(follow_symlinks=False) and not item.is_symlink(),item.stat(follow_symlinks=False).st_size) for item in names)
+                if files:listing.append((entry.name,files))
+        return sorted(listing),marker
+
+    def _working_state(self,row,audio_only=True,fresh=False):
+        """Leftover working files of one needs-attention job (RefusedRetry follow-up 2, section 2), read-only and without
+        opening a file: None (no leftovers; for an M4B row, audio_only: none that stop Retry/Repair, .m4b/.wav), or
+        {'state':'cleanable'|'blocked','bytes','reason','cause'?}. Cleanable means the app's verified disposal
+        (working_lifecycle.retire) would remove all of it now: receipt-owned, closed attempts, every file recorded and
+        unchanged in size, and the originals still where they were (their copies go only once the originals are
+        verified). Anything the app cannot prove reads blocked, never cleanable. A classification is reused while the
+        listing is unchanged for WORKING_RECHECK seconds; a clear that failed keeps its folder blocked until it changes."""
+        stage=getattr(self,'stage_root',None);job_id=row.get('job_id')
+        if stage is None or not isinstance(job_id,str):return None
+        try:
+            if str(uuid.UUID(job_id))!=job_id:return None
+        except ValueError:return None
+        try:listing,marker=self._working_listing(job_id)
+        except ValueError as error:return self._blocked_working(error)
+        except OSError as error:return self._blocked_working('The working folder could not be read: '+str(error))
+        if not listing:return None
+        names=[name for _,files in listing for name,_,_ in files]
+        if audio_only and not any(name.lower().endswith(('.m4b','.wav')) for name in names):return None
+        total=sum(size for _,files in listing for _,_,size in files)
+        signature=json.dumps([marker,listing])
+        with _WORKING_LOCK:
+            failed=self.__dict__.setdefault('_working_failed',{}).get(job_id)
+            if failed and failed[0]==signature:return self._blocked_working(failed[1])|{'bytes':total}
+            cached=self.__dict__.setdefault('_working_cache',{}).get(job_id)
+            if not fresh and cached and cached[0]==signature and 0<=time.monotonic()-cached[1]<WORKING_RECHECK:return copy.deepcopy(cached[2])
+        value=self._working_classify(row,listing,marker)|{'bytes':total}
+        with _WORKING_LOCK:
+            cache=self._working_cache
+            if len(cache)>=512:cache.clear()
+            cache[job_id]=(signature,time.monotonic(),copy.deepcopy(value))
+        return value
+
+    TERMINAL_WORKING=('removed','absent_after_intent','not_created')
+
+    def _working_classify(self,row,listing,marker):
+        if not marker:return self._blocked_working('The working folder has no ownership record; the app cannot prove these files are its own')
+        try:
+            with connect(self.inventory.database) as db:
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='working_attempts'").fetchone():
+                    return self._blocked_working('An earlier attempt has no ownership record; the app cannot prove these files are its own')
+                for attempt_id,files in listing:
+                    try:valid=str(uuid.UUID(attempt_id))==attempt_id
+                    except ValueError:valid=False
+                    if not valid:return self._blocked_working('An item the app did not create is in the working folder: '+attempt_id)
+                    attempt=db.execute('SELECT * FROM working_attempts WHERE job_id=? AND attempt_id=?',(row['job_id'],attempt_id)).fetchone()
+                    if attempt is None:return self._blocked_working('An earlier attempt has no ownership record; the app cannot prove these files are its own')
+                    if attempt['producer']!='closed':return self._blocked_working('An earlier attempt did not close cleanly; its files are kept')
+                    if attempt['state'] in ('published','published_held'):return self._blocked_working('These files belong to a published audiobook')
+                    receipts={r['name']:dict(r) for r in db.execute('SELECT * FROM working_files WHERE job_id=? AND attempt_id=?',(row['job_id'],attempt_id))}
+                    for name,regular,size in files:
+                        receipt=receipts.get(name)
+                        if receipt is None or not regular:return self._blocked_working('A file the app did not record is in the working folder: '+name)
+                        if receipt['state'] in self.TERMINAL_WORKING:return self._blocked_working('A removed working-file name was used again: '+name)
+                        if receipt['state']=='creation_intended':return self._blocked_working('A file whose creation the app did not finish recording is kept: '+name)
+                        if receipt['size']!=size:return self._blocked_working('A working file changed since the app recorded it: '+name)
+                        if name.endswith(('.stdout','.stderr','.decode-stderr','.txt')) and size>8*1024*1024:
+                            return self._blocked_working('A large diagnostic file is kept as evidence: '+name)
+                    present={name for name,_,_ in files}
+                    for name,receipt in receipts.items():
+                        if receipt['state']=='closed' and name not in present:  # the disposal refuses a file gone without its intent
+                            return self._blocked_working('A recorded working file is missing without a removal record: '+name)
+        except (sqlite3.Error,KeyError,TypeError) as error:return self._blocked_working('The app could not read its working-file records: '+str(error))
+        try:sources=json.loads(row['manifest']).get('sources') or []
+        except (TypeError,ValueError,AttributeError):sources=[]
+        for item in sources:
+            try:info=os.stat(item['path'])
+            except (OSError,KeyError,TypeError):
+                return self._blocked_working('The original files cannot be reached; their working copies are kept',cause='originals_unreachable')
+            # The same facts the disposal compares before it hashes (WorkingLifecycle._input): those the manifest records.
+            if 'size' in item and info.st_size!=item['size'] or 'modified' in item and str(info.st_mtime_ns)!=str(item['modified']):
+                return self._blocked_working('An original file changed since it was checked; its working copies are kept')
+        return {'state':'cleanable','reason':'Leftover working files from an earlier attempt'}
+
+    def _working_targets(self,row,listing):
+        """The attempt folders a clear hands to verified disposal, each proven first (the hard safety rule: inside this
+        app's own staging root, owned by this job, never an original). BoundaryError, and nothing removed, unless every
+        name is a canonical UUID, no folder from the staging root down is a link or junction and each resolves to its own
+        place inside the root, the ownership record names this job, every recorded file of each attempt sits directly in
+        its own attempt folder, and no recorded file is an original source, the cover or inside a library."""
+        from native_io import BoundaryError
+        root=ordinary(self.stage_root);job_id=row['job_id']
+        try:canonical=str(uuid.UUID(job_id))==job_id
+        except (ValueError,TypeError,AttributeError):canonical=False
+        if not canonical:raise BoundaryError('Working folder name is not a job identity')
+        real_root=os.path.normcase(os.path.realpath(root))
+        def inside(path,*parts):
+            if os.path.islink(path) or os.path.isjunction(path):raise BoundaryError('A working folder is a link or junction')
+            if os.path.normcase(os.path.realpath(path))!=os.path.join(real_root,*[os.path.normcase(part) for part in parts]):raise BoundaryError('A working folder resolves outside the staging root')
+        if os.path.islink(root) or os.path.isjunction(root):raise BoundaryError('The staging root is a link or junction')
+        job_root=root/job_id;inside(job_root,job_id)
+        try:
+            with open(job_root/'ownership.json','rb') as stream:owner=json.loads(stream.read(16*1024*1024+1))
+        except (OSError,ValueError) as error:raise BoundaryError('Working ownership record unreadable: '+str(error)) from None
+        if not isinstance(owner,dict) or owner.get('job_id')!=job_id:raise BoundaryError('Working ownership record names another job')
+        manifest=json.loads(row['manifest'])
+        protected={os.path.normcase(os.path.abspath(item['path'])) for item in manifest.get('sources') or [] if isinstance(item,dict) and item.get('path')}
+        cover=manifest.get('cover') if isinstance(manifest.get('cover'),dict) else {}
+        if cover.get('path'):protected.add(os.path.normcase(os.path.abspath(cover['path'])))
+        libraries=[ordinary(path) for path in getattr(getattr(self,'inventory',None),'roots',{}).values() if path]
+        targets=[]
+        with connect(self.inventory.database) as db:
+            for attempt_id,_ in listing:
+                try:canonical=str(uuid.UUID(attempt_id))==attempt_id
+                except (ValueError,TypeError,AttributeError):canonical=False
+                if not canonical:raise BoundaryError('Working attempt folder name is not an attempt identity')
+                stage=job_root/attempt_id;inside(stage,job_id,attempt_id)
+                for receipt in db.execute('SELECT path,name FROM working_files WHERE job_id=? AND attempt_id=?',(job_id,attempt_id)):
+                    path=ordinary(receipt['path'])
+                    if path.parent!=stage or path.name!=receipt['name']:raise BoundaryError('A recorded working file is outside its attempt folder')
+                    if os.path.normcase(os.path.abspath(path)) in protected or any(path.is_relative_to(library) for library in libraries):
+                        raise BoundaryError('A recorded working file is an original or inside a library')
+                targets.append(attempt_id)
+        return targets
+
+    def clear_working_files(self,library,identity,revision,job_id):
+        """Clear working files (Sergei, decision B): the app's verified disposal removes the leftover working files of an
+        earlier attempt of this book's current job. {'cleared': True, 'bytes', 'already'?, 'row'}; RetryRefused with cause
+        'changed', 'busy', 'not_safe' or 'file_problem' otherwise (a 'not_safe' or 'file_problem' clear may have removed
+        part of it: verified disposal stops at the first file it cannot prove). Originals are never touched."""
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,CURRENT
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows or rows[0]['state']!='needs attention' or rows[0]['output'] or json.loads(rows[0]['manifest']).get('candidate_id')!=identity:
+            raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
+        with connect(self.inventory.database) as db:
+            newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC, job_id DESC LIMIT 1",(identity,)).fetchone()
+            group=db.execute('SELECT revision FROM book_groups WHERE id=?',(identity,)).fetchone() if db.execute("SELECT 1 FROM sqlite_master WHERE name='book_groups'").fetchone() else None
+        if not newest or newest[0]!=job_id or not group or group[0]!=revision:raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
+        answer=self._clear_working(rows[0])
+        self.invalidate_status()
+        return answer|{'row':self.restart_row(identity)}
+
+    def _working_kind(self,row):
+        """audio_only for the working-file state: True for an M4B job (only .m4b/.wav stop its Retry/Repair)."""
+        import m4b_repair
+        try:return bool(m4b_repair.eligible(row))
+        except Exception:return False
+
+    def _clear_working(self,row):
+        from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_NOT_SAFE,WORKING_FILE_PROBLEM
+        from native_io import BoundaryError
+        job_id=row['job_id'];audio_only=self._working_kind(row)
+        before=self._working_state(row,audio_only,fresh=True)
+        if before is None:return {'cleared':True,'bytes':0,'already':True}
+        if before['state']!='cleanable':raise RetryRefused(WORKING_NOT_SAFE,'not_safe')
+        if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(WORKING_BUSY,'busy')
+        working=getattr(self,'working',None)
+        if working is None or not hasattr(working,'retire'):raise RetryRefused(WORKING_BUSY,'busy')
+        failure=None
+        try:
+            listing,_=self._working_listing(job_id)
+            for attempt_id in self._working_targets(row,listing):working.retire(job_id,attempt_id)
+        except InterruptedError:failure=('busy','The app was busy; nothing more was removed')
+        except sqlite3.Error as error:failure=('busy',str(error))
+        except (BoundaryError,ValueError) as error:failure=('not_safe',str(error))
+        except (OSError,RuntimeError) as error:failure=('file_problem',str(error))
+        with _WORKING_LOCK:self.__dict__.setdefault('_working_cache',{}).pop(job_id,None)
+        after=self._working_state(row,audio_only,fresh=True)
+        if failure is None and after is None:
+            with _WORKING_LOCK:self.__dict__.setdefault('_working_failed',{}).pop(job_id,None)
+            return {'cleared':True,'bytes':before['bytes']}
+        cause,reason=failure or ('not_safe','Verified disposal kept files it could not prove')
+        try:
+            listing,marker=self._working_listing(job_id)
+            if listing and cause=='not_safe':
+                with _WORKING_LOCK:self._working_failed[job_id]=(json.dumps([marker,listing]),'Working files were kept: '+reason)
+        except (OSError,ValueError):pass
+        raise RetryRefused({'busy':WORKING_BUSY,'file_problem':WORKING_FILE_PROBLEM}.get(cause,WORKING_NOT_SAFE),cause)
+
+    def _clear_first(self,job_id,kind='retry'):
+        """Retry and Repair clear leftover working files first (decisions A and O10). Only cleanable files are cleared;
+        when the clear does not finish nothing is queued (RetryRefused, typed cause). Blocked files are left to the
+        row's own rule (no control) and to the worker's admission."""
+        from audio_jobs import RetryRefused,RETRY_NOT_CLEARED,REPAIR_NOT_CLEARED
+        rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows:return
+        row=rows[0];audio_only=self._working_kind(row)
+        if not audio_only:
+            with self.jobs._db() as db:
+                if self.jobs._retry_shape(db,row) is None:return
+        state=self._working_state(row,audio_only,fresh=True)
+        if not state or state['state']!='cleanable':return
+        try:self._clear_working(row)
+        except RetryRefused as error:raise RetryRefused(REPAIR_NOT_CLEARED if kind=='repair' else RETRY_NOT_CLEARED,error.cause) from None
+        self.invalidate_status()
 
     def _m4b_working_refusal(self,job_id):
         """The typed refusal when prior working files block an M4B Retry/Repair, else None."""

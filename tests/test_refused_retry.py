@@ -103,22 +103,24 @@ class TypedRefusalTests(RefusalCase):
                          'Retry all takes the server group, which no longer holds the refused book')
 
     def test_each_fix_decides_the_group_and_the_offer(self):
-        # working_files (fix wait): disabled with the reason until the listing passes, then enabled.
+        # working_files: since follow-up 2 (section 2.2) the record no longer decides the row; the live state of the
+        # files does. Files the app cannot prove its own (no ownership record) are blocked: no Retry, group Other.
         job_id, manifest = self.l.failed(REFUSED, fixture(), name='files')
         self.passed(job_id)
+        self.press(job_id, manifest)
         attempt = self.s.stage_root / job_id / str(uuid.uuid4())
         attempt.mkdir(parents=True)
         leftover = attempt / 'source00000.m4b'
-        leftover.write_bytes(b'unfinished copy')
-        self.press(job_id, manifest)
+        leftover.write_bytes(b'unfinished copy')  # appears after the press: the worker's admission refuses on it
         self.assertIsNone(self.s._next_m4b_readmission())
         value = self.summary(job_id)
-        self.assertEqual((value['group'], value['readmission']['cause'], value['readmission']['fix']), ('other', 'working_files', 'wait'))
-        self.assertEqual(value['retry'], {'allowed': False, 'reason': RETRY_FILES_PRESENT})
+        self.assertEqual((value['group'], value['readmission']['cause'], value['working']['state'], value['working']['stops'], 'retry' in value),
+                         ('other', 'working_files', 'blocked', True, False))
         with self.assertRaises(RetryRefused) as caught:
             self.press(job_id, manifest)
-        self.assertEqual(str(caught.exception), RETRY_FILES_PRESENT)
+        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED, 'a press from an outdated view changes nothing')
         leftover.unlink()
+        self.assertNotIn('working', self.summary(job_id))
         self.assertEqual(self.summary(job_id)['retry'], {'allowed': True, 'reason': ''}, 'enabled once the files are gone')
         self.assertTrue(self.press(job_id, manifest)['queued_next'])
         # source_changed (fix review): no control; a press is refused.
@@ -178,10 +180,10 @@ class StaleRefusalTests(RefusalCase):
         self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['readmission']['stale']), ('retry', True))
         files, manifest = self.l.failed(REFUSED, fixture(), name='files')
         self.passed(files)
+        self.press(files, manifest)
         attempt = self.s.stage_root / files / str(uuid.uuid4())
         attempt.mkdir(parents=True)
         (attempt / 'normalized00000.wav').write_bytes(b'x')
-        self.press(files, manifest)
         self.assertIsNone(self.s._next_m4b_readmission())
         self.set_key(files, OLD_KEY)
         self.assertEqual((self.summary(files)['group'], self.summary(files)['readmission']['stale']), ('other', False), 'a wait fix is checked live, never by build')
@@ -412,29 +414,23 @@ class RepairVerbAndFolderTests(RefusalCase):
         (attempt / 'source00000.m4b').write_bytes(b'unfinished copy')
 
     def test_a_refused_repair_on_working_files_says_repair(self):
+        # Superseded in part by follow-up 2 (section 2.3): blocked files offer no Repair and no Retry (no disabled
+        # ghost), and the blocked words have no verb. The record keeps its kind for the Technical detail line.
         job_id, manifest = self.l.failed(REFUSED, fixture(), name='repair-files')
         self.leftover(job_id)
         with self.l.jobs._db() as db:
             m4b_readmission.request(db, job_id, 'repair', 100)
         self.assertIsNone(self.s._next_m4b_readmission(), 'the real Repair admission refuses on the leftover files')
         value = self.summary(job_id)
-        self.assertEqual((value['readmission']['kind'], value['readmission']['cause'], value['repair'], 'retry' in value),
-                         ('repair', 'working_files', {'allowed': False, 'reason': REPAIR_FILES}, False))
-        with self.assertRaises(RetryRefused) as caught:
-            self.s.repair_blocked_job('Audiobooks', manifest['candidate_id'], 1, job_id)
-        self.assertEqual(str(caught.exception), REPAIR_FILES)
-        retry, retry_manifest = self.l.failed(REFUSED, fixture(), name='retry-files')  # positive control: a Retry says Retry
-        self.passed(retry)
-        self.leftover(retry)
-        self.press(retry, retry_manifest)
-        self.assertIsNone(self.s._next_m4b_readmission())
-        self.assertEqual(self.summary(retry)['retry'], {'allowed': False, 'reason': RETRY_FILES_PRESENT})
+        self.assertEqual((value['readmission']['kind'], value['readmission']['cause'], 'repair' in value, 'retry' in value, value['working']['state']),
+                         ('repair', 'working_files', False, False, 'blocked'))
+        self.assertEqual(REPAIR_FILES, audio_jobs.files_present('repair'), 'the server words still follow the kind')
 
     def test_a_working_files_refusal_names_the_absolute_working_folder(self):
         job_id, manifest = self.l.failed(REFUSED, fixture(), name='folder')
         self.passed(job_id)
-        self.leftover(job_id)
         self.press(job_id, manifest)
+        self.leftover(job_id)
         self.assertIsNone(self.s._next_m4b_readmission())
         folder = self.summary(job_id)['working_folder']
         self.assertTrue(os.path.isabs(folder), folder)

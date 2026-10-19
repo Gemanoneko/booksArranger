@@ -74,6 +74,7 @@ class Base(unittest.TestCase):
         s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'});s._resume_later=Mock()
         s.jobs.m4b_working_clear=s._m4b_working_clear  # as MergeService.__init__ wires it
         s.jobs.repair_check_failed=s._repair_check_failed
+        s.jobs.working_state=s._working_state  # leftover working files decide the row live (RefusedRetry follow-up 2)
         return s
 
     def summary(self,service=None):return (service or self.service()).attention_summary()
@@ -187,8 +188,9 @@ class RetryRouteTests(Base):
         value=s.attention_summary()[job_id]
         self.assertEqual({key:value['readmission'].get(key) for key in ('queued_next','accepted','reason','cause','fix','stale')},
                          {'queued_next':False,'accepted':False,'reason':reason,'cause':'working_files','fix':'wait','stale':False})
-        # RefusedRetry spec: a 'wait' refusal re-enables Retry once the working files are gone (none here).
-        self.assertEqual(value['group'],'other');self.assertEqual(value['retry'],{'allowed':True,'reason':''},'the button comes back');self.assertEqual(self.l.row(job_id),before)
+        # Follow-up 2 (section 2.2): a working-files record no longer decides the row; with no files left it reads as if
+        # there were no record (ready to retry, in Can retry).
+        self.assertEqual(value['group'],'retry');self.assertEqual(value['retry'],{'allowed':True,'reason':''},'the button comes back');self.assertEqual(self.l.row(job_id),before)
         self.assertTrue(s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)['queued_next'],'a refused book can be pressed again')
         # During a library scan the request keeps its place for the next resume.
         s.inventory.worker=ALIVE

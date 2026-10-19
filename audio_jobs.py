@@ -87,6 +87,13 @@ class RetryRefused(ValueError):
 RETRY_FILES_PRESENT = 'Working files from an earlier attempt are still present. Retry after they are cleared.'
 # The same fact for a refused Repair: the verb follows the refusal's kind (RefusedRetry follow-up, point 3b).
 REPAIR_FILES_PRESENT = 'Working files from an earlier attempt are still present. Repair after they are cleared.'
+# Retry and Repair clear leftover working files first (decisions A and O10); when that fails nothing is queued.
+RETRY_NOT_CLEARED = "Retry was not accepted: the working files weren't cleared. Nothing was queued."
+REPAIR_NOT_CLEARED = "Repair was not accepted: the working files weren't cleared. Nothing was queued."
+# Clear working files (decision B): refusals by typed cause; the page picks its own words from the cause.
+WORKING_BUSY = "Working files weren't cleared. The app is busy; try again in a moment."
+WORKING_NOT_SAFE = "Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete."
+WORKING_FILE_PROBLEM = "Some working files weren't cleared. A file couldn't be removed; try again in a moment."
 # An M4B row whose read-only dry run has not finished yet (RefusedRetry follow-up, section 2, state a).
 RETRY_CHECKING = 'The app is checking this M4B before offering Retry. The row updates itself.'
 # Retry pressed on an outdated view (for example, the job was already queued); the panel updates itself.
@@ -156,6 +163,15 @@ def _m4b_fields(row):
     except Exception:
         retry = False
     return (repair if isinstance(repair, dict) else None), retry
+
+
+def _m4b_job(row):
+    """A failed, unpublished single-.m4b job (m4b_repair.eligible): only .m4b/.wav leftovers stop its Retry or Repair."""
+    try:
+        import m4b_repair
+        return bool(m4b_repair.eligible(row))
+    except Exception:
+        return False
 
 
 def dry_run_refused(repair):
@@ -252,6 +268,8 @@ class AudioJobs:
         self.next_priority = None  # m4b_readmission hook: the job id that runs next, or None
         self.m4b_working_clear = None  # MergeService hook: job id -> True once no prior audio working files remain
         self.repair_check_failed = None  # MergeService hook: job id -> raw text when its check could not finish, else None
+        # MergeService hook: (row, audio_only) -> None or the live state of the job's leftover working files.
+        self.working_state = None
         self.after_attempt = None
         self.on_working_hold = None
         self.on_space_hold = None
@@ -607,6 +625,14 @@ class AudioJobs:
         except Exception:
             return False
 
+    def _working(self, row, audio_only):
+        """Read-only: the job's leftover working files (Follow-up 2, section 2), or None. Never raises."""
+        hook = self.working_state
+        try:
+            return hook(row, audio_only) if hook else None
+        except Exception:
+            return None
+
     def _check_failed(self, job_id):
         """Read-only: the raw text of a repair check that could not finish for this job, else None."""
         hook = self.repair_check_failed
@@ -686,7 +712,9 @@ class AudioJobs:
             # and Can repair, and only its fix decides what it offers. A stale record (the deciding code changed) is
             # ignored here, so the book is offered again; the next refusal stores a new record.
             refusal = readmission.get(row['job_id'])
-            refusal = refusal if isinstance(refusal, dict) and refusal.get('state') == 'refused' and refusal.get('stale') is not True else None
+            # A working-files refusal no longer decides the row: the live state of the files does (Follow-up 2, section
+            # 2.2); its record stays for the Technical detail line only.
+            refusal = refusal if isinstance(refusal, dict) and refusal.get('state') == 'refused' and refusal.get('stale') is not True and refusal.get('cause') != 'working_files' else None
             if refusal:
                 group, cause, check = retry_refusal.group(refusal), None, None  # precedence: a current refusal first
             value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
@@ -695,9 +723,8 @@ class AudioJobs:
                 if check == 'unavailable':
                     value['precheck_reason'] = check_reason
             if refusal:
-                if retry and refusal.get('fix') in ('wait', 'user'):
-                    clear = refusal['fix'] == 'user' or self._m4b_working_clear(row['job_id'])
-                    value['repair' if refusal.get('kind') == 'repair' else 'retry'] = {'allowed': clear, 'reason': '' if clear else files_present(refusal.get('kind'))}
+                if retry and refusal.get('fix') == 'user':
+                    value['repair' if refusal.get('kind') == 'repair' else 'retry'] = {'allowed': True, 'reason': ''}
                 if repair and repair.get('state') == 'unchecked':
                     value['repair_check'] = True
             elif group == 'repair':
@@ -718,6 +745,22 @@ class AudioJobs:
             elif retry and group == 'retry' and admission_clear is not None:
                 allowed, reason = self._retry_allowed(row, cause, shapes[row['job_id']], admission_clear, space_ready)
                 value['retry'] = {'allowed': allowed, 'reason': reason}
+            # Leftover working files (Follow-up 2, section 2): cleanable rows keep their natural state and Retry/Repair
+            # clear the files first; blocked files stop a row that would otherwise offer Retry or Repair (group Other, no
+            # control), unless a current refusal of another cause decides the row.
+            working = self._working(row, True) if _m4b_job(row) else self._working(row, False) if shapes[row['job_id']] is not None else None
+            if working:
+                value['working'] = working
+                if working['state'] == 'blocked' and not refusal and (group in ('retry', 'repair', 'checking') or check == 'unavailable'):
+                    value['group'] = 'other'
+                    working['stops'] = True
+                    value.pop('retry', None)
+                    value.pop('repair', None)
+                elif working['state'] == 'cleanable':
+                    for key in ('retry', 'repair'):
+                        offer = value.get(key)
+                        if isinstance(offer, dict) and offer.get('reason') in (RETRY_FILES_PRESENT, REPAIR_FILES_PRESENT):
+                            value[key] = {'allowed': True, 'reason': ''}
             if row['job_id'] in readmission:value['readmission'] = readmission[row['job_id']]  # queued_next + position, or a refusal reason
             summary[row['job_id']] = value
         return summary
