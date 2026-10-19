@@ -59,6 +59,12 @@ class Base(unittest.TestCase):
         self.l=Ledger(self.temp.name);self.addCleanup(self.l.jobs.close)
         # The background repair check reads sources; tests that need it call it explicitly.
         patcher=patch.object(MergeService,'_check_repairs');self.checks=patcher.start();self.addCleanup(patcher.stop)
+        checks=patch.dict(audio_jobs.REPAIR_CHECKS);checks.start();self.addCleanup(checks.stop)  # passed() entries end with the test
+
+    def passed(self,*job_ids):
+        """A finished read-only dry run that passed, as the background check records it. Since the 2026-10-19
+        follow-up an M4B row is "ready to retry" only after it; until then it is Checking."""
+        for job_id in job_ids:audio_jobs.remember_repair_check(audio_jobs.repair_check_key(self.l.row(job_id)),{'state':'intact','reason':'','damage':[],'repairs':[]})
 
     def service(self):
         s=MergeService.__new__(MergeService);s.jobs=self.l.jobs;s.operation_lock=threading.RLock();s.draining=False
@@ -67,6 +73,7 @@ class Base(unittest.TestCase):
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None);s.automatic=SimpleNamespace(stop_event=threading.Event())
         s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'});s._resume_later=Mock()
         s.jobs.m4b_working_clear=s._m4b_working_clear  # as MergeService.__init__ wires it
+        s.jobs.repair_check_failed=s._repair_check_failed
         return s
 
     def summary(self,service=None):return (service or self.service()).attention_summary()
@@ -74,8 +81,8 @@ class Base(unittest.TestCase):
 
 class ClassificationTests(Base):
     def test_m4b_reasons_from_the_module_are_can_retry_with_new_child_retry_data(self):
-        job_id,_=self.l.failed()
-        self.assertEqual(self.summary()[job_id],{'group':'retry','cause':None,'originals_untouched':True,'retry':{'allowed':True,'reason':''}})
+        job_id,_=self.l.failed();self.passed(job_id)
+        self.assertEqual(self.summary()[job_id],{'group':'retry','cause':None,'originals_untouched':True,'precheck':'passed','retry':{'allowed':True,'reason':''}})
         self.l.jobs._thread=ALIVE
         try:self.assertEqual(self.summary()[job_id]['retry'],{'allowed':True,'reason':''},'accepted while a book is being created')
         finally:self.l.jobs._thread=None
@@ -83,7 +90,7 @@ class ClassificationTests(Base):
         self.assertEqual(self.summary()[job_id]['readmission']['queued_next'],True)
         self.assertEqual(self.summary()[job_id]['readmission']['position'],1,'its place survives every status read')
         self.assertNotIn(OUTSIDE,failed_m4b_retry.REASONS)
-        other,_=self.l.failed(OUTSIDE,name='other')
+        other,_=self.l.failed(OUTSIDE,name='other');self.passed(other)
         self.assertEqual(self.summary()[other]['group'],'unsupported','a reason outside REASONS stays out')
         with patch.object(failed_m4b_retry,'REASONS',failed_m4b_retry.REASONS|{OUTSIDE}):
             self.assertEqual(self.summary()[other]['group'],'retry','REASONS is read from his module, never a copy')
@@ -134,7 +141,7 @@ class ClassificationTests(Base):
         self.assertIsNone(repair_record({'manifest':{'m4b_repair':{'schema':failed_m4b_retry.SCHEMA}}}),'a preserved-M4B retry child is no repair')
         silence={'schema':m4b_repair.SCHEMA,'note':'n','repairs':[{'kind':'truncated_final_frames','track_id':1,'first_frame':9,'frames':1,'replaced_ticks':1024,'timescale':44100,'silent_frame':'00c80007','description':'d'}]}
         self.assertEqual(repair_record({'manifest':{'m4b_repair':silence}})['patched'],[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100}],'the amount the panel shows')
-        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'changed':2,'audiobook':3,'other':4,'unsupported':5},'spec section 6 order')
+        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6},'spec section 6 order, Checking after Can repair (follow-up section 2)')
 
 
 class RetryRouteTests(Base):
@@ -143,7 +150,7 @@ class RetryRouteTests(Base):
         fresh=copy.deepcopy(manifest);fresh['job_id']=str(uuid.uuid4());fresh['metadata']['title']+=' (retry)';return self.l.jobs.enqueue(fresh)
 
     def test_click_queues_next_and_the_worker_admits_through_the_proof_route(self):
-        job_id,manifest=self.l.failed();other,other_manifest=self.l.failed(name='other');s=self.service();self.l.jobs._thread=ALIVE
+        job_id,manifest=self.l.failed();other,other_manifest=self.l.failed(name='other');self.passed(job_id,other);s=self.service();self.l.jobs._thread=ALIVE
         try:
             with patch.object(MergeService,'_retry_preserved_m4b') as admit:
                 result=s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)
@@ -166,7 +173,7 @@ class RetryRouteTests(Base):
         self.assertEqual(s.attention_summary()[other]['readmission']['position'],2)
 
     def test_refusals_are_per_book_and_stale_views_change_nothing(self):
-        job_id,manifest=self.l.failed();s=self.service();before=self.l.row(job_id)
+        job_id,manifest=self.l.failed();self.passed(job_id);s=self.service();before=self.l.row(job_id)
         with patch.object(MergeService,'_retry_preserved_m4b') as admit:
             for identity,revision in ((manifest['candidate_id'],2),(str(uuid.uuid4()),1)):
                 with self.assertRaises(RetryRefused) as caught:s.retry_blocked_job('Audiobooks',identity,revision,job_id)
@@ -269,7 +276,7 @@ class RetryAllTests(Base):
             time.sleep(.02)
 
     def test_the_whole_group_one_at_a_time_then_the_queue_starts_once(self):
-        ids=[self.l.failed(name='b%d'%index)[0] for index in range(3)];self.l.failed(OUTSIDE,name='unsupported')
+        ids=[self.l.failed(name='b%d'%index)[0] for index in range(3)];self.l.failed(OUTSIDE,name='unsupported');self.passed(*ids)
         s=self.service();events=[];real=MergeService._request_m4b_readmission
         s.resume=Mock(side_effect=lambda:events.append('resume'))
         def request(service,job_id,kind):
@@ -288,7 +295,7 @@ class RetryAllTests(Base):
         s=self.service()
         with self.assertRaises(RetryRefused) as caught:s.retry_all()
         self.assertEqual(str(caught.exception),RETRY_ALL_NONE)
-        self.l.failed();self.l.failed(name='second');gate=threading.Event()
+        self.passed(self.l.failed()[0],self.l.failed(name='second')[0]);gate=threading.Event()
         with patch.object(MergeService,'_request_m4b_readmission',lambda service,job_id,kind:(gate.wait(10),{'accepted':True})[1]):
             s.retry_all()
             with self.assertRaises(RetryRefused) as caught:s.retry_all()

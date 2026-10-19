@@ -186,6 +186,7 @@ class MergeService:
         self.jobs.before_attempt=self.working.admit
         self.jobs.next_priority=self._next_m4b_readmission
         self.jobs.m4b_working_clear=self._m4b_working_clear  # live check for a Retry refused on working files
+        self.jobs.repair_check_failed=self._repair_check_failed  # a dry run that cannot finish reads "can't open", never "checking"
         try:
             # Once per catalog: v0.18.0 plain-text Retry/Repair refusals become typed records (RefusedRetry spec).
             import m4b_readmission
@@ -447,7 +448,7 @@ class MergeService:
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
-        counts={'retry':0,'repair':0,'changed':0,'audiobook':0,'other':0,'unsupported':0}
+        counts={'retry':0,'repair':0,'checking':0,'changed':0,'audiobook':0,'other':0,'unsupported':0}
         for item in self.attention_summary(retry=False).values():counts[item['group']]+=1
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
@@ -920,13 +921,22 @@ class MergeService:
         return self.jobs.retry_statuses(working.admission_clear,job_id,self._space_ready)
 
     def attention_summary(self,job_ids=None,retry=True):
-        """Group, cause and Retry data per job that needs attention (audio_jobs.attention_summary)."""
+        """Group, cause and Retry data per job that needs attention (audio_jobs.attention_summary).
+
+        'repair_check' is the internal trigger for the background check and never leaves this method; the typed
+        'precheck' state does (RefusedRetry follow-up, finding F2). A current working-files refusal carries the
+        job's absolute working folder for the Technical detail line only (point 3c)."""
         clear=getattr(getattr(self,'working',None),'admission_clear',None)
         if not hasattr(self.jobs,'attention_summary'):return {}
         if getattr(getattr(self,'inventory',None),'database',None):self._load_repair_checks()
         summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
         unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
         if unchecked:self._check_repairs(unchecked)
+        stage=getattr(self,'stage_root',None)
+        for job_id,item in summary.items():
+            refusal=item.get('readmission')
+            if stage is not None and isinstance(refusal,dict) and refusal.get('state')=='refused' and refusal.get('cause')=='working_files' and refusal.get('stale') is not True:
+                item['working_folder']=os.path.abspath(stage/job_id)
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
@@ -1040,13 +1050,25 @@ class MergeService:
                     started=time.monotonic();result=m4b_repair.check(rows[0],stop)
                     if isinstance(result,dict) and result.get('state') in ('intact','refused','repairable') and not str(result.get('reason','')).startswith('Source unavailable'):
                         remember_repair_check(key,result);found.append((key,result))
+                        with _REPAIR_LOCK:self.__dict__.setdefault('_repair_failed',{}).pop(job_id,None)
+                    elif isinstance(result,dict) and result.get('unavailable') is True and not stop.is_set():
+                        # Kept for this run beside m4b_repair's own cache, so the row reads "can't open" until a
+                        # press or the next start, never "checking" again (RefusedRetry follow-up, finding F3a).
+                        with _REPAIR_LOCK:self.__dict__.setdefault('_repair_failed',{})[job_id]=str(result.get('reason') or 'Source unavailable')
                     # The parse is pure Python: rest as long as it ran (at most 2 s), so requests keep most of the interpreter.
                     stop.wait(min(2.0,time.monotonic()-started))
-            except Exception:
-                with _REPAIR_LOCK:self._repair_skipped.add(job_id)  # stays unchecked; never re-read in a loop
+            except Exception as error:
+                # Stays unchecked and is never re-read in a loop; the row reads "can't open", not "checking" (finding F3b).
+                with _REPAIR_LOCK:
+                    self._repair_skipped.add(job_id)
+                    self.__dict__.setdefault('_repair_failed',{})[job_id]=('Source check failed: '+type(error).__name__+': '+str(error))[:500]
         self._save_repair_checks(found)
         if not stop.is_set():self.invalidate_status()  # the new classes show on the next poll
 
+    def _repair_check_failed(self,job_id):
+        """The raw text of this run's repair check that could not finish for the job (an error, or a source it could not
+        open), else None. Read-only; audio_jobs.precheck reads it as 'unavailable', never 'pending'."""
+        with _REPAIR_LOCK:return self.__dict__.get('_repair_failed',{}).get(job_id)
 
     def _space_ready(self,manifest):
         """A full-disk failure can be retried once the working drive has room for a conservative bound
@@ -1132,23 +1154,29 @@ class MergeService:
         view is refused and queues nothing; 'wait' only once the working files are gone; 'user' always. A stale
         refusal (the deciding code changed) does not block: one attempt per book per build."""
         import m4b_readmission
-        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,RETRY_FILES_PRESENT
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,files_present
         with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
         if value and value.get('state')=='refused' and value.get('stale') is not True:
             if value.get('fix')=='user':return
             if value.get('fix')=='wait':
                 if self._m4b_working_clear(job_id):return
-                raise RetryRefused(RETRY_FILES_PRESENT)
+                raise RetryRefused(files_present(value.get('kind')))
             raise RetryRefused(RETRY_BOOK_CHANGED)
-        # No current refusal: a Retry still needs a source this build's read-only dry run did not refuse.
-        if kind=='retry' and self._m4b_dry_run_refused(job_id):raise RetryRefused(RETRY_BOOK_CHANGED)
+        # No current refusal: a Retry still needs a source this build's read-only dry run did not refuse, and a finished
+        # check (a pending row offers no Retry; one that could not open the source does, and the press reads it).
+        if kind=='retry' and self._m4b_precheck(job_id) in ('refused','pending'):raise RetryRefused(RETRY_BOOK_CHANGED)
 
-    def _m4b_dry_run_refused(self,job_id):
-        """True when the cached read-only plan() dry run (the repair check) refused this job's source under this build."""
-        from audio_jobs import _m4b_fields,dry_run_refused
+    def _m4b_precheck(self,job_id):
+        """The read-only plan() dry run's state for this job under this build (audio_jobs.precheck), or None when the
+        job is not an M4B row Retry covers."""
+        import failed_m4b_retry
+        from audio_jobs import _m4b_fields,precheck
         if getattr(getattr(self,'inventory',None),'database',None):self._load_repair_checks()
         rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
-        return bool(rows) and dry_run_refused(_m4b_fields(rows[0])[0])
+        try:
+            if not rows or not failed_m4b_retry.eligible(rows[0]):return None
+        except (KeyError,TypeError,ValueError):return None
+        return precheck(_m4b_fields(rows[0])[0],self._repair_check_failed(job_id))[0]
 
     def _already_accepted(self,job_id,identity):
         """A repeated Retry/Repair press for a book already accepted (v0.16.12): the same answer, and nothing new

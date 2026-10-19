@@ -178,6 +178,19 @@ class BookListTests(unittest.TestCase):
         self.assertEqual(self.service.page(status='output_attention',group='all')['total'],3)
         for bad in (('all','retry'),('output_attention','nope')):
             with self.assertRaises(ValueError):self.service.page(status=bad[0],group=bad[1])
+    def test_checking_group_filters_and_sorts_before_other(self):
+        # RefusedRetry follow-up section 2: a row whose dry run has not finished is in Checking, listed after Can retry
+        # and Can repair and before Other, with its own filter; the typed pre-check state reaches the page.
+        base=self.service.jobs.attention_summary.side_effect
+        def summary(job_ids=None,retry=True):
+            values=base(job_ids,retry)
+            if 'job-Alpha' in values:values['job-Alpha']=dict(values['job-Alpha'],group='checking',precheck='pending')
+            return values
+        self.service.jobs.attention_summary.side_effect=summary
+        page=self.service.page(status='output_attention')
+        self.assertEqual([r['creation']['job']['attention']['group'] for r in page['rows']],['retry','checking','other'])
+        self.assertEqual(page['rows'][1]['creation']['job']['attention']['precheck'],'pending')
+        self.assertEqual(self.names(self.service.page(status='output_attention',group='checking')),['Alpha'])
     def test_kept_files_books_are_listed_until_kept(self):
         # v0.16.8: a completed book whose recovery copies the backup rule keeps joins the filter in its group.
         self.jobs[3].update(state='completed',stage='done')

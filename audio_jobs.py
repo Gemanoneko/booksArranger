@@ -81,6 +81,10 @@ class RetryRefused(ValueError):
 
 # Retry copy shown in the app: one fact, then the fix.
 RETRY_FILES_PRESENT = 'Working files from an earlier attempt are still present. Retry after they are cleared.'
+# The same fact for a refused Repair: the verb follows the refusal's kind (RefusedRetry follow-up, point 3b).
+REPAIR_FILES_PRESENT = 'Working files from an earlier attempt are still present. Repair after they are cleared.'
+# An M4B row whose read-only dry run has not finished yet (RefusedRetry follow-up, section 2, state a).
+RETRY_CHECKING = 'The app is checking this M4B before offering Retry. The row updates itself.'
 # Retry pressed on an outdated view (for example, the job was already queued); the panel updates itself.
 RETRY_BOOK_CHANGED = "This book's status changed. Check the updated status above."
 RETRY_JOB_CHANGED = RETRY_BOOK_CHANGED
@@ -157,6 +161,32 @@ def dry_run_refused(repair):
     return isinstance(repair, dict) and repair.get('state') == 'refused' and repair.get('unavailable') is not True
 
 
+def files_present(kind):
+    """The disabled reason while working files block a Retry or Repair; the verb follows the kind."""
+    return REPAIR_FILES_PRESENT if kind == 'repair' else RETRY_FILES_PRESENT
+
+
+def precheck(repair, failed=None):
+    """(state, raw text) of the read-only dry run for an M4B row that Retry covers (RefusedRetry follow-up, section 2).
+
+    'refused': this build's plan() refuses the source. 'unavailable': the check could not open the source, or it
+    stopped with an error (failed: its raw text), so it will not finish by itself. 'pending': not finished yet.
+    'passed': finished and not refused. A finished result wins over a recorded failure; an unreadable repair field
+    reads as unavailable, so no row ever waits as pending for a check that cannot end.
+    """
+    if isinstance(repair, dict) and repair.get('state') in ('intact', 'refused', 'repairable'):
+        if repair.get('state') != 'refused':
+            return 'passed', ''
+        if repair.get('unavailable') is True:
+            return 'unavailable', str(repair.get('reason') or '')
+        return 'refused', str(repair.get('reason') or '')
+    if failed:
+        return 'unavailable', str(failed)
+    if isinstance(repair, dict) and repair.get('state') == 'unchecked':
+        return 'pending', ''
+    return 'unavailable', 'Source check unavailable'
+
+
 def repair_record(job):
     """The user-approved damage repair a job carries (the Repair button made it), else None.
 
@@ -215,6 +245,7 @@ class AudioJobs:
         self.before_attempt = None
         self.next_priority = None  # m4b_readmission hook: the job id that runs next, or None
         self.m4b_working_clear = None  # MergeService hook: job id -> True once no prior audio working files remain
+        self.repair_check_failed = None  # MergeService hook: job id -> raw text when its check could not finish, else None
         self.after_attempt = None
         self.on_working_hold = None
         self.on_space_hold = None
@@ -567,6 +598,15 @@ class AudioJobs:
         except Exception:
             return False
 
+    def _check_failed(self, job_id):
+        """Read-only: the raw text of a repair check that could not finish for this job, else None."""
+        hook = self.repair_check_failed
+        try:
+            found = hook(job_id) if hook else None
+        except Exception:
+            return None
+        return str(found) if found else None
+
     def attention_summary(self, admission_clear=None, space_ready=None, job_ids=None, retry=True):
         """{job_id: {'group', 'cause', 'originals_untouched', 'retry'}} for every job that needs attention.
 
@@ -580,6 +620,9 @@ class AudioJobs:
         'update' and 'review', a live working-file check for 'wait', always for 'user'.
         retry=False skips the read-only E8 checks (counts on every poll); with retry=True, 'retry' or
         'repair' holds {'allowed', 'reason'}. 'repair_check': the M4B repair check has not run yet.
+        An M4B row Retry covers (failed_m4b_retry.eligible) and with no current refusal carries 'precheck', the state of
+        its read-only dry run (precheck()): 'pending' is group 'checking' with Retry disabled; 'unavailable' is group
+        'other' with Retry enabled and the check's raw text in 'precheck_reason'; 'passed' stays in 'retry'.
         """
         query = "SELECT * FROM audio_jobs WHERE state='needs attention'" + (" AND job_id IN (%s)" % ','.join('?' * len(job_ids)) if job_ids else "") + " ORDER BY created, job_id"
         if job_ids is not None and not job_ids:
@@ -613,6 +656,7 @@ class AudioJobs:
             failure = journal.get('failure') if isinstance(journal, dict) else None
             binding = manifest.get('m4b_repair') if isinstance(manifest, dict) else None
             repair_child = shapes[row['job_id']] is not None and isinstance(binding, dict) and binding.get('user_requested') is True
+            check, check_reason = None, ''
             if repair and repair.get('state') == 'repairable':
                 group, cause = 'repair', None
             elif repair_child:
@@ -621,8 +665,10 @@ class AudioJobs:
                 group = 'retry'
             elif m4b_retry:
                 # "Ready to retry" is a promise that Retry will be accepted: a source this build's read-only plan()
-                # refuses is an M4B the app cannot convert now (RefusedRetry spec O1, Sergei-approved pre-check).
-                group, cause = ('unsupported' if dry_run_refused(repair) else 'retry'), None
+                # refuses is an M4B the app cannot convert now (RefusedRetry spec O1, Sergei-approved pre-check). Until
+                # the check finishes the row is Checking; a check that cannot finish is Other (follow-up, section 2).
+                check, check_reason = precheck(repair, self._check_failed(row['job_id']))
+                group, cause = {'refused': 'unsupported', 'unavailable': 'other', 'pending': 'checking'}.get(check, 'retry'), None
             elif single_m4b and isinstance(failure, dict) and failure.get('exception_class') == 'ValidationError':
                 group, cause = 'unsupported', None
             else:
@@ -633,12 +679,16 @@ class AudioJobs:
             refusal = readmission.get(row['job_id'])
             refusal = refusal if isinstance(refusal, dict) and refusal.get('state') == 'refused' and refusal.get('stale') is not True else None
             if refusal:
-                group, cause = retry_refusal.group(refusal), None
+                group, cause, check = retry_refusal.group(refusal), None, None  # precedence: a current refusal first
             value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
+            if check in ('pending', 'unavailable', 'passed'):
+                value['precheck'] = check
+                if check == 'unavailable':
+                    value['precheck_reason'] = check_reason
             if refusal:
                 if retry and refusal.get('fix') in ('wait', 'user'):
                     clear = refusal['fix'] == 'user' or self._m4b_working_clear(row['job_id'])
-                    value['repair' if refusal.get('kind') == 'repair' else 'retry'] = {'allowed': clear, 'reason': '' if clear else RETRY_FILES_PRESENT}
+                    value['repair' if refusal.get('kind') == 'repair' else 'retry'] = {'allowed': clear, 'reason': '' if clear else files_present(refusal.get('kind'))}
                 if repair and repair.get('state') == 'unchecked':
                     value['repair_check'] = True
             elif group == 'repair':
@@ -650,6 +700,10 @@ class AudioJobs:
                 value['repair_check'] = True
             if refusal:
                 pass  # its fix decided the offer above: none for 'update' and 'review'
+            elif retry and check == 'pending':
+                value['retry'] = {'allowed': False, 'reason': RETRY_CHECKING}  # clears by itself once the check ends
+            elif retry and check == 'unavailable':
+                value['retry'] = {'allowed': True, 'reason': ''}  # Sergei can fix it; a press does the real read
             elif retry and group == 'retry' and shapes[row['job_id']] is None:
                 value['retry'] = {'allowed': True, 'reason': ''}  # M4B: accepted now, runs right after the current book
             elif retry and group == 'retry' and admission_clear is not None:

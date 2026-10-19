@@ -160,6 +160,13 @@ class MergeHTTPTests(unittest.TestCase):
         h=self.handler('/api/inventory?library=Audiobooks&view=candidates&status=ready',method='GET');h.do_GET();self.assertEqual(h.result[0],200);self.reviews.page.assert_called_once_with(100,0,'','ready')
         self.assertIn('audiobook_jobs',self.server.state('Audiobooks'))
 
+    def test_the_checking_attention_group_is_a_known_filter(self):
+        # RefusedRetry follow-up section 2: the new Checking strip group reaches the page; an invented one is refused.
+        h=self.handler('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group=checking',method='GET');h.do_GET()
+        self.assertEqual(h.result[0],200);self.reviews.page.assert_called_once_with(100,0,'','output_attention','checking')
+        h=self.handler('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group=invented',method='GET');h.do_GET()
+        self.assertEqual(h.result[0],400);self.assertEqual(self.reviews.page.call_count,1)
+
     def test_service_creation_only_after_bind_and_close_before_socket(self):
         factory=Mock(return_value=self.merge)
         with patch('web_server.ThreadingHTTPServer.__init__',side_effect=OSError('occupied')):

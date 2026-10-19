@@ -3,14 +3,19 @@ server gate, re-offer when the deciding code changes, and the one-time conversio
 
 Synthetic catalogs and synthetic M4B bytes only; the worker's admission runs the real read-only plan().
 """
+import contextlib
 import json
+import os
+import threading
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import audio_jobs
 import m4b_readmission
+import m4b_repair
 import retry_refusal
-from audio_jobs import RetryRefused, RETRY_BOOK_CHANGED, RETRY_FILES_PRESENT
+from audio_jobs import RetryRefused, RETRY_ALL_NONE, RETRY_BOOK_CHANGED, RETRY_FILES_PRESENT
 from merge_service import MergeService
 from test_attention_repair import Base, REFUSED
 from test_m4b_preservation import fixture, with_iods
@@ -39,8 +44,10 @@ class RefusalCase(Base):
         return self.s.retry_blocked_job('Audiobooks', manifest['candidate_id'], 1, job_id)
 
     def refused(self, source=None, name='book'):
-        """A failed M4B row, a Retry press, then the worker's real admission refusing it."""
+        """A failed M4B row, a Retry press, then the worker's real admission refusing it. The row's dry run is recorded
+        as passed first: since the 2026-10-19 follow-up a row still being checked offers no Retry."""
         job_id, manifest = self.l.failed(REFUSED, source if source is not None else with_iods(fixture(), TRACK_IODS), name=name)
+        self.passed(job_id)
         self.assertTrue(self.press(job_id, manifest)['queued_next'])
         self.assertIsNone(self.s._next_m4b_readmission(), 'refused: the normal queue runs')
         return job_id, manifest
@@ -73,8 +80,9 @@ class TypedRefusalTests(RefusalCase):
     def test_unsupported_file_leaves_can_retry_and_offers_no_retry(self):
         job_id, _ = self.refused()
         other, _ = self.l.failed(REFUSED, fixture(), name='other')  # positive control: never tried, still offered
+        self.passed(other)
         summary = self.s.attention_summary()
-        self.assertEqual(summary[other], {'group': 'retry', 'cause': None, 'originals_untouched': True, 'retry': {'allowed': True, 'reason': ''}})
+        self.assertEqual(summary[other], {'group': 'retry', 'cause': None, 'originals_untouched': True, 'precheck': 'passed', 'retry': {'allowed': True, 'reason': ''}})
         value = summary[job_id]
         self.assertEqual((value['group'], 'retry' in value, value['originals_untouched']), ('unsupported', False, True))
         self.assertEqual({key: value['readmission'][key] for key in ('accepted', 'queued_next', 'cause', 'fix', 'stale', 'app_version')},
@@ -90,12 +98,14 @@ class TypedRefusalTests(RefusalCase):
         self.assertEqual(self.stored(job_id), before, 'no new attempt, the refusal kept')
         self.assertIsNone(self.s._retry_one(job_id), 'Retry all\'s per-book path refuses it too')
         other, _ = self.l.failed(REFUSED, fixture(), name='other')
+        self.passed(other)
         self.assertEqual([key for key, item in self.s.attention_summary(retry=False).items() if item['group'] == 'retry'], [other],
                          'Retry all takes the server group, which no longer holds the refused book')
 
     def test_each_fix_decides_the_group_and_the_offer(self):
         # working_files (fix wait): disabled with the reason until the listing passes, then enabled.
         job_id, manifest = self.l.failed(REFUSED, fixture(), name='files')
+        self.passed(job_id)
         attempt = self.s.stage_root / job_id / str(uuid.uuid4())
         attempt.mkdir(parents=True)
         leftover = attempt / 'source00000.m4b'
@@ -121,6 +131,7 @@ class TypedRefusalTests(RefusalCase):
         self.edited = False
         # file_problem (fix user): Retry stays enabled.
         missing, missing_manifest = self.l.failed(REFUSED, fixture(), name='missing')
+        self.passed(missing)
         self.press(missing, missing_manifest)
         source = self.l.library / 'missing' / 'source.m4b'
         source.unlink()
@@ -129,6 +140,7 @@ class TypedRefusalTests(RefusalCase):
         self.assertEqual((value['group'], value['readmission']['cause'], value['retry']), ('other', 'file_problem', {'allowed': True, 'reason': ''}))
         # unknown (no cause sent): no control, like an update-only cause.
         odd, odd_manifest = self.l.failed(REFUSED, fixture(), name='odd')
+        self.passed(odd)
         self.press(odd, odd_manifest)
         with patch.object(MergeService, '_retry_preserved_m4b', return_value={'requeued': False, 'reason': 'Something new'}):
             self.assertIsNone(self.s._next_m4b_readmission())
@@ -165,6 +177,7 @@ class StaleRefusalTests(RefusalCase):
         self.set_key(job_id, OLD_KEY)
         self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['readmission']['stale']), ('retry', True))
         files, manifest = self.l.failed(REFUSED, fixture(), name='files')
+        self.passed(files)
         attempt = self.s.stage_root / files / str(uuid.uuid4())
         attempt.mkdir(parents=True)
         (attempt / 'normalized00000.wav').write_bytes(b'x')
@@ -184,6 +197,7 @@ class LegacyConversionTests(RefusalCase):
     def legacy_rows(self):
         made = {}
         jobs = [self.l.failed(REFUSED, fixture(), name='legacy%d' % index)[0] for index in range(len(self.TEXTS))]
+        self.passed(*jobs)  # each source's dry run passed under this build, so a stale record is offered again
         with self.l.jobs._db() as db:
             m4b_readmission.ensure(db)
             for index, (job_id, (text, cause)) in enumerate(zip(jobs, self.TEXTS.items()), 1):
@@ -252,7 +266,7 @@ class DryRunTests(RefusalCase):
         job_id, _ = self.l.failed(REFUSED, fixture(), name='intact')
         path, before = self.source('intact')
         self.assertEqual(self.check(job_id)['state'], 'intact')
-        self.assertEqual(self.summary(job_id), {'group': 'retry', 'cause': None, 'originals_untouched': True, 'retry': {'allowed': True, 'reason': ''}})
+        self.assertEqual(self.summary(job_id), {'group': 'retry', 'cause': None, 'originals_untouched': True, 'precheck': 'passed', 'retry': {'allowed': True, 'reason': ''}})
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before, 'the source is only read')
 
     def test_a_refused_dry_run_is_m4b_not_supported_and_queues_nothing(self):
@@ -272,7 +286,7 @@ class DryRunTests(RefusalCase):
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before, 'the source is only read')
         import m4b_repair
         with patch.object(m4b_repair, '_MODULE_SHA256', 'f' * 64):  # a build whose preservation module changed
-            self.assertEqual(self.summary(job_id)['group'], 'retry', 'not held back by the old build\'s check')
+            self.assertEqual(self.summary(job_id)['group'], 'checking', 'checked again under the new build (follow-up section 2), not held back by the old build\'s check')
 
     def test_an_unreadable_source_is_not_taken_for_a_refusal(self):
         job_id, _ = self.l.failed(REFUSED, fixture(), name='gone')
@@ -288,14 +302,150 @@ class DryRunTests(RefusalCase):
         value = self.summary(job_id)
         self.assertEqual((value['group'], 'retry' in value, value['readmission']['stale']), ('unsupported', False, True), 'refused again by this build: not offered')
         intact, manifest = self.l.failed(REFUSED, fixture(), name='intact')
+        self.passed(intact)
         self.press(intact, manifest)
         with patch.object(MergeService, '_retry_preserved_m4b', return_value={'requeued': False, 'reason': 'Failed M4B retained: Unsupported structural box', 'cause': 'unsupported_file'}):
             self.assertIsNone(self.s._next_m4b_readmission())
         self.set_key(intact, OLD_KEY)
         self.assertEqual(self.check(intact)['state'], 'intact')
         value = self.summary(intact)
-        self.assertEqual((value['group'], value['retry'], value['readmission']['stale']), ('retry', {'allowed': True, 'reason': ''}, True), 'passes now: Stopped — try again')
+        self.assertEqual((value['group'], value['retry'], value['readmission']['stale'], value['precheck']), ('retry', {'allowed': True, 'reason': ''}, True, 'passed'),
+                         'passes now: ready to retry, "this M4B now passes its check"')
         self.assertTrue(self.press(intact, manifest)['queued_next'])
+
+
+# The spec's words (RefusedRetry follow-up, 2026-10-19), pinned here rather than imported from the code under test.
+CHECKING = 'The app is checking this M4B before offering Retry. The row updates itself.'
+REPAIR_FILES = 'Working files from an earlier attempt are still present. Repair after they are cleared.'
+
+
+class PrecheckStateTests(RefusalCase):
+    """Follow-up section 2: an M4B row reads "ready to retry" only after its read-only dry run passed. Before that it
+    is Checking (Retry disabled, out of Retry all); a check that cannot open the source, or that stops with an error,
+    reads "can't open" (Retry enabled, group Other) and never "checking" forever (findings F2, F3a, F3b)."""
+    def setUp(self):
+        super().setUp()
+        cache = patch.dict(m4b_repair._CACHE)  # this run's in-memory check results end with the test
+        cache.start()
+        self.addCleanup(cache.stop)
+
+    def run_checker(self, *job_ids, check=None):
+        """The real background pass (MergeService._repair_check_work), on this thread."""
+        self.s._repair_pending = list(job_ids)
+        self.s.__dict__.setdefault('_repair_skipped', set())
+        self.s._repair_running = True
+        self.s.invalidate_status = Mock()
+        with patch.object(m4b_repair, 'check', check) if check else contextlib.nullcontext():
+            self.s._repair_check_work(threading.Event())
+
+    def queued(self, job_id):
+        with self.l.jobs._db() as db:
+            m4b_readmission.ensure(db)
+            return db.execute('SELECT 1 FROM m4b_readmissions WHERE parent_job_id=?', (job_id,)).fetchone() is not None
+
+    def test_an_unchecked_row_is_checking_with_retry_disabled_until_the_check_ends(self):
+        job_id, manifest = self.l.failed(REFUSED, fixture(), name='pending')
+        value = self.summary(job_id)
+        self.assertEqual({key: value.get(key) for key in ('group', 'precheck', 'retry')},
+                         {'group': 'checking', 'precheck': 'pending', 'retry': {'allowed': False, 'reason': CHECKING}})
+        self.assertEqual(self.s.attention_summary(retry=False)[job_id]['group'], 'checking', 'the counts read the same group')
+        self.checks.assert_called_with([job_id])  # the background check is asked for, off the request thread
+        with self.assertRaises(RetryRefused) as caught:
+            self.s.retry_all()
+        self.assertEqual(str(caught.exception), RETRY_ALL_NONE, 'not in Can retry, so not in the Retry all dialog')
+        with self.assertRaises(RetryRefused) as caught:
+            self.press(job_id, manifest)
+        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED, 'a forced press is refused')
+        self.assertIsNone(self.s._retry_one(job_id))
+        self.assertFalse(self.queued(job_id), 'and queues nothing')
+        # The check ends. Passed: ready in place, Retry back. Refused: M4B not supported.
+        refusing, _ = self.l.failed(REFUSED, with_iods(fixture(), TRACK_IODS), name='refusing')
+        self.run_checker(job_id, refusing)
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], value['precheck'], value['retry']), ('retry', 'passed', {'allowed': True, 'reason': ''}))
+        self.assertEqual((self.summary(refusing)['group'], 'precheck' in self.summary(refusing)), ('unsupported', False))
+        self.assertTrue(self.press(job_id, manifest)['queued_next'])
+
+    def test_a_source_the_check_cannot_open_reads_cant_open_and_never_checking_again(self):
+        job_id, manifest = self.l.failed(REFUSED, fixture(), name='gone')
+        present, _ = self.l.failed(REFUSED, fixture(), name='present')  # positive control: same pass, source there
+        (self.l.library / 'gone' / 'source.m4b').unlink()
+        self.run_checker(job_id, present)
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], value['precheck'], value['retry']), ('other', 'unavailable', {'allowed': True, 'reason': ''}))
+        self.assertTrue(value['precheck_reason'].startswith('Source unavailable: '), value['precheck_reason'])
+        self.assertEqual(self.summary(present)['precheck'], 'passed')
+        self.assertEqual([key for key, item in self.s.attention_summary(retry=False).items() if item['group'] == 'retry'], [present], 'Retry all leaves it out')
+        m4b_repair._CACHE.clear()  # the module's own cache forgets (it is bounded); this run still knows
+        self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['precheck']), ('other', 'unavailable'), 'never back to checking')
+        self.assertTrue(self.press(job_id, manifest)['queued_next'], 'enabled: a press (or Retry selected) does the real read')
+
+    def test_a_check_that_throws_reads_cant_open_and_is_not_read_again(self):
+        job_id, _ = self.l.failed(REFUSED, fixture(), name='throws')
+        self.run_checker(job_id, check=Mock(side_effect=ValueError('fixture parse failure')))
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], value['precheck'], value['precheck_reason'], value['retry']),
+                         ('other', 'unavailable', 'Source check failed: ValueError: fixture parse failure', {'allowed': True, 'reason': ''}))
+        self.assertIn(job_id, self.s._repair_skipped, 'never re-read in a loop')
+
+    def test_precedence_refusal_then_cant_open_then_checking_then_stale_then_ready(self):
+        job_id, _ = self.refused()  # unsupported_file, current
+        audio_jobs.REPAIR_CHECKS.pop(audio_jobs.repair_check_key(self.l.row(job_id)))  # not checked under this build
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], 'precheck' in value), ('unsupported', False), 'a current refusal comes first')
+        self.set_key(job_id, OLD_KEY)  # the deciding code changed since: the refusal is stale
+        self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['precheck']), ('checking', 'pending'), 'stale, not yet checked: Checking')
+        self.s._repair_failed = {job_id: 'Source unavailable: fixture'}
+        self.assertEqual((self.summary(job_id)['group'], self.summary(job_id)['precheck']), ('other', 'unavailable'), "stale, cannot open: can't open")
+        self.passed(job_id)
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], value['precheck'], value['readmission']['stale'], value['retry']), ('retry', 'passed', True, {'allowed': True, 'reason': ''}),
+                         'stale, check passed: ready again (a finished check wins over an earlier failure)')
+
+
+class RepairVerbAndFolderTests(RefusalCase):
+    """Follow-up points 3b and 3c: a refused Repair's disabled reason says Repair, and a working-files refusal names the
+    absolute working folder for the Technical detail line only."""
+    def leftover(self, job_id):
+        attempt = self.s.stage_root / job_id / str(uuid.uuid4())
+        attempt.mkdir(parents=True)
+        (attempt / 'source00000.m4b').write_bytes(b'unfinished copy')
+
+    def test_a_refused_repair_on_working_files_says_repair(self):
+        job_id, manifest = self.l.failed(REFUSED, fixture(), name='repair-files')
+        self.leftover(job_id)
+        with self.l.jobs._db() as db:
+            m4b_readmission.request(db, job_id, 'repair', 100)
+        self.assertIsNone(self.s._next_m4b_readmission(), 'the real Repair admission refuses on the leftover files')
+        value = self.summary(job_id)
+        self.assertEqual((value['readmission']['kind'], value['readmission']['cause'], value['repair'], 'retry' in value),
+                         ('repair', 'working_files', {'allowed': False, 'reason': REPAIR_FILES}, False))
+        with self.assertRaises(RetryRefused) as caught:
+            self.s.repair_blocked_job('Audiobooks', manifest['candidate_id'], 1, job_id)
+        self.assertEqual(str(caught.exception), REPAIR_FILES)
+        retry, retry_manifest = self.l.failed(REFUSED, fixture(), name='retry-files')  # positive control: a Retry says Retry
+        self.passed(retry)
+        self.leftover(retry)
+        self.press(retry, retry_manifest)
+        self.assertIsNone(self.s._next_m4b_readmission())
+        self.assertEqual(self.summary(retry)['retry'], {'allowed': False, 'reason': RETRY_FILES_PRESENT})
+
+    def test_a_working_files_refusal_names_the_absolute_working_folder(self):
+        job_id, manifest = self.l.failed(REFUSED, fixture(), name='folder')
+        self.passed(job_id)
+        self.leftover(job_id)
+        self.press(job_id, manifest)
+        self.assertIsNone(self.s._next_m4b_readmission())
+        folder = self.summary(job_id)['working_folder']
+        self.assertTrue(os.path.isabs(folder), folder)
+        self.assertEqual(folder, os.path.abspath(self.s.stage_root / job_id))
+        other, other_manifest = self.l.failed(REFUSED, fixture(), name='no-folder')  # positive control: another cause
+        self.passed(other)
+        self.press(other, other_manifest)
+        (self.l.library / 'no-folder' / 'source.m4b').unlink()
+        self.assertIsNone(self.s._next_m4b_readmission())
+        value = self.summary(other)
+        self.assertEqual((value['readmission']['cause'], 'working_folder' in value), ('file_problem', False))
 
 
 if __name__ == '__main__':

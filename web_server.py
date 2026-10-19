@@ -343,7 +343,7 @@ class Handler(BaseHTTPRequestHandler):
                     if view=='candidates':
                         if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
                         group=query.get('group') or None
-                        if group is not None and group not in {'all','retry','repair','changed','audiobook','other','unsupported'}:raise ValueError('Unknown attention group')
+                        if group is not None and group not in {'all','retry','repair','checking','changed','audiobook','other','unsupported'}:raise ValueError('Unknown attention group')
                         pager=getattr(self.server.merge,'cached_page',None)  # a quiet app reuses the identical page
                         if callable(pager):result=pager(100,int(offset),search,selected_status,group)
                         else:result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)

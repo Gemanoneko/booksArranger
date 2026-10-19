@@ -63,7 +63,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     const text=run('attentionText('+JSON.stringify(refusedRow('m','unknown',missing))+')');
     assert.deepEqual([text.status,text.hint],expected.unknown,'a missing or unrecognised cause reads as unknown');
   }
-  assert.equal(run('attentionText('+JSON.stringify(refusedRow('r','file_problem',{kind:'repair'}))+').hint'),"Repair was refused: the app couldn't read or write a file. Check the folder, then retry.");
+  // The verb follows the refusal's kind (follow-up point 3b): a refused Repair never says "retry".
+  assert.equal(run('attentionText('+JSON.stringify(refusedRow('r','file_problem',{kind:'repair'}))+').hint'),"Repair was refused: the app couldn't read or write a file. Check the folder, then repair.");
   paint([refusedRow('w','working_files'),refusedRow('s','source_changed'),refusedRow('f','file_problem'),refusedRow('k','unknown')]);
   const waiting=actionButtons(rowOf('w'))[0];
   assert.equal(waiting.textContent,'Retry');assert.equal(waiting.disabled,true);assert.equal(waiting.title,NOT_YET,'tooltip exactly as section 3');

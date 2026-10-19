@@ -759,8 +759,8 @@ function finishRetryAll(run){
   stripNote=run.state==='done'?`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}${total>queued?` ${(total-queued).toLocaleString()} could not be retried.`:''}`:`Stopped. Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}`;
   setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();if(!$('attention-groups').hidden)$('group-retry').focus?.({preventScroll:true});},0);
 }
-const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
-const attentionKeys=['all','retry','repair','changed','audiobook','other','unsupported'];
+const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',checking:'Checking',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
+const attentionKeys=['all','retry','repair','checking','changed','audiobook','other','unsupported'];
 function attentionTotal(jobs){
   const counts=jobs?.attention_counts;
   if(!counts || typeof counts!=='object')return jobs?.failed || 0;
@@ -771,10 +771,11 @@ function renderAttentionGroups(){
   const counts=state?.audiobook_jobs?.attention_counts || {},value=key=>Number.isInteger(counts[key])?counts[key]:0,total=attentionTotal({attention_counts:counts});
   const active=globalThis.document?.activeElement;
   if(attentionGroup!=='all' && attentionGroup!=='retry' && counts[attentionGroup]===0){
-    // The selected group emptied: back to All, and focus moves there if it was in the strip or lost.
-    const lost=!active || active===globalThis.document?.body || strip.contains?.(active);
-    attentionGroup='all';resetStrip();
-    setTimeout(()=>{updateList();if(lost)$('group-all').focus?.({preventScroll:true});},0);
+    // The selected group emptied: back to All, and focus moves there if it was in the strip or lost. Checking empties
+    // into Can retry instead: the books Sergei waited for are there (RefusedRetry follow-up, section 2).
+    const lost=!active || active===globalThis.document?.body || strip.contains?.(active),next=attentionGroup==='checking'?'retry':'all';
+    attentionGroup=next;resetStrip();
+    setTimeout(()=>{updateList();if(lost)$('group-'+next).focus?.({preventScroll:true});},0);
   }
   for(const key of attentionKeys){
     const button=$('group-'+key),count=key==='all'?total:value(key),text=`${attentionLabels[key]} · ${count.toLocaleString()}`;
@@ -959,12 +960,18 @@ const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],s
 // A refused Retry or Repair (RefusedRetry spec, 2026-10-19). The server sends a typed cause and fix; these are the
 // words. Behaviour comes from the fix, copy from the cause, never from the server's English reason. A missing or
 // unknown cause reads as 'unknown', whose fix is 'update'.
+// {Verb} and {verb} follow the refusal's kind: Retry, or Repair for a refused Repair (follow-up, point 3b).
 const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
-  working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. Retry after they are cleared.'],
+  working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. {Verb} after they are cleared.'],
   source_changed:['Stopped — review changed',"the book's review or source files changed. Review the book again."],
-  file_problem:['Stopped — file problem',"the app couldn't read or write a file. Check the folder, then retry."],
-  unknown:['Stopped — retry refused','']};
+  file_problem:['Stopped — file problem',"the app couldn't read or write a file. Check the folder, then {verb}."],
+  unknown:['Stopped — {verb} refused','']};
 const refusalFixes={unsupported_file:'update',working_files:'wait',source_changed:'review',file_problem:'user',unknown:'update'};
+function verbed(text,verb){return text.replaceAll('{Verb}',verb).replaceAll('{verb}',verb.toLowerCase());}
+// The read-only dry run before "ready to retry" (RefusedRetry follow-up, section 2): not finished, or could not open
+// the source. The checking text is also the disabled Retry's reason (the server sends the same words).
+const precheckCopy={pending:['Stopped — checking the M4B','The app is checking this M4B before offering Retry. The row updates itself.'],
+  unavailable:["Stopped — can't open the M4B","The app couldn't open this M4B to check it. Check that the library drive is connected, then retry."]};
 function refusalOf(row){const value=readmissionOf(row);return value?.accepted===false && value.queued_next!==true?value:null;}
 function refusalCause(refusal){return Object.hasOwn(refusalCopy,refusal?.cause)?refusal.cause:'unknown';}
 function refusalFix(refusal){return ['update','wait','review','user'].includes(refusal?.fix)?refusal.fix:refusalFixes[refusalCause(refusal)];}
@@ -980,12 +987,18 @@ function attentionText(row){
   const refusal=refusalOf(row),verb=refusal?.kind==='repair'?'Repair':'Retry';
   if(refusal && refusal.stale!==true){
     const cause=refusalCause(refusal),[refusedStatus,text]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
-    return {status:refusedStatus,hint:text?`${verb} was refused: ${text}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true};
+    return {status:verbed(refusedStatus,verb),hint:text?`${verb} was refused: ${verbed(text,verb)}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true};
   }
+  // Precedence after a current refusal: the dry run could not open the source (warning: Sergei can fix it), then it has
+  // not finished (muted: it clears by itself), then a stale refusal, then ready.
+  if(a.precheck==='unavailable')return {status:precheckCopy.unavailable[0],hint:precheckCopy.unavailable[1],warn:true};
+  if(a.precheck==='pending')return {status:precheckCopy.pending[0],hint:precheckCopy.pending[1]};
   // Stale: the app was updated since the refusal; it is information, not an obstacle (muted). A book whose read-only
-  // check refuses again under this build is in M4B not supported and reads as that group.
+  // check refuses again under this build is in M4B not supported and reads as that group. A row the dry run covers and
+  // passed is ready again and says why; "Stopped — try again" is left for rows the dry run does not cover.
   if(refusal && a.group!=='unsupported'){
     const version=typeof refusal.app_version==='string' && refusal.app_version?refusal.app_version:'';
+    if(a.precheck==='passed')return {status:attentionCopy.retry[0],hint:`${verb} was refused${version?' in v'+version:''}. The app was updated, and this M4B now passes its check.`};
     return {status:'Stopped — try again',hint:version?`${verb} was refused in v${version}; the app was updated since. It may work now.`:`${verb} was refused before the app was updated. It may work now.`};
   }
   return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint};
@@ -1008,9 +1021,13 @@ function technicalText(row){
   const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
   const raw=keptGroup(attention) && typeof attention.reason==='string' && attention.reason?attention.reason:job.reason;
   // A refused Retry/Repair keeps both facts for support: the refusal, then the earlier failure (either alone if single).
+  // A dry run that could not open the source puts its own raw text first, in the same format.
   const refusal=refusalOf(row),refused=typeof refusal?.reason==='string'?refusal.reason:'';
-  const facts=refused && raw?`${refused}; earlier failure: ${raw}`:refused || raw;
-  return 'Technical detail: '+(facts || 'Unavailable')+(details.length?' — '+details.join(' '):'');
+  const unopened=attention?.precheck==='unavailable' && typeof attention.precheck_reason==='string'?attention.precheck_reason:'';
+  const first=unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
+  // Working files from an earlier attempt: the absolute folder, here only, never in the hint (follow-up, point 3c).
+  const current=refusalCurrent(row),folder=current && refusalCause(current)==='working_files' && typeof attention?.working_folder==='string' && attention.working_folder?'; working folder: '+attention.working_folder:'';
+  return 'Technical detail: '+(facts || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
 }
 function candidateStatus(row){
   const attention=attentionText(row);if(attention)return attention.status;

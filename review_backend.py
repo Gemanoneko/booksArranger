@@ -200,7 +200,7 @@ class CandidateReviewService:
         row['cleanup']=job.get('cleanup') if job else None
         return row
 
-    ATTENTION_ORDER={'retry':0,'repair':1,'changed':2,'audiobook':3,'other':4,'unsupported':5}
+    ATTENTION_ORDER={'retry':0,'repair':1,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
@@ -214,13 +214,13 @@ class CandidateReviewService:
         Speed (v0.16.7): job, ready, held and attention filters are decided per candidate id first, so
         only matching groups are rendered; per-book extras (cleanup, Retry data, current audiobook)
         are computed for the shown page only, from one jobs list; the converted set comes from the
-        last status computation when fresh. group (Output needs attention only): retry, repair, other
-        or unsupported; that list is ordered retry, repair, other, unsupported, then by scope.
+        last status computation when fresh. group (Output needs attention only): retry, repair, checking, other
+        or unsupported; that list is ordered retry, repair, checking, other, unsupported, then by scope.
         A job made by Repair carries 'repaired' (audio_jobs.repair_record) in every state.
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
         if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review'):raise ValueError('Unknown candidate status')
-        if group not in (None,'all','retry','repair','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
+        if group not in (None,'all','retry','repair','checking','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
