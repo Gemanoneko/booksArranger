@@ -1,5 +1,21 @@
 # Changelog
 
+## [v0.19.0] - 2026-10-19
+
+### Added
+
+- Refused Retry follow-ups. Start over replaces Retry on a book whose saved review changed, and "Let the app handle it" (a single held M4B, with a Cancel-first confirmation) hands the book back to the automatic pass. The book keeps a "Started over" state with the live pass state, and the book list now fits a narrow window.
+- Leftover working files can be cleared or are reported as blocked, with a Clear working files action; Retry and Repair clear them first.
+- A pass started by Start over, a release or a pending start now shows its library scan.
+
+### Fixed
+
+- M4B Retry says "ready to retry" only after a passing dry run, shows "checking" or "can't open" otherwise, stops offering Retry on a book whose Retry was refused, accepts four exact M4B writer shapes that refused nine books, and is admitted on a catalog that never had an audio-staging folder.
+- A pending start now ends on Stop, Quit and the safety stops, and nothing starts once Quit has begun (previously a pass could start during Quit or past a disk-full hold).
+- A working file held open by another program reads "try again in a moment" and its row recovers once released, with no restart.
+- A refused Retry or Repair clear-first answers with the refreshed row, so the details panel no longer offers actions from before the press.
+- The Start over note promises "Let the app handle it" only when the button will appear.
+
 ## [v0.18.0] - 2026-10-18
 
 ### Added
