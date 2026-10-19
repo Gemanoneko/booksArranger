@@ -134,7 +134,7 @@ The holds the app enforces (closing, draining, disk-full, working-file hold) are
 - Total Major: 2
 - Total Minor: 10
 
-**Verdict:** RELEASE CLEAR
+Verdict at `c2abd97` (superseded; the single machine-readable verdict is in the Release pin section at the end): RELEASE CLEAR
 
 No Critical finding and the safety floor is intact: no new path can delete outside the app's own receipt-owned staging, no original is at risk, and nothing new is shelled out, logged or exposed. Majors M1 (pending start fires during Quit and can hang it) and M2 (pending start overrides the disk-full and working-file holds) are advisory. I recommend fixing both before this build reaches Sergei. One fix covers both: `stop()` and drain/close clear `start_pending`, and the pending loop checks closing/draining before `start()`. Each needs a regression test that drives Quit and `stop(force=True)` with a pending start.
 
@@ -247,6 +247,55 @@ Both Majors are closed. `stop()` now ends a pending start on every path: Stop, Q
 - Total Major: 0 open (M1 and M2 closed)
 - Total Minor: 10 open (8 carried, 2 new: d1, d2)
 
-The safety floor is intact. The delta adds no delete path, no shell-out, no logging of secrets and no new exposed route. This line supersedes the one above, which certified `c2abd97`. Both read RELEASE CLEAR, so the release check finds one consistent verdict.
+The safety floor is intact. The delta adds no delete path, no shell-out, no logging of secrets and no new exposed route. This verdict supersedes the one above, which certified `c2abd97`.
+
+Verdict at `6f7680a` (superseded; the single machine-readable verdict is in the Release pin section below): RELEASE CLEAR
+
+---
+
+## Release pin (2026-10-19)
+
+```
+Pinned build: release source a62530c905911b8b847036bbe7ba65197396620b (version bump on top of the CLEAR'd 6f7680a)
+Build ID: d977850e-c012-4170-8ad9-a3a0b52d13de
+Manifest: dist/release-artifacts.json
+Release installer: dist/builds/d977850e-c012-4170-8ad9-a3a0b52d13de/Books-Arranger-Setup-0.19.0.exe
+Release installer SHA256: 4fed020ef9cab0e491c6c7a3dd06ce7a86c5ed5319df40cbeb02cd74a9190543
+Product digest: 262fe0c6448e8ea5e180821fa16cfb4632dad9c75e180206076887048926faf1
+```
+
+### Range 6f7680a..a62530c
+
+- Two commits, linear: `1097662` (docs) and `a62530c` (release). `1097662` touches only six `Docs/` files. `a62530c` touches only `package.json`, `package-lock.json` and `CHANGELOG.md`.
+- Outside `Docs/`, the whole range changes three files. `package.json` changes one line, `"version"` 0.18.0 to 0.19.0. `package-lock.json` changes two lines, the root `version` and `packages[""].version`. `CHANGELOG.md` adds 16 lines. No production, test, `desktop/`, `scripts/` or dependency change. The build scripts are unchanged since v0.18.0 (`git diff adef2118 a62530c -- scripts/ desktop/`: nothing).
+
+### Manifest and artifacts
+
+Checked by `shared/senua-0190/pin_verify.mjs` in the session scratch (28/28 pass). It reads `dist/` only.
+
+- The manifest SHA256, recomputed, is `f1ed7a1b…d7f6b`, which matches the pin. Schema `books-desktop-artifacts-v1`. Version 0.19.0, and the shell and backend versions are both 0.19.0. `source_head` is `a62530c`. `build_id` and `unpacked` both name `d977850e-…`. `verified` and `installer_equivalent` are true.
+- `product_digest` matches when recomputed from `git ls-tree -r --full-tree a62530c`, using the `productTree` rule: `Docs/` and `CHANGELOG.md` excluded. The worktree HEAD is `a62530c`, and the tree is clean.
+- `payload.files` lists 233 files. A fresh walk of `win-unpacked`: 0 missing, 0 extra, 0 differ. `payload.manifest_sha256` matches when recomputed. All 48 `runtime.files` entries are in the payload with equal hashes. `runtime.pins_sha256` matches `desktop/runtime-pins.json`. Python and ffmpeg are byte-identical to the released v0.18.0 manifest.
+- The two `protected_data_files` match the pinned source files.
+- All three artifacts (installer, blockmap, `latest.yml`) match their manifest sha256 and size on disk. `latest.yml` reads version 0.19.0, and its sha512 and size match the installer.
+- **Installer contents, measured.** 7-Zip extracted the installer's `app-64.7z` into the session scratch (`shared/senua-0190/nsis-0190/`): 233 files, identical to the manifest (0 missing, 0 extra, 0 differ).
+
+### Bundled-file hygiene
+
+- **ASAR:** 13 entries: the 12 `desktop/` shell files and `package.json`, which reads 0.19.0. Every shell file is byte-equal to its pinned source.
+- **Backend:** 58 shipped `.py`, `web/` and JSON files, each byte-equal to its pinned source. `VERSION` reads 0.19.0. The only payload delta from v0.18.0 is 4 added files: `book_restart.py`, `retry_refusal.py` and their `.pyc` files. Nothing was removed.
+- **No tests, `Docs/`, scratch, `.claude`, `CLAUDE.md`, logs, databases, source maps or key files ship** (pattern scan over the payload and ASAR paths).
+- **Bytecode:** 52 `.pyc` files ship, one per shipped `.py`. `build_phase.py` compiles them on purpose as `unchecked-hash`, the same as in v0.18.0. Python therefore never revalidates them against the source, so I checked them all with `shared/senua-0190/pyc_verify.py` on 3.14.8, the pinned runtime version. Each one has the right magic, flags = 1, and a source hash equal to its shipped `.py`. Positive control: a one-byte source change gives a hash mismatch. Full NSIS updates replace the `.py` and `.pyc` files together. `engine-update.js` only drains the engine before the installer runs, so no stale bytecode can run.
+- **Update metadata:** `app-update.yml` names the github provider for `Gemanoneko/booksArranger` and carries no token. `builder-debug.yml` sits in the build folder, but it is not an artifact and contains no credential.
+
+### Pin verdict
+
+- Open Critical: 0
+- Open Major: 0
+- Open Minor: 10 (carried from the delta review; nothing new in the pin range)
+
+The safety floor is intact. Every requested check matched, and the bundled output is hygienic. This is the single machine-readable verdict for v0.19.0. The two earlier verdicts above are superseded.
 
 **Verdict:** RELEASE CLEAR
+Release source commit: a62530c905911b8b847036bbe7ba65197396620b
+Release artifact manifest SHA256: f1ed7a1bde447d1892d1a1253cd99fc53c6cf08a610ab4bcba3b6d0bd38d7f6b
