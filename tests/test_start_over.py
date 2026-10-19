@@ -516,6 +516,13 @@ class PassTests(Base):
             self.assertIsNone(auto.start_pending)
             self.assertTrue(notified.called, 'the next poll shows it')
 
+    def test_every_start_tells_the_server_which_library_it_scans(self):
+        auto = self.s.automatic
+        server = SimpleNamespace(active_library=None)
+        auto.on_started = lambda: setattr(server, 'active_library', 'Audiobooks')
+        self.assertEqual(auto.request_start(), {'action': 'started'})
+        self.assertEqual(server.active_library, 'Audiobooks', 'a pass started by Start over shows its scan as Start does')
+
     def test_cancel_another_blocker_and_a_blocker_that_cannot_clear(self):
         auto = self.s.automatic
         self.jobs_state['state'] = 'Running'

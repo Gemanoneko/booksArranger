@@ -1,6 +1,7 @@
 """One explicitly started, checkpointed public-source Audiobooks pass.
 Construction/reconnect/restart never starts inventory, approval or conversion.
 """
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -72,6 +73,9 @@ def research_retry(run):
     except (ValueError,TypeError,AttributeError):return False
 
 class AutomaticProcessing:
+    # Defaults for an instance built without __init__ (private test stubs that run _work directly): no book was put
+    # back, the run is not closing, no hook is set.
+    _requeued=();_closing_run=False;on_started=None
     def __init__(self,merge,research=None,clock=time.time):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
@@ -81,6 +85,8 @@ class AutomaticProcessing:
         self._requeued=[];self._closing_run=False
         # One pending start for the app (O12), in memory only: a start nobody is watching never comes back after a restart.
         self.start_pending=None;self._pending_thread=None;self._pending_wake=threading.Event();self.on_change=None
+        # The server's hook for every start (Start, Start over, release, a pending start): the pass scans Audiobooks.
+        self.on_started=None
         with connect(self.database) as db:
             __import__('groups').setup(db)
             db.execute('CREATE TABLE IF NOT EXISTS automatic_runs(id TEXT PRIMARY KEY,state TEXT,phase TEXT,checkpoint TEXT,reason TEXT,created TEXT,updated TEXT,restart_paused INTEGER DEFAULT 0)')
@@ -253,6 +259,10 @@ class AutomaticProcessing:
             else:self._update(run['id'],state='Running',reason='',restart_paused=0)
             self.stop_event.clear();self.start_pending=None;self._closing_run=False
             self.thread=threading.Thread(target=self._work,args=(run['id'],),name='BooksArrangerAutomatic',daemon=False);self.thread.start()
+        started=self.on_started
+        if started:
+            try:started()
+            except Exception:pass
         return self.status()
     def requeue(self,identity):
         """Start over / release: put a book back on the run's pending list. 'this_run' when the running or saved run will
@@ -281,9 +291,12 @@ class AutomaticProcessing:
         checkpoint['done']=[item for item in list(checkpoint.get('done') or []) if item not in ids]
         deferred=checkpoint.get('deferred')
         if isinstance(deferred,list):deferred[:]=[item for item in deferred if item not in ids]
+    def _requeue_guard(self):
+        return self.__dict__.get('lock') or contextlib.nullcontext()
     def _take_requeued(self,checkpoint):
         """Worker: move books Start over or release put back since the last step to the front of pending."""
-        with self.lock:
+        if not self._requeued:return False
+        with self._requeue_guard():
             taken=list(self._requeued);self._requeued.clear()
         if taken:self._requeue_into(checkpoint,taken)
         return bool(taken)
@@ -593,7 +606,7 @@ class AutomaticProcessing:
                   if self.merge.state()['state']=='Paused':raise InterruptedError()
                   if self._requeued:break  # a book put back meanwhile is researched in this run
               if self.stop_event.is_set():raise InterruptedError()
-              with self.lock:
+              with self._requeue_guard():
                   if not self._requeued:self._closing_run=True
               if self._closing_run:break
               phase='research';self._update(id,phase='research',checkpoint=json.dumps(checkpoint))

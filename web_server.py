@@ -144,6 +144,10 @@ class BrowserServer(ThreadingHTTPServer):
                 from merge_service import MergeService
                 merge_factory = MergeService
             self.merge = merge_factory(inventory, Path(inventory.database).parent / 'merge-cache')
+            # Whatever starts automatic processing (Start, Start over, release, a pending start), its scan is the
+            # Audiobooks library's: the scan line and progress row follow it as after the Start button.
+            automatic=getattr(self.merge,'automatic',None)
+            if automatic is not None and hasattr(automatic,'on_started'):automatic.on_started=lambda:setattr(self,'active_library','Audiobooks')
             if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
             # Published-book hashing reads every finished book from the library share; it must not delay health.
             if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
