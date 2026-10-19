@@ -48,9 +48,10 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(statusCell(tr).textContent,'Stopped — ready to retry');assert.equal(actionButtons(tr)[0].textContent,'Retry');assert.equal(actionButtons(tr)[0].disabled,false);
 
   // Every cause: status and hint from the copy map; behaviour from the fix; none of the internal words.
+  // working_files: superseded by follow-up 2, section 2.2 (the live state of the files decides, see test_working_frontend.js);
+  // source_changed: the hint names Start over (follow-up 2, section 1.2).
   const expected={
-    working_files:['Stopped — waiting for cleanup','Retry was refused: working files from an earlier attempt are still present. Retry after they are cleared.'],
-    source_changed:['Stopped — review changed',"Retry was refused: the book's review or source files changed. Review the book again."],
+    source_changed:['Stopped — review changed',"Retry was refused: the book's review or source files changed. Start over sends it back to automatic processing."],
     file_problem:['Stopped — file problem',"Retry was refused: the app couldn't read or write a file. Check the folder, then retry."],
     unknown:['Stopped — retry refused','Retry was refused. Select the row to read why.']};
   for(const [cause,[status,hint]] of Object.entries(expected)){

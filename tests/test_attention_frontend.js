@@ -94,8 +94,10 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   const refusedM4b={...m4b,creation:{...m4b.creation,job:{...m4b.creation.job,retry:undefined,attention:{group:'other',cause:null,originals_untouched:true},readmission:{accepted:false,queued_next:false,reason:'Failed M4B retained: Reviewed candidate changed during source proof',kind:'retry',state:'refused',cause:'source_changed',fix:'review',stale:false}}}};
   context.fixture=[refusedM4b];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');m4bRow=get('inventory').children[0];
   assert.equal(statusCell(m4bRow).textContent,'Stopped — review changed');
-  assert.equal(statusCell(m4bRow).children[0].textContent,"Retry was refused: the book's review or source files changed. Review the book again.");assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
+  // Superseded by follow-up 2, section 1.2 (Sergei: Start over, with automatic re-processing): the hint names Start over.
+  assert.equal(statusCell(m4bRow).children[0].textContent,"Retry was refused: the book's review or source files changed. Start over sends it back to automatic processing.");assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
   assert.ok(![...actionButtons(m4bRow)].some(button=>button.textContent==='Retry'),'no Retry that cannot work');
+  assert.equal(actionButtons(m4bRow)[0].textContent,'Start over','Start over in the Retry slot');
   assert.match(statusCell(m4bRow).title,/^Technical detail: Failed M4B retained: Reviewed candidate changed during source proof; earlier failure: /);
   // A queued child outside the attention list says the same.
   assert.equal(status(blocked({status:'Queued',creation:{status:'Queued',reasons:[],job:{job_id:'child-m',state:'Queued',stage:'queued',reason:'',readmission:{accepted:true,queued_next:true,position:2,kind:'repair',state:'admitted'}}}})),'Queued — runs after 2 books');

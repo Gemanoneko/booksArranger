@@ -19,3 +19,51 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 #retry-block{margin:8px 0}#retry-job{min-height:32px;min-width:96px}#retry-job[aria-disabled=true],#retry-job[aria-disabled=true]:hover,#retry-job[aria-disabled=true]:active{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}#retry-note.retry-refused{color:var(--warning)}
 #audio-jobs{container-type:inline-size}#jobs-activity{min-height:136px}#jobs-rows{list-style:none;margin:8px 0 0;padding:0}.activity-row{margin:0 0 14px;min-width:0}.activity-line{display:flex;justify-content:space-between;align-items:baseline;gap:12px;min-width:0;height:20px;line-height:20px}.activity-first{height:21px;line-height:21px}.activity-head{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;color:var(--text)}.activity-label{font-weight:600}.activity-detail{flex:none;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}.activity-step{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;color:var(--text)}.activity-time{flex:none;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}.activity-row progress{appearance:none;display:block;box-sizing:border-box;width:100%;height:8px;margin:6px 0;border:1px solid var(--border);border-radius:4px;background:var(--raised);overflow:hidden}.activity-row progress::-webkit-progress-bar{background:var(--raised);border-radius:4px}.activity-row progress::-webkit-progress-value{background:var(--accent);border-radius:4px}.activity-row.paused progress::-webkit-progress-value{background:var(--muted)}.activity-row.attention progress::-webkit-progress-value{background:var(--warning)}.activity-row progress:indeterminate{background:linear-gradient(var(--accent),var(--accent)) no-repeat var(--raised);background-size:35% 100%;background-position:-54% 0;animation:activity-slide 1.4s linear infinite}.activity-row progress:indeterminate::-webkit-progress-bar{background:transparent}.activity-row.paused progress:indeterminate{animation:none;background-image:linear-gradient(var(--muted),var(--muted));background-position:0 0}.activity-row.attention progress:indeterminate{animation:none;background-image:linear-gradient(var(--warning),var(--warning));background-position:0 0}@keyframes activity-slide{from{background-position:-54% 0}to{background-position:154% 0}}@media(prefers-reduced-motion:reduce){.activity-row progress:indeterminate{animation:none;background:repeating-linear-gradient(45deg,var(--accent) 0 8px,var(--raised) 8px 16px)}}@container(max-width:560px){.activity-line,.activity-first{flex-direction:column;align-items:flex-start;height:auto;gap:0}}
 .row-actions .row-retry{min-width:96px;min-height:32px}.row-retry[aria-disabled=true],.row-retry[aria-disabled=true]:hover,.row-retry[aria-disabled=true]:active{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}.attention-hint.retry-refused{color:var(--warning)}#attention-groups{margin-top:10px;gap:8px}#attention-groups button{min-height:32px;font-variant-numeric:tabular-nums}#attention-groups button.attention-group[aria-pressed=true]{background:var(--row-selected);color:var(--text);border:2px solid var(--accent)}#retry-all{margin-left:auto;min-height:32px}#retry-all[aria-disabled=true]{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}#retry-all-confirm{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}#retry-all-go,#retry-all-cancel{min-height:32px}#retry-all-line{flex-basis:100%;margin:0}#retry-all-count{margin-left:8px;font-variant-numeric:tabular-nums}#automatic-repaired p{margin:4px 0 0}#automatic-repaired ul{margin:4px 0 8px;padding-left:20px}#automatic-technical{overflow-wrap:anywhere;user-select:text}
+/* Start over, "Let the app handle it", Clear working files and the pending start (RefusedRetry follow-ups 2-4). */
+.hint-clause{color:var(--muted)}#automatic-result-hint.retry-refused,#release-selected-status.retry-refused{color:var(--warning)}
+.row-actions .row-clear,#clear-working,#release-selected,#cancel-automatic-start{min-width:96px;min-height:32px}
+.row-clear[aria-disabled=true],.row-clear[aria-disabled=true]:hover,.row-clear[aria-disabled=true]:active,#clear-working[aria-disabled=true],#clear-working[aria-disabled=true]:hover,#release-selected[aria-disabled=true],#release-selected[aria-disabled=true]:hover{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+#retry-block .toolbar{gap:8px}#release-selected-status:focus-visible,#automatic-start-reason:focus-visible{outline:3px solid var(--focus);outline-offset:2px}#restart-summary{margin:10px 0 0}
+#discard-dialog{width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px}#discard-dialog::backdrop{background:rgb(0 0 0 / .65)}#discard-dialog p{overflow-wrap:anywhere}#discard-dialog button{min-height:32px;min-width:96px;white-space:normal}
+/* The book list never scrolls sideways (follow-up 3, section 5): three bands on the table box's own width. Scoped to the
+   book list; the Files-era column minimums (895 px in all) no longer apply to it. */
+#inventory-scroll{container-type:inline-size;container-name:booklist}
+#inventory-table th{white-space:normal}#inventory-table td,#inventory-table th{overflow-wrap:anywhere;min-width:0}
+#inventory-table td:nth-child(3),#inventory-table td:nth-child(4),#inventory-table td:last-child{min-width:0}
+#inventory-table .row-actions{min-width:0;max-width:280px}#inventory-table .row-actions button{max-width:100%;white-space:normal}
+.title-facts{display:none;margin:4px 0 0}
+#inventory-table.candidates th:nth-child(1),#inventory-table.candidates td:nth-child(1){width:64px}
+#inventory-table.candidates td:nth-child(2){min-width:140px}#inventory-table.candidates td:nth-child(3){min-width:120px}
+#inventory-table.candidates th:nth-child(4),#inventory-table.candidates td:nth-child(4){width:72px}
+#inventory-table.candidates td:nth-child(5){min-width:180px}#inventory-table.candidates td:nth-child(6){min-width:170px}
+@container booklist (max-width:799px){
+  #inventory-table.candidates th:nth-child(3),#inventory-table.candidates td:nth-child(3),#inventory-table.candidates th:nth-child(4),#inventory-table.candidates td:nth-child(4){display:none}
+  #inventory-table.candidates th:nth-child(1),#inventory-table.candidates td:nth-child(1){width:56px}
+  #inventory-table.candidates td:nth-child(2){min-width:160px}#inventory-table.candidates .title-facts{display:block}
+}
+@container booklist (max-width:599px){
+  #inventory-table.candidates,#inventory-table.candidates tbody{display:block}
+  #inventory-table.candidates thead{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+  #inventory-table.candidates th{position:static}
+  #inventory-table.candidates tbody tr{display:grid;grid-template-columns:40px minmax(0,1fr);column-gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+  #inventory-table.candidates tbody td{display:block;border-bottom:0;padding:4px 8px 4px 0;min-width:0;width:auto}
+  #inventory-table.candidates tbody td:nth-child(1){grid-column:1;grid-row:1 / span 3;padding-left:8px}
+  #inventory-table.candidates tbody td:nth-child(2),#inventory-table.candidates tbody td:nth-child(5),#inventory-table.candidates tbody td:nth-child(6){grid-column:2}
+  #inventory-table.candidates tbody td:nth-child(3),#inventory-table.candidates tbody td:nth-child(4){display:none}
+  #inventory-table.candidates .row-actions{max-width:none}
+}
+/* The Files view: wide at a box of 1000 and up; below that each row is a block: title, then type, arrival and author on
+   one wrapping line, preview status, destination, buttons. */
+@container booklist (max-width:999px){
+  #inventory-table.files,#inventory-table.files tbody{display:block}
+  #inventory-table.files thead{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+  #inventory-table.files th{position:static}
+  #inventory-table.files tbody tr{display:flex;flex-wrap:wrap;column-gap:8px;padding:8px;border-bottom:1px solid var(--border)}
+  #inventory-table.files tbody td{display:block;border-bottom:0;padding:2px 0;min-width:0;flex:0 1 auto}
+  #inventory-table.files tbody td:nth-child(3){order:1;flex-basis:100%;font-weight:600}
+  #inventory-table.files tbody td:nth-child(1){order:2}#inventory-table.files tbody td:nth-child(2){order:3}#inventory-table.files tbody td:nth-child(4){order:4}
+  #inventory-table.files tbody td:nth-child(2):not(:empty)::before,#inventory-table.files tbody td:nth-child(4):not(:empty)::before{content:'· ';color:var(--muted)}
+  #inventory-table.files tbody td:nth-child(5){order:5;flex-basis:100%}
+  #inventory-table.files tbody td:nth-child(6){order:6;flex-basis:100%;font:13px/1.6 ui-monospace,Consolas,monospace}
+  #inventory-table.files tbody td:nth-child(7){order:7;flex-basis:100%}#inventory-table.files .row-actions{max-width:none}
+}

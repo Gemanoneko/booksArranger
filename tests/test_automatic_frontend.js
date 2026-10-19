@@ -78,7 +78,8 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   fixture(candidate({automatic:null,creation:{status:'Audiobook created'}}));assert.equal(run('candidateStatus(fixture)'),'Ready status unavailable');
   fixture(candidate({automatic:null,creation:{status:'Audiobook created'},audiobook_ready:true,status:'Candidate changed'}));assert.equal(run('candidateStatus(fixture)'),'Candidate changed');
   fixture(candidate({automatic:{state:'Needs attention',reasons:['Actual error']},audiobook_ready:true}));assert.equal(run('candidateStatus(fixture)'),'Needs attention — Actual error');
-  assert.deepEqual(Array.from(run('filterOptions.candidates'),item=>item[0]),['converted','all','jobs','held','recording_review','errors','changed','output_attention']);
+  // Follow-up 3, section 2.3: Started over is always listed, after Output needs attention.
+  assert.deepEqual(Array.from(run('filterOptions.candidates'),item=>item[0]),['converted','all','jobs','held','recording_review','errors','changed','output_attention','restarted']);
   run("view='candidates';filters.candidates='ready';viewControls()");assert.equal(get('filter').value,'converted');
   inventoryRows=[];get('search').value='';await run('updateList()');assert.match(get('empty').textContent,/^No audiobooks are ready yet/);assert.match(get('page').textContent,/Audiobook Ready/);
   get('search').value='author';await run('updateList()');assert.doesNotMatch(get('empty').textContent,/No audiobooks are ready yet/);assert.match(get('empty').textContent,/Audiobook Ready/);

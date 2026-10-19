@@ -147,7 +147,8 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
 
   // Static page contract: placement, primary style, the note, and the pending style.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
-  assert.match(html,/<ul id="automatic-reasons"><\/ul><div id="retry-block" hidden><div class="toolbar"><button id="retry-job" type="button" aria-describedby="retry-note" disabled>Retry<\/button><\/div><p id="retry-note" class="field-help" role="status" aria-live="polite" hidden><\/p><\/div><p id="automatic-result-help"/);
+  // Follow-up 2, section 2.5: Clear working files sits beside Retry in the same toolbar, hidden unless the files are cleanable.
+  assert.match(html,/<ul id="automatic-reasons"><\/ul><div id="retry-block" hidden><div class="toolbar"><button id="retry-job" type="button" aria-describedby="retry-note" disabled>Retry<\/button><button id="clear-working" type="button" class="quiet" aria-describedby="retry-note" hidden>Clear working files<\/button><\/div><p id="retry-note" class="field-help" role="status" aria-live="polite" hidden><\/p><\/div><p id="automatic-result-help"/);
   assert.doesNotMatch(html,/id="retry-job"[^>]*class=/,'Retry is a primary button');
   assert.match(css,/#retry-job\{min-height:32px;min-width:96px\}/);assert.match(css,/#retry-job\[aria-disabled=true\],#retry-job\[aria-disabled=true\]:hover,#retry-job\[aria-disabled=true\]:active\{background:var\(--disabled\);color:var\(--disabled-text\);border-color:var\(--border\);cursor:default\}/);
   assert.match(css,/#retry-note\.retry-refused\{color:var\(--warning\)\}/);

@@ -100,7 +100,8 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   const repair=(cause,job={})=>m4bRow('rp',{attention:{group:'other',cause:null,originals_untouched:true},readmission:refusal(cause,{kind:'repair'}),...job});
   assert.equal(text(repair('unknown')).status,'Stopped — repair refused');
   assert.equal(text(m4bRow('rt',{attention:{group:'other',cause:null,originals_untouched:true},readmission:refusal('unknown')})).status,'Stopped — retry refused','positive control: a Retry says retry');
-  assert.equal(text(repair('working_files')).hint,'Repair was refused: working files from an earlier attempt are still present. Repair after they are cleared.');
+  // Superseded by follow-up 2, section 2.2: a working-files record no longer decides the row (its natural state shows).
+  assert.equal(text(repair('working_files')).hint,'Select the row to read why.');
   assert.equal(text(repair('file_problem')).hint,"Repair was refused: the app couldn't read or write a file. Check the folder, then repair.");
   for(const cause of ['unknown','working_files','file_problem','source_changed','unsupported_file']){const lines=text(repair(cause));assert.doesNotMatch(lines.status+' '+lines.hint,/retry/i,cause);}
 

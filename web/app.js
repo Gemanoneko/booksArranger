@@ -7,7 +7,7 @@ let view='candidates',totalRows=0,selectedLibrary=null;
 let automaticRequest=null,automaticResultKey=null,automaticInspectorKey=null;
 let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'converted'};
-const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention']]};
+const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention'],['restarted','Started over']]};
 const form = $('review-form');
 const fields = ['original_language','title','author','canonical_author','narrator','series','number','genre','topic'];
 let proposalId=null,coverId=null,trackDraft=null,trackDirty=false,coverSequence=0,mergeRenderKey=null,proposalRenderKey=null,memberRenderKey=null,coverRenderKey=null;
@@ -22,6 +22,9 @@ const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedCo
 let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='';
 const rowRetries=new Map();
 const pendingFolders=new Set(),folderMessages=new Map();
+// Start over, "Let the app handle it" and Clear working files (RefusedRetry follow-ups 2-4, Sergei 2026-10-19).
+// restartResult: the panel note for a book whose press left it with no control (it now shows its Started over state).
+let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=null;
 
 function routingControls() {
   const audio=['audiobook','candidate'].includes(selectedRow?.kind);
@@ -39,14 +42,16 @@ function viewControls(){
   if(!filterOptions[view].some(([value])=>value===filters[view]))filters[view]=view==='candidates'?'converted':'all';
   $('view').value=view;
   $('filter').replaceChildren();
-  for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(value==='held')option.title='Show books that automatic processing could not safely approve.';if(value==='recording_review')option.title='Show recordings marked for comparison, including verified distinct recordings.';$('filter').append(option);}
+  for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(FILTER_TITLES[value])option.title=FILTER_TITLES[value];$('filter').append(option);}
   $('filter').value=filters[view];
-  $('filter').title=filters[view]==='held'?'Show books that automatic processing could not safely approve.':filters[view]==='recording_review'?'Show recordings marked for comparison, including verified distinct recordings.':'Filter the saved results in this library.';
+  $('filter').title=FILTER_TITLES[filters[view]] || 'Filter the saved results in this library.';
   for(const id of ['automatic-controls','automatic-help','automatic-policy','automatic-status-block'])$(id).hidden=!audio;
   $('search-label').textContent=view==='files'?'Path contains':'Candidate contains';
   inventoryIntro.textContent=view==='files'?'Each row is a source file, including chapter tracks and companion files. Switch to Book candidates to review audiobook groups.':'Automatic processing researches book candidates and converts confident matches. Held books stay out of the queue; manual review is optional.';
   $('batch-controls').hidden=!audio || view!=='candidates';
 }
+const FILTER_TITLES={held:'Show books that automatic processing could not safely approve.',recording_review:'Show recordings marked for comparison, including verified distinct recordings.',
+  restarted:'Show books you started over that automatic processing has not queued yet.'};
 const connectionText='Connection interrupted; automatic processing may still be running. Retrying…';
 const receivedStatus=new Map();
 let refreshSequence=0;
@@ -85,7 +90,7 @@ async function request(route, data, timeoutMs=0) {
   let response;
   try{response = await fetch(route, options);}finally{if(timer)clearTimeout(timer);}
   const result = await response.json();
-  if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;throw error;}
+  if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;error.body=result;throw error;}
   return result;
 }
 function message(value='') { $('message').textContent=value; }
@@ -98,6 +103,8 @@ function controls() {
   $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
   renderAutomaticEligibility();
   $('stop-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_stop!==true;
+  // Cancel automatic start (O12): shown only while a start is pending; the notice above says what it waits for.
+  if($('cancel-automatic-start')){const cancel=$('cancel-automatic-start'),active=globalThis.document?.activeElement;cancel.hidden=!startPending(automatic) && active!==cancel;cancel.disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || !startPending(automatic);}
   const stopped = ['stopped','offline','failed'].includes(state?.status?.state);
   $('start').disabled = busy || ended || recoveryDisconnected || !!active || stopped || !state || automaticOwnsScanner;
   $('resume').disabled = busy || ended || recoveryDisconnected || !!active || !stopped || automaticOwnsScanner;
@@ -112,6 +119,7 @@ function controls() {
   for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
   if($('queue-books'))$('queue-books').disabled=busy || ended || recoveryDisconnected || !rows.some(readyForQueue);
   if($('retry-selected'))renderRetrySelected();
+  if($('release-selected'))renderReleaseSelected();
   if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
   if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !state?.audiobook_jobs?.queued || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
 }
@@ -191,30 +199,41 @@ function renderRows(force=false) {
     for(const entry of rowRetries.values()){const fresh=rows.find(row=>row.path===entry.row.path);if(fresh)entry.row=fresh;}
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const body=$('inventory'); body.replaceChildren();
-  $('inventory-head').replaceChildren();const heading=document.createElement('tr');
-  for(const label of view==='candidates'?['Select','Title clue','Author / reader clues','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;heading.append(th);}$('inventory-head').append(heading);
+  $('inventory-head').replaceChildren();const heading=document.createElement('tr');heading.setAttribute('role','row');
+  // The narrow table (follow-up 3, section 5): the bands come from CSS; explicit roles keep the table's meaning when a
+  // narrow band shows each row as a block.
+  $('inventory-table')?.classList?.toggle('candidates',view==='candidates');$('inventory-table')?.classList?.toggle('files',view!=='candidates');
+  for(const label of view==='candidates'?['Select','Title clue','Author / reader clues','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;th.setAttribute('role','columnheader');heading.append(th);}$('inventory-head').append(heading);
   for (const row of rows) {
-    const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;
+    const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;tr.setAttribute('role','row');
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
-    if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
+    if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');td.setAttribute('role','cell');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
     const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',row.error ? `Read error · ${row.error.split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
-    for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;
+    for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;td.setAttribute('role','cell');
+      // Medium and compact bands fold the two clue columns into a second line of the title cell (follow-up 3, section 5).
+      if(row.kind==='candidate' && index===0)td.append(node('p',titleFacts(row),'field-help title-facts'));
       if(row.kind==='candidate' && index===3){
-        const attention=attentionText(row);
-        if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null,cell:td});}
-        // A book waiting its turn after Retry keeps its disabled "Queued" button (v0.16.12).
-        else if(readmissionOf(row)?.queued_next===true){const hint=node('p',QUEUED_HINT,'field-help attention-hint');td.append(hint);rowRetries.set(row.path,{row,hint,button:null,cell:td});}
+        // One honest state per row: attention, a queued-next press, the Started over marker, or a saved-review hold.
+        // (A book waiting its turn after Retry keeps its disabled "Queued" button, v0.16.12.)
+        const shown=rowState(row);
+        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
       }
       tr.append(td); }
-    const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();
+    const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();actions.setAttribute('role','cell');
     const rowRetry=rowRetries.get(row.path),action=rowAction(row);
     if(rowRetry && action){
       const retry=node('button',action.label,'quiet row-retry');retry.type='button';rowRetry.button=retry;
-      retry.addEventListener('click',event=>{event.stopPropagation();if(retry.getAttribute?.('aria-disabled')==='true' || retryPending)return;retryFromRow(row);});
+      retry.addEventListener('click',event=>{event.stopPropagation();if(retry.getAttribute?.('aria-disabled')==='true' || retryPending)return;retryFromRow(row,retry);});
       retry.addEventListener('keydown',event=>event.stopPropagation());buttons.append(retry);
+    }
+    // Clear working files (decision B): beside the action, only while the server says the files are cleanable; never disabled.
+    if(rowRetry && workingOf(row)?.state==='cleanable'){
+      const clear=node('button','Clear working files','quiet row-clear');clear.type='button';rowRetry.clear=clear;
+      clear.addEventListener('click',event=>{event.stopPropagation();if(clear.getAttribute?.('aria-disabled')==='true')return;clearFromRow(row,clear);});
+      clear.addEventListener('keydown',event=>event.stopPropagation());buttons.append(clear);
     }
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
@@ -230,13 +249,14 @@ function renderRows(force=false) {
   $('empty').hidden=rows.length>0;
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
-  const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':`No ${unit} match these filters · ${label}.`;
+  const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':
+    view==='candidates' && filters[view]==='restarted' && !search?'No books are waiting after Start over. Books you start over appear here until automatic processing queues them.':`No ${unit} match these filters · ${label}.`;
   $('inventory').removeAttribute?.('aria-busy');
   $('empty').textContent=emptyText;
   $('page').textContent=rows.length ? `Showing ${offset+1}–${offset+rows.length} of ${totalRows} ${unit} · ${label}` : `No ${unit} match these filters · ${label}.`;
   $('previous').disabled=offset===0;
   $('next').disabled=offset+rows.length>=totalRows;
-  batchCounts();
+  batchCounts();renderRestartSummary();
 }
 let restartNoticeSeen=null;
 function acknowledgeRestart(current){
@@ -256,6 +276,7 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
+    restartCounts=requestFilter==='restarted' && page.restart_counts && typeof page.restart_counts==='object'?page.restart_counts:null;
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
     else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
     const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
@@ -351,7 +372,7 @@ function updateList(resetPage=true){
 $('library').addEventListener('change',()=>{cancelSearchRefresh();viewControls();return updateList();});
 $('view').addEventListener('change',()=>{cancelSearchRefresh();view=$('view').value;viewControls();return updateList();});
 function resetStrip(){retryAllRun=null;retryAllConfirm=null;stripNote='';}
-$('filter').addEventListener('change',()=>{filters[view]=$('filter').value;attentionGroup='all';resetStrip();return updateList();});
+$('filter').addEventListener('change',()=>{filters[view]=$('filter').value;attentionGroup='all';resetStrip();restartCounts=null;$('release-selected-status').textContent='';return updateList();});
 $('clear-filters').addEventListener('click',()=>{$('search').value='';filters[view]='all';attentionGroup='all';resetStrip();viewControls();return updateList();});
 $('error-shortcut').addEventListener('click',()=>{$('search').value='';filters[view]='errors';viewControls();return updateList();});
 $('search').addEventListener('input',()=>{cancelSearchRefresh();++refreshSequence;if(!$('search').value)return updateList();searchTimer=setTimeout(()=>{searchTimer=null;updateList();},250);});
@@ -405,7 +426,11 @@ async function inspectorCover(cover,holder,sequence){const caption=node('p',cove
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
-function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,leftOut=selected.length-retryable;$('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retryable} can be retried or repaired`+(leftOut>0?` · ${leftOut} left out`:''):`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
+function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,leftOut=selected.length-retryable;const releasable=releaseSelection()?releaseSelectable().length:0;
+  // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
+  $('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retryable} can be retried or repaired`+(leftOut>0?` · ${leftOut} left out`:''):
+    filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
+    `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
@@ -554,25 +579,56 @@ async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmit
 // Retry for an audiobook job refused before it started. One static button, updated in place from
 // controls() on every poll; pending and result text belong to one book (candidate id + job id).
 const retryReady='Check this book again and queue its audiobook job.';
-function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;return job && typeof job.job_id==='string'?JSON.stringify([row.id,job.job_id]):'';}
+// A book's press key: its job, or (a held book with no job) its release.
+function retryKey(row){const job=row?.kind==='candidate'?row.creation?.job:null;if(job && typeof job.job_id==='string')return JSON.stringify([row.id,job.job_id]);return row?.kind==='candidate' && releaseOf(row)?JSON.stringify([row.id,'release']):'';}
 // Repair (Attention spec section 2) is the same control with another label, tooltip and endpoint.
 const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',ready:'',endpoint:null,refused:''},retry:{kind:'retry',label:'Retry',pending:'Checking…',note:'Checking this book…',ready:retryReady,endpoint:'/api/audiobook/retry',refused:'Retry was not accepted. Check the status above.'},
   repair:{kind:'repair',label:'Repair',pending:'Repairing…',note:'Repairing this book…',ready:'Patch the damage found in this book, then queue its audiobook job.',endpoint:'/api/audiobook/repair',refused:'Repair was not accepted. Check the status above.'},
   // Keep files (spec section 3): the kept recovery copies stop being flagged. Nothing is deleted, no job runs.
-  keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's files and stop flagging it. Nothing is deleted.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'}};
+  keep:{kind:'keep',label:'Keep files',pending:'Keeping…',note:'Keeping these files…',ready:"Keep this book's files and stop flagging it. Nothing is deleted.",endpoint:'/api/audiobook/keep',refused:'Keep files was not accepted. Check the status above.'},
+  // Start over (follow-ups 2-4): in the Retry slot of a "review changed" row. The combined press and the release discard
+  // a saved review, so they confirm first. Nothing else on the row moves.
+  startover:{kind:'startover',label:'Start over',pending:'Starting over…',note:'Setting this job aside…',ready:"Set this failed job aside and send the book back to automatic processing. Starts automatic processing if it isn't running. Nothing is deleted.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Check the status above.'},
+  combined:{kind:'combined',label:'Start over and let the app handle it',pending:'Starting over…',note:'Setting this job aside and discarding the saved review…',ready:"Set this failed job aside, discard this book's saved review (including any edits you made by hand), and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. The failed job and your audio files are kept.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Nothing was changed.',confirm:true},
+  release:{kind:'release',label:'Let the app handle it',pending:'Discarding review…',note:'Discarding the saved review…',ready:"Discard this book's saved review, including any edits you made by hand, and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. Your audio files are not touched.",endpoint:'/api/audiobook/release',refused:"The review wasn't discarded. Select the row to read why.",confirm:true}};
+const STARTOVER_HELD_TIP="Set this failed job aside. Starts automatic processing if it isn't running. The book has a saved review, so automatic processing will hold it; \"Let the app handle it\" can then release it. Nothing is deleted.";
+const CLEARS_FIRST={retry:['Clear the leftover working files, then check this book again and queue its audiobook job.','Clearing working files, then checking this book…',' Retry clears leftover working files first.'],
+  repair:['Clear the leftover working files, patch the damage found in this book, then queue its audiobook job.','Clearing working files, then repairing this book…',' Repair clears leftover working files first.']};
 const KEPT_HINT='Files kept at your choice.';
 function keptGroup(attention){return attention?.group==='changed' || attention?.group==='audiobook';}
 function rowAction(row){
-  const job=row?.kind==='candidate'?row.creation?.job:null;if(!job)return null;
+  const job=row?.kind==='candidate'?row.creation?.job:null;
+  // A held single-M4B book with a saved review and no job: "Let the app handle it" (O7), in every filter it shows in.
+  if(!job)return row?.kind==='candidate' && releaseOf(row)?{...rowActions.release,data:{allowed:true,reason:''}}:null;
   // A damaged book shows Repair and never Retry (Retry would fail again on the same damage).
   // Once accepted, the request waits for its turn: the button reads "Queued" and cannot be pressed again.
   const queued=readmissionOf(row);
   if(queued?.queued_next===true)return {...rowActions.queued,data:{allowed:false,reason:queuedNextText(queued)}};
   if(!queued && pressedFor(row)?.state==='checking' && retryPending?.key!==retryKey(row))return {...rowActions.queued,label:'Checking…',pending:'Checking…',data:{allowed:false,reason:'Checking whether the press went through…'}};
-  // A refusal that only an app update or a new review clears offers no control (no disabled ghost); the hint says why.
-  const refusal=refusalCurrent(row);if(refusal && (refusalFix(refusal)==='update' || refusalFix(refusal)==='review'))return null;
-  const attention=attentionOf(row),[kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
-  return data && typeof data==='object' && typeof data.allowed==='boolean'?{...rowActions[kind],data}:null;
+  // A refusal that only an app update clears offers no control (no disabled ghost); the hint says why. A "review changed"
+  // row offers Start over in the Retry slot, or the combined press when the book is known to hold for its saved review.
+  const refusal=refusalCurrent(row),attention=attentionOf(row);
+  if(refusal && refusalFix(refusal)==='review'){
+    if(attention?.startover==='manual_draft' && attention.release_ok===true)return {...rowActions.combined,data:{allowed:true,reason:''}};
+    return {...rowActions.startover,ready:attention?.startover==='manual_draft'?STARTOVER_HELD_TIP:rowActions.startover.ready,data:{allowed:true,reason:''}};
+  }
+  if(refusal && refusalFix(refusal)==='update')return null;
+  const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
+  if(!data || typeof data!=='object' || typeof data.allowed!=='boolean')return null;
+  // Retry and Repair clear leftover working files first (decisions A and O10): their tooltip and press note say so.
+  const clears=workingOf(row)?.state==='cleanable' && data.allowed===true && CLEARS_FIRST[kind];
+  return clears?{...rowActions[kind],ready:clears[0],note:clears[1],data}:{...rowActions[kind],data};
+}
+function releaseOf(row){return row?.release?.allowed===true && !row?.creation?.job;}
+function restartOf(row){const value=row?.restart;return value && typeof value==='object' && typeof value.state==='string'?value:null;}
+function workingOf(row){const value=attentionOf(row)?.working;return value && typeof value==='object' && (value.state==='cleanable' || value.state==='blocked')?value:null;}
+function sizeText(bytes){const units=['B','KB','MB','GB','TB'];let index=0;while(index<units.length-1 && bytes>=1024**(index+1))index++;const scaled=bytes/1024**index;return scaled.toLocaleString(undefined,{maximumFractionDigits:scaled<10 && index?1:0})+' '+units[index];}
+function clearTooltip(row){const bytes=workingOf(row)?.bytes;return 'Delete the working files an earlier attempt left behind. Originals are not touched.'+(Number.isSafeInteger(bytes) && bytes>0?` Frees about ${sizeText(bytes)}.`:'');}
+// The hint text, plus a muted clause (the "clears first" sentence) in its own span; rebuilt only when it changes.
+function setHint(element,text,clause='',warn=false){
+  const key=JSON.stringify([text || '',clause || '']);
+  if(element.dataset?.hint!==key){element.replaceChildren?.();element.textContent=text || '';if(clause)element.append(node('span',clause,'hint-clause'));if(element.dataset)element.dataset.hint=key;}
+  element.classList?.toggle?.('retry-refused',!!warn);
 }
 // Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
 function readmissionOf(row){
@@ -602,16 +658,23 @@ function updateRetry(){
   const block=$('retry-block'),button=$('retry-job'),note=$('retry-note');if(!block || !button || !note)return;
   const row=selectedRow,key=retryKey(row),action=key?rowAction(row):null,retry=action?.data;
   if(retryResult && retryResult.key!==key)retryResult=null;
-  const pending=!!key && retryPending?.key===key,copy=pending?rowActions[retryPending.kind]:action;
-  const shown=pending || !!action;
-  const lost=!shown && !block.hidden && document.activeElement===button;
-  block.hidden=!shown;
-  if(!shown){if(note.textContent)note.textContent='';note.hidden=true;if(lost)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
-  const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning()?'busy':retry.allowed===true?'ready':'unavailable';
+  if(restartResult && restartResult.id!==row?.id)restartResult=null;
+  const pending=!!key && retryPending?.key===key && retryPending.kind!=='clear',copy=pending?{...rowActions[retryPending.kind],note:retryPending.note || rowActions[retryPending.kind].note}:action;
+  const clear=$('clear-working'),clearing=clearPending(row),cleanable=workingOf(row)?.state==='cleanable';
+  if(clear){const gone=!clearing && !cleanable,lostClear=gone && !clear.hidden && document.activeElement===clear;clear.hidden=gone;if(!gone)updateClearButton(clear,row);if(lostClear)$('details-heading').focus?.({preventScroll:true});}
+  const shown=pending || !!action,noted=!pending && !action && restartResult?restartResult:null;
+  const lost=!shown && !button.hidden && document.activeElement===button;
+  block.hidden=!shown && !noted && !clearing && !cleanable;button.hidden=!shown;
+  if(!shown){
+    // The press moved the book on (Started over): its result stays in the note; the button is gone.
+    const text=noted?noted.text:clearing?'Clearing working files…':retryResult?retryResult.text:'';
+    if(note.textContent!==text)note.textContent=text;note.hidden=!text;note.classList?.toggle?.('retry-refused',!!(noted?noted.warn:retryResult && retryResult.warn!==false));
+    if(lost)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
+  const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning() || releaseRun?'busy':retry.allowed===true?'ready':'unavailable';
   const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
   const title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
-  const label=mode==='pending'?copy.pending:copy.label,result=mode!=='pending' && retryResult;
-  const text=result?retryResult.text:mode==='ready'?'':title;
+  const label=mode==='pending'?copy.pending:copy.label,result=mode!=='pending' && !clearing && retryResult;
+  const text=clearing?'Clearing working files…':result?retryResult.text:mode==='ready'?'':title;
   if(button.textContent!==label)button.textContent=label;
   if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label+': '+(row.review?.title || row.title_clue || 'Book'));
@@ -619,23 +682,34 @@ function updateRetry(){
   if(mode==='pending')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=mode!=='ready' && mode!=='pending';
   if(note.textContent!==text)note.textContent=text;
-  note.hidden=!text;note.classList.toggle('retry-refused',!!result);
+  note.hidden=!text;note.classList.toggle('retry-refused',!!result && retryResult.warn!==false);
 }
 function keptByChoice(row){const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
-async function retryFromRow(row){
+async function retryFromRow(row,button=null){
   // Select without scrolling, then the same request as the details-panel Retry.
   if(selectedPath!==row.path)select(row,true);
   const index=rows.findIndex(item=>item.path===row.path);
-  await retryJob({row:true,path:row.path,index});
+  await retryJob({row:true,path:row.path,index,button});
+}
+async function clearFromRow(row,button){
+  if(selectedPath!==row.path)select(row,true);
+  await clearWorking({row:true,path:row.path,index:rows.findIndex(item=>item.path===row.path),button});
+}
+// Focus never falls to the page after a press moved the book on: the same row's first remaining button (or its Retry).
+function focusRowButton(path,preferRetry=false){
+  const buttons=rowButtons(path),list=[...(buttons?.children || [])].filter(item=>item.type==='button' && !item.hidden && !item.disabled);
+  (preferRetry && list.find(item=>item.classList?.contains?.('row-retry')) || list[0])?.focus?.({preventScroll:true});
 }
 function retryMode(row){
   const key=retryKey(row),retry=key?rowAction(row)?.data:null;
   if(ended || recoveryDisconnected)return 'offline';
-  if(key && retryPending?.key===key)return 'pending';
-  if(busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning())return 'busy';
+  if(key && retryPending?.key===key && retryPending.kind!=='clear')return 'pending';
+  if(busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning() || releaseRun)return 'busy';
   return retry?.allowed===true?'ready':'unavailable';
 }
+// Clear working files is never disabled: a press while another request runs is answered in the note.
+function clearPending(row){const key=retryKey(row);return !!key && retryPending?.key===key && retryPending.kind==='clear';}
 // The status cell's own text, beside its hint: changed in place, so the row is not rebuilt under focus.
 function statusInPlace(cell,text){const first=cell?.firstChild;if(first && first.nodeType===3 && first.nodeValue!==text)first.nodeValue=text;}
 // Focus never falls to the page: the first remaining button of the same row (RefusedRetry spec section 3).
@@ -643,16 +717,17 @@ function nextRowButton(buttons,except){return [...(buttons?.children || [])].fin
 function rowButtons(path){const tr=[...($('inventory').children || [])].find(item=>item.dataset?.path===path),cell=tr?.children?.[tr.children.length-1];return cell?.children?.[0] || null;}
 function updateRowRetries(){
   for(const entry of rowRetries.values()){
-    const row=entry.row,attention=attentionText(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
-    const copy=retryPending?.key===key?rowActions[retryPending.kind]:action || rowActions.retry;
-    let hint=attention?attention.hint:readmissionOf(row)?.queued_next===true?QUEUED_HINT:'',warn=!!attention?.warn;
-    if(mode==='unavailable' && action?.kind!=='queued' && typeof retry?.reason==='string' && retry.reason)hint=retry.reason;
-    if(mode==='pending')hint=retryPending?.checking?'Checking…':copy.note;
-    if(!attention && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
-    if(retryResult && retryResult.key===key && mode!=='pending'){hint=retryResult.text;warn=true;}
-    if(entry.hint.textContent!==hint)entry.hint.textContent=hint;
-    entry.hint.classList.toggle('retry-refused',warn);
-    statusInPlace(entry.cell,candidateStatus(row));if(attention && entry.cell && entry.cell.title!==technicalText(row))entry.cell.title=technicalText(row);
+    const row=entry.row,shown=rowState(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
+    const copy=retryPending?.key===key && retryPending.kind!=='clear'?{...rowActions[retryPending.kind],note:retryPending.note || rowActions[retryPending.kind].note}:action || rowActions.retry;
+    let hint=shown?shown.hint:'',warn=!!shown?.warn,clause=shown?.clause || '';
+    if(mode==='unavailable' && action?.kind!=='queued' && typeof retry?.reason==='string' && retry.reason){hint=retry.reason;clause='';}
+    if(mode==='pending'){hint=retryPending?.checking?'Checking…':copy.note;clause='';warn=false;}
+    if(clearPending(row)){hint='Clearing working files…';clause='';warn=false;}
+    if(!shown && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
+    if(retryResult && retryResult.key===key && mode!=='pending' && !clearPending(row)){hint=retryResult.text;warn=retryResult.warn!==false;clause='';}
+    setHint(entry.hint,hint,clause,warn);
+    statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==technicalText(row))entry.cell.title=technicalText(row);
+    if(entry.clear)updateClearButton(entry.clear,row);
     if(!entry.button)continue;
     const gone=!action && mode!=='pending',hadFocus=gone && document.activeElement===entry.button;
     entry.button.hidden=gone;if(hadFocus)nextRowButton(entry.button.parentElement,entry.button)?.focus?.({preventScroll:true});
@@ -664,6 +739,16 @@ function updateRowRetries(){
     if(mode==='pending')entry.button.setAttribute('aria-disabled','true');else entry.button.removeAttribute('aria-disabled');
     entry.button.disabled=mode!=='ready' && mode!=='pending';
   }
+}
+function updateClearButton(button,row){
+  const pending=clearPending(row),gone=!pending && workingOf(row)?.state!=='cleanable',hadFocus=gone && document.activeElement===button;
+  button.hidden=gone;if(hadFocus)(nextRowButton(button.parentElement,button) || button.parentElement?.children?.[0])?.focus?.({preventScroll:true});
+  if(gone)return;
+  const label=pending?'Clearing…':'Clear working files';if(button.textContent!==label)button.textContent=label;
+  const title=pending?'Clearing working files…':clearTooltip(row);if(button.title!==title)button.title=title;
+  button.setAttribute('aria-label',label+': '+(row.title_clue || row.review?.title || 'Book'));
+  if(pending)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  button.disabled=false;
 }
 const PRESS_TIMEOUT=15000;
 // After a press with no reply: re-read the book from the server. Returns its queued state (it landed),
@@ -685,21 +770,26 @@ async function pressLanded(row,jobId){
 }
 async function retryJob(origin=null){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
-  if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || action.data.allowed!==true || $('retry-job').disabled)return;
-  retryPending={key,kind:action.kind};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
+  if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun || action.data.allowed!==true || $('retry-job').disabled)return;
+  if(['startover','combined','release'].includes(action.kind)){
+    // Discarding a saved review deletes hand edits: one confirmation first (follow-up 3, section 4.4; follow-up 4, 3.3).
+    if(action.confirm){openDiscardDialog(action.kind,[row],()=>restartPress(row,action,origin),origin?.button || $('retry-job'));return false;}
+    return restartPress(row,action,origin);
+  }
+  retryPending={key,kind:action.kind,note:action.note};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
   let succeeded=false;
   let answer=null;
   try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);succeeded=true;}
   catch(error){
-    if(error.httpStatus){pressed.delete(key);retryResult={key,text:error.message || action.refused};if(error.httpStatus===409)retryEpoch++;}
+    if(error.httpStatus){pressed.delete(key);retryResult={key,text:error.message || action.refused,warn:true};if(error.httpStatus===409)retryEpoch++;}
     else{
       // No reply in time: the press may still have landed. Check the book's queued state on the server
       // before saying anything; never show a scary error and re-enable a button for a request that worked.
       retryPending={key,kind:action.kind,checking:true};controls();
       const landed=await pressLanded(row,job.job_id);
       if(landed){succeeded=true;answer=landed;}
-      else if(landed===false){pressed.delete(key);retryResult={key,text:action.label+' did not go through. Try again.'};}
-      else retryResult={key,text:'Connection interrupted. Check the status above before trying again.'};  // stays "Checking…": the press may have landed
+      else if(landed===false){pressed.delete(key);retryResult={key,text:action.label+' did not go through. Try again.',warn:true};}
+      else retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};  // stays "Checking…": the press may have landed
     }
   }
   if(succeeded)remember(key,'queued',action.kind,answer?.position);
@@ -729,12 +819,184 @@ async function retryJob(origin=null){
   }
   return succeeded;
 }
+const PASS_PENDING={conversion:'Audiobook conversion is running, so automatic processing will start by itself when it finishes or is paused.',
+  scan:'A library scan is running, so automatic processing will start by itself when the scan ends or is stopped.',
+  stopping:'Automatic processing is stopping, so it will start again by itself once it has stopped.'};
+// The panel note after Start over, the combined press or the release (follow-up 3, sections 1.3 and 4.5; follow-up 4,
+// sections 1.2 and 3.4). The server's pass answer chooses the sentence.
+function restartNote(kind,answer){
+  const lead={startover:'Started over.',release:'Review discarded.',combined:'Started over. Review discarded.'}[kind],pass=answer?.pass,find=' Find it under Status: Started over.';
+  const held=kind==='startover' && answer?.outcome==='manual_draft'?' Automatic processing will then hold this book because it has a saved review; Let the app handle it appears once it is held.':'';
+  if(pass?.action==='blocked')return {text:`${kind==='release'?'Review discarded':kind==='combined'?'Started over. Review discarded':'Started over'}, but automatic processing did not start.${pass.reason?' '+pass.reason:''}`,warn:true};
+  if(pass?.action==='running' && pass.visit==='next_run')return {text:`${lead} Automatic processing is running but has already passed this book. Press Start automatic processing above after it finishes.`+(kind==='release'?'':held+find),warn:true};
+  const middle=pass?.action==='started'?'Automatic processing has started. It scans the library first, so this may take a while.':pass?.action==='continued'?'Automatic processing continued where it paused.':
+    pass?.action==='running'?'Automatic processing is running and will reach this book.':pass?.action==='pending' && PASS_PENDING[pass.pending_kind]?PASS_PENDING[pass.pending_kind]:'The book goes back to automatic processing.';
+  return {text:`${lead} ${middle}${held}${find}`,warn:!!held};
+}
+const CLEAR_FAILURE={busy:"Working files weren't cleared. The app is busy; try again in a moment.",changed:"This book's status changed. Check the updated status above.",
+  not_safe:"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete.",file_problem:"Some working files weren't cleared. A file couldn't be removed; try again in a moment.",
+  unknown:"Working files weren't cleared. Select the row to read why."};
+// The words for a refused press come from its typed cause, never from the server's English.
+function refusedText(kind,error){
+  const cause=error?.body?.cause,changed="This book's status changed. Check the updated status above.",editing='This book is being edited. Finish editing, then try again.';
+  if(kind==='clear')return CLEAR_FAILURE[cause] || CLEAR_FAILURE.unknown;
+  if(kind==='release')return {changed,editing,busy:"The review wasn't discarded. The app is busy; try again in a moment."}[cause] || "The review wasn't discarded. Select the row to read why.";
+  if(kind==='combined')return {changed,editing}[cause] || 'Start over was not accepted. Nothing was changed.';
+  return cause==='changed'?changed:'Start over was not accepted. Check the status above.';
+}
+function freshRow(value,row){return value && typeof value==='object' && typeof value.id==='string'?{...value,path:value.id,kind:'candidate',library:row.library || 'Audiobooks'}:null;}
+function placeRow(row,fresh,origin){
+  rows=rows.map(item=>item.path===row.path?fresh:item);
+  // The book stays where it was until the list changes; it never vanishes under the pointer.
+  heldRow={path:row.path,index:origin?.index ?? rows.findIndex(item=>item.path===row.path),context:listContext(),row:fresh,until:Date.now()+PRESS_MEMORY};
+  const entry=rowRetries.get(row.path);if(entry)entry.row=fresh;
+  if(selectedRow?.path===row.path)select(fresh,false);
+}
+async function restartPress(row,action,origin){
+  const key=retryKey(row);if(retryPending || busy || ended || recoveryDisconnected)return false;
+  const body=action.kind==='release'?{library:'Audiobooks',id:row.id,revision:row.revision}:{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id,...(action.kind==='combined'?{discard_review:true}:{})};
+  retryPending={key,kind:action.kind};retryResult=null;restartResult=null;busy=true;controls();
+  let answer=null,failure=null;
+  try{answer=await request(action.endpoint,body,PRESS_TIMEOUT);}catch(error){failure=error;}
+  const focused=document.activeElement===$('retry-job') || document.activeElement===origin?.button;
+  retryPending=null;busy=false;
+  if(answer){
+    retryEpoch++;
+    // The fresh pass state from the answer, as after Start: the top line and the hints do not wait for the next poll.
+    if(answer.automatic_processing && state)state={...state,automatic_processing:answer.automatic_processing};
+    const fresh=freshRow(answer.row,row) || {...row,release:undefined,restart:{state:'waiting',kind:action.kind==='release'?'release':'start_over'},creation:{...row.creation,job:null}};
+    restartResult={id:row.id,...restartNote(action.kind,answer)};placeRow(row,fresh,origin);renderAutomatic();
+  }else if(failure?.httpStatus){
+    if(failure.httpStatus===409)retryEpoch++;
+    const fresh=freshRow(failure.body?.row,row);if(fresh)placeRow(row,fresh,origin);
+    retryResult={key:retryKey(fresh || row),text:refusedText(action.kind,failure),warn:true};
+    if(!retryKey(fresh || row) || retryKey(fresh || row)!==key)restartResult={id:row.id,text:retryResult.text,warn:true};
+  }else{retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};refreshFailed(failure);}
+  controls();
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();
+  if(answer && focused){if(origin?.row)focusRowButton(row.path);else $('details-heading').focus?.({preventScroll:true});}
+  return !!answer;
+}
+// Clear working files (decision B). No confirmation: the files are the app's own copies and the server deletes only what
+// its verified disposal proves. A press while another request runs is answered in the note; the button never disables.
+async function clearWorking(origin=null){
+  const row=selectedRow,key=retryKey(row),job=row?.creation?.job;
+  if(!key || !job || workingOf(row)?.state!=='cleanable' || clearPending(row))return false;
+  if(ended || recoveryDisconnected){retryResult={key,text:'Local server unavailable.',warn:true};controls();return false;}
+  if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun){retryResult={key,text:'Another operation is in progress. Try again in a moment.',warn:true};controls();return false;}
+  retryPending={key,kind:'clear'};retryResult=null;busy=true;controls();
+  let answer=null,failure=null;
+  try{answer=await request('/api/audiobook/clear-working',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);}catch(error){failure=error;}
+  if(failure && !failure.httpStatus){
+    // No reply in time: a large folder can take longer than the press bound. The row keeps "Clearing…" and is re-read.
+    for(let attempt=0;attempt<3 && !answer && !ended;attempt++){
+      try{const page=await request(`/api/inventory?library=Audiobooks&offset=0&search=${encodeURIComponent(row.title_clue || '')}&view=candidates&status=all`);const found=(page.rows || []).find(item=>item.id===row.id);if(found && !workingOf(freshRow(found,row)))answer={cleared:true,row:found};}catch(error){}
+      if(!answer)await new Promise(resolve=>setTimeout(resolve,1500));
+    }
+  }
+  retryPending=null;busy=false;
+  const focused=document.activeElement===$('clear-working') || document.activeElement===origin?.button;
+  if(answer){
+    retryEpoch++;
+    const fresh=freshRow(answer.row,row) || (()=>{const attention={...row.creation.job.attention};delete attention.working;return {...row,creation:{...row.creation,job:{...row.creation.job,attention}}};})();
+    placeRow(row,fresh,origin);
+    const natural=rowState(fresh),head=answer.already===true?'Working files were already cleared.':Number.isSafeInteger(answer.bytes) && answer.bytes>0?`Cleared ${sizeText(answer.bytes)} of working files.`:'Working files cleared.';
+    retryResult={key:retryKey(fresh),text:head+(natural?.hint?' '+natural.hint:''),warn:false};
+  }else if(failure?.httpStatus){
+    const fresh=freshRow(failure.body?.row,row);if(fresh)placeRow(row,fresh,origin);
+    retryResult={key:retryKey(fresh || row),text:refusedText('clear',failure),warn:true};if(failure.httpStatus===409)retryEpoch++;
+  }else retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};
+  controls();
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();
+  if(focused){if(origin?.row)focusRowButton(row.path,true);else{const retry=$('retry-job');(retry && !retry.hidden && !retry.disabled?retry:$('details-heading')).focus?.({preventScroll:true});}}
+  return !!answer;
+}
+// The confirmation before a saved review is discarded: the native modal dialog, Cancel first and focused.
+const DISCARD_COPY={
+  release:{title:"Discard this book's saved review?",body:["This deletes the metadata, cover and track choices saved on this book, including any you made by hand. It can't be undone.",'Automatic processing then researches the book again and queues it if the match is safe. It starts if it isn\'t running. Your audio files are not touched.'],go:'Discard review',cancelTip:'Keep the saved review and leave this book held.',goTip:"Delete this book's saved review, then let automatic processing take the book. This can't be undone."},
+  combined:{title:"Start over and discard this book's saved review?",body:["This sets the failed job aside, then deletes the metadata, cover and track choices saved on this book, including any you made by hand. The deleted review can't be restored.",'Automatic processing then researches the book again and queues it if the match is safe. It starts if it isn\'t running. The failed job and your audio files are kept.'],go:'Discard review and start over',cancelTip:'Keep everything as it is.',goTip:"Set the failed job aside, delete this book's saved review and let automatic processing take the book. This can't be undone."}};
+function openDiscardDialog(kind,books,onConfirm,button,leftOut=0){
+  if(discardConfirmation)return;
+  const bulk=kind==='bulk' && books.length>1,copy=bulk?{title:`Discard ${books.length.toLocaleString()} saved reviews?`,
+    body:[`This deletes the metadata, cover and track choices saved on these ${books.length.toLocaleString()} books, including any you made by hand. It can't be undone.`,'Automatic processing then researches each book again and queues it if the match is safe. It starts if it isn\'t running. Your audio files are not touched.'],
+    go:`Discard ${books.length.toLocaleString()} reviews`,cancelTip:'Keep the saved reviews and leave these books held.',goTip:`Delete the saved reviews of these ${books.length.toLocaleString()} books, then let automatic processing take them. This can't be undone.`}:DISCARD_COPY[kind==='bulk'?'release':kind];
+  discardConfirmation={onConfirm,button};
+  setText('discard-dialog-title',copy.title);
+  const book=books[0];setText('discard-dialog-book',bulk?'':book?.review?.title || book?.title_clue || 'Book');$('discard-dialog-book').hidden=bulk;
+  setText('discard-dialog-body',copy.body[0]);setText('discard-dialog-body2',copy.body[1]);
+  setText('discard-dialog-body3',bulk && leftOut>0?`${leftOut.toLocaleString()} other selected books are not included. They stay selected and unchanged.`:'');$('discard-dialog-body3').hidden=!(bulk && leftOut>0);
+  setText('discard-confirm',copy.go);$('discard-confirm').title=copy.goTip;$('discard-cancel').title=copy.cancelTip;
+  $('discard-dialog').showModal?.();$('discard-cancel').focus?.();
+}
+function closeDiscardDialog(restore=true){
+  if(!discardConfirmation)return;const button=discardConfirmation.button;discardConfirmation=null;$('discard-dialog').close?.();
+  if(restore)button?.focus?.({preventScroll:true});
+}
+function confirmDiscard(){
+  if(!discardConfirmation)return;const {onConfirm,button}=discardConfirmation;closeDiscardDialog(false);
+  // The dialog closes at once; the button then shows its pending face and keeps focus.
+  button?.focus?.({preventScroll:true});onConfirm();
+}
+$('discard-cancel').addEventListener('click',()=>closeDiscardDialog());
+$('discard-confirm').addEventListener('click',()=>confirmDiscard());
+$('discard-dialog').addEventListener('cancel',event=>{event.preventDefault?.();closeDiscardDialog();});
+$('discard-dialog').addEventListener('keydown',event=>{if(!discardConfirmation)return;if(event.key==='Escape'){event.preventDefault?.();closeDiscardDialog();}else if(event.key==='Tab'){event.preventDefault?.();const first=$('discard-cancel'),last=$('discard-confirm');(document.activeElement===first?last:first).focus?.();}});
+$('clear-working').addEventListener('click',()=>{if($('clear-working').getAttribute?.('aria-disabled')==='true')return;clearWorking();});
+// Let the app handle selected (O14): the Held and Started over filters only. One confirmation with the count.
+function releaseSelection(){return view==='candidates' && (filters[view]==='held' || filters[view]==='restarted');}
+function releaseSelectable(){return rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id) && releaseOf(row));}
+function renderReleaseSelected(){
+  const shown=releaseSelection(),button=$('release-selected'),count=shown?releaseSelectable().length:0;
+  button.hidden=!shown;if(!shown)return;
+  const label=releaseRun?'Discarding…':`Let the app handle selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
+  button.title=count?`Discard the saved reviews of these ${count.toLocaleString()} selected books, including any edits you made by hand, and let automatic processing take them. Starts automatic processing if it isn't running. This can't be undone.`:'Select books held for a saved review.';
+  const unavailable=!count || releaseRun || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning();
+  if(releaseRun || unavailable)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  button.disabled=unavailable && !releaseRun;
+  const help='Only selected books held for a saved review can be handed to the app. The others stay as they are.';
+  if(!attentionSelection() && $('batch-help').textContent!==help)$('batch-help').textContent=help;
+}
+function bulkPassSentence(pass){
+  if(!pass)return '';
+  if(pass.action==='started')return ' Automatic processing has started. It scans the library first, so this may take a while.';
+  if(pass.action==='continued')return ' Automatic processing continued where it paused.';
+  if(pass.action==='running')return pass.visit==='next_run'?' Automatic processing is running but has already passed these books. Press Start automatic processing above after it finishes.':' Automatic processing is running and will reach these books.';
+  if(pass.action==='pending')return {conversion:' Automatic processing will start by itself when audiobook conversion finishes or is paused.',scan:' Automatic processing will start by itself when the library scan ends or is stopped.',stopping:' Automatic processing will start by itself when it has stopped.'}[pass.pending_kind] || '';
+  if(pass.action==='blocked')return ' Automatic processing did not start.'+(pass.reason?' '+pass.reason:'');
+  return '';
+}
+async function startReleaseSelected(items){
+  if(releaseRun || busy || ended || recoveryDisconnected || !items.length)return;
+  releaseRun=true;busy=true;$('release-selected-status').textContent='';controls();
+  let text='',warn=false;
+  try{
+    const answer=await request('/api/audiobook/release-selected',{library:'Audiobooks',items:items.map(row=>({id:row.id,revision:row.revision}))});
+    if(answer.automatic_processing && state)state={...state,automatic_processing:answer.automatic_processing};
+    const released=Number(answer.released) || 0,failed=Array.isArray(answer.refused)?answer.refused.length:0,pass=answer.pass;
+    warn=failed>0 || pass?.action==='blocked' || pass?.visit==='next_run';
+    text=`Discarded ${released.toLocaleString()} of ${items.length.toLocaleString()} saved reviews.${bulkPassSentence(pass)}${pass?.action==='blocked' || pass?.visit==='next_run'?'':' Find them under Status: Started over.'}`+(failed?` ${failed.toLocaleString()} were not changed. Check their status.`:'');
+    retryEpoch++;
+  }catch(error){text=error.httpStatus?"The reviews weren't discarded. Check the status above.":'Connection interrupted. Check the status above before trying again.';warn=true;if(!error.httpStatus)refreshFailed(error);}
+  finally{releaseRun=false;busy=false;}
+  const status=$('release-selected-status');status.textContent=text;status.classList?.toggle?.('retry-refused',warn);renderAutomatic();controls();
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();status.focus?.({preventScroll:true});
+}
+$('release-selected').addEventListener('click',()=>{
+  const button=$('release-selected');if(button.disabled || button.getAttribute?.('aria-disabled')==='true')return;
+  const items=releaseSelectable(),selected=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id)).length;if(!items.length)return;
+  if(items.length===1)openDiscardDialog('release',items,()=>startReleaseSelected(items),button);
+  else openDiscardDialog('bulk',items,()=>startReleaseSelected(items),button,selected-items.length);
+});
 // Retry all (Attention spec section 6): the server's whole Can retry group, not the visible page,
 // after an inline confirmation. The server runs one book at a time; its count arrives with each poll.
 function openRetryAll(){
   const counts=state?.audiobook_jobs?.attention_counts || {},count=Number.isInteger(counts.retry)?counts.retry:0,queued=state?.audiobook_jobs?.queued;
   if(count<2 || bulkRunning() || busy || ended || recoveryDisconnected)return;
-  retryAllConfirm={count,queued:Number.isInteger(queued) && queued>0?queued:0};stripNote='';renderAttentionGroups();
+  const cleanable=state?.audiobook_jobs?.working_cleanable;
+  retryAllConfirm={count,queued:Number.isInteger(queued) && queued>0?queued:0,cleanable:Number.isInteger(cleanable) && cleanable>0?cleanable:0};stripNote='';renderAttentionGroups();
   $('retry-all-cancel').focus?.({preventScroll:true});
 }
 function closeRetryAll(){if(!retryAllConfirm)return;retryAllConfirm=null;renderAttentionGroups();$('retry-all').focus?.({preventScroll:true});}
@@ -795,7 +1057,7 @@ function renderAttentionGroups(){
   // The confirmation keeps the count it opened with; polls never rebuild it.
   $('retry-all-confirm').hidden=!confirm || attentionGroup!=='retry';
   if(confirm){
-    const question=`Queue ${confirm.count.toLocaleString()} books to be checked again? They run one at a time, right after the current book.`,go=`Queue ${confirm.count.toLocaleString()} books`;
+    const question=`Queue ${confirm.count.toLocaleString()} books to be checked again? They run one at a time, right after the current book.`+clearsClause(confirm.cleanable),go=`Queue ${confirm.count.toLocaleString()} books`;
     if($('retry-all-question').textContent!==question)$('retry-all-question').textContent=question;
     if($('retry-all-go').textContent!==go)$('retry-all-go').textContent=go;
     $('retry-all-go').disabled=running || busy || ended || recoveryDisconnected;
@@ -811,6 +1073,8 @@ $('retry-all').addEventListener('click',()=>{if($('retry-all').disabled)return;o
 // Retry selected (v0.16.12): in Output needs attention, the selected books that can be retried or repaired, one
 // press each through the same queued-next path as Retry, after one confirmation (as Retry all).
 function attentionSelection(){return view==='candidates' && filters[view]==='output_attention';}
+// The bulk dialogs say how many of the books have leftover working files, cleared first (decisions A and O10).
+function clearsClause(count){return count>0?` ${count.toLocaleString()} of them ${count===1?'has':'have'} leftover working files, which are cleared first.`:'';}
 function retrySelectable(){
   return rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id)).map(row=>({row,action:rowAction(row)}))
     .filter(item=>item.action && (item.action.kind==='retry' || item.action.kind==='repair') && item.action.data?.allowed===true);
@@ -825,7 +1089,7 @@ function renderRetrySelected(){
   if($('batch-help').textContent!==help)$('batch-help').textContent=help;
   $('retry-selected-confirm').hidden=!shown || !confirm;
   if(confirm){
-    const question=`Queue ${confirm.items.length.toLocaleString()} selected books to be checked again? They run one at a time, right after the current book.`,go=`Queue ${confirm.items.length.toLocaleString()} books`;
+    const question=`Queue ${confirm.items.length.toLocaleString()} selected books to be checked again? They run one at a time, right after the current book.`+clearsClause(confirm.items.filter(item=>workingOf(item.row)?.state==='cleanable').length),go=`Queue ${confirm.items.length.toLocaleString()} books`;
     if($('retry-selected-question').textContent!==question)$('retry-selected-question').textContent=question;
     if($('retry-selected-go').textContent!==go)$('retry-selected-go').textContent=go;
     $('retry-selected-go').disabled=busy || ended || recoveryDisconnected || retrySelectedRun;
@@ -867,12 +1131,17 @@ $('recovery-dialog').addEventListener('keydown',event=>{if(!recoveryConfirmation
 const automaticStates=new Set(['Idle','Running','Stopping','Paused','Completed','Needs attention']);
 function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
 function automaticPhase(value){return {discovery:'discovery',research:'metadata research',conversion:'audiobook jobs',paused:'saving pending work',completed:'finishing the pass'}[value] || 'pending work';}
+const PENDING_NOTICE={conversion:'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.',
+  scan:'Automatic processing will start by itself when the library scan ends or is stopped.',stopping:'Automatic processing will start again by itself once it has stopped.'};
+function startPending(automatic){const kind=automatic?.start_pending?.kind;return Object.hasOwn(PENDING_NOTICE,kind)?kind:null;}
 function renderAutomaticEligibility(){
   const automatic=state?.automatic_processing;
   let reason='';
   if(ended)reason='The local server is stopping or stopped. Start is unavailable.';
   else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason='Start availability is unknown. Waiting for the local server.';
   else if(automaticRequest==='start' || draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
+  // A pending start (O12): the notice says what it waits for, in place of the block reason; Start stays disabled.
+  else if(startPending(automatic))reason=PENDING_NOTICE[startPending(automatic)];
   else if(automatic.can_start!==true)reason=automatic.start_block_reason || 'Start availability is unknown. Waiting for the local server.';
   setText('automatic-start-reason',reason);
   $('automatic-start-reason').hidden=$('library').value!=='Audiobooks' || !reason;
@@ -901,7 +1170,7 @@ function renderAutomatic(){
   setText('research-current',currentText);$('research-current').hidden=!currentText;
 }
 async function automaticAction(kind){
-  controls();const button=$(kind==='start'?'start-automatic':'stop-automatic');
+  controls();const button=$({start:'start-automatic',stop:'stop-automatic','cancel-start':'cancel-automatic-start'}[kind]);
   if(button.disabled || automaticRequest!==null || $('library').value!=='Audiobooks')return;
   automaticRequest=kind;busy=true;renderAutomatic();controls();message();
   try{
@@ -914,7 +1183,10 @@ async function automaticAction(kind){
     message(error.message);
     if(error.httpStatus){lastKey=null;await refresh(true);}else refreshFailed(error);
   }finally{automaticRequest=null;busy=false;renderAutomatic();controls();}
+  // Cancel automatic start: every other toolbar button is disabled, so focus moves to the notice.
+  if(kind==='cancel-start'){const notice=$('automatic-start-reason');notice.setAttribute('tabindex','-1');notice.focus?.({preventScroll:true});}
 }
+$('cancel-automatic-start').addEventListener('click',()=>automaticAction('cancel-start'));
 $('start-automatic').addEventListener('click',()=>automaticAction('start'));
 $('stop-automatic').addEventListener('click',()=>automaticAction('stop'));
 function recordedApproval(row){
@@ -963,7 +1235,7 @@ const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],s
 // {Verb} and {verb} follow the refusal's kind: Retry, or Repair for a refused Repair (follow-up, point 3b).
 const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
   working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. {Verb} after they are cleared.'],
-  source_changed:['Stopped — review changed',"the book's review or source files changed. Review the book again."],
+  source_changed:['Stopped — review changed',"the book's review or source files changed. Start over sends it back to automatic processing."],
   file_problem:['Stopped — file problem',"the app couldn't read or write a file. Check the folder, then {verb}."],
   unknown:['Stopped — {verb} refused','']};
 const refusalFixes={unsupported_file:'update',working_files:'wait',source_changed:'review',file_problem:'user',unknown:'update'};
@@ -972,7 +1244,16 @@ function verbed(text,verb){return text.replaceAll('{Verb}',verb).replaceAll('{ve
 // the source. The checking text is also the disabled Retry's reason (the server sends the same words).
 const precheckCopy={pending:['Stopped — checking the M4B','The app is checking this M4B before offering Retry. The row updates itself.'],
   unavailable:["Stopped — can't open the M4B","The app couldn't open this M4B to check it. Check that the library drive is connected, then retry."]};
-function refusalOf(row){const value=readmissionOf(row);return value?.accepted===false && value.queued_next!==true?value:null;}
+// A working-files record no longer decides the row (follow-up 2, section 2.2): the live state of the files does. The
+// record stays for the Technical detail line (refusalRecord).
+function refusalRecord(row){const value=readmissionOf(row);return value?.accepted===false && value.queued_next!==true?value:null;}
+function refusalOf(row){const value=refusalRecord(row);return value && value.cause!=='working_files'?value:null;}
+// "Review changed": the second wording when the pass will hold the book, the combined wording when one press does both.
+const STARTOVER_HINTS={automatic:"the book's review or source files changed. Start over sends it back to automatic processing.",
+  manual_draft:"the book's review or source files changed. Start over sets this job aside, but automatic processing will hold the book.",
+  combined:"the book's review or source files changed. One press sets this job aside, discards its saved review, and sends the book to automatic processing."};
+const BLOCKED_COPY=['Stopped — can\'t clear working files',"Working files from an earlier attempt are still present, and the app can't clear them safely right now.",
+  "Working files from an earlier attempt are still present, and the app can't clear them while the original files can't be reached. Check that the library drive is connected."];
 function refusalCause(refusal){return Object.hasOwn(refusalCopy,refusal?.cause)?refusal.cause:'unknown';}
 function refusalFix(refusal){return ['update','wait','review','user'].includes(refusal?.fix)?refusal.fix:refusalFixes[refusalCause(refusal)];}
 // The refusal still decides the row: not stale (the deciding code has not changed since).
@@ -984,24 +1265,91 @@ function attentionText(row){
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
-  const refusal=refusalOf(row),verb=refusal?.kind==='repair'?'Repair':'Retry';
+  const refusal=refusalOf(row),verb=refusal?.kind==='repair'?'Repair':'Retry',clause=clearsFirst(row);
   if(refusal && refusal.stale!==true){
-    const cause=refusalCause(refusal),[refusedStatus,text]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
-    return {status:verbed(refusedStatus,verb),hint:text?`${verb} was refused: ${verbed(text,verb)}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true};
+    const cause=refusalCause(refusal),[refusedStatus,copy]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
+    const text=cause==='source_changed'?STARTOVER_HINTS[a.startover==='manual_draft'?(a.release_ok===true?'combined':'manual_draft'):'automatic']:copy;
+    return {status:verbed(refusedStatus,verb),hint:text?`${verb} was refused: ${verbed(text,verb)}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true,clause};
   }
+  // Leftover working files the app cannot clear stop the row: no control, and nothing Sergei can press fixes it here.
+  if(a.working?.state==='blocked' && a.working.stops===true)return {status:BLOCKED_COPY[0],hint:a.working.cause==='originals_unreachable'?BLOCKED_COPY[2]:BLOCKED_COPY[1],warn:true};
   // Precedence after a current refusal: the dry run could not open the source (warning: Sergei can fix it), then it has
   // not finished (muted: it clears by itself), then a stale refusal, then ready.
-  if(a.precheck==='unavailable')return {status:precheckCopy.unavailable[0],hint:precheckCopy.unavailable[1],warn:true};
+  if(a.precheck==='unavailable')return {status:precheckCopy.unavailable[0],hint:precheckCopy.unavailable[1],warn:true,clause};
   if(a.precheck==='pending')return {status:precheckCopy.pending[0],hint:precheckCopy.pending[1]};
   // Stale: the app was updated since the refusal; it is information, not an obstacle (muted). A book whose read-only
   // check refuses again under this build is in M4B not supported and reads as that group. A row the dry run covers and
   // passed is ready again and says why; "Stopped — try again" is left for rows the dry run does not cover.
   if(refusal && a.group!=='unsupported'){
     const version=typeof refusal.app_version==='string' && refusal.app_version?refusal.app_version:'';
-    if(a.precheck==='passed')return {status:attentionCopy.retry[0],hint:`${verb} was refused${version?' in v'+version:''}. The app was updated, and this M4B now passes its check.`};
-    return {status:'Stopped — try again',hint:version?`${verb} was refused in v${version}; the app was updated since. It may work now.`:`${verb} was refused before the app was updated. It may work now.`};
+    if(a.precheck==='passed')return {status:attentionCopy.retry[0],hint:`${verb} was refused${version?' in v'+version:''}. The app was updated, and this M4B now passes its check.`,clause};
+    return {status:'Stopped — try again',hint:version?`${verb} was refused in v${version}; the app was updated since. It may work now.`:`${verb} was refused before the app was updated. It may work now.`,clause};
   }
-  return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint};
+  return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint,clause};
+}
+// " Retry clears leftover working files first." on a cleanable row whose Retry (or Repair) is enabled.
+function clearsFirst(row){const action=workingOf(row)?.state==='cleanable'?rowAction(row):null;return action?.data?.allowed===true && CLEARS_FIRST[action.kind]?CLEARS_FIRST[action.kind][2]:'';}
+// The Started over marker (follow-up 3, section 2.2; follow-up 4, sections 1.3 and 2): status words and a hint that says
+// whether Sergei must act, composed with the live pass state. A null status keeps the existing status chain.
+function restartText(row){
+  const r=restartOf(row);if(!r || row.creation?.job && r.state!=='queued')return null;
+  if(r.state==='queued')return row.creation?.job?{status:null,hint:'Queued by automatic processing after Start over. Nothing to do.'}:null;
+  const auto=state?.automatic_processing,known=automaticStates.has(auto?.state) && !recoveryDisconnected && !ended,running=known && auto.state==='Running';
+  const held=r.expect==='hold',release=held && r.release_expected===true;
+  if(r.state==='held')return heldText(row,r);
+  if(r.state==='failed'){
+    if(known && !running && auto.can_start!==true && !startPending(auto))return {status:null,hint:`Automatic processing hit an error on this book. It can't start again yet. ${auto.start_block_reason || ''}`.trim(),warn:true};
+    return {status:null,hint:'Automatic processing hit an error on this book. Press Start automatic processing above to try again.',warn:true};
+  }
+  if(!known)return {status:'Started over — waiting',hint:'Reconnecting to the app. This row updates when it is back.'};
+  if(running && r.state==='working')return r.source_wait===true?{status:'Started over — waiting for a source',hint:'Nothing to do. A metadata source is busy. Automatic processing tries again by itself.'}:
+    {status:'Started over — researching',hint:'Nothing to do. Automatic processing is looking this book up now. It queues the book if the match is safe.'};
+  if(running && r.visit==='next_run')return {status:'Started over — next run',hint:'Automatic processing has already passed this book. Press Start automatic processing above after it finishes.',warn:true};
+  if(running)return {status:'Started over — waiting its turn',hint:held?'Nothing to do yet. Automatic processing will hold this book because it has a saved review.'+(release?' Then Let the app handle it appears here.':''):'Nothing to do. Automatic processing will research this book and queue it if the match is safe.'};
+  const pending=startPending(auto);
+  if(pending){
+    const when={conversion:'Automatic processing starts by itself when audiobook conversion finishes or is paused, then',scan:'Automatic processing starts by itself when the library scan ends or is stopped, then',stopping:'Automatic processing starts again by itself once it has stopped, then'}[pending];
+    return {status:'Started over — waiting to start',hint:`Nothing to do. ${when} ${held?'holds this book because it has a saved review.'+(release?' Then Let the app handle it appears here.':''):'takes this book.'}`};
+  }
+  if(auto.can_start===true)return {status:'Started over — waiting for you',hint:held?'Press Start automatic processing above. It will then hold this book because it has a saved review'+(release?', and Let the app handle it appears here.':'.'):'Press Start automatic processing above. It will then research this book and queue it if the match is safe.',warn:true};
+  return {status:'Started over — waiting for you',hint:`Automatic processing can't start yet. ${auto.start_block_reason || ''}`.trim(),warn:true};
+}
+// Held for a saved review (follow-up 3, sections 2.2 and 4): "saved review kept" when the button can release it.
+function heldText(row,marker=null){
+  const auto=row.automatic;
+  if(auto?.hold==='manual_draft'){
+    if(releaseOf(row))return {status:'Held — saved review kept',hint:'A saved review keeps this book held. Let the app handle it discards that review, including any hand edits, and lets automatic processing take the book.',warn:true};
+    if(auto.lease===true)return marker?{status:'Held — Manual draft retained',hint:'You are editing this book. Automatic processing waits until you stop.'}:null;
+    return marker?{status:'Held — Manual draft retained',hint:'Automatic processing holds this book because it has a saved review.'}:null;
+  }
+  if(!marker)return null;
+  const retry=retryDate(auto?.retry_at);
+  return {status:null,hint:`Nothing to do. Automatic processing couldn't approve this book safely. ${retry?'It tries again after '+retry+', while it is running.':'It tries again later, while it is running.'}`};
+}
+function releaseText(row){return releaseOf(row)?heldText(row):null;}
+function rowState(row){
+  const attention=attentionText(row);if(attention)return attention;
+  const readmission=readmissionOf(row);if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:QUEUED_HINT};
+  return restartText(row) || releaseText(row);
+}
+// The two folded columns, as the second line of the title cell (medium and compact bands).
+function titleFacts(row){const count=Array.isArray(row.members)?row.members.length:0;return `${(row.artists || []).join('; ') || 'Unknown'} · ${count.toLocaleString()} audio ${count===1?'file':'files'}`;}
+// The Started over summary line (follow-up 3, section 2.3; follow-up 4, section 1.3): global counts, live pass state.
+function renderRestartSummary(){
+  const line=$('restart-summary');if(!line)return;
+  const shown=view==='candidates' && filters[view]==='restarted' && !!restartCounts;line.hidden=!shown;if(!shown){if(line.textContent)line.textContent='';return;}
+  const c=restartCounts,n=key=>Number.isInteger(c[key]) && c[key]>0?c[key]:0,total=n('waiting')+n('working')+n('held')+n('failed');
+  const parts=[[n('waiting'),'waiting'],[n('working'),'being processed'],[n('held'),'held'],[n('failed'),'stopped on an error']].filter(([count])=>count>0).map(([count,label])=>`${count.toLocaleString()} ${label}`);
+  const auto=state?.automatic_processing,running=auto?.state==='Running',pending=startPending(auto),tails=[];
+  if(!running && (n('waiting') || n('working') || n('failed'))){
+    if(pending)tails.push('Nothing for you to do. Automatic processing starts by itself when '+{conversion:'audiobook conversion finishes or is paused.',scan:'the library scan ends or is stopped.',stopping:'it has stopped.'}[pending]);
+    else if(auto?.can_start===true)tails.push('Press Start automatic processing above.');
+    else if(auto && typeof auto.can_start==='boolean')tails.push(`Automatic processing can't start yet. ${auto.start_block_reason || ''}`.trim());
+  }
+  if(running && n('next_run'))tails.push('Press Start automatic processing above after this run finishes.');
+  if(n('release'))tails.push(`${n('release').toLocaleString()} held for a saved review: press Let the app handle it on a book to release it, or leave it held.`);
+  const text=total?`${total.toLocaleString()} ${total===1?'book':'books'} started over: ${parts.join(', ')}. ${tails.length?tails.join(' '):'Nothing for you to do.'}`:'';
+  if(line.textContent!==text)line.textContent=text;line.hidden=!text;
 }
 // What is wrong, then what Repair does; and, once queued or done, what it patched. Keyed by the patch kind.
 const damageCopy={
@@ -1022,16 +1370,20 @@ function technicalText(row){
   const raw=keptGroup(attention) && typeof attention.reason==='string' && attention.reason?attention.reason:job.reason;
   // A refused Retry/Repair keeps both facts for support: the refusal, then the earlier failure (either alone if single).
   // A dry run that could not open the source puts its own raw text first, in the same format.
-  const refusal=refusalOf(row),refused=typeof refusal?.reason==='string'?refusal.reason:'';
+  const refusal=refusalRecord(row),refused=typeof refusal?.reason==='string'?refusal.reason:'';
   const unopened=attention?.precheck==='unavailable' && typeof attention.precheck_reason==='string'?attention.precheck_reason:'';
-  const first=unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
+  // Leftover working files: their own reason first (follow-up 2, section 2.3), then the earlier failure and the folder.
+  const working=workingOf(row),files=typeof working?.reason==='string'?working.reason:'';
+  const first=files || unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
   // Working files from an earlier attempt: the absolute folder, here only, never in the hint (follow-up, point 3c).
-  const current=refusalCurrent(row),folder=current && refusalCause(current)==='working_files' && typeof attention?.working_folder==='string' && attention.working_folder?'; working folder: '+attention.working_folder:'';
+  const folder=(working || refusal && refusal.cause==='working_files' && refusal.stale!==true) && typeof attention?.working_folder==='string' && attention.working_folder?'; working folder: '+attention.working_folder:'';
   return 'Technical detail: '+(facts || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
 }
 function candidateStatus(row){
   const attention=attentionText(row);if(attention)return attention.status;
   const readmission=readmissionOf(row);if(readmission?.queued_next===true)return queuedNextText(readmission);
+  // Precedence (follow-up 3, section 2.2): attention, a queued-next press, the Started over marker, then the existing chain.
+  const shown=restartText(row) || releaseText(row);if(shown?.status)return shown.status;
   const creation=row.creation?.status || '',status=row.status || '',automatic=row.automatic,job=row.creation?.job;
   // A job that needs attention leads with its own reason, so the status names what was blocked.
   const jobReason=job?.state==='Output needs attention' && typeof job.reason==='string'?job.reason:'';
@@ -1053,14 +1405,15 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
   automaticResultKey=key;const automatic=row.automatic;
   setText('automatic-result-status',candidateStatus(row));
-  const attention=attentionText(row),kept=!attention && row.creation?.job?.kept===true;
-  setText('automatic-result-hint',attention?attention.hint:kept?'You chose to keep these files.':'');$('automatic-result-hint').hidden=!attention && !kept;
+  const attention=rowState(row),kept=!attention && row.creation?.job?.kept===true;
+  setText('automatic-result-hint',attention?attention.hint+(attention.clause || ''):kept?'You chose to keep these files.':'');$('automatic-result-hint').hidden=!attention?.hint && !kept;
+  $('automatic-result-hint').classList?.toggle?.('retry-refused',!!attention?.warn);
   // After Repair: a permanent line and one bullet per patch; the technical note is the last line.
   const repaired=row.creation?.job?.repaired,patched=Array.isArray(repaired?.patched)?repaired.patched:[];
   setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;
@@ -1077,6 +1430,7 @@ function renderAutomaticResult(row){
   const facts=$('automatic-facts');facts.replaceChildren();const approval=recordedApproval(row),review=row.review || {},context=row.review_context || {};
   const current=row.current_audiobook,actual=current?.state==='verified'?current.path:current?.state==='none' || !current?'No verified audiobook created yet':'Current audiobook unavailable'+(current.reason?' — '+current.reason:'');
   const values=approval?{'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Reviewed destination':row.creation?.destination || 'Destination unavailable','Current audiobook':actual}:{'Title clue':row.title_clue || 'Unknown','Reviewed destination':row.creation?.destination || 'No verified destination yet','Current audiobook':actual};
+  if(restartOf(row)?.at)values['Started over']=recoveryDate(restartOf(row).at);
   Object.assign(values,provenanceFacts(row),recordingFacts(row));if(row.metadata_facts?.series_state==='omitted_unknown')delete values['Series position'];
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
