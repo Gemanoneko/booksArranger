@@ -237,5 +237,66 @@ class LegacyConversionTests(RefusalCase):
         self.assertEqual(self.stored(job_id), before)
 
 
+class DryRunTests(RefusalCase):
+    """Sergei-approved pre-check: an M4B row is "ready to retry" only after the read-only plan() dry run on its source
+    (the repair check, m4b_repair.check) passed under this build. The check opens the source read-only."""
+    def check(self, job_id):
+        import m4b_repair
+        return m4b_repair.check(self.l.row(job_id))
+
+    def source(self, name):
+        path = self.l.library / name / 'source.m4b'
+        return path, (path.read_bytes(), path.stat().st_mtime_ns)
+
+    def test_a_passed_dry_run_keeps_the_book_ready_and_reads_only(self):
+        job_id, _ = self.l.failed(REFUSED, fixture(), name='intact')
+        path, before = self.source('intact')
+        self.assertEqual(self.check(job_id)['state'], 'intact')
+        self.assertEqual(self.summary(job_id), {'group': 'retry', 'cause': None, 'originals_untouched': True, 'retry': {'allowed': True, 'reason': ''}})
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before, 'the source is only read')
+
+    def test_a_refused_dry_run_is_m4b_not_supported_and_queues_nothing(self):
+        job_id, manifest = self.l.failed(REFUSED, with_iods(fixture(), TRACK_IODS), name='refusing')
+        path, before = self.source('refusing')
+        self.assertEqual(self.check(job_id)['state'], 'refused')
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], 'retry' in value, 'readmission' in value), ('unsupported', False, False))
+        with self.assertRaises(RetryRefused) as caught:
+            self.press(job_id, manifest)
+        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED)
+        with self.l.jobs._db() as db:
+            m4b_readmission.ensure(db)
+            self.assertIsNone(db.execute('SELECT 1 FROM m4b_readmissions WHERE parent_job_id=?', (job_id,)).fetchone(), 'nothing queued')
+        self.assertIsNone(self.s._retry_one(job_id))
+        self.assertNotIn(job_id, [key for key, item in self.s.attention_summary(retry=False).items() if item['group'] == 'retry'], 'Retry all leaves it out')
+        self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before, 'the source is only read')
+        import m4b_repair
+        with patch.object(m4b_repair, '_MODULE_SHA256', 'f' * 64):  # a build whose preservation module changed
+            self.assertEqual(self.summary(job_id)['group'], 'retry', 'not held back by the old build\'s check')
+
+    def test_an_unreadable_source_is_not_taken_for_a_refusal(self):
+        job_id, _ = self.l.failed(REFUSED, fixture(), name='gone')
+        (self.l.library / 'gone' / 'source.m4b').unlink()
+        result = self.check(job_id)
+        self.assertEqual((result['state'], result.get('unavailable')), ('refused', True))
+        self.assertNotEqual(self.summary(job_id)['group'], 'unsupported')
+
+    def test_a_stale_refusal_follows_this_builds_dry_run(self):
+        job_id, _ = self.refused()  # unsupported_file, current
+        self.set_key(job_id, OLD_KEY)  # the deciding code changed since
+        self.assertEqual(self.check(job_id)['state'], 'refused')
+        value = self.summary(job_id)
+        self.assertEqual((value['group'], 'retry' in value, value['readmission']['stale']), ('unsupported', False, True), 'refused again by this build: not offered')
+        intact, manifest = self.l.failed(REFUSED, fixture(), name='intact')
+        self.press(intact, manifest)
+        with patch.object(MergeService, '_retry_preserved_m4b', return_value={'requeued': False, 'reason': 'Failed M4B retained: Unsupported structural box', 'cause': 'unsupported_file'}):
+            self.assertIsNone(self.s._next_m4b_readmission())
+        self.set_key(intact, OLD_KEY)
+        self.assertEqual(self.check(intact)['state'], 'intact')
+        value = self.summary(intact)
+        self.assertEqual((value['group'], value['retry'], value['readmission']['stale']), ('retry', {'allowed': True, 'reason': ''}, True), 'passes now: Stopped — try again')
+        self.assertTrue(self.press(intact, manifest)['queued_next'])
+
+
 if __name__ == '__main__':
     unittest.main()

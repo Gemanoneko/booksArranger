@@ -148,6 +148,15 @@ def _m4b_fields(row):
     return (repair if isinstance(repair, dict) else None), retry
 
 
+def dry_run_refused(repair):
+    """The read-only plan() dry run on the source (the repair check, m4b_repair.check) refused it under this build.
+
+    None, unchecked or an unreadable source is not a refusal. The check is keyed by job, manifest and preservation
+    module, so a build whose module changed checks the book again by itself.
+    """
+    return isinstance(repair, dict) and repair.get('state') == 'refused' and repair.get('unavailable') is not True
+
+
 def repair_record(job):
     """The user-approved damage repair a job carries (the Repair button made it), else None.
 
@@ -611,7 +620,9 @@ class AudioJobs:
             elif shapes[row['job_id']] is not None:
                 group = 'retry'
             elif m4b_retry:
-                group, cause = 'retry', None
+                # "Ready to retry" is a promise that Retry will be accepted: a source this build's read-only plan()
+                # refuses is an M4B the app cannot convert now (RefusedRetry spec O1, Sergei-approved pre-check).
+                group, cause = ('unsupported' if dry_run_refused(repair) else 'retry'), None
             elif single_m4b and isinstance(failure, dict) and failure.get('exception_class') == 'ValidationError':
                 group, cause = 'unsupported', None
             else:

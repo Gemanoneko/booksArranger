@@ -74,7 +74,7 @@ def check(row,stop=None):
     if not eligible(row):return None
     source=json.loads(row['manifest'])['sources'][0]['path']
     try:result=diagnose_path(source,stop)
-    except OSError as error:result={'state':'refused','reason':'Source unavailable: '+str(error),'damage':[],'repairs':[]}
+    except OSError as error:result={'state':'refused','reason':'Source unavailable: '+str(error),'damage':[],'repairs':[],'unavailable':True}
     with _LOCK:
         if len(_CACHE)>=_CACHE_LIMIT:_CACHE.clear()
         _CACHE[_key(row)]=result

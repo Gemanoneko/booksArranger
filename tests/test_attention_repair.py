@@ -100,9 +100,11 @@ class ClassificationTests(Base):
             self.l.jobs._thread=ALIVE
             try:self.assertEqual(self.summary()[job_id]['repair'],{'allowed':True,'reason':''},'accepted while a book is being created')
             finally:self.l.jobs._thread=None
-        for state in ('intact','refused'):
+        # 2026-10-19 (Sergei-approved pre-check): "ready to retry" only after the read-only dry run passed; a source
+        # this build refuses is an M4B the app cannot convert now.
+        for state,group in (('intact','retry'),('refused','unsupported')):
             with patch.object(m4b_repair,'classify',return_value={'state':state,'reason':'x'}):
-                self.assertEqual(self.summary()[job_id]['group'],'retry',state)
+                self.assertEqual(self.summary()[job_id]['group'],group,state)
 
     def test_unchecked_rows_are_checked_off_the_request_thread_once(self):
         job_id,_=self.l.failed();s=self.service()

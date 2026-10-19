@@ -1122,11 +1122,11 @@ class MergeService:
             result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
             queued=self._queue_next_same(job_id,'repair');self._resume_later()
             return result|queued
-        self._m4b_refusal_gate(job_id)
+        self._m4b_refusal_gate(job_id,'repair')
         result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
         return {'job_id':job_id,'requeued':False,**result}
 
-    def _m4b_refusal_gate(self,job_id):
+    def _m4b_refusal_gate(self,job_id,kind='retry'):
         """An M4B Retry/Repair press for a book whose refusal is current follows that refusal's fix, the same rule as
         the row (audio_jobs.attention_summary): 'update' and 'review' offer no control, so a press from an outdated
         view is refused and queues nothing; 'wait' only once the working files are gone; 'user' always. A stale
@@ -1134,11 +1134,21 @@ class MergeService:
         import m4b_readmission
         from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,RETRY_FILES_PRESENT
         with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
-        if not value or value.get('state')!='refused' or value.get('stale') is True or value.get('fix')=='user':return
-        if value.get('fix')=='wait':
-            if self._m4b_working_clear(job_id):return
-            raise RetryRefused(RETRY_FILES_PRESENT)
-        raise RetryRefused(RETRY_BOOK_CHANGED)
+        if value and value.get('state')=='refused' and value.get('stale') is not True:
+            if value.get('fix')=='user':return
+            if value.get('fix')=='wait':
+                if self._m4b_working_clear(job_id):return
+                raise RetryRefused(RETRY_FILES_PRESENT)
+            raise RetryRefused(RETRY_BOOK_CHANGED)
+        # No current refusal: a Retry still needs a source this build's read-only dry run did not refuse.
+        if kind=='retry' and self._m4b_dry_run_refused(job_id):raise RetryRefused(RETRY_BOOK_CHANGED)
+
+    def _m4b_dry_run_refused(self,job_id):
+        """True when the cached read-only plan() dry run (the repair check) refused this job's source under this build."""
+        from audio_jobs import _m4b_fields,dry_run_refused
+        if getattr(getattr(self,'inventory',None),'database',None):self._load_repair_checks()
+        rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        return bool(rows) and dry_run_refused(_m4b_fields(rows[0])[0])
 
     def _already_accepted(self,job_id,identity):
         """A repeated Retry/Repair press for a book already accepted (v0.16.12): the same answer, and nothing new
