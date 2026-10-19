@@ -96,5 +96,6 @@ def next_job(db_factory,admit,now):
                     (json.dumps(refusal,ensure_ascii=False),_stamp(now),parent))
 
 def convert_legacy(db):
-    """Startup, once per catalog: v0.18.0 plain-text refusals become typed records (retry_refusal.legacy)."""
-    return retry_refusal.convert_legacy(db)
+    """Startup, once per catalog: v0.18.0 plain-text refusals become typed records (retry_refusal.legacy), then refusals
+    caused by a defect fixed since are marked resolved (retry_refusal.convert_resolved). Returns the number changed."""
+    return retry_refusal.convert_legacy(db)+retry_refusal.convert_resolved(db)

@@ -1513,8 +1513,16 @@ class MergeService:
     def _m4b_prior_audio(self,job_id):
         """True when an earlier attempt of this job still holds audio working files (.m4b/.wav). A read-only
         listing; ValueError/OSError when the folders cannot be proven. Old attempts predate receipt-owned
-        lifecycle cleanup: M4B Retry and Repair never clone a source while that debt is retained."""
+        lifecycle cleanup: M4B Retry and Repair never clone a source while that debt is retained.
+
+        A catalog whose staging root was never created holds no working files at all. Until 2026-10-19 the
+        boundary below refused the missing root itself ("An inspected destination ancestor is unavailable"), so
+        every M4B Retry on such a catalog was refused as a file problem. The root's absence is proven while its
+        parent is held, so a root created meanwhile is still listed."""
         job_root=self.stage_root/job_id
+        if not os.path.lexists(self.stage_root):
+            with DirectoryBoundary(self.stage_root.anchor,self.stage_root.parent):
+                if not os.path.lexists(self.stage_root):return False
         with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
             if job_root.exists():
                 with DirectoryBoundary(job_root.anchor,job_root):

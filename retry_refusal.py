@@ -123,9 +123,36 @@ def parse(detail, at=''):
     return dict(value) if _typed(value) else legacy(detail, at)
 
 
+# Refusals whose cause was a defect in the app, fixed since, keyed on their exact raw text (RefusedRetry follow-up 3,
+# section 6). A catalog that never had an audio-staging folder refused every M4B Retry with this text, recorded as
+# 'file_problem' (fix 'user'), which no code change can make stale: those rows said "Check the folder" with no folder
+# to check and stayed out of Retry all. Converted once (convert_resolved), they read as stale: one attempt each.
+RESOLVED = {'Prior working-file ownership requires attention: An inspected destination ancestor is unavailable': 'missing_staging_root'}
+
+
 def stale(value):
-    """True when the deciding code changed since the refusal; only an 'update' fix goes stale."""
+    """True when the deciding code changed since the refusal (only an 'update' fix goes stale that way), or the
+    record was converted because the defect that caused it was fixed (convert_resolved)."""
+    if value.get('resolved') in RESOLVED.values():
+        return True
     return value.get('fix') == 'update' and value.get('key') != current_key(value.get('cause'))
+
+
+def convert_resolved(db):
+    """Once, at startup, after convert_legacy: a refused record whose raw text is a fixed defect's (RESOLVED) is marked
+    resolved, so it reads as stale until the next press stores a new record. Text, cause and state are kept; a
+    compare-and-set on the detail column only. Returns the number converted."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='m4b_readmissions'").fetchone() is None:
+        return 0
+    converted = 0
+    for parent, detail, updated in db.execute("SELECT parent_job_id,detail,updated FROM m4b_readmissions WHERE state='refused'").fetchall():
+        value = parse(detail, updated)
+        marker = RESOLVED.get(value.get('reason'))
+        if marker is None or value.get('resolved') == marker:
+            continue
+        converted += db.execute("UPDATE m4b_readmissions SET detail=? WHERE parent_job_id=? AND state='refused' AND detail=?",
+                                (json.dumps(value | {'resolved': marker}, ensure_ascii=False), parent, detail)).rowcount
+    return converted
 
 
 def convert_legacy(db):
