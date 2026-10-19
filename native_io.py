@@ -10,6 +10,12 @@ from pathlib import Path
 
 class BoundaryError(ValueError):pass
 
+class FileInUse(BoundaryError):
+    """The exact file is open in another program without the sharing this check needs (ERROR_SHARING_VIOLATION).
+    Still a BoundaryError: every caller keeps refusing exactly as before. It proves nothing unsafe about the file,
+    so a caller may report "try again" rather than "can't confirm it is safe"."""
+SHARING_VIOLATION=32
+
 if os.name=='nt':
     kernel=ctypes.WinDLL('kernel32',use_last_error=True)
     kernel.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
@@ -170,7 +176,8 @@ class VerifiedFile:
         if os.name!='nt':raise BoundaryError('Verified file disposition requires Windows')
         self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0)|(0x40000000 if self.writable else 0),1,None,3,0x00200000,None)
         if self.handle==ctypes.c_void_p(-1).value:
-            self.handle=None;raise BoundaryError(f'Cannot protect exact file: {ctypes.WinError(ctypes.get_last_error())}')
+            code=ctypes.get_last_error();self.handle=None
+            raise (FileInUse if code==SHARING_VIOLATION else BoundaryError)(f'Cannot protect exact file: {ctypes.WinError(code)}')
         try:
             info=FileInfo()
             if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(info)) or info.attributes&(0x400|0x10):

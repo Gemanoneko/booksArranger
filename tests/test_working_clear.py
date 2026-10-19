@@ -274,6 +274,38 @@ class ClearTests(Base):
             self.clear(manifest, job_id)
         self.assertEqual(caught.exception.cause, 'busy', 'a library scan is running')
 
+    def test_a_file_held_open_by_another_program_is_a_file_problem_and_clears_once_released(self):
+        """Futaba Minor 1 (c2abd97): a file held open without delete sharing (an antivirus scan can) is a sharing
+        violation, which proves nothing unsafe: "try again", and the row recovers once the file is released, with no
+        restart. Before the fix it read not_safe and the folder stayed blocked until the app restarted."""
+        from native_io import FileInUse, VerifiedFile
+        job_id, manifest, source, cover = self.book()
+        attempt, directory = self.stage(job_id, manifest, source, cover)
+        held = open(directory / 'checked.m4b', 'rb')  # Python shares read and write, never delete
+        try:
+            with self.assertRaises(FileInUse) as typed:
+                with VerifiedFile(directory / 'checked.m4b', delete=True):
+                    pass
+            self.assertIsInstance(typed.exception, BoundaryError, 'every other caller still refuses exactly as before')
+            with self.assertRaises(RetryRefused) as caught:
+                self.clear(manifest, job_id)
+            self.assertEqual((str(caught.exception), caught.exception.cause), (audio_jobs.WORKING_FILE_PROBLEM, 'file_problem'))
+            self.assertEqual(len(self.files(directory)), 3, 'nothing removed')
+            value = self.summary(job_id)
+            self.assertEqual((value['working']['state'], value['group'], value['retry']), ('cleanable', 'retry', {'allowed': True, 'reason': ''}),
+                             'still cleanable: Retry and Clear stay offered')
+            with self.assertRaises(RetryRefused) as caught:
+                self.s.retry_blocked_job('Audiobooks', manifest['candidate_id'], 1, job_id)
+            self.assertEqual((str(caught.exception), caught.exception.cause), (RETRY_NOT_CLEARED, 'file_problem'))
+            with connect(self.db) as db:
+                self.assertIsNone(m4b_readmission.describe(db, job_id), 'nothing queued')
+        finally:
+            held.close()
+        answer = self.clear(manifest, job_id)  # released: the next press clears, no restart
+        self.assertTrue(answer['cleared'])
+        self.assertEqual(self.files(directory), [])
+        self.assertEqual(digest(source), manifest['sources'][0]['sha256'], 'the original is untouched')
+
 
 class SafetyTests(Base):
     """The hard safety rule: every escape attempt is refused before anything is deleted."""

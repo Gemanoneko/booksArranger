@@ -1964,7 +1964,7 @@ class MergeService:
 
     def _clear_working(self,row):
         from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_NOT_SAFE,WORKING_FILE_PROBLEM
-        from native_io import BoundaryError
+        from native_io import BoundaryError,FileInUse
         job_id=row['job_id'];audio_only=self._working_kind(row)
         before=self._working_state(row,audio_only,fresh=True)
         if before is None:return {'cleared':True,'bytes':0,'already':True}
@@ -1978,6 +1978,10 @@ class MergeService:
             for attempt_id in self._working_targets(row,listing):working.retire(job_id,attempt_id)
         except InterruptedError:failure=('busy','The app was busy; nothing more was removed')
         except sqlite3.Error as error:failure=('busy',str(error))
+        # Another program holds a file open (an antivirus scan can): nothing is proven unsafe, and the disposal opens
+        # every file of an attempt before it removes any of them. "Try again"; never remembered as blocked below, so
+        # the row stays cleanable and clears once the file is released.
+        except FileInUse as error:failure=('file_problem',str(error))
         except (BoundaryError,ValueError) as error:failure=('not_safe',str(error))
         except (OSError,RuntimeError) as error:failure=('file_problem',str(error))
         with _WORKING_LOCK:self.__dict__.setdefault('_working_cache',{}).pop(job_id,None)
