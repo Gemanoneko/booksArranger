@@ -551,6 +551,89 @@ class PassTests(Base):
             self.assertIsNone(auto.thread)
 
 
+class PendingStartStopTests(Base):
+    """Senua M1 and M2 (v0.19.0 review; probe senua-0190/probe_pending.py): Quit, Stop and the app's own safety stops
+    end a pending start, and no start fires once Quit or shutdown has begun. Before the fix a pending start fired during
+    the Quit drain (which could then hang Quit at "finishing") and after a disk-full or working-file hold."""
+    def setUp(self):
+        super().setUp()
+        poll = patch.object(automatic_processing, 'PENDING_POLL', 0.05)
+        poll.start()
+        self.addCleanup(poll.stop)
+        self.notified = Mock()
+        self.s.automatic.on_change = self.notified
+
+    def pending(self):
+        """A book converts, so Start over leaves one pending start."""
+        self.jobs_state['state'] = 'Running'
+        answer = self.s.automatic.request_start()
+        self.assertEqual((answer['action'], answer['pending_kind']), ('pending', 'conversion'))
+
+    def never_starts(self, case):
+        time.sleep(0.4)  # eight polls of the pending loop
+        auto = self.s.automatic
+        self.assertIsNone(auto.thread, case + ': nothing started by itself')
+        self.assertIsNone(auto.start_pending, case)
+        loop = auto._pending_thread
+        if loop:
+            loop.join(5)
+            self.assertFalse(loop.is_alive(), case + ': the pending loop ended')
+
+    def test_quit_ends_a_pending_start_and_quit_finishes(self):
+        from desktop_backend import DesktopControl
+        self.pending()
+        self.s.cleanup.thread = None
+        self.s.cleanup.current = None
+        self.s._post_current = None
+        lock = threading.Lock()
+        server = SimpleNamespace(merge=self.s, inventory=self.s.inventory, closing=False, merge_admissions=0, control_lock=lock,
+                                 control_condition=threading.Condition(lock), scan_active=lambda: False, finish_shutdown=Mock())
+        self.s.automatic.server_closing = lambda: server.closing  # as BrowserServer wires it
+        control = DesktopControl(server)
+        self.assertEqual(control.quit()['phase'], 'finishing')  # the real Quit: closing, drain, scan stop, automatic.stop()
+        self.assertTrue(self.s.draining)
+        self.assertIsNone(self.s.automatic.start_pending, 'Quit ends the pending start')
+        self.assertTrue(self.notified.called, 'the next poll shows it')
+        self.jobs_state['state'] = 'Paused'  # the book in progress finished under the drain; the next stays queued
+        self.never_starts('Quit')
+        control.thread.join(5)
+        self.assertFalse(control.thread.is_alive(), 'Quit does not hang at "finishing"')
+        server.finish_shutdown.assert_called_once_with()
+
+    def test_a_start_never_fires_once_quit_or_shutdown_has_begun(self):
+        auto = self.s.automatic
+        server = SimpleNamespace(closing=False)
+        auto.server_closing = lambda: server.closing
+        self.pending()
+        # Web shutdown sets closing first; automatic.close() comes only after the scan is joined (finish_shutdown).
+        # The blocker clears inside that window: the start re-reads the flag right before it fires.
+        server.closing = True
+        self.jobs_state['state'] = 'Paused'
+        self.never_starts('shutdown')
+        # A Start over press admitted before Quit reaches request_start after it, carrying the flag it read then.
+        self.assertEqual(auto.request_start(server_closing=False)['action'], 'blocked')
+        server.closing = False
+        self.s.draining = True  # a desktop Quit drain, read from the merge service
+        self.assertEqual(auto.request_start()['action'], 'blocked')
+        self.assertIsNone(auto.thread)
+        self.assertIsNone(auto.start_pending)
+        self.assertEqual(auto.status(jobs=dict(self.jobs_state))['start_block']['kind'], 'closing')
+        self.assertFalse(auto.status(jobs=dict(self.jobs_state))['can_start'])
+
+    def test_stop_and_the_safety_stops_end_a_pending_start(self):
+        auto = self.s.automatic
+        for force, case in ((True, 'disk-full or working-file hold'), (False, 'Stop automatic processing')):
+            self.notified.reset_mock()
+            self.pending()
+            auto.stop(force=force)  # jobs.on_space_hold and jobs.on_working_hold call stop(force=True)
+            self.assertIsNone(auto.start_pending, case)
+            self.assertTrue(self.notified.called, case + ': the next poll shows it')
+            self.assertIsNone(auto.status(jobs={'state': 'Paused', 'queued': 1, 'failed': 0})['start_pending'],
+                              case + ': no "waiting to start" row or notice')
+            self.jobs_state['state'] = 'Paused'  # the jobs worker returned after the hold; the queue is kept
+            self.never_starts(case)
+
+
 class MarkerListTests(Base):
     """The Started over marker on list rows, the release flag, and the Started over filter (follow-up 3, sections 2 and 4)."""
     def auto(self, identity, state, reasons=()):

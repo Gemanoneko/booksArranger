@@ -235,6 +235,18 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(get('automatic-start-reason').textContent,'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.','back to the block reason');
   assert.equal(get('cancel-automatic-start').hidden,true);assert.equal(document.activeElement,get('automatic-start-reason'),'focus moves to the notice');
   assert.equal(get('automatic-start-reason').getAttribute('tabindex'),'-1');
+  // Page contract for Senua M2 (v0.19.0): Stop, Quit or a safety stop (disk full, working-file hold) ends the pending
+  // start on the server, with no Cancel press. The next poll carries no start_pending: the row and the notice stop
+  // promising a start, in place, and read as after Cancel (follow-up 4, section 1.4).
+  run('filters.candidates="restarted";viewControls()');paint([marked('w',{state:'waiting'})]);
+  setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.',start_pending:{kind:'conversion'}});
+  assert.equal(statusCell(rowOf('w')).textContent,'Started over — waiting to start','positive control: the pending start is promised');
+  assert.equal(get('cancel-automatic-start').hidden,false);
+  setAuto(IDLE);  // the converter stopped on the hold and is Paused; the server ended the pending start
+  assert.equal(statusCell(rowOf('w')).textContent,'Started over — waiting for you');
+  assert.equal(statusCell(rowOf('w')).children[0].textContent,'Press Start automatic processing above. It will then research this book and queue it if the match is safe.');
+  assert.equal(get('cancel-automatic-start').hidden,true);assert.equal(get('automatic-start-reason').hidden,true,'no "will start by itself" notice');
+  run('filters.candidates="held";viewControls()');
   setAuto(IDLE);
 
   // ---- Leftover working files (follow-up 2, section 2; follow-up 3, section 3).

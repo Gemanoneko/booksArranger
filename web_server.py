@@ -148,6 +148,9 @@ class BrowserServer(ThreadingHTTPServer):
             # Audiobooks library's: the scan line and progress row follow it as after the Start button.
             automatic=getattr(self.merge,'automatic',None)
             if automatic is not None and hasattr(automatic,'on_started'):automatic.on_started=lambda:setattr(self,'active_library','Audiobooks')
+            # A start that fires later (the O12 pending start) reads the server's closing flag at that moment, as the
+            # control gate does for a press: nothing starts once Quit or shutdown has begun.
+            if automatic is not None and hasattr(automatic,'server_closing'):automatic.server_closing=lambda:self.closing
             if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
             # Published-book hashing reads every finished book from the library share; it must not delay health.
             if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()

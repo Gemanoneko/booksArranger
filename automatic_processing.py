@@ -74,8 +74,8 @@ def research_retry(run):
 
 class AutomaticProcessing:
     # Defaults for an instance built without __init__ (private test stubs that run _work directly): no book was put
-    # back, the run is not closing, no hook is set.
-    _requeued=();_closing_run=False;on_started=None
+    # back, the run is not closing, no hook is set, no start is pending.
+    _requeued=();_closing_run=False;on_started=None;server_closing=None;start_pending=None
     def __init__(self,merge,research=None,clock=time.time):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
@@ -87,6 +87,9 @@ class AutomaticProcessing:
         self.start_pending=None;self._pending_thread=None;self._pending_wake=threading.Event();self.on_change=None
         # The server's hook for every start (Start, Start over, release, a pending start): the pass scans Audiobooks.
         self.on_started=None
+        # The server's closing flag (Quit, shutdown), read at the moment a start fires: a pending start has no request
+        # to carry it, and a press admitted before Quit carries the value it read before Quit began.
+        self.server_closing=None
         with connect(self.database) as db:
             __import__('groups').setup(db)
             db.execute('CREATE TABLE IF NOT EXISTS automatic_runs(id TEXT PRIMARY KEY,state TEXT,phase TEXT,checkpoint TEXT,reason TEXT,created TEXT,updated TEXT,restart_paused INTEGER DEFAULT 0)')
@@ -187,7 +190,7 @@ class AutomaticProcessing:
         'scan', 'conversion' or 'unknown'; 'conversion', 'scan' and 'stopping' clear by themselves (CLEARS)."""
         # This is a read-only snapshot, with no new lock acquisition. In
         # particular, never take merge/scanner locks while holding self.lock.
-        if self.closed or server_closing:return 'closing','The local server is stopping or stopped. Start is unavailable.'
+        if self.closed or server_closing or self._server_closing():return 'closing','The local server is stopping or stopped. Start is unavailable.'
         if self.volatile_failure:return 'failure','Automatic processing cannot restart because its failure record could not be saved.'
         if state=='Stopping':return 'stopping','Automatic processing is stopping. Wait for it to finish stopping.'
         if state=='Running' or self.thread and self.thread.is_alive():return 'running','Automatic processing is already running.'
@@ -240,9 +243,19 @@ class AutomaticProcessing:
             pending=ids('pending');total=len(ids('done')|pending|ids('deferred'))
             return {'completed':total-len(pending),'total':total} if total else None
         except Exception:return None
+    def _server_closing(self):
+        """Quit or shutdown has begun: the server is closing, or the converter drains for a desktop Quit. Read where a
+        start fires, not only where a press enters: the pending start (O12) acts later for a press. Attribute reads
+        only, no lock. A hook that fails reads as closing: no start is the safe answer."""
+        if getattr(self.merge,'draining',False) is True:return True
+        probe=self.server_closing
+        if probe is None:return False
+        try:return bool(probe())
+        except Exception:return True
     def start(self,*,server_closing=False):
         with self.lock:
-            if server_closing:raise ValueError('The local server is stopping or stopped. Start is unavailable.')
+            # Checked under self.lock, which stop() also takes: a start can no longer slip in after Quit's stop.
+            if server_closing or self._server_closing():raise ValueError('The local server is stopping or stopped. Start is unavailable.')
             if self.closed:raise ValueError('Automatic processing is closed')
             if self.volatile_failure:raise ValueError('Failure checkpoint could not be saved; automatic processing remains stopped')
             if self.thread and self.thread.is_alive():return self.status()
@@ -371,11 +384,19 @@ class AutomaticProcessing:
             self._changed()
             if kind not in CLEARS:return
     def stop(self,force=False):
+        """Stop, Quit (not forced) and the app's own safety stops (disk full, working-file hold: forced). Each also ends
+        a pending start (O12): a start the app or Sergei has just stopped must never come back by itself. The rows and
+        the notice then read as after Cancel automatic start (RefusedRetry follow-up 4, section 1.4)."""
         with self.lock:
+            cancelled=self.start_pending is not None;self.start_pending=None
             run=self._run_row()
-            if not force and (not run or run['state'] not in ('Running','Stopping')):return self.status()
-            if run and run['state']=='Running':self._update(run['id'],state='Stopping',reason='Stopping automatic processing — saving pending work')
-            self.stop_event.set();self.next_retry_at=None
+            active=force or bool(run and run['state'] in ('Running','Stopping'))
+            if active:
+                if run and run['state']=='Running':self._update(run['id'],state='Stopping',reason='Stopping automatic processing — saving pending work')
+                self.stop_event.set();self.next_retry_at=None
+        if cancelled:
+            self._pending_wake.set();self._changed()
+        if not active:return self.status()
         self.inventory.stop();self.merge.pause()
         return self.status()
     def close(self,timeout=30):
