@@ -778,10 +778,10 @@ async function retryJob(origin=null){
   }
   retryPending={key,kind:action.kind,note:action.note};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
   let succeeded=false;
-  let answer=null;
+  let answer=null,refreshed=null;
   try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);succeeded=true;}
   catch(error){
-    if(error.httpStatus){pressed.delete(key);retryResult={key,text:error.message || action.refused,warn:true};if(error.httpStatus===409)retryEpoch++;}
+    if(error.httpStatus){pressed.delete(key);refreshed=freshRow(error.body?.row,row);retryResult={key:retryKey(refreshed || row),text:error.message || action.refused,warn:true};if(error.httpStatus===409)retryEpoch++;}
     else{
       // No reply in time: the press may still have landed. Check the book's queued state on the server
       // before saying anything; never show a scary error and re-enable a button for a request that worked.
@@ -799,6 +799,9 @@ async function retryJob(origin=null){
   else if(succeeded && action.kind==='retry')stripNote=`${row.title_clue || row.review?.title || 'The book'} queued — ${queuedNextText({position:answer?.position}).replace(/^Queued — /,'')}`;
   const focused=document.activeElement===$('retry-job');
   retryPending=null;busy=false;
+  // A clear-first that did not finish answers with the book's refreshed row, as Clear does: the panel and the row show
+  // the state after the press now, never the Retry and Clear of the state before it.
+  if(refreshed)placeRow(row,refreshed,origin);
   if(succeeded){
     // The server requeued the job: show it as queued now, and ignore book lists requested before this answer.
     retryEpoch++;const queued=action.kind==='keep'?keptByChoice(row):answer?.queued_next===true?queuedNext(row,answer):queuedByRetry(row);rows=rows.map(item=>item.path===row.path?queued:item);

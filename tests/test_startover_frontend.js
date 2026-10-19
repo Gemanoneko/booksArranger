@@ -273,6 +273,17 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Clearing working files, then checking this book…');
   retryAnswer({ok:false,status:409,json:async()=>({error:"Retry was not accepted: the working files weren't cleared. Nothing was queued.",cause:'not_safe'})});await retrying;
   assert.equal(get('retry-note').textContent,"Retry was not accepted: the working files weren't cleared. Nothing was queued.");retryOverride=null;run('pressed.clear()');
+  // Futaba Minor 2 (c2abd97): the refused clear-first answers with the book's refreshed row, as Clear does; the details
+  // panel shows it at once and stops offering Retry and Clear. The next list no longer holds the book (it moved from
+  // Can retry to Other), so before the fix nothing ever re-selected it and the panel kept the state before the press.
+  const nowBlocked=m4bRow('cw',{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,working:{state:'blocked',stops:true,bytes:null,reason:'Working files were kept: x'},working_folder:FOLDER}});
+  paint([cleanable]);inventoryRows=[];run('select(rows[0],true);controls()');
+  assert.equal(get('retry-job').hidden,false);assert.equal(get('clear-working').hidden,false,'positive control: the panel offers Retry and Clear');
+  retryOverride=async()=>({ok:false,status:409,json:async()=>({error:"Retry was not accepted: the working files weren't cleared. Nothing was queued.",cause:'not_safe',row:nowBlocked})});
+  await run('retryJob()');
+  assert.equal(get('retry-job').hidden,true,'no Retry from the state before the press');assert.equal(get('clear-working').hidden,true,'no Clear either');
+  assert.equal(statusCell(rowOf('cw')).textContent,"Stopped — can't clear working files",'held in place in its new state, never vanishing under the pointer');
+  retryOverride=null;run('pressed.clear();retryResult=null;heldRow=null;controls()');
   // Clear: the press, success with the size and the natural hint, focus to the same row's Retry.
   paint([cleanable]);tr=rowOf('cw');let clearAnswer;replies['/api/audiobook/clear-working']=()=>new Promise(resolve=>{clearAnswer=resolve;});
   const cleared=m4bRow('cw',{attention:{group:'retry',cause:null,originals_untouched:true,precheck:'passed'}});inventoryRows=[cleared];actionButtons(tr)[1].focus();

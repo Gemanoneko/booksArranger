@@ -515,7 +515,9 @@ class Handler(BaseHTTPRequestHandler):
             from audio_jobs import RetryRefused
             try:result=self.server.merge.retry_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
-                if getattr(error,'cause',None):self.refused(error);return  # Retry's clear-first did not finish: typed
+                # Retry's clear-first did not finish: typed, with the book's refreshed row (the panel must not keep
+                # offering Retry and Clear from the state before the press).
+                if getattr(error,'cause',None):self.refused(error,id);return
                 self.fail(409,str(error));return  # Nothing changed; the message is shown as written.
             self.response(202,result);return
         if path=='/api/audiobook/repair':
@@ -526,7 +528,7 @@ class Handler(BaseHTTPRequestHandler):
             from audio_jobs import RetryRefused
             try:result=self.server.merge.repair_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
-                if getattr(error,'cause',None):self.refused(error);return
+                if getattr(error,'cause',None):self.refused(error,id);return
                 self.fail(409,str(error));return
             self.response(202,result);return
         if path=='/api/audiobook/keep':

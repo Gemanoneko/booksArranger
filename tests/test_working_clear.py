@@ -482,3 +482,19 @@ class RouteTests(unittest.TestCase):
         self.merge.retry_blocked_job = Mock(side_effect=RetryRefused(RETRY_NOT_CLEARED, 'file_problem'))
         status, body, _ = self.call('/api/audiobook/retry', self.identity() | {'job_id': job})
         self.assertEqual((status, body['cause']), (409, 'file_problem'), "Retry's clear-first failure is typed too")
+
+    def test_a_refused_clear_first_answers_with_the_refreshed_row(self):
+        """Futaba Minor 2 (c2abd97): Retry's and Repair's clear-first refusal carries the book's refreshed row, as Clear's
+        does, so the details panel stops offering Retry and Clear from the state before the press."""
+        job = str(uuid.uuid4())
+        fresh = {'id': self.identity()['id'], 'creation': {'job': None}}
+        self.merge.restart_row = Mock(return_value=fresh)
+        for route, name in (('/api/audiobook/retry', 'retry_blocked_job'), ('/api/audiobook/repair', 'repair_blocked_job')):
+            setattr(self.merge, name, Mock(side_effect=RetryRefused(RETRY_NOT_CLEARED, 'not_safe')))
+            self.merge.restart_row.reset_mock()
+            status, body, _ = self.call(route, self.identity() | {'job_id': job})
+            self.assertEqual((status, body['cause'], body.get('row')), (409, 'not_safe', fresh), route)
+            self.merge.restart_row.assert_called_once_with(self.identity()['id'])
+        self.merge.retry_blocked_job = Mock(side_effect=RetryRefused(RETRY_BOOK_CHANGED))
+        status, body, _ = self.call('/api/audiobook/retry', self.identity() | {'job_id': job})
+        self.assertEqual((status, body.get('row')), (409, None), 'an untyped refusal is unchanged')
