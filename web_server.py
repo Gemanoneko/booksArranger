@@ -416,7 +416,63 @@ class Handler(BaseHTTPRequestHandler):
     def shape(data,required,optional=()):
         if not set(required)<=set(data) or set(data)-set(required)-set(optional): raise ValueError('Request fields are incomplete or unknown')
 
+    def automatic_status(self):
+        """A fresh automatic-processing status for a control's answer (the page takes it at once, as after Start)."""
+        merge=self.server.merge
+        jobs=merge.status_snapshot() if hasattr(merge,'status_snapshot') else merge.state()
+        return merge.automatic.status(jobs=jobs,scanning=self.server.scan_active(),server_closing=self.server.closing)
+
+    def refused(self,error,identity=None):
+        """409 for a Start over, release or Clear working files press that changed nothing: the message, its typed
+        cause (the page picks its words from it) and the book's refreshed row."""
+        body={'error':str(error)}
+        if getattr(error,'cause',None):body['cause']=error.cause
+        if identity:
+            row=self.server.merge.restart_row(identity) if hasattr(self.server.merge,'restart_row') else None
+            if row is not None:body['row']=row
+        self.response(409,body)
+
     def merge_request(self,path,data):
+        if path=='/api/automatic/cancel-start':
+            # Cancel automatic start (O12): the pending start ends; books keep waiting for a press.
+            if data:raise ValueError('Automatic controls require an empty object; scope is Audiobooks')
+            self.server.merge.automatic.cancel_start()
+            self.response(202,{'automatic_processing':self.automatic_status()});return
+        if path=='/api/audiobook/startover':
+            # Start over: set the stuck job aside (kept) and send the book back to automatic processing, which starts if
+            # it is not running. discard_review: "Start over and let the app handle it", one transaction.
+            self.shape(data,{'library','id','revision','job_id'},{'discard_review'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id']);discard=data.get('discard_review',False)
+            if type(discard) is not bool:raise ValueError('discard_review must be an explicit boolean')
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.start_over(library,id,revision,job_id,discard,server_closing=self.server.closing)
+            except RetryRefused as error:
+                self.refused(error,id);return
+            self.response(202,result|{'automatic_processing':self.automatic_status()});return
+        if path=='/api/audiobook/release':
+            # "Let the app handle it": discard the held book's saved review and let automatic processing take it.
+            self.shape(data,{'library','id','revision'})
+            library,id,revision=self.candidate_identity(data)
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.release(library,id,revision,server_closing=self.server.closing)
+            except RetryRefused as error:
+                self.refused(error,id);return
+            self.response(202,result|{'automatic_processing':self.automatic_status()});return
+        if path=='/api/audiobook/release-selected':
+            # "Let the app handle selected": one call, each book through its own compare-and-set, one start after the last.
+            self.shape(data,{'library','items'})
+            if data['library']!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+            items=data['items']
+            if not isinstance(items,list) or not 1<=len(items)<=1000:raise ValueError('Select between 1 and 1000 books')
+            checked=[]
+            for item in items:
+                if not isinstance(item,dict):raise ValueError('Each selected book needs its identity and revision')
+                self.shape(item,{'id','revision'})
+                checked.append(self.candidate_identity({'library':'Audiobooks',**item})[1:])
+            if len({identity for identity,_ in checked})!=len(checked):raise ValueError('Each book may be selected once')
+            result=self.server.merge.release_selected('Audiobooks',checked,server_closing=self.server.closing)
+            self.response(202,result|{'automatic_processing':self.automatic_status()});return
         if path in {'/api/automatic/start','/api/automatic/stop','/api/automatic/draft'}:
             automatic=self.server.merge.automatic
             if path.endswith('/draft'):
@@ -569,7 +625,8 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep'}
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
+                         '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

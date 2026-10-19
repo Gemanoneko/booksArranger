@@ -219,7 +219,7 @@ class CandidateReviewService:
         A job made by Repair carries 'repaired' (audio_jobs.repair_record) in every state.
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
-        if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review'):raise ValueError('Unknown candidate status')
+        if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review','restarted'):raise ValueError('Unknown candidate status')
         if group not in (None,'all','retry','repair','checking','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
@@ -237,7 +237,10 @@ class CandidateReviewService:
             if status=='output_attention' and hasattr(self.jobs,'attention_summary'):attention=self.jobs.attention_summary(retry=False)
         converted=(self.jobs.converted_ids() if hasattr(self.jobs,'converted_ids') else self.jobs.progress_books()['converted_ids']) if self.jobs and hasattr(self.jobs,'progress_books') else set()
         self.page_local.ready_ids=converted
-        automatic=self.jobs.automatic.index() if self.jobs and hasattr(self.jobs,'automatic') and hasattr(self.jobs.automatic,'index') and status in ('held','recording_review') else None
+        automatic=self.jobs.automatic.index() if self.jobs and hasattr(self.jobs,'automatic') and hasattr(self.jobs.automatic,'index') and status in ('held','recording_review','restarted') else None
+        # Started over (RefusedRetry follow-up 3, section 2.3): books Start over or release sent back to automatic
+        # processing that it has not queued yet, ordered failed, waiting, working, held; global counts for the summary.
+        restart,restart_counts=self.jobs.restart_index(self.page_local.jobs,automatic) if status=='restarted' and self.jobs and hasattr(self.jobs,'restart_index') else ({},None)
         def approved_context(cid):
             saved=self.page_local.contexts.get(cid);ctx=saved['data'] if saved else {}
             return bool(not ctx.get('automatic_pending') and ctx.get('metadata_approved'))
@@ -255,6 +258,7 @@ class CandidateReviewService:
             elif status in ('approved','ready'):ids={cid for cid in self.page_local.contexts if approved_context(cid)}
             elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if item['state']=='Held'}
             elif status=='recording_review' and automatic is not None:ids={cid for cid,item in automatic.items() if item['duplicate_review']}|{cid for cid,saved in self.page_local.contexts.items() if saved['data'].get('duplicate_review')}
+            elif status=='restarted':ids=set(restart)
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all',ids=ids) if ids is not None else \
             self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all')
         def current_auto(row):
@@ -273,6 +277,7 @@ class CandidateReviewService:
             if status=='held':
                 auto=current_auto(row)
                 return bool(auto and auto['state']=='Held')
+            if status=='restarted':return row['id'] in restart
             if status=='review':return not approved
             if status=='approved':return approved
             if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
@@ -292,6 +297,7 @@ class CandidateReviewService:
             else:
                 chosen=[r for r in result['rows'] if selected(r)];total=len(chosen)
                 if status=='output_attention':chosen.sort(key=lambda r:self.ATTENTION_ORDER.get(group_of(r['id']),1))  # stable: scope order within a group
+                if status=='restarted':chosen.sort(key=lambda r:restart.get(r['id'],9))
                 chosen=chosen[offset:offset+limit]
             # Per-book extras for the shown page only.
             shown=[self.page_local.jobs[r['id']] for r in chosen if r['id'] in self.page_local.jobs]
@@ -323,10 +329,11 @@ class CandidateReviewService:
             if job_rows is not None and self.jobs and hasattr(self.jobs,'current_audiobook'):
                 self.page_local.audiobooks={r['id']:self.jobs.current_audiobook(r['id'],jobs=job_rows) for r in chosen}
             rows=[self.enrich(r,check_sources=False) for r in chosen]
+            if self.jobs and hasattr(self.jobs,'restart_view'):self.jobs.restart_view(rows)  # Started over marker, release
         finally:
             del self.page_local.contexts;del self.page_local.jobs;del self.page_local.ready_ids
             if hasattr(self.page_local,'audiobooks'):del self.page_local.audiobooks
-        return {'rows':rows,'total':total}
+        return {'rows':rows,'total':total}|({'restart_counts':restart_counts} if restart_counts is not None else {})
 
     def _actor(self,actor,note):
         if actor not in ('user','assistant'):raise ValueError('Unknown reviewer actor')

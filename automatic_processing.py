@@ -27,6 +27,10 @@ RETRY_HELP = 'Start automatic processing to retry this book and continue saved w
 # without the optional fields (Sergei decision 2026-10-12: gaps never block a book).
 GAP_DEFER_LIMIT = 3
 GAP_DEFER_REASON = 'Optional metadata sources cooling down; converter busy, book admitted when it is free'
+# Start over / "Let the app handle it" (RefusedRetry follow-ups 3 and 4): a blocker that clears by itself leaves one
+# pending start for the app, checked every PENDING_POLL seconds (Judy: within 15 s of the blocker clearing).
+CLEARS = ('conversion', 'scan', 'stopping')
+PENDING_POLL = 3.0
 
 def failure_diagnostic(error,run_id,phase,candidate_id):
     """Keep code locations, never raw traceback lines, paths or arbitrary error text."""
@@ -72,6 +76,11 @@ class AutomaticProcessing:
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
         self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None;self.current=None;self.live_checkpoint=None;self.closed=False;self.volatile_failure=None;self.clock=clock;self.next_retry_at=None
+        # Books put back on the running run by Start over or release (requeue), taken by the worker in click order;
+        # _closing_run is set once the run has passed its last research step, so a later book waits for the next run.
+        self._requeued=[];self._closing_run=False
+        # One pending start for the app (O12), in memory only: a start nobody is watching never comes back after a restart.
+        self.start_pending=None;self._pending_thread=None;self._pending_wake=threading.Event();self.on_change=None
         with connect(self.database) as db:
             __import__('groups').setup(db)
             db.execute('CREATE TABLE IF NOT EXISTS automatic_runs(id TEXT PRIMARY KEY,state TEXT,phase TEXT,checkpoint TEXT,reason TEXT,created TEXT,updated TEXT,restart_paused INTEGER DEFAULT 0)')
@@ -138,9 +147,9 @@ class AutomaticProcessing:
         result={}
         with connect(self.database) as db:
             for r in db.execute('SELECT id,revision,fingerprint,state,result FROM automatic_candidates'):
-                try:duplicate=bool(json.loads(r['result'] or '{}').get('duplicate_review'))
-                except (TypeError,ValueError,AttributeError):duplicate=False
-                result[r['id']]={'revision':r['revision'],'fingerprint':r['fingerprint'],'state':r['state'],'duplicate_review':duplicate}
+                try:recorded=json.loads(r['result'] or '{}');duplicate=bool(recorded.get('duplicate_review'));reasons=[str(x) for x in recorded.get('reasons') or []][:8]
+                except (TypeError,ValueError,AttributeError):duplicate=False;reasons=[]
+                result[r['id']]={'revision':r['revision'],'fingerprint':r['fingerprint'],'state':r['state'],'duplicate_review':duplicate,'reasons':reasons}
         failure=self.volatile_failure
         if failure and failure['diagnostic'].get('candidate_id') in result:result[failure['diagnostic']['candidate_id']]['state']='Needs attention'
         return result
@@ -166,22 +175,26 @@ class AutomaticProcessing:
                 db.execute("UPDATE automatic_candidates SET result=?,retry_at=? WHERE id=? AND revision=? AND fingerprint=? AND state='Waiting for source'",(json.dumps(result,ensure_ascii=False),revised['retry_at'],row['id'],row['revision'],row['fingerprint']))
         return self.candidate(row)
     def _start_block_reason(self,state,*,jobs=None,scanning=None,server_closing=False):
+        return self._start_block(state,jobs=jobs,scanning=scanning,server_closing=server_closing)[1]
+    def _start_block(self,state,*,jobs=None,scanning=None,server_closing=False):
+        """(kind, reason) of what stops Start now, or (None, ''). kind: 'closing', 'failure', 'stopping', 'running',
+        'scan', 'conversion' or 'unknown'; 'conversion', 'scan' and 'stopping' clear by themselves (CLEARS)."""
         # This is a read-only snapshot, with no new lock acquisition. In
         # particular, never take merge/scanner locks while holding self.lock.
-        if self.closed or server_closing:return 'The local server is stopping or stopped. Start is unavailable.'
-        if self.volatile_failure:return 'Automatic processing cannot restart because its failure record could not be saved.'
-        if state=='Stopping':return 'Automatic processing is stopping. Wait for it to finish stopping.'
-        if state=='Running' or self.thread and self.thread.is_alive():return 'Automatic processing is already running.'
+        if self.closed or server_closing:return 'closing','The local server is stopping or stopped. Start is unavailable.'
+        if self.volatile_failure:return 'failure','Automatic processing cannot restart because its failure record could not be saved.'
+        if state=='Stopping':return 'stopping','Automatic processing is stopping. Wait for it to finish stopping.'
+        if state=='Running' or self.thread and self.thread.is_alive():return 'running','Automatic processing is already running.'
         if scanning is None:
             worker=getattr(self.inventory,'worker',None)
             scanning=bool(worker and worker.is_alive())
-        if scanning:return 'Discovery is in progress. Wait for it to stop before starting automatic processing.'
+        if scanning:return 'scan','Discovery is in progress. Wait for it to stop before starting automatic processing.'
         job_state=jobs.get('state') if isinstance(jobs,dict) else None
-        if job_state=='Running':return 'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.'
-        if job_state=='Pausing':return 'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'
+        if job_state=='Running':return 'conversion','Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.'
+        if job_state=='Pausing':return 'conversion','Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'
         if job_state not in ('Idle','Paused','Completed','Needs attention'):
-            return 'Start availability is unknown. Waiting for the local server.'
-        return ''
+            return 'unknown','Start availability is unknown. Waiting for the local server.'
+        return None,''
     def status(self,*,jobs=None,scanning=None,server_closing=False):
         run=self._run_row();counts={'researching':0,'waiting':0,'held':0}
         with connect(self.database) as db:
@@ -197,8 +210,10 @@ class AutomaticProcessing:
             state='Needs attention';diagnostic=self.volatile_failure['diagnostic'];counts['researching']=0
         active=state in ('Running','Stopping')
         armed=state=='Running' and self.next_retry_at is not None and not self.stop_event.is_set() and not self.closed
-        block=self._start_block_reason(state,jobs=jobs,scanning=scanning,server_closing=server_closing)
-        return {'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
+        kind,block=self._start_block(state,jobs=jobs,scanning=scanning,server_closing=server_closing)
+        pending=self.start_pending
+        return {'start_block':{'kind':kind,'clears':kind in CLEARS} if kind and kind!='running' else None,
+                'start_pending':{'kind':pending['kind']} if pending else None,'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
                 'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
                 'automatic_retry_enabled':armed,'next_retry_at':self.next_retry_at if armed else None,'research_pass':self._research_pass(run,self.live_checkpoint)}
@@ -236,9 +251,112 @@ class AutomaticProcessing:
                 id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
                 with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
             else:self._update(run['id'],state='Running',reason='',restart_paused=0)
-            self.stop_event.clear()
+            self.stop_event.clear();self.start_pending=None;self._closing_run=False
             self.thread=threading.Thread(target=self._work,args=(run['id'],),name='BooksArrangerAutomatic',daemon=False);self.thread.start()
         return self.status()
+    def requeue(self,identity):
+        """Start over / release: put a book back on the run's pending list. 'this_run' when the running or saved run will
+        still visit it (the worker takes it next, ahead of the others), 'next_run' when the running run has already
+        passed its last research step. A run that ended or never started visits every book after its scan."""
+        with self.lock:
+            if self.thread and self.thread.is_alive():
+                if self._closing_run:return 'next_run'
+                if identity not in self._requeued:self._requeued.append(identity)
+                return 'this_run'
+            run=self._run_row()
+            if not run or run['phase']=='discovery' or not (run['state'] in ('Paused','Stopping') or research_retry(run)):return 'this_run'
+            def put(db):
+                current=db.execute('SELECT checkpoint FROM automatic_runs WHERE id=?',(run['id'],)).fetchone()
+                try:checkpoint=json.loads(current['checkpoint'] or '{}') if current else {}
+                except (TypeError,ValueError):checkpoint={}
+                if not isinstance(checkpoint,dict):checkpoint={}
+                self._requeue_into(checkpoint,[identity])
+                db.execute('UPDATE automatic_runs SET checkpoint=? WHERE id=?',(json.dumps(checkpoint),run['id']))
+            transaction(self.database,put)
+            return 'this_run'
+    @staticmethod
+    def _requeue_into(checkpoint,ids):
+        """ids go first on pending and leave done and deferred (deferred is changed in place: the worker holds it)."""
+        checkpoint['pending']=list(ids)+[item for item in list(checkpoint.get('pending') or []) if item not in ids]
+        checkpoint['done']=[item for item in list(checkpoint.get('done') or []) if item not in ids]
+        deferred=checkpoint.get('deferred')
+        if isinstance(deferred,list):deferred[:]=[item for item in deferred if item not in ids]
+    def _take_requeued(self,checkpoint):
+        """Worker: move books Start over or release put back since the last step to the front of pending."""
+        with self.lock:
+            taken=list(self._requeued);self._requeued.clear()
+        if taken:self._requeue_into(checkpoint,taken)
+        return bool(taken)
+    def request_start(self,*,server_closing=False):
+        """Start over / release (O9, O12): start automatic processing when it is not running. Never raises: a start a
+        blocker refuses leaves one pending start when that blocker clears by itself, and is reported otherwise.
+        {'action': 'running'|'started'|'continued'|'pending'|'blocked', 'pending_kind'?, 'reason'?}."""
+        with self.lock:
+            if self.thread and self.thread.is_alive():return {'action':'running'}
+            run=self._run_row()
+            continuing=bool(run and (run['state'] in ('Paused','Stopping') or research_retry(run)))
+        try:self.start(server_closing=server_closing)
+        except ValueError as error:
+            kind,reason=self._current_block(server_closing=server_closing)
+            if kind=='running':return {'action':'running'}
+            if kind in CLEARS:
+                self._set_pending(kind)
+                return {'action':'pending','pending_kind':kind,'reason':reason}
+            return {'action':'blocked','reason':reason or str(error)}
+        return {'action':'continued' if continuing else 'started'}
+    def _current_block(self,server_closing=False):
+        run=self._run_row()
+        snapshot=getattr(self.merge,'status_snapshot',None)
+        try:jobs=snapshot() if callable(snapshot) else self.merge.state()
+        except Exception:jobs=None
+        return self._start_block(run['state'] if run else 'Idle',jobs=jobs,server_closing=server_closing)
+    def _changed(self):
+        notify=self.on_change
+        if notify:
+            try:notify()
+            except Exception:pass
+    def _set_pending(self,kind):
+        with self.lock:
+            self.start_pending={'kind':kind}
+            if not (self._pending_thread and self._pending_thread.is_alive()):
+                self._pending_wake.clear()
+                self._pending_thread=threading.Thread(target=self._pending_loop,name='BooksArrangerPendingStart',daemon=True);self._pending_thread.start()
+        self._changed()
+    def cancel_start(self):
+        """Cancel automatic start: the pending start ends; books keep waiting for a press."""
+        with self.lock:self.start_pending=None
+        self._pending_wake.set();self._changed()
+        return self.status()
+    def _pending_loop(self):
+        """The pending start fires with exactly what the Start button does, and nothing else: no window, focus, sound
+        or notification call exists on this path (the server has none). It keeps waiting through another blocker that
+        clears; a blocker that cannot clear ends it."""
+        while True:
+            self._pending_wake.wait(PENDING_POLL);self._pending_wake.clear()
+            with self.lock:
+                pending=self.start_pending
+                if not pending or self.closed:
+                    self.start_pending=None;return
+                if self.thread and self.thread.is_alive():
+                    self.start_pending=None;self._changed();return
+            kind,_=self._current_block()
+            if kind is None:
+                try:
+                    with self.lock:
+                        if self.start_pending is not pending:continue  # cancelled meanwhile
+                        self.start()
+                except ValueError:kind,_=self._current_block()
+                else:
+                    self._changed();return
+            if kind=='running':
+                with self.lock:self.start_pending=None
+                self._changed();return
+            with self.lock:
+                if self.start_pending is not pending:continue
+                if kind in CLEARS and kind==pending['kind']:continue
+                self.start_pending={'kind':kind} if kind in CLEARS else None
+            self._changed()
+            if kind not in CLEARS:return
     def stop(self,force=False):
         with self.lock:
             run=self._run_row()
@@ -371,112 +489,120 @@ class AutomaticProcessing:
             checkpoint['pending']=list(dict.fromkeys(checkpoint.get('pending',[])+checkpoint.get('deferred',[])))
             checkpoint['done']=list(dict.fromkeys(checkpoint.get('done',[])))
             checkpoint['deferred']=[];deferred=checkpoint['deferred']
-            while checkpoint.get('pending') or deferred:
-                if self.stop_event.is_set():raise InterruptedError()
-                if not checkpoint['pending']:
-                    row=None;identity=None;self.current=None;phase='research'
-                    # Let already admitted books and required cleanup drain before waiting.
-                    while not self._idle_jobs():
-                        if self.stop_event.wait(.2):raise InterruptedError()
-                        if self.merge.state()['state']=='Paused':raise InterruptedError()
-                    checkpoint['pending']=list(dict.fromkeys(deferred));deferred.clear()
-                    self._add_current_candidates(checkpoint)
-                    with connect(self.database) as db:
-                        times={r['id']:r['retry_at'] for r in db.execute("SELECT id,retry_at FROM automatic_candidates WHERE state IN ('Waiting for source','Held')")}
-                    next_at=min(times.get(candidate) or self.clock() for candidate in checkpoint['pending'])
-                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint),reason='Waiting for metadata sources; saved research retries automatically.')
-                    self.next_retry_at=next_at
-                    try:
-                        while next_at>self.clock():
-                            if self.stop_event.wait(min(60,next_at-self.clock())):raise InterruptedError()
-                        if self.stop_event.is_set():raise InterruptedError()
-                    finally:self.next_retry_at=None
-                    self._update(id,reason='')
-                identity=checkpoint['pending'][0]
-                try:row=self.merge.reviews._row('Audiobooks',identity)
-                except ValueError:
-                    checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
-                job=self.merge.candidate_status(identity)
-                if job:
-                    if job.get('state')=='Output needs attention':
-                        decision=self.merge.retry_automatic_job(job['job_id'],self.clock())
-                        if decision.get('retryable'):
-                            self._record(row,'Held',{'reasons':['Saved audiobook I/O failure; prior attempt preserved'],'job_retry':decision},decision['retry_at']);deferred.append(identity)
-                    elif job.get('state')=='Audiobook created':self._record(row,'Queued',{'reasons':[]})
-                    checkpoint['pending'].pop(0)
-                    if identity not in checkpoint['done']:checkpoint['done'].append(identity)
-                    self._update(id,checkpoint=json.dumps(checkpoint));continue
-                previous=self._refresh_wait(row,self.candidate(row))
-                if previous and previous['state'] in ('Held','Waiting for source') and previous.get('retry_at') and previous['retry_at']>self.clock():
-                    # Deferred source opportunities stay owned by this authorized worker.
-                    deferred.append(identity)
-                    checkpoint['pending'].pop(0);continue
-                if self.manual_draft(row):
-                    self._record(row,'Held',{'reasons':['Manual draft retained']},self.clock()+300);deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
-                refreshed=self._refresh_observed_sources(row,previous)
-                if refreshed:
-                    compact={k:v for k,v in refreshed.items() if k not in ('row','replacement_ids')}
-                    compact['at_utc']=stamp()
-                    if refreshed['state']=='held':
-                        self._record(row,'Held',{'reasons':[refreshed.get('reason') or 'Observed sources remain unavailable'],'source_refresh':compact},self.clock()+900)
-                        deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
-                    if 'replacement_ids' in refreshed:
-                        self._record(row,'Held',{'reasons':['Refreshed observed sources split into independent candidates'],'source_refresh':compact},self.clock()+900)
-                        checkpoint['pending'].extend(candidate for candidate in refreshed['replacement_ids'] if candidate not in checkpoint['pending'])
-                        checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
-                    row=refreshed['row']
-                    self._record(row,'Pending',{'reasons':[],'source_refresh':compact})
-                    previous=self.candidate(row)
-                self._update(id,checkpoint=json.dumps(checkpoint))
-                self._record(row,'Researching');self._progress(row['title_clue'],'Public sources','Researching work identity')
-                try:
-                    research_failed=True
-                    row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
-                    result=self.research.lookup(row,self.inventory.roots['Audiobooks'],self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
-                except ValueError:
-                    # Unsupported input or malformed public evidence holds only this candidate.
-                    result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
-                research_failed=False
-                if self.stop_event.is_set():raise InterruptedError()
-                deferrals=(previous or {}).get('gap_deferrals',0)
-                if not result.get('reasons') and result.get('gap_wait') and deferrals<GAP_DEFER_LIMIT and not self._idle_jobs():
-                    # The converter has work, so waiting for an optional field costs no throughput.
-                    # Eligible again on the next pass, which starts only once the queue drains.
-                    self._record(row,'Waiting for source',dict(result,reasons=[GAP_DEFER_REASON],wait=None,gap_deferrals=deferrals+1),self.clock())
-                    deferred.append(identity)
-                elif result.get('reasons'):
-                    wait=result.get('wait');state='Waiting for source' if wait else 'Held'
-                    self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)))
-                    deferred.append(identity)
-                else:
-                    try:
-                        fresh,job_id=self.merge.approve_automatic(row,result,self.stop_event,self.research.client)
-                        self._record(fresh,'Queued',result);result['job_id']=job_id
-                    except InterruptedError:raise
-                    except ResearchWait as wait:
-                        if self.stop_event.is_set():raise InterruptedError()
-                        try:fresh=self.merge.reviews._row('Audiobooks',identity)
-                        except ValueError:fresh=row
-                        result['reasons']=['Cover source unavailable'];result['wait']={'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
-                        self._record(fresh,'Waiting for source',result,wait.retry_at);deferred.append(identity)
-                    except (ValueError,OSError) as error:
-                        if self.stop_event.is_set():raise InterruptedError()
-                        try:fresh=self.merge.reviews._row('Audiobooks',identity)
-                        except ValueError:fresh=row
-                        result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
-                checkpoint['pending'].pop(0)
-                if identity not in checkpoint['done']:checkpoint['done'].append(identity)
-                self._update(id,checkpoint=json.dumps(checkpoint))
-            row=None;identity=None;phase='conversion';self.current=None;self._update(id,phase='conversion')
-            while not self._idle_jobs():
-                if self.stop_event.wait(.2):raise InterruptedError()
-                if self.merge.state()['state']=='Paused':raise InterruptedError()
-            if self.stop_event.is_set():raise InterruptedError()
+            while True:
+              while self._take_requeued(checkpoint) or checkpoint.get('pending') or deferred:
+                  if self.stop_event.is_set():raise InterruptedError()
+                  if not checkpoint['pending']:
+                      row=None;identity=None;self.current=None;phase='research'
+                      # Let already admitted books and required cleanup drain before waiting.
+                      while not self._idle_jobs():
+                          if self.stop_event.wait(.2):raise InterruptedError()
+                          if self.merge.state()['state']=='Paused':raise InterruptedError()
+                      checkpoint['pending']=list(dict.fromkeys(deferred));deferred.clear()
+                      self._add_current_candidates(checkpoint)
+                      with connect(self.database) as db:
+                          times={r['id']:r['retry_at'] for r in db.execute("SELECT id,retry_at FROM automatic_candidates WHERE state IN ('Waiting for source','Held')")}
+                      next_at=min(times.get(candidate) or self.clock() for candidate in checkpoint['pending'])
+                      self._update(id,phase='research',checkpoint=json.dumps(checkpoint),reason='Waiting for metadata sources; saved research retries automatically.')
+                      self.next_retry_at=next_at
+                      try:
+                          while next_at>self.clock():
+                              if self.stop_event.wait(min(60,next_at-self.clock())):raise InterruptedError()
+                              if self._requeued:break  # Start over / release: that book is taken within a minute
+                          if self.stop_event.is_set():raise InterruptedError()
+                      finally:self.next_retry_at=None
+                      self._update(id,reason='')
+                  identity=checkpoint['pending'][0]
+                  try:row=self.merge.reviews._row('Audiobooks',identity)
+                  except ValueError:
+                      checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                  job=self.merge.candidate_status(identity)
+                  if job:
+                      if job.get('state')=='Output needs attention':
+                          decision=self.merge.retry_automatic_job(job['job_id'],self.clock())
+                          if decision.get('retryable'):
+                              self._record(row,'Held',{'reasons':['Saved audiobook I/O failure; prior attempt preserved'],'job_retry':decision},decision['retry_at']);deferred.append(identity)
+                      elif job.get('state')=='Audiobook created':self._record(row,'Queued',{'reasons':[]})
+                      checkpoint['pending'].pop(0)
+                      if identity not in checkpoint['done']:checkpoint['done'].append(identity)
+                      self._update(id,checkpoint=json.dumps(checkpoint));continue
+                  previous=self._refresh_wait(row,self.candidate(row))
+                  if previous and previous['state'] in ('Held','Waiting for source') and previous.get('retry_at') and previous['retry_at']>self.clock():
+                      # Deferred source opportunities stay owned by this authorized worker.
+                      deferred.append(identity)
+                      checkpoint['pending'].pop(0);continue
+                  if self.manual_draft(row):
+                      self._record(row,'Held',{'reasons':['Manual draft retained']},self.clock()+300);deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                  refreshed=self._refresh_observed_sources(row,previous)
+                  if refreshed:
+                      compact={k:v for k,v in refreshed.items() if k not in ('row','replacement_ids')}
+                      compact['at_utc']=stamp()
+                      if refreshed['state']=='held':
+                          self._record(row,'Held',{'reasons':[refreshed.get('reason') or 'Observed sources remain unavailable'],'source_refresh':compact},self.clock()+900)
+                          deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                      if 'replacement_ids' in refreshed:
+                          self._record(row,'Held',{'reasons':['Refreshed observed sources split into independent candidates'],'source_refresh':compact},self.clock()+900)
+                          checkpoint['pending'].extend(candidate for candidate in refreshed['replacement_ids'] if candidate not in checkpoint['pending'])
+                          checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                      row=refreshed['row']
+                      self._record(row,'Pending',{'reasons':[],'source_refresh':compact})
+                      previous=self.candidate(row)
+                  self._update(id,checkpoint=json.dumps(checkpoint))
+                  self._record(row,'Researching');self._progress(row['title_clue'],'Public sources','Researching work identity')
+                  try:
+                      research_failed=True
+                      row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
+                      result=self.research.lookup(row,self.inventory.roots['Audiobooks'],self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
+                  except ValueError:
+                      # Unsupported input or malformed public evidence holds only this candidate.
+                      result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
+                  research_failed=False
+                  if self.stop_event.is_set():raise InterruptedError()
+                  deferrals=(previous or {}).get('gap_deferrals',0)
+                  if not result.get('reasons') and result.get('gap_wait') and deferrals<GAP_DEFER_LIMIT and not self._idle_jobs():
+                      # The converter has work, so waiting for an optional field costs no throughput.
+                      # Eligible again on the next pass, which starts only once the queue drains.
+                      self._record(row,'Waiting for source',dict(result,reasons=[GAP_DEFER_REASON],wait=None,gap_deferrals=deferrals+1),self.clock())
+                      deferred.append(identity)
+                  elif result.get('reasons'):
+                      wait=result.get('wait');state='Waiting for source' if wait else 'Held'
+                      self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)))
+                      deferred.append(identity)
+                  else:
+                      try:
+                          fresh,job_id=self.merge.approve_automatic(row,result,self.stop_event,self.research.client)
+                          self._record(fresh,'Queued',result);result['job_id']=job_id
+                      except InterruptedError:raise
+                      except ResearchWait as wait:
+                          if self.stop_event.is_set():raise InterruptedError()
+                          try:fresh=self.merge.reviews._row('Audiobooks',identity)
+                          except ValueError:fresh=row
+                          result['reasons']=['Cover source unavailable'];result['wait']={'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
+                          self._record(fresh,'Waiting for source',result,wait.retry_at);deferred.append(identity)
+                      except (ValueError,OSError) as error:
+                          if self.stop_event.is_set():raise InterruptedError()
+                          try:fresh=self.merge.reviews._row('Audiobooks',identity)
+                          except ValueError:fresh=row
+                          result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
+                  checkpoint['pending'].pop(0)
+                  if identity not in checkpoint['done']:checkpoint['done'].append(identity)
+                  self._update(id,checkpoint=json.dumps(checkpoint))
+              row=None;identity=None;phase='conversion';self.current=None;self._update(id,phase='conversion')
+              while not self._idle_jobs():
+                  if self.stop_event.wait(.2):raise InterruptedError()
+                  if self.merge.state()['state']=='Paused':raise InterruptedError()
+                  if self._requeued:break  # a book put back meanwhile is researched in this run
+              if self.stop_event.is_set():raise InterruptedError()
+              with self.lock:
+                  if not self._requeued:self._closing_run=True
+              if self._closing_run:break
+              phase='research';self._update(id,phase='research',checkpoint=json.dumps(checkpoint))
             if self.merge.state().get('failed'):
                 self._update(id,state='Needs attention',phase='conversion',reason='Some audiobook jobs need attention; verified outputs and pending work are preserved')
             else:self._update(id,state='Completed',phase='completed',reason='')
         except InterruptedError:
             self.current=None;self.next_retry_at=None;self.live_checkpoint=None
+            if isinstance(checkpoint,dict) and checkpoint.get('pending') is not None:self._take_requeued(checkpoint)  # saved, so continuing reaches them
             # Report Paused only after both scan and owned converter/cleanup have stopped.
             self.inventory.stop();self.merge.pause()
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)

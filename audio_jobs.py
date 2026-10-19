@@ -76,7 +76,11 @@ def failure_cause(row, journal):
 
 
 class RetryRefused(ValueError):
-    """A Retry request that changed nothing. Its message is shown to the user exactly as written."""
+    """A Retry request that changed nothing. Its message is shown to the user exactly as written. cause, when given, is
+    a typed reason the page picks its words from (Start over, release and Clear working files), never the message."""
+    def __init__(self, message, cause=None):
+        super().__init__(message)
+        self.cause = cause
 
 
 # Retry copy shown in the app: one fact, then the fix.
@@ -100,6 +104,8 @@ REPAIR_SCANNING = 'Scanning is running. Repair when it stops.'
 REPAIR_CLOSING = 'Books Arranger is closing. Repair after it restarts.'
 RETRY_ALL_RUNNING = 'Retry all is already running.'
 RETRY_ALL_NONE = 'No books can be retried right now.'
+# Rows Start over set aside (book_restart) are kept, never listed: not a book's current job, not attention, not counted.
+CURRENT = 'job_id NOT IN (SELECT job_id FROM audio_job_set_aside)'
 
 
 # Finished repair checks by (job id, manifest hash, preservation module sha256), filled from the catalog's
@@ -266,6 +272,9 @@ class AudioJobs:
             # Status reads look jobs up by state and a book's newest job by candidate; both scanned every manifest.
             db.execute('CREATE INDEX IF NOT EXISTS audio_jobs_state ON audio_jobs(state)')
             db.execute("CREATE INDEX IF NOT EXISTS audio_jobs_candidate ON audio_jobs(json_extract(manifest,'$.candidate_id'),created,job_id)")
+            # Start over (book_restart): a set-aside job is kept as it is but is no longer its book's current job.
+            import book_restart
+            db.execute(book_restart.SET_ASIDE)
         self._recover()
 
     def _db(self):
@@ -457,7 +466,7 @@ class AudioJobs:
                     actual=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],)).fetchone()
                     if not actual or dict(actual)!=parent or parent['state']!='needs attention' or parent['output'] or 'publication_intent' in json.loads(parent['journal']):
                         raise ValueError('Failed parent changed; repair admission cancelled')
-                    latest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC,job_id DESC LIMIT 1",(frozen['candidate_id'],)).fetchone()
+                    latest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC,job_id DESC LIMIT 1",(frozen['candidate_id'],)).fetchone()
                     if not latest or latest[0]!=parent['job_id']:raise ValueError('Candidate already has newer work')
                     current_group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(frozen['candidate_id'],)).fetchone()
                     current_context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(frozen['candidate_id'],)).fetchone()
@@ -532,9 +541,9 @@ class AudioJobs:
         books through the candidate index instead of reading every manifest."""
         newest = {}
         if candidates is None:
-            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs ORDER BY created, job_id")
+            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")
         else:
-            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IN (SELECT value FROM json_each(?)) ORDER BY created, job_id",
+            found = db.execute("SELECT job_id, json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IN (SELECT value FROM json_each(?)) AND " + CURRENT + " ORDER BY created, job_id",
                                (json.dumps(sorted(str(c) for c in candidates if c is not None)),))
         for job_id, candidate in found:
             newest[candidate] = job_id
@@ -571,7 +580,7 @@ class AudioJobs:
                       (row['job_id'],) if child else (row['job_id'], row['job_id'])).fetchone():
             return None  # E5
         newest = latest.get(manifest.get('candidate_id')) if latest is not None else (lambda found: found[0] if found else None)(db.execute(
-            "SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone())
+            "SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND " + CURRENT + " ORDER BY created DESC, job_id DESC LIMIT 1", (manifest.get('candidate_id'),)).fetchone())
         if newest != row['job_id']:
             return None  # E6
         if row['attempt_id'] and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_failure_history'").fetchone():
@@ -841,7 +850,7 @@ class AudioJobs:
             verifier.join(min(timeout, 5))
 
     def status(self):
-        rows = self._rows()
+        rows = self._rows("SELECT * FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")
         counts = {"queued": 0, "completed": 0, "failed": 0}
         current = None
         for row in rows:

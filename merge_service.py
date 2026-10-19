@@ -201,6 +201,7 @@ class MergeService:
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
+        self.automatic.on_change=self.invalidate_status  # a pending start that fires, changes kind or ends shows on the next poll
         from series_backfill import SeriesBackfill
         self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
@@ -932,6 +933,7 @@ class MergeService:
         summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
         unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
         if unchecked:self._check_repairs(unchecked)
+        self._startover_facts(summary)
         stage=getattr(self,'stage_root',None)
         for job_id,item in summary.items():
             refusal=item.get('readmission')
@@ -940,6 +942,225 @@ class MergeService:
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
+
+    def _startover_facts(self,summary):
+        """A current source_changed refusal (fix 'review') offers Start over (RefusedRetry follow-ups 2-4): 'startover'
+        is what automatic processing will do with the book once the job is set aside, 'automatic' or 'manual_draft' (it
+        holds a book with a saved review), the same read-only test the pass runs; 'release_ok' is true when the combined
+        "Start over and let the app handle it" applies (one included .m4b, a saved review, no editing lease now)."""
+        wanted=[job_id for job_id,item in summary.items() if isinstance(item.get('readmission'),dict) and item['readmission'].get('state')=='refused'
+                and item['readmission'].get('cause')=='source_changed' and item['readmission'].get('stale') is not True]
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not wanted or not database:return
+        import book_restart
+        try:
+            with connect(database) as db:
+                for job_id in wanted:
+                    found=db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE job_id=?",(job_id,)).fetchone()
+                    facts=book_restart.book(db,found[0]) if found else None
+                    summary[job_id]['startover']='manual_draft' if facts and facts['manual_draft'] else 'automatic'
+                    summary[job_id]['release_ok']=book_restart.release_ok(facts)
+        except (sqlite3.Error,ValueError):
+            for job_id in wanted:summary[job_id].setdefault('startover','automatic');summary[job_id].setdefault('release_ok',False)
+
+    STARTOVER_REFUSED='Start over was not accepted. Check the status above.'
+    STARTOVER_NOTHING='Start over was not accepted. Nothing was changed.'
+    EDITING='This book is being edited. Finish editing, then try again.'
+    RELEASE_BUSY="The review wasn't discarded. The app is busy; try again in a moment."
+    RELEASE_REFUSED="The review wasn't discarded. Select the row to read why."
+
+    def _restart_locks(self):
+        """The review and grouping locks every review write takes (a save, the automatic approval)."""
+        stack=contextlib.ExitStack()
+        for lock in (getattr(getattr(self,'reviews',None),'lock',None),getattr(getattr(self,'inventory',None),'group_lock',None)):
+            if lock is not None:stack.enter_context(lock)
+        return stack
+
+    def start_over(self,library,identity,revision,job_id,discard_review=False,server_closing=False):
+        """Start over (Sergei, 2026-10-19): set a stuck job aside and send the book back to automatic processing, which
+        is started if it is not running (O9; a blocker that clears by itself leaves a pending start, O12).
+
+        Set aside only the book's newest job that needs attention, has no output and no publication intent, with a
+        current source_changed refusal, on the book revision as read: a compare-and-set on the whole job row and the
+        book's revision in one transaction. The job row, its journal and its working files are kept. discard_review
+        (O13, "Start over and let the app handle it") also discards the saved review in the same transaction: all or
+        nothing. RetryRefused (typed cause) means nothing changed."""
+        import book_restart,m4b_readmission
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,CURRENT
+        from sqlite_retry import transaction
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        refused=self.STARTOVER_NOTHING if discard_review else self.STARTOVER_REFUSED
+        if self.draining:raise RetryRefused(refused,'closing')
+        entry=self.attention_summary([job_id]).get(job_id)
+        if not entry or entry.get('startover') not in ('automatic','manual_draft'):raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
+        rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not rows or json.loads(rows[0]['manifest']).get('candidate_id')!=identity:raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
+        row=rows[0]
+        def write(db):
+            book_restart.ensure(db)
+            current=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not current or dict(current)!=row or row['state']!='needs attention' or row['output'] or 'publication_intent' in json.loads(row['journal']):
+                raise book_restart.Changed('Job changed')
+            if book_restart.current_job(db,identity)!=job_id:raise book_restart.Changed('Newer work')
+            refusal=m4b_readmission.describe(db,job_id)
+            if not refusal or refusal.get('state')!='refused' or refusal.get('cause')!='source_changed' or refusal.get('stale') is True:
+                raise book_restart.Changed('Refusal changed')
+            facts=book_restart.book(db,identity)
+            if not facts or facts['revision']!=revision:raise book_restart.Changed('Book changed')
+            current_revision=revision
+            if discard_review:
+                if facts['lease']:raise book_restart.Editing('Editing')
+                if not book_restart.release_ok(facts):raise book_restart.Changed('Release not allowed')
+                current_revision=book_restart.discard_review(db,facts)
+            book_restart.set_aside(db,job_id,identity,revision)
+            book_restart.reset_automatic(db,identity,current_revision,facts['fingerprint'])
+            book_restart.mark(db,identity,'start_over',job_id)
+        try:
+            with self._restart_locks():transaction(self.inventory.database,write)
+        except book_restart.Editing:raise RetryRefused(self.EDITING,'editing') from None
+        except book_restart.Changed:raise RetryRefused(RETRY_BOOK_CHANGED,'changed') from None
+        except sqlite3.Error:raise RetryRefused(refused,'busy') from None
+        return self._after_restart(identity,server_closing)|{'set_aside':True,'released':bool(discard_review),'job_id':job_id}
+
+    def _after_restart(self,identity,server_closing=False):
+        """Put the book back on the pass and start it; the answer carries the outcome and the refreshed row."""
+        import book_restart
+        automatic=getattr(self,'automatic',None)
+        visit=automatic.requeue(identity) if automatic is not None and hasattr(automatic,'requeue') else 'this_run'
+        started=automatic.request_start(server_closing=server_closing) if automatic is not None and hasattr(automatic,'request_start') else None
+        run=automatic._run_row() if automatic is not None and hasattr(automatic,'_run_row') else None
+        try:
+            with connect(self.inventory.database) as db:
+                book_restart.set_visit(db,identity,visit,run['id'] if run else None)
+                facts=book_restart.book(db,identity)
+        except sqlite3.Error:facts=None
+        self.invalidate_status()
+        answer={'outcome':'manual_draft' if facts and facts['manual_draft'] else 'automatic','row':self.restart_row(identity)}
+        if started is not None:answer['pass']=dict(started,visit=visit)
+        return answer
+
+    def release(self,library,identity,revision,server_closing=False):
+        """"Let the app handle it" (O7, option A): discard a held single-M4B book's saved review (hand edits included) and
+        its context and any editing lease, reset its automatic record, put it back on the pass and start the pass. Its
+        sources and any older job are kept. RetryRefused with cause 'changed', 'editing' or 'busy' changes nothing."""
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        self._release_one(identity,revision)
+        return self._after_restart(identity,server_closing)|{'released':True}
+
+    def _release_one(self,identity,revision):
+        import book_restart
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        from sqlite_retry import transaction
+        if self.draining:raise RetryRefused(self.RELEASE_REFUSED,'closing')
+        def write(db):
+            facts=book_restart.book(db,identity)
+            if not facts or facts['revision']!=revision:raise book_restart.Changed('Book changed')
+            if facts['lease']:raise book_restart.Editing('Editing')
+            if book_restart.current_job(db,identity) is not None:raise book_restart.Changed('Book has a job')
+            held=db.execute("SELECT result FROM automatic_candidates WHERE id=? AND revision=? AND fingerprint=? AND state='Held'",
+                            (identity,facts['revision'],facts['fingerprint'])).fetchone() if book_restart._table(db,'automatic_candidates') else None
+            try:reasons=json.loads(held[0]).get('reasons') or [] if held else []
+            except (TypeError,ValueError,AttributeError):reasons=[]
+            if book_restart.MANUAL_DRAFT not in reasons or not book_restart.release_ok(facts):raise book_restart.Changed('Not held for a saved review')
+            current_revision=book_restart.discard_review(db,facts)
+            book_restart.reset_automatic(db,identity,current_revision,facts['fingerprint'])
+            book_restart.mark(db,identity,'release')
+        try:
+            with self._restart_locks():transaction(self.inventory.database,write)
+        except book_restart.Editing:raise RetryRefused(self.EDITING,'editing') from None
+        except book_restart.Changed:raise RetryRefused(RETRY_BOOK_CHANGED,'changed') from None
+        except sqlite3.Error:raise RetryRefused(self.RELEASE_BUSY,'busy') from None
+
+    def release_selected(self,library,items,server_closing=False):
+        """"Let the app handle selected" (O14): each book through its own compare-and-set (a book that changed is refused
+        alone), then automatic processing is started once, after the last book. {'released', 'refused':[{id, cause}],
+        'pass'}."""
+        from audio_jobs import RetryRefused
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        released,refused=[],[]
+        for identity,revision in items:
+            try:self._release_one(identity,revision)
+            except RetryRefused as error:refused.append({'id':identity,'cause':error.cause or 'unknown'});continue
+            released.append(identity)
+        automatic=getattr(self,'automatic',None)
+        visits={identity:automatic.requeue(identity) for identity in released} if automatic is not None else {}
+        started=automatic.request_start(server_closing=server_closing) if released and automatic is not None else None
+        if released:
+            import book_restart
+            run=automatic._run_row() if automatic is not None else None
+            try:
+                with connect(self.inventory.database) as db:
+                    for identity,visit in visits.items():book_restart.set_visit(db,identity,visit,run['id'] if run else None)
+            except sqlite3.Error:pass
+            self.invalidate_status()
+        answer={'released':len(released),'refused':refused}
+        if started is not None:answer['pass']=dict(started,visit='next_run' if 'next_run' in visits.values() else 'this_run')
+        return answer
+
+    def restart_row(self,identity):
+        """The book's refreshed list row (marker, release and job included), for a press answer; None if unavailable."""
+        reviews=getattr(self,'reviews',None)
+        if not hasattr(reviews,'enrich'):return None
+        try:row=reviews.enrich(reviews._row('Audiobooks',identity),check_sources=False)
+        except (ValueError,OSError,sqlite3.Error):return None
+        self.restart_view([row])
+        return row
+
+    def restart_view(self,rows):
+        """List rows (enriched candidates), in place: 'restart' (the Started over marker's state, Follow-up 3 section 2),
+        'release' {'allowed'} for a book the pass holds for its saved review (section 4.2), and automatic 'hold' /
+        'lease' for that hold. Read-only."""
+        import book_restart
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not rows or not database:return rows
+        automatic=getattr(self,'automatic',None)
+        run=automatic._run_row() if automatic is not None and hasattr(automatic,'_run_row') else None
+        try:
+            with connect(database) as db:
+                marks=book_restart.markers(db)
+                for row in rows:
+                    auto=row.get('automatic') if isinstance(row.get('automatic'),dict) else None
+                    held=bool(auto and auto.get('state')=='Held' and book_restart.MANUAL_DRAFT in (auto.get('reasons') or []))
+                    marker=marks.get(row.get('id'))
+                    if not held and not marker:continue
+                    facts=book_restart.book(db,row['id'])
+                    job=(row.get('creation') or {}).get('job')
+                    if held:
+                        auto['hold']='manual_draft';auto['lease']=bool(facts and facts['lease'])
+                        row['release']={'allowed':bool(facts and facts['saved_review'] and facts['single_m4b'] and not facts['lease'] and not job)}
+                    value=book_restart.state(marker,job.get('state') if isinstance(job,dict) else None,auto,facts,run) if marker else None
+                    if value:row['restart']=value
+        except sqlite3.Error:pass
+        return rows
+
+    def restart_index(self,jobs,index=None):
+        """(order, counts) for the Started over filter: {book id: sort rank} for every marked book that automatic
+        processing has not queued yet, and the global counts the summary line needs (waiting, working, held, failed,
+        next_run, release). jobs: {book id: current job as the book list reads it}."""
+        import book_restart
+        counts={'waiting':0,'working':0,'held':0,'failed':0,'next_run':0,'release':0}
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return {},counts
+        automatic=getattr(self,'automatic',None)
+        index=index if index is not None else automatic.index() if automatic is not None and hasattr(automatic,'index') else {}
+        run=automatic._run_row() if automatic is not None and hasattr(automatic,'_run_row') else None
+        order={}
+        with connect(database) as db:
+            for identity,marker in book_restart.markers(db).items():
+                current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?'+(' AND superseded=0' if 'superseded' in book_restart._columns(db,'book_groups') else ''),(identity,)).fetchone()
+                if current is None:continue
+                item=index.get(identity)
+                auto=item if item and item.get('revision')==current[0] and item.get('fingerprint')==current[1] else None
+                job=jobs.get(identity)
+                value=book_restart.state(marker,job.get('state') if isinstance(job,dict) else None,auto,None,run)
+                if not value or value['state']=='queued':continue
+                order[identity]=book_restart.ORDER[value['state']]
+                counts[value['state']]+=1
+                if value.get('visit')=='next_run':counts['next_run']+=1
+                if value.get('hold')=='manual_draft':
+                    facts=book_restart.book(db,identity)
+                    if facts and facts['saved_review'] and facts['single_m4b'] and not facts['lease']:counts['release']+=1
+        return order,counts
 
     KEPT_CHANGED=('Original bytes differ from reviewed sources',)  # a content mismatch: keep-case (A)
 
@@ -1112,12 +1333,12 @@ class MergeService:
         RetryRefused(RETRY_BOOK_CHANGED) when it does hold but the book or revision on screen is not this
         job's, or the book already has newer work: nothing is admitted from an outdated view.
         """
-        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,CURRENT
         rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
         if not rows or not check(rows[0]):return None
         manifest=json.loads(rows[0]['manifest'])
         with self.jobs._db() as db:
-            newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? ORDER BY created DESC, job_id DESC LIMIT 1",(manifest.get('candidate_id'),)).fetchone()
+            newest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC, job_id DESC LIMIT 1",(manifest.get('candidate_id'),)).fetchone()
         if manifest.get('candidate_id')!=identity or manifest.get('candidate_revision')!=revision or not newest or newest[0]!=job_id:
             raise RetryRefused(RETRY_BOOK_CHANGED)
         return rows[0]
