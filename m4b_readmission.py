@@ -4,10 +4,13 @@ A click is accepted at any time and stored durably in click order. Between books
 worker asks next_job(): the request at the head is admitted through the existing proof route
 (plan() proof, frozen-review compare-and-swap, one child per failed parent, the per-book
 working-file gate) and its child job runs next, before the normal queue. Several clicks run in
-click order. A refused admission is recorded for that book only and the next request proceeds.
-Nothing here proves media, opens sources or changes a job row; it only orders and records.
+click order. A refused admission is recorded for that book only, with a typed cause (retry_refusal),
+and the next request proceeds. Nothing here proves media, opens sources or changes a job row; it only
+orders and records.
 """
 import json
+
+import retry_refusal
 
 KINDS=('retry','repair')
 SCHEMA=('CREATE TABLE IF NOT EXISTS m4b_readmissions(parent_job_id TEXT PRIMARY KEY,kind TEXT NOT NULL,'
@@ -48,11 +51,15 @@ def describe(db,job_id):
     for position,(parent,kind,state,child) in enumerate(order,1):
         if job_id in (parent,child):
             return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child}
-    row=db.execute('SELECT parent_job_id,kind,state,child_job_id,detail FROM m4b_readmissions WHERE parent_job_id=? OR child_job_id=?',(job_id,job_id)).fetchone()
+    row=db.execute('SELECT parent_job_id,kind,state,child_job_id,detail,updated FROM m4b_readmissions WHERE parent_job_id=? OR child_job_id=?',(job_id,job_id)).fetchone()
     if not row:return None
-    parent,kind,state,child,detail=tuple(row)
+    parent,kind,state,child,detail,updated=tuple(row)
     value={'queued_next':False,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child}
-    if state=='refused':value['accepted']=False;value['reason']=detail
+    if state=='refused':
+        # Typed refusal: cause and fix decide what the row offers; reason is the raw text for Technical detail.
+        refusal=retry_refusal.parse(detail,updated)
+        value.update(accepted=False,reason=refusal['reason'],cause=refusal['cause'],fix=refusal['fix'],app_version=refusal['app_version'],
+                     key=refusal['key'],at=refusal['at'],stale=retry_refusal.stale(refusal))
     return value
 
 def status(db,job_ids):
@@ -65,7 +72,8 @@ def next_job(db_factory,admit,now):
     child job id that must run next, or None (normal queue order).
 
     admit(parent_job_id, kind) runs the existing proof route and returns {'requeued': True,
-    'job_id': child}, {'requeued': False, 'reason': ...} (refused for that book only), or
+    'job_id': child}, {'requeued': False, 'reason': ..., 'cause': ...} (refused for that book only; cause is
+    a retry_refusal.FIXES key, 'unknown' when absent), or
     {'defer': True} (not now, e.g. a library scan; the request keeps its place and the normal
     queue runs one book). InterruptedError leaves the request queued for the next resume.
     """
@@ -76,12 +84,17 @@ def next_job(db_factory,admit,now):
         if state=='admitted':return child
         try:result=admit(parent,kind)
         except InterruptedError:raise
-        except Exception as error:result={'requeued':False,'reason':str(error)}
+        except Exception as error:result={'requeued':False,'reason':str(error),'cause':'unknown'}
         if result.get('defer'):return None
         with db_factory() as db:
             if result.get('requeued') and result.get('job_id'):
                 db.execute("UPDATE m4b_readmissions SET state='admitted',child_job_id=?,detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
                     (result['job_id'],json.dumps({'reason':result.get('reason','')}),_stamp(now),parent))
             else:
+                refusal=retry_refusal.record(result.get('reason'),result.get('cause'),_stamp(now))
                 db.execute("UPDATE m4b_readmissions SET state='refused',detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
-                    (str(result.get('reason') or 'Admission refused'),_stamp(now),parent))
+                    (json.dumps(refusal,ensure_ascii=False),_stamp(now),parent))
+
+def convert_legacy(db):
+    """Startup, once per catalog: v0.18.0 plain-text refusals become typed records (retry_refusal.legacy)."""
+    return retry_refusal.convert_legacy(db)

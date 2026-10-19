@@ -23,7 +23,7 @@ const settle=(ms=20)=>new Promise(resolve=>setTimeout(resolve,ms));
   const u=attentionRow('u','unsupported',{retry:undefined}),n=attentionRow('n','retry',{retry:{allowed:false,reason:'Not yet.'}});
   context.fixture=[a,b,r,u,n];run('rows=fixture.map(row=>({...row}));for(const row of rows)selectedBooks.set(row.id,row.revision);renderRows(true);batchCounts();controls()');
   // The selection speaks of retries here, not of review; "Queue selected books" gives way to "Retry selected (N)".
-  assert.equal(get('batch-count').textContent,'5 selected · 3 can be retried or repaired');
+  assert.equal(get('batch-count').textContent,'5 selected · 3 can be retried or repaired · 2 left out','the ticked books that will not be queued are counted (RefusedRetry spec)');
   assert.equal(get('queue-books').hidden,true);assert.equal(get('retry-selected').hidden,false);assert.equal(get('retry-selected').textContent,'Retry selected (3)');assert.equal(get('retry-selected').disabled,false);
   assert.equal(get('batch-help').textContent,'Only selected books that can be retried or repaired are queued.');
   // One confirmation, Cancel first, Esc cancels and nothing is sent.

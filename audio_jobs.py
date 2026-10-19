@@ -10,6 +10,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from sqlite_retry import transaction
+import retry_refusal
 
 
 STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
@@ -204,6 +205,7 @@ class AudioJobs:
         self.after_completed = None
         self.before_attempt = None
         self.next_priority = None  # m4b_readmission hook: the job id that runs next, or None
+        self.m4b_working_clear = None  # MergeService hook: job id -> True once no prior audio working files remain
         self.after_attempt = None
         self.on_working_hold = None
         self.on_space_hold = None
@@ -548,6 +550,14 @@ class AudioJobs:
             return False, RETRY_SPACE
         return True, ''
 
+    def _m4b_working_clear(self, job_id):
+        """Read-only: the listing that refused a Retry/Repair on working files now passes. False without the hook."""
+        check = self.m4b_working_clear
+        try:
+            return bool(check and check(job_id) is True)
+        except Exception:
+            return False
+
     def attention_summary(self, admission_clear=None, space_ready=None, job_ids=None, retry=True):
         """{job_id: {'group', 'cause', 'originals_untouched', 'retry'}} for every job that needs attention.
 
@@ -556,6 +566,9 @@ class AudioJobs:
         can preserve: Retry can resolve it), 'unsupported' (an M4B the app cannot preserve: a validation
         refusal of a single M4B/M4A source), or 'other'. Structural, never the English reason. Only each
         book's newest job is listed: a superseded failure (say, the parent of a retry child) is history.
+        A current refused Retry/Repair record (m4b_readmission, typed by retry_refusal) moves the row to
+        'unsupported' (cause unsupported_file) or 'other', and its fix alone decides the offer: none for
+        'update' and 'review', a live working-file check for 'wait', always for 'user'.
         retry=False skips the read-only E8 checks (counts on every poll); with retry=True, 'retry' or
         'repair' holds {'allowed', 'reason'}. 'repair_check': the M4B repair check has not run yet.
         """
@@ -603,15 +616,30 @@ class AudioJobs:
                 group, cause = 'unsupported', None
             else:
                 group, cause = 'other', None
+            # A refused M4B Retry/Repair (RefusedRetry spec): while its record is current, the row leaves Can retry
+            # and Can repair, and only its fix decides what it offers. A stale record (the deciding code changed) is
+            # ignored here, so the book is offered again; the next refusal stores a new record.
+            refusal = readmission.get(row['job_id'])
+            refusal = refusal if isinstance(refusal, dict) and refusal.get('state') == 'refused' and refusal.get('stale') is not True else None
+            if refusal:
+                group, cause = retry_refusal.group(refusal), None
             value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
-            if group == 'repair':
+            if refusal:
+                if retry and refusal.get('fix') in ('wait', 'user'):
+                    clear = refusal['fix'] == 'user' or self._m4b_working_clear(row['job_id'])
+                    value['repair' if refusal.get('kind') == 'repair' else 'retry'] = {'allowed': clear, 'reason': '' if clear else RETRY_FILES_PRESENT}
+                if repair and repair.get('state') == 'unchecked':
+                    value['repair_check'] = True
+            elif group == 'repair':
                 value['damage'] = [{key: item[key] for key in ('kind', 'padding', 'removed', 'frames', 'replaced_ticks', 'timescale', 'description') if key in item}
                                    for item in repair.get('repairs') or [] if isinstance(item, dict)]
                 if retry:
                     value['repair'] = {'allowed': True, 'reason': ''}  # accepted now, runs right after the current book
             elif repair and repair.get('state') == 'unchecked':
                 value['repair_check'] = True
-            if retry and group == 'retry' and shapes[row['job_id']] is None:
+            if refusal:
+                pass  # its fix decided the offer above: none for 'update' and 'review'
+            elif retry and group == 'retry' and shapes[row['job_id']] is None:
                 value['retry'] = {'allowed': True, 'reason': ''}  # M4B: accepted now, runs right after the current book
             elif retry and group == 'retry' and admission_clear is not None:
                 allowed, reason = self._retry_allowed(row, cause, shapes[row['job_id']], admission_clear, space_ready)

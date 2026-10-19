@@ -89,11 +89,14 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(run('queuedNextText({position:3})'),'Queued — runs after 3 books');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,current_job_id:null}}');assert.equal(run('queuedNextText({position:1})'),'Queued — runs next','nothing running');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,current_job_id:"job-running"}}');
-  // A refusal found by the worker is shown for that book, and Retry is offered again.
-  const refusedM4b={...m4b,creation:{...m4b.creation,job:{...m4b.creation.job,readmission:{accepted:false,queued_next:false,reason:'Failed M4B retained: Reviewed candidate changed during source proof',kind:'retry',state:'refused'}}}};
+  // A refusal found by the worker is shown for that book in the UI's own words, keyed by its typed cause
+  // (RefusedRetry spec 2026-10-19); a review change offers no Retry, and the raw text stays in Technical detail.
+  const refusedM4b={...m4b,creation:{...m4b.creation,job:{...m4b.creation.job,retry:undefined,attention:{group:'other',cause:null,originals_untouched:true},readmission:{accepted:false,queued_next:false,reason:'Failed M4B retained: Reviewed candidate changed during source proof',kind:'retry',state:'refused',cause:'source_changed',fix:'review',stale:false}}}};
   context.fixture=[refusedM4b];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');m4bRow=get('inventory').children[0];
-  assert.equal(statusCell(m4bRow).children[0].textContent,'Retry was refused: Failed M4B retained: Reviewed candidate changed during source proof');assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
-  assert.equal(actionButtons(m4bRow)[0].textContent,'Retry');
+  assert.equal(statusCell(m4bRow).textContent,'Stopped — review changed');
+  assert.equal(statusCell(m4bRow).children[0].textContent,"Retry was refused: the book's review or source files changed. Review the book again.");assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
+  assert.ok(![...actionButtons(m4bRow)].some(button=>button.textContent==='Retry'),'no Retry that cannot work');
+  assert.match(statusCell(m4bRow).title,/^Technical detail: Failed M4B retained: Reviewed candidate changed during source proof; earlier failure: /);
   // A queued child outside the attention list says the same.
   assert.equal(status(blocked({status:'Queued',creation:{status:'Queued',reasons:[],job:{job_id:'child-m',state:'Queued',stage:'queued',reason:'',readmission:{accepted:true,queued_next:true,position:2,kind:'repair',state:'admitted'}}}})),'Queued — runs after 2 books');
   // v0.16.8: the press got no reply but it landed: the page asks the server and shows Queued, never an error.

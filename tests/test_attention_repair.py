@@ -66,6 +66,7 @@ class Base(unittest.TestCase):
         s.working=SimpleNamespace(admission_clear=lambda row:None);s.stage_root=self.l.base/'staging';s.stage_root.mkdir(exist_ok=True)
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None);s.automatic=SimpleNamespace(stop_event=threading.Event())
         s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'});s._resume_later=Mock()
+        s.jobs.m4b_working_clear=s._m4b_working_clear  # as MergeService.__init__ wires it
         return s
 
     def summary(self,service=None):return (service or self.service()).attention_summary()
@@ -172,11 +173,13 @@ class RetryRouteTests(Base):
         s.resume.assert_not_called();self.assertNotIn('readmission',s.attention_summary()[job_id])
         reason='Prior audio working files need verified disposal before another source copy'
         s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)
-        with patch.object(MergeService,'_retry_preserved_m4b',return_value={'retryable':True,'requeued':False,'reason':reason}):
+        with patch.object(MergeService,'_retry_preserved_m4b',return_value={'retryable':True,'requeued':False,'reason':reason,'cause':'working_files'}):
             self.assertIsNone(s._next_m4b_readmission(),'the normal queue runs')
         value=s.attention_summary()[job_id]
-        self.assertEqual({key:value['readmission'].get(key) for key in ('queued_next','accepted','reason')},{'queued_next':False,'accepted':False,'reason':reason})
-        self.assertEqual(value['retry'],{'allowed':True,'reason':''},'the button comes back');self.assertEqual(self.l.row(job_id),before)
+        self.assertEqual({key:value['readmission'].get(key) for key in ('queued_next','accepted','reason','cause','fix','stale')},
+                         {'queued_next':False,'accepted':False,'reason':reason,'cause':'working_files','fix':'wait','stale':False})
+        # RefusedRetry spec: a 'wait' refusal re-enables Retry once the working files are gone (none here).
+        self.assertEqual(value['group'],'other');self.assertEqual(value['retry'],{'allowed':True,'reason':''},'the button comes back');self.assertEqual(self.l.row(job_id),before)
         self.assertTrue(s.retry_blocked_job('Audiobooks',manifest['candidate_id'],1,job_id)['queued_next'],'a refused book can be pressed again')
         # During a library scan the request keeps its place for the next resume.
         s.inventory.worker=ALIVE
@@ -233,7 +236,7 @@ class RepairAdmissionTests(Base):
 
     def test_an_intact_source_has_no_repair(self):
         job_id,_=self.l.failed(REFUSED,fixture(),name='intact')
-        self.assertEqual(self.s._repair_damaged_m4b(self.l.row(job_id),100,in_worker=True),{'requeued':False,'reason':'No provable repair: the source is intact'})
+        self.assertEqual(self.s._repair_damaged_m4b(self.l.row(job_id),100,in_worker=True),{'requeued':False,'reason':'No provable repair: the source is intact','cause':'unknown'})
 
     def test_button_request_rules(self):
         identity=self.manifest['candidate_id']

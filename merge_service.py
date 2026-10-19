@@ -185,6 +185,12 @@ class MergeService:
         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
         self.jobs.before_attempt=self.working.admit
         self.jobs.next_priority=self._next_m4b_readmission
+        self.jobs.m4b_working_clear=self._m4b_working_clear  # live check for a Retry refused on working files
+        try:
+            # Once per catalog: v0.18.0 plain-text Retry/Repair refusals become typed records (RefusedRetry spec).
+            import m4b_readmission
+            with connect(inventory.database) as db:m4b_readmission.convert_legacy(db)
+        except sqlite3.Error:pass  # unconverted records read the same way (retry_refusal.parse); the next start converts them
         self.jobs.after_attempt=self.working.terminal
         from recovery_retention import RecoveryRetention
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
@@ -1069,6 +1075,7 @@ class MergeService:
         if self._m4b_parent(job_id,identity,revision,failed_m4b_retry.eligible) is not None:
             # An M4B failure this version can preserve: accepted at once, even while a book converts. The worker
             # admits it right after that book through the proof route (m4b_readmission); a refusal is per book.
+            self._m4b_refusal_gate(job_id)
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
         # v0.16.12: no review lock here. It is held while the start-of-book check re-reads a whole book, so a
@@ -1115,8 +1122,23 @@ class MergeService:
             result=self.jobs.retry_admission_hold(job_id,identity,revision,self.working.admission_clear,self._space_ready,review=False)
             queued=self._queue_next_same(job_id,'repair');self._resume_later()
             return result|queued
+        self._m4b_refusal_gate(job_id)
         result=self._request_m4b_readmission(job_id,'repair');self._resume_later()  # runs right after the current book
         return {'job_id':job_id,'requeued':False,**result}
+
+    def _m4b_refusal_gate(self,job_id):
+        """An M4B Retry/Repair press for a book whose refusal is current follows that refusal's fix, the same rule as
+        the row (audio_jobs.attention_summary): 'update' and 'review' offer no control, so a press from an outdated
+        view is refused and queues nothing; 'wait' only once the working files are gone; 'user' always. A stale
+        refusal (the deciding code changed) does not block: one attempt per book per build."""
+        import m4b_readmission
+        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED,RETRY_FILES_PRESENT
+        with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
+        if not value or value.get('state')!='refused' or value.get('stale') is True or value.get('fix')=='user':return
+        if value.get('fix')=='wait':
+            if self._m4b_working_clear(job_id):return
+            raise RetryRefused(RETRY_FILES_PRESENT)
+        raise RetryRefused(RETRY_BOOK_CHANGED)
 
     def _already_accepted(self,job_id,identity):
         """A repeated Retry/Repair press for a book already accepted (v0.16.12): the same answer, and nothing new
@@ -1214,6 +1236,7 @@ class MergeService:
             manifest=json.loads(rows[0]['manifest'])
             try:
                 if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),failed_m4b_retry.eligible) is not None:
+                    self._m4b_refusal_gate(job_id)
                     return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
                 with self._review_boundary():
                     self.jobs.retry_admission_hold(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),self.working.admission_clear,self._space_ready,review=False)
@@ -1432,7 +1455,7 @@ class MergeService:
         """Worker thread, between books: the same proof routes as an idle click, minus the worker-busy refusal."""
         if self.inventory.worker and self.inventory.worker.is_alive():return {'defer':True}  # after the scan
         parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(parent_job_id,))),None)
-        if not parent:return {'requeued':False,'reason':'The failed book is no longer in the queue.'}
+        if not parent:return {'requeued':False,'reason':'The failed book is no longer in the queue.','cause':'unknown'}
         if kind=='retry':return self._retry_preserved_m4b(parent,time.time(),in_worker=True)
         return self._repair_damaged_m4b(parent,time.time(),in_worker=True)
 
@@ -1449,37 +1472,68 @@ class MergeService:
         if result.get('requeued') and resume:self.resume()
         return result
 
+    def _m4b_prior_audio(self,job_id):
+        """True when an earlier attempt of this job still holds audio working files (.m4b/.wav). A read-only
+        listing; ValueError/OSError when the folders cannot be proven. Old attempts predate receipt-owned
+        lifecycle cleanup: M4B Retry and Repair never clone a source while that debt is retained."""
+        job_root=self.stage_root/job_id
+        with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
+            if job_root.exists():
+                with DirectoryBoundary(job_root.anchor,job_root):
+                    for attempt in job_root.iterdir():
+                        if not attempt.is_dir():continue
+                        with DirectoryBoundary(attempt.anchor,attempt):
+                            if any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):return True
+        return False
+
+    def _m4b_working_clear(self,job_id):
+        """Live check for a Retry/Repair refused on working files (fix 'wait'), run on status reads: the same
+        listing as _m4b_prior_audio but holding no directory handle, so it never stands in the way of the working-
+        file cleanup it waits for. A link or junction reads as not clear. Admission re-runs the strict listing."""
+        job_root=self.stage_root/job_id
+        try:
+            if not job_root.exists():return True
+            if job_root.is_symlink() or os.path.isjunction(job_root):return False
+            for attempt in job_root.iterdir():
+                if attempt.is_symlink() or os.path.isjunction(attempt):return False
+                if attempt.is_dir() and any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):return False
+            return True
+        except OSError:return False
+
+    def _m4b_working_refusal(self,job_id):
+        """The typed refusal when prior working files block an M4B Retry/Repair, else None."""
+        try:
+            if self._m4b_prior_audio(job_id):
+                return {'reason':'Prior audio working files need verified disposal before another source copy','cause':'working_files'}
+        except (ValueError,OSError) as error:
+            return {'reason':'Prior working-file ownership requires attention: '+str(error),'cause':'file_problem'}
+        return None
+
     def _retry_preserved_m4b(self,parent,now,in_worker=False):
-        """Admit one new child, retaining the failed parent's entire durable row."""
+        """Admit one new child, retaining the failed parent's entire durable row.
+
+        A refusal carries a typed cause (retry_refusal.FIXES) from the step that raised it, never from its text.
+        """
         from failed_m4b_retry import bind,profile_proof
         result={'retryable':True,'retry_at':now+3600,'requeued':False}
         if not in_worker and self.jobs._thread and self.jobs._thread.is_alive():return result
         manifest=json.loads(parent['manifest'])
-        # Old attempts predate receipt-owned lifecycle cleanup. Never clone their
-        # compressed source or generated candidates while that debt is retained.
-        job_root=self.stage_root/parent['job_id']
-        try:
-            with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
-                if job_root.exists():
-                    with DirectoryBoundary(job_root.anchor,job_root):
-                        for attempt in job_root.iterdir():
-                            if not attempt.is_dir():continue
-                            with DirectoryBoundary(attempt.anchor,attempt):
-                                if any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):
-                                    return result|{'reason':'Prior audio working files need verified disposal before another source copy'}
-        except (ValueError,OSError) as error:
-            return result|{'reason':'Prior working-file ownership requires attention: '+str(error)}
+        blocked=self._m4b_working_refusal(parent['job_id'])
+        if blocked:return result|blocked
         from source_cleanup import single_stream
         import m4b_preservation
+        step='file_problem'  # the cause of a ValueError raised by the step running now
         try:
             with contextlib.ExitStack() as holds:
                 source=ordinary(manifest['sources'][0]['path'])
                 holds.enter_context(DirectoryBoundary(manifest['root'],source.parent))
                 held=holds.enter_context(VerifiedFile(source));single_stream(source)
                 if held.facts()['links']!=1:raise ValueError('Source alias is not eligible for repaired admission')
+                step='unknown'
                 module=Path(m4b_preservation.__file__).absolute()
                 holds.enter_context(DirectoryBoundary(module.anchor,module.parent))
                 module_file=holds.enter_context(VerifiedFile(module))
+                step='source_changed'
                 with connect(self.inventory.database) as db:
                     group_before=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
                     context_before=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
@@ -1487,22 +1541,30 @@ class MergeService:
                 fresh=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,stop=self.automatic.stop_event)
                 title=fresh['metadata'].get('title')
                 if not isinstance(title,str) or not title:raise ValueError('Approved title unavailable')
+                step='file_problem'
                 with source.open('rb') as reader:
                     def read_at(offset,count):
                         if self.automatic.stop_event.is_set():raise InterruptedError('Automatic processing stopped')
                         reader.seek(offset);return reader.read(count)
-                    profile=m4b_preservation.plan(held.facts()['size'],read_at,{'title':title},None)
+                    try:profile=m4b_preservation.plan(held.facts()['size'],read_at,{'title':title},None)
+                    except m4b_preservation.Refused:
+                        step='unsupported_file';raise
+                step='unknown'
                 proof=profile_proof(profile,module_file.sha256())
+                step='source_changed'
                 fresh=bind(parent,fresh,proof)
                 with connect(self.inventory.database) as db:
                     group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(fresh['candidate_id'],)).fetchone()
                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(fresh['candidate_id'],)).fetchone()
                 if not group or not context or tuple(group)!=tuple(group_before) or tuple(context)!=tuple(context_before):raise ValueError('Reviewed candidate changed during source proof')
+                step='unknown'
                 child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)))
                 return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'reason':'Source-preserving M4B repair admitted as new work'}
         except InterruptedError:raise
-        except (ValueError,OSError,sqlite3.Error) as error:
-            return result|{'reason':'Failed M4B retained: '+str(error)}
+        except (OSError,sqlite3.Error) as error:
+            return result|{'reason':'Failed M4B retained: '+str(error),'cause':'file_problem'}
+        except ValueError as error:
+            return result|{'reason':'Failed M4B retained: '+str(error),'cause':step}
 
     @operation
     def repair_damaged_m4b(self,job_id,now):
@@ -1523,50 +1585,50 @@ class MergeService:
         from source_cleanup import single_stream
         from audio_jobs import REPAIR_WORKER_BUSY
         result={'requeued':False}
-        if not m4b_repair.eligible(parent):return result|{'reason':'This book cannot be repaired.'}
+        if not m4b_repair.eligible(parent):return result|{'reason':'This book cannot be repaired.','cause':'unknown'}
         if not in_worker and self.jobs._thread and self.jobs._thread.is_alive():return result|{'reason':REPAIR_WORKER_BUSY}
         manifest=json.loads(parent['manifest'])
-        job_root=self.stage_root/parent['job_id']
-        try:
-            with DirectoryBoundary(self.stage_root.anchor,self.stage_root):
-                if job_root.exists():
-                    with DirectoryBoundary(job_root.anchor,job_root):
-                        for attempt in job_root.iterdir():
-                            if not attempt.is_dir():continue
-                            with DirectoryBoundary(attempt.anchor,attempt):
-                                if any(p.suffix.lower() in {'.m4b','.wav'} for p in attempt.iterdir()):
-                                    return result|{'reason':'Prior audio working files need verified disposal before another source copy'}
-        except (ValueError,OSError) as error:
-            return result|{'reason':'Prior working-file ownership requires attention: '+str(error)}
+        blocked=self._m4b_working_refusal(parent['job_id'])
+        if blocked:return result|blocked
+        step='file_problem'  # the cause of a ValueError raised by the step running now (typed, never from the text)
         try:
             with contextlib.ExitStack() as holds:
                 source=ordinary(manifest['sources'][0]['path'])
                 holds.enter_context(DirectoryBoundary(manifest['root'],source.parent))
                 held=holds.enter_context(VerifiedFile(source));single_stream(source)
                 if held.facts()['links']!=1:raise ValueError('Source alias is not eligible for repaired admission')
+                step='unknown'
                 module=Path(m4b_preservation.__file__).absolute()
                 holds.enter_context(DirectoryBoundary(module.anchor,module.parent))
                 module_file=holds.enter_context(VerifiedFile(module))
+                step='source_changed'
                 with connect(self.inventory.database) as db:
                     group_before=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
                     context_before=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
                 if not group_before or not context_before:raise ValueError('Reviewed candidate unavailable')
+                step='file_problem'
                 with source.open('rb') as reader:
                     def read_at(offset,count):
                         reader.seek(offset);return reader.read(count)
                     diagnosis=m4b_repair.diagnose(held.facts()['size'],read_at)
                 if diagnosis['state']!='repairable':
-                    return result|{'reason':'No provable repair: '+(diagnosis['reason'] or 'the source is intact')}
+                    # refused: the preservation proof refuses the file even with every repair; intact: nothing to repair.
+                    return result|{'reason':'No provable repair: '+(diagnosis['reason'] or 'the source is intact'),
+                                   'cause':'unsupported_file' if diagnosis['state']=='refused' else 'unknown'}
+                step='source_changed'
                 fresh=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,stop=self.automatic.stop_event)
                 fresh=m4b_repair.bind(parent,fresh,diagnosis,module_file.sha256())
                 with connect(self.inventory.database) as db:
                     group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(fresh['candidate_id'],)).fetchone()
                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(fresh['candidate_id'],)).fetchone()
                 if not group or not context or tuple(group)!=tuple(group_before) or tuple(context)!=tuple(context_before):raise ValueError('Reviewed candidate changed during source proof')
+                step='unknown'
                 child=self.jobs.enqueue(fresh,repair_context=(parent,tuple(group),tuple(context)))
         except InterruptedError:raise
-        except (ValueError,OSError,sqlite3.Error) as error:
-            return result|{'reason':'Repair refused: '+str(error)}
+        except (OSError,sqlite3.Error) as error:
+            return result|{'reason':'Repair refused: '+str(error),'cause':'file_problem'}
+        except ValueError as error:
+            return result|{'reason':'Repair refused: '+str(error),'cause':step}
         if not in_worker:self.resume()
         return result|{'requeued':True,'job_id':child,'parent_job_id':parent['job_id'],'damage':diagnosis['damage'],'reason':'Repair admitted as new work'}
 

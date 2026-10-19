@@ -185,7 +185,11 @@ function select(row, reset) {
 }
 function renderRows(force=false) {
   const focused=document.activeElement;
-  if(!force && focused && $('inventory').contains?.(focused)){const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
+  if(!force && focused && $('inventory').contains?.(focused)){
+    // Focus stays put: the attention rows take the fresh data in place (updateRowRetries), so a refusal that lands
+    // while Sergei is on a row shows there, and a removed Retry hands focus to the row's next button.
+    for(const entry of rowRetries.values()){const fresh=rows.find(row=>row.path===entry.row.path);if(fresh)entry.row=fresh;}
+    const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const body=$('inventory'); body.replaceChildren();
   $('inventory-head').replaceChildren();const heading=document.createElement('tr');
   for(const label of view==='candidates'?['Select','Title clue','Author / reader clues','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;heading.append(th);}$('inventory-head').append(heading);
@@ -197,9 +201,9 @@ function renderRows(force=false) {
     for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;
       if(row.kind==='candidate' && index===3){
         const attention=attentionText(row);
-        if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null});}
+        if(attention){const hint=node('p',attention.hint,'field-help attention-hint');hint.classList.toggle('retry-refused',!!attention.warn);td.append(hint);td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null,cell:td});}
         // A book waiting its turn after Retry keeps its disabled "Queued" button (v0.16.12).
-        else if(readmissionOf(row)?.queued_next===true){const hint=node('p',QUEUED_HINT,'field-help attention-hint');td.append(hint);rowRetries.set(row.path,{row,hint,button:null});}
+        else if(readmissionOf(row)?.queued_next===true){const hint=node('p',QUEUED_HINT,'field-help attention-hint');td.append(hint);rowRetries.set(row.path,{row,hint,button:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
@@ -253,10 +257,22 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
-    else if(heldRow && !rows.some(item=>item.path===heldRow.path))rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);
+    else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
     const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
     return true;
   }).finally(()=>{if(ticket===listTicket)listPending='';});
+}
+// The pressed book left this list (its child was admitted, or the worker refused it). Re-read it once, so the row held
+// in place shows what is true now, never a stale "Queued" (RefusedRetry spec section 3, "While on screen").
+async function recheckHeld(held){
+  held.rechecked=true;
+  try{
+    const page=await request(`/api/inventory?library=Audiobooks&offset=0&search=${encodeURIComponent(held.row.title_clue || '')}&view=candidates&status=all`);
+    const fresh=(page.rows || []).find(item=>item.id===held.row.id);
+    if(!fresh || heldRow!==held || ended)return;
+    const row={...fresh,path:fresh.id,kind:'candidate',library:held.row.library};held.row=row;
+    if(rows.some(item=>item.path===row.path)){rows=rows.map(item=>item.path===row.path?row:item);renderRows(false);}
+  }catch(error){}  // the held row keeps its last known state until the list changes
 }
 async function refresh(force=false) {
   if (ended) return false;
@@ -389,7 +405,7 @@ async function inspectorCover(cover,holder,sequence){const caption=node('p',cove
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
-function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));$('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retrySelectable().length} can be retried or repaired`:`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
+function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,leftOut=selected.length-retryable;$('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retryable} can be retried or repaired`+(leftOut>0?` · ${leftOut} left out`:''):`${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`;$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
@@ -553,7 +569,9 @@ function rowAction(row){
   const queued=readmissionOf(row);
   if(queued?.queued_next===true)return {...rowActions.queued,data:{allowed:false,reason:queuedNextText(queued)}};
   if(!queued && pressedFor(row)?.state==='checking' && retryPending?.key!==retryKey(row))return {...rowActions.queued,label:'Checking…',pending:'Checking…',data:{allowed:false,reason:'Checking whether the press went through…'}};
-  const attention=attentionOf(row),[kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair'?['repair',job.repair]:['retry',job.retry];
+  // A refusal that only an app update or a new review clears offers no control (no disabled ghost); the hint says why.
+  const refusal=refusalCurrent(row);if(refusal && (refusalFix(refusal)==='update' || refusalFix(refusal)==='review'))return null;
+  const attention=attentionOf(row),[kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
   return data && typeof data==='object' && typeof data.allowed==='boolean'?{...rowActions[kind],data}:null;
 }
 // Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
@@ -586,8 +604,9 @@ function updateRetry(){
   if(retryResult && retryResult.key!==key)retryResult=null;
   const pending=!!key && retryPending?.key===key,copy=pending?rowActions[retryPending.kind]:action;
   const shown=pending || !!action;
+  const lost=!shown && !block.hidden && document.activeElement===button;
   block.hidden=!shown;
-  if(!shown){if(note.textContent)note.textContent='';note.hidden=true;return;}
+  if(!shown){if(note.textContent)note.textContent='';note.hidden=true;if(lost)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
   const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning()?'busy':retry.allowed===true?'ready':'unavailable';
   const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
   const title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
@@ -617,6 +636,11 @@ function retryMode(row){
   if(busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning())return 'busy';
   return retry?.allowed===true?'ready':'unavailable';
 }
+// The status cell's own text, beside its hint: changed in place, so the row is not rebuilt under focus.
+function statusInPlace(cell,text){const first=cell?.firstChild;if(first && first.nodeType===3 && first.nodeValue!==text)first.nodeValue=text;}
+// Focus never falls to the page: the first remaining button of the same row (RefusedRetry spec section 3).
+function nextRowButton(buttons,except){return [...(buttons?.children || [])].find(item=>item!==except && item.type==='button' && !item.hidden && !item.disabled && !item.classList?.contains?.('row-retry')) || null;}
+function rowButtons(path){const tr=[...($('inventory').children || [])].find(item=>item.dataset?.path===path),cell=tr?.children?.[tr.children.length-1];return cell?.children?.[0] || null;}
 function updateRowRetries(){
   for(const entry of rowRetries.values()){
     const row=entry.row,attention=attentionText(row),key=retryKey(row),mode=entry.button?retryMode(row):null,action=rowAction(row),retry=action?.data;
@@ -628,8 +652,11 @@ function updateRowRetries(){
     if(retryResult && retryResult.key===key && mode!=='pending'){hint=retryResult.text;warn=true;}
     if(entry.hint.textContent!==hint)entry.hint.textContent=hint;
     entry.hint.classList.toggle('retry-refused',warn);
+    statusInPlace(entry.cell,candidateStatus(row));if(attention && entry.cell && entry.cell.title!==technicalText(row))entry.cell.title=technicalText(row);
     if(!entry.button)continue;
-    entry.button.hidden=!action && mode!=='pending';if(entry.button.hidden)continue;
+    const gone=!action && mode!=='pending',hadFocus=gone && document.activeElement===entry.button;
+    entry.button.hidden=gone;if(hadFocus)nextRowButton(entry.button.parentElement,entry.button)?.focus?.({preventScroll:true});
+    if(entry.button.hidden)continue;
     const label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
     if(entry.button.textContent!==label)entry.button.textContent=label;
     if(entry.button.title!==title)entry.button.title=title;
@@ -929,6 +956,20 @@ const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],s
   unsupported:["Can't convert — M4B not supported",'Nothing to do for now.'],other:['Stopped — see details','Select the row to read why.'],
   changed:['Original changed since checked','Recovery copies are kept until you decide.'],missing:['Audiobook missing','Recovery copies are kept until you decide.'],
   unverified:['Audiobook not verified','Recovery copies are kept until you decide.']};
+// A refused Retry or Repair (RefusedRetry spec, 2026-10-19). The server sends a typed cause and fix; these are the
+// words. Behaviour comes from the fix, copy from the cause, never from the server's English reason. A missing or
+// unknown cause reads as 'unknown', whose fix is 'update'.
+const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
+  working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. Retry after they are cleared.'],
+  source_changed:['Stopped — review changed',"the book's review or source files changed. Review the book again."],
+  file_problem:['Stopped — file problem',"the app couldn't read or write a file. Check the folder, then retry."],
+  unknown:['Stopped — retry refused','']};
+const refusalFixes={unsupported_file:'update',working_files:'wait',source_changed:'review',file_problem:'user',unknown:'update'};
+function refusalOf(row){const value=readmissionOf(row);return value?.accepted===false && value.queued_next!==true?value:null;}
+function refusalCause(refusal){return Object.hasOwn(refusalCopy,refusal?.cause)?refusal.cause:'unknown';}
+function refusalFix(refusal){return ['update','wait','review','user'].includes(refusal?.fix)?refusal.fix:refusalFixes[refusalCause(refusal)];}
+// The refusal still decides the row: not stale (the deciding code has not changed since).
+function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refusal.stale!==true?refusal:null;}
 // A stopped job, or a completed book whose recovery copies the 0.16.8 rule keeps (changed or audiobook).
 function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
 function attentionText(row){
@@ -936,7 +977,17 @@ function attentionText(row){
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
-  if(readmission?.accepted===false && typeof readmission.reason==='string' && readmission.reason)return {status,hint:(readmission.kind==='repair'?'Repair':'Retry')+' was refused: '+readmission.reason,warn:true};
+  const refusal=refusalOf(row),verb=refusal?.kind==='repair'?'Repair':'Retry';
+  if(refusal && refusal.stale!==true){
+    const cause=refusalCause(refusal),[refusedStatus,text]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
+    return {status:refusedStatus,hint:text?`${verb} was refused: ${text}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true};
+  }
+  // Stale: the app was updated since the refusal; it is information, not an obstacle (muted). A book whose read-only
+  // check refuses again under this build is in M4B not supported and reads as that group.
+  if(refusal && a.group!=='unsupported'){
+    const version=typeof refusal.app_version==='string' && refusal.app_version?refusal.app_version:'';
+    return {status:'Stopped — try again',hint:version?`${verb} was refused in v${version}; the app was updated since. It may work now.`:`${verb} was refused before the app was updated. It may work now.`};
+  }
   return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint};
 }
 // What is wrong, then what Repair does; and, once queued or done, what it patched. Keyed by the patch kind.
@@ -956,7 +1007,10 @@ function repairedText(repaired){
 function technicalText(row){
   const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
   const raw=keptGroup(attention) && typeof attention.reason==='string' && attention.reason?attention.reason:job.reason;
-  return 'Technical detail: '+(raw || 'Unavailable')+(details.length?' — '+details.join(' '):'');
+  // A refused Retry/Repair keeps both facts for support: the refusal, then the earlier failure (either alone if single).
+  const refusal=refusalOf(row),refused=typeof refusal?.reason==='string'?refusal.reason:'';
+  const facts=refused && raw?`${refused}; earlier failure: ${raw}`:refused || raw;
+  return 'Technical detail: '+(facts || 'Unavailable')+(details.length?' — '+details.join(' '):'');
 }
 function candidateStatus(row){
   const attention=attentionText(row);if(attention)return attention.status;
