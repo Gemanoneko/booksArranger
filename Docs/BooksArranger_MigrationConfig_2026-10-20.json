@@ -1,0 +1,14 @@
+{
+  "schema": "books-reviewed-migration-config-v1",
+  "database": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/data/inventory.sqlite3",
+  "roots": {
+    "Audiobooks": "Z:\\Audiobooks",
+    "Podcasts": "Z:\\Audiobooks\\Podcasts",
+    "Ebooks": "Y:\\Books\\Books"
+  },
+  "audiobook_sources": [
+    "Z:\\Audiobooks",
+    "Z:\\OLD_Audiobooks"
+  ],
+  "audiobook_output_root": "Z:\\Audiobooks Sorted"
+}

@@ -1,0 +1,122 @@
+{
+  "schema": "books-user-routing-decisions-v1",
+  "decisions": [
+    {
+      "actor": "user",
+      "candidate_id": "91406f8a-2c9f-4887-9176-5214eff8c405",
+      "fingerprint": "5c7dcf4be189dc551e2892e1fdc277216230dd19776158ad6a4eb0c46f621bd0",
+      "review_sha256": "e88fff979be6967be8f733f797b21e670c18339436e0c4a26f64103bc6b8fc23",
+      "values": {
+        "universe": "Warhammer 40K"
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "31668414-237c-456d-8fab-e79a2b0cbece",
+      "fingerprint": "82f49b7f2f12c009dd6349e63273f8dce7c2a34697aca74f768005fd5186f7d5",
+      "review_sha256": "4f8a0b981452d98eab677db66382317eff1d74cbea628a0965105aad91c4f661",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "236c7bee-8c4d-440c-9b68-a31002176769",
+      "fingerprint": "d719479db4b8fc02dcc616623b1c25f83241a063bbd99c0e1b5edc3dee437aa9",
+      "review_sha256": "d8fcc6fc75a5e9d5258864d1a11956580571f0c06598a617902c474737522fc1",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "3b1601a0-4cf1-46e8-ae02-fee58728218d",
+      "fingerprint": "658eb7fa864dbf8ece5eb60aba3883edac3009098dbea9fd7c63cadbbbd978d9",
+      "review_sha256": "78a4f65d26ec0a05f954b1e93b89318ad795f60b6fde094bbb9d3ecc789184e7",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "1418d2e0-eb30-4874-8575-21e2bb58358c",
+      "fingerprint": "a2f17d860251e381b4fe844f310712cf954b58df5443c6eb3d21fc4b5af2d72f",
+      "review_sha256": "d6ac5a79a981c9294371c88177c684a79b629057dcc526a160874ada4029ce0f",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "fb04364a-249f-489c-981c-8454ea7903a5",
+      "fingerprint": "d3e77196365ea022cd0aaf77ef97ce402d0bcaf2fe4dad95999fc74d409c06f9",
+      "review_sha256": "2a180978645ee09c21c164e2baa430ab1e7b32c6d8e4239b091fa0027715be35",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "ec6be5c6-5aa3-4a94-a3b0-5f061de95a56",
+      "fingerprint": "d1c48b67a56abe990ea007ee458bf37a33d68a3a5919ec1dab3b00d259f268f8",
+      "review_sha256": "9ced90d95f5f9542074864ca66d1dc5614b731524496e775cbb0b984437f6663",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "c154603e-ba62-4d02-9d5c-48d9df80533a",
+      "fingerprint": "b1c63d633a2262ffb62300ee3ffffec0052cb62d9c85d44b26e688e318f7bd82",
+      "review_sha256": "57e0b2aaf9996ee3ca1fbcd4cb57acd4be9b37f26cae836b9094f787e3df90c0",
+      "values": {
+        "universe": "Warhammer 40K",
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "11934811-6c30-42ad-bd38-d94aafeb7f65",
+      "fingerprint": "124f8f10fa9ec35d01a0482fa4672919b221252547e8cd792e9ce2e058b61581",
+      "review_sha256": "eab92f6156c961ef95844c43e363f6dcea3a75e6b211e13dc8fd010134c6da75",
+      "values": {
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "f354f26a-7d9d-4a54-90bf-1d1c6aa98d51",
+      "fingerprint": "a20365f7aee473c85ca26e3aed44a25423504327a6a2e8bbc54d666e180ed965",
+      "review_sha256": "77fa36d4ddd3a1773c613f301b0c95670da190a7d2ab3256d971f50a9cd23b04",
+      "values": {
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    },
+    {
+      "actor": "user",
+      "candidate_id": "a5602c97-4c79-41f1-87f2-9ee9590bc1d4",
+      "fingerprint": "394d7f62f67408697dccbc305f96430c3b82b34f6d11b2e9afb3249da1838957",
+      "review_sha256": "3d43eb0c68f609c61171e61ddf04f0909d93ffd8b7d6b99b9322fdb876c250a0",
+      "values": {
+        "multi_author": true
+      },
+      "evidence": "Sergei explicitly confirmed these exact recorded cycles and folders on 2026-10-20; UX decision pin fcbb444. Snapshot measured08:03–08:07UTC must still match after drain."
+    }
+  ]
+}
