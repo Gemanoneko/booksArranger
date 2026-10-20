@@ -2,7 +2,7 @@
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {fileURLToPath} from 'node:url';
 import {runOwned} from 'file:///C:/Antigravity%20Projects/Studio%20Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs';
 import {createEngineeringOwner,validateOwnedResult,validateNativeSnapshot,NODE} from './engineering-owner.mjs';
-import {Leases} from './build-worker.mjs';
+import {Leases,requireSameDirectoryBirth} from './build-worker.mjs';
 import {validatePreparation,createOwnerIdConsumer,validateFixtureConsolePolicy,fixtureConsolePolicyRecord,decodeFixtureConsoleFacts,validateInnerFixtureImages,createFixtureCompanionScope,closeFixtureResources} from './fixture-owner-ids.mjs';
 import {acquireConsoleCompanion} from './console-companion.mjs';import {createReadonlyConsoleApi} from './console-companion-collector.mjs';
 import {MAX_DIAGNOSTIC_BYTES,fixtureInnerRemaining,describeError,evidenceSnapshot,persistDiagnostic,captureFailed} from './diagnostic-capture.mjs';import {engineeringOwnerChecks} from './engineering-owner-checks.mjs';
@@ -10,6 +10,51 @@ export const CASES=['pure-rejected-handle-and-query-faults','actual-nested-owner
 const SOURCE='C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1/scripts/qa-native',CHILD=SOURCE+'/native-fixture-child.mjs';
 const SHARED='C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared',KOFFI='C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi';
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex'),same=(a,b)=>path.win32.resolve(a).toLowerCase()===path.win32.resolve(b).toLowerCase();const need=(v,m)=>{if(!v)throw Error(m);};
+
+/** Fixed namespace case. Injected boundaries are PURE developer controls, never argv authority. */
+export function namespaceFixture({io,fixtureRoot,deadline,makeLeases=()=>new Leases(deadline),fsOps=fs}){
+ const container=path.win32.join(fixtureRoot,'namespace-case'),branch=path.win32.join(container,'branch'),leaf=path.win32.join(branch,'leaf');
+ const movedHeld=path.win32.join(container,'branch-moved-while-held'),original=path.win32.join(container,'branch-original');
+ const normalized=p=>path.win32.resolve(p).toLowerCase();
+ const paths={container,branch,leaf,moved_while_held:movedHeld,original};
+ let stage='paths',proof=[],phaseCloseReturned=false,phaseCloseCount=0,heldError=null,observed=null;
+ const untouched=()=>{const prefix=normalized(container);for(const p of io.parents.keys())need(normalized(p)!==prefix&&!normalized(p).startsWith(prefix+'\\'),'Long-lived IO acquired isolated namespace');};
+ const errorRecord=error=>{const out={};for(const key of ['name','message','code','errno','syscall','path','dest']){const d=Object.getOwnPropertyDescriptor(error,key);if(d&&Object.hasOwn(d,'value')){const v=d.value;if(typeof v==='string')out[key]=v.length<=2048?v:'[overbound error string]';else if(typeof v==='number'&&Number.isSafeInteger(v))out[key]=v;}}return out;};
+ try{
+  for(const p of Object.values(paths))need(p.length<=259,'Namespace ordinary path bound');untouched();
+  const phase=makeLeases();
+  try{
+   stage='birth';phase.ancestry(container);phase.createDirectory(fixtureRoot,'namespace-case');phase.createDirectory(container,'branch');phase.createDirectory(branch,'leaf');
+   proof=phase.directoryProof();need(Array.isArray(proof)&&proof.length<=256,'Bounded original namespace proof');
+   for(const p of [fixtureRoot,container,branch,leaf])need(proof.filter(x=>normalized(x.path)===normalized(p)).length===1,'Incomplete original namespace proof');
+   for(const item of proof){requireSameDirectoryBirth(item.facts,item.facts);need(item.facts.file_id128!=='0'.repeat(32),'Missing original full128 identity');}
+   untouched();stage='held-rename';let denied=false;
+   try{fsOps.renameSync(branch,movedHeld);}catch(error){heldError=errorRecord(error);denied=['EPERM','EACCES','EBUSY'].includes(error.code);if(!denied)throw error;}
+   need(denied,'Held native directory allowed rename');
+  }finally{
+   const phaseStage=stage;stage='phase-teardown';phaseCloseCount=phase.handles.length;phase.teardown();phaseCloseReturned=true;stage=phaseStage;
+  }
+  untouched();need(phaseCloseReturned,'Phase checked teardown required');stage='unheld-rename';fsOps.renameSync(branch,original);
+  untouched();stage='replacement-birth';fsOps.mkdirSync(branch);untouched();
+  const replacement=makeLeases();let rejected=false;
+  try{
+   stage='replacement-open';replacement.ancestry(branch);const h=replacement.retain(branch,true);observed=replacement.directoryIdentity(h);
+   const expected=proof.find(x=>normalized(x.path)===normalized(branch)).facts;
+   // Self comparisons validate BOTH facts before the one deliberately failing original-branch comparison.
+   requireSameDirectoryBirth(expected,expected);requireSameDirectoryBirth(observed,observed);
+   need(observed.file_id128!=='0'.repeat(32),'Missing replacement full128 identity');
+   need(['volume64','file_id128','creation_ticks'].some(key=>observed[key]!==expected[key]),'Replacement branch retained original native birth');
+   stage='replacement-identity';try{requireSameDirectoryBirth(observed,expected);}catch(error){need(error instanceof Error&&error.message==='Original creation-owned directory replaced or proof malformed','Unexpected original-branch comparison failure');rejected=true;}
+   need(rejected,'Replacement branch adopted');
+  }finally{stage='replacement-teardown';replacement.teardown();}
+  untouched();stage='complete';return {held_rename_denied:true,replaced_ancestor_refused:true,proof,isolated_paths:paths,phase_checked_close:true,phase_handle_count:phaseCloseCount,replacement_branch_facts:observed};
+ }catch(error){
+  const record={schema:'books-namespace-fixture-failure-v1',authoritative:false,stage,paths,original_proof:proof,phase_teardown_returned:phaseCloseReturned,phase_handle_count:phaseCloseCount,held_rename_error:heldError,replacement_branch_facts:observed,error:errorRecord(error),long_lived_parent_paths:[...io.parents.keys()]};
+  try{need(record.long_lived_parent_paths.length<=256&&record.long_lived_parent_paths.every(p=>typeof p==='string'&&p.length<=259),'Namespace diagnostic path quota');need(Buffer.byteLength(JSON.stringify(record))<=131072,'Namespace diagnostic byte quota');io.writeRecord(fixtureRoot+'/evidence/namespace-failure.json',record);}catch(captureError){throw new AggregateError([error,captureError],'Namespace case failed and bounded diagnostic could not be saved');}
+  throw error;
+ }
+}
+
 export async function fixtureController(argv){
  need(argv.length===8&&argv[0]==='--plan'&&argv[2]==='--plan-sha'&&argv[4]==='--deadline'&&argv[6]==='--outer-owner','Exact fixed fixture arguments');const deadline=Number(argv[5]),outerId=argv[7];need(Number.isSafeInteger(deadline)&&deadline>Date.now()&&deadline<=Date.now()+600000,'Same outer deadline');
  const io=new Leases(deadline);let innerUncertain=false,journal=null,companion=null;try{
@@ -45,8 +90,7 @@ export async function fixtureController(argv){
   const nested=await owned('nested-final');need((nested.out.match(/short-leaf-final/g)||[]).length===8&&nested.out.includes('root-stdout-final')&&nested.err.includes('root-stderr-final'),'Lost final/inherited pipe bytes');mark(CASES[1],'NATIVE',{observed:runs.at(-1).evidence.native.identity.observed.length,scope:'Jobactive0 + retained signals, not all-ever-member'});
   io.writeBytesNew(plan.fixture_root+'/lease.txt',Buffer.from('held private fixture input\n'));const lingering=await owned('linger-root');need(lingering.out.includes('linger-root-final')&&lingering.out.includes('linger-lease-denied-final'),'Lingering descendant not held/drained');mark(CASES[2],'NATIVE',{held_until_inner_zero:true});
   // Only deliberate private fixture namespaces are renamed/replaced. No source/runtime/root substitution.
-  const phase=new Leases(deadline);let proof;try{phase.ancestry(plan.fixture_root+'/branch');phase.createDirectory(plan.fixture_root,'branch');phase.createDirectory(plan.fixture_root+'/branch','leaf');proof=phase.directoryProof();need(proof.every(x=>x.facts.file_id128!=='0'.repeat(32)&&x.facts.creation_ticks!=='0'),'Missing full128/birth native identities');let blocked=false;try{fs.renameSync(plan.fixture_root+'/branch',plan.fixture_root+'/branch-moved-while-held');}catch(error){blocked=['EPERM','EACCES','EBUSY'].includes(error.code);}need(blocked,'Held native directory allowed rename');}finally{phase.teardown();}
-  fs.renameSync(plan.fixture_root+'/branch',plan.fixture_root+'/branch-original');fs.mkdirSync(plan.fixture_root+'/branch');const replacement=new Leases(deadline);let rejected=false;try{replacement.rejoinDirectories(proof);}catch{rejected=true;}finally{replacement.teardown();}need(rejected,'Replacement ancestor adopted');mark(CASES[3],'NATIVE',{held_rename_denied:true,replaced_ancestor_refused:true,proof});
+  mark(CASES[3],'NATIVE',namespaceFixture({io,fixtureRoot:plan.fixture_root,deadline}));
   const recordIO=new Leases(deadline);let record;try{recordIO.ancestry(plan.fixture_root+'/cross-close.json');record=recordIO.writeRecord(plan.fixture_root+'/cross-close.json',{authoritative:false,fixture:'cross-close-native-last-write',...binding});}finally{recordIO.teardown();}
   // Windows can finalize last-write facts on final writer close. Mismatch is a real fixture failure, not normalized away.
   io.readRecord(record);mark(CASES[4],'NATIVE',{record,exact_postclose_facts:true});
