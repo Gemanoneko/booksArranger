@@ -140,7 +140,7 @@ class C3SiblingGuard(unittest.TestCase):
         self.assertEqual(folder_siblings(self.database,many,ROOT),[UNREADABLE])
         self.assertEqual(folder_siblings(self.database,self.candidate(ROOT+'\\a.m4b'),''),[UNREADABLE])
         class NoCatalog:pass
-        self.assertEqual(PublicResearch(NoCatalog(),leads=[])._siblings(self.candidate(ROOT+'\\a.m4b'),ROOT)[0],[UNREADABLE])
+        self.assertEqual(PublicResearch(NoCatalog(),leads=[],local_index=self.database.parent/'openlibrary-index')._siblings(self.candidate(ROOT+'\\a.m4b'),ROOT)[0],[UNREADABLE])
 
 class CrossScriptNeedsVowels(unittest.TestCase):
     def test_cross_script_requires_vowels(self):

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import m4b_preservation as preservation
 from failed_m4b_retry import unpublished_single_m4b
+from manifest_compatibility import equivalent_manifest
 
 SCHEMA='m4b-damage-repair-v1'
 CHECK_TITLE='Repair check'
@@ -84,8 +85,7 @@ def bind(parent,fresh,diagnosis,module_sha256):
     """Admission manifest: the identical reviewed manifest plus the user-approved repair."""
     if not eligible(parent):raise ValueError('This book is outside the M4B repair scope')
     prior=json.loads(parent['manifest'])
-    remove=lambda value:{key:item for key,item in value.items() if key!='job_id'}
-    if remove(prior)!=remove(fresh):raise ValueError('Frozen review/source/cover/policy changed; failed job preserved')
+    if not equivalent_manifest(prior,fresh):raise ValueError('Frozen review/source/cover/policy changed; failed job preserved')
     if fresh['job_id']==parent['job_id']:raise ValueError('A repair needs a distinct job identity')
     if diagnosis.get('state')!='repairable' or not diagnosis.get('repairs'):raise ValueError('The source has no provable repair')
     if not isinstance(module_sha256,str) or len(module_sha256)!=64:raise ValueError('Repair module identity is missing')

@@ -4,6 +4,7 @@ This is a marker operation, not atomic whole-file recovery. The ordinary source
 cleanup must independently reacquire its deny-delete lease and recheck streams.
 """
 import base64
+import contextlib
 import configparser
 import ctypes
 import hashlib
@@ -107,3 +108,52 @@ def remove_marker(path,validate,persist):
         if streams(path)!=[('::$DATA',original.facts()['size'])]:raise BoundaryError('Additional filesystem streams preserved after marker removal')
         validate(original)
     return True
+
+
+@contextlib.contextmanager
+def readable_source_streams(path, original):
+    """Read-only admission, distinct from deletion-grade single_stream.
+
+    Caller holds ordinary ancestry and VerifiedFile for the whole proof. The
+    exact download metadata stream remains intact and locked until admission
+    finishes; unknown named streams remain a refusal. Yield a recheck that the
+    caller must run before its durable enqueue. This never authorizes cleanup.
+    """
+    path=ordinary(path);before=original.facts()
+    if original.path!=path or before['links']!=1 or original.delete or original.writable:
+        raise BoundaryError('Read admission needs the same unique read-only protected source')
+    found=streams(path)
+    plain=[('::$DATA',before['size'])]
+    if found==plain:
+        def check():
+            if streams(path)!=found:raise BoundaryError('Filesystem streams changed during read admission')
+        yield check
+        check();return
+    if len(found)!=2 or plain[0] not in found or {name for name,size in found}!={'::$DATA',MARKER}:
+        raise BoundaryError('Additional filesystem streams require review; original retained')
+    size=next(size for name,size in found if name==MARKER)
+    if not 0<size<=MAX_MARKER:raise BoundaryError('Unknown download marker size preserved')
+    handle=kernel.CreateFileW(str(path)+':Zone.Identifier',0x80000081,1,None,3,0x00200000,None)
+    if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot protect read-only download marker')
+    try:
+        def read_marker():
+            info=FileInfo()
+            if not kernel.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.volume!=original.info.volume or info.links!=1 or info.attributes&(0x400|0x10):
+                raise BoundaryError('Download marker native identity differs')
+            if (info.size_high<<32)|info.size_low!=size:raise BoundaryError('Download marker changed during read admission')
+            kernel.SetFilePointerEx.argtypes=[W.HANDLE,ctypes.c_longlong,ctypes.c_void_p,W.DWORD];kernel.SetFilePointerEx.restype=W.BOOL
+            if not kernel.SetFilePointerEx(handle,0,None,0):raise BoundaryError('Cannot rewind protected download marker')
+            kernel.ReadFile.argtypes=[W.HANDLE,ctypes.c_void_p,W.DWORD,ctypes.POINTER(W.DWORD),ctypes.c_void_p];kernel.ReadFile.restype=W.BOOL
+            buffer=ctypes.create_string_buffer(MAX_MARKER+1);count=W.DWORD()
+            if not kernel.ReadFile(handle,buffer,len(buffer),ctypes.byref(count),None) or count.value!=size:raise BoundaryError('Cannot read bounded download marker')
+            return buffer.raw[:count.value],(info.volume,info.index_high,info.index_low,info.links,info.attributes)
+        raw,identity=read_marker()
+        # Exact27-byte marker observed on all44 refused library files, not
+        # generic NUL stripping or a relaxation of the recognized INI schema.
+        observed=bytes.fromhex('5b5a6f6e655472616e736665725d0d0a5a6f6e6549643d330d0a00')
+        _known_marker(raw[:-1] if raw==observed else raw)
+        def check():
+            if original.facts()!=before or streams(path)!=found or read_marker()!=(raw,identity):
+                raise BoundaryError('Filesystem streams changed during read admission')
+        check();yield check;check()
+    finally:kernel.CloseHandle(handle)

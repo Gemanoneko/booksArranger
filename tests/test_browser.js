@@ -6,7 +6,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 
 const fields=new Map();
-for(const name of ['original_language','title','author','canonical_author','narrator','series','number','genre','topic','multi_author','anthology']) fields.set(name,{value:'',checked:false});
+for(const name of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology']) fields.set(name,{value:'',checked:false});
 const nodes=new Map();
 function node(id){
   if(!nodes.has(id))nodes.set(id,{value:id==='library'?'Audiobooks':'',textContent:'',hidden:false,children:[],handlers:{},
@@ -49,8 +49,8 @@ assert.equal(fields.get('title').value,'Old canonical title','polling must prese
   fields.get('multi_author').checked=true;
   fields.get('anthology').checked=true;
   node('review-form').handlers.input();
-  assert.equal(fields.get('author').disabled,true);
-  assert.equal(fields.get('multi_author').disabled,true);
+  assert.equal(fields.get('author').disabled,false,'collection routing preserves editable author credit');
+  assert.equal(fields.get('multi_author').disabled,false,'collection and shared-cycle classification remain independent');
   assert.equal(node('author-folder-help').hidden,false);
   vm.runInContext('select(newRow,false)',context);
   assert.equal(fields.get('anthology').checked,true,'polling preserves unsaved classification');

@@ -9,6 +9,7 @@ from quicktime_chapters import normalize
 from metadata import audiobook_sort_title
 import m4b_preservation
 import m4b_repair
+import mp3_tag_repair
 MAX_IMAGE=8*1024*1024
 PRESERVATION_CANDIDATE_NAME='checked.m4b'
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
@@ -87,7 +88,7 @@ def generated_artifacts(stage, observer=None, attempt_context=None):
     if attempt_context is not None:attempt_context['entered']=True
     previous=getattr(_ARTIFACTS,'current',None)
     receipts={};closure={'safe':True}
-    _ARTIFACTS.current=(Path(stage),receipts,observer,closure)
+    _ARTIFACTS.current=(Path(stage),receipts,observer,closure,{})
     try:yield receipts
     finally:
         error=sys.exc_info()[1]
@@ -162,7 +163,7 @@ class EncodingProgress:
             try:self.callback({'phase':'encoding','completed':seconds,'total':self.total})
             except Exception:pass  # Progress display only: it never fails the media operation.
 
-def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telemetry=None):
+def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telemetry=None,diagnostic=None):
     """Owned child cancellation; bounded diagnostics and transient encoding pipe."""
     directory=Path(directory);token=uuid.uuid4().hex
     stdout=directory/(token+'.stdout');stderr=directory/(token+'.stderr')
@@ -201,6 +202,9 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
         if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
         raw=producer_bytes(out,stdout);error=producer_bytes(err,stderr)
     if len(raw)>max_output or len(error)>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
+    # This point is reached only after normal owned-context exit and successful drain,
+    # file closure and bounds. A media nonzero is distinct from ownership/I/O failure.
+    if diagnostic is not None:diagnostic(mp3_tag_repair.completed_diagnostic(arguments,process.returncode,raw,error),raw,error)
     if process.returncode:raise ValidationError(error.decode('utf-8','replace')[-2000:] or 'Media operation failed')
     return raw
 
@@ -312,8 +316,11 @@ def decoded_duration(path,stage,stop,estimated):
             uncertain_producer()
             raise ValidationError('Owned decoder output has not finished draining')
         error_raw=producer_bytes(errors,stderr)
+    if len(error_raw)>1024*1024:raise ValidationError('Decode diagnostics exceeded their limit')
     if state['error'] or process.returncode or state['bytes']%4:
-        raise ValidationError('Full audio decode failed: '+error_raw.decode('utf-8','replace')[-1000:])
+        error=ValidationError('Full audio decode failed: '+error_raw.decode('utf-8','replace')[-1000:])
+        if process.returncode and not state['error'] and state['bytes']%4==0:error.media_decode_failed=True
+        raise error
     if not state['bytes']:raise ValidationError('Audio decoder produced no samples')
     return state['bytes']/4/44100
 
@@ -338,6 +345,83 @@ def working_space_required(source_bytes, durations, encoding, count):
     return source_bytes+3*output+64*1024*1024
 
 
+def _mp3_tag_copy(manifest,item,path,stage,stop,duration):
+    """Prove a finite non-audio tail repair; retain the original snapshot unchanged."""
+    current=getattr(_ARTIFACTS,'current',None)
+    if current is None or len(current)<5 or current[0]!=Path(stage):
+        raise ValidationError('MP3 repair requires the current owned staging attempt')
+    key=(item['path'],item['sha256']);cached=current[4].get(key)
+    if cached is not None:
+        if digest(stage/cached['name'],stop)!=cached['sha256']:raise ValidationError('Verified MP3 working copy changed')
+        return cached
+    if Path(path).suffix.lower()!='.mp3' or item['size']>mp3_tag_repair.MAX_BYTES:
+        raise ValidationError('Source is outside the finite MP3 tag repair profile')
+    data=Path(path).read_bytes()
+    try:layout=mp3_tag_repair.plan(data)
+    except mp3_tag_repair.UnsupportedProfile as exc:raise ValidationError(str(exc)) from exc
+    if layout.source_sha256!=item['sha256']:raise ValidationError('MP3 repair source differs from frozen source')
+    candidate=Path(stage)/('tag-repair-'+uuid.uuid4().hex+'.mp3');plan_generated(candidate)
+    with candidate.open('xb') as stream:
+        stream.write(data[:layout.prefix_size]);stream.flush();os.fsync(stream.fileno())
+    candidate_sha=digest(candidate,stop);remember_generated(candidate,candidate_sha,layout.prefix_size)
+    ffmpeg=shutil.which('ffmpeg');ffprobe=shutil.which('ffprobe')
+    if not ffmpeg or not ffprobe:raise ValidationError('Installed FFmpeg and FFprobe are required for tag preservation checks')
+    def diagnose(args,telemetry=None,allow_nonzero=False):
+        completed=[]
+        try:
+            raw=run_owned(args,stage,stop,max(300,duration*2),64*1024*1024,telemetry,
+                diagnostic=lambda token,out,err:completed.append((token,out,err)))
+        except ValidationError:
+            if not allow_nonzero or not completed or not completed[0][0].data['returncode']:raise
+            raw=completed[0][1]
+        if not completed:raise ValidationError('No normal owned diagnostic completion')
+        token,out,err=completed[0]
+        if not allow_nonzero and err:raise ValidationError('Strict repair diagnostic reported errors')
+        return raw,token
+    prefix=[ffmpeg,'-hide_banner','-v','error','-xerror','-nostdin','-threads','2','-filter_threads','1','-protocol_whitelist','file','-f','mp3','-i']
+    with ProtectedFiles([candidate]):
+        packets=[]
+        for source in (path,candidate):
+            raw,_=diagnose([ffprobe,'-v','error','-protocol_whitelist','file','-f','mp3','-select_streams','a:0','-show_packets','-show_entries','packet=pts_time,dts_time,duration_time,pos,size,flags','-of','json',str(source)])
+            packets.append(json.loads(raw)['packets'])
+        try:packet_proof=mp3_tag_repair.verify_packets(*packets,layout)
+        except mp3_tag_repair.UnsupportedProfile as exc:raise ValidationError(str(exc)) from exc
+        decoded=[];frame_results=[]
+        for source in (path,candidate):
+            pcm=NativePcmHash(layout.channels)
+            _,token=diagnose(prefix+[str(source),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],pcm,True)
+            result=pcm.result()
+            if result['sample_count']!=layout.samples:
+                # A normally completed child can still fail internally or run out of resources.
+                # Partial PCM is a failed preservation proof, never evidence of source damage.
+                raise ValidationError('MP3 preservation diagnostic is inconclusive: complete native audio could not be verified')
+            if source==candidate and token.data['returncode']:raise ValidationError('Repaired MP3 still fails strict decoding')
+            decoded.append(result)
+            raw,frame_token=diagnose(prefix+[str(source),'-map','0:a:0','-c:a','pcm_s16le','-f','framemd5','-'],allow_nonzero=source==path)
+            frame_results.append(raw)
+        if decoded[0]!=decoded[1] or frame_results[0]!=frame_results[1]:raise ValidationError('MP3 repair changed decoded samples or frame timing')
+        if digest(path,stop)!=item['sha256'] or digest(candidate,stop)!=candidate_sha:raise ValidationError('MP3 repair byte binding changed')
+    proof=layout.receipt()|packet_proof|{'decision':'repairable','affected_audio_seconds':0,'native_pcm':decoded[0],
+        'decoded_frames_sha256':hashlib.sha256(frame_results[0]).hexdigest(),'working_sha256':candidate_sha}
+    write_generated(candidate.with_suffix('.json'),json.dumps(proof,ensure_ascii=False,sort_keys=True))
+    cached={'name':candidate.name,'sha256':candidate_sha,'duration':layout.samples/layout.sample_rate,'proof':proof}
+    current[4][key]=cached
+    return cached
+
+
+def _source_duration(manifest,item,path,stage,stop,duration):
+    if m4b_repair.silence_approved(manifest):return duration
+    current=getattr(_ARTIFACTS,'current',None)
+    if current and len(current)>4 and (item['path'],item['sha256']) in current[4]:
+        return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
+    try:return decoded_duration(path,stage,stop,duration)
+    except ValidationError as original:
+        if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
+        try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
+        except ValidationError as repair:
+            raise original from repair
+
+
 def check_working_space(manifest, stage, stop):
     if shutil.disk_usage(stage).free<sum(item['size'] for item in manifest['sources'])+64*1024*1024:
         raise OSError(errno.ENOSPC,'Insufficient staging space before source admission; originals retained')
@@ -352,7 +436,7 @@ def check_working_space(manifest, stage, stop):
             raw=probe(path,stage,stop);duration,profile=audio_info(raw)
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            durations.append(duration if m4b_repair.silence_approved(manifest) else decoded_duration(path,stage,stop,duration))
+            durations.append(_source_duration(manifest,item,path,stage,stop,duration))
     if manifest.get('profile')==AUTOMATIC_PROFILE:
         encoding=choose_automatic_encoding(profiles,single_m4b=len(profiles)==1 and Path(manifest['sources'][0]['path']).suffix.lower()=='.m4b')
     elif manifest.get('profile')==PROFILE:encoding=choose_encoding(profiles)
@@ -362,7 +446,7 @@ def check_working_space(manifest, stage, stop):
     required=working_space_required(source_bytes,durations,encoding,len(durations))
     if shutil.disk_usage(stage).free<required:
         raise OSError(errno.ENOSPC,f'Insufficient working space; need {required/1024**3:.1f} GB free before snapshotting; originals retained')
-    root=ordinary(manifest['root']);destination=ordinary(manifest['destination'])
+    root=ordinary(manifest.get('output_root',manifest['root']));destination=ordinary(manifest['destination'])
     if not destination.is_relative_to(root):raise ValidationError('Destination is outside the audiobook library')
     parent=destination.parent
     while not parent.exists():
@@ -413,7 +497,7 @@ def snapshot_manifest(manifest,stage,stop,report=None):
             compatibility=profile
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
-            if not m4b_repair.silence_approved(manifest):duration=decoded_duration(alias,stage,stop,duration)
+            duration=_source_duration(manifest,item,alias,stage,stop,duration)
         durations.append(duration);copies.append(alias.name)
         step.update(index+1,index+1,force=True)
     cover=manifest['cover']
@@ -712,6 +796,22 @@ def native_pcm_evidence(path,stage,stop,duration,encoding,on_seconds=None):
 
 def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding):
     original_copies=list(copies);joined=None;feed=None
+    current=getattr(_ARTIFACTS,'current',None);repairs=[]
+    if current is not None and len(current)>4:
+        copies=list(copies)
+        for index,item in enumerate(manifest['sources']):
+            repaired=current[4].get((item['path'],item['sha256']))
+            if repaired:
+                if digest(stage/repaired['name'],stop)!=repaired['sha256']:raise ValidationError('MP3 working repair changed before encoding')
+                copies[index]=repaired['name'];repairs.append(repaired['proof'])
+    with ProtectedFiles([stage/name for name in copies if name not in original_copies]):
+        for repaired in (current[4].values() if current is not None and len(current)>4 else ()):
+            if digest(stage/repaired['name'],stop)!=repaired['sha256']:raise ValidationError('Protected MP3 working repair changed')
+        return _encode_repaired_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,repairs)
+
+
+def _encode_repaired_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,repairs):
+    joined=None;feed=None
     if encoding.get('mode')=='normalize':
         # The protected source snapshots are the only inputs; their normalized audio is proven, then
         # streamed into the encoder and proven again byte for byte (no WAV or concat plan on disk).
@@ -721,6 +821,7 @@ def _encode_private(manifest,stage,copies,durations,cover,stop,progress,encoding
     output,validation=_encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed)
     if joined is not None:
         validation['normalized_joined_pcm']=joined;validation['normalized_pcm_codec']='pcm_f64le'
+    if repairs:validation['source_working_repairs']=repairs
     return output,validation
 
 
@@ -916,7 +1017,7 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
     if any(s.get('codec_type')=='video' and s not in pictures for s in raw.get('streams',[])):raise ValidationError('Unexpected video stream in audiobook output')
     tags={k.lower():str(v) for k,v in raw.get('format',{}).get('tags',{}).items()}
     review=manifest['metadata']
-    expected_tags=[('title',review['title']),('artist',review['canonical_author']),('album_artist',review['canonical_author']),('media_type','2')]
+    expected_tags=([('title',review['title'])] if review.get('title') else [])+[('artist',review['canonical_author']),('album_artist',review['canonical_author']),('media_type','2')]
     sort_title=audiobook_sort_title(review)
     if sort_title!=review['title']:expected_tags.append(('sort_name',sort_title))
     if review.get('series'):
@@ -942,7 +1043,7 @@ def validate(output,manifest,durations,chapters,stage,stop,encoding=None):
       'source_durations':durations,'source_pcm_frames':[round(d*44100) for d in durations],'source_pcm_rate':44100,'decoded_duration':actual_samples_duration,'checks':'Output checks passed','device':'Apple Books sync not checked','tags':tags}
 
 def publish(output,manifest,validation,stop,journal,revision_guard,review_lock=None,report=None):
-    destination=ordinary(manifest['destination']);root=ordinary(manifest['root'])
+    destination=ordinary(manifest['destination']);root=ordinary(manifest.get('output_root',manifest['root']))
     if destination.suffix.lower()!='.m4b':raise ValidationError('Only a reviewed M4B destination can be published')
     if any(os.path.normcase(str(destination))==os.path.normcase(item['path']) for item in manifest['sources']):raise ValidationError('Output must be distinct from every source')
     # Measured: every source is re-checked, the audiobook is copied, then every source is re-checked again.

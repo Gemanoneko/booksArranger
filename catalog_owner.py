@@ -23,7 +23,7 @@ def catalog_lock(database, roots):
         import ctypes
         from native_io import DirectoryBoundary, VerifiedFile, FileInfo, kernel
         from source_cleanup import single_stream
-        with DirectoryBoundary(lock_path.anchor, lock_path.parent, create=True):
+        with DirectoryBoundary(lock_path.anchor, lock_path.parent, create=True) as held_boundary:
             if not lock_path.exists():
                 # CREATE_NEW, protected from birth. Never truncate an unknown entry.
                 handle = kernel.CreateFileW(str(lock_path),0xC0000081,1,None,1,0x00200000,None)
@@ -37,7 +37,7 @@ def catalog_lock(database, roots):
                 # Deny-write/delete sharing conflicts with both other native owners
                 # and the legacy msvcrt open+write lock; no PID liveness inference.
                 marker = ACTIVE_CATALOG.set(str(Path(database).absolute()))
-                try:yield
+                try:yield {'schema':'books-catalog-owner-v1','lock_path':str(lock_path),'lock_identity':held.facts()['identity'],'lock_facts':held.facts(),'lock_ancestry':held_boundary.identities,'held':True}
                 finally:ACTIVE_CATALOG.reset(marker)
         return
     lock_path.parent.mkdir(parents=True, exist_ok=True)

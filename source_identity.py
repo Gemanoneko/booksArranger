@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 VERSION='public-auto-v1'
+LOCAL_SOURCE_GATE_VERSION='local-source-gate-v2'
 def norm(value):
     return ''.join(c for c in str(value or '').casefold().replace('ё','е') if c.isalnum())
 
@@ -104,8 +105,22 @@ def source_gate(row,work):
         # A split part's own name adds its number and chapter label to the book name.
         named=filename_identity(split['book_name']+'.x') if split and split['ok'] and split['book_name'] else {'title':'','author':''} if split else filename_identity(m['filename'])
         if album and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
-        if named.get('author') and (not (same_title(named['title']) if local else norm(named['title']) in aliases) or not source_author(named['author'])):
-            reasons.append('Sources disagree on the title or author')
+        if named.get('author'):
+            filename_ok=(same_title(named['title']) if local else norm(named['title']) in aliases) and source_author(named['author'])
+            if local:
+                from local_identity import NARRATOR_MARKER
+                # A recorded collection may explicitly carry its reader credit
+                # among aliases. Generic name matching cannot turn a different
+                # narrator-marked filename into an author identity.
+                if NARRATOR_MARKER.search(named['author']) and norm(named['author']) not in author_aliases:
+                    filename_ok=False
+            if local and not filename_ok:
+                from local_identity import filename_matches_local_work
+                embedded_authors=[tags[key] for key in ('author','artist') if tags.get(key)]
+                filename_ok=filename_matches_local_work(
+                    split['book_name']+'.x' if split and split['ok'] and split['book_name'] else m['filename'],
+                    work.get('titles',[]),work.get('author_aliases',[]),embedded_authors)
+            if not filename_ok:reasons.append('Sources disagree on the title or author')
         # A source recording needs its own title evidence in addition to a filename clue.
         source_title=album or norm(tags.get('title')) if len(members)==1 else album
         if standing and not source_title:

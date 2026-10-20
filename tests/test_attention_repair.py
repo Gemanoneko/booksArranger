@@ -280,7 +280,7 @@ class RetryAllTests(Base):
     def test_the_whole_group_one_at_a_time_then_the_queue_starts_once(self):
         ids=[self.l.failed(name='b%d'%index)[0] for index in range(3)];self.l.failed(OUTSIDE,name='unsupported');self.passed(*ids)
         s=self.service();events=[];real=MergeService._request_m4b_readmission
-        s.resume=Mock(side_effect=lambda:events.append('resume'))
+        s.resume=Mock(side_effect=lambda **_:events.append('resume'))
         def request(service,job_id,kind):
             events.append(job_id)
             return {'accepted':False,'reason':'refused fixture'} if job_id==ids[1] else real(service,job_id,kind)
@@ -413,3 +413,16 @@ class HTTPTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+    def test_selected_retry_uses_same_correlated_run(self):
+        self.merge.retry_all=Mock(return_value={'id':'selection','state':'running','accepted':0})
+        item={key:self.body[key] for key in ('id','revision','job_id')}|{'kind':'repair'}
+        status,body,_=self.call({'library':'Audiobooks','items':[item]},path='/api/audiobook/retry-all')
+        self.assertEqual((status,body['retry_all']['id']),(202,'selection'))
+        self.merge.retry_all.assert_called_once_with([item])
+    def test_selected_retry_refuses_duplicate_and_malformed_before_service(self):
+        self.merge.retry_all=Mock()
+        item={key:self.body[key] for key in ('id','revision','job_id')}|{'kind':'retry'}
+        for items in ([],[item,item],[item|{'kind':'delete'}],[item|{'extra':'ignored?'}],[item|{'job_id':'not-a-uuid'}]):
+            self.assertEqual(self.call({'library':'Audiobooks','items':items},path='/api/audiobook/retry-all')[0],400)
+        self.merge.retry_all.assert_not_called()
+

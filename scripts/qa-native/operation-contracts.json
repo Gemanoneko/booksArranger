@@ -1,0 +1,54 @@
+{
+  "schema": "books-qa-fixed-operations-v1",
+  "entry": {
+    "enabled": false,
+    "watchdog_argv": [
+      "--registry-sha",
+      "<approved registry SHA256>"
+    ],
+    "guardian_kind": "entry",
+    "checker_argv": [
+      "--context",
+      "<pinned context absolute path>",
+      "--context-sha",
+      "<pinned context SHA256>",
+      "--run-root",
+      "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/q"
+    ],
+    "deadline_ms": 600000
+  },
+  "assemble": {
+    "enabled": false,
+    "reason": "No protected registered plan/source/runtime pins yet"
+  },
+  "copy": {
+    "enabled": false,
+    "reason": "Producer remains failclosed; native design and source/alias freeze review pending"
+  },
+  "pack": {
+    "enabled": false,
+    "entry": "node scripts/build-step.mjs pack",
+    "reason": "Separate exact native build contract/review required"
+  },
+  "release": {
+    "enabled": false,
+    "entry": "node scripts/release.mjs",
+    "owner": "Sully",
+    "reason": "Separate exact native release contract/review required"
+  },
+  "migration": {
+    "enabled": false,
+    "entry": "migration_operation.py --plan ABS --plan-sha HEX --publication UUID --mode check|run",
+    "default_mode": "check",
+    "native_owner_schema": "books-migration-native-owner-v1",
+    "per_publication_ms": 600000,
+    "reason": "Primary owns engine/catalog lease/full source safety; no generic or giant all-library route",
+    "interrupted_old_removal": {
+      "enabled": false,
+      "review": "dd84e69c971842b4ecf31653e13fe4aaab3ee7b3",
+      "requires": "surviving original watchdog, original Job/member handles, active0/all-signaled/EOF, one recovery child in new separate private Job, same600000 remaining budget, intent/catalog/plan/publication/invocation binding",
+      "lost_owner": "hold; no JSON/PID retroactive closure authority",
+      "qa_watcher_supports_it": false
+    }
+  }
+}

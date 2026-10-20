@@ -67,3 +67,5 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
   #inventory-table.files tbody td:nth-child(6){order:6;flex-basis:100%;font:13px/1.6 ui-monospace,Consolas,monospace}
   #inventory-table.files tbody td:nth-child(7){order:7;flex-basis:100%}#inventory-table.files .row-actions{max-width:none}
 }
+
+#root{white-space:pre-wrap}

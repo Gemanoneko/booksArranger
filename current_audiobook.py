@@ -11,10 +11,13 @@ from native_io import DirectoryBoundary, VerifiedFile, ordinary, BoundaryError
 from replacement_jobs import packed, digest
 
 class CurrentAudiobooks:
-    def __init__(self,library,repairs,replacements,verified=None,remember=None,pace=None):
-        self.library=ordinary(library);self.repairs=ordinary(repairs);self.replacements=replacements
+    def __init__(self,library,repairs,replacements,verified=None,remember=None,pace=None,bindings=None):
+        self.libraries=tuple(ordinary(root) for root in library) if isinstance(library,(tuple,list)) else (ordinary(library),)
+        if not self.libraries:raise ValueError('At least one publication root is required')
+        self.library=self.libraries[0];self.repairs=ordinary(repairs);self.replacements=replacements
         # Optional persisted verification: verified(record) answers from the last full hash when the
         # file identity is unchanged; remember(record) records a new full hash; pace(n, stop) limits reads.
+        self.bindings=bindings
         self.verified=verified;self.remember=remember;self.pace=pace
         self._lock=threading.RLock();self._cache={};self._pending=set();self._work=queue.Queue(maxsize=32)
         self._stop=threading.Event();self._thread=None
@@ -49,22 +52,28 @@ class CurrentAudiobooks:
             manifest=parent['manifest'];output=parent['output'];base=ordinary(output['final_path'])
             normalized=validation.get('chapter_format',{}).get('description',{})
             corrected=normalized.get('entry_size')==65 and normalized.get('font_name')=='Arial' and normalized.get('layout')=='Apple QTFF legacy text'
-            expected=base.with_name(base.stem+(' - Chapters v2.m4b' if corrected else ' - Chapters.m4b'))
+            effective_base=base;output_root=manifest.get('output_root',manifest['root'])
+            if intent.get('parent_location') is not None:
+                if self.bindings is None:raise BoundaryError('Relocated chapter parent binding unavailable')
+                with self.bindings.protect_parent(parent['job_id'],intent['parent_location']) as (effective,envelope):
+                    effective_base=ordinary(effective['final_path']);output_root=effective['root']
+                if intent.get('parent_effective_output')!=str(effective_base):raise BoundaryError('Chapter effective parent path differs from binding')
+            expected=effective_base.with_name(effective_base.stem+(' - Chapters v2.m4b' if corrected else ' - Chapters.m4b'))
             if (intent.get('parent_output')!=str(base) or intent.get('parent_sha256')!=output['sha256'] or intent.get('parent_size')!=output['size'] or
                     intent.get('parent_manifest_sha256')!=hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest() or
                     intent.get('candidate_id')!=manifest['candidate_id'] or intent.get('candidate_revision')!=manifest['candidate_revision'] or
                     intent.get('sources')!=manifest['sources'] or intent.get('cover')!=manifest['cover'] or intent.get('root')!=manifest['root'] or
-                    intent.get('profile')!=manifest['profile'] or intent.get('mode')!='copy existing validated AAC; source-track navigation'):
+                    intent.get('output_root',intent.get('root'))!=output_root or intent.get('profile')!=manifest['profile'] or intent.get('mode')!='copy existing validated AAC; source-track navigation'):
                 raise BoundaryError('Recorded chapter update no longer matches its reviewed parent')
             if any(part.get('destination')!=str(expected) for part in (intent,copying,publishing,completed)) or any(part.get('validation')!=validation for part in (copying,publishing,completed)):
                 raise BoundaryError('Chapter publication intent and completed proof disagree')
             if validation.get('chapters')!=intent.get('chapters') or validation.get('cover_sha256')!=manifest['cover']['sha256'] or validation.get('profile')!=manifest['profile']:
                 raise BoundaryError('Chapter publication content proof disagrees')
-            record={'job_id':parent['job_id'],'root':manifest['root'],'final_path':str(expected),'size':validation['size'],'sha256':validation['sha256'],
+            record={'job_id':parent['job_id'],'root':output_root,'final_path':str(expected),'size':validation['size'],'sha256':validation['sha256'],
                     'parent_identity':publishing['parent_identity'],'validation':validation}
             result.append({'id':repair_id,'kind':'chapter_update','record':record,'journal':str(path),'journal_sha256':sha,'journal_facts':facts,
                            'journal_ancestry':ancestry,'corrected':corrected,'saved_tags':copy.deepcopy(output['validation'].get('tags',{})),
-                           'cover':copy.deepcopy(manifest['cover']),'parent':parent})
+                           'cover':copy.deepcopy(manifest['cover']),'parent':parent,'parent_location':copy.deepcopy(intent.get('parent_location'))})
         return result
 
     def publication(self,jobs,candidate):
@@ -88,29 +97,51 @@ class CurrentAudiobooks:
         """Hold authoritative former repair receipts, never the leaf files to be disposed."""
         if digest(parent_row)!=relation['parent_record_sha256']:raise BoundaryError('Original publication history changed')
         parent={'job_id':parent_row['job_id'],'state':parent_row['state'],'manifest':json.loads(parent_row['manifest']),'output':json.loads(parent_row['output'])}
-        base=ordinary(parent['output']['final_path']);expected={str(base),str(base.with_name(base.stem+' - Chapters.m4b')),str(base.with_name(base.stem+' - Chapters v2.m4b'))}
-        approval=json.loads(relation['approval_json']);old=approval['old_outputs']
-        if len(old)!=3 or {p['path'] for p in old}!=expected:raise BoundaryError('Former publication path set is not the exact approved three')
+        base=ordinary(parent['output']['final_path'])
         repairs=self._repairs(parent)
         if len(repairs)!=2 or len([r for r in repairs if r['corrected']])!=1:raise BoundaryError('Both authoritative chapter publications are required')
+        expected={str(base),*(r['record']['final_path'] for r in repairs)}
+        approval=json.loads(relation['approval_json']);old=approval['old_outputs']
+        if len(old)!=3 or {p['path'] for p in old}!=expected:raise BoundaryError('Former publication path set is not the exact approved three')
         with contextlib.ExitStack() as stack:
+            locations={}
             for proof in old:
                 if proof['path']==str(base):
                     if proof.get('publication_id')!=parent['job_id'] or proof['sha256']!=parent['output']['sha256'] or proof['size']!=parent['output']['size'] or proof.get('journal_sha256') is not None:raise BoundaryError('Former base publication proof changed')
-                    continue
-                publication=next((r for r in repairs if r['record']['final_path']==proof['path']),None)
-                if not publication or proof.get('publication_id')!=publication['id'] or proof.get('journal_sha256')!=publication['journal_sha256'] or proof['sha256']!=publication['record']['sha256'] or proof['size']!=publication['record']['size']:
-                    raise BoundaryError('Former chapter publication no longer matches its authoritative receipt')
-                path=ordinary(publication['journal']);boundary=stack.enter_context(DirectoryBoundary(self.repairs,path.parent));file=stack.enter_context(VerifiedFile(path))
-                if file.facts()!=publication['journal_facts'] or boundary.identities!=publication['journal_ancestry'] or file.sha256()!=publication['journal_sha256']:raise BoundaryError('Former publication receipt changed during protection')
-            yield
+                    original=parent['output'];kind='base';journal_sha=None
+                else:
+                    publication=next((r for r in repairs if r['record']['final_path']==proof['path']),None)
+                    if not publication or proof.get('publication_id')!=publication['id'] or proof.get('journal_sha256')!=publication['journal_sha256'] or proof['sha256']!=publication['record']['sha256'] or proof['size']!=publication['record']['size']:
+                        raise BoundaryError('Former chapter publication no longer matches its authoritative receipt')
+                    path=ordinary(publication['journal']);boundary=stack.enter_context(DirectoryBoundary(self.repairs,path.parent));file=stack.enter_context(VerifiedFile(path))
+                    if file.facts()!=publication['journal_facts'] or boundary.identities!=publication['journal_ancestry'] or file.sha256()!=publication['journal_sha256']:raise BoundaryError('Former publication receipt changed during protection')
+                    original=publication['record'];kind='Chaptersv2' if publication['corrected'] else 'Chapters';journal_sha=publication['journal_sha256']
+                effective,envelope=self.bindings.current(original,kind,parent,repair_journal_sha256=journal_sha) if self.bindings else (copy.deepcopy(original),None)
+                locations[proof['path']]={'original':copy.deepcopy(original),'kind':kind,'effective':effective,'envelope':envelope,'journal_sha256':journal_sha}
+            yield locations
 
     @contextlib.contextmanager
     def protected(self,publication):
-        record=publication['record'];path=ordinary(record['final_path'])
-        if ordinary(record['root'])!=self.library or not path.is_relative_to(self.library) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
+        original=publication.get('original_record',publication['record'])
+        kind='replacement' if publication['kind']=='replacement' else ('Chaptersv2' if publication.get('corrected') else 'Chapters') if publication['kind']=='chapter_update' else 'base'
+        lease=self.bindings.protect(original,kind,publication['parent'],repair_journal_sha256=publication.get('journal_sha256')) if self.bindings else contextlib.nullcontext((original,None))
+        with lease as (record,envelope):
+            publication['record']=record
+            publication['original_record']=original
+            publication['location_envelope']=envelope
+            with self._protected_record(publication,record) as protected:yield protected
+
+    @contextlib.contextmanager
+    def _protected_record(self,publication,record):
+        path=ordinary(record['final_path'])
+        root=ordinary(record['root'])
+        if root not in self.libraries or not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
         with contextlib.ExitStack() as stack:
-            boundary=stack.enter_context(DirectoryBoundary(self.library,path.parent));file=stack.enter_context(VerifiedFile(path));facts=file.facts()
+            if publication.get('parent_location') is not None:
+                if self.bindings is None:raise BoundaryError('Relocated repair parent lease unavailable')
+                stack.enter_context(self.bindings.protect_parent(publication['parent']['job_id'],publication['parent_location']))
+            boundary=stack.enter_context(DirectoryBoundary(root,path.parent));file=stack.enter_context(VerifiedFile(path));facts=file.facts()
+            if record.get('identity') is not None and facts['identity']!=record['identity']:raise BoundaryError('Relocated audiobook native identity changed')
             if facts['links']!=1 or facts['size']!=record['size'] or [list(v) for v in boundary.identities]!=[list(v) for v in record['parent_identity']]:
                 raise BoundaryError('Current audiobook native identity or ancestry changed')
             journal_key=None
@@ -123,7 +154,7 @@ class CurrentAudiobooks:
                 if sha!=publication['journal_sha256'] or jfacts!=publication['journal_facts'] or jancestry!=publication['journal_ancestry']:raise BoundaryError('Current publication receipt changed')
                 journal_key=sha
             key=digest({'id':publication['id'],'kind':publication['kind'],'record':record,'facts':facts,'ancestry':boundary.identities,
-                        'journal':journal_key,'relation':publication.get('relation'),'manifest':publication['parent']['manifest']})
+                        'journal':journal_key,'relation':publication.get('relation'),'manifest':publication['parent']['manifest'],'location':publication.get('location_envelope')})
             yield file,key
 
     def _enqueue(self,publication,key):
@@ -155,7 +186,7 @@ class CurrentAudiobooks:
                         h.update(block)
                     if h.hexdigest()!=publication['record']['sha256']:raise BoundaryError('Current audiobook bytes differ from its completed publication')
                     error=''
-                    if self.remember is not None:self.remember(publication['record'])
+                if self.remember is not None:self.remember(publication['record'])
             except Exception as failure:error=str(failure) or type(failure).__name__
             finally:
                 with self._lock:self._pending.discard(key);self._cache[key]=error

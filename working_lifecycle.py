@@ -110,6 +110,7 @@ class WorkingLifecycle:
         return transaction(self.database, write)
 
     def _file_state(self, expected, state, **fields):
+        held_db=fields.pop('_db',None)
         allowed = {'creation_intended': {'closed', 'not_created'}, 'closed': {'removal_intended'},
                    'removal_intended': {'disposition_set', 'absent_after_intent'}, 'disposition_set': {'removed'}}
         if state not in allowed.get(expected['state'], set()):
@@ -126,7 +127,7 @@ class WorkingLifecycle:
             db.execute('UPDATE working_files SET state=?,sha256=?,size=?,facts=?,updated=? WHERE job_id=? AND attempt_id=? AND name=?',
                        (state, target['sha256'], target['size'], target['facts'], target['updated'], target['job_id'], target['attempt_id'], target['name']))
             return target
-        return transaction(self.database, write)
+        return write(held_db) if held_db is not None else transaction(self.database, write)
 
     def begin(self, manifest):
         job_id, attempt_id = manifest['job_id'], manifest['attempt_id']
@@ -324,6 +325,8 @@ class WorkingLifecycle:
     def _retire(self, job_id, attempt_id):
         self.guard()
         attempt = self._attempt(job_id, attempt_id)
+        if attempt['state'] == 'isolated_retained':
+            raise BoundaryError('Isolated old files and source dependencies are retained; Clear is unavailable')
         if attempt['state'] == 'published':
             raise BoundaryError('Published working files belong to protected output cleanup')
         if attempt['state'] == 'retired':
@@ -561,13 +564,14 @@ class WorkingLifecycle:
             for entry,path,handle in prepared:
                 source_proof();self._published(attempt);self._published_references(attempt,[str(path)]);boundary.revalidate()
                 if entry['state']=='closed':entry=self._file_state(entry,'removal_intended')
-                if entry['state']=='removal_intended':
-                    handle.dispose();entry=self._file_state(entry,'disposition_set')
-                elif entry['state']=='disposition_set':handle.dispose()
-                else:raise BoundaryError('Snapshot retirement state is invalid')
-                handle.__exit__(None,None,None)
-                if os.path.lexists(path):raise BoundaryError('Discarded snapshot name survived or was replaced')
-                self._file_state(entry,'removed')
+                with storage._publication_transaction() as generation_db:
+                    if entry['state']=='removal_intended':
+                        handle.dispose();entry=self._file_state(entry,'disposition_set',_db=generation_db)
+                    elif entry['state']=='disposition_set':handle.dispose()
+                    else:raise BoundaryError('Snapshot retirement state is invalid')
+                    handle.__exit__(None,None,None)
+                    if os.path.lexists(path):raise BoundaryError('Discarded snapshot name survived or was replaced')
+                    self._file_state(entry,'removed',_db=generation_db)
             # Generated roles were handed to StorageCleanup. Recognize only its
             # exact terminal native receipts; publication alone is not removal.
             all_removed=True

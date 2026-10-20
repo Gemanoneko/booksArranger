@@ -2,6 +2,7 @@ import json
 import threading
 import subprocess,shutil,uuid
 from pathlib import Path
+from unittest.mock import patch
 from test_merge_service import MergeTests
 from audio_pipeline import digest
 from chapter_repair import restore,recover
@@ -15,7 +16,13 @@ class Repair(MergeTests):
         row=self.ready()
         # A chapterless original is intentionally created, then corrected separately.
         row=self.service.reviews.tracks('Audiobooks',row['id'],row['revision'],row['track_order'],row['included'],True,True,False,evidence_note='Verified fixture source files')
-        self.service.create('Audiobooks',row['id'],row['revision']);status=self.wait();self.assertEqual(status['completed'],1,status)
+        # This repair fixture specifically requires original source tracks for
+        # exact navigation evidence. Conversion retirement is covered elsewhere.
+        build=self.service.reviews.build_manifest
+        def keep_fixture_sources(*args,**kwargs):
+            manifest=build(*args,**kwargs);manifest['cleanup_policy']['enabled']=False;return manifest
+        with patch.object(self.service.reviews,'build_manifest',side_effect=keep_fixture_sources):
+            self.service.create('Audiobooks',row['id'],row['revision']);status=self.wait();self.assertEqual(status['completed'],1,status)
         parent=status['jobs'][0];manifest=parent['manifest'];validation=parent['output']['validation']
         self.assertEqual(validation['chapters'],[]);self.assertEqual(len(validation['source_durations']),2)
         boundary={'tracks':[{'source_path':s['path'],'sha256':s['sha256'],'pcm_frames':round(d*44100),'pcm_rate':44100,'title':'Вступление \\ =;#' if i==0 else 'Track 02'} for i,(s,d) in enumerate(zip(manifest['sources'],validation['source_durations']))]}

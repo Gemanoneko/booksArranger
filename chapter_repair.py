@@ -1,5 +1,6 @@
 """Owned, explicit one-off chapter restoration. No arbitrary destination or in-place edit."""
 import contextlib
+import copy
 import hashlib
 import json
 import os
@@ -67,15 +68,23 @@ def presentation(path,stage,stop):
     pcm.update(frames=pcm['bytes']//(2*channels),sample_rate=rate,channels=channels)
     return {'stream':stream,'packets':packets,'pcm':pcm}
 
-def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
+def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None,bindings=None):
+    original=copy.deepcopy(parent['output'])
+    lease=bindings.protect(original,job=parent) if bindings else contextlib.nullcontext((original,None))
+    with lease as (effective,envelope):
+        current=copy.deepcopy(parent);current['output']=effective
+        return _restore_at(current,boundaries,owned_root,stop,review_guard,review_lock,original,envelope)
+
+def _restore_at(parent,boundaries,owned_root,stop,review_guard,review_lock,original_output,location_envelope):
     """Parent is a read-only completed job manifest plus recorded validation/output.
 
     Caller must verify the durable current catalog revision/evidence in review_guard.
     The helper derives output paths, never updates the original completed job.
     """
     manifest=parent['manifest'];record=parent['output']['validation'];source=ordinary(parent['output']['final_path'])
-    if parent.get('state')!='completed' or source!=ordinary(manifest['destination']):raise ValidationError('A verified completed parent audiobook is required')
+    if parent.get('state')!='completed' or ordinary(original_output['final_path'])!=ordinary(manifest['destination']):raise ValidationError('A verified completed parent audiobook is required')
     if source.suffix.lower()!='.m4b':raise ValidationError('Chapter repair requires the validated M4B parent')
+    output_root=parent['output'].get('root',manifest.get('output_root',manifest['root']))
     destination=source.with_name(source.stem+' - Chapters v2.m4b')
     sources=manifest['sources'];rows=boundaries['tracks']
     if len(rows)!=len(sources) or not sources:raise ValidationError('Exact boundary proof must cover all reviewed sources')
@@ -92,7 +101,7 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
     if abs(position-record['expected_duration'])>.000001:raise ValidationError('Boundary proof does not match the validated parent source duration')
     if not review_guard():raise ValidationError('Parent source/review evidence changed — review required')
     for item in sources:same_source(item,stop)
-    with DirectoryBoundary(manifest['root'],destination.parent):
+    with DirectoryBoundary(output_root,destination.parent):
         if destination.exists():raise FileExistsError('A corrected audiobook already exists; nothing was overwritten')
     job_id=str(uuid.uuid4());root=ordinary(owned_root);stage=root/job_id
     with DirectoryBoundary(root,stage,create=True) as cache:
@@ -101,14 +110,18 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
             def journal(state,data):
                 journal_file.write(json.dumps({'job_id':job_id,'parent_job_id':manifest['job_id'],'state':state,'data':data},ensure_ascii=False)+'\n')
                 journal_file.flush();os.fsync(journal_file.fileno())
-            intent={'parent_output':str(source),'parent_sha256':record['sha256'],'parent_size':record['size'],
+            intent={'parent_output':original_output['final_path'],'parent_sha256':record['sha256'],'parent_size':record['size'],
                 'destination':str(destination),'parent_manifest_sha256':hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest(),
                 'boundary_evidence_sha256':hashlib.sha256(json.dumps(boundaries,sort_keys=True).encode()).hexdigest(),
                 'candidate_id':manifest['candidate_id'],'candidate_revision':manifest['candidate_revision'],'sources':sources,'chapters':chapters,
-                'root':manifest['root'],'cover':manifest['cover'],
+                'root':manifest['root'],'output_root':output_root,'cover':manifest['cover'],
                 'mode':'copy existing validated AAC; source-track navigation','profile':manifest['profile']}
+            if location_envelope is not None:
+                from publication_locations import _digest
+                intent['parent_effective_output']=str(source)
+                intent['parent_location']={'schema':'books-repair-parent-location-v1','immutable_receipt_sha256':_digest(original_output),'generation':location_envelope['generation'],'effective_location':copy.deepcopy(location_envelope['effective_location'])}
             journal('intent',intent)
-            with DirectoryBoundary(manifest['root'],source.parent),ProtectedFiles([source]):
+            with DirectoryBoundary(output_root,source.parent),ProtectedFiles([source]):
                 if source.stat().st_size!=record['size'] or digest(source,stop)!=record['sha256']:raise ValidationError('The original audiobook changed since validation; nothing was overwritten')
                 alias=stage/'parent.m4b';copy_owned(source,alias,record['sha256'],stop)
                 with ProtectedFiles([alias]):
@@ -143,12 +156,12 @@ def restore(parent,boundaries,owned_root,stop,review_guard,review_lock=None):
                         'presentation':after_presentation,'chapter_format':chapter_format,'cover_sha256':cover_receipts[1]['sha256'],'profile':manifest['profile'],
                         'checks':'Audio copied without re-encoding; presentation and chapter checks passed','device':'Corrected chapter navigation not checked on iPhone'}
                     journal('validated',validation)
-                repaired=dict(manifest,job_id=job_id,destination=str(destination),chapters=[c['title'] for c in chapters])
+                repaired=dict(manifest,job_id=job_id,destination=str(destination),output_root=output_root,chapters=[c['title'] for c in chapters])
                 cache.revalidate()
                 final=publish(output,repaired,validation,stop,journal,review_guard,review_lock)
                 return {'job_id':job_id,'parent_job_id':manifest['job_id'],'output':final,'journal':str(journal_path),'validation':validation}
 
-def recover(journal_path,owned_root,stop,review_guard):
+def recover(journal_path,owned_root,stop,review_guard,bindings=None,publication_authorizer=None):
     """Recognize only this owned intent's exact already-published bytes after a crash.
 
     Returns a receipt without writing, adopting unrelated files or retrying conversion.
@@ -163,13 +176,37 @@ def recover(journal_path,owned_root,stop,review_guard):
         if any(e['job_id']!=intent['job_id'] or e['parent_job_id']!=intent['parent_job_id'] for e in events):raise ValidationError('Recovery journal association differs')
         publishing=[e for e in events if e['state'] in ('publishing','completed')]
         if not publishing:raise ValidationError('No durable publication intent exists; no output was adopted')
-        data=intent['data'];destination=ordinary(data['destination']);source=ordinary(data['parent_output'])
+        data=intent['data'];destination=ordinary(data['destination']);source=ordinary(data.get('parent_effective_output',data['parent_output']))
+        if data.get('parent_location') is not None and bindings is None:raise ValidationError('Relocated parent recovery requires its exact current publication generation lease')
         allowed={source.with_name(source.stem+suffix) for suffix in (' - Chapters.m4b',' - Chapters v2.m4b')}
         if destination not in allowed:raise ValidationError('Recovery destination differs from the parent-derived path')
         validation=publishing[-1]['data']['validation']
         if publishing[-1]['data']['destination']!=str(destination):raise ValidationError('Publication intent differs from the corrected destination')
         if not review_guard():raise ValidationError('Recovery source/review evidence changed')
-        with DirectoryBoundary(data['root'],destination.parent),ProtectedFiles([source,destination]):
+        lease=bindings.protect_parent(intent['parent_job_id'],data['parent_location']) if data.get('parent_location') is not None else contextlib.nullcontext()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(lease)
+            output_root=data.get('output_root',data['root']);journal_sha=digest(path,stop)
+            publication_intents=[event for event in publishing if event['state']=='publishing']
+            if len(publication_intents)!=1:raise ValidationError('Exact repaired publication intent is required')
+            original={'job_id':intent['parent_job_id'],'root':output_root,'final_path':str(destination),'size':validation['size'],'sha256':validation['sha256'],'parent_identity':publication_intents[0]['data']['parent_identity'],'validation':validation}
+            normalized=validation.get('chapter_format',{}).get('description',{})
+            kind='Chaptersv2' if normalized.get('entry_size')==65 and normalized.get('font_name')=='Arial' and normalized.get('layout')=='Apple QTFF legacy text' else 'Chapters'
+            if publication_authorizer is not None:
+                if bindings is None:raise ValidationError('Independent repaired-publication binding is unavailable')
+                authorization=publication_authorizer(intent['parent_job_id'],path,journal_sha)
+                if authorization['original']!=original or authorization['kind']!=kind or authorization['journal_sha256']!=journal_sha:raise ValidationError('Recovery authorization differs from the fresh authoritative repair receipt')
+                effective,envelope=stack.enter_context(bindings.protect(original,kind,repair_journal_sha256=journal_sha))
+                if effective!=authorization['effective'] or envelope!=authorization['envelope']:raise ValidationError('Repaired publication changed before recovery protection')
+                destination=ordinary(effective['final_path']);output_root=effective['root']
+            elif bindings is not None:
+                _,envelope=bindings.current(original,kind,repair_journal_sha256=journal_sha)
+                if envelope is not None:raise ValidationError('Relocated repair recovery requires fresh authoritative journal authorization')
+            boundary=stack.enter_context(DirectoryBoundary(output_root,destination.parent));stack.enter_context(ProtectedFiles([source,destination]))
+            if publication_authorizer is not None:
+                from native_io import VerifiedFile
+                final=stack.enter_context(VerifiedFile(destination))
+                if (effective.get('identity') is not None and final.facts()['identity']!=effective['identity']) or [list(v) for v in boundary.identities]!=[list(v) for v in effective['parent_identity']]:raise ValidationError('Repaired recovery native identity changed')
             if digest(source,stop)!=data['parent_sha256'] or digest(destination,stop)!=validation['sha256'] or destination.stat().st_size!=validation['size']:raise ValidationError('Recovery cannot adopt unmatched parent/output bytes')
             for item in data['sources']:same_source(item,stop)
             if digest(data['cover']['path'],stop)!=data['cover']['sha256']:raise ValidationError('Recovery cover evidence changed')

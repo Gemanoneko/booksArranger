@@ -71,6 +71,12 @@ class Replacements:
         if manifest.get('cleanup_policy',{}).get('enabled'):raise ValueError('Original replacement sources must remain')
         if manifest['destination']!=approval['destination'] or manifest['profile']!=approval['profile']:raise ValueError('Replacement plan changed')
         if manifest!=approval.get('replacement_manifest'):raise ValueError('Complete replacement manifest is not frozen by admission')
+        locations=approval.get('former_locations',{})
+        if locations:
+            guard=binding.get('location_guard')
+            if not callable(guard) or set(locations)!={item['path'] for item in approval['old_outputs']}:raise ValueError('Exact former publication location set is required')
+            for location in locations.values():
+                if not guard(db,location['original'],location['envelope'],kind=location['kind'],repair_journal_sha256=location.get('journal_sha256'),require_transaction=True):raise ValueError('Former publication location changed before replacement admission')
         group=db.execute('SELECT * FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
         context=db.execute('SELECT * FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
         if not group or not context or dict(group)!=approval['group_row'] or dict(context)!=approval['context_row']:
@@ -94,7 +100,7 @@ class Replacements:
         count=db.execute(f'UPDATE {table} SET {update} WHERE {where}',(*changes.values(),*expected.values())).rowcount
         if count!=1:raise ValueError('Replacement receipt changed during guarded transition')
 
-    def publish(self,expected,new_row,output,storage_row,verify):
+    def publish(self,expected,new_row,output,storage_row,verify,*,location=None,location_guard=None):
         """Caller freshly verified media/native/journal; callbacks never do filesystem work here."""
         if expected['state']!='queued':
             if expected['state'] in {'published','retiring','completed'} and json.loads(expected['current_output_json'])==output:return expected
@@ -111,6 +117,7 @@ class Replacements:
         if verify is not True:raise ValueError('Fresh replacement native proof required')
         with connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE')
+            if (location is not None or location_guard is not None) and (not callable(location_guard) or not location_guard(db,output,location,kind='replacement',require_transaction=True)):raise ValueError('Replacement location changed before current publication')
             if self.raw_job(db,new_row['job_id'])!=new_row:raise ValueError('Completed replacement changed')
             parent=self.raw_job(db,expected['parent_job_id'])
             if digest(parent)!=expected['parent_record_sha256']:raise ValueError('Historical parent changed')
@@ -152,10 +159,10 @@ class Replacements:
         if [item.get('title') for item in validation.get('chapters',[])]!=manifest.get('chapters',[]):return False
         return True
 
-    def structural_guard(self,relation,historical=False,queued=False):
+    def structural_guard(self,relation,historical=False,queued=False,*,db=None):
         """One non-recursive verdict for metadata, Ready, retirement and startup history."""
         try:
-            with connect(self.database) as db:
+            with (connect(self.database) if db is None else contextlib.nullcontext(db)) as db:
                 current=db.execute('SELECT * FROM audiobook_replacements WHERE id=?',(relation['id'],)).fetchone()
                 if not current or dict(current)!=relation:return False
                 parent=self.raw_job(db,relation['parent_job_id']);new=self.raw_job(db,relation['replacement_job_id'])
@@ -174,6 +181,11 @@ class Replacements:
                 if not storage or storage['state']!='completed' or storage['output_hash']!=output['sha256']:return False
                 owned=db.execute('SELECT * FROM owned_artifacts WHERE path=?',(output['final_path'],)).fetchone()
                 if not owned or tuple(owned)!=(output['final_path'],new['job_id'],'output',output['sha256'],output['size']):return False
+                from publication_binding import PublicationBindings
+                effective,envelope=PublicationBindings(self.database).lookup(db,output,'replacement')
+                if envelope is not None:
+                    owned=db.execute('SELECT * FROM owned_artifacts WHERE path=?',(effective['final_path'],)).fetchone()
+                    if not owned or tuple(owned)!=(effective['final_path'],new['job_id'],'output',output['sha256'],output['size']):return False
                 return True
         except (ValueError,OSError,KeyError,TypeError):return False
 
@@ -185,21 +197,29 @@ class Replacements:
         transaction(self.database,lambda db:self.cas(db,'audiobook_replacements',expected,changes,('id',)))
         return self.get(new_job=expected['replacement_job_id'])
 
-    def file_transition(self,expected,state,recovery=None):
+    def file_transition(self,expected,state,recovery=None,*,db=None):
         allowed={'waiting':{'copied'},'copied':{'retirement_intended'},'retirement_intended':{'removed'}}
         if state not in allowed.get(expected['state'],set()):raise ValueError('Non-monotonic old-output retirement')
         changes={'state':state,'updated':now()}
         if recovery is not None:changes['recovery_json']=packed(recovery)
-        transaction(self.database,lambda db:self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
-        return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
+        if db is None:
+            transaction(self.database,lambda connection:self.cas(connection,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
+            return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
+        if not db.in_transaction:raise ValueError('Retirement receipt requires the retained native disposition transaction')
+        self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path'))
+        return dict(db.execute('SELECT * FROM audiobook_replacement_retirements WHERE replacement_id=? AND original_path=?',(expected['replacement_id'],expected['original_path'])).fetchone())
 
-    def file_purged(self,expected,recovery):
+    def file_purged(self,expected,recovery,*,db=None):
         """A removed former output's recovery copy was deleted (or found gone) after the replacement was
         verified: the record keeps state 'removed' and gains purged_at; history no longer needs the copy."""
         if expected['state']!='removed':raise ValueError('Only a retired former output has a recovery copy to purge')
         changes={'recovery_json':packed(recovery),'updated':now()}
-        transaction(self.database,lambda db:self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
-        return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
+        if db is None:
+            transaction(self.database,lambda connection:self.cas(connection,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path')))
+            return next(r for r in self.files(expected['replacement_id']) if r['original_path']==expected['original_path'])
+        if not db.in_transaction:raise ValueError('Recovery purge requires the retained publication transaction')
+        self.cas(db,'audiobook_replacement_retirements',expected,changes,('replacement_id','original_path'))
+        return dict(db.execute('SELECT * FROM audiobook_replacement_retirements WHERE replacement_id=? AND original_path=?',(expected['replacement_id'],expected['original_path'])).fetchone())
 
     def copy_intent(self,expected,recovery):
         if expected['state']!='waiting' or expected['recovery_json']:raise ValueError('Recovery copy intent already exists')

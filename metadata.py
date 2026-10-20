@@ -178,6 +178,17 @@ def propose(path, root, kind, metadata, review=None, automatic_facts=None):
         return {'confidence': 'Needs review', 'path': '',
                 'reason': 'Confirm original language, canonical title and surname-first author; embedded language describes this edition'}
     standing=bool(kind=='audiobook' and isinstance(automatic_facts,dict) and automatic_facts.get('policy_version')=='standing-17-v1')
+    if kind=='audiobook' and review.get('organization_policy')=='books-hierarchy-v2':
+        if review.get('original_language') not in ({'Russian','Other','Unknown'} if standing else {'Russian','Other'}):
+            return {'confidence':'Needs review','path':'','reason':'Canonical identity and original language incomplete'}
+        if not standing and review.get('original_language')=='Other' and re.search('[А-Яа-яЁё]',str(review.get('title',''))+str(review.get('canonical_author') or review.get('author',''))):
+            return {'confidence':'Needs review','path':'','reason':'Non-Russian originals need English canonical title and author'}
+        from organization import plan
+        try:destination=plan(root,review,facts=automatic_facts)['path']
+        except ValueError as error:return {'confidence':'Needs review','path':'','reason':str(error)}
+        if len(destination)>240:return {'confidence':'Needs review','path':'','reason':'Verified metadata exceeds the supported Windows output path length'}
+        return {'confidence':'Reviewed preview','path':destination,'reason':'Reviewed hierarchy preview; saving does not move an existing audiobook'}
+
     anthology = kind == 'audiobook' and review.get('anthology') is True
     required = ['title', 'original_language'] + ([] if anthology else ['author'])
     if any(not review.get(key) for key in required) or review['original_language'] not in ({'Russian','Other','Unknown'} if standing else {'Russian','Other'}):
@@ -225,8 +236,8 @@ def propose(path, root, kind, metadata, review=None, automatic_facts=None):
             return {'confidence': 'Needs review', 'path': '', 'reason': 'Confirm series position; do not invent a number'}
         filename = f'{series} - {safe_name(number)} - {title} - {author}.m4b' if series else f'{title} - {author}.m4b'
         if standing and automatic_facts.get('destination_suffix'):
-            suffix=safe_name(automatic_facts['destination_suffix'])
-            filename=filename[:-4]+' - '+suffix+'.m4b'
+            from organization import append_recording_suffix
+            filename=append_recording_suffix(filename,review,automatic_facts)
         if len(os.path.join(*pieces,filename))>240:
             return {'confidence':'Needs review','path':'','reason':'Verified output path exceeds supported Windows length'}
         pieces.append(filename)

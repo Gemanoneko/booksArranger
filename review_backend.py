@@ -11,6 +11,7 @@ import struct
 import subprocess
 import threading
 import uuid
+import manual_metadata
 from metadata import propose, future_audio_tags
 from metadata_sources import MetadataClient, SourceUnavailable, manual_evidence, local_evidence
 from native_io import DirectoryBoundary, ProtectedFiles, ordinary
@@ -18,7 +19,7 @@ from audio_pipeline import run_owned, INPUT_FORMATS
 from scanner import connect, fresh_stat, inside
 
 from encoding_policy import PROFILE, freeze_policy, AUTOMATIC_PROFILE, freeze_automatic_policy
-TEXT_FIELDS=('title','author','canonical_author','original_language','series','number','genre','topic','narrator')
+TEXT_FIELDS=('title','author','canonical_author','original_language','series','number','genre','topic','narrator','universe')
 MAX_COVER=8*1024*1024
 def utc(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def member_key(path): return str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(path))))
@@ -65,7 +66,7 @@ def image_kind(data):
 class CandidateReviewService:
     def __init__(self,inventory,cache_dir,client=None,jobs=None):
         self.inventory=inventory; self.cache=ordinary(cache_dir)
-        if any(inside(self.cache,root) for root in inventory.roots.values()):raise ValueError('Cover cache must be outside source libraries')
+        if any(inside(self.cache,root) for root in (inventory.all_source_roots() if hasattr(inventory,'all_source_roots') else inventory.roots.values())):raise ValueError('Cover cache must be outside source libraries')
         with DirectoryBoundary(self.cache.anchor,self.cache,create=True) as boundary:
             self.cache_identity=boundary.identities
         self.client=client or MetadataClient(); self.jobs=jobs
@@ -74,11 +75,26 @@ class CandidateReviewService:
         self.page_local=threading.local()
         with connect(inventory.database) as db:
             db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, data TEXT NOT NULL)')
+            manual_metadata.initialize(db)
+            # Preserve existing user drafts before any release/start-over can clear canonical context.
+            prior_drafts=db.execute('SELECT g.id,g.fingerprint,g.review,g.revision,c.revision AS context_revision,c.data FROM book_groups g JOIN candidate_context c ON c.id=g.id') if db.execute("SELECT 1 FROM sqlite_master WHERE name='book_groups' AND type='table'").fetchone() else []
+            for saved in prior_drafts:
+                context=json.loads(saved['data'])
+                if context.get('metadata_actor')=='user' and saved['review']:
+                    prior=db.execute('SELECT 1 FROM manual_metadata_sources WHERE candidate_id=? LIMIT 1',(saved['id'],)).fetchone()
+                    if not prior:
+                        binding=dict(saved)
+                        if saved['revision']!=saved['context_revision']:binding['fingerprint']='legacy-unbound:'+str(saved['context_revision'])
+                        manual_metadata.append(db,manual_metadata.capture(binding,json.loads(saved['review']),context.get('manual_note','')))
 
     def set_jobs(self,jobs):self.jobs=jobs
 
     def _row(self,library,id,revision=None):
         if library!='Audiobooks':raise ValueError('Only Audiobooks have candidate review')
+        with connect(self.inventory.database) as db:
+            import reacquire_sources
+            marker=reacquire_sources.marker(db,id)
+            if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
         row=self.inventory.candidate(library,id) if hasattr(self.inventory,'candidate') else next((r for r in self.inventory.candidates(library,limit=1000000)['rows'] if r['id']==id),None)
         if row is None or (revision is not None and row['revision']!=revision):raise ValueError('Candidate changed; reload evidence before reviewing')
         return row
@@ -92,14 +108,31 @@ class CandidateReviewService:
             saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(row['id'],)).fetchone()
         return json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
 
-    def _write(self,row,ctx,bump=True):
+    def _write(self,row,ctx,bump=True,manual_source=None,decision_record=None):
         with self.inventory.group_lock,connect(self.inventory.database) as db:
+            import reacquire_sources
+            marker=reacquire_sources.marker(db,row['id'])
+            if marker and marker['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
             current=db.execute('SELECT revision FROM book_groups WHERE id=?',(row['id'],)).fetchone()
             if not current or current['revision']!=row['revision']:raise ValueError('Candidate changed; reload evidence before reviewing')
             revision=row['revision']+int(bump)
             if bump:db.execute('UPDATE book_groups SET revision=?,approved=0 WHERE id=?',(revision,row['id']))
             db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(row['id'],revision,json.dumps(ctx,ensure_ascii=False)))
+            manual_metadata.append(db,manual_source)
+            if decision_record is not None:
+                import metadata_choices
+                metadata_choices.append(db,decision_record,applied_revision=revision)
         return self.enrich(self._row('Audiobooks',row['id']))
+
+    def _source_root(self,row,library='Audiobooks'):
+        if row.get('source_root'):return row['source_root']
+        if hasattr(self.inventory,'source_root_for_candidate'):return self.inventory.source_root_for_candidate(row['id'])
+        return self.inventory.roots[library]
+
+    def _output_root(self,row,review=None,library='Audiobooks'):
+        review=review if review is not None else row.get('review') or {}
+        configured=getattr(self.inventory,'output_root',None)
+        return configured if configured and review.get('organization_policy')=='books-hierarchy-v2' else self._source_root(row,library)
 
     def _keys(self,row):return [member_key(m['path']) for m in row['members']]
 
@@ -114,11 +147,13 @@ class CandidateReviewService:
 
     def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False):
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row)
+        with connect(self.inventory.database) as db:row['manual_metadata_sources']=manual_metadata.records(db,row)
         facts=ctx.get('metadata_facts')
         if facts:
             from standing_metadata import validate_policy
             validate_policy(row,row.get('review',{}),facts)
-            row['preview']=propose(row['members'][0]['path'],self.inventory.roots['Audiobooks'],'audiobook',row['metadata'],row['review'],automatic_facts=facts)
+            row['preview']=propose(row['members'][0]['path'],self._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=facts)
+        if (row.get('review') or {}).get('organization_policy')=='books-hierarchy-v2':row['preview']=propose(row['members'][0]['path'],self._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=facts)
         row['metadata_facts']=copy.deepcopy(facts)
         row['duplicate_review']=copy.deepcopy(ctx.get('duplicate_review'))
         for m,key in zip(row['members'],keys):m['member_key']=key
@@ -151,7 +186,7 @@ class CandidateReviewService:
         albums={str({k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
         if len(row['members'])>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not facts:reasons.append('Establish one common book source context; loose files cannot establish recording membership')
         if any(m.get('error') or m.get('missing') for m in row['members']):reasons.append('Source files unavailable or unreadable')
-        if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not facts:reasons.append('Single audiobook file')
+        if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not facts and not manual_metadata.approved(row,ctx):reasons.append('Single audiobook file')
         destination=row.get('preview',{}).get('path','')
         if not destination:reasons.append(row.get('preview',{}).get('reason') or 'Confirm output destination')
         elif check_sources and os.path.exists(destination):reasons.append('An audiobook already exists at this path. Review it or choose a different reviewed destination.')
@@ -175,6 +210,7 @@ class CandidateReviewService:
                              'device':'Apple Books sync not checked','recording_completeness':'Recording completeness unknown','job':job})
         automatic=self.jobs.automatic.candidate(row) if self.jobs and hasattr(self.jobs,'automatic') else None
         row['automatic']=automatic
+        row['metadata_holds']=manual_metadata.holds(automatic)
         if automatic:
             if not facts:row['metadata_facts']=copy.deepcopy(automatic.get('metadata_facts'))
             if not row['duplicate_review']:row['duplicate_review']=copy.deepcopy(automatic.get('duplicate_review'))
@@ -198,9 +234,47 @@ class CandidateReviewService:
         if job and not allow_existing_job:policy=job.get('cleanup_policy',{'enabled':False,'recovery_root':policy['recovery_root']})
         row['creation']['cleanup_policy']=policy
         row['cleanup']=job.get('cleanup') if job else None
+        row['metadata_questions']=self.metadata_questions(row,ctx)
+        if self.jobs and hasattr(self.jobs,'producer_retention'):row['producer_recovery_retained']=self.jobs.producer_retention(row['id'])
         return row
 
-    ATTENTION_ORDER={'retry':0,'repair':1,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
+    def metadata_questions(self,row,ctx):
+        """Compare current evidence without treating a decision as new evidence."""
+        import metadata_choices
+        matching=self.matching.get(row['id'],row.get('matching') or ctx.get('matching') or {})
+        automatic=row.get('automatic')
+        if automatic is None and self.jobs and hasattr(self.jobs,'automatic'):automatic=self.jobs.automatic.candidate(row)
+        conflicts=list(matching.get('conflicts') or [])+list((automatic or {}).get('manual_metadata_conflicts') or [])
+        with connect(self.inventory.database) as db:
+            entered=manual_metadata.records(db,row)
+            return metadata_choices.present(db,row,matching.get('proposals') or [],entered,conflicts)
+
+    def choose_metadata(self,library,id,revision,signature,choices,manual_note=''):
+        """Save an explicit evidence-scoped draft choice; never approve or queue."""
+        import metadata_choices
+        with self.lock:
+            try:row=self._row(library,id,revision)
+            except ValueError:raise metadata_choices.ChoiceChanged() from None
+            ctx=self._context(row);snapshot=self.metadata_questions(row,ctx)
+            prepared=metadata_choices.prepare(row,snapshot,signature,choices,actor='user',note=manual_note)
+            if prepared['record']['choices'] and all(choice['mode']=='unresolved' for choice in prepared['record']['choices']):
+                held=copy.deepcopy(ctx);held['metadata_approved']=False
+                saved=self._write(row,held,decision_record=prepared['record'])
+                questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
+                return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
+            review=copy.deepcopy(row.get('review') or {})
+            patch=prepared['patch']
+            if 'original_language' in patch:
+                language=patch['original_language'].strip().casefold()
+                patch['original_language']='Unknown' if language in {'','unknown','und','unverified'} else 'Russian' if language in {'ru','rus','russian','русский'} else 'Other'
+            review.update(patch)
+            saved=self.save(library,id,revision,review,approve=False,manual_note=manual_note or ctx.get('manual_note',''),
+                proposal_id=ctx.get('proposal_id') or None,cover_id=ctx.get('cover_id') or None,actor='user',
+                capture_manual=bool(prepared['corrected_values']),manual_source_values=prepared['corrected_values'],decision_record=prepared['record'])
+            questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
+            return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
+
+    ATTENTION_ORDER={'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
@@ -220,7 +294,7 @@ class CandidateReviewService:
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
         if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review','restarted'):raise ValueError('Unknown candidate status')
-        if group not in (None,'all','retry','repair','checking','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
+        if group not in (None,'all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
@@ -231,6 +305,7 @@ class CandidateReviewService:
                 state={'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],
                     'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+                if isinstance(job['manifest'].get('retry_intent'),dict):self.page_local.jobs[job['manifest']['candidate_id']]['retry_parent_job_id']=job['manifest']['retry_intent'].get('parent_job_id')
                 if job['manifest'].get('m4b_repair'):
                     from audio_jobs import repair_record;repaired=repair_record(job)
                     if repaired:self.page_local.jobs[job['manifest']['candidate_id']]['repaired']=repaired
@@ -333,23 +408,38 @@ class CandidateReviewService:
         finally:
             del self.page_local.contexts;del self.page_local.jobs;del self.page_local.ready_ids
             if hasattr(self.page_local,'audiobooks'):del self.page_local.audiobooks
-        return {'rows':rows,'total':total}|({'restart_counts':restart_counts} if restart_counts is not None else {})
+        return {'rows':rows,'total':total,'reacquire_archives':result.get('reacquire_archives',[])}|({'restart_counts':restart_counts} if restart_counts is not None else {})
 
     def _actor(self,actor,note):
         if actor not in ('user','assistant'):raise ValueError('Unknown reviewer actor')
         if not isinstance(note,str) or len(note)>16000:raise ValueError('Evidence note exceeds bound')
         if actor=='assistant' and len(note.strip())<20:raise ValueError('Assistant review requires concrete supporting evidence')
 
-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None):
+    def routing_preview(self,library,id,revision,review):
+        with self.lock:
+            row=self._row(library,id,revision)
+            if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid preview metadata')
+            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology'}:raise ValueError('Unknown preview field')
+            draft=copy.deepcopy(review)
+            for field in TEXT_FIELDS:
+                value=draft.setdefault(field,'')
+                if not isinstance(value,str) or len(value)>2000:raise ValueError('Preview fields must be bounded text')
+            for field in ('multi_author','anthology'):
+                if type(draft.setdefault(field,False)) is not bool:raise ValueError('Routing choices must be explicit booleans')
+            draft['organization_policy']='books-hierarchy-v2'
+            return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=self._context(row).get('metadata_facts'))
+
+    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None):
         with self.lock:
             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
             review=copy.deepcopy(review)
+            review['organization_policy']='books-hierarchy-v2'
             ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if automatic_pending is not None:
                 if actor!='assistant' or not approve or not isinstance(automatic_pending,dict) or set(automatic_pending)!={'matcher_version','work_id'} or not all(isinstance(v,str) and v for v in automatic_pending.values()):raise ValueError('Invalid private automatic approval checkpoint')
                 ctx['automatic_pending']=copy.deepcopy(automatic_pending)
-            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology'}:raise ValueError('Unknown canonical metadata field')
+            if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology','organization_policy'}:raise ValueError('Unknown canonical metadata field')
             for field in TEXT_FIELDS:
                 value=review.setdefault(field,'')
                 if not isinstance(value,str) or len(value)>2000:raise ValueError('Canonical metadata fields must be bounded text')
@@ -382,11 +472,14 @@ class CandidateReviewService:
                 if ('original_language' in needed) and (not langs or any(v in ('','unknown','other','unverified') for v in langs)):raise ValueError('Establish the actual original-work language in evidence')
                 russian=any(v in ('russian','ru','rus','русский') for v in langs)
                 if 'original_language' in needed and russian!=(review.get('original_language')=='Russian'):raise ValueError('Original-work language contradicts cited evidence')
+            if approve:
+                import metadata_choices
+                metadata_choices.admission(self.metadata_questions(row,ctx),review)
             if approve and (not manual_note.strip() or not (review.get('canonical_author') or '').strip()):raise ValueError('Confirm the author role and record metadata evidence')
             if cover_id is not None and not any(c['id']==cover_id for c in ctx.get('cover_choices',[])):raise ValueError('Choose a discovered local cover')
             trial=copy.deepcopy(ctx);trial['cover_id']=cover_id or ctx.get('cover_id')
             if approve and not self._cover(trial):raise ValueError('Choose a usable cover')
-            preview=propose(row['members'][0]['path'],self.inventory.roots[library],'audiobook',row['metadata'],review,automatic_facts=automatic_facts)
+            preview=propose(row['members'][0]['path'],self._output_root(row,review,library),'audiobook',row['metadata'],review,automatic_facts=automatic_facts)
             if approve and not preview['path']:raise ValueError(preview['reason'])
             if proposal_id is not None and not any(p['id']==proposal_id for p in self.matching.get(id,ctx.get('matching',{})).get('proposals',[])):raise ValueError('Unknown metadata proposal')
             changed=review!=row.get('review') or manual_note!=ctx.get('manual_note') or trial['cover_id']!=ctx.get('cover_id') or records!=ctx.get('metadata_evidence',[])
@@ -394,23 +487,27 @@ class CandidateReviewService:
             if automatic_facts is not None:ctx['metadata_facts']=copy.deepcopy(automatic_facts)
             else:ctx.pop('metadata_facts',None);ctx.pop('duplicate_review',None)
             ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
+            ctx.pop('manual_metadata_acceptance',None)
+            if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
             if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
-            return self._write(fresh,ctx)
+            return self._write(fresh,ctx,manual_source=manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None,decision_record=decision_record)
 
     def match(self,library,id,revision):
         with self.lock:
             row=self._row(library,id,revision)
             if id in self.workers and self.workers[id].is_alive():return self.enrich(row)['matching']
-            query=(row.get('review') or {}).get('title') or row['title_clue']
-            author=(row.get('review') or {}).get('canonical_author') or ''
+            with connect(self.inventory.database) as db:entered=manual_metadata.proposals(manual_metadata.records(db,row))
+            query=(row.get('review') or {}).get('title') or (entered[0].get('title') if entered else '') or row['title_clue']
+            author=(row.get('review') or {}).get('canonical_author') or (entered[0].get('authors') if entered else '') or ''
             self.matching[id]={'state':'finding','proposals':self._context(row).get('matching',{}).get('proposals',[]),'error':''}
             def lookup():
                 try:
                     proposals=self.client.lookup(query,author)
                     for p in proposals:p['id']=str(uuid.uuid5(uuid.NAMESPACE_URL,p['public_url']))
-                    result={'state':'found' if proposals else 'empty','proposals':proposals,'error':''}
-                except SourceUnavailable as error:result={'state':'unavailable','proposals':self.matching[id]['proposals'],'error':str(error),'code':error.code}
-                except Exception:result={'state':'unavailable','proposals':self.matching[id]['proposals'],'error':'Metadata source unavailable. Review cached evidence or enter verified metadata manually.'}
+                    conflicts=manual_metadata.compare(entered,proposals)
+                    result={'state':'found' if proposals or entered else 'empty','proposals':entered+proposals,'conflicts':conflicts,'error':''}
+                except SourceUnavailable as error:result={'state':'unavailable','proposals':entered+[p for p in self.matching[id]['proposals'] if not p.get('manual_source')],'error':str(error),'code':error.code}
+                except Exception:result={'state':'unavailable','proposals':entered+[p for p in self.matching[id]['proposals'] if not p.get('manual_source')],'error':'Metadata source unavailable. Review cached evidence or enter verified metadata manually.'}
                 with self.lock:
                     try:
                         current=self._row(library,id,revision);ctx=self._context(current);ctx['matching']=result
@@ -457,7 +554,7 @@ class CandidateReviewService:
                 with connect(self.inventory.database) as db:
                     for m in (row['members'] if all_embedded else row['members'][:30]):
                         if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
-                        raw=db.execute('SELECT metadata FROM files WHERE root=? AND path=?',(self.inventory.roots[library],m['path'])).fetchone()
+                        raw=db.execute('SELECT metadata FROM files WHERE root=? AND path=?',(self._source_root(row,library),m['path'])).fetchone()
                         streams=json.loads(raw[0]).get('probe',{}).get('streams',[]) if raw else []
                         attached=next((s for s in streams if s.get('disposition',{}).get('attached_pic')==1),None)
                         if attached is None:continue
@@ -575,6 +672,8 @@ class CandidateReviewService:
             return self._write(row,ctx)
 
     def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None):
+        import reacquire_sources
+        with connect(self.inventory.database) as db:reacquire_sources.require_admission(db,id)
         with self.lock:
             row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending);ctx=self._context(row)
             if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
@@ -586,17 +685,21 @@ class CandidateReviewService:
                 sources.append({'path':m['path'],'size':stored['size'],'modified':stored['modified'],'sha256':stored['sha256'],'fingerprint':{'size':stored['size'],'modified':stored['modified']},'metadata':m['metadata']})
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']
-            automatic_profile=bool(ctx.get('metadata_facts'))
+            manual_m4b=bool(len(sources)==1 and Path(sources[0]['path']).suffix.lower()=='.m4b' and manual_metadata.approved(row,ctx))
+            automatic_profile=bool(ctx.get('metadata_facts')) or manual_m4b
             profile=AUTOMATIC_PROFILE if automatic_profile else PROFILE
             encoding=freeze_automatic_policy(sources) if automatic_profile else freeze_policy(sources)
             manifest={'job_id':str(uuid.uuid4()),'candidate_id':id,'candidate_revision':revision,'sources':sources,'metadata':copy.deepcopy(row['review']),
-                    'root':self.inventory.roots[library],'destination':row['creation']['destination'],'profile':profile,'encoding_policy':encoding,'cover':cover,'comments':comments,
+                    'root':self._source_root(row,library),'output_root':self._output_root(row,library=library),'destination':row['creation']['destination'],'profile':profile,'encoding_policy':encoding,'cover':cover,'comments':comments,
                     'cleanup_policy':row['creation']['cleanup_policy'],
                     'evidence':{'metadata_actor':ctx['metadata_actor'],'metadata_utc':ctx['metadata_utc'],'manual_note':ctx['manual_note'],'metadata_fields':ctx.get('metadata_evidence',[]),'track_actor':ctx['track_actor'],'track_utc':ctx['track_utc'],'track_basis':ctx['track_evidence'],'recording_completeness':'unknown'},
                     'chapters':chapter_names([members[key] for key in row['track_order'] if key in row['included']]) if ctx.get('chapters') else []}
-            if automatic_profile:
+            if ctx.get('metadata_facts'):
                 manifest['metadata_facts']=copy.deepcopy(ctx['metadata_facts'])
                 manifest['duplicate_review']=copy.deepcopy(ctx.get('duplicate_review'))
+            if manual_m4b:
+                manifest['evidence']['manual_metadata_acceptance']=copy.deepcopy(ctx['manual_metadata_acceptance'])
+            if automatic_profile:
                 if len(sources)==1 and Path(sources[0]['path']).suffix.lower()=='.m4b':
                     from audio_pipeline import source_chapters
                     manifest['source_chapters']=source_chapters(sources[0]['path'],self.cache,stop or threading.Event(),row['creation']['duration_seconds'])

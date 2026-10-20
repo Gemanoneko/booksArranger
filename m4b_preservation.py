@@ -274,6 +274,46 @@ def validate_track(box,mdat_extents,chunk_budget,eof=None):
     local=one(parts,b'udta',True);need(local is None or local.raw==EMPTY_TRACK_NAME,'Unsupported track-local user data')
     return {'id':identity,'handler':handler,'codec':codec,'chap':refs,'chap_boxes':chap_boxes,'samples':samples,'spans':spans,'cut':cut,'sha256':hashlib.sha256(box.raw).hexdigest()}
 
+def profile_zero_chapter_count(box,mdat_extents,chunk_budget,read_at):
+    """Recognize only the observed zero-count QuickTime text writer quirk.
+
+    A virtual count validates existing sample addresses; no native box is ever
+    rewritten. All original track bytes and externally visible chapter
+    presentation must remain unchanged. This does not claim the count valid.
+    """
+    parts=boxes(box.payload);mdia=one(parts,b'mdia');media=boxes(mdia.payload)
+    if one(media,b'hdlr').payload[8:12]!=b'text':return None
+    minf=one(media,b'minf');children=boxes(minf.payload);stbl=one(children,b'stbl');tables=boxes(stbl.payload)
+    sizes=one(tables,b'stsz')
+    if sizes.payload!=bytes(4)+struct.pack('>II',16,0):return None
+    observed_stsd=bytes.fromhex('00000000000000010000003b7465787400000000000000010000000400000001ffffffffffff0000000000000000000000000010000d00000000000d00000000000000')
+    need(one(tables,b'stsd').payload==observed_stsd,'Zero-count text profile sample description differs')
+    offsets=one(tables,b'stco',True)
+    need(offsets is not None and one(tables,b'co64',True) is None,'Zero-count text profile needs observed32-bit offsets')
+    count=table(offsets.payload,4);need(0<count<=99,'Zero-count text profile label bound')
+    need(one(tables,b'stsc').payload==bytes(4)+struct.pack('>IIII',1,1,1,1),'Zero-count text profile needs one sample per chunk')
+    # Independent count comes from chunk entries, not inferred chapter timing.
+    patched_sizes=repack(sizes,sizes.payload[:8]+struct.pack('>I',count))
+    def replace(container,kind,raw):return repack(container,b''.join(raw if child.kind==kind else child.raw for child in boxes(container.payload)))
+    new_stbl=replace(stbl,b'stsz',patched_sizes);new_minf=replace(minf,b'stbl',new_stbl)
+    new_mdia=replace(mdia,b'minf',new_minf);patched=replace(box,b'mdia',new_mdia)
+    track=validate_track(boxes(patched)[0],mdat_extents,chunk_budget)
+    need(track['handler']==b'text' and track['codec']==b'text' and track['samples']==count,'Zero-count text profile identity mismatch')
+    payload_hash=hashlib.sha256()
+    for index,(start,end) in enumerate(track['spans'],1):
+        need(end-start==16,'Zero-count text profile needs fixed16-byte samples')
+        raw=read_at(start,16)
+        need(raw==b'\x00\x02'+f'{index:02d}'.encode('ascii')+bytes.fromhex('0000000c656e636400000100'),'Zero-count text profile label bytes differ')
+        payload_hash.update(raw)
+    track['sha256']=hashlib.sha256(box.raw).hexdigest()
+    facts={'schema':'quicktime-zero-fixed-text-count-preserved-v1','track_id':track['id'],
+           'invalid_field':'stsz.sample_count','preserved_count':0,'mapped_samples':count,
+           'fixed_sample_bytes':16,'chapter_payload_sha256':payload_hash.hexdigest(),
+           'unchanged_trak_sha256':track['sha256'],'native_track_bytes_unchanged':True,
+           'note':'Observed zero text sample count preserved byte for byte; virtual count validates existing chunk extents only. Chapter presentation must match the source; no chapter repair or synthesis.'}
+    return track,facts
+
+
 def silence_final_frames(box,track,media_offset):
     """Repair only: the audio trak whose cut final samples point to silent frames at media_offset.
 
@@ -431,6 +471,7 @@ class Plan:
     appended_media:bytes=b''
     header_patches:tuple=()
     metadata_dropped:tuple=()
+    profile_notes:tuple=()
 
 def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     """repair names the damage kinds the user approved; each applies only to its exact shape.
@@ -496,13 +537,17 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     descriptor=one(parts,b'iods',True)
     need(descriptor is None or descriptor.header==8 and len(descriptor.raw)==len(IODS_FORM)+IODS_PROFILE_BYTES and descriptor.raw.startswith(IODS_FORM),'Unsupported object descriptor')
     track_boxes=[b for b in parts if b.kind==b'trak'];need(0<len(track_boxes)<=MAX_TRACKS,'Track count')
-    tracks=[];remaining_chunks=MAX_CHUNKS
+    tracks=[];remaining_chunks=MAX_CHUNKS;profile_notes=[]
     # Only the silence repair lets chunks reach the declared (missing) tail, and it names every
     # sample that does; without it, chunks must lie inside the bytes the file actually holds.
     silence=bool(padding) and REPAIR_TRUNCATED_FRAMES in repair
     checked=[(lo,declared_end if hi==source_size else hi) for lo,hi in extents] if silence else extents
     for track_box in track_boxes:
-        track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None);remaining_chunks-=len(track['spans']);tracks.append(track)
+        fixed=profile_zero_chapter_count(track_box,checked,remaining_chunks,read)
+        if fixed:
+            track,facts=fixed;profile_notes.append(facts)
+        else:track=validate_track(track_box,checked,remaining_chunks,source_size if silence else None)
+        remaining_chunks-=len(track['spans']);tracks.append(track)
     ids=[t['id'] for t in tracks];need(len(set(ids))==len(ids),'Duplicate track identity')
     audio=[t for t in tracks if t['handler']==b'soun'];need(len(audio)==1,'Exactly one audio track required')
     audio=audio[0];expected=[b.raw for b in track_boxes];output_movie=movie;media=b''
@@ -550,7 +595,7 @@ def plan(source_size,read_at,tags,cover=None,repair=frozenset()):
     # chapter reference is the only permitted difference and was rebuilt exactly above.
     need([b.raw for b in boxes(appended[16:] if appended[:4]==b'\0\0\0\1' else appended[8:]) if b.kind==b'trak']==expected,'Track bytes changed')
     return Plan(source_size,movie.start,movie.size,hashlib.sha256(movie.raw).hexdigest(),appended,
-        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media,patches,tuple(dropped))
+        tuple({k:v for k,v in t.items() if k not in ('spans','chap_boxes','cut')} for t in tracks),tuple(extents),padding,tuple(repairs),media,patches,tuple(dropped),tuple(profile_notes))
 
 def _patches(source_plan):
     """In-place header edits: the old moov's type becomes free, plus approved repair size fields."""
@@ -577,6 +622,7 @@ def stream_candidate(source_plan,read_at,write,stopped=lambda:False):
     if source_plan.appended_media:write(source_plan.appended_media);candidate_hash.update(source_plan.appended_media)
     write(source_plan.appended_movie);candidate_hash.update(source_plan.appended_movie)
     receipt={'schema':'m4b-metadata-preservation-v1','source_sha256':source_hash.hexdigest(),'sha256':candidate_hash.hexdigest(),'size':source_plan.source_size+source_plan.tail_padding+len(source_plan.appended_media)+len(source_plan.appended_movie),'old_moov_offset':source_plan.movie_offset,'old_moov_size':source_plan.movie_size,'old_moov_sha256':source_plan.movie_sha256,'appended_moov_sha256':hashlib.sha256(source_plan.appended_movie).hexdigest(),'track_sha256':[t['sha256'] for t in source_plan.tracks],'source_offsets_preserved':True,'fast_start_preserved':False,'pcm_verified':False}
+    if source_plan.profile_notes:receipt['source_profile_notes']=[dict(r) for r in source_plan.profile_notes]
     if source_plan.repairs:receipt.update(tail_padding=source_plan.tail_padding,repairs=[dict(r) for r in source_plan.repairs],
         appended_media_sha256=hashlib.sha256(source_plan.appended_media).hexdigest() if source_plan.appended_media else None)
     # Blank metadata the plan dropped (clean_items): kept in the job's validation with this receipt.

@@ -1,0 +1,123 @@
+# REFERENCE TEXT FOR SENUA REVIEW — NOT APPROVED; do not execute an elevated workspace script.
+# After all pins and native reviews are final, a human enters the approved literal recipe
+# into the trusted installed Windows PowerShell5.1 console. No Add-Type or temp installer.
+$ErrorActionPreference='Stop'
+$ApprovedManifestSHA256='UNAPPROVED'
+$ManifestPath='C:\Users\AnGeLZzZ\AppData\Local\Temp\codex-books-2026-10-20\shared\FINAL_REVIEWED_MANIFEST.json'
+$Leaf='C:\Program Files\BooksArranger-QA-v2'
+if($ApprovedManifestSHA256 -notmatch '^[0-9a-f]{64}$'){throw 'STOP: source checkpoint is not deployment approval'}
+# PRECONDITION: no other privileged installer/writer can create this leaf while this
+# human operation runs. Directory.CreateDirectory may return an existing directory;
+# it is NOT CREATE_NEW and cannot prove absence of an uncooperative admin race.
+# If privileged quiescence cannot be established, STOP without creation or ACL repair.
+$principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Elevated trusted human console required'}
+$overload=[IO.Directory].GetMethod('CreateDirectory',[Type[]]@([string],[Security.AccessControl.DirectorySecurity]))
+if($null -eq $overload){throw 'Installed framework lacks reviewed birth-ACL directory overload'}
+$fsCtor=[IO.FileStream].GetConstructor([Type[]]@([string],[IO.FileMode],[Security.AccessControl.FileSystemRights],[IO.FileShare],[int],[IO.FileOptions],[Security.AccessControl.FileSecurity]))
+if($null -eq $fsCtor){throw 'Installed framework lacks reviewed CreateNew birth-security file constructor'}
+# One ordinary file stream denies write/delete sharing. Hash and parse the SAME bounded bytes.
+# Native ancestry/default-stream/full128 identity admission is separately UNBUILT;
+# this reference is hard-disabled before any privileged copy/create below.
+$manifestStream=[IO.FileStream]::new($ManifestPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+try {
+ if($manifestStream.Length -lt 2 -or $manifestStream.Length -gt 1048576){throw 'Manifest byte quota'}
+ $manifestBytes=New-Object byte[] ([int]$manifestStream.Length)
+ $read=0;while($read -lt $manifestBytes.Length){$n=$manifestStream.Read($manifestBytes,$read,$manifestBytes.Length-$read);if($n -eq 0){throw 'Manifest short read'};$read+=$n}
+ if($manifestStream.ReadByte() -ne -1){throw 'Manifest changed length'}
+ $hasher=[Security.Cryptography.SHA256]::Create()
+ try{$actualManifestHash=([BitConverter]::ToString($hasher.ComputeHash($manifestBytes))).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}
+ if($actualManifestHash -ne $ApprovedManifestSHA256){throw 'Held manifest hash changed'}
+ $strictUtf8=[Text.UTF8Encoding]::new($false,$true)
+ $manifest=$strictUtf8.GetString($manifestBytes) | ConvertFrom-Json
+ throw 'STOP: native held manifest ancestry/default-stream/full128 identity and directory identity fence remain unbuilt; reference cannot provision'
+
+if([IO.Path]::GetFullPath($manifest.root) -ne $Leaf -or $manifest.disabled -ne $true -or $manifest.binary_current_source_verified -ne $true){throw 'Wrong root, enabled plan or unverified binary'}
+if(Test-Path -LiteralPath $Leaf){throw 'Existing leaf preserved; no adoption or repair'}
+$parent=Get-Item -LiteralPath 'C:\Program Files' -Force
+if(($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Parent reparse point'}
+$parentAcl=Get-Acl -LiteralPath 'C:\Program Files'
+if($parentAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'){throw 'Observed protected parent owner changed'}
+$unsafe=[Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+foreach($rule in $parentAcl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){if(($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0){continue};if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') -and ($rule.FileSystemRights -band $unsafe) -ne 0){throw 'Parent has unprivileged create/write/delete/owner rights'}}
+$volumeText=& 'C:\Windows\System32\fsutil.exe' fsinfo volumeinfo 'C:'
+if($LASTEXITCODE -ne 0 -or ($volumeText -join ' ') -notmatch '0xa71ada10'){throw 'Observed native volume serial changed'}
+# No low64-to128 padding claim. Full FILE_ID_INFO parent/root/directory proof is a deployment gate.
+$admin=[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+$system=[Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$users=[Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+function New-DirectoryBirthAcl {
+ $s=[Security.AccessControl.DirectorySecurity]::new();$s.SetOwner($admin);$s.SetAccessRuleProtection($true,$false)
+ foreach($sid in @($admin,$system)){$s.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))}
+ $s.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,[Security.AccessControl.FileSystemRights]::ReadAndExecute,[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow));return $s
+}
+function New-FileBirthAcl {
+ $s=[Security.AccessControl.FileSecurity]::new();$s.SetOwner($admin);$s.SetAccessRuleProtection($true,$false)
+ foreach($sid in @($admin,$system)){$s.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow))}
+ $s.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,[Security.AccessControl.FileSystemRights]::ReadAndExecute,[Security.AccessControl.AccessControlType]::Allow));return $s
+}
+function Assert-ProtectedAcl($path) {
+ $s=Get-Acl -LiteralPath $path
+ if($s.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $admin.Value -or -not $s.AreAccessRulesProtected){throw 'Destination owner/protected DACL mismatch'}
+ $rules=@($s.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]));if($rules.Count -ne 3){throw 'Unexpected destination ACE count'}
+ $seen=@{};foreach($r in $rules){$sid=$r.IdentityReference.Value;if($seen.ContainsKey($sid) -or $r.IsInherited -or $r.AccessControlType -ne 'Allow'){throw 'Unexpected destination ACE'};$seen[$sid]=$true;$wanted=if($sid -eq $users.Value){[Security.AccessControl.FileSystemRights]::ReadAndExecute}else{[Security.AccessControl.FileSystemRights]::FullControl};if($sid -notin @($admin.Value,$system.Value,$users.Value) -or $r.FileSystemRights -ne $wanted){throw 'Unreviewed destination rights'}}
+ $i=Get-Item -LiteralPath $path -Force;if(($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Destination reparse point'}
+}
+# DirectorySecurity is supplied to the creation overload itself; no user-owned
+# ordinary directory is created and then made protected. API existing-leaf races
+# remain governed by the explicit privileged-quiescence precondition above.
+[void][IO.Directory]::CreateDirectory($Leaf,(New-DirectoryBirthAcl));Assert-ProtectedAcl $Leaf
+$expected=@{};$nativeIds=@{};$total=0
+foreach($f in $manifest.files){
+ if($f.relative -match '(^/|\\|:|(^|/)\.\.?(/|$))' -or $expected.ContainsKey($f.relative.ToLowerInvariant())){throw 'Unsafe/duplicate member'}
+ $destination=[IO.Path]::GetFullPath((Join-Path $Leaf $f.relative));if(-not $destination.StartsWith($Leaf+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Escaped output'}
+ $dir=[IO.Path]::GetDirectoryName($destination)
+ # Parents are derived only from the fixed manifest. Before creation, verify any
+ # existing parent is one already created/recorded by this same human operation.
+ if(-not(Test-Path -LiteralPath $dir)){[void][IO.Directory]::CreateDirectory($dir,(New-DirectoryBirthAcl))};Assert-ProtectedAcl $dir
+ if(Test-Path -LiteralPath $destination){throw 'Existing output preserved'}
+ $input=[IO.FileStream]::new($f.source,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+ try{
+  if($input.Length -ne $f.size){throw 'Held source size changed'}
+  $hash=[Security.Cryptography.SHA256]::Create();try{$sourceHash=([BitConverter]::ToString($hash.ComputeHash($input))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
+  if($sourceHash -ne $f.sha256){throw 'Held source pin changed'};$input.Position=0
+  $output=$fsCtor.Invoke(@($destination,[IO.FileMode]::CreateNew,([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Write),[IO.FileShare]::Read,65536,[IO.FileOptions]::WriteThrough,(New-FileBirthAcl)))
+  try{$buffer=New-Object byte[] 65536;$count=0;while(($n=$input.Read($buffer,0,$buffer.Length)) -gt 0){$count+=$n;$total+=$n;if($count -gt $f.size -or $total -gt 8388608){throw 'Copy quota exceeded'};$output.Write($buffer,0,$n)};if($count -ne $f.size){throw 'Copy byte count changed'};$output.Flush($true)}finally{$output.Dispose()}
+ }finally{$input.Dispose()}
+ Assert-ProtectedAcl $destination
+ if((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $f.sha256){throw 'Protected destination hash mismatch'}
+ $id=& 'C:\Windows\System32\fsutil.exe' file queryfileid $destination;if($LASTEXITCODE -ne 0){throw 'Protected destination native ID unavailable'};$nativeIds[$f.relative]=($id -join ' ')
+ $expected[$f.relative.ToLowerInvariant()]=$true
+}
+# Verify complete file AND directory closure, including unexpected empty directories.
+$actualFiles=@(Get-ChildItem -LiteralPath $Leaf -Force -File -Recurse)
+if($actualFiles.Count -ne $manifest.files.Count){throw 'Protected file count differs'}
+$wantedDirs=@{};foreach($f in $manifest.files){$parts=$f.relative.Split('/');for($i=1;$i -lt $parts.Count;$i++){$wantedDirs[($parts[0..($i-1)] -join '/').ToLowerInvariant()]=$true}}
+$actualDirs=@(Get-ChildItem -LiteralPath $Leaf -Force -Directory -Recurse)
+if($actualDirs.Count -ne $wantedDirs.Count){throw 'Protected directory count differs; empty additions refused'}
+foreach($d in $actualDirs){$rel=$d.FullName.Substring($Leaf.Length+1).Replace('\','/').ToLowerInvariant();if(-not $wantedDirs.ContainsKey($rel)){throw 'Unexpected protected directory'};Assert-ProtectedAcl $d.FullName}
+$seenNative=@{};$identityProof=@()
+foreach($f in $actualFiles){
+ $rel=$f.FullName.Substring($Leaf.Length+1).Replace('\','/');if(-not $expected.ContainsKey($rel.ToLowerInvariant())){throw 'Unknown protected file'};Assert-ProtectedAcl $f.FullName
+ $streams=@(Get-Item -LiteralPath $f.FullName -Stream '*');if($streams.Count -ne 1 -or $streams[0].Stream -notin @(':$DATA','::$DATA')){throw 'Additional/unproved file stream'}
+ $links=@(& 'C:\Windows\System32\fsutil.exe' hardlink list $f.FullName);if($LASTEXITCODE -ne 0 -or @($links | Where-Object {$_.Trim() -ne ''}).Count -ne 1){throw 'Destination is not a unique-link file'}
+ $idAgain=& 'C:\Windows\System32\fsutil.exe' file queryfileid $f.FullName;if($LASTEXITCODE -ne 0 -or ($idAgain -join ' ') -ne $nativeIds[$rel]){throw 'Protected destination native identity changed'}
+ $matches=[regex]::Matches(($idAgain -join ' '),'0x[0-9a-fA-F]{16,32}');if($matches.Count -ne 1){throw 'Unrecognized native file ID output'};$id=$matches[0].Value.ToLowerInvariant();if($seenNative.ContainsKey($id)){throw 'Native file ID alias in protected closure'};$seenNative[$id]=$true
+ $identityProof+=@{relative=$rel;file_id=$id;sha256=(Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant();owner_sid=$admin.Value;protected_dacl=$true;single_link=$true;default_stream_only=$true}
+}
+# Final proof is itself newly created under the same protected file ACL, flushed,
+# read back and checked before any later separately approved protected execution.
+$proof=@{schema='books-protected-human-bootstrap-v1';disabled=$true;executed=$false;manifest_sha256=$ApprovedManifestSHA256;root=$Leaf;files=$identityProof;privileged_quiescence='required external human precondition, not an atomic directory-CREATE_NEW claim'}
+$proofBytes=[Text.Encoding]::UTF8.GetBytes(($proof | ConvertTo-Json -Depth 10))
+$proofPath=Join-Path $Leaf 'install-proof.json'
+$proofStream=$fsCtor.Invoke(@($proofPath,[IO.FileMode]::CreateNew,([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Write),[IO.FileShare]::Read,65536,[IO.FileOptions]::WriteThrough,(New-FileBirthAcl)))
+try{$proofStream.Write($proofBytes,0,$proofBytes.Length);$proofStream.Flush($true)}finally{$proofStream.Dispose()}
+Assert-ProtectedAcl $proofPath
+$proofHash=[Security.Cryptography.SHA256]::Create();try{$expectedProof=([BitConverter]::ToString($proofHash.ComputeHash($proofBytes))).Replace('-','').ToLowerInvariant()}finally{$proofHash.Dispose()}
+if((Get-FileHash -LiteralPath $proofPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedProof){throw 'Protected proof readback failed'}
+# No automatic source removal, partial-root cleanup, global edit, or execution.
+# This copies trusted reviewed BYTES only. It neither creates a trusted source
+# interpreter nor grants approval to execute a new binary or canonical checker.
+'Protected COPY proof prepared; operations remain disabled; execute nothing until separate approval.'
+
+} finally { $manifestStream.Dispose() } # retain frozen manifest through complete operation

@@ -23,9 +23,10 @@ kernel.WriteFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes
 kernel.WriteFile.restype=wintypes.BOOL
 
 class ReplacementRetirement:
-    def __init__(self,store,root,library,stop,guard,former_guard):
+    def __init__(self,store,root,library,stop,guard,former_guard,bindings=None):
         self.store=store;self.root=ordinary(root);self.library=ordinary(library);self.stop=stop;self.guard=guard
         self.former_guard=former_guard
+        self.bindings=bindings
         self.lock=threading.RLock();self.current=None;self.last_errors={}
         with DirectoryBoundary(self.root.anchor,self.root,create=True) as boundary:self.root_identity=boundary.identities
 
@@ -43,13 +44,31 @@ class ReplacementRetirement:
 
     @contextlib.contextmanager
     def _current(self,relation,historical=False,stop=None):
-        record=json.loads(relation['current_output_json']);path=ordinary(record['final_path'])
-        if not path.is_relative_to(self.library) or path.suffix.lower()!='.m4b':raise BoundaryError('Current replacement is outside the audiobook library')
-        with DirectoryBoundary(self.library,path.parent) as boundary,VerifiedFile(path) as file:
+        original=json.loads(relation['current_output_json'])
+        record,envelope=self.bindings.current(original,'replacement') if self.bindings else (original,None)
+        path=ordinary(record['final_path']);root=ordinary(record.get('root',self.library))
+        if not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current replacement is outside its bound audiobook root')
+        with DirectoryBoundary(root,path.parent) as boundary,VerifiedFile(path) as file:
             if [list(v) for v in boundary.identities]!=[list(v) for v in record['parent_identity']] or file.facts()['links']!=1 or file.facts()['size']!=record['size'] or self._hash(file,stop if historical else self.stop)!=record['sha256']:
                 raise BoundaryError('Current replacement changed; former outputs retained')
+            if record.get('identity') is not None and record['identity']!=file.facts()['identity']:raise BoundaryError('Current replacement native identity changed')
             if self.guard(relation,historical=historical) is not True:raise BoundaryError('Replacement approval or publication changed')
-            yield file
+            yield {'original':original,'effective':record,'envelope':envelope,'kind':'replacement','journal_sha256':None}
+
+    @contextlib.contextmanager
+    def _publication_transaction(self,relation,*publications,historical=False):
+        from scanner import connect
+        with connect(self.store.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            current=db.execute('SELECT * FROM audiobook_replacements WHERE id=?',(relation['id'],)).fetchone()
+            if not current or dict(current)!=relation:raise BoundaryError('Replacement relation changed before native disposition')
+            if not self.store.structural_guard(relation,historical=historical,db=db):raise BoundaryError('Replacement approval changed before native disposition')
+            for publication in publications:
+                if publication is None:continue
+                if self.bindings:
+                    if not self.bindings.guard(db,publication['original'],publication['envelope'],kind=publication['kind'],repair_journal_sha256=publication.get('journal_sha256'),require_transaction=True):raise BoundaryError('Publication generation changed before native disposition')
+                elif publication.get('envelope') is not None:raise BoundaryError('Relocated publication guard unavailable')
+            yield db
 
     @contextlib.contextmanager
     def _recovery(self,relation,row,historical=False,stop=None):
@@ -66,8 +85,8 @@ class ReplacementRetirement:
             single_stream(path)
             yield file
 
-    def _absent(self,path):
-        with DirectoryBoundary(self.library,path.parent):
+    def _absent(self,path,root=None):
+        with DirectoryBoundary(root or self.library,path.parent):
             # lstat rather than exists: broken/reparse names are never absence.
             try:path.lstat()
             except FileNotFoundError:return True
@@ -129,11 +148,11 @@ class ReplacementRetirement:
                 with contextlib.ExitStack() as stack:
                     from scanner import connect
                     with connect(self.store.database) as db:parent_row=self.store.raw_job(db,relation['parent_job_id'])
-                    stack.enter_context(self.former_guard(relation,parent_row))
+                    former=stack.enter_context(self.former_guard(relation,parent_row))
                     destination=self.root/relation['id']
                     boundary=stack.enter_context(DirectoryBoundary(self.root.anchor,destination,create=True))
                     if boundary.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery storage ancestry changed')
-                    stack.enter_context(self._current(relation))
+                    successor=stack.enter_context(self._current(relation))
                     for source in approval['sources']:
                         path=ordinary(source['path']);stack.enter_context(DirectoryBoundary(self.library,path.parent));file=stack.enter_context(VerifiedFile(path))
                         if file.facts()['links']!=1 or file.facts()['size']!=source['size'] or self._hash(file,self.stop)!=source['sha256']:raise BoundaryError('Original source changed; former conversions retained')
@@ -145,34 +164,43 @@ class ReplacementRetirement:
                     rows.sort(key=lambda row:row['original_path']==base)
                     for index,row in enumerate(rows):
                         self._stop();phase='verifying former output'
-                        proof=json.loads(row['provenance_json']);path=ordinary(row['original_path'])
-                        if not path.is_relative_to(self.library) or path==ordinary(json.loads(relation['current_output_json'])['final_path']):raise BoundaryError('Former-output allowlist is unsafe')
-                        ancestry=stack.enter_context(DirectoryBoundary(self.library,path.parent))
-                        if [list(v) for v in ancestry.identities]!=[list(v) for v in proof['ancestry']]:raise BoundaryError('Former-output ancestry changed')
-                        if row['state'] in {'retirement_intended','removed'} and self._absent(path):
+                        proof=json.loads(row['provenance_json']);publication=former.get(row['original_path']) if former else None
+                        if self.bindings and publication is None:raise BoundaryError('Former publication lacks its independent authoritative location proof')
+                        record=publication['effective'] if publication else {'root':str(self.library),'final_path':row['original_path'],'parent_identity':proof['ancestry']}
+                        path=ordinary(record['final_path']);output_root=ordinary(record['root'])
+                        if not path.is_relative_to(output_root) or path==ordinary(successor['effective']['final_path']):raise BoundaryError('Former-output allowlist is unsafe')
+                        ancestry=stack.enter_context(DirectoryBoundary(output_root,path.parent))
+                        if [list(v) for v in ancestry.identities]!=[list(v) for v in record['parent_identity']]:raise BoundaryError('Former-output ancestry changed')
+                        if row['state'] in {'retirement_intended','removed'} and self._absent(path,output_root):
+                            if publication and publication['envelope'] is not None and row['state']=='retirement_intended':raise BoundaryError('Relocated former-output absence needs exact native-owner closure; recovery retained')
                             stack.enter_context(self._recovery(relation,row))
                             if row['state']=='retirement_intended':
                                 recovery=json.loads(row['recovery_json']);retired=now();recovery.update(retired_at=retired,expire_after=(datetime.fromisoformat(retired)+timedelta(hours=24)).isoformat())
                                 row=self.store.file_transition(row,'removed',recovery)
                             continue
                         if row['state']=='removed':raise BoundaryError('A retired old output unexpectedly exists; no replay allowed')
-                        with VerifiedFile(path,delete=True) as original:
+                        with contextlib.ExitStack() as leaf:
+                            original=VerifiedFile(path,delete=True).__enter__()
+                            leaf.callback(lambda:original.__exit__(None,None,None) if original.handle is not None else None)
                             facts=original.facts()
-                            if facts!=proof['facts'] or facts['links']!=1 or facts['size']!=proof['size'] or self._hash(original,self.stop)!=proof['sha256']:
+                            native_match=facts['identity']==record['identity'] if record.get('identity') is not None else facts==proof['facts']
+                            if not native_match or facts['links']!=1 or facts['size']!=proof['size'] or self._hash(original,self.stop)!=proof['sha256']:
                                 raise BoundaryError('Former output changed; it cannot be retired')
                             single_stream(path)
                             if row['state']=='waiting':
                                 phase='copying verified former output'
-                                row=self._copy(relation,row,original,proof,destination,boundary)
+                                row=self._copy(relation,row,original,dict(proof,facts=facts),destination,boundary)
                             stack.enter_context(self._recovery(relation,row))
                             self._stop()
                             if self.guard(relation) is not True:raise BoundaryError('Replacement publication changed before old disposition')
                             if row['state']=='copied':row=self.store.file_transition(row,'retirement_intended')
                             if row['state']!='retirement_intended':raise BoundaryError('Old disposition has no exact durable intent')
-                            phase='native former-output disposition';self._stop();original.dispose()
-                        if not self._absent(path):raise BoundaryError('Native former-output disposition did not establish absence')
-                        recovery=json.loads(row['recovery_json']);retired=now();recovery.update(retired_at=retired,expire_after=(datetime.fromisoformat(retired)+timedelta(hours=24)).isoformat())
-                        phase='recording native disposition';row=self.store.file_transition(row,'removed',recovery)
+                            phase='native former-output disposition';self._stop()
+                            with self._publication_transaction(relation,successor,*(former.values() if former else ())) as db:
+                                ancestry.revalidate();original.dispose();original.__exit__(None,None,None)
+                                if not self._absent(path,output_root):raise BoundaryError('Native former-output disposition did not establish absence')
+                                recovery=json.loads(row['recovery_json']);retired=now();recovery.update(retired_at=retired,expire_after=(datetime.fromisoformat(retired)+timedelta(hours=24)).isoformat(),effective_retirement=publication,native_handle_closed=True)
+                                phase='recording native disposition';row=self.store.file_transition(row,'removed',recovery,db=db)
                     return self.store.transition(relation,'completed')
             except BaseException as error:
                 diagnostic={'type':type(error).__name__,'message':str(error),'phase':phase,'secondary':[],'at':now()}
@@ -190,7 +218,7 @@ class ReplacementRetirement:
         rows=[r for r in self.store.files(relation['id']) if r['state']=='removed' and not json.loads(r['recovery_json'] or '{}').get('purged_at')]
         if not rows:return 0
         freed=0
-        with self.lock,self._current(relation,historical=True,stop=self.stop):
+        with self.lock,self._current(relation,historical=True,stop=self.stop) as successor:
             for row in rows:
                 self._stop();recovery=json.loads(row['recovery_json']);path=ordinary(recovery['path']);expected=self.root/relation['id']
                 if path.parent!=expected:raise BoundaryError('Former-output recovery is outside its owned folder')
@@ -200,11 +228,14 @@ class ReplacementRetirement:
                     with DirectoryBoundary(self.root,expected),VerifiedFile(path,delete=True) as file:
                         if file.facts()!=recovery['facts'] or file.facts()['links']!=1 or self._hash(file,self.stop)!=recovery['sha256']:
                             raise BoundaryError('Former-output recovery changed; preserved')
-                        file.dispose();freed+=recovery['size']
-                    try:path.lstat()
-                    except FileNotFoundError:pass
-                    else:raise BoundaryError('Recovery copy disposition did not remove its name')
-                self.store.file_purged(row,dict(recovery,purged_at=now(),purged_bytes=recovery['size'] if present else 0))
+                        with self._publication_transaction(relation,successor,historical=True) as db:
+                            file.dispose();file.__exit__(None,None,None)
+                            try:path.lstat()
+                            except FileNotFoundError:pass
+                            else:raise BoundaryError('Recovery copy disposition did not remove its name')
+                            self.store.file_purged(row,dict(recovery,purged_at=now(),purged_bytes=recovery['size']),db=db);freed+=recovery['size']
+                else:
+                    with self._publication_transaction(relation,successor,historical=True) as db:self.store.file_purged(row,dict(recovery,purged_at=now(),purged_bytes=0),db=db)
             try:expected.rmdir()
             except OSError:pass
         return freed
@@ -223,8 +254,13 @@ class ReplacementRetirement:
             if not row or row['state'] not in {'retirement_intended','removed'}:return False
             proof=json.loads(row['provenance_json'])
             if proof['sha256']!=parent_output['sha256'] or proof['size']!=parent_output['size']:return False
-            if json.loads(row['recovery_json'] or '{}').get('purged_at'):
-                with self.former_guard(relation,parent_row),self._current(relation,historical=True,stop=stop):return self._absent(path)
-            with self.former_guard(relation,parent_row),self._current(relation,historical=True,stop=stop),self._recovery(relation,row,historical=True,stop=stop):return self._absent(path)
+            with self.former_guard(relation,parent_row) as former,self._current(relation,historical=True,stop=stop):
+                publication=former.get(str(path)) if former else None
+                if self.bindings and publication is None:return False
+                if publication:path=ordinary(publication['effective']['final_path'])
+                root=publication['effective']['root'] if publication else self.library
+                if row['state']=='retirement_intended' and publication and publication['envelope'] is not None:return False
+                if json.loads(row['recovery_json'] or '{}').get('purged_at'):return self._absent(path,root)
+                with self._recovery(relation,row,historical=True,stop=stop):return self._absent(path,root)
         except InterruptedError:raise
         except (ValueError,OSError,KeyError):return False

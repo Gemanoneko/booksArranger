@@ -7,7 +7,7 @@ class Element{
  insertBefore(child){child.parentElement=this;if(!this.children.includes(child))this.children.push(child);}querySelector(){return this.header || (this.header=new Element());}
 }
 const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,new Element(id));return nodes.get(id);};
-const fields=new Map();for(const key of ['original_language','title','author','canonical_author','narrator','series','number','genre','topic','multi_author','anthology'])fields.set(key,new Element());
+const fields=new Map();for(const key of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology'])fields.set(key,new Element());
 get('review-form').elements={namedItem:key=>fields.get(key)};get('candidate-members').parentElement=new Element();
 const document={getElementById:get,querySelector:()=>({content:'fixture-token'}),querySelectorAll:()=>[],createElement:tag=>new Element(tag)};
 let requests=[],inspectReply=null,folderFailure=false;

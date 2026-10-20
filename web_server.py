@@ -232,7 +232,7 @@ class BrowserServer(ThreadingHTTPServer):
             automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
             if token is not None and quiet()==token:self._quiet_parts=((token,key),time.monotonic(),copy.deepcopy((status,automatic)))
         return self.health() | {'library': library, 'root': self.inventory.roots[library],
-            'libraries': list(self.inventory.roots), 'genres': list(GENRES),
+            'libraries': list(self.inventory.roots), 'genres': list(GENRES),'source_roots':list(self.inventory.source_roots(library)) if hasattr(self.inventory,'source_roots') else [self.inventory.roots[library]],'audiobook_output_root':getattr(self.inventory,'output_root',None),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
             'status': status, 'audiobook_jobs': jobs,
@@ -458,6 +458,10 @@ class Handler(BaseHTTPRequestHandler):
             except RetryRefused as error:
                 self.refused(error,id);return
             self.response(202,result|{'automatic_processing':self.automatic_status()});return
+        if path=='/api/audiobook/prepare-recovery':
+            self.shape(data,{'job_id'})
+            job_id=self.uuid_value(data['job_id'])
+            self.response(200,self.server.merge.prepare_producer_recovery(job_id));return
         if path=='/api/audiobook/clear-working':
             # Clear working files: verified disposal of an earlier attempt's leftovers; originals are never touched.
             self.shape(data,{'library','id','revision','job_id'})
@@ -543,10 +547,19 @@ class Handler(BaseHTTPRequestHandler):
             self.response(202,result);return
         if path=='/api/audiobook/retry-all':
             # Retry all: the whole Can retry group, server side; progress arrives in the status payload.
-            self.shape(data,{'library'})
+            self.shape(data,{'library','items'} if 'items' in data else {'library'})
             if data['library']!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+            items=data.get('items')
+            if items is not None:
+                if not isinstance(items,list) or not 1<=len(items)<=10000:raise ValueError('Invalid retry selection')
+                for item in items:
+                    self.shape(item,{'id','revision','job_id','kind'})
+                    self.candidate_identity({'library':'Audiobooks','id':item['id'],'revision':item['revision']})
+                    self.uuid_value(item['job_id'])
+                    if item['kind'] not in ('retry','repair'):raise ValueError('Invalid retry action')
+                if len({item['job_id'] for item in items})!=len(items):raise ValueError('Duplicate retry target')
             from audio_jobs import RetryRefused
-            try:run=self.server.merge.retry_all()
+            try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all()
             except RetryRefused as error:
                 self.fail(409,str(error));return
             self.response(202,{'retry_all':run});return
@@ -606,13 +619,28 @@ class Handler(BaseHTTPRequestHandler):
                 if item['id'] in ids: raise ValueError('Repeated candidate selection')
                 ids.add(item['id'])
             self.response(200,self.server.merge.queue(library,candidates));return
+        if path=='/api/candidate/metadata-choice':
+            import metadata_choices
+            self.shape(data,{'library','id','revision','signature','choices'},{'manual_note'})
+            library,id,revision=self.candidate_identity(data)
+            try:
+                result=reviews.choose_metadata(library,id,revision,self.text_value(data['signature']),data['choices'],self.text_value(data.get('manual_note','')))
+            except metadata_choices.ChoiceChanged as error:
+                try:row=reviews.enrich(reviews._row(library,id))
+                except ValueError:row=None
+                self.response(409,{'error':str(error),'code':error.code,'row':row});return
+            self.response(200,result);return
         base={'library','id','revision'}
         if path=='/api/candidate/review':
             self.shape(data,base|{'review','approve'},{'manual_note','proposal_id','cover_id','actor','evidence'})
+        elif path=='/api/candidate/routing-preview':
+            self.shape(data,base|{'review'})
         elif path=='/api/candidate/tracks':
             self.shape(data,base|{'order','included','source_coverage_confirmed','order_confirmed','chapters'},{'actor','evidence_note'})
         else: self.shape(data,base)
         library,id,revision=self.candidate_identity(data)
+        if path=='/api/candidate/routing-preview':
+            self.response(200,{'preview':reviews.routing_preview(library,id,revision,data['review'])});return
         if path=='/api/candidate/match':
             self.response(202,{'matching':reviews.match(library,id,revision)});return
         if path=='/api/candidate/covers':
@@ -647,9 +675,9 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
-                         '/api/audiobook/clear-working'}
+                         '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/candidate/metadata-choice'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -791,6 +819,8 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database',default=str(BASE / 'data' / 'inventory.sqlite3'))
     parser.add_argument('--roots-json',help='Optional local fixture roots; not exposed through HTTP')
+    parser.add_argument('--audiobook-source',action='append',help='Full ordered audiobook source list; first must preserve the existing root')
+    parser.add_argument('--audiobook-output-root',help='Independent audiobook destination; no media is moved by configuration')
     parser.add_argument('--port',type=int,default=PORT,help='Strict loopback port; no fallback when occupied')
     args = parser.parse_args(argv)
     if not 1024<=args.port<=65535:parser.error('Port must be between 1024 and 65535')
@@ -800,22 +830,27 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
         roots = json.loads(Path(args.roots_json).read_text(encoding='utf-8'))
         if set(roots)!=set(DEFAULT_ROOTS) or any(not isinstance(path,str) or not os.path.isabs(path) for path in roots.values()):
             parser.error('Root configuration must contain exactly the three absolute library paths')
+    from source_config import normalize_sources
+    source_config=normalize_sources(roots,args.audiobook_source,args.audiobook_output_root)
+    guard_roots=dict(roots)
+    guard_roots.update({'Audiobooks source '+str(i+1):root for i,root in enumerate(source_config.audiobook_sources)})
+    if source_config.audiobook_output_root:guard_roots['Audiobooks output']=source_config.audiobook_output_root
     from scanner import inside
     from native_io import DirectoryBoundary
     database_path = Path(args.database).absolute()
-    if any(inside(database_path, root) for root in roots.values()):
+    if any(inside(database_path, root) for root in guard_roots.values()):
         raise ValueError('Keep the inventory database outside source libraries')
     # Existing mode cannot create missing ancestry. Explicit new mode alone may
     # create the selected empty folder; the final guard runs before lock/schema.
     with DirectoryBoundary(database_path.anchor, database_path.parent, create=create_data):
-        if startup_guard is not None:startup_guard(database_path, roots, port)
-        with catalog_lock(args.database,roots):
-            if before_start is not None:before_start(database_path, roots, port)
+        if startup_guard is not None:startup_guard(database_path, guard_roots, port)
+        with catalog_lock(args.database,guard_roots):
+            if before_start is not None:before_start(database_path, guard_roots, port)
             return serve_owned(args, roots, port, ready)
 
 
 def serve_owned(args, roots, port, ready):
-    inventory = Inventory(args.database,roots)
+    inventory = Inventory(args.database,roots,audiobook_sources=getattr(args,'audiobook_source',None),output_root=getattr(args,'audiobook_output_root',None))
     try:
         server = BrowserServer(('127.0.0.1',port),inventory)
     except OSError as error:

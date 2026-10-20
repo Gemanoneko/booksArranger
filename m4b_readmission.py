@@ -50,7 +50,9 @@ def describe(db,job_id):
     order=_order(db)
     for position,(parent,kind,state,child) in enumerate(order,1):
         if job_id in (parent,child):
-            return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child}
+            saved=db.execute('SELECT detail FROM m4b_readmissions WHERE parent_job_id=?',(parent,)).fetchone()
+            detail=json.loads(saved[0] or '{}') if saved else {}
+            return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child,'waiting_reason':detail.get('waiting_reason','')}
     row=db.execute('SELECT parent_job_id,kind,state,child_job_id,detail,updated FROM m4b_readmissions WHERE parent_job_id=? OR child_job_id=?',(job_id,job_id)).fetchone()
     if not row:return None
     parent,kind,state,child,detail,updated=tuple(row)
@@ -67,7 +69,7 @@ def status(db,job_ids):
     if not _exists(db):return {}
     return {job_id:value for job_id in job_ids if (value:=describe(db,job_id))}
 
-def next_job(db_factory,admit,now):
+def next_job(db_factory,admit,now,report=None):
     """Worker hook between books. Admits queued requests at the head in click order and returns the
     child job id that must run next, or None (normal queue order).
 
@@ -79,13 +81,19 @@ def next_job(db_factory,admit,now):
     """
     while True:
         with db_factory() as db:order=_order(db)
-        if not order:return None
+        if not order:
+            if report:report({'state':'idle','reason':'','job_id':None})
+            return None
         parent,kind,state,child=order[0]
         if state=='admitted':return child
+        if report:report({'state':'checking','job_id':parent,'reason':''})
         try:result=admit(parent,kind)
         except InterruptedError:raise
         except Exception as error:result={'requeued':False,'reason':str(error),'cause':'unknown'}
-        if result.get('defer'):return None
+        if result.get('defer'):
+            with db_factory() as db:record_waiting(db,result.get('reason') or 'Retry admission is waiting.')
+            if report:report({'state':'waiting','job_id':parent,'reason':result.get('reason') or 'Retry requests are saved; admission is waiting.'})
+            return None
         with db_factory() as db:
             if result.get('requeued') and result.get('job_id'):
                 db.execute("UPDATE m4b_readmissions SET state='admitted',child_job_id=?,detail=?,updated=? WHERE parent_job_id=? AND state='queued'",
@@ -99,3 +107,48 @@ def convert_legacy(db):
     """Startup, once per catalog: v0.18.0 plain-text refusals become typed records (retry_refusal.legacy), then refusals
     caused by a defect fixed since are marked resolved (retry_refusal.convert_resolved). Returns the number changed."""
     return retry_refusal.convert_legacy(db)+retry_refusal.convert_resolved(db)
+
+
+def pending_count(db):
+    return db.execute("SELECT COUNT(*) FROM m4b_readmissions WHERE state='queued'").fetchone()[0] if _exists(db) else 0
+
+def target_progress(db,job_ids,checking_job=None):
+    """Mutually exclusive current states; accepted requests are never child jobs."""
+    counts={key:0 for key in ('waiting','checking','queued','running','completed','stopped')};targets=[]
+    for job_id in job_ids:
+        request=db.execute('SELECT * FROM m4b_readmissions WHERE parent_job_id=?',(job_id,)).fetchone() if _exists(db) else None
+        child=request['child_job_id'] if request else job_id
+        job=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(child or job_id,)).fetchone()
+        reason=''
+        if request and request['state']=='queued':
+            state='checking' if checking_job==job_id else 'waiting'
+            if state=='waiting':reason=json.loads(request['detail'] or '{}').get('waiting_reason','')
+        elif request and request['state']=='refused':
+            state='stopped'
+            try:reason=__import__('json').loads(request['detail']).get('reason','')
+            except (ValueError,TypeError):reason='Retry request refused; see details'
+        elif job and job['state'] in ('pending','running','completed'):state={'pending':'queued','running':'running','completed':'completed'}[job['state']]
+        else:state='stopped';reason=job['reason'] if job else 'Saved retry target is unavailable'
+        counts[state]+=1;targets.append({'job_id':job_id,'state':state,'child_job_id':child,'reason':reason})
+    return {'schema':'books-retry-progress-v1','counts':counts,'targets':targets}
+
+
+def save_bulk(db,run):
+    """Submission receipt only; durable request rows remain the admission authority."""
+    import json
+    db.execute('CREATE TABLE IF NOT EXISTS retry_bulk_runs(id TEXT PRIMARY KEY,created TEXT NOT NULL,data TEXT NOT NULL)')
+    db.execute('INSERT OR REPLACE INTO retry_bulk_runs VALUES(?,?,?)',(run['id'],run['created'],json.dumps(run,ensure_ascii=False,allow_nan=False)))
+
+def latest_bulk(db):
+    import json
+    if not _table_exists(db,'retry_bulk_runs'):return None
+    row=db.execute('SELECT data FROM retry_bulk_runs ORDER BY created DESC,rowid DESC LIMIT 1').fetchone()
+    return json.loads(row[0]) if row else None
+
+def _table_exists(db,name):return db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",(name,)).fetchone() is not None
+
+
+def record_waiting(db,reason):
+    """A failed start preserves requests and records its real reason; never admits a child."""
+    if not _exists(db):return
+    db.execute("UPDATE m4b_readmissions SET detail=? WHERE state='queued'",(json.dumps({'waiting_reason':str(reason)},ensure_ascii=False),))

@@ -142,6 +142,9 @@ class GapSearchTests(unittest.TestCase):
         return PublicResearch(self.client,leads=[]).lookup(self.row,str(self.base),self.stop)
     def test_agreeing_local_sources_approve_without_identity_research(self):
         self.catalog.closed={'api.fantlab.ru','www.wikidata.org'}
+        # Empty primary-page discovery is an optional series gap, never identity evidence.
+        self.client.wikipedia=Mock(return_value={'sources':[],'leads':[]})
+        self.client.discover=Mock(return_value=[])
         result=self.lookup(SERGEI)
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['metadata_facts']['identity_basis'],'local_agreement')
         self.assertEqual(result['review']['title'],'Око Бога');self.assertEqual(result['review']['canonical_author'],'Rollins James')
@@ -153,17 +156,31 @@ class GapSearchTests(unittest.TestCase):
         self.assertEqual(result['sources'][0]['kind'],'local_agreement');self.assertTrue(result['sources'][0]['verified_identity'])
         local=[e for e in result['evidence'] if e['source_url']=='']
         self.assertEqual({e['field'] for e in local},{'title','authors'});self.assertIn('Rollins James',local[0]['basis'])
+        self.client.wikipedia.assert_called_once();self.client.discover.assert_called_once()
+        query=self.client.wikipedia.call_args.args[0]
+        self.assertIn(query,('"Око Бога" Джеймс Роллинс','"Око Бога" Rollins James'))
+        self.assertEqual(self.client.discover.call_args.args[0],query+' publisher')
+        self.assertFalse(result['work'].get('verified_series'));self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
         validate_policy(self.row,result['review'],result['metadata_facts'])
     def test_catalog_fills_only_missing_original_title_and_language(self):
         self.catalog.fantlab=[{'work_id':42,'name':'Sandstorm','rusname':'Око Бога','all_autor_name':'James Rollins','all_autor_rusname':'Джеймс Роллинс'}]
         self.catalog.extended['/work/42/extended']={'work_id':42,'work_name':'Око Бога','work_name_orig':'The Eye of God','lang_code':'en','work_type_name':'Роман',
             'authors':[{'type':'autor','name':'Джеймс Роллинс','name_orig':'James Rollins'}]}
+        # Empty primary-page discovery is an optional series gap, never identity evidence.
+        self.client.wikipedia=Mock(return_value={'sources':[],'leads':[]})
+        self.client.discover=Mock(return_value=[])
         result=self.lookup(SERGEI)
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['review']['title'],'The Eye of God');self.assertEqual(result['review']['canonical_author'],'Rollins James')
         self.assertEqual(result['work']['id'],'fantlab:42');self.assertEqual(result['metadata_facts']['original_language'],{'value':'en','status':'verified'})
         cited={e['field']:e['source_url'] for e in result['evidence'] if e['source_url']}
         self.assertEqual(cited,{'title':'https://fantlab.ru/work42','authors':'https://fantlab.ru/work42','original_language':'https://fantlab.ru/work42'})
-        self.assertFalse(any('duckduckgo' in u or 'wikipedia' in u for u in self.catalog.calls))
+        self.client.wikipedia.assert_called_once();self.client.discover.assert_called_once()
+        query=self.client.wikipedia.call_args.args[0]
+        self.assertIn(query,('"Око Бога" Джеймс Роллинс','"Око Бога" Rollins James'))
+        self.assertEqual(self.client.discover.call_args.args[0],query+' publisher')
+        self.assertFalse(result['work'].get('verified_series'));self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
+        hosts={urllib.parse.urlsplit(u).hostname for u in self.catalog.calls}
+        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org','www.goodreads.com'},self.catalog.calls)
     def test_catalog_with_a_different_author_is_never_adopted(self):
         self.catalog.fantlab=[{'work_id':43,'name':'Око Бога','rusname':'Око Бога','all_autor_name':'Other Writer','all_autor_rusname':'Другой Автор'}]
         result=self.lookup(SERGEI)

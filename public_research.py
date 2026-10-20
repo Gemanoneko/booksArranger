@@ -2,6 +2,7 @@
 No paid connector, arbitrary host, model confidence or model-invented field is used.
 """
 import base64
+import copy
 import datetime as dt
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -558,6 +559,28 @@ class PublicResearch:
         return result
 
     def lookup(self,row,root,stop=None,progress=lambda *_:None):
+        import manual_metadata
+        entered=manual_metadata.proposals(row.get('_manual_metadata_sources',[]))
+        result=self._lookup(row,root,stop,progress)
+        if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
+        from source_identity import LOCAL_SOURCE_GATE_VERSION
+        result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
+        if not entered:return result
+        # Human values guide discovery and remain attributed evidence. They never count
+        # as an independent fetched publisher/catalog or as local-file agreement.
+        result['manual_metadata_sources']=copy.deepcopy(row['_manual_metadata_sources'])
+        result['sources'].extend({'kind':'manual_metadata','source_id':p['id'],'provider':'Entered by you',
+                                 'verified_identity':False,'fingerprint':row['fingerprint'],
+                                 'values':copy.deepcopy(p['per_field_evidence']['values'])} for p in entered)
+        conflicts=manual_metadata.compare_research(entered,result)
+        result['manual_metadata_conflicts']=conflicts
+        if conflicts:
+            result['reasons']=list(dict.fromkeys(result.get('reasons',[])+['Saved manual metadata disagrees with researched identity']))
+            result['metadata_holds']=[{'cause':'metadata_conflict','fields':sorted({c['field'] for c in conflicts}),
+                                       'reason':'Saved manual metadata disagrees with researched identity'}]
+        return result
+
+    def _lookup(self,row,root,stop=None,progress=lambda *_:None):
         stop=stop or threading.Event();budget={'remaining':12};all_clues=[c for m in row['members'] for c in clues(m,root)]
         candidates=[]
         # A split book's parts share one book name; their own numbers and chapter labels are not titles.
@@ -577,6 +600,12 @@ class PublicResearch:
                 if str(folder)==str(__import__('pathlib').Path(root)):continue
                 parsed=filename_identity(folder.name)
                 if parsed.get('author') and (parsed['title'],parsed['author']) not in candidates:candidates.append((parsed['title'],parsed['author']))
+        observed_candidate_count=len(candidates)
+        import manual_metadata
+        entered=manual_metadata.proposals(row.get('_manual_metadata_sources',[]))
+        for proposal in reversed(entered):
+            title=proposal.get('title');author=proposal.get('authors') or ''
+            if title and (title,author) not in candidates:candidates.insert(0,(title,author))
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':all_clues,'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         # Sergei decision 2026-10-12: tags, file name and folder that agree are the identity.
         # Only missing optional fields are searched; a local conflict keeps the research path.
@@ -586,7 +615,7 @@ class PublicResearch:
         result['local_agreement']=local_identity.summary(local)
         if self.local_agreement and local.get('route'):return self._local_collection(row,local,result)
         if local['accepted'] and self.local_agreement:return self._local_lookup(row,local,stop,budget,progress,result,index)
-        if len(candidates)>3:return result|{'reasons':['Mixed recordings in this group']}
+        if observed_candidate_count>3:return result|{'reasons':['Mixed recordings in this group']}
         attempt=row.get('_research_attempt',0)
         if type(attempt) is not int or not 0<=attempt<=100000:raise ValueError('Invalid research history')
         if candidates and attempt:candidates=candidates[attempt%len(candidates):]+candidates[:attempt%len(candidates)]

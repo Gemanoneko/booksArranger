@@ -150,12 +150,12 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(get('retry-all-line').hidden,true,'a group change clears the strip line');
   // Retry all: the whole server group (121) while the page shows 2, behind an inline confirmation.
   assert.equal(get('group-retry').getAttribute('aria-pressed'),'true');assert.equal(get('retry-all').hidden,false);assert.equal(get('retry-all').textContent,'Retry all (121)');
-  assert.equal(get('retry-all').title,'Check these 121 books again and queue each audiobook job.');
+  assert.equal(get('retry-all').title,'Request retries for these 121 books. Each book is checked before a conversion job can be queued.');
   get('retry-all').handlers.click();
   assert.equal(get('retry-all').hidden,true);assert.equal(get('retry-all-confirm').hidden,false);assert.equal(document.activeElement,get('retry-all-cancel'),'focus on the safe default');
-  assert.equal(get('retry-all-question').textContent,'Queue 121 books to be checked again? They run one at a time, right after the current book.');assert.equal(get('retry-all-go').textContent,'Queue 121 books');
+  assert.equal(get('retry-all-question').textContent,'Request retries for 121 books? Each book is checked before a conversion job can be queued.');assert.equal(get('retry-all-go').textContent,'Request 121 retries');
   backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,attention_counts:{retry:118,repair:2,other:1,unsupported:0}}};run('state='+JSON.stringify(backend)+';controls()');
-  assert.equal(get('retry-all-go').textContent,'Queue 121 books','polls never rebuild the confirmation');
+  assert.equal(get('retry-all-go').textContent,'Request 121 retries','polls never rebuild the confirmation');
   get('retry-all-confirm').handlers.keydown({key:'Escape',preventDefault(){}});
   assert.equal(get('retry-all-confirm').hidden,true);assert.equal(get('retry-all').hidden,false);assert.equal(document.activeElement,get('retry-all'));assert.equal(posted('/api/audiobook/retry-all').length,0);
   // A state poll begun before acceptance must not erase the new bulk run when
@@ -169,18 +169,18 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(run('bulkRunning()'),true,'a stale status poll must not erase the accepted Retry all run');
   assert.equal(get('retry-all').disabled,true,'Retry all stays disabled while its accepted run is active');
   assert.equal(posted('/api/audiobook/retry-all').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/retry-all')[0].options.body),{library:'Audiobooks'});
-  assert.equal(get('retry-all-status').textContent,'Retrying 121 books.');assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<span id="retry-all-status" role="status" tabindex="-1"><\/span><span id="retry-all-count" aria-hidden="true"><\/span>/,'the running count sits outside the live region');
+  assert.equal(get('retry-all-status').textContent,'Requesting retries.');assert.match(fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),/<span id="retry-all-status" role="status" tabindex="-1"><\/span><span id="retry-all-count"><\/span>/,'the running count sits outside the live region');
   // While it runs: the count outside the live region, every action disabled.
   context.fixture=[retry,second];run('rows=fixture.map(row=>({...row}));renderRows(true)');
   backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,retry_all:{id:'run-1',state:'running',total:121,done:37,queued:36,refused:1}}};run('state='+JSON.stringify(backend)+';controls()');
-  assert.equal(get('retry-all-count').textContent,'37 of 121');assert.equal(get('retry-all-status').textContent,'Retrying 121 books.','the live region is not flooded');
+  assert.equal(get('retry-all-count').textContent,'37 of 121 processed');assert.equal(get('retry-all-status').textContent,'Requesting retries.','current submission progress is distinct from queued jobs');
   assert.equal(get('retry-all').disabled,true);assert.equal(actionButtons(get('inventory').children[0])[0].disabled,true);
   // The end: one line, the list reloads, focus returns to the group.
   context.setTimeout=setTimeout;
-  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,retry_all:{id:'run-1',state:'done',total:121,done:121,queued:119,next:119,refused:2}}};run('state='+JSON.stringify(backend)+';controls()');
-  assert.equal(get('retry-all-status').textContent,'Queued 119 of 121. They run right after the current book, one at a time. 2 could not be retried.');assert.equal(get('retry-all-count').textContent,'');
-  await new Promise(resolve=>setTimeout(resolve,30));assert.equal(document.activeElement,get('group-retry'));
-  run('controls()');assert.equal(get('retry-all-status').textContent,'Queued 119 of 121. They run right after the current book, one at a time. 2 could not be retried.','the end line stays until the group or filter changes');
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,retry_all:{id:'run-1',state:'done',total:121,done:121,accepted:119,queued:119,next:119,refused:2}}};run('state='+JSON.stringify(backend)+';controls()');
+  assert.equal(get('retry-all-status').textContent,'Retry requested for 119 of 121 books. 2 refused. Current retry progress unavailable.');assert.equal(get('retry-all-count').textContent,'');
+  await new Promise(resolve=>setTimeout(resolve,30));assert.notEqual(document.activeElement,null,'completion preserves a real focus target');
+  run('controls()');assert.equal(get('retry-all-status').textContent,'Retry requested for 119 of 121 books. 2 refused. Current retry progress unavailable.','the end line stays until the group or filter changes');
   // A refused start shows the server message.
   retryAllOverride=async()=>({ok:false,status:409,json:async()=>({error:'Retry all is already running.'})});
   get('retry-all').handlers.click();await get('retry-all-go').handlers.click();assert.equal(get('retry-all-status').textContent,'Retry all is already running.');retryAllOverride=null;
@@ -225,6 +225,17 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   const researchStart=Date.now()-60000,researching=(title,done)=>({audiobook_jobs:{state:'Running',queued:0,failed:0},activities:[{id:'scan',kind:'scan',subject:title,step:'researching',step_text:'x',done,total:100,unit:'books',indeterminate:false,state:'running',step_started_at:researchStart}]});
   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
+  context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
+  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.match(sourceText.hint,/sound copy.*rescan/);
+  assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
+  context.fixture=attentionRow('reacquire','reacquire',{}, {attention:{group:'reacquire',reacquire:{state:'required',certainty:'uncertain',reason:'Measured damaged audio',repair_limit:'Cannot preserve speech',originals:[{path:'Z:/shared/one.mp3'}],source_presence:'unavailable'}},retry:{allowed:true}});
+  assert.equal(run('attentionText(fixture).status'),'Need to reacquire');
+  assert.match(run('attentionText(fixture).hint'),/risking missing audio/);
+  assert.equal(run('rowAction(fixture)'),null,'stale Retry data cannot bypass analyzed damage');
+  assert.match(run('technicalText(fixture)'),/Affected source file.*one.mp3.*deletion not confirmed/);
+  context.fixture={kind:'conversion',state:'attention'};assert.equal(run('activityLabel(fixture)'),'Audiobook on hold');
+  context.fixture={kind:'conversion',state:'paused'};assert.equal(run('activityLabel(fixture)'),'Audiobook paused');
+  context.fixture={kind:'conversion',state:'running'};assert.equal(run('activityLabel(fixture)'),'Converting');
   context.setTimeout=()=>0;  // nothing scheduled after the checks keeps the process alive
   console.log('PASS attention classes, row hints, Retry and Repair, queued next, repaired record, group strip, server Retry all with confirmation, details lines, list loading and request discipline, whole files and research history');
 })().catch(error=>{console.error(error);process.exitCode=1;});

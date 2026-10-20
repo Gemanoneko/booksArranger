@@ -7,6 +7,7 @@ import threading
 import datetime
 from metadata import AUDIO, EBOOK, ScanStopped, read_metadata, propose, future_audio_tags
 import groups
+from source_config import normalize_sources, contains as source_contains
 
 DEFAULT_ROOTS = {'Audiobooks': r'Z:\Audiobooks', 'Podcasts': r'Z:\Audiobooks\Podcasts', 'Ebooks': r'Y:\Books\Books'}
 
@@ -96,10 +97,13 @@ def inside(path, root):
         return False
 
 class Inventory:
-    def __init__(self, database, roots=None, reader=read_metadata):
+    def __init__(self, database, roots=None, reader=read_metadata, *, audiobook_sources=None, output_root=None):
         self.database = str(database)
         self.roots = dict(roots or DEFAULT_ROOTS)
-        if any(inside(self.database, root) for root in self.roots.values()):
+        self.source_config = normalize_sources(self.roots, audiobook_sources, output_root)
+        self.audiobook_sources = self.source_config.audiobook_sources
+        self.output_root = self.source_config.audiobook_output_root
+        if any(source_contains(self.database, root) for root in self.all_source_roots()) or (self.output_root and source_contains(self.database,self.output_root)):
             raise ValueError('Keep the inventory database outside source libraries')
         Path(database).parent.mkdir(parents=True, exist_ok=True)
         self.reader = reader
@@ -112,16 +116,66 @@ class Inventory:
             connection.execute("UPDATE queue SET state='pending' WHERE state='running'")
             connection.execute("UPDATE jobs SET state='stopped' WHERE state='scanning'")
 
+    def source_roots(self, label='Audiobooks'):
+        return self.audiobook_sources if label=='Audiobooks' else (self.roots[label],)
+
+    def all_source_roots(self):
+        return tuple(dict.fromkeys((*self.audiobook_sources, *self.roots.values())))
+
+    def source_root_for_path(self, path, label='Audiobooks'):
+        if not os.path.isabs(path):raise ValueError('Source paths must be absolute')
+        normalize_sources(self.roots,self.audiobook_sources,self.output_root)
+        matches=[root for root in self.source_roots(label) if source_contains(path,root)]
+        if len(matches)!=1 or self._excluded_path(path,label):
+            raise ValueError('Path is outside the configured source boundary')
+        return matches[0]
+
+    def source_root_for_candidate(self, identity):
+        with connect(self.database) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='book_groups'").fetchone():
+                raise ValueError('Candidate inventory is unavailable')
+            row=db.execute('SELECT root FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
+            if row is None or row['root'] not in self.audiobook_sources:
+                raise ValueError('Candidate is outside configured audiobook sources')
+            return row['root']
+
+    def _excluded_path(self,path,label):
+        return bool(label=='Audiobooks' and ((self.roots.get('Podcasts') and source_contains(path,self.roots['Podcasts'])) or
+                    (self.output_root and source_contains(path,self.output_root))))
+
     def status(self, label):
-        root = self.roots[label]
-        with connect(self.database) as connection:
-            row = connection.execute('SELECT * FROM jobs WHERE root=?', (root,)).fetchone()
-            count = connection.execute('SELECT count(*) FROM files WHERE root=?', (root,)).fetchone()[0]
-            pending = connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')", (root,)).fetchone()[0]
-            unresolved = connection.execute("SELECT count(*) FROM files WHERE root=? AND error<>''",(root,)).fetchone()[0]
-            issues = connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND generation=? AND directory=1 AND outcome='error' ORDER BY path",(root,row['generation'] if row else 0)).fetchall()
+        values=[self.source_status(root) for root in self.source_roots(label)]
+        if len(values)==1:return values[0]
+        states=[value['state'] for value in values]
+        state=next((name for name in ('scanning','failed','offline','stopped','completed with errors','not scanned') if name in states),'completed')
+        return {'state':state, **{name:sum(value.get(name,0) for value in values) for name in
+                ('checked','reused','errors','count','pending','unresolved_errors')},
+                'current':next((value.get('current','') for value in values if value.get('current')),''),
+                'scan_issues':[issue for value in values for issue in value['scan_issues']],
+                'sources':[{'source_root':root,**value} for root,value in zip(self.source_roots(label),values)]}
+
+    def source_status(self, root):
+        if root not in self.all_source_roots():raise ValueError('Unknown configured source')
+        failure=getattr(self,'_catalog_failures',{}).get(root)
+        ended=not self.worker or not self.worker.is_alive()
+        matching=bool(failure and failure['root']==root and ended)
+        try:
+            with connect(self.database) as connection:
+                row=connection.execute('SELECT * FROM jobs WHERE root=?',(root,)).fetchone()
+                count=connection.execute('SELECT count(*) FROM files WHERE root=?',(root,)).fetchone()[0]
+                pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
+                unresolved=connection.execute("SELECT count(*) FROM files WHERE root=? AND error<>''",(root,)).fetchone()[0]
+                issues=connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND generation=? AND directory=1 AND outcome='error' ORDER BY path",(root,row['generation'] if row else 0)).fetchall()
+        except sqlite3.Error as error:
+            if matching:
+                from catalog_contention import CatalogHold
+                raise CatalogHold('Catalog status unknown: saved scan generation could not be read; failure checkpoint is not durable') from error
+            raise
         extra={'count':count,'pending':pending,'unresolved_errors':unresolved,'scan_issues':[dict(issue) for issue in issues]}
-        return dict(row) | extra if row else {'state': 'not scanned', 'checked': 0, 'reused': 0, 'errors': 0, 'current': ''} | extra
+        result=dict(row)|extra if row else {'state':'not scanned','checked':0,'reused':0,'errors':0,'current':''}|extra
+        if matching and row and row['generation']==failure['generation'] and row['state']=='scanning':
+            result.update(state='failed',current=failure['message'],failure_durable=False,catalog_hold={'root':root,'generation':failure['generation'],'reason':failure['message']})
+        return result
 
     def _outcome(self, connection, root, generation, path, directory, error='', details=''):
         connection.execute('INSERT OR REPLACE INTO scan_outcomes VALUES(?,?,?,?,?,?,?,?)',
@@ -129,12 +183,24 @@ class Inventory:
              datetime.datetime.now(datetime.timezone.utc).isoformat(),details))
 
     def launch(self, label, resume=False):
+        self._launch_sources(label,self.source_roots(label),resume)
+
+    def launch_source(self,root,resume=False):
+        labels=[label for label in self.roots if root in self.source_roots(label)]
+        if len(labels)!=1:raise ValueError('Unknown or ambiguous configured source')
+        self._launch_sources(labels[0],(root,),resume)
+
+    def _launch_sources(self,label,roots,resume):
         if self.worker and self.worker.is_alive():
             raise ValueError('A scan is already running; stop it before starting another')
-        root = self.roots[label]
+        normalize_sources(self.roots,self.audiobook_sources,self.output_root)
+        plans=[]
         with connect(self.database) as connection:
+          for root in roots:
             job = connection.execute('SELECT * FROM jobs WHERE root=?', (root,)).fetchone()
             if resume:
+                if job and job['state'] in {'completed','completed with errors'}:
+                    continue
                 if not job or job['state'] not in {'stopped', 'offline', 'failed'}:
                     raise ValueError('No stopped scan to resume')
                 generation = job['generation']
@@ -146,152 +212,229 @@ class Inventory:
                 connection.execute('INSERT OR REPLACE INTO jobs(root,label,generation,state) VALUES(?,?,?,?)', (root,label,generation,'scanning'))
                 connection.execute('INSERT INTO queue(root,generation,path,directory) VALUES(?,?,?,1)', (root,generation,root))
             connection.execute("UPDATE jobs SET state='scanning' WHERE root=?", (root,))
+            plans.append((label,root,generation))
+        if not plans:raise ValueError('No stopped scan to resume')
         self.stop_event.clear()
         self.last_error = ''
-        self.worker = threading.Thread(target=self._run, args=(label,root,generation), daemon=True)
+        self.worker = threading.Thread(target=self._run_sources, args=(plans,), daemon=True)
         self.worker.start()
+
+    def _run_sources(self,plans):
+        from catalog_contention import remember_busy_failure,write
+        for label,root,generation in plans:
+            if self.stop_event.is_set():
+                def stopped(db):db.execute("UPDATE jobs SET state='stopped' WHERE root=? AND generation=? AND state='scanning'",(root,generation))
+                try:write(self.database,stopped)
+                except Exception as error:
+                    self.last_error='Scan stop checkpoint could not be saved: '+str(error)
+                    remember_busy_failure(self,root,generation,error,self.last_error)
+            else:self._run(label,root,generation)
 
     def stop(self):
         self.stop_event.set()
 
     def _run(self, label, root, generation):
-        connection = connect(self.database)
-        task = None
+        from catalog_contention import CatalogHold,file_token,remember_busy_failure,scan_guard,write
+        import contextlib,reacquire_sources
+        connection=None;task=None;expected=None
+        failures=getattr(self,'_catalog_failures',{});failures.pop(root,None);self._catalog_failures=failures
+        reacquire_lease=contextlib.ExitStack()
+        def pending(db):
+            row=db.execute('SELECT generation,state FROM jobs WHERE root=?',(root,)).fetchone()
+            if not row or row['generation']!=generation or row['state']!='scanning':return False
+            if task:db.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=? AND state='running'",(root,generation,task['path']))
+            return True
         try:
+            connection=connect(self.database)
+            source_boundary=reacquire_lease.enter_context(reacquire_sources.root_scan_lease(connection,root))
             if not os.path.isdir(root):
-                connection.execute("UPDATE jobs SET state='offline', current=? WHERE root=?", ('Root unavailable; saved results preserved', root))
-                connection.commit()
-                return
+                def offline(db):
+                    scan_guard(db,root,generation)
+                    db.execute("UPDATE jobs SET state='offline',current=? WHERE root=? AND generation=?",('Root unavailable; saved results preserved',root,generation))
+                write(self.database,offline,self.stop_event);return
             while not self.stop_event.is_set():
-                task = connection.execute("SELECT * FROM queue WHERE root=? AND generation=? AND state='pending' ORDER BY path LIMIT 1", (root,generation)).fetchone()
+                row=connection.execute("SELECT * FROM queue WHERE root=? AND generation=? AND state='pending' ORDER BY path LIMIT 1",(root,generation)).fetchone()
+                task=dict(row) if row else None
                 if not task:
-                    errors = connection.execute('SELECT errors FROM jobs WHERE root=?', (root,)).fetchone()[0]
+                    errors=connection.execute('SELECT errors FROM jobs WHERE root=? AND generation=?',(root,generation)).fetchone()
+                    if errors is None:raise CatalogHold('Scan generation changed before completion')
+                    errors=errors[0]
                     if not errors:
-                        if _has_retirements(connection):
-                            connection.execute("""UPDATE files SET missing=(seen<>? AND NOT EXISTS(
-                                SELECT 1 FROM source_retirements r WHERE r.root=files.root AND r.path=files.path
-                                AND r.state='removed' AND r.size=files.size AND r.modified=CAST(files.modified AS TEXT)))
-                                WHERE root=?""",(generation,root))
-                        else:
-                            connection.execute('UPDATE files SET missing=(seen<>?) WHERE root=?', (generation,root))
-                    connection.execute('UPDATE jobs SET state=?, current=? WHERE root=?', ('completed with errors' if errors else 'completed','',root))
-                    connection.commit()
-                    return
-                path = task['path']
-                connection.execute("UPDATE queue SET state='running' WHERE root=? AND generation=? AND path=?", (root,generation,path))
-                connection.execute('UPDATE jobs SET current=? WHERE root=?', (path,root))
-                connection.commit()
+                        # Native/source reconciliation is deliberately ONCE, outside DB replay.
+                        reacquire_sources.reconcile_scan(connection,self,root,generation,source_boundary)
+                    def complete(db):
+                        scan_guard(db,root,generation)
+                        if db.execute("SELECT 1 FROM queue WHERE root=? AND generation=? AND state IN ('pending','running') LIMIT 1",(root,generation)).fetchone():raise CatalogHold('Scan queue changed before completion')
+                        fresh=db.execute('SELECT errors FROM jobs WHERE root=? AND generation=?',(root,generation)).fetchone()[0]
+                        if fresh!=errors:raise CatalogHold('Scan errors changed before completion')
+                        if not errors:
+                            if _has_retirements(db):
+                                db.execute("""UPDATE files SET missing=(seen<>? AND NOT EXISTS(
+                                    SELECT 1 FROM source_retirements r WHERE r.root=files.root AND r.path=files.path AND r.state='removed' AND r.size=files.size AND r.modified=CAST(files.modified AS TEXT))) WHERE root=?""",(generation,root))
+                            else:db.execute('UPDATE files SET missing=(seen<>?) WHERE root=?',(generation,root))
+                        db.execute('UPDATE jobs SET state=?,current=? WHERE root=? AND generation=?',('completed with errors' if errors else 'completed','',root,generation))
+                    write(self.database,complete,self.stop_event);return
+                def claim(db):
+                    scan_guard(db,root,generation)
+                    fresh=db.execute('SELECT * FROM queue WHERE root=? AND generation=? AND path=?',(root,generation,task['path'])).fetchone()
+                    if not fresh or dict(fresh)!=task:raise CatalogHold('Scan task changed before admission')
+                    db.execute("UPDATE queue SET state='running' WHERE root=? AND generation=? AND path=?",(root,generation,task['path']))
+                    db.execute('UPDATE jobs SET current=? WHERE root=? AND generation=?',(task['path'],root,generation))
+                write(self.database,claim,self.stop_event)
+                path=task['path'];expected=file_token(connection,root,path)
                 try:
-                    if task['directory']:
-                        self._directory(connection, label, root, generation, path)
-                    else:
-                        self._file(connection, label, root, generation, path)
-                    connection.execute("UPDATE queue SET state='done' WHERE root=? AND generation=? AND path=?", (root,generation,path))
-                except ScanStopped:
-                    connection.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=?", (root,generation,path))
-                    connection.commit()
-                    break
-                except (OSError, ValueError, TimeoutError, sqlite3.Error) as error:
-                    connection.execute("UPDATE queue SET state='error' WHERE root=? AND generation=? AND path=?", (root,generation,path))
-                    connection.execute('UPDATE jobs SET errors=errors+1, current=? WHERE root=?', (f'{path}: {error}', root))
-                    self._outcome(connection,root,generation,path,task['directory'],str(error))
-                    if not task['directory']:
-                        connection.execute('UPDATE jobs SET checked=checked+1 WHERE root=?',(root,))
-                        # A source changing/disappearing mid-read invalidates its old canonical review.
-                        # Keep a visible catalog error even if this is its very first scan.
-                        result = connection.execute("UPDATE files SET error=?,review='' WHERE root=? AND path=?", (str(error),root,path))
-                        if not result.rowcount:
-                            kind, arrival = self._classify(label,root,path)
-                            connection.execute('''INSERT INTO files(root,path,size,modified,seen,kind,arrival,metadata,error)
-                              VALUES(?,?,0,0,?,?,?,?,?)''', (root,path,generation,kind,int(arrival),json.dumps({'notes':['File unavailable or changed during read; inspect before arranging']}),str(error)))
-                connection.commit()
-            connection.execute("UPDATE jobs SET state='stopped' WHERE root=?", (root,))
-            connection.commit()
+                    if task['directory']:self._directory(connection,label,root,generation,path)
+                    else:self._file(connection,label,root,generation,path)
+                except (ScanStopped,InterruptedError):raise
+                except (CatalogHold,sqlite3.Error):raise
+                except (OSError,ValueError,TimeoutError) as error:
+                    # Database/CAS exceptions never enter this source-read error branch.
+                    message=str(error);kind,arrival=self._classify(label,root,path) if not task['directory'] else ('',False)
+                    def source_error(db):
+                        scan_guard(db,root,generation,path,task['directory'])
+                        if file_token(db,root,path)!=expected:raise CatalogHold('Catalog evidence changed during source error; review preserved')
+                        db.execute("UPDATE queue SET state='error' WHERE root=? AND generation=? AND path=?",(root,generation,path))
+                        db.execute('UPDATE jobs SET errors=errors+1,current=? WHERE root=? AND generation=?',(path+': '+message,root,generation))
+                        self._outcome(db,root,generation,path,task['directory'],message)
+                        if not task['directory']:
+                            db.execute('UPDATE jobs SET checked=checked+1 WHERE root=? AND generation=?',(root,generation))
+                            changed=db.execute("UPDATE files SET error=?,review='' WHERE root=? AND path=?",(message,root,path))
+                            if not changed.rowcount:db.execute("""INSERT INTO files(root,path,size,modified,seen,kind,arrival,metadata,error)
+                              VALUES(?,?,0,0,?,?,?,?,?)""",(root,path,generation,kind,int(arrival),json.dumps({'notes':['File unavailable or changed during read; inspect before arranging']}),message))
+                    write(self.database,source_error,self.stop_event)
+            def stopped(db):
+                if pending(db):db.execute("UPDATE jobs SET state='stopped' WHERE root=? AND generation=? AND state='scanning'",(root,generation))
+            write(self.database,stopped)
+        except (ScanStopped,InterruptedError):
+            try:
+                def stopped(db):
+                    if pending(db):db.execute("UPDATE jobs SET state='stopped' WHERE root=? AND generation=? AND state='scanning'",(root,generation))
+                write(self.database,stopped)
+            except Exception as error:
+                self.last_error='Scan stop checkpoint could not be saved: '+str(error)
+                remember_busy_failure(self,root,generation,error,self.last_error)
         except Exception as error:
-            self.last_error = str(error)
-            if task:
-                connection.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=?", (root,generation,task['path']))
-            connection.execute("UPDATE jobs SET state='failed', current=? WHERE root=?", (str(error),root))
-            connection.commit()
+            try:
+                if connection is not None:connection.rollback()
+            except sqlite3.Error:pass
+            self.last_error=str(error)
+            def failed(db):
+                if pending(db):db.execute("UPDATE jobs SET state='failed',current=? WHERE root=? AND generation=? AND state='scanning'",(str(error),root,generation))
+            try:write(self.database,failed)
+            except Exception as save_error:
+                self.last_error=str(error)+'; failure checkpoint could not be saved: '+str(save_error)
+                remember_busy_failure(self,root,generation,save_error,self.last_error)
         finally:
-            connection.close()
+            try:reacquire_lease.close()
+            finally:
+                if connection is not None:connection.close()
 
     def _directory(self, connection, label, root, generation, path):
+        from catalog_contention import CatalogHold,file_token,scan_write
+        def preserve(tree,details=None):
+            observed={row['path']:file_token(connection,root,row['path']) for row in connection.execute('SELECT path FROM files WHERE root=?',(root,)).fetchall() if source_contains(row['path'],tree)}
+            def persist(db):
+                for name,expected in observed.items():
+                    if file_token(db,root,name)!=expected:raise CatalogHold('Catalog source changed during directory read; task remains pending')
+                    db.execute('UPDATE files SET seen=? WHERE root=? AND path=?',(generation,root,name))
+                if details:self._outcome(db,root,generation,path,True,details=details)
+            scan_write(self,root,generation,path,persist,finish=details is not None,task_directory=True)
+        if self._excluded_path(path,label):
+            preserve(path,'Excluded output or separate library tree');return
+        if self.source_root_for_path(path,label)!=root:raise ValueError('Saved directory belongs to another source boundary')
         owned=set()
         if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
-            owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind IN ('temporary','recovery')")}
+            owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind IN ('temporary','recovery','output')")}
+        if 'planned_destination' in {row[1] for row in connection.execute('PRAGMA table_info(output_relocations)')}:
+            owned.update(os.path.normcase(row[0]) for row in connection.execute("SELECT planned_destination FROM output_relocations WHERE planned_destination<>''"))
         with os.scandir(path) as entries:
             for entry in entries:
-                if self.stop_event.is_set():
-                    raise ScanStopped()
-                # Never follow symlinks/junctions into another tree or a recursive loop.
-                if entry.is_symlink() or (hasattr(os.path, 'isjunction') and os.path.isjunction(entry.path)):
-                    continue
-                if label == 'Audiobooks' and inside(entry.path, self.roots['Podcasts']):
-                    continue
+                if self.stop_event.is_set():raise ScanStopped()
+                if entry.is_symlink() or (hasattr(os.path,'isjunction') and os.path.isjunction(entry.path)):continue
+                if self._excluded_path(entry.path,label):preserve(entry.path);continue
                 if os.path.normcase(entry.path) in owned:
-                    continue
-                directory = entry.is_dir(follow_symlinks=False)
+                    name=entry.path;expected=file_token(connection,root,name)
+                    def preserve_owned(db):
+                        if file_token(db,root,name)!=expected:raise CatalogHold('Owned source evidence changed; scan task remains pending')
+                        db.execute('UPDATE files SET seen=? WHERE root=? AND path=?',(generation,root,name))
+                    scan_write(self,root,generation,path,preserve_owned,finish=False,task_directory=True);continue
+                directory=entry.is_dir(follow_symlinks=False)
                 if directory or entry.is_file(follow_symlinks=False):
-                    connection.execute('INSERT OR IGNORE INTO queue(root,generation,path,directory) VALUES(?,?,?,?)', (root,generation,entry.path,int(directory)))
-                    connection.commit()
-        self._outcome(connection,root,generation,path,True)
+                    name=entry.path
+                    prior=connection.execute('SELECT * FROM queue WHERE root=? AND generation=? AND path=?',(root,generation,name)).fetchone()
+                    prior=dict(prior) if prior else None
+                    def enqueue(db):
+                        row=db.execute('SELECT * FROM queue WHERE root=? AND generation=? AND path=?',(root,generation,name)).fetchone()
+                        if (dict(row) if row else None)!=prior:raise CatalogHold('Directory queue changed; captured entry was not applied')
+                        db.execute('INSERT OR IGNORE INTO queue(root,generation,path,directory) VALUES(?,?,?,?)',(root,generation,name,int(directory)))
+                    scan_write(self,root,generation,path,enqueue,finish=False)
+        scan_write(self,root,generation,path,lambda db:self._outcome(db,root,generation,path,True),task_directory=True)
 
     def _file(self, connection, label, root, generation, path):
-        if self.stop_event.is_set():
-            raise ScanStopped()
-        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
-            if connection.execute("SELECT 1 FROM owned_artifacts WHERE path=? AND kind IN ('temporary','recovery')",(path,)).fetchone():
-                self._outcome(connection,root,generation,path,False,details='Exact owned recovery/temporary asset excluded from discovery')
-                return
-        retired = _retired_source(connection,root,path)
-        try:
-            before = fresh_stat(path)
+        from catalog_contention import CatalogHold,file_token,scan_write
+        if self.stop_event.is_set():raise ScanStopped()
+        expected=file_token(connection,root,path)
+        def save(operation):return scan_write(self,root,generation,path,operation,expected,task_directory=False)
+        def excluded(details):
+            def persist(db):
+                db.execute('UPDATE files SET seen=? WHERE root=? AND path=?',(generation,root,path))
+                self._outcome(db,root,generation,path,False,details=details)
+            save(persist)
+        if self._excluded_path(path,label):
+            excluded('Configured output or separate library excluded from discovery');return
+        if self.source_root_for_path(path,label)!=root:raise ValueError('Saved file belongs to another source boundary')
+        if expected['relocations']:
+            excluded('Exact relocation destination excluded from discovery');return
+        if any(row['kind'] in ('temporary','recovery','output') for row in expected['owned']):
+            excluded('Exact owned output/recovery/temporary asset excluded from discovery');return
+        retired=_retired_source(connection,root,path)
+        try:before=fresh_stat(path)
         except FileNotFoundError:
             if not retired:raise
-            # A saved queue may precede cleanup. Absence plus exact retirement provenance
-            # is an intentional historical source, not a read failure. Existing names
-            # always continue through the normal read path below.
-            connection.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(root,path))
-            connection.execute('UPDATE jobs SET checked=checked+1 WHERE root=?',(root,))
-            self._outcome(connection,root,generation,path,False,details='Source intentionally retired; recovery provenance retained')
-            return
-        old = connection.execute('SELECT * FROM files WHERE root=? AND path=?', (root,path)).fetchone()
-        unchanged = old and old['size'] == before.st_size and old['modified'] == before.st_mtime_ns and not old['error'] and not retired
-        if unchanged:
-            _same_source(before, fresh_stat(path))
-            connection.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?', (generation,root,path))
-            connection.execute('UPDATE jobs SET checked=checked+1,reused=reused+1 WHERE root=?', (root,))
-            self._outcome(connection,root,generation,path,False)
-            return
-        kind, arrival = self._classify(label,root,path)
-        metadata, error = {}, ''
+            def persist_retired(db):
+                db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(root,path))
+                db.execute('UPDATE jobs SET checked=checked+1 WHERE root=? AND generation=?',(root,generation))
+                self._outcome(db,root,generation,path,False,details='Source intentionally retired; recovery provenance retained')
+            save(persist_retired);return
+        old=expected['file']
+        unchanged=old and old['size']==before.st_size and old['modified']==before.st_mtime_ns and not old['error'] and not retired
+        import reacquire_sources
+        if unchanged and not reacquire_sources.marked_path(connection,root,path):
+            _same_source(before,fresh_stat(path))
+            def persist_reused(db):
+                db.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?',(generation,root,path))
+                db.execute('UPDATE jobs SET checked=checked+1,reused=reused+1 WHERE root=? AND generation=?',(root,generation))
+                self._outcome(db,root,generation,path,False)
+            save(persist_reused);return
+        kind,arrival=self._classify(label,root,path)
+        metadata,error={},''
         try:
-            metadata = self.reader(path, kind, self.stop_event)
-            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owned_artifacts'").fetchone():
-                output=connection.execute("SELECT * FROM owned_artifacts WHERE path=? AND kind='output'",(path,)).fetchone()
-                if output:
-                    import hashlib
-                    digest=hashlib.sha256()
-                    with open(path,'rb') as stream:
-                        for block in iter(lambda:stream.read(1024*1024),b''):
-                            if self.stop_event.is_set():raise ScanStopped()
-                            digest.update(block)
-                    if before.st_size!=output['size'] or digest.hexdigest()!=output['sha256']:
-                        raise ValueError('Created audiobook changed; inspect the recorded output')
-                    metadata['arranger_output']=output['job_id']
-        except ScanStopped:
-            raise
+            metadata=self.reader(path,kind,self.stop_event)
+            # Existing source guards and the captured output token are not replayed.
+            output=next((row for row in expected['owned'] if row['kind']=='output'),None)
+            if output:
+                import hashlib
+                digest=hashlib.sha256()
+                with open(path,'rb') as stream:
+                    for block in iter(lambda:stream.read(1024*1024),b''):
+                        if self.stop_event.is_set():raise ScanStopped()
+                        digest.update(block)
+                if before.st_size!=output['size'] or digest.hexdigest()!=output['sha256']:
+                    raise ValueError('Created audiobook changed; inspect the recorded output')
+                metadata['arranger_output']=output['job_id']
+        except (ScanStopped,InterruptedError,CatalogHold,sqlite3.Error):raise
         except Exception as issue:
-            error = str(issue)
-            metadata = {'notes': ['Metadata read failed; source file untouched'], 'title': '', 'author': ''}
-        after = fresh_stat(path)
-        _same_source(before, after)
-        connection.execute('''INSERT OR REPLACE INTO files(root,path,size,modified,seen,kind,arrival,metadata,error,missing,review)
-          VALUES(?,?,?,?,?,?,?,?,?,0,'')''', (root,path,before.st_size,before.st_mtime_ns,generation,kind,int(arrival),json.dumps(metadata,ensure_ascii=False),error))
-        connection.execute('UPDATE jobs SET checked=checked+1,errors=errors+? WHERE root=?', (int(bool(error)),root))
-        self._outcome(connection,root,generation,path,False,error)
-        if not error:_supersede_retirement(connection,root,path)
+            error=str(issue)
+            metadata={'notes':['Metadata read failed; source file untouched'],'title':'','author':''}
+        after=fresh_stat(path);_same_source(before,after)
+        encoded=json.dumps(metadata,ensure_ascii=False)
+        def persist_read(db):
+            db.execute("""INSERT OR REPLACE INTO files(root,path,size,modified,seen,kind,arrival,metadata,error,missing,review)
+              VALUES(?,?,?,?,?,?,?,?,?,0,'')""",(root,path,before.st_size,before.st_mtime_ns,generation,kind,int(arrival),encoded,error))
+            db.execute('UPDATE jobs SET checked=checked+1,errors=errors+? WHERE root=? AND generation=?',(int(bool(error)),root,generation))
+            self._outcome(db,root,generation,path,False,error)
+            if not error:_supersede_retirement(db,root,path)
+        save(persist_read)
 
     def refresh_candidate_sources(self,label,identity,revision,stop=None,*,force=False,max_members=500,max_bytes=4*1024*1024*1024,deadline_seconds=120):
         """Freshen one unprotected candidate's observed sources without a scan.
@@ -356,12 +499,16 @@ class Inventory:
                 raise ValueError('Source retirement provenance is preserved')
             if table(db,'owned_artifacts') and db.execute(f'SELECT 1 FROM owned_artifacts WHERE path IN ({marks}) LIMIT 1',member_paths).fetchone():
                 raise ValueError('App-owned output or recovery evidence is preserved')
+            if 'planned_destination' in {row[1] for row in db.execute('PRAGMA table_info(output_relocations)')}:
+                if db.execute(f'SELECT 1 FROM output_relocations WHERE planned_destination IN ({marks}) LIMIT 1',member_paths).fetchone():
+                    raise ValueError('Relocation destination evidence is preserved')
             job=db.execute('SELECT * FROM jobs WHERE root=?',(root,)).fetchone()
             if job and job['state']=='scanning' or self.worker and self.worker.is_alive():raise ValueError('A library scan is active; source refresh waits')
             rows=[db.execute('SELECT * FROM files WHERE root=? AND path=?',(root,path)).fetchone() for path in member_paths]
             if any(row is None for row in rows):raise ValueError('Observed source is missing from the inventory')
             return dict(group),[dict(row) for row in rows],dict(job) if job else None,dict(context) if context else None
-        root=self.roots[label]
+        try:root=self.source_root_for_candidate(identity)
+        except ValueError as issue:return result('held',str(issue),'protected_or_changed')
         try:
             with self.group_lock,contextlib.ExitStack() as guards:
                 check()
@@ -370,7 +517,7 @@ class Inventory:
                 root_path=ordinary(root);updates=[];receipts=[];hashed_bytes=0
                 for row in rows:
                     check();path=ordinary(row['path'])
-                    if not inside(path,root_path) or row['kind']!='audiobook' or inside(path,self.roots.get('Podcasts',str(root_path/'Podcasts'))):
+                    if not inside(path,root_path) or row['kind']!='audiobook' or self.source_root_for_path(path,label)!=root:
                         raise BoundaryError('Source refresh must stay within exact observed audiobook members')
                     guards.enter_context(DirectoryBoundary(root_path,path.parent))
                     held=guards.enter_context(VerifiedFile(path));facts=held.facts();before=fresh_stat(path)
@@ -413,14 +560,21 @@ class Inventory:
         return kind, arrival
 
     def rows(self, label, limit=1000, offset=0, search='', status='all', page=False):
-        root = self.roots[label]
+        roots=self.source_roots(label)
         with connect(self.database) as connection:
-            # Escape wildcard characters: searching a filename means literal substring.
-            pattern = '%' + search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
-            values = connection.execute("SELECT * FROM files WHERE root=? AND path LIKE ? ESCAPE '\\' ORDER BY path", (root,pattern)).fetchall()
-            failures={item['path']:dict(item) for item in connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND outcome='error' ORDER BY generation",(root,))}
-            reviewed = connection.execute("SELECT path,kind,metadata,review FROM files WHERE root=? AND kind='ebook' AND review<>'' AND missing=0", (root,)).fetchall()
-            existing = {os.path.normcase(os.path.normpath(item[0])):item[0] for item in connection.execute('SELECT path FROM files WHERE root=? AND missing=0',(root,))}
+            connection.execute('BEGIN')
+            rows=[row for root in roots for row in self._rows_source(connection,root,search,status)]
+        rows.sort(key=lambda row:(row['path'].casefold(),row['source_root']))
+        result=rows[offset:offset+limit]
+        return {'rows':result,'total':len(rows)} if page else result
+
+    def _rows_source(self,connection,root,search,status):
+        # Escape wildcard characters: searching a filename means literal substring.
+        pattern = '%' + search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+        values = connection.execute("SELECT * FROM files WHERE root=? AND path LIKE ? ESCAPE '\\' ORDER BY path", (root,pattern)).fetchall()
+        failures={item['path']:dict(item) for item in connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND outcome='error' ORDER BY generation",(root,))}
+        reviewed = connection.execute("SELECT path,kind,metadata,review FROM files WHERE root=? AND kind='ebook' AND review<>'' AND missing=0", (root,)).fetchall()
+        existing = {os.path.normcase(os.path.normpath(item[0])):item[0] for item in connection.execute('SELECT path FROM files WHERE root=? AND missing=0',(root,))}
         destinations = {}
         for candidate in reviewed:
             preview = propose(candidate['path'],root,'ebook',json.loads(candidate['metadata']),json.loads(candidate['review']))
@@ -430,6 +584,7 @@ class Inventory:
         rows = []
         for source in values:
             row = dict(source)
+            row['source_root']=root
             row['metadata'] = json.loads(row['metadata'])
             row['review'] = json.loads(row['review']) if row['review'] else None
             row['preview'] = propose(row['path'],root,row['kind'],row['metadata'],row['review'])
@@ -451,8 +606,7 @@ class Inventory:
             'missing':lambda row:bool(row['missing'])}
         if status not in filters:raise ValueError('Unknown inventory status')
         rows=[row for row in rows if filters[status](row)]
-        result=rows[offset:offset+limit]
-        return {'rows':result,'total':len(rows)} if page else result
+        return rows
 
     def save_review(self, root, path, review, size=None, modified=None):
         with connect(self.database) as connection:
@@ -468,16 +622,28 @@ class Inventory:
             # v0.16.12: a plain read when the stored groups are current, so the page (11-13 s on the live catalog)
             # no longer holds the write lock every other write waited behind, a Retry press included.
             connection.execute('BEGIN')
-            if not groups.current(connection,self.roots[label]):
+            roots=self.source_roots(label)
+            if not all(groups.current(connection,root) for root in roots):
                 connection.execute('ROLLBACK');connection.execute('BEGIN IMMEDIATE')  # the groups are rebuilt: that writes
-            current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(self.roots[label],)).fetchone()
-            pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(self.roots[label],)).fetchone()[0]
-            return groups.page(connection,self.roots[label],limit,offset,search,status,
-                bool(current and current['state']=='completed' and not pending and not current['errors']),ids=ids)
+            import reacquire_sources
+            archived=[item['candidate_id'] for root in roots for item in reacquire_sources.markers(connection,root) if item['state']=='archived']
+            if len(roots)==1:
+                result=groups.page(connection,roots[0],limit,offset,search,status,self._coverage(connection,roots[0]),ids=ids)
+                return dict(result,reacquire_archives=archived)
+            # One transaction, one global ordering/filter/pagination. Each source
+            # is grouped independently; no tracks cross a durable root boundary.
+            result=groups.page_sources(connection,roots,limit,offset,search,status,
+                {root:self._coverage(connection,root) for root in roots},ids=ids)
+            return dict(result,reacquire_archives=archived)
+
+    def _coverage(self,connection,root):
+        current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
+        pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
+        return bool(current and current['state']=='completed' and not pending and not current['errors'])
 
     def candidate(self,label,identity):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
-        root=self.roots[label]
+        root=self.source_root_for_candidate(identity)
         with self.group_lock,connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
             row=db.execute('SELECT * FROM book_groups WHERE root=? AND id=? AND superseded=0',(root,identity)).fetchone()
@@ -490,4 +656,5 @@ class Inventory:
         if label!='Audiobooks':raise ValueError('Only audiobooks have book candidates')
         with self.group_lock,connect(self.database) as connection:
             connection.execute('BEGIN IMMEDIATE')
-            return groups.save(connection,self.roots[label],identity,revision,review,approve)
+            root=self.source_root_for_candidate(identity)
+            return groups.save(connection,root,identity,revision,review,approve)

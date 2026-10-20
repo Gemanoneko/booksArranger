@@ -11,6 +11,7 @@ import re
 import uuid
 import sqlite3
 import traceback
+import threading
 from sqlite_retry import transaction
 from pathlib import Path
 from scanner import connect
@@ -20,11 +21,13 @@ from source_cleanup import packed, stamp, single_stream
 TERMINAL = {'removed', 'absent_after_intent'}
 
 class StorageCleanup:
-    def __init__(self, database, stage_root, recovery_root, guard=lambda: None):
+    def __init__(self, database, stage_root, recovery_root, guard=lambda: None,output_location=None,output_location_guard=None,repair_publication=None,repair_location_guard=None):
         self.database = str(database)
         self.stage_root = ordinary(stage_root)
         self.recovery_root = ordinary(recovery_root)
         self.guard = guard
+        self.repair_publication=repair_publication;self.repair_location_guard=repair_location_guard
+        self.output_location=output_location;self.output_location_guard=output_location_guard;self._location_local=threading.local()
         self._receipts = {}
         self.last_errors = {}
         self._phase = "not_started"
@@ -131,19 +134,39 @@ class StorageCleanup:
     @contextlib.contextmanager
     def protected_output(self, job_id, guard=None):
         (guard or self.guard)()
-        m, out = self._job(job_id)
-        root = ordinary(m['root']); final = ordinary(out['final_path'])
-        if final != ordinary(m['destination']) or not final.is_relative_to(root) or final.suffix.lower() != '.m4b':
-            raise BoundaryError('Completed output destination changed')
-        with DirectoryBoundary(root, final.parent) as ancestry, VerifiedFile(final) as handle:
-            if [list(x) for x in ancestry.identities] != [list(x) for x in out['parent_identity']]:
-                raise BoundaryError('Completed output ancestry changed')
-            value=hashlib.sha256()
-            for block in handle.chunks():
-                (guard or self.guard)();value.update(block)
-            if handle.facts()['size'] != out['size'] or value.hexdigest() != out['sha256']:
-                raise BoundaryError('Completed output bytes changed; copies retained')
-            yield m, out
+        m, original = self._job(job_id)
+        frozen_root=ordinary(m.get('output_root',m['root']))
+        if ordinary(original.get('root',str(frozen_root)))!=frozen_root or ordinary(original['final_path'])!=ordinary(m['destination']):
+            raise BoundaryError('Frozen publication provenance changed')
+        out,envelope=self.output_location(original) if self.output_location else (original,None)
+        root=ordinary(out.get('root',str(frozen_root)));final=ordinary(out['final_path'])
+        if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Completed output destination changed')
+        prior=getattr(self._location_local,'publication',None);prior_effective=getattr(self._location_local,'effective',None)
+        self._location_local.publication=(original,envelope);self._location_local.effective=out
+        try:
+            with DirectoryBoundary(root,final.parent) as ancestry,VerifiedFile(final) as handle:
+                if out.get('identity') is not None and handle.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; copies retained')
+                if [list(x) for x in ancestry.identities]!=[list(x) for x in out['parent_identity']]:raise BoundaryError('Completed output ancestry changed')
+                value=hashlib.sha256()
+                for block in handle.chunks():(guard or self.guard)();value.update(block)
+                if handle.facts()['size']!=out['size'] or value.hexdigest()!=out['sha256']:raise BoundaryError('Completed output bytes changed; copies retained')
+                yield m,original
+        finally:self._location_local.publication=prior;self._location_local.effective=prior_effective
+
+    @contextlib.contextmanager
+    def _publication_transaction(self):
+        current=getattr(self._location_local,'publication',None)
+        if not self.output_location_guard or current is None:
+            yield None;return
+        original,envelope=current
+        with connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not self.output_location_guard(db,original,envelope,require_transaction=True):raise BoundaryError('Current publication changed before copy disposition')
+            for derived in getattr(self._location_local,'derived_publications',()):
+                if not self.repair_location_guard or not self.repair_location_guard(db,derived['original'],derived['envelope'],kind=derived['kind'],repair_journal_sha256=derived['journal_sha256'],require_transaction=True):raise BoundaryError('Authorized repaired publication changed before copy disposition')
+            prior=getattr(self._location_local,'disposal_db',None);self._location_local.disposal_db=db
+            try:yield db
+            finally:self._location_local.disposal_db=prior
 
     def _known(self, path):
         with connect(self.database) as db:
@@ -151,6 +174,9 @@ class StorageCleanup:
         return dict(row) if row else None
 
     def _prepare(self, stack, job_id, kind, path, root, expected=None):
+        from producer_recovery import protected_dependency
+        with connect(self.database) as db:
+            if protected_dependency(db,[path]):raise BoundaryError('Isolated old files and source dependencies are retained')
         path = ordinary(path); root = ordinary(root)
         if not path.is_relative_to(root) or path == root:
             raise BoundaryError('Copy is outside its owned storage root')
@@ -222,12 +248,14 @@ class StorageCleanup:
     def _file_state(self, path, state):
         expected=self._receipts.get(str(path))
         if not expected:raise BoundaryError('No held cleanup receipt provenance')
+        held_db=getattr(self._location_local,'disposal_db',None)
+        apply=lambda change:self._cas(held_db,'storage_cleanup_files',expected,change) if held_db is not None else transaction(self.database,lambda db:self._cas(db,'storage_cleanup_files',expected,change))
         if expected['state']==state:
-            return transaction(self.database,lambda db:self._cas(db,'storage_cleanup_files',expected,expected))
+            return apply(expected)
         allowed={'verified':{'removal_intended'},'removal_intended':{'disposition_set','absent_after_intent'},'disposition_set':{'removed'}}
         if state not in allowed.get(expected['state'],set()):raise BoundaryError('Invalid cleanup file transition')
         target=dict(expected,state=state,updated=stamp())
-        result=transaction(self.database,lambda db:self._cas(db,'storage_cleanup_files',expected,target))
+        result=apply(target)
         self._receipts[str(path)]=result
         return result
 
@@ -237,20 +265,21 @@ class StorageCleanup:
             self._phase='commit removal intent'
             self._file_state(path, 'removal_intended')
             self._disposition='intent_committed'
-            handle.dispose()
-            self._disposition='disposition_called'
-            self._phase='commit disposition receipt'
-            self._file_state(path, 'disposition_set')
-            self._disposition='disposition_receipt_committed'
-            handle.__exit__(None, None, None)
-            try:
-                path.stat()
-            except FileNotFoundError:
-                self._disposition='confirmed_absent'
-                self._phase='commit removed receipt'
-                self._file_state(path, 'removed')
-            else:
-                raise BoundaryError('Verified copy disposition did not remove its name')
+            with self._publication_transaction():
+                handle.dispose()
+                self._disposition='disposition_called'
+                self._phase='commit disposition receipt'
+                self._file_state(path, 'disposition_set')
+                self._disposition='disposition_receipt_committed'
+                handle.__exit__(None, None, None)
+                try:
+                    path.stat()
+                except FileNotFoundError:
+                    self._disposition='confirmed_absent'
+                    self._phase='commit removed receipt'
+                    self._file_state(path, 'removed')
+                else:
+                    raise BoundaryError('Verified copy disposition did not remove its name')
 
     def _source_safety(self, stack, job_id, manifest, output):
         with connect(self.database) as db:
@@ -706,11 +735,15 @@ class StorageCleanup:
         return self._folder_known(job_id,path)
 
     def _remove_folder(self, job_id, manifest, output, path):
+        from producer_recovery import protected_dependency
+        with connect(self.database) as db:
+            if protected_dependency(db,[path]):raise BoundaryError('Isolated old namespace is retained')
         known=self._capture_folder(job_id,ordinary(manifest['root']),path)
         if known is None:return
         # The validated output keeps any candidate containing it nonempty. Its
         # held ancestor handle also intentionally denies DELETE on that target.
-        contains_output=ordinary(output['final_path']).is_relative_to(path)
+        effective=getattr(self._location_local,'effective',None) or output
+        contains_output=ordinary(effective['final_path']).is_relative_to(path)
         with self._folder_boundary(job_id,manifest['root'],path.parent,json.loads(known['ancestry'])) as boundary, VerifiedDirectory(path,delete=not contains_output) as target:
             if target.facts()!=json.loads(known['identity']):raise BoundaryError('Source-folder native identity changed before disposition')
             if not target.empty():
@@ -722,16 +755,19 @@ class StorageCleanup:
                 self._folder_state(job_id,path,'retained_unsupported',str(error));return
             self.guard();boundary.revalidate();self._folder_obligations(job_id,manifest,output)
             self._folder_state(job_id,path,'removal_intended')
-            try:target.dispose_empty()
+            try:
+                with self._publication_transaction():
+                    target.dispose_empty()
+                    target.__exit__(None,None,None)
+                    try:path.lstat()
+                    except FileNotFoundError:pass
+                    else:raise BoundaryError('Exact empty-directory disposition did not remove its name')
             except DirectoryNotEmptyError as error:
                 self._folder_state(job_id,path,'retained_nonempty',str(error));return
             except DirectoryDispositionUnsupported as error:
                 self._folder_state(job_id,path,'retained_unsupported',str(error));return
             self._folder_state(job_id,path,'disposition_set')
-            target.__exit__(None,None,None)
-            try:path.lstat()
-            except FileNotFoundError:self._folder_state(job_id,path,'removed')
-            else:raise BoundaryError('Exact empty-directory disposition did not remove its name')
+            self._folder_state(job_id,path,'removed')
 
     def run_folders(self, job_id, progress=None):
         """Check only completed enrolled source parents; never enroll originals."""
@@ -780,13 +816,27 @@ class StorageCleanup:
             if not rows or any(r['parent_job_id'] != job_id or r['job_id'] != p.parent.name for r in rows) or rows[0]['state'] != 'intent' or rows[-1]['state'] != 'completed':
                 raise BoundaryError('Completed repair ownership is not proved')
             final=ordinary(rows[-1]['data']['destination']);validated=rows[-1]['data']['validation']
-            source=ordinary(rows[0]['data']['parent_output'])
-            if source!=ordinary(parent_output['final_path']) or final not in {source.with_name(source.stem+' - Chapters.m4b'),source.with_name(source.stem+' - Chapters v2.m4b')}:
+            source=ordinary(rows[0]['data']['parent_output']);published_parent=ordinary(rows[0]['data'].get('parent_effective_output',str(source)))
+            if source!=ordinary(parent_output['final_path']) or final not in {published_parent.with_name(published_parent.stem+' - Chapters.m4b'),published_parent.with_name(published_parent.stem+' - Chapters v2.m4b')}:
                 raise BoundaryError('Corrected repair destination changed')
-            stack.enter_context(DirectoryBoundary(manifest['root'],final.parent))
+            authorization=None
+            if self.repair_publication:
+                authorization=self.repair_publication(job_id,p.parent/'corrected-artifact.jsonl',journal.sha256())
+                if authorization['original']['final_path']!=str(final) or authorization['original']['sha256']!=validated['sha256'] or authorization['original']['size']!=validated['size']:raise BoundaryError('Repair authorization differs from the exact completed journal')
+                final=ordinary(authorization['effective']['final_path']);publication_root=authorization['effective']['root']
+            else:
+                publication_root=rows[0]['data'].get('output_root',manifest.get('output_root',manifest['root']))
+                if rows[0]['data'].get('parent_location') is not None:raise BoundaryError('Relocated repair requires independent authorized publication binding')
+            ancestry=stack.enter_context(DirectoryBoundary(publication_root,final.parent))
             corrected=stack.enter_context(VerifiedFile(final))
             if corrected.facts()['size']!=validated['size'] or corrected.sha256()!=validated['sha256']:
                 raise BoundaryError('Corrected published repair is missing or changed; copy retained')
+            if authorization:
+                effective=authorization['effective']
+                if (effective.get('identity') is not None and corrected.facts()['identity']!=effective['identity']) or [list(v) for v in ancestry.identities]!=[list(v) for v in effective['parent_identity']]:raise BoundaryError('Relocated repaired publication native identity changed')
+                prior=getattr(self._location_local,'derived_publications',())
+                self._location_local.derived_publications=tuple(prior)+(authorization,)
+                stack.callback(setattr,self._location_local,'derived_publications',prior)
             item = self._prepare(stack, job_id, 'repair', p, root, (sha256, size))
             if item:
                 self._dispose([item])

@@ -9,7 +9,7 @@ let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,d
 const filters={files:'all',candidates:'converted'};
 const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention'],['restarted','Started over']]};
 const form = $('review-form');
-const fields = ['original_language','title','author','canonical_author','narrator','series','number','genre','topic'];
+const fields = ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic'];
 let proposalId=null,coverId=null,trackDraft=null,trackDirty=false,coverSequence=0,mergeRenderKey=null,proposalRenderKey=null,memberRenderKey=null,coverRenderKey=null;
 const selectedBooks=new Map(),coverObjects=[];
 let inspectorIdentity=null,inspectSequence=0;
@@ -26,14 +26,23 @@ const pendingFolders=new Set(),folderMessages=new Map();
 // restartResult: the panel note for a book whose press left it with no control (it now shows its Started over state).
 let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=null;
 
+let routingPreviewTimer=null,routingPreviewSequence=0;
+function queueRoutingPreview(){
+  if(routingPreviewTimer!==null)clearTimeout(routingPreviewTimer);const seq=++routingPreviewSequence;
+  if(selectedRow?.kind!=='candidate')return;
+  const original=selectedRow,library=selectedLibrary,review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
+  review.multi_author=form.elements.namedItem('multi_author').checked;review.anthology=form.elements.namedItem('anthology').checked;
+  $('routing-preview-label').textContent='Unsaved destination preview';$('routing-preview-path').textContent='Checking destination…';
+  routingPreviewTimer=setTimeout(async()=>{routingPreviewTimer=null;try{const response=await request('/api/candidate/routing-preview',{library,id:original.id,revision:original.revision,review});if(seq!==routingPreviewSequence||selectedRow?.id!==original.id)return;$('routing-preview-path').textContent=response.preview?.path || response.preview?.reason || 'Confirm the cycle or universe';}catch(error){if(seq===routingPreviewSequence&&selectedRow?.id===original.id)$('routing-preview-path').textContent=error.message;}},250);
+}
 function routingControls() {
   const audio=['audiobook','candidate'].includes(selectedRow?.kind);
   const anthology=audio && form.elements.namedItem('anthology').checked;
   for(const element of document.querySelectorAll('.audio-only'))element.hidden=!audio;
-  form.elements.namedItem('author').disabled=anthology;
-  form.elements.namedItem('multi_author').disabled=anthology;
+  form.elements.namedItem('author').disabled=false;
+  form.elements.namedItem('multi_author').disabled=false;
   $('author-folder-help').hidden=!anthology;
-  $('multi-author-help').hidden=!anthology;
+  $('multi-author-help').hidden=false;
 }
 function viewControls(){
   const audio=$('library').value==='Audiobooks';
@@ -116,12 +125,13 @@ function controls() {
   if($('create-audiobook'))$('create-audiobook').disabled=busy || ended || recoveryDisconnected || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
   for(const id of ['source-coverage','playback-order'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected;
   if($('add-chapters'))$('add-chapters').disabled=busy || ended || recoveryDisconnected || !selectedRow?.creation?.chapters_available;
+  if($('check-metadata')){$('check-metadata').hidden=selectedRow?.kind!=='candidate';$('check-metadata').disabled=busy || ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate';$('check-metadata-save').hidden=!dirty;}
   for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
   if($('queue-books'))$('queue-books').disabled=busy || ended || recoveryDisconnected || !rows.some(readyForQueue);
   if($('retry-selected'))renderRetrySelected();
   if($('release-selected'))renderReleaseSelected();
   if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
-  if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !state?.audiobook_jobs?.queued || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
 }
 async function action(route, data) {
   if (busy || ended) return;
@@ -131,6 +141,7 @@ async function action(route, data) {
   finally { busy=false; controls(); }
 }
 function select(row, reset) {
+  $('manual-review').hidden=false;
   const changing=selectedPath!==row.path;
   if(reset && (changing || dirty || trackDirty)){discardManualDraft();if(changing)$('manual-review').open=row.kind!=='candidate';}
   if(changing){automaticResultKey=null;automaticInspectorKey=null;closeRecoveryDialog(false);recoveryPanel=null;inspectorIdentity=null;++inspectSequence;$('metadata-inspector').hidden=true;for(const url of inspectorObjects)URL.revokeObjectURL(url);inspectorObjects.length=0;}
@@ -226,6 +237,7 @@ function renderRows(force=false) {
     const rowRetry=rowRetries.get(row.path),action=rowAction(row);
     if(rowRetry && action){
       const retry=node('button',action.label,'quiet row-retry');retry.type='button';rowRetry.button=retry;
+      rowRetry.hint.id='attention-hint-'+row.id;retry.setAttribute('aria-describedby',rowRetry.hint.id);
       retry.addEventListener('click',event=>{event.stopPropagation();if(retry.getAttribute?.('aria-disabled')==='true' || retryPending)return;retryFromRow(row,retry);});
       retry.addEventListener('keydown',event=>event.stopPropagation());buttons.append(retry);
     }
@@ -268,6 +280,15 @@ function acknowledgeRestart(current){
 }
 
 // One book-list request; it paints itself if it is still the newest request for the list on screen.
+function acknowledgeReacquireArchives(page){
+  if(!selectedRow || !Array.isArray(page.reacquire_archives) || !page.reacquire_archives.includes(selectedRow.id))return;
+  const focused=$('details').contains?.(document.activeElement),notice='Damaged originals confirmed removed. Scan the replacement for fresh research.';
+  if(heldRow?.row?.id===selectedRow.id)heldRow=null;
+  selectedRow=null;selectedPath=null;reviewRow=null;dirty=false;trackDirty=false;
+  for(const id of ['manual-review','candidate-details','candidate-approval','automatic-result','metadata-inspector','audiobook-output'])$(id).hidden=true;
+  $('details').hidden=false;$('details-heading').textContent='Source entry cleared';$('reason').textContent=notice;$('proposed').textContent='Historical jobs and evidence are kept.';
+  controls();message(notice);if(focused)$('details-heading').focus?.({preventScroll:true});
+}
 function loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,forceRender){
   const ticket=++listTicket;listPending=context;
   if(context!==paintedContext)showListLoading();
@@ -275,6 +296,7 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
   return request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`).then(page=>{
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
+    acknowledgeReacquireArchives(page);
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
     restartCounts=requestFilter==='restarted' && page.restart_counts && typeof page.restart_counts==='object'?page.restart_counts:null;
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
@@ -308,7 +330,7 @@ async function refresh(force=false) {
   state=current;
   renderJobs();renderAutomatic();renewManualDraft();
   renderVersion();
-  $('root').textContent=`Source: ${state.root}`;
+  const sourceRoots=Array.isArray(state.source_roots)&&state.source_roots.length?state.source_roots:[state.root];$('root').textContent=state.library==='Audiobooks'?sourceRoots.map((root,i)=>`Source ${i+1}: ${root}`).concat(state.audiobook_output_root?[`Output: ${state.audiobook_output_root}`]:[]).join('\n'):`Source: ${state.root}`;
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
   const statusText=`Discovery: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
@@ -379,7 +401,7 @@ $('search').addEventListener('input',()=>{cancelSearchRefresh();++refreshSequenc
 $('search-form').addEventListener('submit',event=>{event.preventDefault();return updateList();});
 $('previous').addEventListener('click',()=>{offset=Math.max(0,offset-100);return updateList(false);});
 $('next').addEventListener('click',()=>{offset+=100;return updateList(false);});
-form.addEventListener('input',()=>{if(!dirty)reviewRow=selectedRow;dirty=true;manualMetadataTouched=true;syncManualDraft();routingControls();controls();$('review-note').textContent='Unsaved local review.';});
+form.addEventListener('input',()=>{if(!dirty)reviewRow=selectedRow;dirty=true;manualMetadataTouched=true;syncManualDraft();routingControls();queueRoutingPreview();updateMetadataChoiceControls();controls();$('review-note').textContent='Unsaved local review.';});
 form.addEventListener('submit',async event=>{
   event.preventDefault();if(!selectedRow || busy || ended || recoveryDisconnected)return;
   const row=reviewRow || selectedRow;const review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
@@ -387,7 +409,7 @@ form.addEventListener('submit',async event=>{
   review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && form.elements.namedItem('anthology').checked;
   if(!['audiobook','candidate'].includes(selectedRow.kind)){review.canonical_author='';review.narrator='';}
   busy=true;controls();message();
-  try {if(row.kind==='candidate'){const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext()});dirty=false;if(trackDraft?.id===row.id && trackDraft.revision===row.revision)trackDraft.revision=result.row.revision;select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);}else await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});dirty=false;manualMetadataTouched=false;syncManualDraft();await refresh(true);message('Preview metadata saved. Source files unchanged.');}
+  try {if(row.kind==='candidate'){const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext()});dirty=false;if(trackDraft?.id===row.id && trackDraft.revision===row.revision)trackDraft.revision=result.row.revision;select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);}else await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});dirty=false;manualMetadataTouched=false;syncManualDraft();await refresh(true);message('Metadata source saved. Review or check this book to continue.');}
   catch(error){message(error.message);}
   finally{busy=false;controls();}
 });
@@ -426,16 +448,17 @@ async function inspectorCover(cover,holder,sequence){const caption=node('p',cove
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
-function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,leftOut=selected.length-retryable;const releasable=releaseSelection()?releaseSelectable().length:0;
+function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,waiting=selected.filter(row=>readmissionOf(row)?.state==='queued').length,leftOut=selected.length-retryable-waiting;const releasable=releaseSelection()?releaseSelectable().length:0;
   // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
-  $('batch-count').textContent=attentionSelection()?`${selected.length} selected · ${retryable} can be retried or repaired`+(leftOut>0?` · ${leftOut} left out`:''):
+  $('batch-count').textContent=attentionSelection()?`${selected.length} selected`+(waiting?` · ${waiting} already waiting for retry checks`:String())+` · ${retryable} new retries available`+(leftOut>0?` · ${leftOut} left out`:''):
     filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
     `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
-  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
+  const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
+  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} output issues`].filter(Boolean).join(' · '));
   renderActivities(Array.isArray(state.activities)?state.activities:[],jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -448,7 +471,7 @@ const activityOrder=['conversion','cleanup','identity','series','scan'],activity
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing empty source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 function activityLabel(row){
-  if(row.kind==='conversion')return 'Converting';
+  if(row.kind==='conversion')return ({attention:'Audiobook on hold',paused:'Audiobook paused',pausing:'Pausing audiobook'})[row.state] || 'Converting';
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
   if(row.kind==='identity')return 'Checking finished books';
   if(row.kind==='series')return 'Updating series';
@@ -530,19 +553,98 @@ function updateActivity(view,now){
   writeText(view.time,held?'':clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=held;
 }
 async function candidateRequest(route,extra={}){if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){message(error.message);}finally{busy=false;controls();}}
-function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
-  const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,row.audiobook_ready,row.metadata_facts,row.duplicate_review,dirty,trackDirty,coverId]);
+let metadataChoiceState=null;
+function metadataChoiceValues(){const values={};for(const name of fields)values[name]=form.elements.namedItem(name)?.value || '';for(const name of ['multi_author','anthology'])values[name]=!!form.elements.namedItem(name)?.checked;return values;}
+function metadataChoiceFieldLabel(field){return ({title:'Title',canonical_author:'Author',original_language:'Original language',series:'Cycle',number:'Number in cycle',universe:'Universe',genre:'Genre',topic:'Topic',narrator:'Reader / narrator'})[field] || field.replaceAll('_',' ');}
+function metadataChoiceDirtyReason(){
+  const saved=metadataChoiceState;if(!saved)return '';
+  if(!dirty)return '';
+  if(saved.blockedDirty)return 'Save your edits before choosing a result.';
+  const allowed=new Set();for(const question of saved.snapshot.questions || [])if(saved.answers[question.id]?.mode==='corrected')for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])allowed.add(field);
+  const values=metadataChoiceValues();if(!allowed.size || Object.keys(values).some(field=>values[field]!==saved.baseline[field] && !allowed.has(field)) || coverId!==saved.cover)return 'Save your edits before choosing a result.';
+  return '';
+}
+function updateMetadataChoiceControls(){
+  const saved=metadataChoiceState;if(!saved || $('metadata-questions').hidden)return;
+  const reason=metadataChoiceDirtyReason();$('save-metadata-choices').disabled=!!(reason || saved.pending || busy || ended || recoveryDisconnected);
+  $('save-metadata-choices').textContent=saved.pending?'Saving choices…':'Save choices';
+  $('metadata-question-status').textContent=[saved.error,reason || saved.status || ''].filter(Boolean).join(' ');
+}
+function renderMetadataQuestions(row,reset=false){
+  const section=$('metadata-questions'),snapshot=row.metadata_questions;
+  if(row.kind!=='candidate' || !snapshot?.questions?.length){section.hidden=true;metadataChoiceState=null;return;}
+  section.hidden=false;$('resolve-metadata-question').setAttribute('aria-label','Resolve metadata: '+(row.title_clue || row.id));
+  const key=JSON.stringify([row.id,snapshot.signature,snapshot.questions.map(question=>[question.id,question.decision,question.renewed])]);
+  if(metadataChoiceState?.key===key){metadataChoiceState.revision=row.revision;updateMetadataChoiceControls();return;}
+  metadataChoiceState={id:row.id,revision:row.revision,key,snapshot,answers:{},baseline:metadataChoiceValues(),cover:row.review_context?.cover_id || row.selected_cover?.id || null,blockedDirty:dirty,
+    pending:false,status:snapshot.questions.some(question=>question.renewed)?'Sources disagree — choose again.':snapshot.unresolved_count?`Metadata choice needed for ${row.title_clue || 'this book'}.`:'Chosen by you. Review the metadata to continue.'};
+  const saved=metadataChoiceState,container=$('metadata-question-fields');container.replaceChildren();
+  for(const question of snapshot.questions){
+    const fieldset=node('fieldset'),legend=node('legend',question.label),help=node('p','Choose a result for this evidence snapshot. Other sources remain available.','field-help');help.id='metadata-question-help-'+question.id;fieldset.append(legend,help);fieldset.setAttribute('aria-describedby',help.id);
+    const grid=node('div','','metadata-choice-grid');fieldset.append(grid);
+    function radio(value,text,tooltip){
+      const label=node('label','','metadata-choice-label'),input=node('input');input.type='radio';input.name='metadata-question-'+question.id;input.value=value;input.title=tooltip;input.setAttribute('aria-describedby',help.id);
+      input.addEventListener('input',event=>event.stopPropagation());label.append(input,node('span',text));grid.append(label);return {input,label};
+    }
+    const prior=question.decision; saved.answers[question.id]=prior?{mode:prior.mode,option_id:prior.option_id}:{mode:'unresolved'};
+    for(const option of question.options || []){
+      const values=Object.entries(option.values || {}).map(([field,value])=>`${metadataChoiceFieldLabel(field)}: ${value || 'Not supplied'}`).join(' · '),names=(option.sources || []).map(source=>source.provider).join(', ');
+      const item=radio(option.id,values+' — '+names,'Use this result for this conflict after saving your choices.');item.input.checked=prior?.mode==='provider' && prior.option_id===option.id;
+      item.input.addEventListener('change',()=>{if(!item.input.checked)return;saved.answers[question.id]={mode:'provider',option_id:option.id};updateMetadataChoiceControls();});
+      const card=node('section'),details=node('details'),summary=node('summary','View source evidence');card.append(item.label);details.append(summary);
+      for(const source of option.sources || []){
+        details.append(node('p',`${source.provider} · Record ${source.id || 'not supplied'} · Retrieved ${source.retrieved_utc || 'time not supplied'}`));
+        if(source.public_url){const link=sourceLink(source.public_url,'Source record: '+source.provider+' — '+values);link.title='Open the source record for this result.';details.append(link);}
+        for(const reference of source.source_links || []){const link=sourceLink(reference.url,'Source record: '+reference.provider+' — '+values);link.title='Open the source record for this result.';details.append(link);}
+        details.append(node('pre',JSON.stringify(source.evidence || {},null,2)));
+      }
+      card.append(details);grid.append(card);
+    }
+    for(const source of question.not_supplied || [])fieldset.append(node('p',`Not supplied — ${source.provider} · ${source.id || 'Record ID not supplied'}`));
+    const corrected=radio('corrected','Enter a corrected value','Enter your own value and save it with this conflict decision.');corrected.input.checked=prior?.mode==='corrected';
+    corrected.input.addEventListener('change',()=>{if(!corrected.input.checked)return;saved.answers[question.id]={mode:'corrected'};$('manual-review').open=true;const control=form.elements.namedItem(question.type==='work_profile'?'title':question.field);if(control){control.title='Enter the value you want this book to use.';control.scrollIntoView?.({block:'center',behavior:'auto'});control.focus?.({preventScroll:true});}updateMetadataChoiceControls();});
+    const unresolved=radio('unresolved','Keep unresolved','Leave this conflict open and keep this book out of automatic conversion.');unresolved.input.checked=!prior || prior.mode==='unresolved';
+    unresolved.input.addEventListener('change',()=>{if(unresolved.input.checked){saved.answers[question.id]={mode:'unresolved'};updateMetadataChoiceControls();}});
+    if(question.previous_decision){const decision=node('details'),summary=node('summary','View decision');summary.title='Show the sources compared and your saved choice.';decision.append(summary,node('p',question.resolved?'Chosen by you':'Earlier choice; current evidence needs review'),node('pre',JSON.stringify(question.previous_decision,null,2)));fieldset.append(decision);}
+    container.append(fieldset);
+  }
+  // No focus/scroll action on a background render, including newly found conflicts.
+  updateMetadataChoiceControls();
+}
+$('resolve-metadata-question').addEventListener('click',()=>{$('manual-review').open=true;$('metadata-questions-heading').scrollIntoView?.({block:'center',behavior:'auto'});$('metadata-questions-heading').focus?.({preventScroll:true});});
+$('save-metadata-choices').addEventListener('click',async()=>{
+  const saved=metadataChoiceState;if(!saved || busy || ended || recoveryDisconnected || metadataChoiceDirtyReason())return;
+  const choices=saved.snapshot.questions.map(question=>{const answer=saved.answers[question.id] || {mode:'unresolved'},choice={question_id:question.id,...answer};if(answer.mode==='corrected'){choice.values={};for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])choice.values[field]=form.elements.namedItem(field)?.value.trim() || '';}return choice;});
+  saved.pending=true;saved.error='';busy=true;controls();updateMetadataChoiceControls();
+  try{
+    const result=await request('/api/candidate/metadata-choice',{library:selectedLibrary,id:saved.id,revision:saved.revision,signature:saved.snapshot.signature,choices,manual_note:$('manual-evidence').value});
+    if(selectedRow?.id===saved.id && result.row){
+      if(trackDraft?.id===saved.id && trackDraft.revision===saved.revision)trackDraft.revision=result.row.revision;
+      dirty=false;manualMetadataTouched=false;syncManualDraft();
+      for(const field of fields)if(form.elements.namedItem(field)!==document.activeElement)form.elements.namedItem(field).value=result.row.review?.[field] || (field==='original_language'?'Unknown':'');
+      select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);
+      if(metadataChoiceState?.id===saved.id)metadataChoiceState.status=choices.every(choice=>choice.mode==='unresolved')?'Left unresolved. This book stays held.':result.unresolved_count?`Choices saved. ${result.unresolved_count} conflicts remain.`:'Choices saved. Review the metadata to continue.';
+    }
+  }catch(error){
+    if(selectedRow?.id===saved.id && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
+    if(metadataChoiceState?.id===saved.id)metadataChoiceState.error=error.message;
+  }finally{saved.pending=false;busy=false;controls();updateMetadataChoiceControls();}
+});
+function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';renderMetadataQuestions(row,reset);for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
+  const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,row.audiobook_ready,row.metadata_facts,row.duplicate_review,row.manual_metadata_sources,row.metadata_holds,dirty,trackDirty,coverId]);
   if(!reset && renderKey===mergeRenderKey)return;mergeRenderKey=$('manual-review').contains?.(document.activeElement)?null:renderKey;
   // Keep metadata and track editing inside the optional manual disclosure.
   if($('candidate-details').parentElement!==$('manual-review') || $('candidate-details').nextElementSibling!==$('track-review'))$('manual-review').insertBefore($('candidate-details'),$('track-review'));
   const context=row.review_context || {},creation=row.creation || {},matching=row.matching || {};
+  if(!dirty){++routingPreviewSequence;$('routing-preview-label').textContent='Output folder';$('routing-preview-path').textContent=creation.destination || row.preview?.reason || '';}
+  const metadataHolds=row.metadata_holds || [],questionsPending=(row.metadata_questions?.unresolved_count || 0)>0;const metadataRemedy=questionsPending?'Resolve metadata question':'Edit metadata';$('edit-held-metadata').hidden=!metadataHolds.length && !questionsPending;$('edit-held-metadata').textContent=metadataRemedy;$('edit-held-metadata').setAttribute('aria-label',metadataRemedy+': '+(row.title_clue || row.id));$('metadata-hold-fields').hidden=!metadataHolds.length && !questionsPending;$('metadata-hold-fields').textContent=questionsPending?'Choose which recorded values this book should use. Your answer saves a draft for review.':metadataHolds.map(item=>item.reason).join(' · ');
   if(reset || (!dirty && !$('manual-review').contains?.(document.activeElement))){$('manual-evidence').value=context.manual_note || '';proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
   if(reset || (!trackDirty && !$('track-review').contains?.(document.activeElement) && !$('candidate-details').contains?.(document.activeElement))){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
   const actor=actorValue=>actorValue==='assistant'?'Assistant review':actorValue==='user'?'User review':'Needs review';
   $('candidate-facts').textContent=`Metadata: ${actor(context.metadata_actor)} · ${context.source_coverage_confirmed?'Source files reviewed: '+actor(context.track_actor):'Source files need review'} · Playback order: ${context.order_confirmed?actor(context.track_actor):'Needs review'} · Recording completeness unknown`;
-  $('accepted-evidence').textContent=JSON.stringify({proposal_id:context.proposal_id,metadata_reviewer:context.metadata_actor,metadata_date:context.metadata_utc,track_reviewer:context.track_actor,track_date:context.track_utc,metadata_evidence:context.metadata_evidence || [],track_evidence:context.track_evidence || '',manual_note:context.manual_note || ''},null,2);
-  $('matching-status').textContent=matching.error || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
-  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey && !$('metadata-proposals').contains?.(document.activeElement)){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.setAttribute('aria-describedby','lookup-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
+  $('accepted-evidence').textContent=JSON.stringify({proposal_id:context.proposal_id,metadata_reviewer:context.metadata_actor,metadata_date:context.metadata_utc,track_reviewer:context.track_actor,track_date:context.track_utc,entered_by_you:row.manual_metadata_sources || [],metadata_conflicts:row.matching?.conflicts || [],metadata_evidence:context.metadata_evidence || [],track_evidence:context.track_evidence || '',manual_note:context.manual_note || ''},null,2);
+  $('matching-status').textContent=matching.error || (matching.conflicts?.length?`${matching.conflicts.length} metadata disagreements need review. See View evidence.`:null) || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
+  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey && !$('metadata-proposals').contains?.(document.activeElement)){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),proposal.manual_source?node('p','Entered by you · '+(proposal.per_field_evidence?.saved_utc || '')):sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.setAttribute('aria-describedby','lookup-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.universe)form.elements.namedItem('universe').value=proposal.universe;if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
   renderMembers(row);renderCovers(row);
   $('chapters-control').hidden=!creation.chapters_available;$('add-chapters').disabled=!creation.chapters_available || busy;$('chapters-help').textContent=creation.chapters_available?"Preserves source track names when available. Unnamed tracks use Track 01, Track 02, and so on. These markers may differ from the book's written chapters.":creation.chapters_description || 'Chapter boundaries unavailable.';
   $('output-status').textContent=candidateStatus(row);$('output-path').textContent=creation.destination || 'No reviewed destination yet.';
@@ -560,6 +662,8 @@ function tracksChanged(){trackDirty=true;manualTrackTouched=true;syncManualDraft
 async function renderCovers(row){const coverKey=JSON.stringify([row.id,row.cover_choices,coverId]);if(coverKey===coverRenderKey || $('selected-cover').contains?.(document.activeElement) || $('cover-choices').contains?.(document.activeElement))return;coverRenderKey=coverKey;const seq=++coverSequence;for(const url of coverObjects)URL.revokeObjectURL(url);coverObjects.length=0;$('selected-cover').replaceChildren();$('cover-choices').replaceChildren();for(const cover of row.cover_choices || []){const panel=node('section','','cover-choice');panel.append(node('p',`${cover.source_label || 'Artwork'} · ${cover.evidence_kind || 'Local artwork — edition unverified'}`));if(cover.source_url)panel.append(sourceLink(cover.source_url,`Cover source: ${cover.source_label || 'Artwork'}`));const image=node('img');image.alt=`Cover: ${row.review?.title || row.title_clue}`;image.hidden=true;panel.append(image);const imageState=node('p','Loading cover…');panel.append(imageState);const use=node('button','Use this cover','quiet');use.type='button';use.title='Select this image as the single cover in the output audiobook.';use.setAttribute('aria-describedby','cover-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;coverId=cover.id;dirty=true;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Cover selection is an unsaved draft.';renderCovers(row);controls();});panel.append(use);(cover.id===coverId?$('selected-cover'):$('cover-choices')).append(panel);if(!cover.thumbnail_url){imageState.textContent='Cover image unavailable';continue;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Invalid local thumbnail route');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover image unavailable');const blob=await response.blob();if(seq!==coverSequence)return;const object=URL.createObjectURL(blob);coverObjects.push(object);image.src=object;image.hidden=false;imageState.textContent='';}catch(error){if(seq===coverSequence)imageState.textContent=error.message || 'Cover image unavailable';}}if(!coverId)$('selected-cover').append(node('p',row.metadata_facts?.cover?.kind==='absent'?'No artwork available; the saved policy permits processing without artwork.':'Artwork not selected. Artwork alone does not establish recording identity.'));}
 $('select-page').addEventListener('change',()=>{for(const row of rows.filter(item=>item.kind==='candidate')){if($('select-page').checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);}renderRows();});
 $('find-metadata').addEventListener('click',()=>candidateRequest('/api/candidate/match'));
+$('edit-held-metadata').addEventListener('click',()=>{if(!selectedRow || ended)return;if(selectedRow.metadata_questions?.unresolved_count){$('manual-review').open=true;const heading=$('metadata-questions-heading');heading.scrollIntoView?.({block:'center',behavior:'auto'});heading.focus?.({preventScroll:true});return;}$('manual-review').open=true;const field=(selectedRow.metadata_holds || []).flatMap(item=>item.fields || [])[0] || 'title';const control=form.elements.namedItem(field) || form.elements.namedItem('title');control?.scrollIntoView?.({block:'center',behavior:'auto'});control?.focus?.({preventScroll:true});});
+$('check-metadata').addEventListener('click',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');});
 $('find-covers').addEventListener('click',()=>candidateRequest('/api/candidate/covers'));
 $('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:$('manual-evidence').value});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;syncManualDraft();renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');}});
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
@@ -591,6 +695,57 @@ const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',
   startover:{kind:'startover',label:'Start over',pending:'Starting over…',note:'Setting this job aside…',ready:"Set this failed job aside and send the book back to automatic processing. Starts automatic processing if it isn't running. Nothing is deleted.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Check the status above.'},
   combined:{kind:'combined',label:'Start over and let the app handle it',pending:'Starting over…',note:'Setting this job aside and discarding the saved review…',ready:"Set this failed job aside, discard this book's saved review (including any edits you made by hand), and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. The failed job and your audio files are kept.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Nothing was changed.',confirm:true},
   release:{kind:'release',label:'Let the app handle it',pending:'Discarding review…',note:'Discarding the saved review…',ready:"Discard this book's saved review, including any edits you made by hand, and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. Your audio files are not touched.",endpoint:'/api/audiobook/release',refused:"The review wasn't discarded. Select the row to read why.",confirm:true}};
+rowActions.prepare={kind:'prepare',label:'Prepare recovery',pending:'Preparing…',note:"Saving this book's recovery checkpoint. Audio files stay in place.",ready:"Save this job's recovery checkpoint without changing its audio files.",endpoint:'/api/audiobook/prepare-recovery'};
+function producerRecoveryOf(row){const value=row?.creation?.job?.attention?.producer_recovery;return value?.schema==='books-producer-recovery-capability-v1' && ['prepare','waiting_restart','ready','isolated_retained','unsupported'].includes(value.state)?value:null;}
+function producerRecoveryText(row){
+  const capability=producerRecoveryOf(row);if(!capability)return null;
+  const key=retryKey(row);
+  if(retryResult?.key===key && retryResult.producer && ((retryResult.snapshot && retryResult.snapshot!==JSON.stringify([capability.state,capability.checkpoint_id,capability.cause])) || (retryResult.transport && !recoveryDisconnected)))retryResult=null;
+  if(retryPending?.key===key && retryPending.kind==='prepare')return {status:'Preparing recovery…',hint:rowActions.prepare.note};
+  if(retryResult?.key===key && retryResult.producer && retryResult.warn)return {status:retryResult.status,hint:retryResult.text,warn:true};
+  if(capability.state==='prepare')return {status:'Stopped — recovery check needed',hint:"The app cannot confirm that this book's conversion process ended. Prepare recovery to save a checkpoint."};
+  if(capability.state==='waiting_restart')return typeof capability.checkpoint_id==='string' && capability.checkpoint_id?{status:'Restart verification needed',hint:'Recovery checkpoint saved. Use Restart in Windows, then reopen Books Arranger and choose Retry so the app can verify the restart. Restarting only the app will not help. A Windows restart may still need another recovery check.'}:{status:'Recovery stays blocked',hint:'The saved recovery checkpoint is unavailable. Files are retained.',warn:true};
+  if(capability.state==='ready' || capability.state==='isolated_retained')return {status:capability.can_retry?'Stopped — ready for a new attempt':'Recovery stays blocked',hint:capability.can_retry?'Old working files are kept. Retry starts a new attempt after checking the original sources.':capability.reason,warn:!capability.can_retry};
+  if(capability.cause==='origin_unproved')return {status:'Recovery stays blocked',hint:'The saved information cannot establish where this conversion ran. All files are retained.'+(capability.reason?' '+capability.reason:''),warn:true};
+  if(capability.cause==='startup_unavailable')return {status:'Recovery check unavailable',hint:'The app cannot verify this Windows startup. Files are retained; recovery stays blocked.'+(capability.reason?' '+capability.reason:''),warn:true};
+  if(capability.cause==='binding_mismatch')return {status:'Recovery checkpoint does not match',hint:'This book changed or the checkpoint belongs to another computer. Files are retained; recovery stays blocked.'+(capability.reason?' '+capability.reason:''),warn:true};
+  return {status:'Recovery stays blocked',hint:capability.reason || 'Files are retained; recovery stays blocked.',warn:true};
+}
+function updateProducerRecoverySurface(row){
+  if(selectedRow?.path!==row.path)return;
+  const shown=producerRecoveryText(row);if(!shown)return;
+  setText('automatic-result-status',shown.status);setText('automatic-result-hint',shown.hint);$('automatic-result-hint').hidden=false;
+}
+function renderProducerRetained(row){
+  const saved=row?.producer_recovery_retained,valid=saved?.schema==='books-producer-retention-v1' && Array.isArray(saved.attempts);
+  const section=$('producer-retained');if(!section)return;
+  section.hidden=!valid && producerRecoveryOf(row)?.state!=='isolated_retained';
+  setText('producer-retained-paths',valid?saved.attempts.map(item=>[item.path,item.attempt_id?'Attempt: '+item.attempt_id:'',item.reason].filter(value=>typeof value==='string' && value).join('\n')).join('\n\n'):'');
+}
+async function prepareProducerRecovery(row,origin=null){
+  const capability=producerRecoveryOf(row),key=retryKey(row),job=row?.creation?.job;
+  if(!key || !job || capability?.state!=='prepare' || capability.can_prepare!==true || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun)return false;
+  const focused=document.activeElement===(origin?.button || $('retry-job'));
+  retryPending={key,kind:'prepare'};retryResult=null;busy=true;controls();updateProducerRecoverySurface(row);
+  let fresh=row,acknowledged=false;
+  try{
+    const answer=await request('/api/audiobook/prepare-recovery',{job_id:job.job_id},PRESS_TIMEOUT),saved=answer?.producer_recovery;
+    if(answer?.job_id!==job.job_id || answer.queued!==false || answer.outputs_changed!==false || saved?.schema!=='books-producer-recovery-capability-v1' || typeof saved.can_prepare!=='boolean' || typeof saved.can_retry!=='boolean' || !['prepare','waiting_restart','ready','isolated_retained','unsupported'].includes(saved.state) || (saved.state==='waiting_restart' && !(typeof saved.checkpoint_id==='string' && saved.checkpoint_id)))throw Object.assign(new Error('The recovery checkpoint response could not be verified.'),{httpStatus:502});
+    fresh={...row,creation:{...row.creation,job:{...job,attention:{...job.attention,producer_recovery:saved}}}};
+    rows=rows.map(item=>item.path===row.path?fresh:item);const entry=rowRetries.get(row.path);if(entry)entry.row=fresh;
+    if(selectedRow?.path===row.path)selectedRow=fresh;
+    acknowledged=saved.state==='waiting_restart' && typeof saved.checkpoint_id==='string' && !!saved.checkpoint_id;
+    retryResult=acknowledged?{key,producer:true,snapshot:JSON.stringify([saved.state,saved.checkpoint_id,saved.cause]),warn:false,text:'Recovery checkpoint saved. Restart Windows, then choose Retry to verify.'}:null;
+  }catch(error){
+    retryResult={key,producer:true,snapshot:JSON.stringify([capability.state,capability.checkpoint_id,capability.cause]),transport:!error.httpStatus,warn:true,status:error.httpStatus?'Recovery checkpoint not saved':'Checkpoint status unknown',text:error.httpStatus?(error.message || 'The recovery checkpoint could not be saved.')+' Files are retained.':'Could not confirm the checkpoint. Reconnect to check its saved state.'};
+    if(!error.httpStatus)refreshFailed(error);
+  }finally{retryPending=null;busy=false;controls();updateProducerRecoverySurface(fresh);}
+  if(acknowledged && focused){
+    if(origin?.row)focusRowButton(row.path);
+    else{$('automatic-result-status').setAttribute('tabindex','-1');$('automatic-result-status').focus?.({preventScroll:true});}
+  }
+  return acknowledged;
+}
 const STARTOVER_HELD_TIP="Set this failed job aside. Starts automatic processing if it isn't running. The book has a saved review, so automatic processing will hold it; \"Let the app handle it\" can then release it. Nothing is deleted.";
 const CLEARS_FIRST={retry:['Clear the leftover working files, then check this book again and queue its audiobook job.','Clearing working files, then checking this book…',' Retry clears leftover working files first.'],
   repair:['Clear the leftover working files, patch the damage found in this book, then queue its audiobook job.','Clearing working files, then repairing this book…',' Repair clears leftover working files first.']};
@@ -600,6 +755,21 @@ function rowAction(row){
   const job=row?.kind==='candidate'?row.creation?.job:null;
   // A held single-M4B book with a saved review and no job: "Let the app handle it" (O7), in every filter it shows in.
   if(!job)return row?.kind==='candidate' && releaseOf(row)?{...rowActions.release,data:{allowed:true,reason:''}}:null;
+  if(attentionOf(row)?.group==='reacquire')return null;
+  const savedRequest=readmissionOf(row);
+  if(savedRequest?.state==='queued')return {...rowActions.queued,label:queuedNextText(savedRequest),data:{allowed:false,reason:queuedNextText(savedRequest)}};
+  const destination=attentionOf(row)?.destination_review;
+  if(destination && readmissionOf(row)?.queued_next===true)return {...rowActions.queued,data:{allowed:false,reason:queuedNextText(readmissionOf(row))}};
+  if(destination){
+    if(destination.state!=='needs_review' || destination.can_retry!==true || job.retry?.allowed!==true)return null;
+    return {...rowActions.retry,ready:'Check the current sources, review and destination; queue a new job only if all checks pass.',note:'Checking the current sources, review and destination…',data:job.retry};
+  }
+  const recovery=producerRecoveryOf(row);
+  if(recovery){
+    if(recovery.state==='prepare' && recovery.can_prepare===true)return {...rowActions.prepare,data:{allowed:true,reason:recovery.reason}};
+    if(['ready','isolated_retained'].includes(recovery.state) && recovery.can_retry===true && job.retry?.allowed===true)return {...rowActions.retry,ready:'Check the original sources and start a new attempt. Keep the old working files.',note:'Checking the original sources for a new attempt…',data:job.retry};
+    return null;
+  }
   // A damaged book shows Repair and never Retry (Retry would fail again on the same damage).
   // Once accepted, the request waits for its turn: the button reads "Queued" and cannot be pressed again.
   const queued=readmissionOf(row);
@@ -621,7 +791,7 @@ function rowAction(row){
 }
 function releaseOf(row){return row?.release?.allowed===true && !row?.creation?.job;}
 function restartOf(row){const value=row?.restart;return value && typeof value==='object' && typeof value.state==='string'?value:null;}
-function workingOf(row){const value=attentionOf(row)?.working;return value && typeof value==='object' && (value.state==='cleanable' || value.state==='blocked')?value:null;}
+function workingOf(row){if(producerRecoveryOf(row))return null;const value=attentionOf(row)?.working;return value && typeof value==='object' && (value.state==='cleanable' || value.state==='blocked')?value:null;}
 function sizeText(bytes){const units=['B','KB','MB','GB','TB'];let index=0;while(index<units.length-1 && bytes>=1024**(index+1))index++;const scaled=bytes/1024**index;return scaled.toLocaleString(undefined,{maximumFractionDigits:scaled<10 && index?1:0})+' '+units[index];}
 function clearTooltip(row){const bytes=workingOf(row)?.bytes;return 'Delete the working files an earlier attempt left behind. Originals are not touched.'+(Number.isSafeInteger(bytes) && bytes>0?` Frees about ${sizeText(bytes)}.`:'');}
 // The hint text, plus a muted clause (the "clears first" sentence) in its own span; rebuilt only when it changes.
@@ -633,6 +803,8 @@ function setHint(element,text,clause='',warn=false){
 // Retry and Repair of an M4B book are accepted at once and run right after the current book (m4b_readmission).
 function readmissionOf(row){
   const job=row?.creation?.job,value=job?.readmission || job?.attention?.readmission;
+  const tracked=bulkRun()?.progress?.schema==='books-retry-progress-v1'?bulkRun().progress.targets?.find(item=>item.job_id===job?.job_id):null;
+  if(tracked && ['waiting','checking'].includes(tracked.state))return {accepted:true,queued_next:true,state:'queued',parent_job_id:job.job_id,child_job_id:null};
   if(value && typeof value==='object')return value;
   const memory=pressedFor(row);
   return memory?.state==='queued'?{accepted:true,queued_next:true,position:memory.position,kind:memory.kind,remembered:true}:null;
@@ -645,11 +817,12 @@ function pressedFor(row){
 }
 function remember(key,state,kind,position){if(kind==='retry' || kind==='repair')pressed.set(key,{state,kind,at:Date.now(),position:Number.isInteger(position) && position>0?position:1});}
 function queuedNextText(value){
+  if(value?.state==='queued' || value?.child_job_id===null)return state?.audiobook_jobs?.retry_checks?.worker?.state==='checking' && state.audiobook_jobs.retry_checks.worker.job_id===value?.parent_job_id?'Checking retry':'Waiting for retry checks';
   const running=!!state?.audiobook_jobs?.current_job_id,position=Number.isInteger(value?.position) && value.position>0?value.position:1,ahead=(running?1:0)+position-1;
   return ahead===0?'Queued — runs next':ahead===1 && running?'Queued — runs after the current book':`Queued — runs after ${ahead.toLocaleString()} books`;
 }
 function queuedNext(row,result){
-  const job={...row.creation.job,readmission:{accepted:true,queued_next:true,position:result.position,kind:result.kind}};delete job.retry;delete job.repair;
+  const job={...row.creation.job,readmission:{accepted:true,queued_next:true,position:result.position,kind:result.kind,state:result.state,child_job_id:result.child_job_id,parent_job_id:result.parent_job_id}};delete job.retry;delete job.repair;
   return {...row,creation:{...row.creation,job}};
 }
 function bulkRun(){const run=state?.audiobook_jobs?.retry_all;return run && typeof run==='object' && typeof run.id==='string'?run:null;}
@@ -662,14 +835,14 @@ function updateRetry(){
   const pending=!!key && retryPending?.key===key && retryPending.kind!=='clear',copy=pending?{...rowActions[retryPending.kind],note:retryPending.note || rowActions[retryPending.kind].note}:action;
   const clear=$('clear-working'),clearing=clearPending(row),cleanable=workingOf(row)?.state==='cleanable';
   if(clear){const gone=!clearing && !cleanable,lostClear=gone && !clear.hidden && document.activeElement===clear;clear.hidden=gone;if(!gone)updateClearButton(clear,row);if(lostClear)$('details-heading').focus?.({preventScroll:true});}
-  const shown=pending || !!action,noted=!pending && !action && restartResult?restartResult:null;
+  const producer=producerRecoveryOf(row),shown=pending || !!action,noted=!pending && !action && restartResult?restartResult:null;
   const lost=!shown && !button.hidden && document.activeElement===button;
-  block.hidden=!shown && !noted && !clearing && !cleanable;button.hidden=!shown;
+  block.hidden=!shown && !noted && !clearing && !cleanable && !producer;button.hidden=!shown;
   if(!shown){
     // The press moved the book on (Started over): its result stays in the note; the button is gone.
-    const text=noted?noted.text:clearing?'Clearing working files…':retryResult?retryResult.text:'';
+    const text=producer?producerRecoveryText(row)?.hint:noted?noted.text:clearing?'Clearing working files…':retryResult?retryResult.text:'';
     if(note.textContent!==text)note.textContent=text;note.hidden=!text;note.classList?.toggle?.('retry-refused',!!(noted?noted.warn:retryResult && retryResult.warn!==false));
-    if(lost)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
+    if(lost && !producer)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
   const mode=ended || recoveryDisconnected?'offline':pending?'pending':busy || recoverySubmitting || automaticRequest!==null || retryPending || bulkRunning() || releaseRun?'busy':retry.allowed===true?'ready':'unavailable';
   const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
   const title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,busy:'Another operation is in progress.',unavailable:reason,ready:copy.ready}[mode];
@@ -677,7 +850,7 @@ function updateRetry(){
   const text=clearing?'Clearing working files…':result?retryResult.text:mode==='ready'?'':title;
   if(button.textContent!==label)button.textContent=label;
   if(button.title!==title)button.title=title;
-  button.setAttribute('aria-label',label+': '+(row.review?.title || row.title_clue || 'Book'));
+  button.setAttribute('aria-label',label+': '+((copy.kind==='prepare'?row.title_clue || row.review?.title:row.review?.title || row.title_clue) || 'Book'));
   // Pending keeps keyboard focus: aria-disabled with a disabled look, never the disabled attribute.
   if(mode==='pending')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=mode!=='ready' && mode!=='pending';
@@ -687,6 +860,7 @@ function updateRetry(){
 function keptByChoice(row){const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
 async function retryFromRow(row,button=null){
+  if(rowAction(row)?.kind==='prepare')return prepareProducerRecovery(row,{row:true,path:row.path,button});
   // Select without scrolling, then the same request as the details-panel Retry.
   if(selectedPath!==row.path)select(row,true);
   const index=rows.findIndex(item=>item.path===row.path);
@@ -730,7 +904,7 @@ function updateRowRetries(){
     if(entry.clear)updateClearButton(entry.clear,row);
     if(!entry.button)continue;
     const gone=!action && mode!=='pending',hadFocus=gone && document.activeElement===entry.button;
-    entry.button.hidden=gone;if(hadFocus)nextRowButton(entry.button.parentElement,entry.button)?.focus?.({preventScroll:true});
+    entry.button.hidden=gone;if(hadFocus && !producerRecoveryOf(row))nextRowButton(entry.button.parentElement,entry.button)?.focus?.({preventScroll:true});
     if(entry.button.hidden)continue;
     const label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
     if(entry.button.textContent!==label)entry.button.textContent=label;
@@ -771,6 +945,7 @@ async function pressLanded(row,jobId){
 async function retryJob(origin=null){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
   if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun || action.data.allowed!==true || $('retry-job').disabled)return;
+  if(action.kind==='prepare')return prepareProducerRecovery(row,origin);
   if(['startover','combined','release'].includes(action.kind)){
     // Discarding a saved review deletes hand edits: one confirmation first (follow-up 3, section 4.4; follow-up 4, 3.3).
     if(action.confirm){openDiscardDialog(action.kind,[row],()=>restartPress(row,action,origin),origin?.button || $('retry-job'));return false;}
@@ -1006,29 +1181,43 @@ function openRetryAll(){
   $('retry-all-cancel').focus?.({preventScroll:true});
 }
 function closeRetryAll(){if(!retryAllConfirm)return;retryAllConfirm=null;renderAttentionGroups();$('retry-all').focus?.({preventScroll:true});}
+function retryReceiptText(run,includeProgress=true){
+  if(!run)return '';
+  const n=value=>Number.isInteger(value)&&value>=0?value.toLocaleString():'unavailable';
+  if(run.state==='running')return includeProgress?'Requesting retries — '+n(run.done)+' of '+n(run.total)+' processed':'Requesting retries.';
+  let line='Retry requested for '+n(run.accepted)+' of '+n(run.total)+' books.';
+  if(run.refused>0)line+=' '+n(run.refused)+' refused.';
+  const counts=run.progress?.schema==='books-retry-progress-v1'?run.progress.counts:null;
+  if(counts && includeProgress)line+=' '+['waiting','checking','queued','running','completed','stopped'].map(key=>n(counts[key])+' '+key).join(' · ')+'.';
+  else if(!counts)line+=' Current retry progress unavailable.';
+  else line+=' '+(counts.running?'Conversion is running.':counts.checking?'Retry checks are running.':counts.queued?'Conversion jobs are queued.':counts.waiting?'Waiting for retry checks.':counts.stopped?'Some retry checks stopped.':'Retry work completed.');
+  const stalled=!counts || (counts.waiting>0 && !counts.checking && !counts.queued && !counts.running);
+  const blocked=run.receipt_error || (stalled?(run.worker?.reason || run.start_outcome?.reason || run.progress?.targets?.find(item=>item.reason)?.reason):'');
+  if(blocked)line+=' '+blocked;
+  else if(counts && (counts.waiting || counts.checking) && !counts.queued && !counts.running)line+=' Retry requests are saved; conversion has not started. Check the status above.';
+  return line;
+}
+function acceptBulkResponse(result){
+  const run=result?.retry_all;
+  if(!run || typeof run.id!=='string')throw Error('Retry request receipt unavailable; check the current status before trying again.');
+  retryEpoch++;retryAllRun={id:run.id,ended:false};
+  state={...state,audiobook_jobs:{...(state?.audiobook_jobs || {}),retry_all:run}};
+  $('retry-selected-status').textContent='';stripNote=retryReceiptText(run,false);
+}
 async function startRetryAll(){
   if(!retryAllConfirm || bulkRunning() || busy || ended || recoveryDisconnected)return;
-  retryAllConfirm=null;busy=true;stripNote='';controls();
-  try{
-    const result=await request('/api/audiobook/retry-all',{library:'Audiobooks'}),run=result?.retry_all;
-    if(run && typeof run.id==='string'){
-      retryEpoch++; // Drop state/list polls begun before this bulk request was accepted.
-      retryAllRun={id:run.id,ended:false};state={...state,audiobook_jobs:{...(state?.audiobook_jobs || {}),retry_all:run}};
-      stripNote=`Retrying ${Number(run.total).toLocaleString()} books.`;
-    }
-  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry all was not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
+  retryAllConfirm=null;busy=true;stripNote='';retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};$('retry-selected-status').textContent='';controls();
+  try{acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks'}));}
+  catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
   finally{busy=false;}
   controls();$('retry-all-status').focus?.({preventScroll:true});
 }
 function finishRetryAll(run){
-  // Once per run: the end line stays until the group or filter changes; the list reloads and focus returns to the group.
-  retryAllRun.ended=true;const queued=Number(run.queued)||0,total=Number(run.total)||0;
-  const next=Number(run.next)||0,after=next?` ${next===queued?'They run':`${next.toLocaleString()} of them run`} right after the current book, one at a time.`:'';
-  stripNote=run.state==='done'?`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}${total>queued?` ${(total-queued).toLocaleString()} could not be retried.`:''}`:`Stopped. Queued ${queued.toLocaleString()} of ${total.toLocaleString()}.${after}`;
-  setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();if(!$('attention-groups').hidden)$('group-retry').focus?.({preventScroll:true});},0);
+  retryAllRun.ended=true;stripNote=retryReceiptText(run,false);
+  setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();},0);
 }
-const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',checking:'Checking',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
-const attentionKeys=['all','retry','repair','checking','changed','audiobook','other','unsupported'];
+const attentionLabels={all:'All',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
+const attentionKeys=['all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported'];
 function attentionTotal(jobs){
   const counts=jobs?.attention_counts;
   if(!counts || typeof counts!=='object')return jobs?.failed || 0;
@@ -1046,30 +1235,32 @@ function renderAttentionGroups(){
     setTimeout(()=>{updateList();if(lost)$('group-'+next).focus?.({preventScroll:true});},0);
   }
   for(const key of attentionKeys){
-    const button=$('group-'+key),count=key==='all'?total:value(key),text=`${attentionLabels[key]} · ${count.toLocaleString()}`;
+    const button=$('group-'+key),count=key==='all'?total:value(key),text=`${attentionLabels[key]} · ${key==='reacquire' && !Number.isInteger(counts[key])?'unavailable':count.toLocaleString()}`;
     if(button.textContent!==text)button.textContent=text;
     button.setAttribute('aria-pressed',String(attentionGroup===key));
     if(key==='all')button.title=`Show all ${total.toLocaleString()} books that need attention.`;
     // A group at zero is hidden, except All and Can retry; it stays while selected or focused.
-    button.hidden=key!=='all' && key!=='retry' && value(key)===0 && attentionGroup!==key && active!==button;
+    button.hidden=key!=='all' && key!=='retry' && !(key==='reacquire' && !Number.isInteger(counts[key])) && value(key)===0 && attentionGroup!==key && active!==button;
   }
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
   const all=$('retry-all'),confirm=retryAllConfirm,allLabel=`Retry all (${value('retry').toLocaleString()})`;
   all.hidden=attentionGroup!=='retry' || value('retry')<2 || !!confirm;
   if(all.textContent!==allLabel)all.textContent=allLabel;
-  all.title=`Check these ${value('retry').toLocaleString()} books again and queue each audiobook job.`;
+  all.title=`Request retries for these ${value('retry').toLocaleString()} books. Each book is checked before a conversion job can be queued.`;
   all.disabled=running || busy || ended || recoveryDisconnected;
   // The confirmation keeps the count it opened with; polls never rebuild it.
   $('retry-all-confirm').hidden=!confirm || attentionGroup!=='retry';
   if(confirm){
-    const question=`Queue ${confirm.count.toLocaleString()} books to be checked again? They run one at a time, right after the current book.`+clearsClause(confirm.cleanable),go=`Queue ${confirm.count.toLocaleString()} books`;
+    const question=`Request retries for ${confirm.count.toLocaleString()} books? Each book is checked before a conversion job can be queued.`+clearsClause(confirm.cleanable),go=`Request ${confirm.count.toLocaleString()} retries`;
     if($('retry-all-question').textContent!==question)$('retry-all-question').textContent=question;
     if($('retry-all-go').textContent!==go)$('retry-all-go').textContent=go;
     $('retry-all-go').disabled=running || busy || ended || recoveryDisconnected;
   }
   // The live region announces only the start and the end; the running count sits outside it.
-  const count=running?`${Number(run.done).toLocaleString()} of ${Number(run.total).toLocaleString()}`:'';
+  const countsForRun=run?.progress?.schema==='books-retry-progress-v1'?run.progress.counts:null;
+  const count=running?`${Number(run.done).toLocaleString()} of ${Number(run.total).toLocaleString()} processed`:countsForRun?['waiting','checking','queued','running','completed','stopped'].map(key=>`${Number(countsForRun[key]).toLocaleString()} ${key}`).join(' · '):'';
+  if(run && !retryAllRun?.suppressReceipt && (!retryAllRun || run.id===retryAllRun.id))stripNote=retryReceiptText(run,false);
   if($('retry-all-status').textContent!==stripNote)$('retry-all-status').textContent=stripNote;
   if($('retry-all-count').textContent!==count)$('retry-all-count').textContent=count;
   $('retry-all-line').hidden=!stripNote && !count;
@@ -1089,13 +1280,13 @@ function renderRetrySelected(){
   const shown=attentionSelection(),button=$('retry-selected'),count=shown?retrySelectable().length:0,confirm=retrySelectedConfirm;
   $('queue-books').hidden=shown;button.hidden=!shown || !!confirm;
   const label=`Retry selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
-  button.title=count?`Check these ${count.toLocaleString()} selected books again and queue each one, right after the current book.`:'Select books that can be retried or repaired.';
+  button.title=count?`Request retries for these ${count.toLocaleString()} selected books. Each book is checked before a conversion job can be queued.`:'Select books that can be retried or repaired.';
   button.disabled=!count || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning() || retrySelectedRun;
-  const help=shown?'Only selected books that can be retried or repaired are queued.':'Only ready selected revisions are queued. Candidates needing review remain selected.';
+  const help=shown?'Only selected books that can be retried or repaired can request new checks.':'Only ready selected revisions are queued. Candidates needing review remain selected.';
   if($('batch-help').textContent!==help)$('batch-help').textContent=help;
   $('retry-selected-confirm').hidden=!shown || !confirm;
   if(confirm){
-    const question=`Queue ${confirm.items.length.toLocaleString()} selected books to be checked again? They run one at a time, right after the current book.`+clearsClause(confirm.items.filter(item=>workingOf(item.row)?.state==='cleanable').length),go=`Queue ${confirm.items.length.toLocaleString()} books`;
+    const question=`Request retries for ${confirm.items.length.toLocaleString()} selected books? Each book is checked before a conversion job can be queued.`+clearsClause(confirm.items.filter(item=>workingOf(item.row)?.state==='cleanable').length),go=`Request ${confirm.items.length.toLocaleString()} retries`;
     if($('retry-selected-question').textContent!==question)$('retry-selected-question').textContent=question;
     if($('retry-selected-go').textContent!==go)$('retry-selected-go').textContent=go;
     $('retry-selected-go').disabled=busy || ended || recoveryDisconnected || retrySelectedRun;
@@ -1103,20 +1294,14 @@ function renderRetrySelected(){
 }
 function closeRetrySelected(){if(!retrySelectedConfirm)return;retrySelectedConfirm=null;controls();$('retry-selected').focus?.({preventScroll:true});}
 async function startRetrySelected(){
-  const confirm=retrySelectedConfirm;if(!confirm || retrySelectedRun || busy || ended || recoveryDisconnected)return;
-  retrySelectedConfirm=null;retrySelectedRun=true;busy=true;controls();
-  let queued=0;const refused=[];
-  for(const {row,action} of confirm.items){
-    if(ended || recoveryDisconnected)break;
-    const key=retryKey(row);remember(key,'checking',action.kind);controls();
-    try{const answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id},PRESS_TIMEOUT);remember(key,'queued',action.kind,answer?.position);queued++;}
-    catch(error){if(error.httpStatus){pressed.delete(key);refused.push(error.message);}}  // no reply: stays "Checking…" until the server shows it
-  }
-  retrySelectedRun=false;busy=false;retryEpoch++;
-  const total=confirm.items.length,text=`Queued ${queued.toLocaleString()} of ${total.toLocaleString()}. They run one at a time, right after the current book.`+(refused.length?` ${refused.length.toLocaleString()} could not be retried.`:'');
-  $('retry-selected-status').textContent=text;controls();
-  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
-  controls();$('retry-selected-status').focus?.({preventScroll:true});
+  const confirm=retrySelectedConfirm;if(!confirm || retrySelectedRun || bulkRunning() || busy || ended || recoveryDisconnected)return;
+  retrySelectedConfirm=null;retrySelectedRun=true;busy=true;stripNote='';retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};$('retry-selected-status').textContent='';controls();
+  try{
+    const items=confirm.items.map(({row,action})=>({id:row.id,revision:row.revision,job_id:row.creation.job.job_id,kind:action.kind}));
+    acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks',items},PRESS_TIMEOUT));
+  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
+  finally{retrySelectedRun=false;busy=false;}
+  controls();$('retry-all-status').focus?.({preventScroll:true});
 }
 $('retry-selected').addEventListener('click',()=>{
   if($('retry-selected').disabled)return;const items=retrySelectable();if(!items.length)return;
@@ -1267,7 +1452,18 @@ function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refu
 // A stopped job, or a completed book whose recovery copies the 0.16.8 rule keeps (changed or audiobook).
 function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
 function attentionText(row){
+  const reacquire=attentionOf(row)?.reacquire;
+  if(reacquire?.state==='required')return {status:'Need to reacquire',hint:(reacquire.certainty==='uncertain'?'The app cannot repair this damage without risking missing audio.':'The audio is damaged and cannot be repaired safely.')+' Put an intact replacement in an unsorted source, then scan it.',warn:true};
+  const producer=producerRecoveryText(row);if(producer)return producer;
   const a=attentionOf(row);if(!a)return null;
+  const destination=a.destination_review;
+  if(destination){
+    if(destination.state!=='needs_review')return {status:'Destination unavailable — review this book',hint:destination.reason || 'The destination or review changed. Check the current details before retrying.',warn:true};
+    const queued=readmissionOf(row);
+    if(queued?.queued_next===true)return {status:/paused|stopped|idle/i.test(state?.audiobook_jobs?.state || '')?'Queued — queue paused':queuedNextText(queued),hint:'The saved job is kept. The current sources, review and destination are checked before a new job is created.'};
+    return {status:'Queued destination needs review',hint:'This saved job uses a different destination. Retry checks the current book before creating a new job.',warn:true};
+  }
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:'The MP3 failed its full audio check. Keep this original, replace the source with a sound copy, then rescan this source. The affected file is listed in the details.',warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
@@ -1324,7 +1520,7 @@ function restartText(row){
 function heldText(row,marker=null){
   const auto=row.automatic;
   if(auto?.hold==='manual_draft'){
-    if(releaseOf(row))return {status:'Held — saved review kept',hint:'A saved review keeps this book held. Let the app handle it discards that review, including any hand edits, and lets automatic processing take the book.',warn:true};
+    if(releaseOf(row))return {status:'Held — saved review kept',hint:'A saved review keeps this book held. Let the app handle it clears the preview draft and lets automatic processing take the book. Saved Entered by you evidence is kept.',warn:true};
     if(auto.lease===true)return marker?{status:'Held — Manual draft retained',hint:'You are editing this book. Automatic processing waits until you stop.'}:null;
     return marker?{status:'Held — Manual draft retained',hint:'Automatic processing holds this book because it has a saved review.'}:null;
   }
@@ -1373,6 +1569,9 @@ function repairedText(repaired){
 }
 function technicalText(row){
   const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
+  if(typeof job.retry_parent_job_id==='string')details.push('Saved job retained: '+job.retry_parent_job_id);
+  const destination=attention?.destination_review;if(destination?.state==='needs_review')details.push('Saved job destination: '+destination.old_destination,'Current proposed destination: '+destination.proposed_destination,'Saved job retained.');
+  const producer=producerRecoveryOf(row);if(producer)details.push(['Producer recovery: '+producer.state,producer.cause,producer.reason,producer.checkpoint_id?'Checkpoint: '+producer.checkpoint_id:'',producer.attempt_id?'Attempt: '+producer.attempt_id:'',producer.retained_path].filter(value=>typeof value==='string' && value).join('; '));
   const raw=keptGroup(attention) && typeof attention.reason==='string' && attention.reason?attention.reason:job.reason;
   // A refused Retry/Repair keeps both facts for support: the refusal, then the earlier failure (either alone if single).
   // A dry run that could not open the source puts its own raw text first, in the same format.
@@ -1380,7 +1579,9 @@ function technicalText(row){
   const unopened=attention?.precheck==='unavailable' && typeof attention.precheck_reason==='string'?attention.precheck_reason:'';
   // Leftover working files: their own reason first (follow-up 2, section 2.3), then the earlier failure and the folder.
   const working=workingOf(row),files=typeof working?.reason==='string'?working.reason:'';
-  const first=files || unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
+  if(attention?.reacquire){const r=attention.reacquire;return 'Affected source file: '+r.originals.map(s=>s.path).join('; ')+' — Audio problem: '+r.reason+' — Why replacement is needed: '+r.repair_limit+' — The amount of affected audio is not established. You can remove these damaged originals yourself. After a completed scan confirms they are gone, their active source entry is cleared.'+(r.source_presence==='unavailable'?' Source unavailable — deletion not confirmed. Connect the source drive and scan again.':r.source_presence==='partially_missing'?' Some original files remain. The book stays listed until all its original source files are confirmed gone.':'');}
+  const sourceFile=attention?.remedy?.kind==='replace_source' && typeof attention.remedy.path==='string'?attention.remedy.path:'';
+  const first=(sourceFile?'Source to replace: '+sourceFile:'') || files || unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
   // Working files from an earlier attempt: the absolute folder, here only, never in the hint (follow-up, point 3c).
   const folder=(working || refusal && refusal.cause==='working_files' && refusal.stale!==true) && typeof attention?.working_folder==='string' && attention.working_folder?'; working folder: '+attention.working_folder:'';
   return 'Technical detail: '+(facts || 'Unavailable')+folder+(details.length?' — '+details.join(' '):'');
@@ -1411,7 +1612,8 @@ function candidateStatus(row){
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
+  renderProducerRetained(row);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
@@ -1441,7 +1643,7 @@ function renderAutomaticResult(row){
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row)].join('\n')));
-  const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
+  const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(source.kind==='manual_metadata'?node('span','Entered by you'):sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
   const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',manual_note:context.manual_note || '',metadata_provenance:row.metadata_facts || null,recording_review:row.duplicate_review || null};
   $('automatic-accepted-evidence').textContent=JSON.stringify(accepted,null,2);$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.manual_note && !accepted.metadata_provenance && !accepted.recording_review;
 }

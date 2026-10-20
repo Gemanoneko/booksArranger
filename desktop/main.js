@@ -90,6 +90,17 @@ function readSettings() {
   if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Desktop settings are not an ordinary bounded file; retained unchanged.');
   const value=JSON.parse(fs.readFileSync(file,'utf8'));
   if(!value||typeof value.dataDir!=='string'||!path.isAbsolute(value.dataDir))throw new Error('Desktop settings need an explicit absolute data folder; retained unchanged.');
+  const sourcesFile=path.join(app.getPath('userData'),'audiobook-sources.json');
+  if(fs.existsSync(sourcesFile)){
+    const sourceInfo=fs.lstatSync(sourcesFile);
+    if(!sourceInfo.isFile()||sourceInfo.isSymbolicLink()||sourceInfo.size>16384)throw Error('Audiobook source settings are not an ordinary bounded file.');
+    const sources=JSON.parse(fs.readFileSync(sourcesFile,'utf8'));
+    if(!sources||Array.isArray(sources)||Object.keys(sources).some(key=>!['audiobook_sources','audiobook_output_root'].includes(key)))throw Error('Unknown audiobook source settings.');
+    for(const key of ['audiobook_sources','audiobook_output_root'])if(key in sources){
+      if(key in value&&JSON.stringify(value[key])!==JSON.stringify(sources[key]))throw Error('Conflicting source settings preserved; review configuration.');
+      value[key]=sources[key];
+    }
+  }
   return value;
 }
 
@@ -114,6 +125,11 @@ function configuration() {
   let rootsJson = absoluteOption('roots-json');
   if (!rootsJson && isDev) rootsJson = devRoots();
 
+  const audiobookSources=(!isDev && !rootsJson)?settings.audiobook_sources:null;
+  const audiobookOutputRoot=(!isDev && !rootsJson)?settings.audiobook_output_root:null;
+  if(audiobookSources!==null && audiobookSources!==undefined && (!Array.isArray(audiobookSources)||!audiobookSources.length||audiobookSources.length>32||audiobookSources.some(root=>typeof root!=='string'||!path.isAbsolute(root))))throw Error('Audiobook source settings need an ordered list of absolute paths.');
+  if(audiobookOutputRoot!==null && audiobookOutputRoot!==undefined && (typeof audiobookOutputRoot!=='string'||!path.isAbsolute(audiobookOutputRoot)))throw Error('Audiobook output setting needs an absolute path.');
+
   // Dev runs use the same pinned runtime the installer bundles (npm run fetch-runtime).
   let runtime=process.resourcesPath;
   if(isDev){
@@ -135,7 +151,7 @@ function configuration() {
     throw new Error(isDev ? 'The bundled runtime is missing. Run: npm run fetch-runtime' : 'The installation is incomplete. Reinstall Books Arranger.');
   }
   const backendDir = isDev ? repoRoot : path.join(process.resourcesPath, 'backend');
-  return { dataDir, requiresSetup, catalogMode: settings.catalogMode || (option(argv,'catalog-mode') || 'existing'), port, rootsJson, python, backendDir, ffmpegDir };
+  return { dataDir, requiresSetup, catalogMode: settings.catalogMode || (option(argv,'catalog-mode') || 'existing'), port, rootsJson, audiobookSources, audiobookOutputRoot, python, backendDir, ffmpegDir };
 }
 
 // Dev runs never touch the real libraries unless --roots-json says so.
@@ -154,6 +170,8 @@ function startBackend(config) {
   const args = ['-I', '-B', path.join(config.backendDir, 'desktop_host.py'),
     '--database', path.join(config.dataDir, 'inventory.sqlite3'), '--port', String(config.port), '--catalog-mode=' + config.catalogMode];
   if (config.rootsJson) args.push('--roots-json', config.rootsJson);
+  for(const root of config.audiobookSources || [])args.push('--audiobook-source',root);
+  if(config.audiobookOutputRoot)args.push('--audiobook-output-root',config.audiobookOutputRoot);
   const pathEntries = [config.ffmpegDir, system32, process.env.SystemRoot || 'C:\\Windows'];
   const env = {};
   for (const key of ['SystemRoot', 'windir', 'TEMP', 'TMP', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'HOMEDRIVE', 'HOMEPATH', 'ProgramData', 'COMPUTERNAME', 'USERNAME', 'PATHEXT', 'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE']) {

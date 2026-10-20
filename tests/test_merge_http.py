@@ -26,6 +26,7 @@ class MergeHTTPTests(unittest.TestCase):
         self.server=BrowserServer.__new__(BrowserServer)
         self.server.inventory=self.inventory;self.server.server_address=('127.0.0.1',5211);self.server.server_port=5211
         self.server.token='fixture-token';self.server.instance='fixture';self.server.active_library=None
+        self.server.loaded_version='fixture';self.server.restart_context=None;self.server.recovery_operations=0
         self.server.closing=False;self.server.control_lock=threading.Lock();self.server.control_condition=threading.Condition(self.server.control_lock);self.server.merge_admissions=0
         self.jobs=SimpleNamespace(pause=Mock(return_value={'state':'Paused'}),resume=Mock(return_value={'state':'Running'}))
         self.reviews=SimpleNamespace(save=Mock(return_value={'id':ID,'revision':2}),tracks=Mock(return_value={'id':ID,'revision':2}),match=Mock(return_value={'state':'finding'}),covers=Mock(return_value={'id':ID}),page=Mock(return_value={'rows':[],'total':0}),cover_bytes=Mock())
@@ -62,7 +63,7 @@ class MergeHTTPTests(unittest.TestCase):
         for route in ('/api/automatic/start','/api/automatic/stop'):
             self.assertEqual(self.call(route,{},token=False)[0],403)
             self.assertEqual(self.call(route,{'library':'Ebooks'})[0],400)
-        self.assertEqual(self.call('/api/automatic/start',{})[0],202);automatic.start.assert_called_once_with()
+        self.assertEqual(self.call('/api/automatic/start',{})[0],202);automatic.start.assert_called_once_with(server_closing=False)
         body={'id':ID,'revision':1,'active':True}
         self.assertEqual(self.call('/api/automatic/draft',body)[0],200);automatic.draft.assert_called_once_with(ID,1,True)
         for update in ({'revision':True},{'id':'../escape'},{'path':'Z:/anything'}):self.assertEqual(self.call('/api/automatic/draft',body|update)[0],400)

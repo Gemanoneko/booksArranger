@@ -1,5 +1,6 @@
 """Pure revision-bound approval/completion predicates; no media reads or mutations."""
 import os
+import manual_metadata
 from pathlib import Path
 
 def approved_scope(row,ctx,key_for):
@@ -11,7 +12,7 @@ def approved_scope(row,ctx,key_for):
     included=ctx.get('included',[]);order=ctx.get('track_order',[])
     if not included or len(set(included))!=len(included) or set(order)!=set(keys) or len(order)!=len(keys) or not set(included)<=set(keys):return False
     selected=[m for m,k in zip(members,keys) if k in included]
-    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not ctx.get('metadata_facts'):return False
+    if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not ctx.get('metadata_facts') and not manual_metadata.approved(row,ctx):return False
     if any(m.get('error') or m.get('missing') for m in members):return False
     albums={str({k.casefold():v for k,v in m.get('metadata',{}).get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
     if len(members)>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not ctx.get('metadata_facts'):return False
@@ -22,12 +23,47 @@ def approved_scope(row,ctx,key_for):
         if any(str(saved.get(k))!=str(m.get(k)) for k in ('size','modified')):return False
     return bool(ctx.get('cover_id') and any(c.get('id')==ctx['cover_id'] for c in ctx.get('cover_choices',[])))
 
-def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile,replacement=None):
+def routing_compatibility(row,job,envelope):
+    """Accept only a resolver-validated, exact reviewed hierarchy binding.
+
+    A global policy/output-root setting alone never rewrites old provenance.
+    Any changed non-routing metadata or evidence/revision requires normal review.
+    """
+    try:
+        import json
+        from publication_locations import _digest,publication_id
+        from organization import frozen_plan,POLICY
+        relocation=envelope['relocation'];original=job['output'];manifest=job['manifest']
+        if envelope['original_receipt']!=original:return False
+        if relocation['publication_kind'] not in {'base','replacement'}:return False
+        if relocation['job_id']!=job['job_id'] or envelope['publication_id']!=publication_id(job['job_id'],relocation['publication_kind'],original):return False
+        if relocation['immutable_receipt_sha256']!=_digest(original) or relocation['original_manifest_hash']!=_digest(manifest):return False
+        if relocation['candidate_id']!=row['id'] or relocation['source_fingerprint']!=row['fingerprint']:return False
+        routing=json.loads(relocation['accepted_routing_json'])
+        if routing.get('routing_policy_version')!=POLICY or routing.get('accepted_candidate_revision')!=row['revision'] or routing.get('accepted_review_sha256')!=_digest(row['review']):return False
+        ignored={'universe','multi_author','anthology','organization_policy'}
+        before={key:value for key,value in manifest['metadata'].items() if key not in ignored}
+        after={key:value for key,value in row['review'].items() if key not in ignored}
+        if before!=after:return False
+        route_review=routing.get('routing_review',row['review'])
+        if not isinstance(route_review,dict) or {key:value for key,value in route_review.items() if key not in ignored}!=after:return False
+        if manifest.get('metadata_facts',{}).get('destination_suffix') and routing.get('recording_facts_sha256')!=_digest(manifest['metadata_facts']):return False
+        expected=frozen_plan(manifest,relocation['target_root'],route_review)['path']
+        if os.path.normcase(expected)!=os.path.normcase(relocation['planned_destination']):return False
+        current_preview=frozen_plan(manifest,relocation['target_root'],dict(row['review'],organization_policy=POLICY))['path']
+        if os.path.normcase(row['preview']['path']) not in {os.path.normcase(original['final_path']),os.path.normcase(expected),os.path.normcase(current_preview)}:return False
+        return True
+    except (KeyError,TypeError,ValueError):return False
+
+def completed_book(row,ctx,job,source,storage,folders,output_current,key_for,modern_profile,replacement=None,location_envelope=None,retry_binding=False):
     if not output_current or job.get('state')!='completed':return False
     manifest=job['manifest'];record=job.get('output') or {}
-    if manifest.get('candidate_id')!=row['id'] or manifest.get('candidate_revision')!=row['revision'] or manifest.get('metadata')!=row.get('review'):return False
+    from retry_intent import ready_compatible
+    compatible=bool(location_envelope and routing_compatibility(row,job,location_envelope)) or ready_compatible(row,manifest,retry_binding)
+    if manifest.get('candidate_id')!=row['id']:return False
+    if (manifest.get('candidate_revision')!=row['revision'] or manifest.get('metadata')!=row.get('review')) and not compatible:return False
     if record.get('validation',{}).get('passed') is not True or record.get('job_id')!=job['job_id']:return False
-    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']):
+    if os.path.normcase(record.get('final_path',''))!=os.path.normcase(row['preview']['path']) and not compatible:
         if not replacement or replacement.get('state') not in {'published','retiring','completed'} or replacement.get('replacement_job_id')!=job['job_id'] or replacement.get('candidate_id')!=row['id'] or replacement.get('candidate_revision')!=row['revision'] or manifest.get('replacement_id')!=replacement.get('id') or manifest.get('replacement_parent_job_id')!=replacement.get('parent_job_id') or replacement.get('parent_job_id')==job['job_id']:return False
         import json
         if record!=json.loads(replacement.get('current_output_json') or '{}'):return False

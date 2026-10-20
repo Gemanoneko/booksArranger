@@ -152,7 +152,7 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   paint([heldRow('h'),heldRow('l',{automatic:{state:'Held',reasons:['Manual draft retained'],hold:'manual_draft',lease:true},release:{allowed:false}})]);
   tr=rowOf('h');
   assert.equal(statusCell(tr).textContent,'Held — saved review kept');
-  assert.equal(statusCell(tr).children[0].textContent,'A saved review keeps this book held. Let the app handle it discards that review, including any hand edits, and lets automatic processing take the book.');
+  assert.equal(statusCell(tr).children[0].textContent,'A saved review keeps this book held. Let the app handle it clears the preview draft and lets automatic processing take the book. Saved Entered by you evidence is kept.');
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning: a decision is waiting');
   const release=actionButtons(tr)[0];
   assert.equal(release.textContent,'Let the app handle it');assert.equal(release.getAttribute('aria-label'),'Let the app handle it: Title h');

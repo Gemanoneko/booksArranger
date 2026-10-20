@@ -752,6 +752,31 @@ def _claims_person(value):
     return bool(value) and not re.search(r'\d', value) and 1 <= len(words(value)) <= 4 and not NARRATOR_MARKER.search(value)
 
 
+def filename_matches_local_work(filename, titles, authors, embedded_authors=()):
+    """Re-use local agreement's title semantics without inventing an author.
+
+    A complete filename can repeat an author-prefixed album or a numbered cycle
+    label. Its parsed title alone loses that context. Real person claims still
+    must match the accepted author; numeric cycle labels need a matching actual
+    embedded author instead. No metadata, order or source-membership gate is
+    replaced by this check.
+    """
+    component={'kind':'file name','value':Path(filename).stem,'numbered':False}
+    parsed=filename_identity(filename)
+    if not any(_title_support(title,[component],'') for title in titles):
+        return False
+    claimed=parsed.get('author','')
+    if not claimed:
+        return True
+    if _claims_person(claimed):
+        return any(compare_names(claimed,author) for author in authors)
+    # Position suffixes are source labels, never people. Do not extend this to
+    # arbitrary non-person credits, narrator markers, or missing author evidence.
+    positioned=bool(re.fullmatch(r'.*[^\W\d_].*\s+\d{1,4}(?:\.\d{1,3})?',claimed))
+    return bool(positioned and not NARRATOR_MARKER.search(claimed) and
+                any(compare_names(value,author) for value in embedded_authors for author in authors))
+
+
 def _contradicts(components, title, author):
     """Structured 'Author - Title' names that pair one local value with a different other value."""
     found = []

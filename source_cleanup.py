@@ -80,7 +80,9 @@ def single_stream(path):
 
 
 class CleanupJobs:
-    def __init__(self,database,recovery_root,guard,review_boundary):
+    def __init__(self,database,recovery_root,guard,review_boundary,output_location=None,output_location_guard=None):
+        self.output_location_guard=output_location_guard
+        self.output_location=output_location
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
         self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
         self.checked={}  # cleanup id -> originals checked so far while its recovery copies are checked (in memory)
@@ -256,18 +258,39 @@ class CleanupJobs:
                     elif recovery['state']=='deleted':item['status']='Originals removed; recovery copies deleted'
                 item['recovery_bytes']=recovery['bytes'];item['recovery_location']=recovery['location'] if recovery['count'] else ''
         return result[0] if job_id and result else (None if job_id else result)
-    def resume(self,selected=None,follow_audio=True):
+    def resume(self,selected=None,follow_audio=True,admission_check=None,after_drain=None,admission_token=None):
         with self.lock:
             if self.closed:raise ValueError('Cleanup worker is closing')
-            if self.thread and self.thread.is_alive():return
-            self.stop.clear();self.thread=threading.Thread(target=self._work,args=(selected,follow_audio),name='books-source-cleanup',daemon=False);self.thread.start()
-    def pause(self):self.stop.set()
+            if admission_check is not None and admission_check() is not True:
+                from audio_jobs import StartRefused
+                raise StartRefused('stale','Cleanup startup was superseded by Pause or closing.')
+            if self.thread and self.thread.is_alive():
+                if admission_check is not None and (self.stop.is_set() or getattr(self,'_thread_admission_token',None)!=admission_token):
+                    from audio_jobs import StartRefused
+                    raise StartRefused('busy','The previous cleanup worker is still pausing. Retry Start after it stops.')
+                return {'state':'checking'}
+            self.stop.clear()
+            try:
+                if admission_check is not None and admission_check() is not True:
+                    from audio_jobs import StartRefused
+                    raise StartRefused('stale','Cleanup startup was superseded by Pause or closing.')
+            except BaseException:
+                self.stop.set();raise
+            self._thread_admission_token=admission_token
+            self.thread=threading.Thread(target=self._work,args=(selected,follow_audio,after_drain),name='books-source-cleanup',daemon=False)
+            self.thread.start()
+            return {'state':'started'}
+
+    def pause(self):
+        with self.lock:self.stop.set()
     def close(self):
-        self.closed=True;self.stop.set()
-        if self.thread:
-            self.thread.join(30)
-            if self.thread.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
-    def _work(self,selected=None,follow_audio=True):
+        with self.lock:
+            self.closed=True;self.stop.set();worker=self.thread
+        if worker:
+            worker.join(30)
+            if worker.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
+
+    def _work(self,selected=None,follow_audio=True,after_drain=None):
         for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (?,?,?)) ORDER BY created",('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')):
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
@@ -277,7 +300,8 @@ class CleanupJobs:
                 if self.on_completed and self.status(row['job_id'])['state']=='completed':self.on_completed(row['job_id'])
             except Exception as error:self.hold(row['id'],error)
             finally:self.current=None
-        if follow_audio and not self.stop.is_set() and self.after_drain:self.after_drain()
+        handoff=after_drain if after_drain is not None else self.after_drain
+        if follow_audio and not self.stop.is_set() and handoff:handoff()
     @staticmethod
     def _match(handle,source,stored=None,approved=None):
         facts=handle.facts()
@@ -289,13 +313,20 @@ class CleanupJobs:
         return facts
     def run(self,id):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
-        root=ordinary(manifest['root']);final=ordinary(out['final_path']);recovery=self.root/id
-        if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Validated output is outside the source library')
+        source_root=ordinary(manifest['root'])
+        frozen_root=ordinary(manifest.get('output_root',manifest['root']))
+        if ordinary(out.get('root',str(frozen_root)))!=frozen_root:raise BoundaryError('Validated output root differs from frozen output policy')
+        if self.output_location:
+            out,envelope=self.output_location(out)
+            intent['_location_envelope']=envelope
+        root=ordinary(out.get('root',str(frozen_root)));final=ordinary(out['final_path']);recovery=self.root/id
+        if not final.is_relative_to(root) or final.suffix.lower()!='.m4b':raise BoundaryError('Validated output is outside the frozen output root')
         with contextlib.ExitStack() as stack:
             rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
             if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
             if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
             ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(VerifiedFile(final))
+            if out.get('identity') is not None and output.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; originals retained')
             if ob.identities!=[tuple(v) for v in out['parent_identity']] or output.facts()['size']!=out['size'] or output.sha256()!=out['sha256']:
                 raise BoundaryError('Validated output is changed or unavailable; originals retained')
             cover=ordinary(manifest['cover']['path']);stack.enter_context(DirectoryBoundary(cover.anchor,cover.parent));art=stack.enter_context(VerifiedFile(cover))
@@ -319,7 +350,7 @@ class CleanupJobs:
                     continue
                 if member and member['state']=='removal_intended' and not path.exists():
                     raise BoundaryError('Interrupted removal has unknown outcome; verified recovery can restore this original before another cleanup attempt')
-                stack.enter_context(DirectoryBoundary(root,path.parent))
+                stack.enter_context(DirectoryBoundary(source_root,path.parent))
                 key=str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(str(path)))))
                 approved=intent['binding'].get('context',{}).get('source_hashes',{}).get(key)
                 from zone_identifier import remove_marker
@@ -360,12 +391,13 @@ class CleanupJobs:
                     db.commit() # Intent must survive a crash before native disposition.
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
+                    if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
                     single_stream(source['path'])
                     original.dispose()
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
-                    db.commit()
                     original.__exit__(None,None,None)
                     if Path(source['path']).exists():raise BoundaryError('Disposition did not remove the verified name; no weaker deletion attempted')
+                    db.commit() # Keep the location-generation reservation through native closure and absence.
                     db.execute('BEGIN IMMEDIATE');self._retire(intent,source,{'facts':packed(facts)},db);db.commit()
             self._set(id,'completed')
     def _retire(self,intent,source,member,db=None):

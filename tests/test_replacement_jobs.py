@@ -236,9 +236,9 @@ class ReplacementTests(unittest.TestCase):
 
     def test_native_disposition_never_replayed_after_receipt_write_failure(self):
         relation=self.publish();original=self.store.file_transition;calls=[]
-        def fail_after(row,state,recovery=None):
+        def fail_after(row,state,recovery=None,**kwargs):
             if state=='removed' and not calls:calls.append(row['original_path']);raise sqlite3.OperationalError('injected unclassified receipt failure')
-            return original(row,state,recovery)
+            return original(row,state,recovery,**kwargs)
         with patch.object(self.store,'file_transition',side_effect=fail_after):
             with self.assertRaises(sqlite3.OperationalError):self.retire.run(relation)
         self.assertFalse(Path(calls[0]).exists())
@@ -271,10 +271,10 @@ class ReplacementTests(unittest.TestCase):
             finally:result=actual_exit(file,*args)
             if file.delete and file.path in self.old:protected_attempt(file.path,'after old close')
             return result
-        def absent(path):protected_attempt(path,'absence');return actual_absent(path)
-        def transition(row,state,recovery=None):
+        def absent(path,root=None):protected_attempt(path,'absence');return actual_absent(path,root)
+        def transition(row,state,recovery=None,**kwargs):
             if state=='removed':protected_attempt(Path(row['original_path']),'removed CAS')
-            return actual_transition(row,state,recovery)
+            return actual_transition(row,state,recovery,**kwargs)
         with patch.object(VerifiedFile,'__exit__',new=close),patch.object(self.retire,'_absent',side_effect=absent),patch.object(self.store,'file_transition',side_effect=transition):self.retire.run(relation)
         for phase in ['before old close','after old close','absence','removed CAS']:self.assertEqual(checked.count(phase),3)
 

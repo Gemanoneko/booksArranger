@@ -1,0 +1,90 @@
+{
+  "schema": "books-host-observation-pure-receipt-v1",
+  "result": {
+    "checks": 78,
+    "passed": true,
+    "native_executed": false,
+    "processes_started": 0,
+    "capture_io": "injected fake only",
+    "authority": false
+  },
+  "prior_54_checks_preserved": true,
+  "red_before_green": {
+    "cases": [
+      "duplicate input cmd",
+      "duplicate outer tool_input",
+      "escaped-equivalent cmd"
+    ],
+    "before": "metadata accepted",
+    "after": "metadata refused; exact probe remains identified, capture IO/evaluator not invoked"
+  },
+  "pins": [
+    {
+      "file": "candidate.json",
+      "bytes": 36131,
+      "sha256": "0f725067022892f83eee518c07bf97c9cd6f8c934950ffa5609764a4a3844117"
+    },
+    {
+      "file": "checks.mjs",
+      "bytes": 12054,
+      "sha256": "406d35516dc02c56bcb40baa5056c84b197fff176f78c46c14fdbc91d69225e2"
+    },
+    {
+      "file": "compat.mjs",
+      "bytes": 3691,
+      "sha256": "ca16148b1036325bb8f98d5a63b8cf40bb4ed4e4a8b58eae4982d22c8e0ff5c5"
+    },
+    {
+      "file": "host.mjs",
+      "bytes": 4935,
+      "sha256": "89a44e7cdbb2c637e2e895b5db9d51b93bd4f6e2d905f8f4e4f6b932c3b53366"
+    },
+    {
+      "file": "observer.mjs",
+      "bytes": 4316,
+      "sha256": "647af77bc90e088f6b6c5bc536c9d05c24bab4351cf0a3635bebdb7fcabc763a"
+    },
+    {
+      "file": "probe.mjs",
+      "bytes": 8468,
+      "sha256": "b585a4f5ba1ffa0f5c4837efef1d7b09c9f78df912805d5029115f8a8e814029"
+    },
+    {
+      "file": "rollback.json",
+      "bytes": 31464,
+      "sha256": "a497293dddefe0d33686696380b3135c5bd81a8d23351eaec863dfa2085aaf94"
+    }
+  ],
+  "live_baseline_unchanged": [
+    {
+      "path": "C:/Users/AnGeLZzZ/.codex/hooks/command-safety-route/runtime-repair-20261018/hook.mjs",
+      "sha256": "cf2f7250ce825117ad51477b502cb25fe5187771b5e359f90b9290bc2d9445f3",
+      "unchanged": true
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/.codex/hooks/command-safety-route/runtime-repair-20261018/timeout-compatibility-hook.mjs",
+      "sha256": "c37c18c5a2281ff4e2149f92f2e10f79e9e58c69c9b113ed0013645afa0d0c95",
+      "unchanged": true
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/.codex/hooks/command-safety-route/observer.mjs",
+      "sha256": "4eab19e937a28166f8af4e019b325f1118be7e3d644c1914d72351b541b2a171",
+      "unchanged": true
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/.codex/hooks/command-safety-route/capture-file.mjs",
+      "sha256": "93fbe1517025f7318ab7de884797707fcd05f00101cf0015295996a193f85d0f",
+      "unchanged": true
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/.codex/hooks.json",
+      "sha256": "c4b5c102f2af0a7ddd30bb9838fcac087c5aa12e05a69c6f2137160e78426aa3",
+      "unchanged": true
+    }
+  ],
+  "future_leaf_absent_at_preparation": true,
+  "global_candidate_sha256": "8748fa67ddc1dd031ff5973d4ae77d226f5b2c98c9de194f6545a5f0d7c41ab6",
+  "installed": false,
+  "probe_executed": false,
+  "notes": "Source-only two-Major correction. All capture and guard IO injected, zero processes/native. Strict decoded-key duplicate detection before capture JSON.parse; finite syntax/depth/key/node/array/raw quotas. Human procedure holds ALL tools through install/trust and baseline restoration/retrust before any resume."
+}

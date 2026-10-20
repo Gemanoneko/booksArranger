@@ -3,8 +3,11 @@ import hashlib
 import json
 import uuid
 from pathlib import Path
+from manifest_compatibility import equivalent_manifest
 
 REASONS={
+    # Exact zero-count text writer quirk; every original track byte is preserved.
+    'M4B preservation requires review: Sample size table',
     'Remux changed the decoder configuration or relative audio packet timing',
     'M4B leading gaps or edit presentation require a verified preservation plan',
     # Raised by the old remux path's presentation proof, which byte-exact preservation does not use.
@@ -30,6 +33,8 @@ def profile_proof(profile,module_sha256):
     # Blank metadata the plan drops is part of what the admitted child will change.
     dropped=getattr(profile,'metadata_dropped',())
     if dropped:proof['metadata_dropped']=[dict(item) for item in dropped]
+    notes=getattr(profile,'profile_notes',())
+    if notes:proof['source_profile_notes']=[dict(item) for item in notes]
     return proof
 
 def eligible(row):
@@ -55,8 +60,7 @@ def bind(parent, fresh, proof):
     """Require the identical reviewed manifest; add only the new repair relation."""
     if not eligible(parent):raise ValueError('Failure is outside the reviewed M4B repair cohort')
     prior=json.loads(parent['manifest'])
-    remove=lambda value:{key:item for key,item in value.items() if key!='job_id'}
-    if remove(prior)!=remove(fresh):raise ValueError('Frozen review/source/cover/policy changed; failed job preserved')
+    if not equivalent_manifest(prior,fresh):raise ValueError('Frozen review/source/cover/policy changed; failed job preserved')
     if fresh['job_id']==parent['job_id']:raise ValueError('A repair needs a distinct job identity')
     if proof.get('schema')!=SCHEMA or len(proof.get('module_sha256',''))!=64 or not proof.get('tracks'):
         raise ValueError('Source-preservation profile proof is missing')

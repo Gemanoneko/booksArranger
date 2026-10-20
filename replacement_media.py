@@ -111,7 +111,7 @@ def _plan(sources, frozen):
     return tracks, frames
 
 
-def prepare_replacement(parent, newjobid, frozenplan):
+def prepare_replacement(parent, newjobid, frozenplan, *, effective_output=None, location_envelope=None):
     """Derive one new immutable source-matched manifest; never enqueue it."""
     _identity(newjobid)
     if not isinstance(parent, dict) or parent.get('state') != 'completed':
@@ -127,14 +127,27 @@ def prepare_replacement(parent, newjobid, frozenplan):
     destination = ordinary(manifest.get('destination'))
     if destination.suffix.lower() != '.m4b' or str(destination) != output.get('final_path'):
         _fail('Replacement parent publication relation differs')
-    root = ordinary(manifest.get('root'))
+    root = ordinary(manifest.get('output_root',manifest.get('root')))
     try:
         destination.relative_to(root)
     except ValueError:
         _fail('Replacement destination is outside its approved root')
+    output_root=ordinary(manifest.get('output_root',manifest['root']))
+    if effective_output is not None or location_envelope is not None:
+        from publication_locations import _digest
+        if (not isinstance(effective_output,dict) or not isinstance(location_envelope,dict) or
+                location_envelope.get('original_receipt')!=output or
+                not isinstance(location_envelope.get('relocation'),dict) or location_envelope['relocation'].get('immutable_receipt_sha256')!=_digest(output) or
+                not isinstance(location_envelope.get('generation'),int)):
+            _fail('Replacement effective location lacks its immutable publication binding')
+        expected=copy.deepcopy(output);expected.update(location_envelope['effective_location'])
+        if effective_output!=expected:_fail('Replacement effective receipt differs from its bound location')
+        destination=ordinary(effective_output['final_path']);output_root=ordinary(effective_output['root'])
+        if not destination.is_relative_to(output_root) or destination.suffix.lower()!='.m4b':_fail('Replacement effective destination is outside its bound root')
     result = copy.deepcopy(manifest)
     result['job_id'] = newjobid
     result['destination'] = str(destination.with_name(destination.stem + ' - Final.m4b'))
+    result['output_root'] = str(output_root)
     result['profile'] = PROFILE
     result['encoding_policy'] = freeze_policy(result['sources'])
     result['chapters'] = [track['title'] for track in tracks]

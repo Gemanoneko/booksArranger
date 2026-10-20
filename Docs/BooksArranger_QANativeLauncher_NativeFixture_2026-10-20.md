@@ -32,3 +32,14 @@ Startup/work/final observer records remain nonauthoritative, native-fenced, CREA
 Candidate plan C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/native-fixture-plan.json SHA256d66073f53df717cc26690d658e9f6d225315a0fff38ea5ada871fc9d5b61d968; exact proposed installed-Git-Bash exec_command command/argv/cwd/loginfalse/yield10000 plus session/write_stdin observation are in proposed-invocation.json. UIyield is observation only; no unsupported tool timeout parameter. Guard rejection means STOP, never repackage. The candidate command is NOT executed and candidate plan deliberately refuses activation. A separately pinned approved plan/admission and exact final invocation must return for Senua before any native run.
 
 Reused engineering base95-file manifest SHA256f44f4b51513bd4a50cdaacdd2167a66766beaf79292a9e653724ce01c8642b98. No1GB toolchain copy/read is required for these compiler-free fixtures. All source/test pins and pure-control receipts are in packet. No build can proceed merely because this source exists; actual fixture outcome and closure are still unknown. Old NORESULT/stale exe untouched, never executed or retrospectively reconciled. Session scratch preserved for Sergei; delete nothing while active evidence remains.
+
+
+## Approved invocation observation — STOP at shell boundary
+
+The final approved plan4bae6efa3e8f75915d223b797d9117173b20381ffa69b18161c93c9ea6487b78 was invoked exactly once through the reviewed exec_command arguments after Jane instruction. Preflight19source pins and reviewc194d747ea3546beeb5603db3d7539ce9a2ac73d5a53d8cbb44388c23ca73539 matched. The tool returned terminal exit1 in1.6818835s with no session_id:
+
+> <3>WSL (18 - Relay) ERROR: CreateProcessCommon:735: execvpe(/bin/bash) failed: No such file or directory
+
+The absolute requested shell C:/Program Files/Git/bin/bash.exe was routed to missing WSL /bin/bash by the tool. There is no observer stdout, startup/work/final native receipt or fixture closure proof. No fixture PASS or native failure is inferred; this is an invocation/shell availability refusal. No retry, alternate tool/shell, command repackaging, repair, PID cleanup or compiler follows. The original unresolved compiler NORESULT is unchanged.
+
+Exact JSON evidence: C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/invocation-shell-stop.json SHA2569737a52a74a2c6767d298bc002796dbb55c7fed73db010c52ae1a8ed0dd66b48. Exact stderr evidence same directory/invocation-shell-stop.stderr.txt SHA2568cf1cb6bac96028f19813df6f1d13002f2f8f9b0e5380990aacc6cc74a556f3c. Allsession scratch preserved.

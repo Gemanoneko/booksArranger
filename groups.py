@@ -318,14 +318,22 @@ def sync(connection,root):
     if saved and saved[0]==revision:return
     rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
     retired=retired_sources(connection,root)
+    import reacquire_sources
+    archived=reacquire_sources.archived_ids(connection,root)
+    frozen={json.loads(item['snapshot'])['group']['scope']:json.loads(item['snapshot']) for item in reacquire_sources.markers(connection,root) if item['state']=='required'}
+    frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
+    rows=[row for row in rows if row['path'] not in frozen_paths]
     protected={}
     jobs=set()
     if connection.execute("SELECT 1 FROM sqlite_master WHERE name='audio_jobs'").fetchone():
         jobs={json.loads(r[0])['candidate_id'] for r in connection.execute('SELECT manifest FROM audio_jobs')}
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
+        if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
     groups=build(rows,protected,chaptered_parts(connection,root))
+    for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
     for scope,evidence in groups.items():
+        if scope in frozen:continue
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
         if old:
             evidence=_preserve_retired_evidence(old,evidence,retired)
@@ -339,6 +347,7 @@ def sync(connection,root):
                 (fingerprint,json.dumps(evidence,ensure_ascii=False),old['id']))
     # A formerly indexed group no longer present retains evidence but cannot stay approved.
     for old in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)).fetchall():
+        if old['id'] in archived or old['scope'] in frozen:continue
         former=json.loads(old['evidence'])['members']
         all_retired=bool(former) and all(m['path'] in retired for m in former)
         if old['scope'] not in groups and old['scope'] not in protected:
@@ -364,7 +373,7 @@ def render(row,root,coverage,retired=None):
         if item['intentionally_retired']:
             item['retirement']={key:retired[item['path']][key] for key in ('cleanup_id','job_id','source_hash','state')}
     retired_count=sum(m['intentionally_retired'] for m in evidence['members'])
-    return evidence | {'id':row['id'],'revision':row['revision'],'fingerprint':row['fingerprint'],
+    return evidence | {'id':row['id'],'source_root':row['root'],'revision':row['revision'],'fingerprint':row['fingerprint'],
       'review':review,'metadata_approved':approved,'status':status,'changed':bool(row['changed']),
       'preview':preview,'tag_preview':future_audio_tags(evidence['metadata'],review),
       'approval_reason':'; '.join(reasons),'can_approve':not reasons and not retired_count,
@@ -393,7 +402,42 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
     values=[row for row in values if filters[status](row) and search.casefold() in (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
     return {'rows':values[offset:offset+limit],'total':len(values)}
 
+def page_sources(connection,roots,limit=100,offset=0,search='',status='all',coverage=None,ids=None):
+    """All-source page from the caller's transaction, preserving source identity.
+
+    Unfiltered pages render only the requested rows. Filtered pages share the
+    same predicate for returned rows and total; ids are an optional intersection.
+    """
+    for root in roots:sync(connection,root)
+    coverage=coverage or {}
+    marks=','.join('?' for _ in roots)
+    clause=f'root IN ({marks}) AND superseded=0'
+    args=tuple(roots)
+    if ids is not None:
+        clause+=' AND id IN (SELECT value FROM json_each(?))'
+        args+=(json.dumps(sorted(str(identity) for identity in ids)),)
+    order=' ORDER BY scope COLLATE NOCASE,root,id'
+    if status=='all' and not search:
+        total=connection.execute('SELECT count(*) FROM book_groups WHERE '+clause,args).fetchone()[0]
+        records=connection.execute('SELECT * FROM book_groups WHERE '+clause+order+' LIMIT ? OFFSET ?',args+(limit,offset)).fetchall()
+    else:
+        total=None
+        records=connection.execute('SELECT * FROM book_groups WHERE '+clause+order,args).fetchall()
+    retirements={root:retired_sources(connection,root) for root in {row['root'] for row in records}}
+    values=[render(row,row['root'],coverage.get(row['root'],False),retirements[row['root']]) for row in records]
+    if total is not None:return {'rows':values,'total':total}
+    filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
+      'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),
+      'changed':lambda row:row['changed']}
+    if status not in filters:raise ValueError('Unknown candidate status')
+    values=[row for row in values if filters[status](row) and search.casefold() in
+            (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
+    return {'rows':values[offset:offset+limit],'total':len(values)}
+
 def save(connection,root,identity,revision,review,approve=False):
+    import reacquire_sources
+    value=reacquire_sources.marker(connection,identity)
+    if value and value['state']=='archived':raise ValueError('Damaged-source entry archived; use the newly discovered replacement')
     sync(connection,root)
     row=connection.execute('SELECT * FROM book_groups WHERE root=? AND id=?',(root,identity)).fetchone()
     if row is None or row['revision']!=revision:raise ValueError('Candidate changed; reload evidence before reviewing')

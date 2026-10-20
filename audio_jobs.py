@@ -1,5 +1,6 @@
 """Durable injected audio queue. This module never opens media or publishes files."""
 import errno
+import contextlib
 import copy
 import hashlib
 import json
@@ -11,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlite_retry import transaction
 import retry_refusal
+import destination_admission
 
 
 STAGES = {"checking sources", "creating", "checking", "copying", "publishing"}
@@ -45,6 +47,19 @@ def _failure_details(error, stage, now=None):
 
 
 REVISION_GUARD_REFUSAL = "Source changed — review required"  # the worker's own guard, before any work is published
+
+
+def source_remedy(row,journal,manifest):
+    """Identify the exact source checked by the production full-decode failure.
+
+    Legacy failures are admitted only by the fixed producer prefix, typed stage
+    and a single MP3 input; ambiguous multi-input/output failures stay unclassified.
+    """
+    failure=journal.get('failure',{}) if isinstance(journal,dict) else {}
+    sources=manifest.get('sources') if isinstance(manifest,dict) else None
+    if failure.get('exception_class')!='ValidationError' or failure.get('stage')!='checking sources' or not str(row.get('reason') or '').startswith('Full audio decode failed: '):return None
+    if not isinstance(sources,list) or len(sources)!=1 or not isinstance(sources[0],dict) or not str(sources[0].get('path','')).lower().endswith('.mp3'):return None
+    return {'kind':'replace_source','cause':'source_decode_failed','path':sources[0]['path'],'sha256':sources[0].get('sha256'),'original_retained':True}
 
 
 def failure_cause(row, journal):
@@ -264,7 +279,11 @@ class AudioJobs:
         self._thread = None
         self._closed = False
         self.after_completed = None
+        self.after_failed = None
         self.before_attempt = None
+        self.destination_policy = None # Server-derived effective root/hierarchy snapshot.
+        self.attempt_boundary = None # Optional native capability held across admission, runner and closure.
+        self._priority_status={'state':'idle','job_id':None,'reason':''}
         self.next_priority = None  # m4b_readmission hook: the job id that runs next, or None
         self.m4b_working_clear = None  # MergeService hook: job id -> True once no prior audio working files remain
         self.repair_check_failed = None  # MergeService hook: job id -> raw text when its check could not finish, else None
@@ -286,6 +305,8 @@ class AudioJobs:
         self._check_progress = None
         with self._db() as db:
             db.execute("CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
+            destination_admission.ensure(db)
+            db.execute('CREATE TABLE IF NOT EXISTS audio_retry_intents(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS audio_repair_admissions(parent_job_id TEXT PRIMARY KEY,child_job_id TEXT UNIQUE NOT NULL,binding TEXT NOT NULL,created TEXT NOT NULL)')
             # Status reads look jobs up by state and a book's newest job by candidate; both scanned every manifest.
             db.execute('CREATE INDEX IF NOT EXISTS audio_jobs_state ON audio_jobs(state)')
@@ -429,7 +450,7 @@ class AudioJobs:
             except Exception:
                 continue  # resume() repeats this exact check before any new work
 
-    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None):
+    def enqueue(self, manifest, *, approval_context=None,replacement_context=None,repair_context=None,retry_context=None):
         """Freeze JSON-safe authoritative server manifest. Never HTTP path input."""
         frozen = json.loads(json.dumps(manifest, ensure_ascii=False, allow_nan=False))
         if not isinstance(frozen, dict):
@@ -452,9 +473,12 @@ class AudioJobs:
                 raise ValueError("Source requires SHA256 identity")
         encoded = json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        import reacquire_sources
+        with self._db() as db:reacquire_sources.require_admission(db,frozen['candidate_id'])
         with self._lock:
             if self._closed:
                 raise RuntimeError("Queue is closed")
+            if retry_context is not None and (approval_context is not None or replacement_context is not None):raise ValueError('Explicit retry cannot replace another approval boundary')
             if repair_context is not None and (approval_context is not None or replacement_context is not None):
                 raise ValueError('Repair admission cannot replace another approval boundary')
             existing = self._rows("SELECT * FROM audio_jobs WHERE job_id=?", (frozen["job_id"],))
@@ -465,6 +489,7 @@ class AudioJobs:
                     frozen["job_id"] = existing[0]["job_id"]
                     digest = existing[0]["manifest_hash"]
             if existing:
+                if retry_context is not None:raise ValueError('Explicit retry already has bound work')
                 if repair_context is not None:raise ValueError('Repair UUID is already bound; inspect its relation instead')
                 if replacement_context is not None:raise ValueError('Replacement UUID is already bound; inspect its relation instead')
                 if approval_context is not None:raise ValueError("Automatic candidate already has a bound job")
@@ -478,9 +503,26 @@ class AudioJobs:
                 return frozen["job_id"]
             timestamp = _now()
             with self._db() as db:
+                if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
+                reacquire_sources.require_admission(db,frozen['candidate_id'])
+                if retry_context is not None:
+                    parent,group,context=retry_context[:3]
+                    expected_destination=retry_context[3] if len(retry_context)>3 else None
+                    if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
+                    if expected_destination and (not self.destination_policy or destination_admission.current(db,parent,self.destination_policy())!=expected_destination):raise ValueError(destination_admission.STALE)
+                    actual=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],)).fetchone()
+                    if not actual or dict(actual)!=parent or parent['state']!='needs attention' or parent['output'] or 'publication_intent' in json.loads(parent['journal']):raise ValueError('Failed retry parent changed')
+                    latest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC,job_id DESC LIMIT 1",(frozen['candidate_id'],)).fetchone()
+                    if not latest or latest[0]!=parent['job_id']:raise ValueError('Retry candidate has newer work')
+                    current_group=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(frozen['candidate_id'],)).fetchone()
+                    current_context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(frozen['candidate_id'],)).fetchone()
+                    if not current_group or tuple(current_group)!=group or not current_context or tuple(current_context)!=context:raise ValueError('Approved retry evidence changed')
+                    binding=frozen.get('retry_intent')
+                    if not isinstance(binding,dict) or binding.get('parent_job_id')!=parent['job_id'] or binding.get('parent_manifest_hash')!=parent['manifest_hash']:raise ValueError('Explicit retry parent binding missing')
+                    db.execute('INSERT INTO audio_retry_intents VALUES(?,?,?,?)',(parent['job_id'],frozen['job_id'],json.dumps(binding,sort_keys=True),timestamp))
                 if repair_context is not None:
                     parent,group,context=repair_context
-                    db.execute('BEGIN IMMEDIATE')
+                    if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
                     actual=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],)).fetchone()
                     if not actual or dict(actual)!=parent or parent['state']!='needs attention' or parent['output'] or 'publication_intent' in json.loads(parent['journal']):
                         raise ValueError('Failed parent changed; repair admission cancelled')
@@ -497,7 +539,7 @@ class AudioJobs:
                 if replacement_context is not None:
                     if approval_context is not None:raise ValueError('Replacement and automatic approval cannot be combined')
                     store,binding=replacement_context
-                    db.execute('BEGIN IMMEDIATE')
+                    if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
                     store.admission(db,frozen,binding)
                 if approval_context is not None:
                     # Only the private automatic caller provides this exact checked context.
@@ -506,7 +548,7 @@ class AudioJobs:
                     if not expected.get('automatic_pending') or not expected.get('metadata_approved'):raise ValueError('Automatic approval checkpoint missing')
                     delta=dict(expected);delta.pop('automatic_pending',None);delta['automatic_approval']=approved.get('automatic_approval')
                     if delta!=approved or not isinstance(delta['automatic_approval'],dict):raise ValueError('Unexpected automatic approval mutation')
-                    db.execute('BEGIN IMMEDIATE')
+                    if not db.in_transaction:db.execute('BEGIN IMMEDIATE')
                     group=db.execute('SELECT revision FROM book_groups WHERE id=?',(id,)).fetchone()
                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
                     if not group or not context or group[0]!=revision or context[0]!=revision or json.loads(context[1])!=expected:raise ValueError('Automatic approval checkpoint changed')
@@ -675,6 +717,8 @@ class AudioJobs:
             shapes = {row['job_id']: self._retry_shape(db, row, latest) for row in rows}
             import m4b_readmission
             readmission = m4b_readmission.status(db, [row['job_id'] for row in rows]) if rows else {}
+        import reacquire_sources
+        with self._db() as db:reacquire={row['job_id']:reacquire_sources.project(db,row['job_id']) for row in rows}
         summary = {}
         worker = bool(self._thread and self._thread.is_alive())
         for row in rows:
@@ -718,6 +762,8 @@ class AudioJobs:
             if refusal:
                 group, cause, check = retry_refusal.group(refusal), None, None  # precedence: a current refusal first
             value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
+            remedy=source_remedy(row,journal,manifest)
+            if remedy and value['originals_untouched']:value['remedy']=remedy
             if check in ('pending', 'unavailable', 'passed'):
                 value['precheck'] = check
                 if check == 'unavailable':
@@ -761,7 +807,23 @@ class AudioJobs:
                         offer = value.get(key)
                         if isinstance(offer, dict) and offer.get('reason') in (RETRY_FILES_PRESENT, REPAIR_FILES_PRESENT):
                             value[key] = {'allowed': True, 'reason': ''}
+            if self.destination_policy:
+                try:
+                    with self._db() as destination_db:destination=destination_admission.current(destination_db,row,self.destination_policy())
+                except (ValueError,sqlite3.Error,KeyError,TypeError):
+                    destination=None
+                    with self._db() as destination_db:stale=destination_db.execute('SELECT 1 FROM audio_destination_holds WHERE job_id=?',(row['job_id'],)).fetchone()
+                    if stale:
+                        value['destination_review']={'schema':destination_admission.SCHEMA,'state':'stale','can_retry':False,'reason':destination_admission.STALE};value.pop('retry',None)
+                if destination:
+                    destination['can_retry']=bool(shapes[row['job_id']] is not None and value.get('retry',{}).get('allowed') is True and row['attempt_id'] is None)
+                    value['destination_review']=destination
             if row['job_id'] in readmission:value['readmission'] = readmission[row['job_id']]  # queued_next + position, or a refusal reason
+            if readmission.get(row['job_id'],{}).get('state')=='queued':
+                value={'group':'checking','cause':None,'originals_untouched':value.get('originals_untouched',False),'readmission':readmission[row['job_id']],'retry_wait':True}
+
+            if reacquire.get(row['job_id']):
+                value={'group':'reacquire','cause':None,'originals_untouched':True,'reacquire':reacquire[row['job_id']]}
             summary[row['job_id']] = value
         return summary
 
@@ -793,6 +855,8 @@ class AudioJobs:
                 raise RetryRefused(RETRY_BOOK_CHANGED)
             row = rows[0]
             with self._db() as db:
+                import reacquire_sources
+                reacquire_sources.require_admission(db,candidate_id)
                 manifest = self._retry_shape(db, row)  # E1-E7
                 cause = failure_cause(row, json.loads(row['journal'])) if manifest is not None and 'failure' in json.loads(row['journal']) else 'files'
                 group = None
@@ -815,6 +879,8 @@ class AudioJobs:
         with self._lock:
             refuse_if_closing()
             with self._db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                reacquire_sources.require_admission(db,candidate_id)
                 changed = db.execute(
                     "UPDATE audio_jobs SET state='pending', stage='queued', reason=?, updated=? WHERE job_id=? AND state='needs attention' AND output IS NULL"
                     " AND attempt_id IS ? AND journal=? AND manifest=? AND manifest_hash=? AND reason=? AND stage=? AND updated=?",
@@ -823,48 +889,65 @@ class AudioJobs:
                 raise RetryRefused(RETRY_JOB_CHANGED)
         return {'job_id': job_id, 'requeued': True}
 
-    def resume(self):
-        """Re-check every published book, then start the worker.
+    def resume(self,admission_check=None,admission_token=None):
+        """Check published outputs, then start under the original queue lock.
 
-        The check holds no lock, so Pause, Quit and status answer at once; either one during the check
-        wins and nothing starts. Unchanged books pass on their verified file identity; any other book is
-        hashed in full before the worker starts.
+        A guarded stale start cannot undo a completed Pause. No Merge lock is acquired
+        by admission_check, and published-output hashing remains outside the queue lock.
         """
+        def permitted():
+            if admission_check is not None and admission_check() is not True:
+                raise StartRefused('stale','This start was superseded by Pause or closing. Retry Start after pending checks stop.')
+        def answer(kind):
+            value=self.status()
+            if admission_check is not None:value['start_admission']={'state':kind,'generation':admission_token}
+            return value
         with self._lock:
-            if self._closed:
-                raise RuntimeError("Queue is closed")
-            self._verify_stop.set()  # This resume runs the published-output check itself.
-            if self._thread and self._thread.is_alive() or self._resuming:
-                return self.status()
-            self._resuming = True
+            if self._closed or self._drain.is_set():raise StartRefused('closing','The audiobook queue is closing; saved requests are retained.')
+            permitted()
+            self._verify_stop.set()
+            if self._thread and self._thread.is_alive():
+                if admission_check is not None and self._stop.is_set():raise StartRefused('busy','The previous audiobook worker is still pausing. Retry Start after it stops.')
+                return answer('running')
+            if self._resuming:
+                if admission_check is not None and getattr(self,'_resuming_token',None)!=admission_token:
+                    raise StartRefused('busy','A previous start is still reaching its pause checkpoint. Retry Start after it stops.')
+                return answer('checking')
+            self._resuming=True;self._resuming_token=admission_token
             self._stop.clear()
-            stop = _Any(self._stop, self._drain)
+            stop=_Any(self._stop,self._drain)
         try:
-            changes = []
+            changes=[]
             try:
-                rows = self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
-                for index, row in enumerate(rows):
+                rows=self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
+                for index,row in enumerate(rows):
+                    permitted()
                     if stop.is_set():
-                        return self.status()
+                        if admission_check is not None:raise StartRefused('stale','Audiobook startup was paused; saved requests are retained.')
+                        return answer('paused')
                     with self._lock:
-                        started = self._check_progress['started'] if self._check_progress and self._check_progress['kind'] == 'start' else _epoch_ms()
-                        self._check_progress = {'kind': 'start', 'completed': index, 'total': len(rows), 'started': started}
-                    change = self._settle(row, True, stop)
-                    if change:
-                        changes.append((row, change))
+                        started=self._check_progress['started'] if self._check_progress and self._check_progress['kind']=='start' else _epoch_ms()
+                        self._check_progress={'kind':'start','completed':index,'total':len(rows),'started':started}
+                    change=self._settle(row,True,stop)
+                    if change:changes.append((row,change))
             except InterruptedError:
-                return self.status()
+                permitted()
+                if admission_check is not None:raise StartRefused('stale','Audiobook startup was interrupted; saved requests are retained.')
+                return answer('paused')
             with self._lock:
-                if self._closed or stop.is_set() or self._thread and self._thread.is_alive():
-                    return self.status()
+                permitted()
+                if self._closed or self._drain.is_set():raise StartRefused('closing','The audiobook queue is closing; saved requests are retained.')
+                if stop.is_set():
+                    if admission_check is not None:raise StartRefused('stale','Audiobook startup was paused; saved requests are retained.')
+                    return answer('paused')
+                if self._thread and self._thread.is_alive():return answer('running')
                 self._apply_unchanged(changes)
-                self._thread = threading.Thread(target=self._work, name="BooksArrangerAudioJobs", daemon=False)
+                self._thread=threading.Thread(target=self._work,name='BooksArrangerAudioJobs',daemon=False)
                 self._thread.start()
         finally:
             with self._lock:
-                self._resuming = False
-                self._check_progress = None
-        return self.status()
+                self._resuming=False;self._resuming_token=None;self._check_progress=None
+        return answer('started')
 
     def pause(self):
         with self._lock:
@@ -893,6 +976,8 @@ class AudioJobs:
             verifier.join(min(timeout, 5))
 
     def status(self):
+        import m4b_readmission
+        with self._db() as db:waiting_requests=m4b_readmission.pending_count(db)
         rows = self._rows("SELECT * FROM audio_jobs WHERE " + CURRENT + " ORDER BY created, job_id")
         counts = {"queued": 0, "completed": 0, "failed": 0}
         current = None
@@ -905,12 +990,17 @@ class AudioJobs:
         state = "Pausing" if running and self._stop.is_set() else "Running" if running else "Paused" if counts["queued"] else "Needs attention" if counts["failed"] else "Completed"
         with self._lock:
             check = copy.deepcopy(self._check_progress)
-        return {"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
+        if not running and not counts['queued'] and waiting_requests:state='Waiting for retry checks'
+        return {"retry_checks":{"waiting":waiting_requests,"worker":copy.deepcopy(self._priority_status)},"state": state, **counts, "published_check": check, "current_stage": current["stage"] if current else None, "current_job_id": current["job_id"] if current else None, "jobs": [{"job_id": row["job_id"], "state": row["state"], "stage": row["stage"], "attempt_id": row["attempt_id"], "reason": row["reason"], "manifest": json.loads(row["manifest"]), "output": json.loads(row["output"]) if row["output"] else None,"progress":copy.deepcopy(self._progress.get(row["job_id"]))} for row in rows]}
+
+    def report_priority(self,value):
+        with self._lock:self._priority_status=dict(value)
 
     def has_unfinished(self):
         """Same answer as scanning status()['jobs'] for pending/running rows, without loading every manifest."""
         with self._db() as db:
-            return db.execute("SELECT 1 FROM audio_jobs WHERE state IN ('pending','running') LIMIT 1").fetchone() is not None
+            import m4b_readmission
+            return db.execute("SELECT 1 FROM audio_jobs WHERE state IN ('pending','running') LIMIT 1").fetchone() is not None or m4b_readmission.pending_count(db)>0
 
     def _work(self):
         # Resume only explicitly paused durable postprocessing; never loop unclassified failures.
@@ -923,103 +1013,164 @@ class AudioJobs:
         while not self._stop.is_set() and not self._drain.is_set():
             # Retry/Repair clicks run right after the current book, in click order (m4b_readmission).
             try:priority = self.next_priority() if self.next_priority else None
-            except Exception:priority = None  # ordering only: the request keeps its place, the normal queue runs
+            except Exception as error:
+                self.report_priority({'state':'blocked','job_id':None,'reason':str(error) or type(error).__name__})
+                priority = None # Durable requests are kept; expose the actual failed admission.
             pending = (self._rows("SELECT * FROM audio_jobs WHERE job_id=? AND state='pending'", (priority,)) if priority else []) or self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
             if not pending: return
             row = pending[0]
-            job_id = row["job_id"]
-            manifest = json.loads(row["manifest"])
             try:
-                if self.before_attempt:self.before_attempt(copy.deepcopy(row))
-                self._archive_attempt(row)
+                boundary=self.attempt_boundary(copy.deepcopy(row)) if self.attempt_boundary else contextlib.nullcontext()
+                with boundary:proceed=self._work_attempt(row)
+            except destination_admission.DestinationReviewNeeded as error:
+                if not self._hold_destination(row,error.observation):
+                    self._stop.set();return
+                if self._stop.is_set() or self._drain.is_set():return
+                continue
             except Exception as error:
-                self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
+                self._update(row['job_id'],state='needs attention',reason='Working cleanup requires attention: '+str(error))
                 self._stop.set()
                 if self.on_working_hold:self.on_working_hold()
-                return  # No new attempt or source copy exists before admission.
-            attempt = str(uuid.uuid4())
-            journal = {"attempt_id": attempt, "history": []}
-            with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources","started":_epoch_ms()}
-            self._update(job_id, state="running", stage="checking sources", attempt_id=attempt, journal=json.dumps(journal), reason="")
-            def checkpoint(stage, details=None):
-                if stage == "checking_sources": stage = "checking sources"
-                if stage not in STAGES:
-                    raise ValueError("Unsupported job stage: " + str(stage))
-                if isinstance(details,dict) and 'progress' in details:
-                    measured=details['progress'];units=MEASURED.get(stage,{})
-                    if not isinstance(measured,dict) or measured.get('phase') not in units or measured.get('unit',units.get(measured.get('phase')))!=units[measured['phase']]:
-                        raise ValueError('Unsupported progress measurement')
-                    done,total=measured.get('completed'),measured.get('total')
-                    if type(done) not in (int,float) or type(total) not in (int,float) or not math.isfinite(done) or not math.isfinite(total) or total<=0 or not 0<=done<=total:
-                        raise ValueError('Invalid progress denominator')
-                    if ('item' in measured or 'items' in measured) and not (type(measured.get('item')) is int and type(measured.get('items')) is int and 1<=measured['item']<=measured['items']):
-                        raise ValueError('Invalid progress item')
-                    if 'fraction' in measured and not (type(measured['fraction']) in (int,float) and math.isfinite(measured['fraction']) and 0<=measured['fraction']<=1):
-                        raise ValueError('Invalid progress fraction')
-                    measured={key:measured[key] for key in ('phase','completed','total','unit','item','items','fraction') if key in measured}
-                    measured['unit']=units[measured['phase']]
-                    # Never wait for the queue lock: it can be held across catalog I/O (busy timeout), and an
-                    # FFmpeg drain thread blocked here fails the attempt. A dropped progress tick is harmless.
-                    if not self._lock.acquire(blocking=False):return
-                    try:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
-                    finally:self._lock.release()
-                    return
-                with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
-                entry = {"stage": stage, "at": _now(), "details": details}
-                if stage == "publishing":
-                    if self._stop.is_set(): raise InterruptedError("Paused before publication")
-                    if self.revision_guard(copy.deepcopy(manifest)) is not True:
-                        raise ValueError(REVISION_GUARD_REFUSAL)
-                    self._validate_record(details)
-                    if details["job_id"] != job_id: raise ValueError("Publication job identity mismatch")
-                    journal["publication_intent"] = copy.deepcopy(details)
-                journal["history"].append(entry)
-                self._update(job_id, stage=stage, journal=json.dumps(journal, ensure_ascii=False))
+                return
+            if proceed is False:return
+
+    def _hold_destination(self,expected,observation):
+        """Atomic admission refusal: immutable queue intent and journal stay exact."""
+        if self._closed or self._stop.is_set() or self._drain.is_set() or not self.destination_policy:return False
+        target=None;binding=None
+        try:
+            with self._lock,self._db() as db:
+                db.execute('PRAGMA synchronous=FULL');db.execute('BEGIN IMMEDIATE')
+                actual=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(expected['job_id'],)).fetchone()
+                if actual is None or dict(actual)!=expected or expected['state']!='pending' or expected['attempt_id'] is not None or expected['output'] is not None:return False
+                manifest=json.loads(expected['manifest']);journal=json.loads(expected['journal'])
+                if not isinstance(journal,dict) or 'publication_intent' in journal or destination_admission.digest(manifest)!=expected['manifest_hash']:return False
+                if destination_admission.observe(manifest,self.destination_policy())!=observation:return False
+                latest=db.execute("SELECT job_id FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND "+CURRENT+" ORDER BY created DESC,job_id DESC LIMIT 1",(manifest['candidate_id'],)).fetchone()
+                group=db.execute('SELECT revision,review,superseded FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                context=db.execute('SELECT revision FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
+                if latest is None or latest[0]!=expected['job_id'] or group is None or group['superseded'] or group['revision']!=manifest['candidate_revision'] or json.loads(group['review'])!=manifest['metadata'] or context is None or context['revision']!=group['revision']:return False
+                if self._closed or self._stop.is_set() or self._drain.is_set() or destination_admission.observe(manifest,self.destination_policy())!=observation:return False
+                target=dict(expected,state='needs attention',reason=destination_admission.REASON,updated=_now())
+                binding={'observation':observation,'pending_row_sha256':destination_admission.digest(expected),'held_row':target}
+                changed=db.execute("UPDATE audio_jobs SET state=?,reason=?,updated=? WHERE job_id=? AND state='pending'",(target['state'],target['reason'],target['updated'],expected['job_id']))
+                if changed.rowcount!=1:raise ValueError('Queued destination hold CAS failed')
+                db.execute('INSERT OR REPLACE INTO audio_destination_holds VALUES(?,?,?,?)',(expected['job_id'],expected['manifest_hash'],destination_admission.packed(binding),_now()))
+                if self._closed or self._stop.is_set() or self._drain.is_set() or destination_admission.observe(manifest,self.destination_policy())!=observation:raise ValueError('Pause or destination policy changed before hold commit')
+                db.commit()
+            with self._db() as db:
+                actual=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(expected['job_id'],)).fetchone()
+                saved=db.execute('SELECT binding FROM audio_destination_holds WHERE job_id=?',(expected['job_id'],)).fetchone()
+                return actual is not None and dict(actual)==target and saved is not None and json.loads(saved[0])==binding
+        except (ValueError,sqlite3.Error,OSError):return False # Unknown commit is not an acknowledged hold.
+
+    def _work_attempt(self,row):
+        """Exactly one prior work-loop body, inside its retained admission capability."""
+        job_id = row["job_id"]
+        manifest = json.loads(row["manifest"])
+        try:
+            import reacquire_sources
+            with self._db() as db:reacquire_sources.require_admission(db,manifest['candidate_id'])
+            if self.before_attempt:self.before_attempt(copy.deepcopy(row))
+            self._archive_attempt(row)
+        except Exception as error:
+            self._update(job_id,state='needs attention',reason='Working cleanup requires attention: '+str(error))
+            self._stop.set()
+            if self.on_working_hold:self.on_working_hold()
+            return False # No new attempt or source copy exists before admission.
+        attempt = str(uuid.uuid4())
+        journal = {"attempt_id": attempt, "history": []}
+        with self._lock: self._progress[job_id] = {"attempt_id":attempt,"phase":"checking sources","started":_epoch_ms()}
+        self._update(job_id, state="running", stage="checking sources", attempt_id=attempt, journal=json.dumps(journal), reason="")
+        def checkpoint(stage, details=None):
+            if stage == "checking_sources": stage = "checking sources"
+            if stage not in STAGES:
+                raise ValueError("Unsupported job stage: " + str(stage))
+            if isinstance(details,dict) and 'progress' in details:
+                measured=details['progress'];units=MEASURED.get(stage,{})
+                if not isinstance(measured,dict) or measured.get('phase') not in units or measured.get('unit',units.get(measured.get('phase')))!=units[measured['phase']]:
+                    raise ValueError('Unsupported progress measurement')
+                done,total=measured.get('completed'),measured.get('total')
+                if type(done) not in (int,float) or type(total) not in (int,float) or not math.isfinite(done) or not math.isfinite(total) or total<=0 or not 0<=done<=total:
+                    raise ValueError('Invalid progress denominator')
+                if ('item' in measured or 'items' in measured) and not (type(measured.get('item')) is int and type(measured.get('items')) is int and 1<=measured['item']<=measured['items']):
+                    raise ValueError('Invalid progress item')
+                if 'fraction' in measured and not (type(measured['fraction']) in (int,float) and math.isfinite(measured['fraction']) and 0<=measured['fraction']<=1):
+                    raise ValueError('Invalid progress fraction')
+                measured={key:measured[key] for key in ('phase','completed','total','unit','item','items','fraction') if key in measured}
+                measured['unit']=units[measured['phase']]
+                # Never wait for the queue lock: it can be held across catalog I/O (busy timeout), and an
+                # FFmpeg drain thread blocked here fails the attempt. A dropped progress tick is harmless.
+                if not self._lock.acquire(blocking=False):return
+                try:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
+                finally:self._lock.release()
+                return
+            with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
+            entry = {"stage": stage, "at": _now(), "details": details}
+            if stage == "publishing":
+                if self._stop.is_set(): raise InterruptedError("Paused before publication")
+                if self.revision_guard(copy.deepcopy(manifest)) is not True:
+                    raise ValueError(REVISION_GUARD_REFUSAL)
+                self._validate_record(details)
+                if details["job_id"] != job_id: raise ValueError("Publication job identity mismatch")
+                journal["publication_intent"] = copy.deepcopy(details)
+            journal["history"].append(entry)
+            self._update(job_id, stage=stage, journal=json.dumps(journal, ensure_ascii=False))
+        damage_assessment=None
+        attempt_closed=False
+        try:
             try:
-                try:
-                    if self.revision_guard(copy.deepcopy(manifest)) is not True:
-                        raise ValueError(REVISION_GUARD_REFUSAL)
-                    if self._stop.is_set(): raise InterruptedError("Paused before starting book")
-                    runner_manifest = copy.deepcopy(manifest)
-                    runner_manifest["attempt_id"] = attempt
-                    record = self.runner(runner_manifest, self._stop, checkpoint)
-                    intent = journal.get("publication_intent")
-                    if intent is None or record != intent:
-                        raise ValueError("Runner completion does not match durable publication intent")
-                    self._check_output(record)
-                    self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
-                except Exception as exc:
-                    # A publication boundary cannot be blindly reset to pending.
-                    if journal.get("publication_intent"):
-                        try:
-                            record = journal["publication_intent"]
-                            self._check_output(record)
-                            self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
-                        except Exception as validation_exc:
-                            self._update(job_id, state="needs attention", reason=str(validation_exc) or type(validation_exc).__name__)
-                    elif isinstance(exc, InterruptedError) and self._stop.is_set():
-                        self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
-                    else:
-                        failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
-                        journal['failure'] = _failure_details(exc, failure_stage)
-                        self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
-                        if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
-                            self._stop.set()
-                            if self.on_space_hold:self.on_space_hold()
-                            return  # Preserve the rest of the queue without producing more attempts.
-            finally:
-                if self.after_attempt:
-                    try:self.after_attempt(job_id,attempt)
-                    except Exception as cleanup_error:
+                if self.revision_guard(copy.deepcopy(manifest)) is not True:
+                    raise ValueError(REVISION_GUARD_REFUSAL)
+                if self._stop.is_set(): raise InterruptedError("Paused before starting book")
+                runner_manifest = copy.deepcopy(manifest)
+                runner_manifest["attempt_id"] = attempt
+                record = self.runner(runner_manifest, self._stop, checkpoint)
+                intent = journal.get("publication_intent")
+                if intent is None or record != intent:
+                    raise ValueError("Runner completion does not match durable publication intent")
+                self._check_output(record)
+                self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
+            except Exception as exc:
+                damage_assessment=getattr(exc,'source_damage_analysis',None)
+                # A publication boundary cannot be blindly reset to pending.
+                if journal.get("publication_intent"):
+                    try:
+                        record = journal["publication_intent"]
+                        self._check_output(record)
+                        self._update(job_id, state="completed", stage="completed", output=json.dumps(record), reason="")
+                    except Exception as validation_exc:
+                        self._update(job_id, state="needs attention", reason=str(validation_exc) or type(validation_exc).__name__)
+                elif isinstance(exc, InterruptedError) and self._stop.is_set():
+                    self._update(job_id, state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+                else:
+                    failure_stage = journal['history'][-1]['stage'] if journal['history'] else 'checking sources'
+                    journal['failure'] = _failure_details(exc, failure_stage)
+                    self._update(job_id,state='needs attention',journal=json.dumps(journal),reason=str(exc) or type(exc).__name__)
+                    if isinstance(exc,OSError) and exc.errno==errno.ENOSPC:
                         self._stop.set()
-                        latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
-                        if latest and latest[0]['state'] in {'pending','needs attention'}:
-                            self._update(job_id,reason=(latest[0]['reason']+'; ' if latest[0]['reason'] else '')+'Working cleanup requires attention: '+str(cleanup_error))
-                        if self.on_working_hold:self.on_working_hold()
-            if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
-                try:self.after_completed(job_id)
-                except InterruptedError:return
-                except Exception:pass # Durable postprocessing diagnostics preserve the completed audio row.
+                        if self.on_space_hold:self.on_space_hold()
+                        return False # Preserve the rest of the queue without producing more attempts.
+        finally:
+            if self.after_attempt:
+                try:
+                    self.after_attempt(job_id,attempt)
+                    attempt_closed=True
+                except Exception as cleanup_error:
+                    self._stop.set()
+                    latest=self._rows('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,))
+                    if latest and latest[0]['state'] in {'pending','needs attention'}:
+                        self._update(job_id,reason=(latest[0]['reason']+'; ' if latest[0]['reason'] else '')+'Working cleanup requires attention: '+str(cleanup_error))
+                    if self.on_working_hold:self.on_working_hold()
+        if damage_assessment is not None and attempt_closed and self.after_failed:
+            try:self.after_failed(job_id,attempt,damage_assessment)
+            except (ValueError,OSError):pass # No marker without exact supported assessment and closure.
+        if self.after_completed and self._rows('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,))[0]['state']=='completed':
+            try:self.after_completed(job_id)
+            except InterruptedError:return False
+            except Exception:pass # Durable postprocessing diagnostics preserve the completed audio row.
+
+        return True
 
 
 class _Connection:
@@ -1031,3 +1182,9 @@ class _Connection:
             else: self.connection.rollback()
         finally:
             self.connection.close()
+
+class StartRefused(RetryRefused):
+    """A saved request remains saved; this particular queue start was not admitted."""
+    def __init__(self,state,message):
+        super().__init__(message);self.start_state=state
+

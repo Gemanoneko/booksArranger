@@ -28,3 +28,11 @@ Read-only inspection of that test's retained plan also confirmed `scope_counts.u
 | native_io.py | e5e6aef41da64308215d10b636d6e583635b7e2476c7d90a7158d8ad4525dc14 |
 
 This slice changed only the new fixture and this evidence document. Product corrections belong to primary Ender. Entry/source/destination/kind/candidate/size/root mismatch controls are his operator tests, not claimed as additional coverage here. Successful private local OS flush is not a NAS hardware persistence promise or live deletion clearance. Formal QA, the unresolved combined heavy gate/native-owner membership limitation, independent compiler NO RESULT and full release review remain separate; this fixture does not close those gates.
+
+## Final-source primary verification
+
+Jane explicitly authorized primary Ender to repeat the single unchanged actual derived test after the planner gained durable verification-cache progress. Final source: migration_planning.py1a76c4d8a8af5623ae1b57ffa1eda6d839dc07bd647e6469174144d707558efc; migration_operation.pya12172b3cf98f7759d449c071d30793130fea4626a60cfc7c2feb8332f052cfb. Test unchangedb6d8d19d94298078db3407102190a4545f901f28e7744a10e9642e5ddccf7fe8. Result1/1PASS11.959s (owner elapsed12.362s), closedtrue, forcedfalse, active0/unsignaled0,58 retained native identities. The real uncached corrected chapter was selected, native-hashed, planned, freshly journal-authorized and actually moved by the concrete operator; immutable parent output/job/journal and source hashes remained unchanged. No live app/media operation or formal QA receipt is implied.
+
+Following Senua’s review, only the verification-deferred explanatory message changed; final planner SHA8ba34427605b0c2b93a279c1d1bf0276e9208f1ce3c93051946c77e59528cc2a. It explicitly avoids promising that replans finish an individually over-bound file. No algorithm, test or native contract changed, so the actual derived media test was not repeated for this text correction.
+
+After the accepted explicit preflight-selection addition, primary reran the unchanged actual derived case once:1/1PASS11.421s, owner elapsed11.817s, closedtrue/forcedfalse/native active0/unsignaled0/58 retained. Final operatione8d247893dbe1b1a3657c7f5da6321971993272e09cc97f9b14b20fb77d018bc and planningaefd085b9c2cfdcf3a9aa483b0133ca780a0c8b2a7bcf24b3b8c221525708e3b. No live action/formal receipt.

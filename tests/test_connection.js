@@ -10,7 +10,7 @@ function make(id=''){
     insertAdjacentElement(_where,child){nodes.set(child.id,child);}};
 }
 function node(id){if(!nodes.has(id))nodes.set(id,make(id));return nodes.get(id);}
-for(const name of ['original_language','title','author','canonical_author','narrator','series','number','genre','topic','multi_author','anthology'])fields.set(name,{value:'',checked:false,options:[{}],append(value){this.options.push(value);}});
+for(const name of ['original_language','title','author','canonical_author','narrator','universe','series','number','genre','topic','multi_author','anthology'])fields.set(name,{value:'',checked:false,options:[{}],append(value){this.options.push(value);}});
 node('review-form').elements={namedItem:name=>fields.get(name)};
 const clean={path:'C:/fixture/book.mp3',kind:'audiobook',size:10,modified:'2000000000000000001',error:'',missing:0,metadata:{title:'Existing',tags:{}},preview:{reason:'Needs review',path:''},review:null};
 const bad={...clean,path:'C:/fixture/bad.mp3',error:'Source metadata read failed',preview:{reason:'Source metadata read failed',path:'',confidence:'Read error'}};

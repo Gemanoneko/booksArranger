@@ -52,7 +52,9 @@ def ordinary(path):
 
 class DirectoryBoundary:
     """Hold ancestor directory handles without write/delete sharing during publication."""
-    def __init__(self,root,parent,create=False):
+    def __init__(self,root,parent,create=False,*,writable_parent=False):
+        if type(writable_parent) is not bool:raise BoundaryError('Writable parent capability must be explicit')
+        self.writable_parent=writable_parent
         self.root=ordinary(root);self.parent=ordinary(parent);self.create=create
         self.handles=[];self.identities=[]
         try:self.parent.relative_to(self.root)
@@ -74,7 +76,8 @@ class DirectoryBoundary:
                 # OPEN_REPARSE_POINT prevents transparently following a swapped reparse entry.
                 # READ_ATTRIBUTES alone does not participate in Windows sharing
                 # checks. LIST_DIRECTORY makes deny-delete sharing effective.
-                handle=kernel.CreateFileW(str(current),0x81,1,None,3,0x02000000|0x00200000,None)
+                access=0x81 | (0x40000000 if self.writable_parent and index==len(parts)-1 else 0)
+                handle=kernel.CreateFileW(str(current),access,1,None,3,0x02000000|0x00200000,None)
                 if handle==ctypes.c_void_p(-1).value:
                     raise BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(ctypes.get_last_error())}')
                 self.handles.append(handle)

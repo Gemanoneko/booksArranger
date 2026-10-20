@@ -162,14 +162,25 @@ class AutomaticProcessing:
         failure=self.volatile_failure
         if failure and failure['diagnostic'].get('candidate_id') in result:result[failure['diagnostic']['candidate_id']]['state']='Needs attention'
         return result
+    def _candidate_root(self,row):
+        if row.get('source_root'):return row['source_root']
+        sources=self.inventory.source_roots('Audiobooks') if hasattr(self.inventory,'source_roots') else (self.inventory.roots['Audiobooks'],)
+        if len(sources)==1:return sources[0]
+        return self.inventory.source_root_for_path(row['members'][0]['path'])
+
     def candidate(self,row):
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
+        return {'state':r['state'],'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
     def _refresh_wait(self,row,previous):
+        from source_identity import LOCAL_SOURCE_GATE_VERSION
+        if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
+            # Narrow policy invalidation only. The normal worker still respects editing leases,
+            # saved drafts, source revalidation and all metadata/media admission gates.
+            return dict(previous,retry_at=None)
         if previous and previous['state']=='Held' and previous.get('research_version')!=RESEARCH_VERSION:return dict(previous,retry_at=None)
         if not previous or previous['state']!='Waiting for source' or not previous.get('wait'):return previous
         if previous.get('research_version')!=RESEARCH_VERSION:
@@ -413,7 +424,7 @@ class AutomaticProcessing:
         if type(active) is not bool:raise ValueError('Draft activity must be an explicit boolean')
         with connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE')
-            row=db.execute('SELECT revision FROM book_groups WHERE id=? AND root=? AND superseded=0',(id,self.inventory.roots['Audiobooks'])).fetchone()
+            row=db.execute('SELECT revision FROM book_groups WHERE id=? AND root=? AND superseded=0',(id,self.inventory.source_root_for_candidate(id) if hasattr(self.inventory,'source_root_for_candidate') else self.inventory.roots['Audiobooks'])).fetchone()
             if not row or row['revision']!=revision:raise ValueError('Candidate changed; reload before editing')
             if active:db.execute('INSERT OR REPLACE INTO automatic_manual_drafts VALUES(?,?,?)',(id,revision,time.time()+300))
             else:db.execute('DELETE FROM automatic_manual_drafts WHERE id=?',(id,))
@@ -460,7 +471,7 @@ class AutomaticProcessing:
             # refreshed observed paths; do not expand discovery or inherit approval.
             with connect(self.database) as db:
                 marks=','.join('?' for _ in old_paths)
-                groups=db.execute(f"SELECT DISTINCT g.* FROM book_groups g,json_each(g.evidence,'$.members') m WHERE g.root=? AND g.superseded=0 AND json_extract(m.value,'$.path') IN ({marks})",(self.inventory.roots['Audiobooks'],*old_paths)).fetchall()
+                groups=db.execute(f"SELECT DISTINCT g.* FROM book_groups g,json_each(g.evidence,'$.members') m WHERE g.root=? AND g.superseded=0 AND json_extract(m.value,'$.path') IN ({marks})",(self._candidate_root(row),*old_paths)).fetchall()
             covered=[];replacements=[]
             for group in groups:
                 members=json.loads(group['evidence'])['members'];paths=[m['path'] for m in members]
@@ -586,12 +597,29 @@ class AutomaticProcessing:
                   try:
                       research_failed=True
                       row['_research_attempt']=previous.get('research_attempt',0) if previous else 0
-                      result=self.research.lookup(row,self.inventory.roots['Audiobooks'],self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
+                      import manual_metadata
+                      with connect(self.inventory.database) as db:row['_manual_metadata_sources']=manual_metadata.records(db,row)
+                      result=self.research.lookup(row,self._candidate_root(row),self.stop_event,lambda source,stage:self._progress(row['title_clue'],source,stage))
                   except ValueError:
                       # Unsupported input or malformed public evidence holds only this candidate.
                       result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
                   research_failed=False
                   if self.stop_event.is_set():raise InterruptedError()
+                  # Human choices are scoped constraints; a matching researched draft
+                  # may discharge only the exact manual/provider conflict hold.
+                  # Other source/identity reasons and normal admission proofs remain.
+                  if hasattr(getattr(self.merge,'reviews',None),'metadata_questions'):
+                      import metadata_choices
+                      question_row=dict(row,automatic=result)
+                      questions=self.merge.reviews.metadata_questions(question_row,self.merge.reviews._context(row))
+                      try:metadata_choices.admission(questions,result.get('review') or {})
+                      except ValueError as error:
+                          result['reasons']=list(dict.fromkeys(result.get('reasons',[])+[str(error)]))
+                          result['metadata_holds']=list(result.get('metadata_holds',[]))+[{'cause':'metadata_choice_required','reason':str(error)}]
+                      else:
+                          if questions.get('questions'):
+                              result['reasons']=[reason for reason in result.get('reasons',[]) if reason!='Saved manual metadata disagrees with researched identity']
+                              result['metadata_holds']=[hold for hold in result.get('metadata_holds',[]) if hold.get('reason')!='Saved manual metadata disagrees with researched identity']
                   deferrals=(previous or {}).get('gap_deferrals',0)
                   if not result.get('reasons') and result.get('gap_wait') and deferrals<GAP_DEFER_LIMIT and not self._idle_jobs():
                       # The converter has work, so waiting for an optional field costs no throughput.

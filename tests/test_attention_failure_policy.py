@@ -179,5 +179,17 @@ class RationalPresentationTests(unittest.TestCase):
         self.assertEqual(evidence['relative_packet_timing']['packet_count'],1)
 
 
+class SourceRemedyTests(unittest.TestCase):
+    def test_exact_single_source_decode_failure_exposes_retained_path(self):
+        from audio_jobs import source_remedy
+        row={'reason':'Full audio decode failed: Header missing'}
+        journal={'failure':{'exception_class':'ValidationError','stage':'checking sources'}}
+        manifest={'sources':[{'path':'Z:/Audio/Железная.mp3','sha256':'a'*64}]}
+        self.assertEqual(source_remedy(row,journal,manifest),{'kind':'replace_source','cause':'source_decode_failed','path':'Z:/Audio/Железная.mp3','sha256':'a'*64,'original_retained':True})
+        for changed in ({'sources':manifest['sources']*2},{'sources':[{'path':'Z:/Audio/book.m4b'}]}):self.assertIsNone(source_remedy(row,journal,changed))
+        self.assertIsNone(source_remedy(row,{'failure':{'exception_class':'ValidationError','stage':'checking output'}},manifest))
+        self.assertIsNone(source_remedy({'reason':'Other decode failure'},journal,manifest))
+
+
 if __name__ == '__main__':
     unittest.main()
