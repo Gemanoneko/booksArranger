@@ -44,3 +44,27 @@ Key pins: diagnostic-capture.mjs `f8ffb06bfcb015f2bf7e1458419d6b6544cb8411fc9d30
 Candidate NEW UUIDe275bbfc-db1a-42fd-ae91-907ba2848c27/roots/plan SHA256 `b22ff69edc403c22cff740d642ea135760d65a1fe067126812c6d3193872b14d` stays disabled/unadmitted; no one-group execution accepted at these source pins. After the finite reserve correction, regenerate source/plan pins and return for a small scoped source check before enabled-plan/literal-invocation delta review. This is not permission to retry old group0980, subdivide it, query PIDs, clean artifacts or compile. Old native fault/closure remains UNKNOWN; old compiler NO RESULT is unchanged.
 
 Only this separate review document appended; pin before source fix cites it. No new Critical/safety-floor issue identified in the narrowed diagnostics-only delta, but Major remains open. No native/compile/runtime/deployment/formal QA/release clearance. Session evidence preserved.
+
+
+## Reserve correction source checkpoint — conditional new private fixture
+
+Scope: static source-only re-review of packet `92bab5252214af2561405a7441d3bf5b8a62f1eec3887fa1c307068eabfb3683` under pinned ruling `1ef7c0b7decb5b5a90504bafc7a8eb3fa47bcf9f`. No tests, process, native probe, compiler or fixture were executed by this reviewer. All 21 source hashes and the test-wrapper hash matched before/after this checkpoint; final sizes and captured filesystem identities/mtime also matched the packet. Developer reports diagnostic40/owner33/plan14/contracts49 pure controls; these do not establish native behavior.
+
+**Resolved Major: full-timeout diagnostic reserve.** The observer now passes fixed `OUTER_OWNER_TIMEOUT_MS=570000` to the unchanged owner within its original absolute 600000ms envelope. The controller derives inner remaining time from that same absolute deadline minus30000 outer reserve minus10000 existing inner reserve; its20s/4s case caps remain. Capture still requires strictly before deadline−2000; delayed OS return, excessive teardown or synchronous IO can exhaust that margin and must refuse rather than extend the deadline or manufacture a successful capture. This is a nominal positive reserve, not a guarantee against OS stalls. Pure clock controls exercise configured timeout returns at570000/572000, capture before validation, and no namespace/write at598000. The unchanged uncertain-owner path retains leases until original outer termination.
+
+Own undefined values now refuse the detailed serializer and yield a fixed nonauthoritative capture_failed record; the concrete pre-spawn own pid:undefined test verifies no invented PID/null or detailed-result retention claim. Existing native write/readback/close failures and overrun remain refusal paths. No new Critical, Major or safety-floor finding was identified in these four changed files under the previously accepted engineering boundary.
+
+Exact changed source pins:
+
+| Source | SHA256 |
+| --- | --- |
+| diagnostic-capture.mjs | `75f5adce3980028c93e0e9ebbad178a4543d0d669507e91d465a21a6cf4cfaca` |
+| diagnostic-capture-checks.mjs | `233d2a55f4976c664ba0e485a79a1ff0fe045ab03fddcf0f5110c88fb13efd6e` |
+| native-fixture-observer.mjs | `fc9c82e32c99f6de5d701f984b333372284807e9827aa4bf131df4e3e72fbb3f` |
+| native-fixture-controller.mjs | `dd6c2535cdc9330302a6dc946cd42952174471b7845a81b248aa0d5c5e6fa106` |
+
+Engineering-owner remains `f7b9db56437eca8f607e66d01ef7edd1877f586dbfac9a05d7b90b02fa384a1f`; test wrapper `52234f6645b3ed9c80edf5f025821c4efe9334aac38fe47c732a87236d060f50`. Candidate `native-fixture-reserve-candidate-plan.json` SHA256 `60ed0658c87c464a41fcb0741d897bf927fadb55b83e93e06fbeb12d72b7be85` has all21 exact source pins, compiler/new_binary/global_changes/reuse=false, execute_reviewed=false and admission zeros. Its new UUID is `bc2a3b11-0186-416c-93f7-2a7d483ca903`; distinct controller and diagnostic leaf paths are plan-bound and currently absent on this read-only check.
+
+**Conditional next step:** one coherent NEW private native fixture group is acceptable only after Sully pins this ruling and a final enabled-plan delta is independently checked: change execute_reviewed totrue, admission SHA to the exact pinned review bytes, descriptive purpose only; keep all other plan fields/source/runtime pins fixed. Review the exact enabled-plan SHA/path and default-PowerShell argv before Jane instructs execution. Use the literal installed Node, fixed observer, --plan and --plan-sha arguments, shell field omitted, same studio cwd/login=false/yield10000/max2000; poll only the returned session. A guard/entry refusal, group failure, absent final record, uncertain closure, IO overrun or native cross-close identity drift means STOP without retry, process cleanup or compiler admission. Native root ownership, full128 identity, closure, EOF and actual last-write behavior remain unrun questions.
+
+Startup before Job remains explicitly trusted, unbounded engineering startup. The600000 assigned-work/closure contract is unchanged; no immutable sandbox, whole-startup timing, formal QA, release, global deployment or production-media approval is given. Original0980 group closure stays UNKNOWN and original compiler NO RESULT stays unresolved; no retroactive inference or old-arena reuse. Bound QANativeLauncher_Review SHA `c194d747ea3546beeb5603db3d7539ce9a2ac73d5a53d8cbb44388c23ca73539` was verified unchanged and is not edited here. Freeze this separate review’s eventual admission bytes through the new group.
