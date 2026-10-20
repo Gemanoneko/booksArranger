@@ -1,0 +1,39 @@
+# Continuously retained process-object identity — new contract proposal
+
+2026-10-20, Ender. NEW AUTHORITY-CONTRACT AMENDMENT for independent Senua review. Not an implementation bug fix, AccessDenied exception, missing-image admission, error fallback or invocation approval. No source/native/process/probe/retry/global change.
+
+## Actual e275 facts and limits
+
+C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/native-fixture-diag-e275bbfc-db1a-42fd-ae91-907ba2848c27/owner-result.json SHA256 5dba11e40ecd2f81fbc175e300e2deb971b2dd7b478afa6cb8ba833f0738946d. This outer owner e3d98848-b79d-485c-a3e6-74817566e47d actually returned closed:true, active0/retained14/unsignaled0/zero:true; SAME-instance evidence is identical, closed:true/failure:null/close_errors[]. Group still FAIL: okfalse/forcedtrue/code:null/reason Native executable image query failed; no inner result or completed case group. This does not close any older unknown group.
+
+First saved failure: retained-final PID77132, rights0x101000, creation134369759201794286 equal to admission, image-query error5. Bound owner source f77ffc7506e9c463c13ec43c99b0e97ec988d26c2168d13e566ce162e51091df routes that diagnostic through the nonsignaled retained-final branch, so the preceding sampled wait was false. That is a source-backed branch inference, not a saved second wait. The later terminal close proof is later and after forced cleanup; it cannot establish spontaneous exit, exact transition timing or cause at the failure. AccessDenied does not establish exit or justify ignoring a missing initial image.
+
+## Documented support, and what is deliberately NOT claimed
+
+[Microsoft process termination](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process) describes process-object signaling and retained-handle object lifetime. [GetProcessId](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocessid) and [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes) address the object selected by that process handle. [WaitForSingleObject](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject) reports its sampled state and forbids concurrent close during a wait. These support identity of a continuously retained object independently of when its state changes.
+
+[QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew) returns an executable image NAME. A name/path query is not loaded-code integrity. This proposal does NOT assume the pathname can never change or that initial path proves current bytes/modules/security state. The evidence must say image_path_at_admission, not fresh/current image. If policy requires current pathname revalidation as an independent security property, this amendment is insufficient and must be rejected; do not silently remove that requirement. Runtime/source leases and initial fixed-image consumer policy stay independently mandatory.
+
+## Recommended minimum finite amendment
+
+1. Initial supervisor and EVERY newly acquired member keep FULL successful fresh native image/PID/positive uint64creation and exact original Job membership on the SAME original handle. Fixed supervisor/consumer image policy stays. No old JSON/plan/cached name substitutes for that admission. Initial/new-member image failure of ANY code remains hard refusal; rejected handles never gain termination eligibility.
+
+2. After successful admission, identity of that process object is its lexical continuously retained native handle, reconfirmed by fresh GetProcessId/GetProcessTimes creation equal to the immutable admitted values. Use this SAME private retained-object identity primitive for live AND terminal retained samples. Do not query a new executable name as a prerequisite for already-admitted object identity. This is a deliberate change to the prior fresh-live-image floor, not an error-driven fallback. No QueryFullProcessImageName failure or error code triggers this branch.
+
+3. Preserve zero-time actual wait first. Listed+signaled remains a reuse/membership-race contradiction and refuses without PID reopen. Listed+nonsignaled retains exact current IsProcessInJob proof and complete active/list checks. Final loop reads actual sampled wait then fresh SAME-handle PID/creation in both branches; terminal requires list absence. An absent but nonsignaled retained object keeps unsignaled>0/zero:false; absence alone never proves termination. If state changes after the sampled wait, keep that sampled state; a later independent normal sample may observe terminal, never relabel the earlier observation. No local image-error retry/second-wait fallback.
+
+4. Keep object/provenance evidence explicit: image basis admission-image-continuously-retained-object for both states, actual wait_signaled, fresh pid_creation_confirmed, sample_list_absent and original admission identity. Bump the bounded proof version/consumer validation as needed; do not silently call it fresh-native-query or equate public JSON with native continuity. The same original owner instance and handle retain/close controls supply continuity, not an exported descriptive record.
+
+5. Handle substitution, transfer, premature/external close, closed-and-reopened numeric slot, PID/time mismatch, missing admitted image, wrong Job/owner, failed/unknown wait/PID/time/membership/count query remain refusals. No greater rights, OpenJobObject, numeric-PID authority, unrelated termination or cached full snapshot. Nativezero still requires current complete Jobactive0 plus ALL originally retained handles actually signaled and checked identity, complete EOF, original controller/supervisor correspondence and checked close. Keep output/deadline/570/600 bounds.
+
+## Finite implementation/review scope and matrix
+
+Project engineering-owner retained-object native helper/phase logic, new exact proof schema/validator, bounded serializer and exact consumer tests only; no initial admission/native ownership algorithm change. Sources owns controller/observer/plan files. Independent source ruling/pin precedes any edits; a fresh separately reviewed plan/argv precedes any actual fixture.
+
+Mandatory pure controls: valid initial image then continuously held live→terminal object with SAME handle/creation and actual sampled waits; no retained image call at all, even if image API would fail5/31; explicit admission-image basis. Initial/new image failure or missing admission image refuses. Live→exit between wait and PID/time keeps sampled live/zero:false until later independent sample. Invalid/PIDreused/changed FILETIME, transferred/replaced/closed handle, wrong owner/Job, signaled+listed, active list/count mismatch, wait/query/membership failure, partial EOF or close error refuse. Fixed-image admission mismatch still refuses. Verify unknown/missing/wrong proof basis rejected by serializer/normal+negative+final consumers; exact original result and close evidence agree. No actual run outcome is inferred from pure fakes.
+
+## Separate observed-image limit — no silent allowlist expansion
+
+Saved14-member native snapshot includes C:/Windows/System32/conhost.exe as well as fixed Node. Current observer line31 independently requires every observed image equal NODE. That consumer would therefore refuse such a completed snapshot even after the image-query issue is resolved. This note records the actual mismatch only: it does not establish why conhost exists or authorize it. Do not silently weaken the fixed-image rule while implementing retained-object identity. Any required fixed OS-helper contract needs separate bounded source/provenance review before another full group.
+
+Only this proposal documentation created. Current25 sources/runtime/reviews, app/catalog/media/global state and old evidence remain untouched.
