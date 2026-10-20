@@ -37,3 +37,22 @@ Prospective literal command template FOR REVIEW ONLY:
 CLI accepts precisely those2 arguments; deadline >now+2000 and <=now+60000. Actual numeric deadline, outer fixed owned-operation invocation, cwd/environment/source3hashes +existing Node/Koffi/OS trusted engineering runtime pins must be separately frozen/reviewed before execution. No command/probe has been invoked. The owner must reserve logging/teardown inside its existing absolute budget; no new route or global allowlist is supplied here. No durable receipt backend or scratch adoption is introduced; existing observer may capture stdout after its actual checkedclose.
 
 Next bounded step: independent source review of these3 files and exact later read-only collector request; then actual facts can be reviewed, and only then Sources may integrate immutable expected facts/private retained leases into observer+inner controllers. Pure/mock sharing controls do not prove Windows native sharing. Subsequent private native hardlink controls require their own admitted request and must never target System32. Current e275 remains groupFAILED with its own outerclosedtrue; earlier UNKNOWN groups/compiler NORESULT remain unresolved.
+
+
+## Pinned7034 correction checkpoint (supersedes prior47-source pins)
+
+Under implementation/review pin49dbf94e478608b892f428bb7fc249e202cdbe99, fixed the finite Major and both Minors. Discovery still returns descriptive proof/revalidate/close but acceptImage UNCONDITIONALLY refuses when expectedFacts was absent. Null/malformed/changed expected facts refuse acquisition. Only independently supplied, strictly validated and exactly matching expected facts enable private live acceptImage; root roles and expired/closed capabilities still refuse. The standalone collector always uses discovery, never expected facts.
+
+Strict own-data proof validation now rejects proxies before any trap operation (node:util types.isProxy), nonplain prototypes, symbol/extra/getter fields, proxy/subclass/sparse/extra-field arrays, native uint64 string overflow and uint32 attrs/link overflow without coercion. Revalidation/acquisition/image acceptance check the original2s reserve after the final full read; collector checks reserve after checkedclose. The injectable now function is a trusted pure-test seam, default Date.now; it grants no JSON/native authority and does not change deadlines or create retries.
+
+ONE fresh uncached pure-kernel run coordinated with Sources: consoleCompanionChecks65PASS and consoleDiscoveryChecks64PASS; native_executionfalse/newprocesses0/RNG0. Added discovery refusal/valid reviewed positive, null/malformed/digest mismatch, no-proxytrap/no-getter execution, symbol/prototype/array/nativeinteger bounds, final-EOF expiry and post-close expiry controls. Actual native/private hardlink/System32 operations remain unexecuted.
+
+Corrected frozen3file pins:
+
+| Path | Bytes | SHA256 |
+|---|---:|---|
+| scripts/qa-native/console-companion.mjs |6790|c10239fe8b2a7c60ebfc3da18620a79f64e3d84892c03503e593984bc8f3464d|
+| scripts/qa-native/console-companion-collector.mjs |5544|da38278d4735ca1a1f137720b7d8ce6f41434795e99631e216c407624ef034bd|
+| scripts/qa-native/console-companion-checks.mjs |8106|c23a8c1ae0bb60d90dac5702a010540d5c09ad7448e31b1d0542f3ff15ee3f56|
+
+Preserved exact export validateCompanionProof and CLI --deadline-unix-ms <exact13digitabsolute>. Output books-console-companion-collection-v1 fields facts/checked_close/limitations unchanged. Sources owns the separate fixed two-level observer/controller/request/source/runtime/owner/EOF joint-proof packet and actual numeric invocation; this helper document does not admit its execution. No existing25graph/application/global file was edited here. All original group statuses remain as previously recorded.
