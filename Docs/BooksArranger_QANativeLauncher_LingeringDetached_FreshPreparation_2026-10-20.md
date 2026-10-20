@@ -1,0 +1,19 @@
+# Lingering detached fixture: fresh disabled preparation candidate
+
+Planning/source review only; no preparation/native execution. One unchanged node:crypto.randomUUID call in the existing trusted tool kernel produced `5d82c043-03df-46d3-b1da-9fc798f189b5`. Exact kernel executable/version is unexposed; this public label grants no native identity. Scanned102existing owned planning JSON artifacts plus owned fixture-root names, excluding28recorded namespaces/labels including actual9b5 namespace, four labels and outer owner. Origin inventory is preserved; no registry or cleanup was introduced.
+
+Request `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/lingering-detached-fresh-preparation-request.json`20968bytes SHA `39bdf26b8a77f4aaef53b784590928cc04a4a7aa49e1dc28e40bd0af316ea0ca` remains execute_reviewed=false/admissionzero, with no inner labels. Its31-source graph differs from prior accepted request only at the two reviewed fixture sources; other29declared identities/hashpins match.95runtime entries and immutable expected OS facts remain unchanged. Added exact component review/amendment/source packet/research pins; replaced old group-origin input with new provenance. Output/controller/diagnostic targets are absent.
+
+The SAME exported preparation pre-RNG function read the actual complete request graph:148pins/108613823bytes, including the declared empty Koffi unions.md. Only read/stat IO capabilities were supplied: zero RNG/outputwrite/native/process calls during preflight. Prior request correctly refuses changed source size. Receipt `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/lingering-detached-fresh-readonly-preflight.json` SHA `5c9204948a7aa6bd3321da72fef67a6c09a424398244f3da4d4bf9e1a7003b79`.
+
+Senua component review `C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1/Docs/BooksArranger_QANativeLauncher_LingeringDetached_Source_Component_Review_2026-10-20.md` SHA `abd09d68549ff5fab06d2c83818fb23a2ffee00d7778da864011fd949f83111a` (root reports8b106d79) accepts the two-file amendment and prior9b5 same-object/checked-candidate-close component within unchanged5/runtime/contracts. This future group still needs all four actual cases and full companion/closure proof. Missing comparison diagnostic is UNEXERCISED IN THIS RUN; cite old scoped coverage separately, never claim recurrence or use it to waive a refused/uncertain group. Old9b5 staysFAIL; prior51innerUNKNOWN stays unchanged.
+
+Exact proposed preparation tool input (not invoked):
+
+```powershell
+& 'C:/Program Files/nodejs/node.exe' 'C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1/scripts/qa-native/prepare-fixture-owner-ids.mjs' --request 'C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/lingering-detached-fresh-preparation-request.json' --request-sha 39bdf26b8a77f4aaef53b784590928cc04a4a7aa49e1dc28e40bd0af316ea0ca
+```
+
+Omit shell; studio cwd; login=false; yield_time_ms10000; max_output_tokens2000. Inherited startup/imports/ordinary IO are trusted, not sanitized or native600000 bounded. Independent prep review/pin/Jane instruction required; generated disabled output and later native enabling/argv need separate reviews. No four-inner draws, process/native/probe/RNG retry/source/global/app/NAS/Git/compiler action occurred.
+
+Frozen packet `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/lingering-detached-fresh-preparation-packet.json` SHA `010b46f1096878b0be5c0d29922306057c7a01db8d532903c40426e137c2f546` contains all exactpins/proposedtoolinput/freshabsence/exclusions. Origin `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-native-fixture-plan-v1-VzIVqp/lingering-detached-fresh-group-origin.json` SHA `b7e06ece361641fd55c8504d6d08a3d029b38fd114ea798309a846abe9c1d6e3`.
