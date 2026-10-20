@@ -1,3 +1,4 @@
+import {validateV2InputBytes,V2_BINDING_KEYS,ownExact,canonicalData,strictJSON} from './launch-books-qa.mjs';
 /** Unimported PRE contract preparation. No process/native/host authority. */
 export const STUDIO='C:/Antigravity Projects/Studio Illuminati';
 export const SOURCE='C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1';
@@ -33,7 +34,7 @@ function executableSyntax(command){
 }
 function payload(raw){
   need(typeof raw==='string' && raw.length<=65536,'shape','Bounded literal input required');
-  let parsed;try{parsed=JSON.parse(raw);}catch{throw new AdmissionRefused('shape','Invalid request JSON');}
+  let parsed;try{parsed=strictJSON(Buffer.from(raw,'utf8'),65536);}catch{throw new AdmissionRefused('shape','Invalid request JSON');}
   return keys(keys(parsed,['tool_input']).tool_input,['cmd','workdir','login','yield_time_ms','max_output_tokens']);
 }
 // Identification only: this is NOT a trusted host decoder or Books admission.
@@ -69,29 +70,17 @@ export function classifyRequest(raw,{originalOwned=false}={}){
   if(booksArgument||inside(executable,SOURCE)||inside(executable,BASE)||(booksCwd&&(executor||/[;&|{}]/.test(data.cmd))))return {route:'deny',reason:'Unwrapped or unsupported wrapped Books operation',authority:false};
   return {route:'opaque-fallback',opaque_input:raw,authority:false};
 }
-export function validatePreRequest(raw,policy){
-  const data=payload(raw),p=keys(policy,['schema','enabled','operation','registry_sha256','context_sha256','source_sha256','runtime_sha256','bootstrap_sha256','manifest_sha256','watchdog_sha256']);
-  need(p.schema==='books-protected-admission-policy-v1' && p.enabled===true && p.operation==='entry','policy','Disabled/unsupported fixed operation');
-  for(const key of Object.keys(p).filter(key=>key.endsWith('_sha256')))need(typeof p[key]==='string' && HASH.test(p[key]),'policy','Invalid exact pin');
-  const expected="& '"+WATCHDOG+"' --registry-sha "+p.registry_sha256;
-  need(data.cmd===expected && data.workdir===STUDIO && data.login===false,'envelope','Wrong exact literal command/cwd/login');
-  need(data.yield_time_ms===10000 && Number.isSafeInteger(data.max_output_tokens) && data.max_output_tokens>0 && data.max_output_tokens<=100000,'envelope','Unsupported observation fields');
-  need(classifyRequest(raw).route==='watchdog-candidate','command','Not a watchdog candidate');
-  return Object.freeze({kind:'pre-validation-only',authority:false,watchdog:WATCHDOG,command:expected,registry_sha256:p.registry_sha256,context_sha256:p.context_sha256,source_sha256:p.source_sha256,policy:Object.freeze({...p}),observation:Object.freeze({yield_time_ms:data.yield_time_ms,max_output_tokens:data.max_output_tokens}),execution_bound_from_observation:false});
+export function validatePreRequest(raw,registration){
+ const data=payload(raw),r=keys(registration,['bytes','registry_sha256']),graph=validateV2InputBytes(r.bytes,r.registry_sha256);
+ const expected="& '"+WATCHDOG+"' --registry-sha "+graph.binding.registry_sha256;
+ need(data.cmd===expected&&data.workdir===STUDIO&&data.login===false,'envelope','Wrong exact fixed PowerShell command/cwd/login');need(data.yield_time_ms===10000&&Number.isSafeInteger(data.max_output_tokens)&&data.max_output_tokens>0&&data.max_output_tokens<=100000,'envelope','Observation fields do not establish a deadline');need(classifyRequest(raw).route==='watchdog-candidate','command','Unwrapped Books operation');return Object.freeze({kind:'pre-v2-raw-byte-validation-only',authority:false,binding:graph.binding,policy:graph.policy,command:expected,execution_bound_from_observation:false});
 }
-export function requireProductionAdmissionCapability(){throw new AdmissionRefused('native_contract_missing','Trusted hook/default-shell binding and protected native admission capability are unimplemented');}
+export function requireProductionAdmissionCapability(){throw new AdmissionRefused('native_contract_missing','Actual original-host streams/EOF/duration association and current protected V2 artifact proof are unavailable; production refuses');}
 export async function verifyProtectedAdmission(){return requireProductionAdmissionCapability();}
-/** Fixture-only dependency exercise; cannot return a host allow/result status. */
-export async function exercisePreBoundary(raw,policy,capabilities){
-  const intent=validatePreRequest(raw,policy),caps=keys(capabilities,['observeTrustedHost','freezeProtectedInputs','revalidateProtectedInputs','closeProtectedInputs']);
-  for(const fn of Object.values(caps))need(typeof fn==='function','capability','Missing fixture capability function');
-  let lease;
-  try{
-    const host=await caps.observeTrustedHost(raw);
-    need(host && host.defaultShell==='WindowsPowerShell' && host.requestLiteral===raw,'host','Fixture host binding mismatch');
-    lease=await caps.freezeProtectedInputs(intent);
-    need(lease && typeof lease==='object','capability','Missing fixture held input capsule');
-    need(await caps.revalidateProtectedInputs(lease,intent)===true,'input_drift','Fixture protected input drift');
-    return Object.freeze({kind:'fixture-pre-boundary-only',authority:false,production:false,canonical_runs:0});
-  }finally{if(lease)need(await caps.closeProtectedInputs(lease)===true,'close','Fixture held input closure failed');}
+const fixturePending=new WeakMap();
+export function consumeFixturePending(pending,expected){const held=fixturePending.get(pending);if(!held)throw new AdmissionRefused('replay','Missing/copied/already-consumed private fixture pending association');fixturePending.delete(pending);const wanted=ownExact(expected,V2_BINDING_KEYS);need(canonicalData(held.binding)===canonicalData(wanted),'binding','Private pending invocation/digests changed');return held;}
+/** Test-only private association. No actual host API or production permission is supplied. */
+export async function exercisePreBoundary(raw,registration,capabilities){
+ const intent=validatePreRequest(raw,registration),caps=keys(capabilities,['observeTrustedHost','freezeProtectedInputs','revalidateProtectedInputs','closeProtectedInputs']);for(const fn of Object.values(caps))need(typeof fn==='function','capability','Missing fixture capability');let lease;
+ try{const host=await caps.observeTrustedHost(raw);need(host&&host.defaultShell==='WindowsPowerShell'&&host.requestLiteral===raw&&typeof host.tool_use_id==='string'&&host.tool_use_id.length>0&&host.tool_use_id.length<=256,'host','Fixture host association missing');lease=await caps.freezeProtectedInputs(intent);need(lease&&typeof lease==='object','capability','Missing fixture lease');need(await caps.revalidateProtectedInputs(lease,intent)===true,'input_drift','Fixture protected input drift');const pending=Object.freeze(Object.create(null));fixturePending.set(pending,{binding:intent.binding,host,raw});return Object.freeze({kind:'fixture-pre-boundary-only',authority:false,production:false,pending});}finally{if(lease)need(await caps.closeProtectedInputs(lease)===true,'close','Fixture protected input close failed');}
 }

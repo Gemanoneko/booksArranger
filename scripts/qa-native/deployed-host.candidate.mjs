@@ -45,12 +45,7 @@ if (path.resolve(process.argv[1]??'') === fileURLToPath(import.meta.url)) {
 }
     const booksCommand=!route.owned&&(()=>{let input;try{input=JSON.parse(raw);}catch{return false;}const tool=input?.tool_input??{};return ['command','cmd'].some(key=>isBooksOperation(tool[key]));})();
     if(booksCommand){
-      const booksVerifier='C:/Program Files/BooksArranger-QA-v2/dispatch-books.mjs';
-      if(sha(fs.readFileSync(booksVerifier))!=='e7c74e5e9a86cbe53d2527b92ffb647db4864705451eb90c6ec0c861744441b2')throw Error('Books protected verifier drift');
-      const {verifyBooksGuard}=await import('file:///C:/Program%20Files/BooksArranger-QA-v2/dispatch-books.mjs');
-      const booksResult=await verifyBooksGuard(raw,{policySHA:'0000000000000000000000000000000000000000000000000000000000000000'});
-      if(booksResult?.status!==0||typeof booksResult.stdout!=='string'||typeof booksResult.stderr!=='string')throw Error('Books verification refused');
-      process.stdout.write(booksResult.stdout);process.stderr.write(booksResult.stderr);process.exitCode=booksResult.status;
+      throw Error('Books V2 candidate disabled: protected current artifact and real original-host result association are unavailable');
     }else{
     let result;
     if(route.owned){

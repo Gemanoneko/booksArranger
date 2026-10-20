@@ -1,9 +1,18 @@
-BOOKS_QA_REGISTRY_V1
+BOOKS_QA_REGISTRY_V2
 state=disabled
 node_sha256=0000000000000000000000000000000000000000000000000000000000000000
 bootstrap_sha256=0000000000000000000000000000000000000000000000000000000000000000
 operation=entry
-plan_path=C:\Users\AnGeLZzZ\AppData\Local\Temp\codex-books-2026-10-20\shared\qa-entry-context\NOT_APPROVED.json
+plan_path=C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-entry-context/NOT_APPROVED.json
 plan_sha256=0000000000000000000000000000000000000000000000000000000000000000
-source_root=C:\Antigravity Projects\Worktrees\Books Arranger\electron-m1
-run_parent=C:\Users\AnGeLZzZ\AppData\Local\Temp\codex-books-2026-10-20\shared\q
+source_root=C:/Antigravity Projects/Worktrees/Books Arranger/electron-m1
+run_parent=C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/q
+invocation_id=00000000-0000-4000-8000-000000000000
+context_path=C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-entry-context/NOT_APPROVED-context.json
+context_sha256=0000000000000000000000000000000000000000000000000000000000000000
+policy_path=C:/Program Files/BooksArranger-QA-v2/native-admission-policy.json
+policy_sha256=0000000000000000000000000000000000000000000000000000000000000000
+runtime_path=C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared/qa-entry-context/NOT_APPROVED-runtime.json
+runtime_sha256=0000000000000000000000000000000000000000000000000000000000000000
+source_sha256=0000000000000000000000000000000000000000000000000000000000000000
+watchdog_sha256=0000000000000000000000000000000000000000000000000000000000000000

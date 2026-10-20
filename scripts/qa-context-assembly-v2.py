@@ -367,11 +367,13 @@ def main():
                                      'runParentNativeReceipt': run_receipt, 'auditedNodes': audited_nodes}}
             identity()
             context_ref = emit('context.json', context)
+            # V2 raw-byte sidecar; context schema/runtime data remain unchanged.
+            runtime_index_ref = emit('runtime-index.json', {'schema': 'books-protocol2-runtime-index-v2', 'runtime': runtime})
             owner_ref = emit('assembly-owner.json', {'schema': 'books-entry-assembly-owner-v2', 'plan_sha256': args.plan_sha, 'source_head': plan['source_head'],
                                                     'context_base': directory_receipt(output, CONTEXT_BASE), 'context_root': directory_receipt(output, owned),
                                                     'run_parent': run_receipt, 'context_file': _native_receipt(output, Path(context_ref['path']))})
             remaining()
-            print(json.dumps({'assembled': True, 'checks_executed': False, 'context': context_ref, 'owner': owner_ref, 'runRootParent': str(RUN_BASE), 'max_declared_fixture_path': max(item['chars'] for item in graph['path_examples'])}))
+            print(json.dumps({'assembled': True, 'checks_executed': False, 'context': context_ref, 'runtimeIndex': runtime_index_ref, 'owner': owner_ref, 'runRootParent': str(RUN_BASE), 'max_declared_fixture_path': max(item['chars'] for item in graph['path_examples'])}))
     finally:
         timer.cancel()
 

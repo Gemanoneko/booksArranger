@@ -23,17 +23,14 @@ export function booksCandidate(raw,originalOwned=false){
  const tool=input?.tool_input??{};return ['command','cmd'].some(key=>isBooksOperation(tool[key]));
 }
 export async function verifyBooksGuard(){
- throw Error('Protected Books native admission backend is not yet reviewed/installed; deny Books only');
+ throw Error('Protected V2 artifact/current native proof and actual original-tool streams/EOF/duration association are unavailable; deny Books only');
 }
 export function classify(input,policy){
- const tool=input?.tool_input??{};const command=tool.command??tool.cmd;
- if(!['command','cmd'].some(key=>isBooksOperation(tool[key])))return {kind:'fallback'};
- if(!policy||policy.schema!=='books-qa-dispatch-policy-v1'||policy.enabled!==true||!hex(policy.registry_sha256))return {kind:'deny',reason:'Books protected registration is disabled'};
- const wanted="'C:/Program Files/BooksArranger-QA-v2/books-qa-watchdog.exe' --registry-sha "+policy.registry_sha256;
- if(command!==wanted||!same(tool.cwd??tool.workdir,STUDIO)||tool.command!==undefined&&tool.cmd!==undefined||tool.cwd!==undefined&&tool.workdir!==undefined)return {kind:'deny',reason:'Wrong exact Books command or cwd'};
- const allowed=new Set(['command','cmd','cwd','workdir','shell','timeout','yield_time_ms','max_output_tokens','login','tty']);
- if(Object.keys(tool).some(k=>!allowed.has(k))||tool.tty===true||tool.login!==false||tool.timeout!==undefined&&tool.timeout!==600000||!same(tool.shell,'C:/Program Files/Git/bin/bash.exe'))return {kind:'deny',reason:'Unknown Books launch envelope'};
- return {kind:'books'};
+ const tool=input?.tool_input??{};if(!['command','cmd'].some(k=>isBooksOperation(tool[k])))return {kind:'fallback'};
+ if(!policy||policy.schema!=='books-qa-dispatch-policy-v2'||policy.enabled!==true||!hex(policy.registry_sha256))return {kind:'deny',reason:'V2 protected Books registration disabled'};
+ const wanted="& '"+BASE+"/books-qa-watchdog.exe' --registry-sha "+policy.registry_sha256;
+ if(tool.cmd!==wanted||!same(tool.workdir,STUDIO)||tool.login!==false||tool.yield_time_ms!==10000||!Number.isSafeInteger(tool.max_output_tokens)||tool.max_output_tokens<1||tool.max_output_tokens>100000||Object.keys(tool).some(k=>!['cmd','workdir','login','yield_time_ms','max_output_tokens'].includes(k)))return {kind:'deny',reason:'Wrong exact default-PowerShell Books envelope'};
+ return {kind:'books-candidate',authority:false,requires:'Private actual host association and current protected native V2 artifact proof; classification never grants permission'};
 }
 export function proposedHook(original,policySHA){
  if(!hex(policySHA)||!original?.hooks?.PreToolUse)throw Error('Exact original hook and policy pin required');

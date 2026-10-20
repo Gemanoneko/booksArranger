@@ -1,3 +1,5 @@
+import {validateV2Policy,parseRegistry,REGISTRY_KEYS,canonicalData} from './launch-books-qa.mjs';
+import {createHash} from 'node:crypto';
 /** Pure installation/rollback orchestration candidate. No production native backend is installed. */
 export const PROTECTED_ROOT='C:/Program Files/BooksArranger-QA-v2';
 export const ACL='O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)';
@@ -5,7 +7,7 @@ const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 export function validateInstallPlan(plan){
  if(plan?.schema!=='books-qa-protected-install-v1'||plan.root!==PROTECTED_ROOT||plan.disabled!==true||plan.sddl!==ACL||!Array.isArray(plan.files)||!plan.files.length||plan.files.length>110||!hex(plan.original_global_sha256)||!hex(plan.candidate_global_sha256))throw Error('Unknown fixed disabled install plan');
  let bytes=0;const seen=new Set();for(const f of plan.files){if(!f||typeof f.relative!=='string'||!f.relative||f.relative.startsWith('/')||f.relative.includes('\\')||f.relative.includes(':')||f.relative.split('/').some(p=>!p||p==='.'||p==='..')||seen.has(f.relative.toLowerCase())||!hex(f.sha256)||!Number.isInteger(f.size)||f.size<0)throw Error('Unsafe install member');seen.add(f.relative.toLowerCase());bytes+=f.size;}
- if(bytes>8*1024*1024||!['books-qa-watchdog.exe','launch-books-qa.mjs','dispatch-books.mjs','operations.registry','bootstrap.manifest','dispatch-policy.json','original-bash-entry.json','original-global-hooks.json','candidate-global-hooks.json'].every(p=>seen.has(p)))throw Error('Incomplete fixed install closure');
+ if(bytes>8*1024*1024||!['books-qa-watchdog.exe','launch-books-qa.mjs','dispatch-books.mjs','operations.registry','bootstrap.manifest','dispatch-policy.json','native-admission-policy.json','original-bash-entry.json','original-global-hooks.json','candidate-global-hooks.json'].every(p=>seen.has(p)))throw Error('Incomplete fixed install closure');
  return {bytes,count:seen.size};
 }
 export async function installCandidate(plan,io){
@@ -19,3 +21,6 @@ export async function installCandidate(plan,io){
 export async function deployCandidate(){throw Error('Automatic uncooperative global CAS is unavailable; only a separately reviewed explicit human host/pin update may proceed');}
 export async function rollbackCandidate(){throw Error('Automatic global rollback is unavailable; require explicit human quiescent restoration of exact protected baseline bytes');}
 export function requireProductionBackend(){throw Error('No approved automatic privileged bootstrap/global-CAS route; literal human creation-only recipe requires separate review and authorization');}
+
+/** Disabled data construction only. No native/ACL/bootstrap/host authority. */
+export function buildDisabledV2Registration(value){const policy=validateV2Policy(value),policyBytes=Buffer.from(canonicalData(policy),'utf8');if(policyBytes.length>16384)throw Error('Policy byte cap');const hash=b=>createHash('sha256').update(b).digest('hex');const values={state:'disabled',node_sha256:policy.node.sha256,bootstrap_sha256:policy.bootstrap_manifest.sha256,operation:'entry',plan_path:policy.guardian_plan.path,plan_sha256:policy.guardian_plan.sha256,source_root:policy.source_root,run_parent:policy.run_parent,invocation_id:policy.invocation_id,context_path:policy.context.path,context_sha256:policy.context.sha256,policy_path:PROTECTED_ROOT+'/native-admission-policy.json',policy_sha256:hash(policyBytes),runtime_path:policy.runtime_index.path,runtime_sha256:policy.runtime_index.sha256,source_sha256:policy.source_manifest.sha256,watchdog_sha256:policy.watchdog.sha256};const registryBytes=Buffer.from(['BOOKS_QA_REGISTRY_V2',...REGISTRY_KEYS.map(k=>k+'='+values[k]),''].join('\n'),'ascii');parseRegistry(registryBytes.toString('ascii'),{allowDisabled:true});return Object.freeze({disabled:true,authority:false,policy_bytes:policyBytes,policy_sha256:hash(policyBytes),registry_bytes:registryBytes,registry_sha256:hash(registryBytes),requires:'Full raw-byte graph/native protected copy/actual original-host proof and separate human deployment review; no install or enable action.'});}
