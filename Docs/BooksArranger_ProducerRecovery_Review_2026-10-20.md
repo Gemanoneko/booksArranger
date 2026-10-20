@@ -61,3 +61,47 @@ Senua supplied this clarification to Jane after the design checkpoint: a truthfu
 Judy owns wording: clearly distinguish old files retained, historical attempt isolated, and a new attempt requiring normal checks. No claim that restart repairs ownership, frees space, validates old output or guarantees Retry success.
 
 **STOP conditions:** unavailable exact producer closure or historical fact; unplanned/drifting namespace; inability to preserve an isolated namespace from every lifecycle/deletion path; new attempt/path or cleanup dependency conflict. Keep the old attempt and all bytes. This ruling authorizes only the finite reviewed implementation/fault-fixture work after pinning; independent source/native/UX review remains required. No live isolation, Retry, producer reset, deletion, restart, deployment, formal QA or release clearance. Only this review document was appended; session scratch/unresolved evidence is preserved.
+
+
+## Recovery/retry implementation checkpoint — source only
+
+2026-10-20, Senua. Scope: frozen14-file developer packet in BooksArranger_ProducerRecovery_Implementation_2026-10-20.md, core recovery/retry/queue/retention/Ready and user-route regions. Before/after SHA256 matched all14 listed files. Inspected helper compatibility call sites, conflict-decision review entry/approval boundary, and relevant native VerifiedFile contract; canonical checker script was hash-captured only, not reviewed/executed. No process, test, catalog, native probe or live change performed. Active native QA/bootstrap source excluded. This is not RELEASE CLEAR or production recovery clearance.
+
+### Findings
+
+**Major — retained native fence expires at enqueue, before actual new attempt admission.** MergeService._admit_new_retry holds protect_retained through build_manifest/enqueue only. A queued child can run later after old namespace bytes/members change. At execution retry_intent.guard verifies retained database history only, and before_attempt remains WorkingLifecycle.admit on the NEW child job; neither freshly opens/hashes the old retained namespace. Thus enqueue→old namespace drift→run can still admit a fresh producer despite the pinned isolation contract. Add a fresh exact retained parent native/fullhash fence at actual child attempt/source admission, held through the admitted transition/start, with normal source guards retained afterward. Enqueued children must not gain a permanent waiver. Test byte/member/identity/ADS drift after enqueue and before execution; refuse without touching old ledger/bytes or starting source copies. Primary accepted the gap and proposed a fixed before_attempt/runner hook; correction is not in this reviewed snapshot.
+
+**Major — isolation can consume a superseded checkpoint.** ProducerRecovery.isolate reads latest saved checkpoint before the potentially long native/fullhash observation, then BEGIN IMMEDIATE rechecks only _scope(job/attempt/files/candidate), not the latest exact checkpoint/origin state. A concurrent prepare can append a newer checkpoint without changing that scope. Isolation can then transition the older prepared row by ID; update rowcount is unchecked. The real worker _next_m4b_readmission explicitly runs without operation_lock, so the prepare endpoint decorator does not eliminate this race. Under the SAME writer transaction reread and compare exact latest checkpoint row/state/ID and authoritative origin binding, require the captured immutable saved row still current, and require exactly one CAS update. A superseding prepare must invalidate the old admission, preserving both histories and all files. Add deterministic interleaving and failed/uncertain commit/readback cases.
+
+**Major — alternate streams omitted from the purported complete isolation fence.** ProducerRecovery._native uses VerifiedFile but never enumerates/default-stream-checks the marker or old artifacts. VerifiedFile enforces ordinary base identity and hashes the default stream; it does not enforce single_stream. An unplanned ADS is therefore absent from both namespace listing and native snapshot, yet isolation/admission can still accept. Add read-only supported default-stream-only verification while exact native leases are held, with refusal for unknown/extra/unavailable stream membership. Preserve every ADS; do not remove it or weaken disposal safety. Add precheckpoint, postcheckpoint and postisolation stream-drift fixtures.
+
+Further hardening requirement: verify_retained should explicitly validate the origin record actor/claim/evidence and exact origin job/attempt identity, saved platform versus proof prior platform, target attempt exact permitted closed/isolated fields, and typed native observation schema/ownership_authority. Current hashes prove internal correspondence but not those semantic shapes independently. Invalid/malformed durable proof must refuse admission/dependency discharge; no browser JSON closure boolean exists and none may be added. These checks should accompany negative proof-corruption fixtures; they do not grant authority against arbitrary direct hostile SQLite editing.
+
+### Verified source behavior and evidence limits
+
+The ordinary implementation preserves original audio_jobs and working_files rows during isolation, stores a separate full-byte/native observation explicitly ownership_authority:false, and changes only the old attempt classification plus proof. Source/storage protected_dependency and WorkingLifecycle isolated_retained retirement refusal keep old paths/original sources protected. Retained recovery child policy disables source/empty-folder removal rather than manufacturing a cleanup receipt. Retry binds a fresh UUID to a durable one-parent/one-child relation, exact parent manifest/journal and fresh revision/context; canonical metadata/source/order/hash/cover/evidence/profile are not generically waived. The compatibility helper defaults only ABSENT legacy output_root to its frozen root; explicit values/null remain authoritative.
+
+Ready compatibility retains exact source/cover/current validation and immutable accepted-routing checks. The user Universe fixture binds candidate/fingerprint/review evidence, moves via the actual planner/operator, then uses normal fresh startup output verification before asserting current/Ready/filter, preserving original receipt/job. Human metadata decisions produce a draft/evidence-scoped record; review approval still calls metadata_choices.admission and is not silently granted by a saved choice. Full independent metadata_choices module review is separate from these wrapper regions.
+
+Developer reports10 core negatives PASS0.791s; real legacy child+two sources+Sorted/Ready PASS7.995s; actual retained recovery conversion PASS7.585s with synthetic explicit locality fact and old bytes/ledger/sources preserved; actual candidate-bound Universe move/fresh Current/Ready PASS9.377s;2 retry-route negatives PASS2.244s. These are meaningful private developer cases, not execution by this reviewer or formal QA. Current tests do not close the three gaps above. Prior combined6.813s owner-membership uncertainty remains NO RESULT; later cases do not retroactively turn it into PASS. Actual production historical-locality fact remains missing: real Сказка is held, with no live Prepare/isolate/retry accepted.
+
+### Source pins
+
+| File | SHA256 |
+|---|---|
+| producer_recovery.py | `297d31c4cb0dab0d06d4d26395771cfdd99a756102a9e65e2d376540904e8445` |
+| retry_intent.py | `b7c9f832a4e033621e0b33a1afc7aa1d9db692750a6629862ac7d2087619dea1` |
+| audio_jobs.py | `7abbd12fd8afac2aaaeb1caf2230c2c79c30dd9c0d21325e48f858d905a7d0c4` |
+| merge_service.py | `6a7d99f0fdd1f4b62c3f8f56939ba52033948aa860cef1d920ffe8b6f763ce51` |
+| working_lifecycle.py | `409280ddf0adb151b85138538451da609cac9c33a406bbf28308c0713328407f` |
+| storage_cleanup.py | `9f5bc97ab91b3d2e0684ff976cb5a75c4586ded92c851bedae5eaad87beb92da` |
+| review_backend.py | `ff723a7afdfb6f1274d9c39d9f54b3e731f8b96dc4ca981e8ce393606975967c` |
+| conversion_progress.py | `0d191a65b7079db82b35ea58d31c665070df29bba9d9941a13fb3619467ad04c` |
+| manifest_compatibility.py | `9d70158c6f8a247fffc6993ded82d66b308537bbb6addb919b359dbadc9efb58` |
+| failed_m4b_retry.py | `24f45434afcbcd94d3bce691190c69949ce3b6863f680a8dd006527f36c02e3d` |
+| m4b_repair.py | `ee7b9f06a279f74327948ce41c359ef7aee5bff7b383afe92fa19e689507a9fd` |
+| tests/test_producer_recovery.py | `baecca97f0ecbad7510958fcb165c62509c9c456ef1edcf944814bfc62f6fbae` |
+| tests/test_retry_intent.py | `da61e8c68110ca94fb9892782668ef54357c44e9031becc67d38e204f3310edf` |
+| scripts/check-desktop.mjs | `72c1bc08c2ef4d5dca95e7442b8298e93be6d14b9c55bb0a38c83031ce270eb8` |
+
+No new Critical or safety-floor violation identified in this narrow presently uninvoked source checkpoint; three Major findings remain for correction. Only this review document appended. Pin before implementation briefs cite these findings. No formal release, full QA, live recovery, source deletion or migration clearance. Session scratch and unresolved evidence preserved.
