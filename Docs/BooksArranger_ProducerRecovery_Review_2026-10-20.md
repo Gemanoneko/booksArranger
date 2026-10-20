@@ -105,3 +105,41 @@ Developer reports10 core negatives PASS0.791s; real legacy child+two sources+Sor
 | scripts/check-desktop.mjs | `72c1bc08c2ef4d5dca95e7442b8298e93be6d14b9c55bb0a38c83031ce270eb8` |
 
 No new Critical or safety-floor violation identified in this narrow presently uninvoked source checkpoint; three Major findings remain for correction. Only this review document appended. Pin before implementation briefs cite these findings. No formal release, full QA, live recovery, source deletion or migration clearance. Session scratch and unresolved evidence preserved.
+
+
+## Three recovery-Major corrections — scoped static re-review
+
+2026-10-20, Senua. Basis prior finding checkpoint pinned `498e22c`, corrected developer implementation packet and tests. All14 listed corrected source/test pins matched before/after reading. No tests/processes/native probes/live changes executed by reviewer; actual test evidence below remains developer-owned. Native build/guard infrastructure excluded from product ruling.
+
+**All three recovery Majors resolved in this source slice.** AudioJobs now enters the optional attempt_boundary BEFORE before_attempt, archive, fresh attempt UUID or staging creation, and retains it across the complete existing one-attempt body, actual runner/closure and postprocessing. MergeService binds isolation children to protect_retained on the exact parent/checkpoint; the parent old-file native/fullhash fence no longer expires at enqueue. Enqueued byte/member/identity/stream drift refuses fresh attempt admission. Normal jobs use the unchanged null boundary behavior. Existing source/retention protections remain.
+
+prepare and isolate now recheck the latest entire captured checkpoint and authoritative origin under BEGIN IMMEDIATE, together with exact old scope. Isolation rejects origin supersession, and its conditional prepared→isolated_retained checkpoint transition must affect exactly1row; the attempt mutation rolls back on CAS failure. The deterministic nested prepare-during-isolate observation test retains both prepared histories and refuses old isolation.
+
+_native now invokes the existing strict single_stream floor on the held ownership marker and every held old artifact, without removal or ownership capture. Unknown ADS before Prepare, after checkpoint or after isolation refuse. Artifact base identities/hashes and exact name inventory remain separately bound.
+
+The added tests exercise actual enqueue→old-byte drift→worker refusal before child attempt id/path, plus a genuine fresh retained recovery conversion attempting to write the old artifact DURING the real runner and receiving an OS refusal while the normal conversion/Ready/current view succeeds. Old parent/file ledger/bytes and originals remain unchanged. Core fixture now honors BOOKS_QA_FIXTURE_ROOT. Developer reports15core native cases PASS1.400s, then15PASS1.456s after test-only root adjustment; queued-child drift PASS1.683s; actual positive held-fence conversion PASS9.104s;50 queue Retry/Quit/failure regressions PASS4.763s, all owned closure/nativezero. The earlier combined NO RESULT remains unchanged.
+
+**Minor remaining proof-schema hardening:** historical actor/claim/nonempty evidence is now explicitly revalidated. Additional consistency checks proposed in the prior checkpoint (origin row job/attempt fields, saved platform versus proof prior platform, native observation schema/nonownership flag, exact permitted target-state shape) are still not all independently asserted in verify_retained. Current normal server creation binds these records and no client supplies a closure boolean; arbitrary malicious SQLite rewriting is outside that trust model. Add malformed-durable-proof controls when tightening these checks; do not treat a self-consistent digest as a substitute for semantic type validation. No new Major/Critical or safety-floor issue identified in this narrowed correction.
+
+Human historical-origin confirmation is now reported received directly by Jane. This updates the previously missing FACT only; no production record, checkpoint, later-boot proof, isolation or retry was performed or accepted by this review. Exact native/uptime/scope checks and explicit separate live-operation admission remain mandatory.
+
+### Corrected pins
+
+| File | SHA256 |
+|---|---|
+| producer_recovery.py | `2c712278a4fed89d329fd5b5722a4c5ec5a0efc30cc9fdab68517f187f596628` |
+| retry_intent.py | `b7c9f832a4e033621e0b33a1afc7aa1d9db692750a6629862ac7d2087619dea1` |
+| audio_jobs.py | `881e748d43c9cb82d7d7dfa3afe53aef39ea893c458c0215faae91df455fc0ec` |
+| merge_service.py | `a0157d8d97a288f78098e1d68d314c29869ba01d4dc167218836298bed03dbed` |
+| working_lifecycle.py | `409280ddf0adb151b85138538451da609cac9c33a406bbf28308c0713328407f` |
+| storage_cleanup.py | `9f5bc97ab91b3d2e0684ff976cb5a75c4586ded92c851bedae5eaad87beb92da` |
+| review_backend.py | `ff723a7afdfb6f1274d9c39d9f54b3e731f8b96dc4ca981e8ce393606975967c` |
+| conversion_progress.py | `0d191a65b7079db82b35ea58d31c665070df29bba9d9941a13fb3619467ad04c` |
+| manifest_compatibility.py | `9d70158c6f8a247fffc6993ded82d66b308537bbb6addb919b359dbadc9efb58` |
+| failed_m4b_retry.py | `24f45434afcbcd94d3bce691190c69949ce3b6863f680a8dd006527f36c02e3d` |
+| m4b_repair.py | `ee7b9f06a279f74327948ce41c359ef7aee5bff7b383afe92fa19e689507a9fd` |
+| tests/test_producer_recovery.py | `023944cc140a0b0d224bf2a8b1f1dc72f786bc0c128a4a01cc9242d098964810` |
+| tests/test_retry_intent.py | `d5063339377860c6472bd1ad7d463e89480cb2796bcc62c523aa109c53b01376` |
+| scripts/check-desktop.mjs | `72c1bc08c2ef4d5dca95e7442b8298e93be6d14b9c55bb0a38c83031ce270eb8` |
+
+Scoped producer recovery/retry/retention/Ready source findings are resolved except the logged Minor hardening. This is not a full accumulated release review, canonical QA receipt, safe-deployment claim, live producer closure or production-delete/migration clearance. Only this review document appended; scratch and unresolved evidence preserved. Sully should pin this corrected checkpoint before subsequent briefs cite it.
