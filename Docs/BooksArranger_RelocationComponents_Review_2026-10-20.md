@@ -60,3 +60,20 @@ First/last reads matched for all twelve product files below. MergeService's acti
 Reviewed test pins: output_migration `141078153ea71fa21ade8a351da189a35c6d2eab0775c4640e7fa03062ea9d0e`; relocated_replacement `804d8298446a4c6737bd47456ab1c127b9e0124b213490dca88bf802cc6448b3`; relocated_chapter_repair `0277421693f94da6c8171d1ce0b9e845dc8e421af2ef2404514d6d0743d7f3e3`; publication_binding `3882be88b0d85f4a8b0cd67669c3f36727504b763cd84dd67e762b645fb45876`; publication_consumers `d79713bd1964f967f197840d09fa7afd80a08d3d977a9bd945c3727770d649d5`; relocation_progress `7b9f899732e98033dc3238fb90a19c578773e9878d6d9ca0d17e87d680a279f5`. These pins do not certify execution.
 
 Only this review document created; no disposable/scratch output. Session evidence remains for Sergei's manual deletion. Native worker/operator, whole-product QA, runtime admission and final release review remain separate gates.
+
+## Bounded adapter/worker correction checkpoint
+
+Reviewed source-only under design `905a077` and worker evidence document pinned at `7e66fe7fc366178248c277ea38a648e17fdf0260`. Before/after file hashes agree:
+
+- publication_binding.py: `6230cfd9413dc7cfaf88a936a24a6a80039c612b660bd3ab6bfd9eda172d299a`.
+- tests/test_publication_binding.py: `09637ef79288eb3cda105674ef32e22a421dd8315ab6c68e346ec7195d811df8`.
+- output_migration.py: `453e1500ba3cb75d5f50abc77b5e51029ee994351f3bda44d455d7e660d57c8c`.
+- tests/test_output_migration.py: `ed9fbd64ea71e2a34ca204c5b45ba12ab72d24c77f6c317179ae2a6c3ec97136`.
+
+**The adapter Major writer-reservation issue is resolved in the inspected source.** Observed WAL uses explicit BEGIN with nested scopes sharing one coherent connection/snapshot; non-WAL uses the previous conservative BEGIN IMMEDIATE without changing journal mode. Each scope's exit reconstructs the original/effective binding, complete relocation history and required repair-journal digest on a newly opened different connection/transaction, not the old WAL snapshot. Relevant provenance/generation drift refuses. Actual destructive `guard` remains unchanged and requires the caller's retained writer transaction. The no-legal-relocation-writer-while-live authority contract still depends on the concrete catalog-owner entry points, excluded active operator code; no read snapshot grants deletion authority.
+
+Tests add unrelated writer success during a WAL view, externally committed generation drift refusal on a fresh read, nested old-snapshot consistency followed by refusal, and real catalog-owner exclusion. Developer reports9 adapter plus4 native consumer cases passing; Senua did not execute them. There is no new Critical finding in this delta. Non-WAL remains intentionally writer-blocking; that is not a claim of responsive WAL behavior on a different database mode.
+
+**Same-handle worker capability is implemented as designed.** `_target_boundary` requests writable_parent at its original safe acquisition and reports unavailable capability rather than weakening access/sharing. `_flush_parent` borrows `handles[-1]`, revalidates exact parent identity, calls FlushFileBuffers on that same capable handle and never opens/closes a second parent. Boundary owner retains closure responsibility. Acquisition/flush failure refuses or retains original; it is not a filesystem-support waiver. The unchanged native_io default and sharing-floor review still applies.
+
+The updated fixtures retain earlier crash/collision/native-identity/closure/content/generation scenarios and add no-reopen assertions plus exact same-handle identity/closure and readonly/nested-sharing refusal. Developer reports21 actual native/fault cases passing, with the previous conditional delete cases now using successful private local parent flush rather than a simulated success flag. Senua did not reproduce them. A private local OS flush does not establish NAS persistence. No live Z: copy, production old-output deletion, actual owner/media callback acceptance, operator activation, combined heavy QA PASS or release clearance follows from this checkpoint.
