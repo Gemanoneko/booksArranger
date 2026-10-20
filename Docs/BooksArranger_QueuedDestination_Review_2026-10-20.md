@@ -68,3 +68,37 @@ The shared route takes canonical frozen review plus existing verified source-der
 Separately audit replacement destinations against their existing exact authoritative replacement relation/frozen approval and effective parent location. A replacement_id string alone is no exception. Preserve a valid current authorized replacement target; an unsupported old-root replacement or unrecognized variant must failclosed with its real replacement/routing reason rather than enter a generic retry child that strips lineage. Do not invent a new replacement-retarget product flow within this fix.
 
 Required meaningful regressions: exact current-v2 suffix pass-through; old-root and same-root legacy hierarchy suffix changes producing the correct distinct child; two related-distinct recordings remain separate with no collisions; forged/stale suffix evidence refuses; actual suffixed completed publication→plan→operator→fresh Current/Ready retains immutable original/job/journal; valid replacement target keeps existing lineage and mismatched replacement target cannot get a normal retry waiver. Existing no-side-effect/CAS/Pause/config-drift cases remain. The minor queued-action fix only restores the existing queued_next disabled-action priority and its exact destination-row DOM case. This is finite SOURCE correction authorization after pinning, not execution or activation.
+
+
+## Shared frozen-route correction — scoped re-review
+
+2026-10-20, Senua. Prior correction ruling pinned `cee896ee5e6ac1d9fe2fe25c2a2a9979420efc12`; actual final Implementation doc SHA256 `193528430eced49b1875c5f4d80b4692cad9238a6ef65f80f8d53d449d12f89a`. Twelve source/test/declaration hashes below matched before/after static reading. No tests, processes, live queue/catalog/media or source edits executed by reviewer. Bound QANativeLauncher review c194 bytes were NOT edited/readapted by this checkpoint while its separate fixture group runs.
+
+**Queued-route Major resolved in this source slice.** organization.append_recording_suffix shares safe bounded preview naming; frozen_plan independently reconstructs the deterministic recording distinction from the frozen candidate/ordered source hashes+sizes/chapter facts and work/collection/volume/narrator/language inputs using the existing recording_classification function. Frozen suffix/policy/author mismatch refuses. It preserves the distinction under target root/hierarchy changes instead of dropping it. The original _recording_review input shape was compared with that reconstruction. Existing approved context/manifest binding remains its authority; no new related-distinct classification or unconditional metadata-source override is introduced.
+
+metadata.propose, queued desired comparison and Retry bind/validate share those semantics. Planner requires current recording facts equal the immutable parent facts, binds their full digest into accepted routing, and computes the suffixed route. Operator independently checks that route, digest and exact current facts; Ready compatibility uses the same frozen route/digest. Publication resolver did not compute naming and retains its existing immutable manifest/accepted-routing correspondence, so no resolver bypass/edit was needed. No collision or no-replace rule was relaxed.
+
+Exact replacement handling is separate: a pending replacement must match its real queued relation, frozen approval manifest, structural guard and current output-root policy. Arbitrary replacement_id/forged destination/new root refuses; generic route Retry explicitly rejects replacement lineage. This preserves existing authorized replacement targets and does not invent a retarget workflow or rewrite their parent. Retained recovery fences and normal source/media/publication checks remain.
+
+**Queued-action Minor resolved.** The exact acknowledged destination queued_next branch returns the existing disabled Queued action before generic destination Retry, even when structural retry.allowed remains true. No layout/control was added.
+
+Read controls cover correct-v2 suffix passthrough, two distinct recording suffixes, changed source/suffix/policy/author refusal, exact replacement destination/root/lineage/generic-Retry refusal and existing stop/CAS/configuration cases. Developer reports14controls PASS0.617s; actual suffixed new-root Retry→Current/Ready11.106s, same-root11.025s, suffixed immutable publication→Universe routing plan→native move→fresh Current/Ready11.765s; replacement0.175s, DOM Queued regression,13organization/10operator/16standing/2strictRetry regressions, all owned closure/nativezero. Those are meaningful private developer evidence, not an independent canonical QA receipt or visual measurement. Original unrelated combined-heavy NO RESULT remains explicit.
+
+No remaining Critical/Major or safety-floor finding identified in this narrowed correction. The queued-destination source findings are resolved; this is NOT a full accumulated release verdict, live activation, source deletion, migration completion or formal QA approval.
+
+| File | SHA256 |
+|---|---|
+| organization.py | `329bbd1fdf5ec05fb92fe16332d2bbbff9758713c62d6738c58b1a1d3a919401` |
+| metadata.py | `3458c54cbde8d91902b09aa75de07539ef5cd0d1919f7659bf1fa01d2233db2e` |
+| destination_admission.py | `9f4ead6a2c7955270b06fe2ac40467dd8417d4c2af5b5e2526455296ea5d8371` |
+| retry_intent.py | `b8de3686baa1d3d2d7226444f93f5065eee8515cfbf3613c0d84db6ef7c2b3d1` |
+| migration_planning.py | `c59903d054227656a22ff6ef0fbe0f88d9dfa6392ccf04a9f10af983fa910bfb` |
+| migration_operation.py | `5d20571a9f44f26c57091f316d0627aad6a7f9de7a180a905a25691a60bc4470` |
+| conversion_progress.py | `b62caf9d606c07371c97942607f65e32dafd2cd0a4f2216324d1c146193d3816` |
+| merge_service.py | `468687181c6fa6099845b66cc5048afcf9bb5195118216f70d3fa128d29d2055` |
+| web/app.js | `2412a80b761918c247b3238ff13d945ae3ec6eae44cd3217145efc7d6106e05d` |
+| tests/test_destination_admission.py | `40fa255c62e24c719ab0074c0bd7e89e41807b709a4e873fabea4170fbe571c6` |
+| tests/test_retry_frontend.js | `e72986825bea25e61183d283bf853dd15ed4154ee4fa4d714c53351a3b822029` |
+| scripts/check-desktop.mjs | `c69ef2b8defc6d462110fb39b806ff6704b03d55430c30a2816cb1ff71393a15` |
+
+Only this queued review document appended. Sully may pin it for the next scoped handoff; preserve session scratch and unique unresolved evidence. The separate native fixture result/invocation/closure must be assessed independently before any compiler/deployment step.
