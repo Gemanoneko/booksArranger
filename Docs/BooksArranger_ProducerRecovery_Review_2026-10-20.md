@@ -32,3 +32,7 @@ UX§8 correctly separates acknowledged durable checkpoint, verification-only Ret
 ## Handoff
 
 Ender may implement the finite server provider, append-only checkpoint/proof/CAS and narrowly scoped WorkingLifecycle hook plus committed UX/API flow within these requirements. The existing attempt remains untouched during development. Sully must pin this review before the implementation brief cites it. No product/Windows restart action, live cleanup, source write, process termination, iTunes action, Git mutation or scratch output was performed by this review. This report is not RELEASE CLEAR.
+
+## Reviewer clarification — historical fact versus closure
+
+Senua supplied this clarification to Jane after the design checkpoint: a truthful direct user attestation may supply only the missing historical locality fact. Record the exact job/attempt, current machine, actor=user, and the user assertion that the attempt ran here without data/staging move, clone, restore or a remote producer. It does not establish native closure. A later strictly lower64-bit uptime, fresh fixed native identities, no current producer and all normal inventory/source/native checks remain mandatory. No answer is assumed. If the user cannot affirm, the supported state is recovery blocked for missing historical origin, retaining the old attempt and files; Prepare/Retry must not claim proof.
