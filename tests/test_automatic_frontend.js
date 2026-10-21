@@ -108,11 +108,12 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   run("offset=0");
   // Text coalesces at 250ms; a selection consumes the visible query and cancels the timer.
   const queries=calls.filter(call=>call.route.startsWith('/api/inventory')).length;
+  const otherTimers=scheduled.size,previewTimer=run('routingPreviewTimer');
   get('search').value='a';get('search').handlers.input();get('search').value='ab';get('search').handlers.input();
-  assert.equal(calls.filter(call=>call.route.startsWith('/api/inventory')).length,queries);assert.equal(scheduled.size,1);assert.equal([...scheduled.values()][0].delay,250);
-  const typing=[...scheduled.values()][0];scheduled.clear();typing.callback();await new Promise(setImmediate);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=ab/);
-  get('search').value='latest text';get('search').handlers.input();get('filter').value='held';await get('filter').handlers.change();assert.equal(scheduled.size,0);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=latest%20text.*status=held/);
-  get('search').value='enter';get('search').handlers.input();let prevented=false;await get('search-form').handlers.submit({preventDefault(){prevented=true;}});assert.equal(prevented,true);assert.equal(scheduled.size,0);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=enter/);
+  assert.equal(calls.filter(call=>call.route.startsWith('/api/inventory')).length,queries);assert.equal(scheduled.size,otherTimers+1);assert.equal(scheduled.get(run('searchTimer')).delay,250);if(previewTimer!==null)assert.ok(scheduled.has(previewTimer),'typing preserves the unrelated routing-preview timer');
+  const typingId=run('searchTimer'),typing=scheduled.get(typingId);scheduled.delete(typingId);typing.callback();await new Promise(setImmediate);assert.equal(run('searchTimer'),null);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=ab/);
+  get('search').value='latest text';get('search').handlers.input();const selectedSearch=run('searchTimer');get('filter').value='held';await get('filter').handlers.change();assert.equal(run('searchTimer'),null);assert.equal(scheduled.has(selectedSearch),false);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=latest%20text.*status=held/);
+  get('search').value='enter';get('search').handlers.input();const submittedSearch=run('searchTimer');let prevented=false;await get('search-form').handlers.submit({preventDefault(){prevented=true;}});assert.equal(prevented,true);assert.equal(run('searchTimer'),null);assert.equal(scheduled.has(submittedSearch),false);assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=enter/);
   get('search').value='';await get('search').handlers.input();assert.match(calls.filter(call=>call.route.startsWith('/api/inventory')).at(-1).route,/search=&view=candidates&status=held/);
   await run('refresh()');assert.equal(get('filter').value,'held');
   await get('clear-filters').handlers.click();assert.equal(get('filter').value,'all');assert.equal(get('search').value,'');

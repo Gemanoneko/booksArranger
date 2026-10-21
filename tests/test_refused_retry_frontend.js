@@ -92,11 +92,11 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   // Selection: the tick stays; the bulk count leaves the refused book out and says so.
   paint([m4bRow('a'),m4bRow('b'),refused]);
   run('for(const row of rows)selectedBooks.set(row.id,row.revision);renderRows(true);batchCounts();controls()');
-  assert.equal(get('batch-count').textContent,'3 selected · 2 can be retried or repaired · 1 left out');
+  assert.equal(get('batch-count').textContent,'3 selected · 2 new retries available · 1 left out');
   assert.equal(get('retry-selected').textContent,'Retry selected (2)');
   paint([m4bRow('a'),m4bRow('b'),refused]);run('batchCounts()');
   assert.equal(rowOf('u').children[0].children[0].children[0].checked,true,'the refused row keeps its tick after a refresh');
-  run('selectedBooks.clear();batchCounts()');assert.equal(get('batch-count').textContent,'0 selected · 0 can be retried or repaired','no "left out" at zero');
+  run('selectedBooks.clear();batchCounts()');assert.equal(get('batch-count').textContent,'0 selected · 0 new retries available','no "left out" at zero');
 
   // Focus: a refusal lands while Sergei is on the row's Retry. The row updates in place, focus goes to the same row.
   paint([m4bRow('x'),m4bRow('y')]);

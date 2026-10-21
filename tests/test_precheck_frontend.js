@@ -61,7 +61,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   // Selection: a ticked pending row is left out; a ticked can't-open row goes into Retry selected.
   paint([m4bRow('a'),pendingRow('p'),unopenedRow('u')]);
   run('for(const row of rows)selectedBooks.set(row.id,row.revision);renderRows(true);batchCounts();controls()');
-  assert.equal(get('batch-count').textContent,'3 selected · 2 can be retried or repaired · 1 left out');
+  assert.equal(get('batch-count').textContent,'3 selected · 2 new retries available · 1 left out');
   assert.equal(get('retry-selected').textContent,'Retry selected (2)');
   assert.deepEqual(run('retrySelectable().map(item=>item.row.id)'),['cand-a','cand-u']);
   run('selectedBooks.clear();batchCounts()');
@@ -83,11 +83,11 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
 
   // The Checking strip group: after Can repair, counted in All, hidden at zero.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
-  assert.match(html,/id="group-repair"[^>]*>[^<]*<\/button><button id="group-checking" type="button" class="quiet attention-group" aria-pressed="false" title="Show books the app is still checking before it offers Retry\." hidden>Checking · 0<\/button>/);
-  assert.deepEqual([...run('attentionKeys')],['all','retry','repair','checking','changed','audiobook','other','unsupported']);
+  assert.match(html,/id="group-repair"[^>]*>[^<]*<\/button><button id="group-reacquire"[^>]* hidden>Need to reacquire · 0<\/button><button id="group-checking" type="button" class="quiet attention-group" aria-pressed="false" title="Show saved retry requests waiting for checks and books whose retry checks are running\." hidden>Checking · 0<\/button>/);
+  assert.deepEqual([...run('attentionKeys')],['all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported']);
   run('attentionGroup="all"');
   counts({retry:2,repair:0,checking:3,changed:0,audiobook:0,other:1,unsupported:0});
-  assert.equal(get('group-checking').textContent,'Checking · 3');assert.equal(get('group-checking').hidden,false);assert.equal(get('group-all').textContent,'All · 6');
+  assert.equal(get('group-checking').textContent,'Retry checks · 3');assert.equal(get('group-checking').hidden,false);assert.equal(get('group-all').textContent,'All · 6');
   counts({retry:2,repair:0,checking:0,changed:0,audiobook:0,other:1,unsupported:0});
   assert.equal(get('group-checking').hidden,true,'hidden at zero');
   // Checking empties while selected: the view moves to Can retry (the books he waited for), not to All.

@@ -335,10 +335,10 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.doesNotMatch(JSON.stringify(text(oldRecord)),/waiting for cleanup|still present/);
   // The bulk dialogs carry k (decision A).
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{retry:3},working_cleanable:2}};attentionGroup="retry";openRetryAll()');
-  assert.equal(get('retry-all-question').textContent,'Queue 3 books to be checked again? They run one at a time, right after the current book. 2 of them have leftover working files, which are cleared first.');
+  assert.equal(get('retry-all-question').textContent,'Request retries for 3 books? Each book is checked before a conversion job can be queued. 2 of them have leftover working files, which are cleared first.');
   run('retryAllConfirm=null;attentionGroup="all"');
   paint([cleanable,m4bRow('plain')]);run('for(const row of rows)selectedBooks.set(row.id,row.revision);batchCounts()');get('retry-selected').handlers.click();
-  assert.equal(get('retry-selected-question').textContent,'Queue 2 selected books to be checked again? They run one at a time, right after the current book. 1 of them has leftover working files, which are cleared first.');
+  assert.equal(get('retry-selected-question').textContent,'Request retries for 2 selected books? Each book is checked before a conversion job can be queued. 1 of them has leftover working files, which are cleared first.');
   run('retrySelectedConfirm=null;selectedBooks.clear();controls()');
 
   // ---- Let the app handle selected (follow-up 4, section 4).
