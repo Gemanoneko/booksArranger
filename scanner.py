@@ -115,6 +115,8 @@ class Inventory:
             # A prior process may have died while a task was running.
             connection.execute("UPDATE queue SET state='pending' WHERE state='running'")
             connection.execute("UPDATE jobs SET state='stopped' WHERE state='scanning'")
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_groups'").fetchone():
+                groups.setup_group_member_index(connection)
 
     def source_roots(self, label='Audiobooks'):
         return self.audiobook_sources if label=='Audiobooks' else (self.roots[label],)

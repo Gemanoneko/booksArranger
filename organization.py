@@ -15,7 +15,7 @@ def plan(output_root,review,*,collection_fallback='legacy',facts=None):
         value=review.get(field,'')
         if not isinstance(value,str) or len(value)>2000:raise ValueError('Routing fields must be bounded text')
         return value.strip()
-    title=text('title');author=text('canonical_author') or text('author')
+    title=text('title');author=text('author') or text('canonical_author')
     cycle=text('series');universe=text('universe');number=text('number')
     collection=review.get('anthology',False);multi=review.get('multi_author',False)
     if type(collection)is not bool or type(multi)is not bool:raise ValueError('Routing choices must be explicit booleans')

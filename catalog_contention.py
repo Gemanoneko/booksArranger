@@ -39,7 +39,12 @@ def file_token(db,root,path):
     token['owned']=[dict(r) for r in db.execute('SELECT * FROM owned_artifacts WHERE path=?',(path,))] if table('owned_artifacts') else []
     token['relocations']=[dict(r) for r in db.execute('SELECT * FROM output_relocations WHERE planned_destination=?',(path,))] if table('output_relocations') and 'planned_destination' in {r[1] for r in db.execute('PRAGMA table_info(output_relocations)')} else []
     token['reacquire']=[dict(r) for r in db.execute('SELECT * FROM reacquire_markers WHERE root=? ORDER BY candidate_id',(root,)) if path in {m['path'] for m in json.loads(r['snapshot'])['members']}] if table('reacquire_markers') else []
-    grouped=[dict(r) for r in db.execute('SELECT * FROM book_groups WHERE root=? ORDER BY id',(root,)) if path in {m['path'] for m in json.loads(r['evidence'])['members']}] if table('book_groups') else []
+    grouped=[]
+    if table('book_groups'):
+        if not table('catalog_group_members'):
+            raise CatalogHold('Group membership index unavailable; initialize the catalog before scanning')
+        grouped=[dict(r) for r in db.execute('''SELECT g.* FROM catalog_group_members m JOIN book_groups g ON g.id=m.group_id
+            WHERE m.root=? AND m.path=? ORDER BY g.id''',(root,path))]
     token['groups']=grouped
     token['contexts']=[dict(r) for group in grouped for r in db.execute('SELECT * FROM candidate_context WHERE id=?',(group['id'],))] if table('candidate_context') else []
     return token

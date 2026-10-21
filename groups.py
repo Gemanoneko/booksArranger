@@ -40,6 +40,24 @@ def setup(connection):
         for operation in ('INSERT','UPDATE','DELETE'):
             connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_retirements_{operation.lower()} AFTER {operation} ON source_retirements BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
     setup_part_chapters(connection)
+    setup_group_member_index(connection)
+
+
+def setup_group_member_index(connection):
+    """Transactionally project exact group membership once, then maintain it on writes.
+
+    This index contains identities only. The scanner still compares the complete
+    matching group and context rows, including overlaps and newly added members.
+    """
+    fresh=not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog_group_members'").fetchone()
+    connection.execute('CREATE TABLE IF NOT EXISTS catalog_group_members(root TEXT NOT NULL,path TEXT NOT NULL,group_id TEXT NOT NULL,PRIMARY KEY(root,path,group_id))')
+    connection.execute('CREATE INDEX IF NOT EXISTS catalog_group_members_by_group ON catalog_group_members(group_id)')
+    for operation in ('INSERT','UPDATE','DELETE'):
+        remove="DELETE FROM catalog_group_members WHERE group_id=OLD.id;" if operation!='INSERT' else "DELETE FROM catalog_group_members WHERE group_id=NEW.id;"
+        insert="INSERT INTO catalog_group_members(root,path,group_id) SELECT DISTINCT NEW.root,json_extract(value,'$.path'),NEW.id FROM json_each(NEW.evidence,'$.members');" if operation!='DELETE' else ''
+        connection.execute(f'CREATE TRIGGER IF NOT EXISTS catalog_group_members_{operation.lower()} AFTER {operation} ON book_groups BEGIN {remove}{insert} END')
+    if fresh:
+        connection.execute("INSERT INTO catalog_group_members(root,path,group_id) SELECT DISTINCT g.root,json_extract(m.value,'$.path'),g.id FROM book_groups g,json_each(g.evidence,'$.members') m")
 
 def setup_part_chapters(connection):
     """M4B parts found at admission to carry their own chapters (Sergei 2026-10-13: each such part

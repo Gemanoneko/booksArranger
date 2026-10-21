@@ -26,6 +26,86 @@ def busy(code=sqlite3.SQLITE_BUSY):
 
 
 class CatalogContentionTests(unittest.TestCase):
+    def add_group(self,identity,paths,root=None):
+        with connect(self.db) as db:
+            groups.setup(db)
+            db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
+            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
+                       (identity,root or str(self.root),identity,1,'fp',json.dumps({'members':[{'path':p} for p in paths]})))
+            db.execute('INSERT INTO candidate_context VALUES(?,1,?)',(identity,'{}'))
+
+    def token(self,path=None):
+        with connect(self.db) as db:return contention.file_token(db,str(self.root),path or str(self.path))
+
+    def test_member_index_backfills_existing_catalog_before_first_scan(self):
+        self.add_group('old',[str(self.path)])
+        with connect(self.db) as db:
+            for operation in ('insert','update','delete'):db.execute('DROP TRIGGER catalog_group_members_'+operation)
+            db.execute('DROP TABLE catalog_group_members')
+        Inventory(self.db,self.roots,self.inv.reader,output_root=str(self.base/'sorted'))
+        self.assertEqual([g['id'] for g in self.token()['groups']],['old'])
+
+    def test_member_index_detects_insert_update_delete_and_context_drift(self):
+        with connect(self.db) as db:groups.setup(db)
+        empty=self.token();self.add_group('first',[str(self.path)])
+        inserted=self.token();self.assertNotEqual(empty,inserted)
+        with connect(self.db) as db:db.execute("UPDATE candidate_context SET data='changed' WHERE id='first'")
+        revised=self.token();self.assertNotEqual(inserted,revised)
+        with connect(self.db) as db:db.execute("UPDATE book_groups SET approved=1 WHERE id='first'")
+        approved=self.token();self.assertNotEqual(revised,approved)
+        with connect(self.db) as db:db.execute("UPDATE book_groups SET evidence=? WHERE id='first'",(json.dumps({'members':[{'path':'different'}]}),))
+        self.assertEqual(self.token()['groups'],[])
+        with connect(self.db) as db:db.execute("UPDATE book_groups SET evidence=? WHERE id='first'",(json.dumps({'members':[{'path':str(self.path)}]}),))
+        self.assertEqual([g['id'] for g in self.token()['groups']],['first'])
+        with connect(self.db) as db:db.execute("DELETE FROM book_groups WHERE id='first'")
+        self.assertEqual(self.token()['groups'],[])
+
+    def test_member_index_preserves_overlapping_groups_and_root_boundary(self):
+        self.add_group('first',[str(self.path),str(self.path)])
+        self.add_group('overlap',[str(self.path)])
+        self.add_group('other-root',[str(self.path)],root='different root')
+        value=self.token()
+        self.assertEqual([g['id'] for g in value['groups']],['first','overlap'])
+        self.assertEqual([c['id'] for c in value['contexts']],['first','overlap'])
+
+    def test_member_index_rollback_preserves_projection(self):
+        self.add_group('first',[str(self.path)])
+        before=self.token()
+        with connect(self.db) as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE book_groups SET evidence=? WHERE id='first'",(json.dumps({'members':[{'path':'changed'}]}),))
+            db.rollback()
+        self.assertEqual(self.token(),before)
+
+    def test_member_index_insert_or_replace_does_not_keep_old_membership(self):
+        self.add_group('first',[str(self.path)])
+        with connect(self.db) as db:
+            db.execute('INSERT OR REPLACE INTO book_groups(id,root,scope,revision,fingerprint,evidence) VALUES(?,?,?,?,?,?)',
+                       ('first',str(self.root),'first',2,'new',json.dumps({'members':[{'path':'different'}]})))
+        self.assertEqual(self.token()['groups'],[])
+        with connect(self.db) as db:
+            self.assertEqual(db.execute('SELECT path FROM catalog_group_members WHERE group_id=?',('first',)).fetchone()[0],'different')
+
+    def test_malformed_new_membership_aborts_group_update(self):
+        self.add_group('first',[str(self.path)])
+        before=self.token()
+        with self.assertRaises(sqlite3.IntegrityError):
+            with connect(self.db) as db:
+                db.execute("UPDATE book_groups SET evidence=? WHERE id='first'",(json.dumps({'members':[{}]}),))
+        self.assertEqual(self.token(),before)
+
+    def test_member_token_does_not_parse_unrelated_group_evidence(self):
+        self.add_group('first',[str(self.path)])
+        self.add_group('unrelated',['different'])
+        with connect(self.db) as db:
+            statements=[];db.set_trace_callback(statements.append)
+            with patch.object(contention.json,'loads',side_effect=AssertionError('No per-file JSON group scan')):
+                value=contention.file_token(db,str(self.root),str(self.path))
+            self.assertEqual([g['id'] for g in value['groups']],['first'])
+            plans=db.execute('EXPLAIN QUERY PLAN SELECT g.* FROM catalog_group_members m JOIN book_groups g ON g.id=m.group_id WHERE m.root=? AND m.path=? ORDER BY g.id',(str(self.root),str(self.path))).fetchall()
+            self.assertTrue(any('SEARCH m USING' in row[3] for row in plans),plans)
+            self.assertFalse(any('SELECT * FROM book_groups WHERE root=' in s for s in statements))
+
     def setUp(self):
         SCRATCH.mkdir(parents=True,exist_ok=True)
         self.base=Path(tempfile.mkdtemp(prefix='case-',dir=SCRATCH))

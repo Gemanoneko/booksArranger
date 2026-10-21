@@ -14,6 +14,17 @@ class OrganizationTests(unittest.TestCase):
     def test_multi_author_collection(self):self.assertEqual(self.path(anthology=True,multi_author=True),'Cycle/Book - Cycle - Short Stories.m4b')
     def test_collection_without_title(self):self.assertEqual(self.path(anthology=True,title=''),'Writer/Cycle/Cycle - Short Stories.m4b')
     def test_standalone_legacy_behavior(self):self.assertEqual(self.path(series='',number=''),'Writer/Book - Writer.m4b')
+    def test_distinct_folder_author_keeps_legacy_path_and_artist_credit(self):
+        from metadata import future_audio_tags
+        review=dict(self.review,author='Folder Writer',canonical_author='Artist Credit')
+        result=plan(self.root,review)
+        self.assertEqual(result['relative_path'].replace(os.sep,'/'),'Folder Writer/Cycle/Cycle - 2 - Book - Folder Writer.m4b')
+        self.assertEqual(future_audio_tags({},review)['ARTIST'],'Artist Credit')
+        self.assertEqual(review['canonical_author'],'Artist Credit')
+    def test_distinct_folder_author_standalone(self):
+        self.assertEqual(self.path(author='Folder Writer',canonical_author='Artist Credit',series='',number=''),'Folder Writer/Book - Folder Writer.m4b')
+    def test_blank_folder_author_falls_back_to_canonical(self):
+        self.assertEqual(self.path(author='  '),'Writer/Cycle/Cycle - 2 - Book - Writer.m4b')
     def test_unassigned_collection_legacy(self):self.assertEqual(self.path(anthology=True,series='',number=''),'Сборники/Book - Writer.m4b')
     def test_missing_number_holds_normal_book(self):
         with self.assertRaises(ValueError):self.path(number='')
