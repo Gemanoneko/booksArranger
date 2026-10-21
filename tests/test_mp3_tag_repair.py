@@ -96,7 +96,7 @@ class ActualPrivateStagingTests(unittest.TestCase):
     def test_verified_tag_copy_used_only_as_derived_encoder_input(self):
         source=Path(os.environ['BOOKS_MP3_REAL_FIXTURE']);data=source.read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(),'e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed')
-        stage=source.parent/('app-staging-'+uuid.uuid4().hex);stage.mkdir()
+        stage_parent=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT',str(source.parent)));stage_parent.mkdir(parents=True,exist_ok=True);stage=stage_parent/('app-staging-'+uuid.uuid4().hex);stage.mkdir()
         item={'path':str(source),'sha256':hashlib.sha256(data).hexdigest(),'size':len(data),'modified':str(source.stat().st_mtime_ns)}
         manifest={'job_id':'private-diagnostic','candidate_id':'private-candidate','candidate_revision':1,'sources':[item],
             'metadata_facts':{'source_fingerprint':'private'},'root':str(source.parent)}
