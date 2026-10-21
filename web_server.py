@@ -752,11 +752,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def review_data(self,review):
         names = {'title','author','original_language','series','number','genre','topic','multi_author'}
-        additions = {'anthology','canonical_author','narrator'}
+        additions = {'anthology','canonical_author','narrator','universe'}
         if not isinstance(review,dict) or not names.issubset(review) or set(review)-names-additions:
             raise ValueError('Review fields are incomplete or unknown')
-        review = {'anthology':False,'canonical_author':'','narrator':''} | review
-        if any(not isinstance(review[key],str) or len(review[key])>1000 for key in (names-{'multi_author'}) | {'canonical_author','narrator'}):
+        review = {'anthology':False,'canonical_author':'','narrator':'','universe':''} | review
+        if any(not isinstance(review[key],str) or len(review[key])>1000 for key in (names-{'multi_author'}) | {'canonical_author','narrator','universe'}):
             raise ValueError('Review text must be bounded strings')
         if type(review['multi_author']) is not bool or type(review['anthology']) is not bool or review['original_language'] not in {'Unknown','Russian','Other'} or review['genre'] not in {'',*GENRES}:
             raise ValueError('Invalid original language, genre or series flag')

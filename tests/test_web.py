@@ -143,15 +143,45 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(code,200);self.assertEqual(page['total'],1)
         row=page['rows'][0]
         review={'title':'Book','author':'Writer Jane','canonical_author':'Jane Writer','narrator':'Reader',
-            'original_language':'Other','series':'','number':'','genre':'','topic':'','multi_author':False,'anthology':False}
+            'original_language':'Other','series':'','number':'','genre':'','topic':'','multi_author':False,'anthology':False,'universe':'QA Universe'}
         payload={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'review':review,'approve':False}
         code,saved=self.json_call('/api/candidate/review',payload)
         self.assertEqual(code,200);self.assertGreater(saved['row']['revision'],row['revision'])
+        self.assertEqual(saved['row']['review']['universe'],'QA Universe')
+        self.assertEqual(saved['row']['review']['canonical_author'],'Jane Writer')
+        self.assertIn('QA Universe',saved['row']['preview']['path'])
         self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400)
         payload['revision']=saved['row']['revision'];payload['approve']=True
         self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400,'Unreadable members block approval')
         self.assertEqual(self.json_call('/api/inventory?library=Ebooks&view=candidates')[0],400)
         self.assertEqual(self.json_call('/api/inventory?library=Audiobooks&status=invented')[0],400)
+
+    def test_file_review_universe_optional_bounded_and_unknown_fields_refused(self):
+        source=Path(self.roots['Audiobooks'])/'universe.mp3';source.write_bytes(b'fixture')
+        self.assertEqual(self.call('/api/scan/start',{'library':'Audiobooks'})[0],200)
+        self.wait_scan()
+        row=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        review={'original_language':'Other','title':'Book','author':'Folder Author','canonical_author':'Artist Author',
+                'narrator':'','series':'Cycle','number':'2','genre':'','topic':'','multi_author':False,'anthology':False}
+        body={'library':'Audiobooks','path':row['path'],'size':row['size'],'modified':row['modified'],'review':review}
+        self.assertEqual(self.call('/api/review',body)[0],200,'Legacy clients may omit universe')
+        saved=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        self.assertEqual(saved['review']['universe'],'')
+        review=review|{'universe':'QA Universe'};body=body|{'review':review}
+        self.assertEqual(self.call('/api/review',body)[0],200)
+        saved=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        self.assertEqual(saved['review']['universe'],'QA Universe')
+        self.assertIn('Folder Author',saved['preview']['path'],'File-level previews retain their existing legacy routing policy')
+        self.assertEqual(saved['tag_preview']['ARTIST'],'Artist Author')
+        for bad in (True,123,None,[],{},'x'*1001):
+            with self.subTest(value=bad):
+                self.assertEqual(self.call('/api/review',body|{'review':review|{'universe':bad}})[0],400)
+        self.assertEqual(self.call('/api/review',body|{'review':review|{'unknown_field':'refuse'}})[0],400)
+        missing=dict(review);missing.pop('title')
+        self.assertEqual(self.call('/api/review',body|{'review':missing})[0],400)
+        final=self.json_call('/api/inventory?library=Audiobooks')[1]['rows'][0]
+        self.assertEqual(final['review'],saved['review'],'Rejected values cannot alter the saved review')
+        self.assertEqual(source.read_bytes(),b'fixture')
 
     def test_health_page_identity_and_source_files_not_served(self):
         code,data=self.json_call('/api/health',authorized=False)
