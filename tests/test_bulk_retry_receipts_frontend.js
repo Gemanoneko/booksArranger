@@ -38,7 +38,15 @@ module.exports=(async()=>{
   assert.doesNotMatch(run('retryReceiptText(recoveredRun)'),/actual database start failure/,'current running child supersedes old startup blockage');
   assert.equal(run('retryReceiptText({id:"unknown",state:"done",total:1,accepted:1})').includes('0 queued'),false,'missing progress is not invented');
   context.newer={...result,id:'run-all',accepted:0,refused:1,progress:{schema:'books-retry-progress-v1',counts:{waiting:0,checking:0,queued:0,running:0,completed:0,stopped:0},targets:[]}};run('acceptBulkResponse({retry_all:newer});renderAttentionGroups()');
-  assert.match(get('retry-all-status').textContent,/Retry requested for 0 of 1/);assert.equal(get('retry-selected-status').textContent,'');
+  assert.equal(get('retry-all-status').textContent,'No retry requests accepted. 1 refused. No conversion started from this request.');assert.equal(get('retry-selected-status').textContent,'');
+  context.zero44={...context.newer,total:44,done:44,accepted:0,refused:44};
+  assert.equal(run('retryReceiptText(zero44,false)'),'No retry requests accepted. 44 refused. No conversion started from this request.');
+  const conditional=Array.from({length:44},(_,i)=>blocked({id:'conditional-'+i,path:'conditional-'+i},{job_id:'old-job-'+i,attention:{group:'other'},retry:{allowed:true,reason:''},readmission:{state:'refused',accepted:false,queued_next:false,kind:'retry',cause:'file_problem',fix:'user',stale:false}}));
+  const excluded=[0,1].map(i=>blocked({id:'excluded-'+i,path:'excluded-'+i},{job_id:'excluded-job-'+i,attention:{group:'other'},retry:{allowed:false,reason:'Not available'}}));
+  context.conditionalRows=[...conditional,...excluded];run('rows=conditionalRows;selectedBooks.clear();for(const row of rows)selectedBooks.set(row.id,row.revision);state.audiobook_jobs.attention_counts={retry:0,other:46};batchCounts();controls()');
+  assert.equal(get('batch-count').textContent,'46 selected · 44 can be checked again · 2 left out');
+  assert.match(get('batch-help').textContent,/Previous attempts were refused/);assert.equal(run('retrySelectable().length'),44);assert.equal(get('retry-selected').disabled,false);
+  assert.match(get('group-retry').textContent,/Can retry · 0/);
   context.fetch=async(route,options)=>{calls.push({route,options});throw Error('network unavailable');};
   run('retryAllConfirm={count:2,cleanable:0};');await run('startRetryAll()');run('renderAttentionGroups()');
   assert.match(get('retry-all-status').textContent,/Connection interrupted/,'new failed action is not overwritten by the older successful run');

@@ -79,7 +79,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   assert.equal(run('candidateStatus('+JSON.stringify(stale('s5',{group:'unsupported'}))+')'),"Can't convert — M4B not supported");
   assert.equal(text(stale('s6',{group:'retry',precheck:undefined})).status,'Stopped — try again','positive control: a row the check does not cover');
   // A current refusal comes before the pre-check.
-  assert.equal(text(m4bRow('s7',{attention:{group:'other',cause:null,originals_untouched:true,precheck:'pending'},readmission:refusal('file_problem')})).status,'Stopped — file problem');
+  assert.equal(text(m4bRow('s7',{attention:{group:'other',cause:null,originals_untouched:true,precheck:'pending'},readmission:refusal('file_problem')})).status,'Stopped — check refused');
 
   // The Checking strip group: after Can repair, counted in All, hidden at zero.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
@@ -102,7 +102,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   assert.equal(text(m4bRow('rt',{attention:{group:'other',cause:null,originals_untouched:true},readmission:refusal('unknown')})).status,'Stopped — retry refused','positive control: a Retry says retry');
   // Superseded by follow-up 2, section 2.2: a working-files record no longer decides the row (its natural state shows).
   assert.equal(text(repair('working_files')).hint,'Select the row to read why.');
-  assert.equal(text(repair('file_problem')).hint,"Repair was refused: the app couldn't read or write a file. Check the folder, then repair.");
+  assert.equal(text(repair('file_problem')).hint,"Repair was refused: the previous check stopped. Read the recorded reason before you repair.");
   for(const cause of ['unknown','working_files','file_problem','source_changed','unsupported_file']){const lines=text(repair(cause));assert.doesNotMatch(lines.status+' '+lines.hint,/retry/i,cause);}
 
   // 3c: the absolute working folder is in Technical detail only (panel and hover title), for working_files only.

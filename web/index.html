@@ -24,16 +24,16 @@
         <button id="stop-automatic" type="button" class="quiet" title="Stop research and pause audiobook jobs. Save pending work; finished books stay in place." aria-describedby="automatic-help" disabled>Stop automatic processing</button>
         <button id="cancel-automatic-start" type="button" class="quiet" title="Don't start automatic processing by itself. Books you started over keep waiting. Press Start automatic processing when you want it to run." hidden>Cancel automatic start</button>
       </div>
-      <p id="automatic-help" class="field-help" hidden>Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it. Existing audiobook jobs must be paused before starting automatic discovery.</p>
-      <p id="automatic-start-reason" class="field-help" role="status" aria-live="polite" hidden></p>
-      <p id="automatic-policy" class="notice" hidden>Verified audiobooks replace their included originals. Once a book is verified, its backup copies are deleted right away.</p>
       <div id="automatic-status-block" hidden>
         <p id="automatic-status" aria-live="polite">Automatic processing: status unavailable</p>
         <p id="automatic-request" role="status"></p>
-        <p id="automatic-detail" class="field-help"></p>
-        <p id="research-status" aria-live="polite">Research status unavailable</p>
+        <p id="automatic-detail" class="field-help" role="status" aria-live="polite"></p>
+        <p id="automatic-start-reason" class="field-help" role="status" aria-live="polite" hidden></p>
+        <p id="research-status">Research status unavailable</p>
         <p id="research-current" class="field-help"></p>
       </div>
+      <p id="automatic-help" class="field-help" hidden>Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it. Existing audiobook jobs must be paused before starting automatic discovery.</p>
+      <p id="automatic-policy" class="notice" hidden>Verified audiobooks replace their included originals. Once a book is verified, its backup copies are deleted right away.</p>
       <div class="toolbar discovery-controls" aria-label="Discovery only">
         <span>Discovery only</span>
         <button id="start" class="quiet" title="Check for new or changed files and retry unreadable files. Reuse saved metadata for unchanged readable files.">Start scanning</button><button id="stop" class="quiet" title="Stop discovery after its current read and save pending scan work." aria-describedby="discovery-help" disabled>Stop scanning</button><button id="resume" class="quiet" title="Continue saved pending work without starting a new discovery pass." disabled>Resume scanning</button>

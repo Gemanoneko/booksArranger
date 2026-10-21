@@ -52,8 +52,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   // source_changed: the hint names Start over (follow-up 2, section 1.2).
   const expected={
     source_changed:['Stopped — review changed',"Retry was refused: the book's review or source files changed. Start over sends it back to automatic processing."],
-    file_problem:['Stopped — file problem',"Retry was refused: the app couldn't read or write a file. Check the folder, then retry."],
-    unknown:['Stopped — retry refused','Retry was refused. Select the row to read why.']};
+    file_problem:['Stopped — check refused',"Retry was refused: the previous check stopped. Read the recorded reason before you retry."],
+    unknown:['Stopped — retry refused','Retry was refused. The app did not report a specific reason.']};
   for(const [cause,[status,hint]] of Object.entries(expected)){
     const text=run('attentionText('+JSON.stringify(refusedRow('c',cause))+')');
     assert.equal(text.status,status,cause);assert.equal(text.hint,hint,cause);assert.equal(text.warn,true,cause);
@@ -65,7 +65,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     assert.deepEqual([text.status,text.hint],expected.unknown,'a missing or unrecognised cause reads as unknown');
   }
   // The verb follows the refusal's kind (follow-up point 3b): a refused Repair never says "retry".
-  assert.equal(run('attentionText('+JSON.stringify(refusedRow('r','file_problem',{kind:'repair'}))+').hint'),"Repair was refused: the app couldn't read or write a file. Check the folder, then repair.");
+  assert.equal(run('attentionText('+JSON.stringify(refusedRow('r','file_problem',{kind:'repair'}))+').hint'),"Repair was refused: the previous check stopped. Read the recorded reason before you repair.");
   paint([refusedRow('w','working_files'),refusedRow('s','source_changed'),refusedRow('f','file_problem'),refusedRow('k','unknown')]);
   const waiting=actionButtons(rowOf('w'))[0];
   assert.equal(waiting.textContent,'Retry');assert.equal(waiting.disabled,true);assert.equal(waiting.title,NOT_YET,'tooltip exactly as section 3');

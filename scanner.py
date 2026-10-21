@@ -199,18 +199,23 @@ class Inventory:
         if self.worker and self.worker.is_alive():
             raise ValueError('A scan is already running; stop it before starting another')
         normalize_sources(self.roots,self.audiobook_sources,self.output_root)
-        plans=[]
-        with connect(self.database) as connection:
+        from catalog_contention import write
+        def prepare(connection):
+          plans=[]
+          saved={root:connection.execute('SELECT * FROM jobs WHERE root=?',(root,)).fetchone() for root in roots}
+          resumable={'stopped','offline','failed'}
+          if resume and not any(job and job['state'] in resumable for job in saved.values()):
+              raise ValueError('No stopped scan to resume')
           for root in roots:
-            job = connection.execute('SELECT * FROM jobs WHERE root=?', (root,)).fetchone()
-            if resume:
+            job=saved[root]
+            if resume and job:
                 if job and job['state'] in {'completed','completed with errors'}:
                     continue
-                if not job or job['state'] not in {'stopped', 'offline', 'failed'}:
+                if job['state'] not in resumable:
                     raise ValueError('No stopped scan to resume')
                 generation = job['generation']
             else:
-                if job and job['state'] in {'stopped', 'offline', 'failed'}:
+                if job and job['state'] in resumable:
                     raise ValueError('Use Resume scanning to continue saved progress')
                 generation = (job['generation'] if job else 0) + 1
                 connection.execute('DELETE FROM queue WHERE root=?', (root,))
@@ -218,6 +223,10 @@ class Inventory:
                 connection.execute('INSERT INTO queue(root,generation,path,directory) VALUES(?,?,?,1)', (root,generation,root))
             connection.execute("UPDATE jobs SET state='scanning' WHERE root=?", (root,))
             plans.append((label,root,generation))
+          return plans
+        # Only SQL is replayed on contention. A saved source keeps its generation
+        # and queue; newly configured sources start once in the same transaction.
+        plans=write(self.database,prepare)
         if not plans:raise ValueError('No stopped scan to resume')
         self.stop_event.clear()
         self.last_error = ''

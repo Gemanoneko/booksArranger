@@ -145,6 +145,38 @@ class CatalogContentionTests(unittest.TestCase):
         contention.write(self.db,operation)
         self.assertEqual(len(attempts),2);self.assertEqual(self.row('tally')['n'],1)
 
+    def test_launch_resume_replays_only_catalog_plan_before_starting_worker(self):
+        extra=self.base/'old-audio';extra.mkdir()
+        second=extra/'other.mp3';second.write_bytes(b'new source')
+        with connect(self.db) as db:db.execute("UPDATE jobs SET state='failed'")
+        inv=Inventory(self.db,self.roots,self.inv.reader,audiobook_sources=[str(self.root),str(extra)],output_root=str(self.base/'sorted'))
+        fault,attempts=self.inject_after_write_once()
+        with fault:
+            inv.launch('Audiobooks',resume=True);inv.worker.join(10)
+        self.assertFalse(inv.worker.is_alive())
+        self.assertEqual(inv.last_error,'')
+        self.assertGreaterEqual(len(attempts),2)
+        self.assertEqual(self.calls.count(str(self.path)),1)
+        self.assertEqual(self.calls.count(str(second)),1)
+        with connect(self.db) as db:
+            self.assertEqual([(r['generation'],r['state']) for r in db.execute('SELECT generation,state FROM jobs')],[(1,'completed'),(1,'completed')])
+
+    def test_launch_exhausted_busy_does_not_start_worker_or_partially_add_source(self):
+        extra=self.base/'old-audio';extra.mkdir()
+        with connect(self.db) as db:db.execute("UPDATE jobs SET state='failed'")
+        inv=Inventory(self.db,self.roots,self.inv.reader,audiobook_sources=[str(self.root),str(extra)],output_root=str(self.base/'sorted'))
+        original=contention.write
+        def exhausted(database,operation,stop=None):
+            def fail(db):operation(db);raise busy()
+            return original(database,fail,stop)
+        with patch.object(contention,'write',side_effect=exhausted):
+            with self.assertRaises(contention.CatalogHold):inv.launch('Audiobooks',resume=True)
+        self.assertIsNone(inv.worker)
+        self.assertEqual(self.calls,[])
+        with connect(self.db) as db:
+            self.assertIsNone(db.execute('SELECT 1 FROM jobs WHERE root=?',(str(extra),)).fetchone())
+            self.assertEqual(db.execute('SELECT state FROM jobs WHERE root=?',(str(self.root),)).fetchone()[0],'failed')
+
     def test_real_other_connection_writer_can_release_without_losing_increment(self):
         acquired=threading.Event();release=threading.Event();errors=[]
         def holder():

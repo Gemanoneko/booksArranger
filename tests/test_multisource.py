@@ -77,6 +77,49 @@ class MultiSourceTests(unittest.TestCase):
             self.assertEqual(inv.source_root_for_candidate(row['id']),row['source_root'])
             self.assertEqual(inv.source_root_for_path(row['members'][0]['path']),row['source_root'])
 
+    def test_resume_failed_primary_also_starts_newly_added_source(self):
+        self.file(self.primary)
+        old=self.inventory(extra=False);self.scan(old)
+        before=old.candidates('Audiobooks')['rows'][0]
+        old.save_candidate('Audiobooks',before['id'],before['revision'],{'title':'Kept title','author':'Kept author'})
+        before=old.candidate('Audiobooks',before['id'])
+        with connect(self.db) as db:
+            generation=db.execute('SELECT generation FROM jobs WHERE root=?',(str(self.primary),)).fetchone()[0]
+            db.execute("UPDATE jobs SET state='failed',current='database is locked' WHERE root=?",(str(self.primary),))
+            db.execute("UPDATE queue SET state='pending' WHERE root=? AND path=?",(str(self.primary),str(self.primary)))
+        self.file(self.extra,data=b'new source fixture')
+        added=self.inventory();self.scan(added,resume=True)
+        self.assertEqual(added.source_status(str(self.primary))['generation'],generation)
+        self.assertEqual(added.source_status(str(self.extra))['generation'],1)
+        self.assertEqual(added.status('Audiobooks')['state'],'completed')
+        self.assertEqual(added.candidates('Audiobooks')['total'],2)
+        after=added.candidate('Audiobooks',before['id'])
+        for key in ('id','revision','fingerprint','review'):
+            self.assertEqual(after[key],before[key])
+
+    def test_resume_without_any_saved_scan_does_not_create_new_work(self):
+        inv=self.inventory()
+        with self.assertRaisesRegex(ValueError,'No stopped scan'):
+            inv.launch('Audiobooks',resume=True)
+        self.assertIsNone(inv.worker)
+        with connect(self.db) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM jobs').fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT count(*) FROM queue').fetchone()[0],0)
+
+    def test_resume_invalid_other_source_rolls_back_saved_source_transition(self):
+        inv=self.inventory()
+        with connect(self.db) as db:
+            db.execute("INSERT INTO jobs(root,label,generation,state) VALUES(?,?,7,'failed')",(str(self.primary),'Audiobooks'))
+            db.execute("INSERT INTO queue(root,generation,path,directory,state) VALUES(?,7,?,1,'pending')",(str(self.primary),str(self.primary)))
+            db.execute("INSERT INTO jobs(root,label,generation,state) VALUES(?,?,3,'scanning')",(str(self.extra),'Audiobooks'))
+        with self.assertRaisesRegex(ValueError,'No stopped scan'):
+            inv.launch('Audiobooks',resume=True)
+        self.assertIsNone(inv.worker)
+        with connect(self.db) as db:
+            row=db.execute('SELECT generation,state FROM jobs WHERE root=?',(str(self.primary),)).fetchone()
+            self.assertEqual(tuple(row),(7,'failed'))
+            self.assertEqual(db.execute('SELECT state FROM queue WHERE root=?',(str(self.primary),)).fetchone()[0],'pending')
+
     def test_global_pagination_ids_and_file_rows_share_sources(self):
         self.file(self.primary);self.file(self.extra)
         inv=self.inventory();self.scan(inv)

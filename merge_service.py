@@ -1708,9 +1708,9 @@ class MergeService:
         from audio_jobs import RETRY_SCANNING,RETRY_CLOSING,RETRY_ALL_RUNNING,RETRY_ALL_NONE
         if self.inventory.worker and self.inventory.worker.is_alive():raise StartRefused('busy',RETRY_SCANNING)
         generation=self._capture_start_generation()
-        summary=self.attention_summary(retry=False)
         if items is None:
-            targets=[{'job_id':job_id,'kind':'retry'} for job_id,item in summary.items() if item['group']=='retry']
+            summary=self.attention_summary()
+            targets=[{'job_id':job_id,'kind':'retry'} for job_id,item in summary.items() if item.get('retry',{}).get('allowed') is True]
         else:
             if not isinstance(items,list) or not 1<=len(items)<=10000 or len({item.get('job_id') for item in items if isinstance(item,dict)})!=len(items):raise ValueError('Expected unique selected retry targets')
             targets=[]
@@ -1816,8 +1816,10 @@ class MergeService:
         with self.operation_lock:
             if start_generation is not None and not self._start_allowed(start_generation):raise StartRefused('stale','Retry admission was superseded by Pause or closing.')
             if self.inventory.worker and self.inventory.worker.is_alive() or self.draining:return None
-            current=self.attention_summary([job_id],retry=False).get(job_id)
-            if not current or current['group']!=('repair' if kind=='repair' else 'retry'):return None
+            current=self.attention_summary([job_id]).get(job_id)
+            # A current user-fixable refusal can offer Retry while grouped under Other.
+            # Use the same capability as the individual button; admission still rechecks the book.
+            if kind not in ('retry','repair') or not current or current.get(kind,{}).get('allowed') is not True:return None
             rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
             if not rows:return None
             manifest=json.loads(rows[0]['manifest'])

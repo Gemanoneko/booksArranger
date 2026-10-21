@@ -4,7 +4,7 @@ const token = document.querySelector('meta[name="books-token"]').content;
 let offset = 0, search = '', selectedPath = null, selectedRow = null, reviewRow = null, rows = [], lastKey = null;
 let dirty = false, busy = false, polling = false, ended = false, timer = null, state = null;
 let view='candidates',totalRows=0,selectedLibrary=null;
-let automaticRequest=null,automaticResultKey=null,automaticInspectorKey=null;
+let automaticRequest=null,automaticFlight=null,automaticResultKey=null,automaticInspectorKey=null;
 let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'converted'};
 const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention'],['restarted','Started over']]};
@@ -333,7 +333,8 @@ async function refresh(force=false) {
   const sourceRoots=Array.isArray(state.source_roots)&&state.source_roots.length?state.source_roots:[state.root];$('root').textContent=state.library==='Audiobooks'?sourceRoots.map((root,i)=>`Source ${i+1}: ${root}`).concat(state.audiobook_output_root?[`Output: ${state.audiobook_output_root}`]:[]).join('\n'):`Source: ${state.root}`;
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
-  const statusText=`Discovery: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
+  const scanLabel=!state.active_library && status.state==='failed'?'Last scan':'Discovery';
+  const statusText=`${scanLabel}: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
   receivedStatus.set(library,statusText);$('status').textContent=statusText;
   $('error-shortcut').hidden=!(status.unresolved_errors ?? status.errors);$('error-shortcut').textContent=`Read errors · ${status.unresolved_errors ?? status.errors}`;
   $('scan-issues').hidden=!status.scan_issues?.length;$('scan-issues-text').textContent=(status.scan_issues || []).map(issue=>`${issue.path}\n${issue.error}\n${issue.time}`).join('\n\n');
@@ -448,9 +449,9 @@ async function inspectorCover(cover,holder,sequence){const caption=node('p',cove
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
 function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
-function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryable=attentionSelection()?retrySelectable().length:0,waiting=selected.filter(row=>readmissionOf(row)?.state==='queued').length,leftOut=selected.length-retryable-waiting;const releasable=releaseSelection()?releaseSelectable().length:0;
+function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryItems=attentionSelection()?retrySelectable():[],retryable=retryItems.length,conditional=conditionalRetries(retryItems),waiting=selected.filter(row=>readmissionOf(row)?.state==='queued').length,leftOut=selected.length-retryable-waiting;const releasable=releaseSelection()?releaseSelectable().length:0;
   // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
-  $('batch-count').textContent=attentionSelection()?`${selected.length} selected`+(waiting?` · ${waiting} already waiting for retry checks`:String())+` · ${retryable} new retries available`+(leftOut>0?` · ${leftOut} left out`:''):
+  $('batch-count').textContent=attentionSelection()?`${selected.length} selected`+(waiting?` · ${waiting} already waiting for retry checks`:String())+(retryable>conditional || !conditional?` · ${retryable-conditional} new retries available`:'')+(conditional?` · ${conditional} can be checked again`:'')+(leftOut>0?` · ${leftOut} left out`:''):
     filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
     `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
@@ -1185,12 +1186,13 @@ function retryReceiptText(run,includeProgress=true){
   if(!run)return '';
   const n=value=>Number.isInteger(value)&&value>=0?value.toLocaleString():'unavailable';
   if(run.state==='running')return includeProgress?'Requesting retries — '+n(run.done)+' of '+n(run.total)+' processed':'Requesting retries.';
+  if(run.accepted===0 && Number.isInteger(run.refused) && run.refused>0)return 'No retry requests accepted. '+n(run.refused)+' refused. No conversion started from this request.';
   let line='Retry requested for '+n(run.accepted)+' of '+n(run.total)+' books.';
   if(run.refused>0)line+=' '+n(run.refused)+' refused.';
   const counts=run.progress?.schema==='books-retry-progress-v1'?run.progress.counts:null;
   if(counts && includeProgress)line+=' '+['waiting','checking','queued','running','completed','stopped'].map(key=>n(counts[key])+' '+key).join(' · ')+'.';
   else if(!counts)line+=' Current retry progress unavailable.';
-  else line+=' '+(counts.running?'Conversion is running.':counts.checking?'Retry checks are running.':counts.queued?'Conversion jobs are queued.':counts.waiting?'Waiting for retry checks.':counts.stopped?'Some retry checks stopped.':'Retry work completed.');
+  else line+=' '+(counts.running?'Conversion is running.':counts.checking?'Retry checks are running.':counts.queued?'Conversion jobs are queued.':counts.waiting?'Waiting for retry checks.':counts.stopped?'Some retry checks stopped.':counts.completed?'Retry checks finished.':'Retry request finished.');
   const stalled=!counts || (counts.waiting>0 && !counts.checking && !counts.queued && !counts.running);
   const blocked=run.receipt_error || (stalled?(run.worker?.reason || run.start_outcome?.reason || run.progress?.targets?.find(item=>item.reason)?.reason):'');
   if(blocked)line+=' '+blocked;
@@ -1276,13 +1278,14 @@ function retrySelectable(){
   return rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id)).map(row=>({row,action:rowAction(row)}))
     .filter(item=>item.action && (item.action.kind==='retry' || item.action.kind==='repair') && item.action.data?.allowed===true);
 }
+function conditionalRetries(items){return items.filter(item=>!!refusalCurrent(item.row)).length;}
 function renderRetrySelected(){
   const shown=attentionSelection(),button=$('retry-selected'),count=shown?retrySelectable().length:0,confirm=retrySelectedConfirm;
   $('queue-books').hidden=shown;button.hidden=!shown || !!confirm;
   const label=`Retry selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
   button.title=count?`Request retries for these ${count.toLocaleString()} selected books. Each book is checked before a conversion job can be queued.`:'Select books that can be retried or repaired.';
   button.disabled=!count || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning() || retrySelectedRun;
-  const help=shown?'Only selected books that can be retried or repaired can request new checks.':'Only ready selected revisions are queued. Candidates needing review remain selected.';
+  const help=shown?(conditionalRetries(retrySelectable())?'Previous attempts were refused. Check each book\'s reason before retrying.':'Only selected books that can be retried or repaired can request new checks.'):'Only ready selected revisions are queued. Candidates needing review remain selected.';
   if($('batch-help').textContent!==help)$('batch-help').textContent=help;
   $('retry-selected-confirm').hidden=!shown || !confirm;
   if(confirm){
@@ -1320,6 +1323,17 @@ $('recovery-dialog').addEventListener('cancel',event=>{event.preventDefault();cl
 $('recovery-dialog').addEventListener('keydown',event=>{if(!recoveryConfirmation)return;if(event.key==='Escape'){event.preventDefault();closeRecoveryDialog();}else if(event.key==='Tab'){event.preventDefault();const first=$('recovery-cancel'),last=$('recovery-confirm');(document.activeElement===first?last:first).focus();}});
 
 const automaticStates=new Set(['Idle','Running','Stopping','Paused','Completed','Needs attention']);
+function settleAutomaticRequest(flight){
+  if(!flight || automaticFlight!==flight)return;
+  automaticFlight=null;automaticRequest=null;busy=false;
+}
+function reconcileAutomaticRequest(automatic){
+  const flight=automaticFlight;if(!flight)return;
+  const changed=automatic?.run_id!==flight.run_id || automatic?.state!==flight.state || automatic?.failure?.id!==flight.failure_id;
+  const confirmed=flight.kind==='start'?['Running','Needs attention','Completed','Paused'].includes(automatic?.state):
+    flight.kind==='stop'?['Stopping','Paused','Completed','Needs attention','Idle'].includes(automatic?.state):!startPending(automatic);
+  if(recoveryDisconnected || ended || !automaticStates.has(automatic?.state) || (changed && confirmed))settleAutomaticRequest(flight);
+}
 function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
 function automaticPhase(value){return {discovery:'discovery',research:'metadata research',conversion:'audiobook jobs',paused:'saving pending work',completed:'finishing the pass'}[value] || 'pending work';}
 const PENDING_NOTICE={conversion:'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.',
@@ -1340,7 +1354,9 @@ function renderAutomaticEligibility(){
 }
 function renderAutomatic(){
   const automatic=state?.automatic_processing,known=automaticStates.has(automatic?.state),stale=recoveryDisconnected || ended?'Last confirmed — ':'';
-  setText('automatic-status',stale+'Automatic processing: '+(known?automatic.state:'status unavailable'));
+  reconcileAutomaticRequest(automatic);
+  const shown=automatic?.state==='Needs attention'?'Stopped — needs attention':automatic?.state;
+  setText('automatic-status',(!known || stale?'Current processing status unavailable. ':'')+stale+'Automatic processing: '+(known?(stale?automatic.state:shown):'status unavailable'));
   setText('automatic-request',automaticRequest==='start'?'Starting automatic processing…':automaticRequest==='stop'?'Requesting automatic stop…':'');
   renderAutomaticEligibility();
   let detail='';
@@ -1352,8 +1368,11 @@ function renderAutomatic(){
   }else if(automatic?.state==='Running' && automatic.phase==='waiting' && automatic.automatic_retry_enabled===true){
     detail='Waiting for metadata sources; saved research retries automatically.';
     const retry=retryDate(automatic.next_retry_at);detail+=retry?' Next automatic retry check: '+retry:' Automatic retry time unavailable';
-  }else if(automatic?.reason)detail=automatic.reason;
+  }else if(automatic?.state==='Needs attention')detail=(automatic.reason || 'Automatic processing stopped. The app did not report a specific reason.')+
+    (automatic.can_start===true?' Start automatic processing to continue.':automatic.start_block_reason?'':' No action is available here yet.');
+  else if(automatic?.reason)detail=automatic.reason;
   setText('automatic-detail',detail);$('automatic-detail').hidden=!detail;
+  $('stop-automatic').title=!known || stale?'Current processing status unavailable.':automatic.state==='Stopping'?'Automatic processing is stopping.':automatic.can_stop!==true && automatic.state!=='Running'?'Automatic processing is stopped.':'Stop research and pause audiobook jobs. Save pending work; finished books stay in place.';
   const research=automatic?.research,counts=research && ['researching','waiting','held'].every(key=>verifiedCount(research[key])!==null);
   setText('research-status',stale+(counts?'Metadata research: '+research.researching+' researching · '+research.waiting+' waiting · '+research.held+' held':'Research status unavailable'));
   const current=automatic?.current;
@@ -1363,17 +1382,28 @@ function renderAutomatic(){
 async function automaticAction(kind){
   controls();const button=$({start:'start-automatic',stop:'stop-automatic','cancel-start':'cancel-automatic-start'}[kind]);
   if(button.disabled || automaticRequest!==null || $('library').value!=='Audiobooks')return;
-  automaticRequest=kind;busy=true;renderAutomatic();controls();message();
+  const automatic=state?.automatic_processing,flight={kind,run_id:automatic?.run_id,state:automatic?.state,failure_id:automatic?.failure?.id};
+  automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();
+  let refreshNeeded=false;
   try{
-    const result=await request('/api/automatic/'+kind,{});
+    const result=await request('/api/automatic/'+kind,{},60000);
+    if(automaticFlight!==flight)return;
     const acknowledged=result.automatic_processing || result.state?.automatic_processing;
-    if(acknowledged && state){state={...state,automatic_processing:acknowledged};renderAutomatic();}
-    lastKey=null;if(await refresh(true))clearConnectionNotice();
+    if(!automaticStates.has(acknowledged?.state) || typeof acknowledged.can_start!=='boolean' || typeof acknowledged.can_stop!=='boolean')throw Error('Current processing status unavailable. Check the current status before trying again.');
+    if(state)state={...state,automatic_processing:acknowledged};
+    settleAutomaticRequest(flight);renderAutomatic();controls();
+    refreshNeeded=true;
   }catch(error){
+    if(automaticFlight!==flight)return;
     if(error.automaticProcessing && state)state={...state,automatic_processing:error.automaticProcessing};
+    settleAutomaticRequest(flight);renderAutomatic();controls();
     message(error.message);
-    if(error.httpStatus){lastKey=null;await refresh(true);}else refreshFailed(error);
-  }finally{automaticRequest=null;busy=false;renderAutomatic();controls();}
+    if(error.httpStatus)refreshNeeded=true;else refreshFailed(error);
+  }finally{settleAutomaticRequest(flight);renderAutomatic();controls();}
+  if(refreshNeeded){
+    try{lastKey=null;if(await refresh(true))clearConnectionNotice();}
+    catch(error){if(error.httpStatus)message(error.message);else refreshFailed(error);}
+  }
   // Cancel automatic start: every other toolbar button is disabled, so focus moves to the notice.
   if(kind==='cancel-start'){const notice=$('automatic-start-reason');notice.setAttribute('tabindex','-1');notice.focus?.({preventScroll:true});}
 }
@@ -1427,7 +1457,7 @@ const attentionCopy={retry:['Stopped — ready to retry','Safe to retry now.'],s
 const refusalCopy={unsupported_file:["Can't convert — M4B not supported","the app doesn't support how this M4B is built. Nothing to do for now."],
   working_files:['Stopped — waiting for cleanup','working files from an earlier attempt are still present. {Verb} after they are cleared.'],
   source_changed:['Stopped — review changed',"the book's review or source files changed. Start over sends it back to automatic processing."],
-  file_problem:['Stopped — file problem',"the app couldn't read or write a file. Check the folder, then {verb}."],
+  file_problem:['Stopped — check refused','the previous check stopped. Read the recorded reason before you {verb}.'],
   unknown:['Stopped — {verb} refused','']};
 const refusalFixes={unsupported_file:'update',working_files:'wait',source_changed:'review',file_problem:'user',unknown:'update'};
 function verbed(text,verb){return text.replaceAll('{Verb}',verb).replaceAll('{verb}',verb.toLowerCase());}
@@ -1471,7 +1501,7 @@ function attentionText(row){
   if(refusal && refusal.stale!==true){
     const cause=refusalCause(refusal),[refusedStatus,copy]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
     const text=cause==='source_changed'?STARTOVER_HINTS[a.startover==='manual_draft'?(a.release_ok===true?'combined':'manual_draft'):'automatic']:copy;
-    return {status:verbed(refusedStatus,verb),hint:text?`${verb} was refused: ${verbed(text,verb)}${untouched}`:`${verb} was refused. Select the row to read why.`,warn:true,clause};
+    return {status:verbed(refusedStatus,verb),hint:text?`${verb} was refused: ${verbed(text,verb)}${untouched}`:`${verb} was refused. The app did not report a specific reason.`,warn:true,clause};
   }
   // Leftover working files the app cannot clear stop the row: no control, and nothing Sergei can press fixes it here.
   if(a.working?.state==='blocked' && a.working.stops===true)return {status:BLOCKED_COPY[0],hint:a.working.cause==='originals_unreachable'?BLOCKED_COPY[2]:BLOCKED_COPY[1],warn:true};

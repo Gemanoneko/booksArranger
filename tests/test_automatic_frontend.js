@@ -155,7 +155,7 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   const workerReason='Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.';
   snapshot({state:'Needs attention',can_start:false,can_stop:false,start_block_reason:workerReason},{audiobook_jobs:{state:'Running',queued:6,converted_total:12,approved_total:111,current_title:'Digital Fortress — Длинное название',progress:{phase:'checking sources'}},activities:[{id:'conversion',kind:'conversion',subject:'Digital Fortress — Длинное название',step:'checking sources',step_index:1,step_count:4,indeterminate:true,state:'running',step_started_at:Date.now()}]});run('renderJobs()');
   assert.equal(get('start-automatic').disabled,true);assert.equal(get('automatic-start-reason').textContent,workerReason);assert.equal(get('automatic-start-reason').hidden,false);assert.equal(get('start-automatic').title,workerReason);
-  assert.equal(get('automatic-status').textContent,'Automatic processing: Needs attention');assert.match(get('jobs-status').textContent,/Running/);assert.match(textTree(get('jobs-rows').children[0]),/Converting: .*Digital Fortress/);assert.match(textTree(get('jobs-rows').children[0]),/Step 1 of 4 - Checking source files/);
+  assert.equal(get('automatic-status').textContent,'Automatic processing: Stopped — needs attention');assert.match(get('jobs-status').textContent,/Running/);assert.match(textTree(get('jobs-rows').children[0]),/Converting: .*Digital Fortress/);assert.match(textTree(get('jobs-rows').children[0]),/Step 1 of 4 - Checking source files/);
   const explanation=get('automatic-start-reason');let writes=0,reasonText=explanation.textContent;Object.defineProperty(explanation,'textContent',{configurable:true,get(){return reasonText;},set(value){writes++;reasonText=value;}});
   get('focused-metadata').focus();run('renderAutomatic();controls();renderAutomatic();controls()');assert.equal(writes,0);assert.equal(document.activeElement,get('focused-metadata'));
   for(const reason of ['Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.','Discovery is in progress. Wait for it to stop before starting automatic processing.','Automatic processing is already running.','Automatic processing is stopping. Wait for it to finish stopping.','Automatic processing cannot restart because its failure record could not be saved.']){
@@ -171,5 +171,32 @@ function candidate(overrides={}){return {id:'candidate-fixture',path:'candidate-
   await run("automaticAction('start')");postOverride=null;
   assert.equal(calls.filter(call=>call.route==='/api/automatic/start').length,rejectedCount+1);assert.equal(run('state.automatic_processing.state'),'Needs attention');assert.equal(get('automatic-request').textContent,'');assert.equal(get('start-automatic').disabled,true);assert.equal(explanation.textContent,workerReason);assert.match(get('jobs-status').textContent,/Running/);
   assert.match(html,/aria-describedby="automatic-help automatic-start-reason"[^>]*>Start automatic processing/);assert.match(html,/id="automatic-start-reason"[^>]*role="status"[^>]*aria-live="polite"/);assert.match(html,/Existing audiobook jobs must be paused before starting automatic discovery\./);
+  // A command acknowledgement settles the controls even while the expensive list read is pending.
+  run('manualDraftLease=null;draftLeaseFailure="";dirty=false;trackDirty=false;ended=false;recoveryDisconnected=false;busy=false;automaticRequest=null;automaticFlight=null');
+  backend={...backend,automatic_processing:{state:'Idle',phase:'discovery',run_id:'old-run',can_start:true,can_stop:false,research:{researching:0,waiting:1218,held:65}},audiobook_jobs:{state:'Needs attention',queued:0,converted_total:434,approved_total:480}};
+  snapshot(backend.automatic_processing,{audiobook_jobs:backend.audiobook_jobs});
+  let releaseSlowList;
+  readOverride=route=>route.startsWith('/api/inventory')?new Promise(resolve=>{releaseSlowList=resolve;}):null;
+  postOverride=async()=>{backend={...backend,automatic_processing:{...backend.automatic_processing,state:'Running',run_id:'acknowledged-run',can_start:false,can_stop:true}};return {ok:true,json:async()=>({automatic_processing:backend.automatic_processing})};};
+  const slowStart=run("automaticAction('start')");await new Promise(setImmediate);
+  assert.equal(run('automaticRequest'),null);assert.equal(run('busy'),false);assert.equal(get('automatic-request').textContent,'');assert.equal(get('stop-automatic').disabled,false);
+  releaseSlowList({ok:true,json:async()=>({rows:[],total:0})});await slowStart;readOverride=null;postOverride=null;
+  // A fresh terminal failure received by polling supersedes an outstanding older acknowledgement.
+  backend={...backend,automatic_processing:{...backend.automatic_processing,state:'Idle',run_id:'before-failure',can_start:true,can_stop:false,failure:null}};
+  snapshot(backend.automatic_processing);let releaseOldStart;
+  postOverride=()=>new Promise(resolve=>{releaseOldStart=resolve;});
+  const failedStart=run("automaticAction('start')");assert.match(get('automatic-request').textContent,/Starting/);
+  backend={...backend,automatic_processing:{...backend.automatic_processing,state:'Needs attention',run_id:'failed-current-run',can_start:true,can_stop:false,reason:'The app could not start discovery for all source folders.',failure:{id:'new-failure'}}};
+  snapshot(backend.automatic_processing,{status:{state:'failed',current:'database is locked',count:9623,checked:70,reused:54,pending:291,errors:0}});
+  assert.equal(get('automatic-request').textContent,'');assert.equal(get('start-automatic').disabled,false);assert.equal(get('stop-automatic').disabled,true);
+  assert.match(get('automatic-detail').textContent,/could not start discovery for all source folders.*Start automatic processing to continue/);
+  assert.doesNotMatch(get('automatic-detail').textContent,/database is locked/);assert.equal(get('stop-automatic').title,'Automatic processing is stopped.');
+  releaseOldStart({ok:true,json:async()=>({automatic_processing:{state:'Running',run_id:'older-ack',can_start:false,can_stop:true}})});await failedStart;postOverride=null;
+  assert.equal(run('state.automatic_processing.run_id'),'failed-current-run');assert.equal(get('automatic-request').textContent,'');
+  // An unconfirmed acknowledgement is not activity and cannot leave an optimistic Starting notice.
+  postOverride=async()=>({ok:true,json:async()=>({})});await run("automaticAction('start')");postOverride=null;
+  assert.equal(get('automatic-request').textContent,'');assert.match(get('automatic-status').textContent,/Current processing status unavailable/);assert.equal(get('start-automatic').disabled,true);
+  run('clearConnectionNotice()');
+  assert.ok(html.indexOf('id="automatic-status-block"')<html.indexOf('id="automatic-help"'),'current state precedes explanatory help');
   console.log('PASS automatic lifecycle acknowledgements, controls, disconnects, holds/evidence, draft leases, Held paging and focused poll preservation');
 })().catch(error=>{console.error(error);process.exitCode=1;});

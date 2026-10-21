@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.20.3] - 2026-10-21
+
+### Fixed
+
+- Automatic discovery resumes safely when a previous scan is interrupted and an additional source is configured, preventing the mixed resume/new-source path from aborting the scan.
+- Bulk Retry accepts eligible books in the Other reason group instead of refusing them because of the displayed group label.
+- Processing status clears stale Starting messages and keeps Pause, Continue and retry refusal feedback aligned with the current operation.
+
 ## [v0.20.2] - 2026-10-21
 
 ### Fixed

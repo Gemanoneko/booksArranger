@@ -444,5 +444,60 @@ class RepairVerbAndFolderTests(RefusalCase):
         self.assertEqual((value['readmission']['cause'], 'working_folder' in value), ('file_problem', False))
 
 
+class BulkCapabilityTests(RefusalCase):
+    def user_fixable(self, name='book', kind='retry'):
+        job_id, manifest = self.l.failed(REFUSED, fixture(), name=name)
+        self.passed(job_id)
+        with self.l.jobs._db() as db:
+            m4b_readmission.request(db, job_id, kind, 1)
+        m4b_readmission.next_job(self.l.jobs._db, lambda *_: {
+            'requeued': False, 'reason': 'Filesystem stream check refused the source', 'cause': 'file_problem'}, 2)
+        return job_id, manifest
+
+    def test_all_44_other_books_reach_worker_admission_without_changing_parents(self):
+        ids = [self.user_fixable('other%d' % index)[0] for index in range(44)]
+        before = {job_id: self.l.row(job_id) for job_id in ids}
+        summary = self.s.attention_summary()
+        self.assertEqual([(summary[job_id]['group'], summary[job_id]['retry']['allowed']) for job_id in ids], [('other', True)] * 44)
+        self.s.retry_all()
+        self.s._retry_all_thread.join(10)
+        self.assertFalse(self.s._retry_all_thread.is_alive())
+        self.assertEqual((self.s._retry_all_run['total'], self.s._retry_all_run['accepted'], self.s._retry_all_run['refused']), (44, 44, 0))
+        with self.l.jobs._db() as db:
+            self.assertEqual(m4b_readmission.pending_count(db), 44)
+            progress = m4b_readmission.target_progress(db, ids)
+        self.assertEqual((progress['counts']['waiting'], progress['counts']['queued']), (44, 0))
+        # Request acceptance grants no native/stream bypass: the unchanged worker owns admission.
+        with patch.object(MergeService, '_retry_preserved_m4b', return_value={
+                'requeued': False, 'reason': 'Current stream check still refuses', 'cause': 'file_problem'}) as admit:
+            self.assertIsNone(self.s._next_m4b_readmission())
+        self.assertEqual([call.args[0]['job_id'] for call in admit.call_args_list], ids)
+        self.assertTrue(all(call.kwargs == {'in_worker': True} for call in admit.call_args_list))
+        self.assertEqual({job_id: self.l.row(job_id) for job_id in ids}, before)
+        self.assertEqual(self.l.count(), 44, 'no child is invented for a refused admission')
+
+    def test_selected_other_checks_identity_revision_and_newest_parent(self):
+        job_id, manifest = self.user_fixable()
+        target = {'id': manifest['candidate_id'], 'revision': 1, 'job_id': job_id, 'kind': 'retry'}
+        self.assertIsNone(self.s._retry_one(job_id, target=target | {'revision': 2}))
+        self.assertIsNone(self.s._retry_one(job_id, target=target | {'id': 'different-book'}))
+        self.assertIsNone(self.s._retry_one(job_id, 'repair', target))
+        self.assertEqual(self.s._retry_one(job_id, target=target), 'next')
+        other, other_manifest = self.user_fixable('stale')
+        self.l.failed(REFUSED, fixture(), name='newer', candidate=other_manifest['candidate_id'])
+        self.assertIsNone(self.s._retry_one(other))
+        self.assertEqual(self.stored(other)[0], 'refused')
+
+    def test_selected_repair_keeps_its_mode_and_cannot_be_submitted_as_retry(self):
+        job_id, manifest = self.user_fixable(kind='repair')
+        self.assertTrue(self.s.attention_summary()[job_id]['repair']['allowed'])
+        self.assertIsNone(self.s._retry_one(job_id, 'retry'))
+        target = {'id': manifest['candidate_id'], 'revision': 1, 'job_id': job_id, 'kind': 'repair'}
+        self.assertEqual(self.s._retry_one(job_id, 'repair', target), 'next')
+        with self.l.jobs._db() as db:
+            value = m4b_readmission.describe(db, job_id)
+        self.assertEqual((value['kind'], value['state'], value['child_job_id']), ('repair', 'queued', None))
+
+
 if __name__ == '__main__':
     unittest.main()
