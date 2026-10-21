@@ -68,8 +68,10 @@ class Base(unittest.TestCase):
 
     def service(self):
         s=MergeService.__new__(MergeService);s.jobs=self.l.jobs;s.operation_lock=threading.RLock();s.draining=False
-        s.inventory=SimpleNamespace(worker=None,database=self.l.db,group_lock=threading.RLock());s.reviews=SimpleNamespace(lock=threading.RLock())
+        s.inventory=SimpleNamespace(worker=None,database=self.l.db,group_lock=threading.RLock(),roots={'Audiobooks':str(self.l.library)});s.reviews=SimpleNamespace(lock=threading.RLock())
         s.working=SimpleNamespace(admission_clear=lambda row:None);s.stage_root=self.l.base/'staging';s.stage_root.mkdir(exist_ok=True)
+        from producer_recovery import ProducerRecovery
+        s.producer_recovery=ProducerRecovery(self.l.db,s.stage_root)
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None);s.automatic=SimpleNamespace(stop_event=threading.Event())
         s.resume=Mock(return_value={'state':'Running'});s._state=Mock(return_value={'state':'Running'});s._resume_later=Mock()
         s.jobs.m4b_working_clear=s._m4b_working_clear  # as MergeService.__init__ wires it
@@ -142,7 +144,7 @@ class ClassificationTests(Base):
         self.assertIsNone(repair_record({'manifest':{'m4b_repair':{'schema':failed_m4b_retry.SCHEMA}}}),'a preserved-M4B retry child is no repair')
         silence={'schema':m4b_repair.SCHEMA,'note':'n','repairs':[{'kind':'truncated_final_frames','track_id':1,'first_frame':9,'frames':1,'replaced_ticks':1024,'timescale':44100,'silent_frame':'00c80007','description':'d'}]}
         self.assertEqual(repair_record({'manifest':{'m4b_repair':silence}})['patched'],[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100}],'the amount the panel shows')
-        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6},'spec section 6 order, Checking after Can repair (follow-up section 2)')
+        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6},'Reacquire follows Can repair and precedes Checking')
 
 
 class RetryRouteTests(Base):
@@ -267,7 +269,9 @@ class RepairAdmissionTests(Base):
         child=self.s._next_m4b_readmission()
         [row]=self.children();self.assertEqual(child,row['job_id']);self.assertEqual(m4b_repair.approved_repairs(json.loads(row['manifest'])),{'dangling_chapter_reference'})
         status=self.s.candidate_status(identity);self.assertEqual((status['readmission']['queued_next'],status['readmission']['kind']),(True,'repair'))
-        self.assertEqual(self.s.repair_damaged_m4b(self.job_id,100)['requeued'],False,'the API entry also only queues')
+        with self.assertRaisesRegex(RetryRefused,'A retry request is already saved for this book'):
+            self.s.repair_damaged_m4b(self.job_id,100)
+        self.assertEqual([job['job_id'] for job in self.children()],[child],'duplicate repair admits no second child')
 
 
 class RetryAllTests(Base):

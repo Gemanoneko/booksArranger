@@ -2,14 +2,14 @@
 // Pure-node handoff graph; the outer protocol-2 supervisor owns its descendants.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawnSync,spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
-import {pythonBatches,validatePythonReports} from './python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout} from './python-check-batches.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'scripts/qa-runtime.json'),'utf8'));
 const python=fixture.python.path,sha=fixture.python.sha256;
 for(const [name,expected] of Object.entries(fixture.ffmpeg.files)){const file=path.join(fixture.ffmpeg.root,name),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected.sha256)throw Error('Bundled QA media runtime differs');}
 if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)throw Error('QA Python runtime differs');
 fs.mkdirSync(path.join(root,'scratch','source-fallback-2026-10-11'),{recursive:true});
-const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate"};
+const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate","test_series_backfill.AREA":"scratch/s"};
 const deadline=Date.now()+540000;
 function run(exe,args){const r=spawnSync(exe,args,{cwd:root,encoding:'utf8',windowsHide:true,timeout:Math.max(1,deadline-Date.now()),maxBuffer:16*1024*1024,env:{...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')}});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.error||r.status!==0)throw Error(r.error?.message||'Focused desktop check failed');return r.stdout;}
 for(const name of ['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js'])run(process.execPath,['--check',name]);
@@ -75,10 +75,11 @@ function inventory(directory,relative=''){
 }
 const inputs=inventory(root),batches=pythonBatches(patterns);
 const workers=batches.map((batch,i)=>{
- const directory=path.join(root,'scratch','python-batch-'+i);fs.mkdirSync(directory); // fresh or refuse
+ const layout=pythonWorkerLayout(i),directory=path.join(root,layout.relative);fs.mkdirSync(directory); // fresh or refuse
  for(const [name,sha] of inputs){const destination=path.join(directory,name),bytes=fs.readFileSync(path.join(root,name));if(createHash('sha256').update(bytes).digest('hex')!==sha)throw Error('Python batch source changed during copy');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes,{flag:'wx'});}
  if(JSON.stringify(inventory(directory))!==JSON.stringify(inputs))throw Error('Python batch copy differs');
- const temp=path.join(directory,'scratch','tmp');fs.mkdirSync(temp,{recursive:true});
+ for(const relative of layout.requiredDirectories)fs.mkdirSync(path.join(directory,relative),{recursive:true});
+ const temp=path.join(directory,'scratch','tmp');
  return {directory,temp,batch,i};
 });
 let outputBytes=0,overflow=false;
