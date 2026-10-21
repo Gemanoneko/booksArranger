@@ -134,6 +134,70 @@ def _fetch(db,sql,args):
     return dict(zip([column[0] for column in cursor.description],tuple(row))) if row is not None else None
 
 
+def _completed_parent_lineage(db,identity,manifest,journal,parent):
+    """Accept the one supported completed series-retag successor, never a guess.
+
+    SeriesBackfill preserves the original publication intent and replaces the
+    current receipt. Replay its exact catalog transformation; native media proof
+    remains the planner/worker's responsibility. Pin the entire durable record.
+    """
+    intent=_receipt(journal['publication_intent'])
+    if _digest(intent)==_digest(parent):return None
+    _need(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='series_backfill'").fetchone(),
+          'Completed parent publication intent/output differs')
+    rows=db.execute('SELECT job_id,state,reason,record FROM series_backfill WHERE job_id=?',(identity,)).fetchall()
+    _need(len(rows)==1,'Exactly one completed parent backfill is required')
+    saved=dict(zip(('job_id','state','reason','record'),tuple(rows[0])))
+    _need(saved['job_id']==identity and saved['state']=='done' and saved['reason']=='','Parent backfill is not complete')
+    record=_object(saved['record']);review=_object(record.get('review'))
+    _need(intent.get('job_id')==identity==parent.get('job_id'),'Parent backfill publication job differs')
+    _need(_path(record.get('temp'))==ntpath.join(ntpath.dirname(_path(intent['final_path'])),'.books-arranger-series-'+identity+'.m4b'),
+          'Parent backfill temporary belongs to another job')
+    _need(record.get('removal_intended') is True,'Parent backfill removal chain is incomplete')
+    _need(_native(record.get('old_identity')) and _native(record.get('new_identity'))
+          and record['old_identity']!=record['new_identity'] and record['old_identity'][0]==record['new_identity'][0],
+          'Parent backfill native identities are invalid')
+    _need(type(record.get('new_mtime')) is int and record['new_mtime']>0,'Parent backfill modification proof is missing')
+    for prefix,receipt in (('old',intent),('new',parent)):
+        _need(record.get(prefix+'_path')==receipt['final_path'] and record.get(prefix+'_sha256')==receipt['sha256']
+              and type(record.get(prefix+'_size')) is int and record[prefix+'_size']==receipt['size'],
+              'Parent backfill does not bind the exact '+prefix+' receipt')
+        _need(record.get('root')==receipt['root'],'Parent backfill root differs')
+    _need(_path(intent['final_path'])!=_path(parent['final_path']) and ntpath.dirname(_path(intent['final_path']))==ntpath.dirname(_path(parent['final_path'])),
+          'Parent backfill is not a same-directory retag')
+    _need(record.get('parent_identity')==intent['parent_identity']==parent['parent_identity'],'Parent backfill ancestry differs')
+    legacy_proof_absent='series_proof' not in record
+    # Before 0.18 only Goodreads/FantLab existed and this optional research
+    # annotation was not produced. Do not add it: absence is part of the pinned
+    # original record. It is never a replacement for publication/media proof.
+    _need(record.get('provider') in {'goodreads','fantlab','wikidata','publisher'} and isinstance(record.get('source_url'),str)
+          and record['source_url'].startswith(('https://','http://'))
+          and (record['provider'] in {'goodreads','fantlab'} if legacy_proof_absent else isinstance(record['series_proof'],dict))
+          and isinstance(record.get('research_receipts'),list) and isinstance(record.get('deferred_sources'),list),
+          'Parent backfill provider provenance is incomplete')
+    _need(isinstance(record.get('series'),str) and bool(record['series'].strip()) and isinstance(record.get('number'),str)
+          and review.get('series')==record['series'] and review.get('number')==record['number'] and isinstance(review.get('title'),str)
+          and bool(review['title'].strip()),'Parent backfill review differs')
+    _need(manifest.get('root')==record['root'] and manifest.get('destination')==record['new_path']
+          and manifest.get('metadata')==review,'Parent backfill manifest differs')
+    if isinstance(manifest.get('metadata_facts'),dict):
+        facts=manifest['metadata_facts'];source=facts.get('series_source')
+        _need(facts.get('series_state')=='verified' and isinstance(source,dict)
+              and source.get('provider')==record['provider'] and source.get('url')==record['source_url']
+              and source.get('evidence')==record['research_receipts'] and source.get('deferred_sources')==record['deferred_sources'],
+              'Parent backfill manifest provider evidence differs')
+        _need(not legacy_proof_absent or not any(key in facts or key in source for key in ('series_proof','proof')),
+              'Parent backfill is missing manifest-declared research proof')
+    expected=copy.deepcopy(intent)
+    expected.update(final_path=record['new_path'],sha256=record['new_sha256'],size=record['new_size'],parent_identity=record['parent_identity'])
+    validation=_object(expected.get('validation'));validation.update(sha256=record['new_sha256'],size=record['new_size'])
+    validation['tags']=dict(validation.get('tags') or {},album=' - '.join([review['series'],review.get('number',''),review['title']]),grouping=review['series'])
+    expected['validation']=validation
+    _need(_digest(expected)==_digest(parent),'Parent backfill contains unexplained receipt changes')
+    return {'schema':'books-completed-series-backfill-lineage-v1','job_id':identity,'record_sha256':_digest(record),
+            'original_intent_sha256':_digest(intent),'completed_receipt_sha256':_digest(parent),'manifest_sha256':_digest(manifest)}
+
+
 def _job(db,job,kind,receipt):
     job=_object(job);identity=job.get('job_id');_need(isinstance(identity,str) and identity,'Job identity unavailable')
     try:durable=_fetch(db,'SELECT * FROM audio_jobs WHERE job_id=?',(identity,))
@@ -147,13 +211,13 @@ def _job(db,job,kind,receipt):
     _need('publication_intent' in journal and _digest(journal['publication_intent'])==_digest(given.get('publication_intent')),'Original publication intent differs')
     parent=_receipt(durable.get('output'))
     _need(isinstance(parent.get('validation'),dict) and parent['validation'].get('passed') is True,'Completed parent publication validation did not pass')
-    _need(_digest(journal['publication_intent'])==_digest(parent),'Completed parent publication intent/output differs')
+    lineage=_completed_parent_lineage(db,identity,manifest,journal,parent)
     if kind in {'base','replacement'}:
         _need(_digest(_receipt(durable.get('output')))==_digest(receipt),'Receipt is not the durable original publication')
         _need(_digest(_receipt(job.get('output')))==_digest(receipt),'Supplied original output differs')
-        _need(_digest(journal['publication_intent'])==_digest(receipt),'Original publication intent differs from receipt')
+        _need(lineage is not None or _digest(journal['publication_intent'])==_digest(receipt),'Original publication intent differs from receipt')
     _need(isinstance(manifest.get('candidate_id'),str) and manifest['candidate_id'] and type(manifest.get('candidate_revision')) is int and manifest['candidate_revision']>=0,'Candidate provenance unavailable')
-    return job,manifest,journal
+    return job,manifest,journal,lineage
 
 
 def _event(db,row,from_stage,to_stage,outcome,proof=None,error=None):
@@ -169,12 +233,13 @@ def _frozen(row):
     return {key:value for key,value in row.items() if key not in mutable}
 
 
-def _binding(row,job,manifest,journal,receipt,kind):
+def _binding(row,job,manifest,journal,receipt,kind,lineage):
     _need(row['schema']==SCHEMA and row['publication_id']==publication_id(job['job_id'],kind,receipt) and row['publication_kind']==kind and row['job_id']==job['job_id'],'Publication binding identity differs')
     _need(row['immutable_receipt_sha256']==row['original_output_sha256']==_digest(receipt)==_digest(_object(row['original_output_json'])),'Immutable original receipt changed')
     _need(row['original_manifest_hash']==job['manifest_hash'] and row['original_publication_intent_sha256']==_digest(journal['publication_intent']),'Frozen publication provenance changed')
     _need(row['candidate_id']==manifest['candidate_id'] and row['candidate_revision']==manifest['candidate_revision'],'Frozen publication candidate changed')
     routing=_object(row['accepted_routing_json'])
+    _need(routing.get('completed_parent_lineage')==lineage,'Completed parent lineage changed after enrollment')
     _need(routing.get('routing_policy_version')==row['routing_policy_version'] and isinstance(row['source_fingerprint'],str) and bool(row['source_fingerprint']),'Accepted routing binding differs')
     fingerprint=_source_fingerprint(manifest)
     _need(not fingerprint or fingerprint==row['source_fingerprint'],'Original source fingerprint changed')
@@ -190,8 +255,10 @@ def plan(db,job,kind,original_receipt,target_root,destination,accepted_routing):
     immutable repair journal; its optional SHA can be pinned in accepted_routing.
     The stored parent job intent is provenance, not that chapter receipt.
     """
-    receipt=_receipt(original_receipt);job,manifest,journal=_job(db,job,kind,receipt);pubid=publication_id(job['job_id'],kind,receipt)
+    receipt=_receipt(original_receipt);job,manifest,journal,lineage=_job(db,job,kind,receipt);pubid=publication_id(job['job_id'],kind,receipt)
     routing=_object(accepted_routing);version=routing.get('routing_policy_version')
+    _need('completed_parent_lineage' not in routing or routing['completed_parent_lineage']==lineage,'Supplied parent lineage differs')
+    if lineage is not None:routing['completed_parent_lineage']=lineage
     _need(isinstance(version,str) and bool(version.strip()),'Accepted routing policy version required')
     fingerprint=routing.get('source_fingerprint') or _source_fingerprint(manifest)
     _need(isinstance(fingerprint,str) and bool(fingerprint),'Accepted source fingerprint required')
@@ -202,7 +269,7 @@ def plan(db,job,kind,original_receipt,target_root,destination,accepted_routing):
     try:
         existing=_load(db,pubid)
         if existing:
-            _binding(existing,job,manifest,journal,receipt,kind)
+            _binding(existing,job,manifest,journal,receipt,kind,lineage)
             _history(db,existing)
             _need(_path(existing['target_root'])==_path(target_root) and _path(existing['planned_destination'])==_path(destination) and _object(existing['accepted_routing_json'])==routing,'A different relocation already exists')
             db.execute('RELEASE publication_plan');return copy.deepcopy(existing)
@@ -211,7 +278,7 @@ def plan(db,job,kind,original_receipt,target_root,destination,accepted_routing):
             'original_publication_intent_sha256':_digest(journal['publication_intent']),'candidate_id':manifest['candidate_id'],'candidate_revision':manifest['candidate_revision'],
             'source_fingerprint':fingerprint,'planned_destination':destination,'target_root':target_root,'routing_policy_version':version,'accepted_routing_json':_packed(routing),
             'previous_location_json':_packed(receipt),'destination_verification_json':None,'generation':0,'last_error':None,'created_utc':now,'updated_utc':now}
-        _binding(row,job,manifest,journal,receipt,kind)
+        _binding(row,job,manifest,journal,receipt,kind,lineage)
         db.execute('INSERT INTO output_relocations('+','.join(row)+') VALUES('+','.join('?' for _ in row)+')',tuple(row.values()))
         _event(db,row,None,'planned','transition',{'frozen_binding_sha256':_digest(_frozen(row))});db.execute('RELEASE publication_plan');return copy.deepcopy(row)
     except BaseException:
@@ -339,8 +406,8 @@ def transition(db,pubid,expected_generation,newstage,proof=None,error=None):
         _need(type(expected_generation) is int and row['generation']==expected_generation,'Relocation generation changed','relocation_generation_changed')
         durable=_fetch(db,'SELECT * FROM audio_jobs WHERE job_id=?',(row['job_id'],))
         receipt=_receipt(row['original_output_json'])
-        job,manifest,journal=_job(db,durable,row['publication_kind'],receipt)
-        _binding(row,job,manifest,journal,receipt,row['publication_kind']);_history(db,row)
+        job,manifest,journal,lineage=_job(db,durable,row['publication_kind'],receipt)
+        _binding(row,job,manifest,journal,receipt,row['publication_kind'],lineage);_history(db,row)
         _need(newstage in STAGES,'Unknown relocation stage')
         _need(error is None or isinstance(error,str),'Relocation error must be text')
         oldstage=row['stage'];normal=oldstage!='complete' and STAGES.index(newstage)==STAGES.index(oldstage)+1
@@ -411,7 +478,7 @@ def resolve(db,job,kind,original_receipt,verify=None):
     retain and recheck their operation/generation lease through disposal.
     Unknown derived receipts never bypass an existing same-kind binding.
     """
-    receipt=_receipt(original_receipt);job,manifest,journal=_job(db,job,kind,receipt);pubid=publication_id(job['job_id'],kind,receipt)
+    receipt=_receipt(original_receipt);job,manifest,journal,lineage=_job(db,job,kind,receipt);pubid=publication_id(job['job_id'],kind,receipt)
     exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone()
     row=_load(db,pubid) if exists else None
     if exists and row is None:
@@ -420,7 +487,7 @@ def resolve(db,job,kind,original_receipt,verify=None):
     effective=_location(receipt)
     envelope={'publication_id':pubid,'original_receipt':copy.deepcopy(receipt),'effective_location':effective,'stage':'original','generation':None,'relocation':None,'verified':False,'outcome':None}
     if row:
-        _binding(row,job,manifest,journal,receipt,kind);_history(db,row)
+        _binding(row,job,manifest,journal,receipt,kind,lineage);_history(db,row)
         if row['stage'] in COMMITTED:
             _need(row['destination_verification_json'] is not None,'Committed destination proof unavailable','relocated_output_unavailable')
             saved=_object(row['destination_verification_json']);final=_final_proof(row,saved,saved.get('generation'))

@@ -14,6 +14,72 @@ import test_merge_service as fixture
 from publication_locations import _digest
 
 class MigrationPlanningTests(unittest.TestCase):
+    def test_real_series_retag_enrolls_relocates_and_revalidates_original_history(self):
+        import json
+        from series_backfill import SeriesBackfill,encoded
+        from types import SimpleNamespace
+        from migration_operation import MigrationOperation
+        from publication_binding import PublicationBindings
+        f=fixture.MergeTests();f.setUp();self.addCleanup(f.tearDown)
+        f.review.update(series='',number='')
+        book=f.ready();f.service.create('Audiobooks',book['id'],book['revision']);status=f.wait()
+        self.assertEqual(status['completed'],1,status)
+        job_id=status['jobs'][0]['job_id']
+        with contextlib.closing(sqlite3.connect(f.inv.database)) as db:
+            before=db.execute('SELECT journal FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()[0]
+        f.service.close()
+        # Reproduce the historical pre-hierarchy metadata shape of the affected
+        # jobs. Actual media/publication intent stay exactly as converted; the
+        # legacy same-parent series producer is then exercised without mocks.
+        with contextlib.closing(sqlite3.connect(f.inv.database)) as db:
+            manifest=json.loads(db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()[0])
+            for key in ('organization_policy','universe'):manifest['metadata'].pop(key,None)
+            text,sha=encoded(manifest)
+            db.execute('UPDATE audio_jobs SET manifest=?,manifest_hash=? WHERE job_id=?',(text,sha,job_id))
+            db.execute('UPDATE book_groups SET review=? WHERE id=?',(json.dumps(manifest['metadata']),book['id']));db.commit()
+        backfill=SeriesBackfill(f.service,research=SimpleNamespace(),stage=f.base/'backfill-proof')
+        backfill.apply(job_id,{'name':'Added Series','number':'3','provider':'goodreads','source_url':'https://www.goodreads.com/book/show/private-fixture'})
+        self.assertEqual(backfill.entry(job_id)['state'],'done',backfill.entry(job_id))
+        target=f.base/'sorted';target.mkdir()
+        with catalog_lock(f.inv.database,f.inv.roots):
+            plan=prepare(f.inv.database,f.inv.roots,[f.inv.roots['Audiobooks']],str(target))
+        self.assertEqual(len(plan['publications']),1,plan);self.assertEqual(plan['held'],[])
+        proof=plan['completed_candidate_completeness'];self.assertEqual(proof['completed_candidates'],proof['accounted_candidates'])
+        area=Path(tempfile.mkdtemp(dir=f.base.parent));published=write_plan(area/'backfilled-plan.json',plan)
+        entry=plan['publications'][0]
+        migrated=MigrationOperation(f.inv.database,plan['roots'],published['plan'],published['sha256']).run(entry['publication_id'])
+        self.assertEqual(migrated['stage'],'complete');self.assertEqual(migrated['outcome'],'moved')
+        with contextlib.closing(sqlite3.connect(f.inv.database)) as db:
+            db.row_factory=sqlite3.Row;job=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone())
+            self.assertEqual(job['journal'],before)
+            original=json.loads(job['output']);effective,envelope=PublicationBindings(f.inv.database).lookup(db,original,'base')
+            self.assertEqual(effective['final_path'],entry['destination']);self.assertEqual(envelope['relocation']['stage'],'complete')
+            self.assertEqual(original['final_path'],entry['source'])
+        # Re-entry consumes the exact journaled complete relocation and re-proves
+        # the destination; it neither reconstructs the old receipt nor recopies.
+        repeated=MigrationOperation(f.inv.database,plan['roots'],published['plan'],published['sha256']).run(entry['publication_id'])
+        self.assertEqual(repeated['outcome'],'moved');self.assertTrue(Path(entry['destination']).is_file())
+        self.assertFalse(Path(entry['source']).exists())
+        with contextlib.closing(sqlite3.connect(f.inv.database)) as db:
+            saved=json.loads(db.execute('SELECT record FROM series_backfill WHERE job_id=?',(job_id,)).fetchone()[0])
+            saved['new_mtime']+=1
+            db.execute('UPDATE series_backfill SET record=? WHERE job_id=?',(json.dumps(saved),job_id));db.commit()
+        with self.assertRaisesRegex(ValueError,'lineage changed'):
+            MigrationOperation(f.inv.database,plan['roots'],published['plan'],published['sha256']).run(entry['publication_id'])
+        self.assertTrue(Path(entry['destination']).is_file());self.assertFalse(Path(entry['source']).exists())
+
+    def test_enrollment_refusal_is_an_explicit_completed_outcome(self):
+        import publication_locations as locations
+        f=fixture.MergeTests();f.setUp();self.addCleanup(f.tearDown)
+        book=f.ready();f.service.create('Audiobooks',book['id'],book['revision']);status=f.wait();self.assertEqual(status['completed'],1,status)
+        f.service.close();target=f.base/'sorted';target.mkdir()
+        with catalog_lock(f.inv.database,f.inv.roots),patch('migration_planning.locations.plan',side_effect=locations.PublicationRefused('fixture','Exact publication proof refused')):
+            plan=prepare(f.inv.database,f.inv.roots,[f.inv.roots['Audiobooks']],str(target))
+        proof=plan['completed_candidate_completeness']
+        self.assertEqual(proof['completed_candidates'],1);self.assertEqual(proof['accounted_candidates'],1)
+        self.assertEqual(proof['outcomes'][0]['outcome'],'held');self.assertEqual(plan['planned_bytes'],0)
+        self.assertEqual(plan['publications'],[]);self.assertIn('Exact publication proof refused',plan['held'][0]['reason'])
+
     def test_plan_requires_owner_before_any_catalog_change(self):
         with self.assertRaisesRegex(ValueError,'exclusive catalog owner'):prepare('C:/not-opened/catalog.sqlite',{'Audiobooks':'C:/not-opened/audio'},None,'C:/not-opened/sorted')
     def test_current_completed_book_enrolls_without_changing_receipt_or_sources(self):

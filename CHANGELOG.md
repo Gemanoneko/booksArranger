@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.20.1] - 2026-10-21
+
+### Fixed
+
+- Output migration recognizes completed series retagging through its recorded publication history, while refusing changed or incomplete records.
+- A book whose publication cannot be verified is reported as held without aborting planning for the remaining books.
+
 ## [v0.20.0] - 2026-10-21
 
 ### Added

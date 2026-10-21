@@ -48,6 +48,75 @@ class PublicationLocationsTests(unittest.TestCase):
     def plan(self,kind='base',receipt=None):
         return p.plan(self.db,self.job,kind,receipt or self.original,self.target,self.destination,self.routing)
 
+    def completed_backfill(self):
+        old=copy.deepcopy(self.original)
+        old['validation'].update(sha256=old['sha256'],size=old['size'],tags={'title':'Book','album':'Book'})
+        review={'title':'Book','series':'Series','number':'2'}
+        record={'root':self.root,'old_path':old['final_path'],'old_sha256':old['sha256'],'old_size':old['size'],
+            'new_path':str(Path(self.root)/'Series - 2 - Book.m4b'),'new_sha256':hashlib.sha256(b'retagged fixture').hexdigest(),'new_size':old['size']+1,
+            'old_identity':[1,0,2],'new_identity':[1,0,3],'new_mtime':123456,'parent_identity':old['parent_identity'],
+            'temp':str(Path(self.root)/('.books-arranger-series-'+self.job_id+'.m4b')),'removal_intended':True,
+            'provider':'goodreads','source_url':'https://www.goodreads.com/book/show/fixture','series_proof':{},
+            'research_receipts':[],'deferred_sources':[],'review':review,'series':'Series','number':'2'}
+        self.original=copy.deepcopy(old)
+        self.original.update(final_path=record['new_path'],sha256=record['new_sha256'],size=record['new_size'])
+        self.original['validation'].update(sha256=record['new_sha256'],size=record['new_size'])
+        self.original['validation']['tags'].update(album='Series - 2 - Book',grouping='Series')
+        self.manifest.update(metadata=review,destination=record['new_path'])
+        self.manifest['metadata_facts'].update(series_state='verified',series_source={'provider':record['provider'],'url':record['source_url'],'evidence':[],'deferred_sources':[]})
+        self.job.update(manifest=packed(self.manifest),manifest_hash=digest(self.manifest),journal=packed({'publication_intent':old}),output=packed(self.original))
+        self.store_job()
+        self.db.execute('CREATE TABLE series_backfill(job_id TEXT PRIMARY KEY,state TEXT,reason TEXT,record TEXT)')
+        self.db.execute('INSERT INTO series_backfill VALUES(?,?,?,?)',(self.job_id,'done','',packed(record)))
+        return record,old
+
+    def test_completed_backfill_pins_lineage_without_rewriting_original_intent(self):
+        record,old=self.completed_backfill();before=self.job['journal']
+        # The pre-0.18 Goodreads producer omitted this optional research field.
+        record.pop('series_proof');self.db.execute('UPDATE series_backfill SET record=?',(packed(record),))
+        result=self.plan();proof=json.loads(result['accepted_routing_json'])['completed_parent_lineage']
+        self.assertEqual(proof['record_sha256'],digest(record));self.assertEqual(proof['original_intent_sha256'],digest(old))
+        self.assertEqual(result['original_publication_intent_sha256'],digest(old));self.assertEqual(self.job['journal'],before)
+        self.assertEqual(json.loads(result['original_output_json']),self.original)
+        self.assertEqual(self.plan(),result)
+        record['series_proof']={}
+        self.db.execute('UPDATE series_backfill SET record=?',(packed(record),))
+        with self.assertRaisesRegex(p.PublicationRefused,'lineage changed'):p.resolve(self.db,self.job,'base',self.original)
+
+    def test_backfill_rejects_incomplete_stale_cross_job_and_multiple_lineage(self):
+        record,old=self.completed_backfill()
+        cases=[('old_sha256','0'*64),('new_sha256','0'*64),('old_size',old['size']+1),('new_size',self.original['size']+1),
+            ('new_identity',record['old_identity']),('old_identity',[0,0,0]),('removal_intended',False),
+            ('temp',str(Path(self.root)/'.books-arranger-series-other-job.m4b')),('old_path',record['new_path']),
+            ('parent_identity',[[self.root,1,0,99]]),('review',dict(record['review'],number='3')),
+            ('series_proof',None),('series_proof',[])]
+        for key,value in cases:
+            with self.subTest(key=key):
+                changed=copy.deepcopy(record);changed[key]=value
+                self.db.execute('UPDATE series_backfill SET record=?',(packed(changed),))
+                with self.assertRaises(p.PublicationRefused):self.plan()
+        self.db.execute('UPDATE series_backfill SET record=?,state=?',(packed(record),'cataloged'))
+        with self.assertRaises(p.PublicationRefused):self.plan()
+
+    def test_missing_research_annotation_is_not_allowed_for_new_provider_or_declared_proof(self):
+        record,old=self.completed_backfill();record.pop('series_proof')
+        for provider in ('wikidata','publisher','unknown'):
+            with self.subTest(provider=provider):
+                changed=dict(record,provider=provider)
+                self.db.execute('UPDATE series_backfill SET record=?',(packed(changed),))
+                with self.assertRaises(p.PublicationRefused):self.plan()
+        self.db.execute('UPDATE series_backfill SET record=?',(packed(record),))
+        self.manifest['metadata_facts']['series_source']['series_proof']={}
+        self.job.update(manifest=packed(self.manifest),manifest_hash=digest(self.manifest));self.store_job()
+        with self.assertRaisesRegex(p.PublicationRefused,'manifest-declared'):self.plan()
+
+    def test_backfill_rejects_unexplained_receipt_change_and_missing_row(self):
+        record,old=self.completed_backfill();self.original['validation']['marker']='not a retag'
+        self.job['output']=packed(self.original);self.store_job()
+        with self.assertRaisesRegex(p.PublicationRefused,'unexplained'):self.plan()
+        self.db.execute('DELETE FROM series_backfill')
+        with self.assertRaises(p.PublicationRefused):self.plan()
+
     def final_proof(self,row):
         location={'root':row['target_root'],'final_path':row['planned_destination'],'sha256':self.original['sha256'],
             'size':self.original['size'],'identity':getattr(self,'target_identity',[1,0,42]),'parent_identity':getattr(self,'target_parents',[[row['target_root'],1,0,41]])}

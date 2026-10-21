@@ -173,10 +173,17 @@ def _prepare(database,roots,audiobook_sources,output_root,decisions=(),verificat
             if item['journal']:
                 rows,sha,facts,ancestry=publications._read_journal(publications.repairs,Path(item['journal']))
                 if sha!=item['journal_sha256']:raise ValueError('Authoritative chapter journal changed before enrollment')
-            relocation=locations.plan(db,item['raw'],item['kind'],item['original'],config.audiobook_output_root,item['destination'],item['routing'])
+            try:
+                relocation=locations.plan(db,item['raw'],item['kind'],item['original'],config.audiobook_output_root,item['destination'],item['routing'])
+            except locations.PublicationRefused as error:
+                # plan() rolls back its own savepoint. Expected per-book proof
+                # refusals remain explicit outcomes; other books can enroll.
+                held.append({'candidate_id':item['identity'],'hold_type':'publication_binding_refused','reason':str(error)})
+                continue
             enrolled.append({'publication_id':relocation['publication_id'],'candidate_id':item['identity'],'kind':item['kind'],'source':item['original']['final_path'],'destination':item['destination'],
                 'size':item['original']['size'],'frozen_binding_sha256':locations._digest(locations._frozen(relocation))})
         db.commit()
+        bytes_required=sum(item['size'] for item in enrolled)
     outcomes=[]
     for outcome,items in (('enrolled',enrolled),('already_at_destination',already),('held',held)):
         for item in items:
