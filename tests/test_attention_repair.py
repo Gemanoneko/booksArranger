@@ -276,10 +276,12 @@ class RepairAdmissionTests(Base):
 
 class RetryAllTests(Base):
     def wait(self,s):
-        deadline=time.monotonic()+10
-        while s._retry_all_run['state']=='running':
-            if time.monotonic()>deadline:raise AssertionError('Retry all did not finish')
-            time.sleep(.02)
+        # The public terminal state precedes the worker's final SQLite receipt write.
+        # Join this exact worker before assertions or temporary-catalog disposal.
+        worker=s._retry_all_thread
+        worker.join(10)
+        self.assertFalse(worker.is_alive(),'Retry all worker did not close')
+        self.assertNotEqual(s._retry_all_run['state'],'running')
 
     def test_the_whole_group_one_at_a_time_then_the_queue_starts_once(self):
         ids=[self.l.failed(name='b%d'%index)[0] for index in range(3)];self.l.failed(OUTSIDE,name='unsupported');self.passed(*ids)
