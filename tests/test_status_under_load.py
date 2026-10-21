@@ -100,7 +100,7 @@ class FastPressTests(unittest.TestCase):
 
     def service(self):
         s = MergeService.__new__(MergeService); s.jobs = self.q.jobs; s.working = self.q.life; s.operation_lock = threading.RLock()
-        s.inventory = SimpleNamespace(worker=None, group_lock=threading.RLock()); s.reviews = SimpleNamespace(lock=threading.RLock())
+        s.inventory = SimpleNamespace(database=self.q.db, roots={'Audiobooks':str(self.q.base/'library')}, worker=None, group_lock=threading.RLock()); s.reviews = SimpleNamespace(lock=threading.RLock())
         s.cleanup = SimpleNamespace(status=lambda job_id=None: None); s.draining = False
         s.resume = Mock(side_effect=AssertionError('the press never waits for Start')); s._resume_later = Mock()
         s.state = Mock(side_effect=AssertionError('the press computes no status'))

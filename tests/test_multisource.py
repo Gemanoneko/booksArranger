@@ -149,8 +149,13 @@ class MultiSourceTests(unittest.TestCase):
         self.scan(inv)
         self.assertEqual(self.calls,[str(a)])
         with connect(self.db) as db:
-            inv._file(db,'Audiobooks',str(self.extra),1,str(destination))
+            generation=db.execute('SELECT generation FROM jobs WHERE root=?',(str(self.extra),)).fetchone()[0]
+            db.execute("UPDATE jobs SET state='scanning' WHERE root=? AND generation=?",(str(self.extra),generation))
+            db.execute("INSERT OR REPLACE INTO queue(root,generation,path,directory,state) VALUES(?,?,?,0,'running')",(str(self.extra),generation,str(destination)))
+        with connect(self.db) as db:
+            inv._file(db,'Audiobooks',str(self.extra),generation,str(destination))
             self.assertIsNone(db.execute('SELECT 1 FROM files WHERE path=?',(str(destination),)).fetchone())
+            self.assertEqual(db.execute('SELECT state FROM queue WHERE root=? AND generation=? AND path=?',(str(self.extra),generation,str(destination))).fetchone()[0],'done')
         self.assertEqual(destination.read_bytes(),b'fixture')
 
     def test_output_exclusion_preserves_historical_catalog_identity(self):

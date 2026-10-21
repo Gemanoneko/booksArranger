@@ -172,6 +172,10 @@ class MergeStatusTests(unittest.TestCase):
 
     def test_one_state_computation_reads_replacement_relations_once(self):
         merge = MergeService.__new__(MergeService)
+        private = tempfile.TemporaryDirectory(dir=AREA)
+        self.addCleanup(private.cleanup)
+        merge.jobs = AudioJobs(Path(private.name) / 'bulk-status.sqlite3', None, lambda m: True, lambda r: True)
+        self.addCleanup(merge.jobs.close)
         merge.replacements = SimpleNamespace(snapshot=Mock())
         entered = []
         class Context:

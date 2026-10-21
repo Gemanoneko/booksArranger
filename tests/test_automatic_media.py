@@ -97,6 +97,7 @@ class AutomaticMediaTests(unittest.TestCase):
         row,result=self.result();original=self.service.jobs._db
         class FailInsert:
             def __init__(self,db):self.db=db
+            def __getattr__(self,name):return getattr(self.db,name)
             def execute(self,sql,*args):
                 if sql.startswith('INSERT INTO audio_jobs'):raise __import__('sqlite3').OperationalError('Private fixture insertion failure')
                 return self.db.execute(sql,*args)

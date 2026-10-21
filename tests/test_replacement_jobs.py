@@ -149,7 +149,7 @@ class ReplacementTests(unittest.TestCase):
         new=next(j for j in jobs if j['job_id']==self.new_id);new.update(state='running',stage='creating',progress=None)
         for index in range(4):jobs.append({'job_id':str(uuid.uuid4()),'state':'completed','stage':'completed','reason':'','manifest':{'candidate_id':f'other{index}','metadata':{'title':'Other'}}})
         status={'state':'Running','queued':0,'completed':5,'failed':0,'current_job_id':self.new_id,'jobs':jobs}
-        self.service.jobs=SimpleNamespace(status=lambda:copy.deepcopy(status))
+        self.service.jobs=SimpleNamespace(status=lambda:copy.deepcopy(status),_db=self.queue._db)
         self.service.cleanup=SimpleNamespace(status=lambda:[],current=None,thread=None)
         self.service.storage_cleanup=SimpleNamespace(status=lambda:[],folder_status=lambda:[]);self.service._post_current=None
         def totals(raw,*_):

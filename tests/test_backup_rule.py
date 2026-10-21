@@ -26,7 +26,7 @@ def service():
     s._manual_recovery = None; s._post_current = None; s.storage_cleanup = None
     s.working = SimpleNamespace(reconcile=lambda **kwargs: None, schedule_published=lambda job_id: None)
     s.jobs = SimpleNamespace(_thread=SimpleNamespace(is_alive=lambda: True), has_unfinished=lambda: True, status=lambda: {'jobs': [{'state': 'pending'}]})
-    s.cleanup = SimpleNamespace(thread=None, current=None, _rows=lambda *args: [], resume=Mock())
+    s.cleanup = SimpleNamespace(thread=None, current=None, _rows=lambda *args: [], resume=Mock(return_value={'state':'started'}))
     return s
 
 
@@ -64,14 +64,22 @@ class HeldCleanupTests(unittest.TestCase):
                                          {'id': 'c2', 'job_id': 'j2', 'reason': 'Unknown download marker contents preserved'},
                                          {'id': 'c3', 'job_id': 'j3', 'reason': 'Download marker native identity differs'}]
         s._finish_held_cleanups(); s._finish_held_cleanups()
-        s.cleanup.resume.assert_called_once_with(['c1', 'c2', 'c3'], follow_audio=False)
+        s.cleanup.resume.assert_called_once()
+        self.assertEqual(s.cleanup.resume.call_args.args, (['c1', 'c2', 'c3'],))
+        self.assertFalse(s.cleanup.resume.call_args.kwargs['follow_audio'])
+        self.assertEqual(s.cleanup.resume.call_args.kwargs['admission_token'], 0)
+        self.assertTrue(s.cleanup.resume.call_args.kwargs['admission_check']())
 
     def test_a_kept_book_is_never_resumed_and_an_unreadable_record_resumes_nothing(self):
         rows = [{'id': 'c1', 'job_id': 'j1', 'reason': 'Download marker native identity differs'},
                 {'id': 'c2', 'job_id': 'j2', 'reason': 'Download marker native identity differs'}]
         s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
         s._kept_by_choice = lambda job_ids: {'j2'}
-        s._finish_held_cleanups(); s.cleanup.resume.assert_called_once_with(['c1'], follow_audio=False)
+        s._finish_held_cleanups(); s.cleanup.resume.assert_called_once()
+        self.assertEqual(s.cleanup.resume.call_args.args, (['c1'],))
+        self.assertFalse(s.cleanup.resume.call_args.kwargs['follow_audio'])
+        self.assertEqual(s.cleanup.resume.call_args.kwargs['admission_token'], 0)
+        self.assertTrue(s.cleanup.resume.call_args.kwargs['admission_check']())
         s = service(); s.jobs._thread = None; s._purge_tried = set(); s.cleanup._rows = lambda *args: rows
         s._kept_by_choice = Mock(side_effect=sqlite3.OperationalError('database is locked'))
         s._finish_held_cleanups(); s.cleanup.resume.assert_not_called()

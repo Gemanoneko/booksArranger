@@ -390,9 +390,15 @@ class InlineAndStartTests(Base):
         self.assertEqual(len(b.holds()),3);self.assertIn('attempt 3',b.holds()[-1]['cause'])
         state=s.state();self.assertEqual(state['state'],'Paused');self.assertGreaterEqual(state['queued'],1,'a paused cleanup counts as queued, so Start resumes it')
         order=[]
-        b.cleanup.after_drain=lambda:order.append(('converter',b.row()['state']))
+        original_resume=s.jobs.resume
+        def observe_resume(**kwargs):
+            self.assertTrue(kwargs['admission_check']())
+            self.assertEqual(kwargs['admission_token'],0)
+            order.append(('converter',b.row()['state']))
+            return original_resume(**kwargs)
         s.state=lambda:{}
-        s.resume();b.cleanup.thread.join(30);self.assertFalse(b.cleanup.thread.is_alive())
+        with patch.object(s.jobs,'resume',side_effect=observe_resume):
+            s.resume();b.cleanup.thread.join(30);self.assertFalse(b.cleanup.thread.is_alive())
         self.assertEqual(order,[('converter','completed')],'the cleanup finishes before the converter is resumed')
         self.assertEqual(b.row()['state'],'completed')
         self.assertEqual(list(b.stage.iterdir()),[],'staging snapshots and generated files are retired')

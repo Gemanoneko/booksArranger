@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 import uuid
 
-from audio_jobs import AudioJobs
+from audio_jobs import AudioJobs, StartRefused
 from desktop_backend import DesktopControl, handler_class
 from encoding_policy import PROFILE
 from merge_service import MergeService
@@ -55,8 +55,12 @@ class DrainTests(unittest.TestCase):
             self.assertEqual(states[first['job_id']], 'completed')
             self.assertEqual(states[second['job_id']], 'pending')
             self.assertEqual(seen, [first['job_id']])
-            queue.resume(); queue._thread.join(5)  # still draining: nothing new starts
+            with self.assertRaises(StartRefused) as closing:
+                queue.resume()  # typed closing refusal; nothing new starts
+            self.assertEqual(closing.exception.start_state, 'closing')
+            queue._thread.join(5)
             self.assertEqual(seen, [first['job_id']])
+            self.assertEqual({job['job_id']: job['state'] for job in queue.status()['jobs']}, states)
             queue.close()
 
     def test_merge_pause_and_resume_are_inert_while_draining(self):
@@ -69,7 +73,10 @@ class DrainTests(unittest.TestCase):
         merge.state = Mock(return_value={'state': 'Running'})
         merge.drain()
         self.assertTrue(merge.draining); merge.jobs.drain.assert_called_once_with()
-        merge.pause(); merge.resume()
+        merge.pause()
+        with self.assertRaises(StartRefused) as closing:
+            merge.resume()
+        self.assertEqual(closing.exception.start_state, 'closing')
         merge.jobs.pause.assert_not_called(); merge.cleanup.pause.assert_not_called()
         self.assertTrue(merge.drained())
         merge.cleanup.current = 'cleanup-in-progress'

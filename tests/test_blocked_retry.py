@@ -220,7 +220,8 @@ class StatusCostTests(Base):
 class ServiceTests(Base):
     def service(self):
         s=MergeService.__new__(MergeService);s.jobs=self.q.jobs;s.working=self.q.life;s.operation_lock=threading.RLock()
-        s.inventory=SimpleNamespace(worker=None,group_lock=threading.RLock());s.reviews=SimpleNamespace(lock=threading.RLock())
+        s.inventory=SimpleNamespace(database=self.q.db,roots={'Audiobooks':str(self.q.base/'library')},worker=None,group_lock=threading.RLock());s.reviews=SimpleNamespace(lock=threading.RLock())
+        s.draining=False
         s.cleanup=SimpleNamespace(status=lambda job_id=None:None)
         s.resume=Mock(return_value={'state':'Running','queued':1});s._resume_later=Mock()
         return s
@@ -242,11 +243,11 @@ class ServiceTests(Base):
         while not self.q.runs and time.monotonic()<deadline:time.sleep(.01)
         self.assertEqual(self.q.runs[0][0],current)
         s=self.service()
-        s.attention_summary=lambda retry=False:self.q.jobs.attention_summary(self.q.life.admission_clear)
+        s.attention_summary=lambda job_ids=None,retry=False:self.q.jobs.attention_summary(self.q.life.admission_clear,job_ids=job_ids,retry=retry)
         m=json.loads(self.q.row(first)['manifest']);answer=s.retry_blocked_job('Audiobooks',m['candidate_id'],1,first)
         self.assertTrue(answer['queued_next']);self.assertEqual(answer['position'],1)
         bulk=s.retry_all();s._retry_all_thread.join(5);self.assertFalse(s._retry_all_thread.is_alive())
-        self.assertEqual((s._retry_all_run['queued'],s._retry_all_run['refused']),(1,0))
+        self.assertEqual((s._retry_all_run['queued'],s._retry_all_run['refused']),(1,0),s._retry_all_run)
         for _ in range(10):
             for index,job in enumerate((first,second),1):
                 manifest=json.loads(self.q.row(job)['manifest']);status=s.candidate_status(manifest['candidate_id'])

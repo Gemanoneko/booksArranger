@@ -135,7 +135,7 @@ class QueuedDestinationNative(unittest.TestCase):
         children=[j for j in status['jobs'] if j['job_id']!=parent['job_id']]
         self.assertEqual(len(children),1,status);child=children[0]
         self.assertEqual(child['state'],'completed',status)
-        expected=(target or Path(self.inv.roots['Audiobooks']))/'Name Author'/'Series'
+        expected=(target or Path(self.inv.roots['Audiobooks']))/'Author Name'/'Series'
         self.assertEqual(Path(child['output']['final_path']).parent,expected)
         self.assertNotEqual(child['attempt_id'],parent['attempt_id'])
         self.assertEqual(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],))[0],parent)

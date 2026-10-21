@@ -717,8 +717,8 @@ class AudioJobs:
             shapes = {row['job_id']: self._retry_shape(db, row, latest) for row in rows}
             import m4b_readmission
             readmission = m4b_readmission.status(db, [row['job_id'] for row in rows]) if rows else {}
-        import reacquire_sources
-        with self._db() as db:reacquire={row['job_id']:reacquire_sources.project(db,row['job_id']) for row in rows}
+            import reacquire_sources
+            reacquire={row['job_id']:reacquire_sources.project(db,row['job_id']) for row in rows}
         summary = {}
         worker = bool(self._thread and self._thread.is_alive())
         for row in rows:

@@ -87,6 +87,8 @@ class RepairAdmissionTests(unittest.TestCase):
     def test_legacy_audio_debt_blocks_another_source_copy(self):
         from merge_service import MergeService
         service=MergeService.__new__(MergeService);service.jobs=self.jobs
+        from types import SimpleNamespace
+        service.inventory=SimpleNamespace(database=self.jobs.database)
         service.stage_root=Path(self.temp.name)/'staging';service.stage_root.mkdir()
         attempt=service.stage_root/self.parent['job_id']/str(uuid.uuid4());attempt.mkdir(parents=True)
         snapshot=attempt/'source00000.m4b';snapshot.write_bytes(b'unfinished original copy')

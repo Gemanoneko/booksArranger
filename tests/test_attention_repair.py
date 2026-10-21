@@ -412,7 +412,6 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.merge.retry_all.call_count,2)
 
 
-if __name__=='__main__':unittest.main()
     def test_selected_retry_uses_same_correlated_run(self):
         self.merge.retry_all=Mock(return_value={'id':'selection','state':'running','accepted':0})
         item={key:self.body[key] for key in ('id','revision','job_id')}|{'kind':'repair'}
@@ -425,4 +424,7 @@ if __name__=='__main__':unittest.main()
         for items in ([],[item,item],[item|{'kind':'delete'}],[item|{'extra':'ignored?'}],[item|{'job_id':'not-a-uuid'}]):
             self.assertEqual(self.call({'library':'Audiobooks','items':items},path='/api/audiobook/retry-all')[0],400)
         self.merge.retry_all.assert_not_called()
+
+
+if __name__=='__main__':unittest.main()
 

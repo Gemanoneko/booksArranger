@@ -37,7 +37,7 @@ class RetryIntent(unittest.TestCase):
         row,parent=self.parent();target=self.base/'Audiobooks Sorted';self.activate(target)
         admitted=self.service._admit_new_retry(parent);self.assertTrue(admitted['requeued'],admitted);self.assertNotEqual(admitted['job_id'],parent['job_id'])
         child=self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(admitted['job_id'],))[0];manifest=json.loads(child['manifest'])
-        self.assertEqual(Path(manifest['destination']).parent,target/'Name Author'/'Series');self.assertTrue(self.service._guard(manifest))
+        self.assertEqual(Path(manifest['destination']).parent,target/'Author Name'/'Series');self.assertTrue(self.service._guard(manifest))
         self.service.jobs.resume();status=self.wait();created=next(job for job in status['jobs'] if job['job_id']==admitted['job_id']);self.assertEqual(created['state'],'completed',status)
         self.assertEqual(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],))[0],parent)
         self.assertTrue(Path(created['output']['final_path']).is_file());self.assertEqual(self.service.progress_books()['converted'],1)
