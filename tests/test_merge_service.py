@@ -1,4 +1,4 @@
-import base64,json,shutil,subprocess,tempfile,time,unittest
+import base64,contextlib,json,shutil,sqlite3,subprocess,tempfile,time,unittest
 from unittest.mock import patch
 from pathlib import Path
 from scanner import Inventory,connect
@@ -8,6 +8,36 @@ from encoding_policy import PROFILE
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'merge-tests';AREA.mkdir(parents=True,exist_ok=True)
 PNG=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
+
+class NativeMoveStartupFenceTests(unittest.TestCase):
+    def test_pending_move_blocks_both_entry_points_before_recovery_writes(self):
+        from types import SimpleNamespace
+        from publication_locations import PublicationRefused
+        for stage in ('rename_intent','renamed','location_committed','duplicate_cleanup_intent','duplicate_removed'):
+            with self.subTest(stage=stage),tempfile.TemporaryDirectory(dir=AREA) as area:
+                base=Path(area);database=base/'catalog.sqlite';cache=base/'must-not-exist'
+                with contextlib.closing(sqlite3.connect(database)) as db,db:
+                    db.executescript('CREATE TABLE output_relocations(publication_id TEXT,stage TEXT);CREATE TABLE migration_events(publication_id TEXT,outcome TEXT,to_stage TEXT);CREATE TABLE audio_jobs(job_id TEXT,state TEXT);CREATE TABLE scan_jobs(id TEXT,state TEXT);')
+                    db.execute('INSERT INTO output_relocations VALUES(?,?)',('owned-publication',stage))
+                    db.execute('INSERT INTO migration_events VALUES(?,?,?)',('owned-publication','transition','duplicate_cleanup_intent' if stage.startswith('duplicate') else 'rename_intent'))
+                    db.execute('INSERT INTO audio_jobs VALUES(?,?)',('saved-running-job','running'))
+                    db.execute('INSERT INTO scan_jobs VALUES(?,?)',('saved-running-scan','running'))
+                before=database.read_bytes()
+                for entry in (lambda:Inventory(database,{}),lambda:MergeService(SimpleNamespace(database=database),cache)):
+                    with self.assertRaises(PublicationRefused) as caught:entry()
+                    self.assertEqual(caught.exception.code,'native_move_pending')
+                    self.assertEqual(database.read_bytes(),before)
+                    self.assertFalse(cache.exists())
+                with contextlib.closing(sqlite3.connect(database)) as db:
+                    self.assertEqual(db.execute('SELECT * FROM audio_jobs').fetchall(),[('saved-running-job','running')])
+                    self.assertEqual(db.execute('SELECT * FROM scan_jobs').fetchall(),[('saved-running-scan','running')])
+
+    def test_readonly_fence_preserves_new_and_legacy_catalogs(self):
+        from publication_locations import require_no_pending_moves
+        with tempfile.TemporaryDirectory(dir=AREA) as area:
+            database=Path(area)/'new.sqlite';require_no_pending_moves(database);self.assertFalse(database.exists())
+            with contextlib.closing(sqlite3.connect(database)) as db,db:db.execute('CREATE TABLE output_relocations(old_legacy_column TEXT)')
+            before=database.read_bytes();require_no_pending_moves(database);self.assertEqual(database.read_bytes(),before)
 
 class MergeTests(unittest.TestCase):
     def setUp(self):
@@ -78,15 +108,20 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(output['validation']['encoding']['bitrate'],128000)
         self.assertEqual(output['validation']['encoding']['sample_rate'],44100)
         self.assertTrue(self.service._output_valid(output));self.assertEqual(output['validation']['tags']['track'],'2')
+        self.service.close() # Quiesce automatic HOURS=0 recovery purge before inspecting its actual outcome.
         cleanup=self.service.cleanup.status(status['jobs'][0]['job_id'])
         self.assertEqual(cleanup['state'],'completed',cleanup)
         self.assertEqual(cleanup['removed'],len(self.sources))
         self.assertTrue(all(not p.exists() for p in self.sources))
-        self.assertGreater(cleanup['recovery_bytes'],0)
-        self.assertEqual(cleanup['recovery']['state'],'retained')
         self.assertEqual(cleanup['temporary_cleanup'],'completed')
-        self.assertTrue(cleanup['restore_available'])
-        self.assertEqual(len(list((self.service.cleanup.root/cleanup['id']).iterdir())),len(self.sources))
+        self.assertIn(cleanup['recovery']['state'],{'retained','deleted'},cleanup)
+        if cleanup['recovery']['state']=='deleted':
+            self.assertEqual(cleanup['recovery_bytes'],0);self.assertFalse(cleanup['restore_available'])
+            recovery=self.service.cleanup.root/cleanup['id']
+            self.assertFalse(recovery.exists() and any(recovery.iterdir()))
+        else:
+            self.assertGreater(cleanup['recovery_bytes'],0);self.assertTrue(cleanup['restore_available'])
+            self.assertEqual(len(list((self.service.cleanup.root/cleanup['id']).iterdir())),len(self.sources))
         attempts=list((self.service.stage_root/status['jobs'][0]['job_id']).iterdir())
         self.assertTrue(all(not list(p.iterdir()) for p in attempts if p.is_dir()))
         self.assertTrue(output['validation']['staging_artifacts']['files'])
@@ -96,7 +131,11 @@ class MergeTests(unittest.TestCase):
         self.inv.launch('Audiobooks');self.inv.worker.join(5)
         with connect(self.inv.database) as db:
             created=db.execute('SELECT metadata FROM files WHERE path=?',(output['final_path'],)).fetchone()
-        self.assertIn('arranger_output',json.loads(created[0]))
+            owned=db.execute("SELECT job_id,kind,sha256,size FROM owned_artifacts WHERE path=?",(output['final_path'],)).fetchone()
+        # Owned outputs are excluded before new metadata discovery. A legacy
+        # indexed row, if present, must also carry its exclusion marker.
+        self.assertEqual(tuple(owned),(output['job_id'],'output',output['sha256'],output['size']))
+        if created is not None:self.assertIn('arranger_output',json.loads(created[0]))
         self.assertEqual(self.service.reviews.page()['total'],1)
         deadline=time.monotonic()+5
         while self.service.current_audiobook(row['id'])['state']=='verifying' and time.monotonic()<deadline:time.sleep(.01)

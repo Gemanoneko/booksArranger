@@ -52,9 +52,11 @@ def ordinary(path):
 
 class DirectoryBoundary:
     """Hold ancestor directory handles without write/delete sharing during publication."""
-    def __init__(self,root,parent,create=False,*,writable_parent=False):
+    def __init__(self,root,parent,create=False,*,writable_parent=False,rename_destination=False):
         if type(writable_parent) is not bool:raise BoundaryError('Writable parent capability must be explicit')
-        self.writable_parent=writable_parent
+        if type(rename_destination) is not bool:raise BoundaryError('Rename destination capability must be explicit')
+        if rename_destination and writable_parent:raise BoundaryError('Rename destination capability is separate from writable publication')
+        self.writable_parent=writable_parent;self.rename_destination=rename_destination
         self.root=ordinary(root);self.parent=ordinary(parent);self.create=create
         self.handles=[];self.identities=[]
         try:self.parent.relative_to(self.root)
@@ -77,7 +79,11 @@ class DirectoryBoundary:
                 # READ_ATTRIBUTES alone does not participate in Windows sharing
                 # checks. LIST_DIRECTORY makes deny-delete sharing effective.
                 access=0x81 | (0x40000000 if self.writable_parent and index==len(parts)-1 else 0)
-                handle=kernel.CreateFileW(str(current),access,1,None,3,0x02000000|0x00200000,None)
+                # Win32 absolute rename opens the destination leaf for directory writes.
+                # Only this explicit rename leaf shares WRITE; every ancestor and
+                # every default/copy guard still denies WRITE and DELETE.
+                share=3 if self.rename_destination and index==len(parts)-1 else 1
+                handle=kernel.CreateFileW(str(current),access,share,None,3,0x02000000|0x00200000,None)
                 if handle==ctypes.c_void_p(-1).value:
                     raise BoundaryError(f'Destination directory cannot be protected: {ctypes.WinError(ctypes.get_last_error())}')
                 self.handles.append(handle)
@@ -147,6 +153,102 @@ def publish_no_replace(temporary,destination,boundary,expected_sha256=None,expec
             if error in {80,183}:raise FileExistsError('Destination collision; existing file was preserved')
             raise BoundaryError(f'Handle-bound no-replace publication failed: {ctypes.WinError(error)}')
     finally:kernel.CloseHandle(handle)
+
+class RenamePostconditionError(BoundaryError):
+    """The OS accepted rename; retain its durable intent for reconciliation.
+
+    Never respond by copying, recreating the old name or assuming no change.
+    """
+
+
+def rename_no_replace(source,destination,source_boundary,destination_boundary,*,expected_identity,expected_size,expected_sha256):
+    """Rename this caller-held DELETE handle, without copying or replacement.
+
+    The caller must prove full content on this SAME retained native identity
+    (recording a fresh-hash or accepted-cache basis), then keep its deny-writer
+    handle held through durable catalog commit. No bytes are re-read here.
+    This function supplies name/native identity proof, not catalog durability.
+    """
+    if os.name!='nt':raise BoundaryError('Handle-bound rename requires Windows')
+    if not isinstance(source,VerifiedFile) or not source.handle or source.delete is not True:
+        raise BoundaryError('Rename requires the already-held source DELETE capability')
+    old=ordinary(source.path);destination=ordinary(destination)
+    if os.path.normcase(str(old))==os.path.normcase(str(destination)):
+        raise BoundaryError('Rename requires a distinct destination name')
+    if (not isinstance(source_boundary,DirectoryBoundary) or not isinstance(destination_boundary,DirectoryBoundary)
+        or not source_boundary.handles or not destination_boundary.handles
+        or old.parent!=source_boundary.parent or destination.parent!=destination_boundary.parent):
+        raise BoundaryError('Rename requires both retained exact parent boundaries')
+    if type(expected_size) is not int or expected_size<0 or not isinstance(expected_sha256,str) or not re.fullmatch('[0-9a-f]{64}',expected_sha256):
+        raise BoundaryError('Exact previously checked content size/SHA256 required')
+
+    def refresh(handle,path):
+        view=VerifiedFile(path);view.handle=handle;view.info=FileInfo()
+        if not kernel.GetFileInformationByHandle(handle,ctypes.byref(view.info)):
+            raise BoundaryError('Rename native identity refresh failed')
+        return view.info,view.facts()
+
+    def ordinary_unique(facts):
+        if facts['links']!=1 or facts['attributes']&(0x400|0x10):raise BoundaryError('Rename requires a unique ordinary source')
+        if (facts['identity_method']=='FileIdInfo128' and facts['identity_api_error']==0
+            or facts['identity_method']=='BY_HANDLE_FILE_INFORMATION64' and facts['identity_api_error'] in {1,50,87}):return
+        raise BoundaryError('Rename native identity method is unknown')
+
+    def named(path,expected):
+        # Only this temporary read-open shares DELETE, so it can coexist with
+        # OUR original DELETE handle. That original still denies other deleters.
+        handle=kernel.CreateFileW(str(path),0x81,1|4,None,3,0x00200000,None)
+        if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Rename named-file proof open refused')
+        try:
+            _,facts=refresh(handle,path);ordinary_unique(facts)
+            if facts!=expected:raise BoundaryError('Renamed pathname does not name the held source identity')
+            return facts
+        finally:
+            if not kernel.CloseHandle(handle):raise BoundaryError('Rename named-file proof checked-close failed')
+
+    source_boundary.revalidate();destination_boundary.revalidate()
+    source.info,before=refresh(source.handle,old);ordinary_unique(before)
+    if type(expected_identity) is not dict or before!=expected_identity or before['size']!=expected_size:
+        raise BoundaryError('Rename held source differs from its complete checked identity/size')
+    named(old,before)
+    old_parent=FileInfo();new_parent=FileInfo()
+    if (not kernel.GetFileInformationByHandle(source_boundary.handles[-1],ctypes.byref(old_parent))
+        or not kernel.GetFileInformationByHandle(destination_boundary.handles[-1],ctypes.byref(new_parent))
+        or any(info.attributes&0x400 or not info.attributes&0x10 for info in (old_parent,new_parent))):
+        raise BoundaryError('Rename parent native identity unavailable')
+    if not old_parent.volume or old_parent.volume!=source.info.volume or new_parent.volume!=old_parent.volume:
+        raise BoundaryError('Rename requires matching native source/destination volumes')
+    if os.path.lexists(destination):raise FileExistsError('Rename destination exists; both files preserved')
+    encoded=str(destination).encode('utf-16-le')
+    if not encoded or len(encoded)>65532:raise BoundaryError('Rename absolute wide destination exceeds bound')
+    class Rename(ctypes.Structure):
+        _fields_=[('replace',wintypes.BOOLEAN),('root',wintypes.HANDLE),('length',wintypes.DWORD),
+                  ('name',wintypes.WCHAR*(len(encoded)//2+1))]
+    rename=Rename();rename.replace=False;rename.root=None;rename.length=len(encoded)
+    ctypes.memmove(ctypes.addressof(rename)+Rename.name.offset,encoded,len(encoded))
+    kernel.SetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD]
+    kernel.SetFileInformationByHandle.restype=wintypes.BOOL
+    source_boundary.revalidate();destination_boundary.revalidate()
+    if not kernel.SetFileInformationByHandle(source.handle,3,ctypes.byref(rename),ctypes.sizeof(rename)):
+        error=ctypes.get_last_error()
+        if error in {80,183}:raise FileExistsError('Rename destination collision; existing file preserved')
+        raise BoundaryError(f'No-copy handle-bound rename refused (Windows error {error})')
+    try:
+        source.info,after=refresh(source.handle,destination);ordinary_unique(after)
+        if after!=before:raise BoundaryError('Held source identity changed across rename')
+        destination_facts=named(destination,after)
+        source_boundary.revalidate();destination_boundary.revalidate()
+        if os.path.lexists(old):raise BoundaryError('Old pathname remains or was replaced after rename')
+        return {'schema':'books-native-no-copy-rename-v1','old_path':str(old),'final_path':str(destination),
+            'identity':after['identity'],'source_native_before':before,'source_native_after':after,
+            'destination_native':destination_facts,'sha256':expected_sha256,'size':expected_size,
+            'content_basis':'Caller-proven full content on same retained identity; denywriters across rename (caller records fresh-hash or accepted-cache basis)',
+            'source_delete_handle_still_held':True,'named_read_handle_checked_closed':True,
+            'old_absent':True,'no_replace':True,'copy_fallback':False,
+            'api':'SetFileInformationByHandle(FileRenameInfo)','root_directory_null':True,
+            'absolute_destination_utf16_bytes':len(encoded)}
+    except BaseException as error:
+        raise RenamePostconditionError('OS rename accepted; postcondition unproved, retain durable rename intent: '+str(error)) from error
 
 class ProtectedFiles:
     """Deny write/delete access to owned immutable snapshots while media tools read them."""

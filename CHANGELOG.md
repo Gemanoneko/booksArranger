@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.20.2] - 2026-10-21
+
+### Fixed
+
+- Same-volume output migration uses a journaled Windows move without copying files, with recovery after interrupted moves and explicit cleanup of a previously verified duplicate.
+- Scanning and conversion wait for unfinished moves, and completed books remain valid under the configured output root.
+
 ## [v0.20.1] - 2026-10-21
 
 ### Fixed

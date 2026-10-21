@@ -49,12 +49,19 @@ def catalog_identity_lease(database):
         finally:kernel.CloseHandle(handle)
 
 class MigrationOperation:
-    def __init__(self,database,roots,plan_path,plan_sha256,*,stop=None):
+    def __init__(self,database,roots,plan_path,plan_sha256,*,stop=None,strategy='copy'):
         self.database=ordinary(database);self.roots={key:str(ordinary(value)) for key,value in roots.items()}
         self.plan_path=ordinary(plan_path);self.plan_sha256=plan_sha256
         if not isinstance(plan_sha256,str) or len(plan_sha256)!=64:raise ValueError('Exact reviewed plan SHA256 is required')
         if self.plan_path.is_relative_to(self.database.parent) or any(self.plan_path.is_relative_to(ordinary(root)) for root in self.roots.values()):raise ValueError('Keep reviewed plan outside catalog data and libraries')
-        self.stop=stop or threading.Event();self.worker=MigrationWorker(self.database,operation_lease=self.operation_lease,media_verify=self.media_verify,invalidate=self.invalidate,stop=self.stop)
+        if strategy not in {'copy','rename'}:raise ValueError('Unknown reviewed migration strategy')
+        self.strategy=strategy
+        self.stop=stop or threading.Event()
+        if strategy=='rename':
+            from output_rename import RenameWorker
+            worker=RenameWorker
+        else:worker=MigrationWorker
+        self.worker=worker(self.database,operation_lease=self.operation_lease,media_verify=self.media_verify,invalidate=self.invalidate,stop=self.stop)
 
     def _plan(self,file):
         if file.facts()['links']!=1 or file.facts()['size']>4*1024*1024:raise ValueError('Migration plan is not a bounded unique file')
@@ -62,6 +69,8 @@ class MigrationOperation:
         if hashlib.sha256(raw).hexdigest()!=self.plan_sha256:raise ValueError('Reviewed migration plan changed')
         plan=json.loads(raw)
         if plan.get('schema')!=PLAN_SCHEMA or ordinary(plan.get('database',''))!=self.database:raise ValueError('Plan catalog/schema differs')
+        expected=locations.RENAME_STRATEGY if self.strategy=='rename' else 'copy'
+        if plan.get('operation_strategy','copy')!=expected:raise ValueError('Reviewed plan and concrete operation strategy differ')
         if policy_roots(plan.get('source_policy'))!=self.roots or plan.get('roots')!=self.roots:raise ValueError('Reviewed plan source/output roots differ from concrete operation')
         if plan.get('source_policy_sha256')!=digest(plan['source_policy']):raise ValueError('Reviewed source/output policy digest differs')
         if plan.get('catalog_identity')!=self.catalog_facts:raise ValueError('Reviewed native catalog identity differs')
@@ -71,11 +80,23 @@ class MigrationOperation:
         if selected is not None and (not isinstance(selected,list) or len(selected)>10000 or any(not isinstance(identity,str) for identity in selected) or len(set(selected))!=len(selected)):raise ValueError('Reviewed verification selection is malformed')
         entries=plan.get('publications')
         if not isinstance(entries,list) or not entries or len(entries)>10000 or len({entry.get('publication_id') for entry in entries})!=len(entries):raise ValueError('Invalid reviewed publication scope')
+        if self.strategy=='rename' and any(entry.get('move_action') not in {'rename','remove_verified_duplicate'} or type(entry.get('initial_generation')) is not int or entry['initial_generation']<0 for entry in entries):raise ValueError('Exact native move action/generation must be frozen in the reviewed plan')
         return plan
 
     def _scope(self,db,entry):
         publication=row(db,'SELECT * FROM output_relocations WHERE publication_id=?',(entry['publication_id'],))
         if publication is None or entry.get('frozen_binding_sha256')!=digest(locations._frozen(publication)):raise ValueError('Reviewed publication binding changed')
+        selected=locations.move_strategy(db,publication)
+        if self.strategy=='copy' and selected:raise ValueError('Native move intent cannot resume through the copy worker')
+        if self.strategy=='rename':
+            expected=locations.RENAME_STRATEGY if entry['move_action']=='rename' else locations.DUPLICATE_STRATEGY
+            if selected:
+                if selected!=expected:raise ValueError('Native move action differs from its frozen intent')
+                phase='rename_intent' if expected==locations.RENAME_STRATEGY else 'duplicate_cleanup_intent'
+                intent=locations._proof_for(db,publication,phase)
+                if intent['operation_plan_sha256']!=self.plan_sha256 or intent['generation']!=entry['initial_generation']:raise ValueError('Native move intent was selected under another plan/generation')
+            elif publication['generation']!=entry['initial_generation'] or publication['stage']!=('planned' if entry['move_action']=='rename' else 'complete'):
+                raise ValueError('Native move initial stage/generation changed')
         expected={'source':json.loads(publication['original_output_json'])['final_path'],'destination':publication['planned_destination'],'kind':publication['publication_kind'],'candidate_id':publication['candidate_id'],'size':json.loads(publication['original_output_json'])['size']}
         if any(type(entry.get(key)) is not type(value) or entry.get(key)!=value for key,value in expected.items()):raise ValueError('Reviewed publication displayed scope differs from immutable binding')
         if publication['target_root']!=self.plan['source_policy']['audiobook_output_root']:raise ValueError('Publication output root differs from reviewed policy')
@@ -158,13 +179,15 @@ class MigrationOperation:
                     return {'schema':'books-migration-durable-commit-v1','committed':not db.in_transaction,'publication_id':publication_id,
                         'generation':actual['generation'],'relocation_sha256':digest(actual),'event_sha256':digest(event),
                         'journal_mode':str(db.execute('PRAGMA journal_mode').fetchone()[0]).lower(),'synchronous':int(db.execute('PRAGMA synchronous').fetchone()[0]),'owner_invocation_id':invocation}
-                yield {'db':db,'drained':True,'native_owner':native,'generation_guard':guard,'durable_commit':durable,'removal_closure':lambda intent:None}
+                yield {'db':db,'drained':True,'native_owner':native,'generation_guard':guard,'durable_commit':durable,'removal_closure':lambda intent:None,
+                    'operation_strategy':self.strategy,'operation_plan_sha256':self.plan_sha256,'move_action':entry.get('move_action')}
             finally:
                 self.active=None;db.rollback();db.close()
 
     def media_verify(self,path,receipt,stop):
-        # The worker independently hashes native-held original AND destination;
-        # this callback seals the supported historical media contract only.
+        # The worker proves full content under native protection (both files for
+        # copy; the same retained identity for rename). This callback seals only
+        # the supported historical media contract, without reopening the file.
         db,identity,entry,current,native=self.active
         current,envelope=self._scope(db,entry)
         if receipt!=json.loads(current['original_output_json']):raise ValueError('Original media receipt changed')
@@ -201,6 +224,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description='Run one exact reviewed publication under exclusive catalog ownership; never starts the app')
     parser.add_argument('--plan',required=True);parser.add_argument('--plan-sha',required=True)
     parser.add_argument('--publication',required=True);parser.add_argument('--mode',choices=('check','run'),default='check')
+    parser.add_argument('--strategy',choices=('copy','rename'),default='copy')
     args=parser.parse_args(argv);path=ordinary(args.plan)
     with DirectoryBoundary(path.anchor,path.parent),VerifiedFile(path) as file:
         if file.facts()['links']!=1 or file.facts()['size']>4*1024*1024:raise ValueError('Reviewed plan is not bounded unique data')
@@ -208,7 +232,7 @@ def main(argv=None):
         if hashlib.sha256(raw).hexdigest()!=args.plan_sha:raise ValueError('Reviewed plan SHA256 differs')
         plan=json.loads(raw)
         if not isinstance(plan.get('roots'),dict) or not plan['roots']:raise ValueError('Reviewed source/output roots are required')
-        operation=MigrationOperation(plan['database'],plan['roots'],path,args.plan_sha)
+        operation=MigrationOperation(plan['database'],plan['roots'],path,args.plan_sha,strategy=args.strategy)
         if args.mode=='check':
             with operation.operation_lease(args.publication) as lease:
                 current=row(lease['db'],'SELECT * FROM output_relocations WHERE publication_id=?',(args.publication,))

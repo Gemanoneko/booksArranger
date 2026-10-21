@@ -98,6 +98,9 @@ def inside(path, root):
 
 class Inventory:
     def __init__(self, database, roots=None, reader=read_metadata, *, audiobook_sources=None, output_root=None):
+        # Before directory/schema creation or resetting saved running tasks.
+        from publication_locations import require_no_pending_moves
+        require_no_pending_moves(database)
         self.database = str(database)
         self.roots = dict(roots or DEFAULT_ROOTS)
         self.source_config = normalize_sources(self.roots, audiobook_sources, output_root)

@@ -101,3 +101,23 @@ class MigrationOperationTests(unittest.TestCase):
             changed=copy.deepcopy(self.plan);changed['verification_selection']=value
             with self.subTest(value=value),self.assertRaisesRegex(ValueError,'verification selection'):
                 with self.rewritten(changed).operation_lease(self.pubid):pass
+
+    def move_operation(self,plan):
+        raw=json.dumps(plan).encode();self.path.write_bytes(raw)
+        return MigrationOperation(self.database,self.roots,self.path,hashlib.sha256(raw).hexdigest(),strategy='rename')
+
+    def test_native_strategy_requires_explicit_review_and_initial_generation(self):
+        with self.assertRaisesRegex(ValueError,'strategy differ'):
+            with self.move_operation(self.plan).operation_lease(self.pubid):pass
+        plan=copy.deepcopy(self.plan);plan['operation_strategy']=p.RENAME_STRATEGY
+        plan['publications'][0].update(move_action='rename',initial_generation=0)
+        with self.move_operation(plan).operation_lease(self.pubid) as lease:
+            self.assertEqual(lease['move_action'],'rename')
+            self.assertEqual(lease['operation_strategy'],'rename')
+        for field,value,reason in (('initial_generation',1,'initial stage/generation'),('initial_generation',True,'action/generation'),('move_action','copy','action/generation'),('move_action','remove_verified_duplicate','initial stage/generation')):
+            changed=copy.deepcopy(plan);changed['publications'][0][field]=value
+            with self.subTest(field=field,value=value),self.assertRaisesRegex(ValueError,reason):
+                with self.move_operation(changed).operation_lease(self.pubid):pass
+        raw=json.dumps(plan).encode();self.path.write_bytes(raw)
+        with self.assertRaisesRegex(ValueError,'strategy differ'):
+            with MigrationOperation(self.database,self.roots,self.path,hashlib.sha256(raw).hexdigest()).operation_lease(self.pubid):pass

@@ -382,4 +382,96 @@ class PublicationLocationsTests(unittest.TestCase):
         self.assertEqual(error.exception.code,'relocation_generation_changed');self.assertEqual(source.read_bytes(),raw);self.assertEqual(destination.read_bytes(),raw)
 
 
+class NativeMoveLedger(unittest.TestCase):
+    setUp=PublicationLocationsTests.setUp
+    store_job=PublicationLocationsTests.store_job
+    plan=PublicationLocationsTests.plan
+    resolve=PublicationLocationsTests.resolve
+    advance=PublicationLocationsTests.advance
+    next=PublicationLocationsTests.next
+    phase_proof=PublicationLocationsTests.phase_proof
+    final_proof=PublicationLocationsTests.final_proof
+    prior=PublicationLocationsTests.prior
+    removal_intent=PublicationLocationsTests.removal_intent
+
+    def claim(self,row,schema,strategy=p.RENAME_STRATEGY):
+        return {'schema':schema,'strategy':strategy,'publication_id':row['publication_id'],
+            'immutable_receipt_sha256':row['immutable_receipt_sha256'],'generation':row['generation'],
+            'frozen_binding_sha256':digest(p._frozen(row)),'operation_plan_sha256':'a'*64}
+
+    def intent(self,row,strategy=p.RENAME_STRATEGY):
+        native={'identity':[1,0,2],'dev':1,'ino':2,'modified':1,'size':self.original['size'],'links':1,'attributes':32}
+        source=dict(copy.deepcopy(self.original),identity=native['identity'],native=native,content_basis={'kind':'fresh_full_held_hash'})
+        proof=dict(self.claim(row,'books-output-native-move-intent-v1',strategy),original_location=source,
+            target={'root':row['target_root'],'final_path':row['planned_destination'],'parent_identity':[[row['target_root'],1,0,41]]},no_replace=True,copy_fallback=False)
+        if strategy==p.DUPLICATE_STRATEGY:
+            final=json.loads(row['destination_verification_json'])
+            proof['destination_location']={k:copy.deepcopy(final[k]) for k in ('root','final_path','sha256','size','identity','parent_identity')}
+            proof['destination_location']['content_basis']={'kind':'fresh_full_held_hash'}
+        return proof
+
+    def rename_final(self,row):
+        target={'root':row['target_root'],'final_path':row['planned_destination'],'sha256':self.original['sha256'],
+            'size':self.original['size'],'identity':[1,0,2],'parent_identity':[[row['target_root'],1,0,41]]}
+        return dict(schema=p.PROOF_SCHEMA,publication_id=row['publication_id'],immutable_receipt_sha256=row['immutable_receipt_sha256'],
+            generation=row['generation'],**target,media_validation={'passed':True,'full_content_sha256':self.original['sha256'],'size':self.original['size']},
+            final_publication=dict(target,published=True,no_replace=True,copy_fallback=False))
+
+    def renamed(self):
+        row=self.plan();intent=self.intent(row);row=p.move_transition(self.db,row['publication_id'],row['generation'],'rename_intent',intent)
+        final=self.rename_final(row)
+        proof=dict(self.claim(row,'books-output-native-renamed-v1'),intent_sha256=digest(intent),old_absent=True,final=final)
+        return p.move_transition(self.db,row['publication_id'],row['generation'],'renamed',proof),intent,final
+
+    def test_rename_history_commits_same_file_without_copy_stages(self):
+        before=copy.deepcopy(self.job);row,intent,final=self.renamed()
+        self.assertEqual(self.resolve()['effective_location']['final_path'],self.original['final_path'])
+        final=dict(final,generation=row['generation'])
+        row=p.move_transition(self.db,row['publication_id'],row['generation'],'location_committed',dict(self.claim(row,'books-output-native-move-commit-v1'),intent_sha256=digest(intent),final=final))
+        row=p.move_transition(self.db,row['publication_id'],row['generation'],'complete',dict(self.claim(row,'books-output-native-move-complete-v1'),intent_sha256=digest(intent),outcome='moved'))
+        result=self.resolve();self.assertEqual(result['effective_location']['final_path'],self.destination);self.assertEqual(result['outcome'],'moved')
+        self.assertEqual(self.job,before);self.assertEqual([v[0] for v in self.db.execute('SELECT to_stage FROM migration_events')],['planned','rename_intent','renamed','location_committed','complete'])
+
+    def test_rename_refuses_copy_fallback_cross_volume_and_alias(self):
+        row=self.plan()
+        for change in ('fallback','volume','hardlink'):
+            proof=self.intent(row)
+            if change=='fallback':proof['copy_fallback']=True
+            if change=='volume':proof['target']['parent_identity'][0][1]=2
+            if change=='hardlink':proof['original_location']['native']['links']=2
+            with self.subTest(change=change),self.assertRaises(p.PublicationRefused):p.move_transition(self.db,row['publication_id'],0,'rename_intent',proof)
+        self.assertEqual(self.resolve()['stage'],'planned')
+
+    def test_copy_transition_cannot_consume_rename_intent(self):
+        row=self.plan();row=p.move_transition(self.db,row['publication_id'],0,'rename_intent',self.intent(row))
+        with self.assertRaises(p.PublicationRefused):p.transition(self.db,row['publication_id'],row['generation'],'copied',{})
+        self.assertEqual(self.resolve()['stage'],'rename_intent')
+
+    def test_rename_wrong_same_hash_destination_identity_refused(self):
+        row=self.plan();intent=self.intent(row);row=p.move_transition(self.db,row['publication_id'],0,'rename_intent',intent)
+        final=self.rename_final(row);final['identity']=[1,0,999];final['final_publication']['identity']=[1,0,999]
+        with self.assertRaises(p.PublicationRefused):p.move_transition(self.db,row['publication_id'],1,'renamed',dict(self.claim(row,'books-output-native-renamed-v1'),intent_sha256=digest(intent),old_absent=True,final=final))
+
+    def test_cache_authority_must_match_exact_native_identity(self):
+        row=self.plan();proof=self.intent(row)
+        proof['original_location']['content_basis']={'kind':'accepted_persisted_verification_cache','identity':[1,2,self.original['size'],1],'cache_record_sha256':'b'*64}
+        bad=copy.deepcopy(proof);bad['original_location']['content_basis']['identity'][1]=999
+        with self.assertRaises(p.PublicationRefused):p.move_transition(self.db,row['publication_id'],0,'rename_intent',bad)
+        p.move_transition(self.db,row['publication_id'],0,'rename_intent',proof)
+        self.assertEqual(self.resolve()['stage'],'rename_intent')
+        self.assertEqual(p.STAGES[1],'copy_intent')
+
+    def test_explicit_duplicate_cleanup_preserves_retained_copy_prefix(self):
+        row=self.advance(self.plan(),'location_committed')
+        row=p.transition(self.db,row['publication_id'],row['generation'],'complete',{'outcome':'copied_verified_original_retained','reason':'NAS parent flush unsupported'})
+        prefix=[tuple(v) for v in self.db.execute('SELECT * FROM migration_events')]
+        intent=self.intent(row,p.DUPLICATE_STRATEGY)
+        row=p.move_transition(self.db,row['publication_id'],row['generation'],'duplicate_cleanup_intent',intent)
+        proof=dict(self.claim(row,'books-output-duplicate-removed-v1',p.DUPLICATE_STRATEGY),intent_sha256=digest(intent),old_absent=True,
+            destination_location=intent['destination_location'],basis='intent_bound_absence_with_verified_destination')
+        row=p.move_transition(self.db,row['publication_id'],row['generation'],'duplicate_removed',proof)
+        row=p.move_transition(self.db,row['publication_id'],row['generation'],'complete',dict(self.claim(row,'books-output-native-move-complete-v1',p.DUPLICATE_STRATEGY),intent_sha256=digest(intent),outcome='moved'))
+        self.assertEqual(self.resolve()['outcome'],'moved');self.assertEqual([tuple(v) for v in self.db.execute('SELECT * FROM migration_events')][:len(prefix)],prefix)
+
+
 if __name__=='__main__':unittest.main()

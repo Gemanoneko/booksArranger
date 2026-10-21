@@ -163,6 +163,8 @@ class MergeService:
     draining=False # Set by a desktop Quit: the current book finishes, nothing new starts.
 
     def __init__(self, inventory, cache_dir):
+        from publication_locations import require_no_pending_moves
+        require_no_pending_moves(inventory.database)
         self.inventory = inventory
         self.operation_lock=threading.RLock()
         self._progress_lock=threading.RLock()

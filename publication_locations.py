@@ -19,6 +19,10 @@ KINDS=frozenset({'base','Chapters','Chaptersv2','replacement'})
 STAGES=('planned','copy_intent','copied','temporary_verified','final_publish_intent','final_published',
         'location_committed','old_removal_intent','original_removed','complete')
 COMMITTED=frozenset(STAGES[6:])
+MOVE_STAGES=frozenset({'rename_intent','renamed','duplicate_cleanup_intent','duplicate_removed'})
+COMMITTED=COMMITTED|{'duplicate_cleanup_intent','duplicate_removed'}
+RENAME_STRATEGY='windows-same-volume-rename-v1'
+DUPLICATE_STRATEGY='windows-explicit-duplicate-cleanup-v1'
 
 class PublicationRefused(ValueError):
     def __init__(self,code,message):super().__init__(message);self.code=code;self.cause=code
@@ -245,7 +249,7 @@ def _binding(row,job,manifest,journal,receipt,kind,lineage):
     _need(not fingerprint or fingerprint==row['source_fingerprint'],'Original source fingerprint changed')
     _need(_contained(row['target_root'],row['planned_destination']) and _path(row['planned_destination'])!=_path(receipt['final_path']),'Relocation path is invalid')
     _need(_object(row['previous_location_json'])==receipt,'Previous publication location differs')
-    _need(row['stage'] in STAGES and type(row['generation']) is int and row['generation']>=0,'Relocation state is malformed')
+    _need(row['stage'] in set(STAGES)|MOVE_STAGES and type(row['generation']) is int and row['generation']>=0,'Relocation state is malformed')
 
 
 def plan(db,job,kind,original_receipt,target_root,destination,accepted_routing):
@@ -408,6 +412,7 @@ def transition(db,pubid,expected_generation,newstage,proof=None,error=None):
         receipt=_receipt(row['original_output_json'])
         job,manifest,journal,lineage=_job(db,durable,row['publication_kind'],receipt)
         _binding(row,job,manifest,journal,receipt,row['publication_kind'],lineage);_history(db,row)
+        _need(not move_strategy(db,row),'Copy transitions cannot alter a native-move binding')
         _need(newstage in STAGES,'Unknown relocation stage')
         _need(error is None or isinstance(error,str),'Relocation error must be text')
         oldstage=row['stage'];normal=oldstage!='complete' and STAGES.index(newstage)==STAGES.index(oldstage)+1
@@ -442,9 +447,10 @@ def transition(db,pubid,expected_generation,newstage,proof=None,error=None):
         raise
 
 
-def _history(db,row):
-    cursor=db.execute("SELECT * FROM migration_events WHERE publication_id=? AND outcome='transition' ORDER BY event_id",(row['publication_id'],))
-    columns=[c[0] for c in cursor.description];events=[dict(zip(columns,tuple(r))) for r in cursor]
+def _copy_history(db,row,events=None):
+    if events is None:
+        cursor=db.execute("SELECT * FROM migration_events WHERE publication_id=? AND outcome='transition' ORDER BY event_id",(row['publication_id'],))
+        columns=[c[0] for c in cursor.description];events=[dict(zip(columns,tuple(r))) for r in cursor]
     _need(len(events)==row['generation']+1 and events[0]['from_stage'] is None and events[0]['to_stage']=='planned','Relocation event history is incomplete')
     _need(_object(events[0]['proof_json']).get('frozen_binding_sha256')==_digest(_frozen(row)),'Frozen relocation plan differs from journal')
     prior=None
@@ -467,6 +473,154 @@ def _history(db,row):
     finals=[event for event in events if event['to_stage'] in {'final_published','location_committed'}]
     if finals:
         _need(row['destination_verification_json']==finals[-1]['proof_json'],'Stored final destination proof differs from its journal')
+
+
+def move_strategy(db,row):
+    event=_fetch(db,"SELECT to_stage,proof_json FROM migration_events WHERE publication_id=? AND outcome='transition' AND to_stage IN ('rename_intent','duplicate_cleanup_intent') ORDER BY event_id LIMIT 1",(row['publication_id'],))
+    return _object(event['proof_json']).get('strategy') if event else None
+
+
+def _move_phase(db,row,stage,proof,generation,strategy):
+    proof=_object(proof)
+    _need(proof.get('strategy')==strategy and proof.get('publication_id')==row['publication_id']
+        and proof.get('immutable_receipt_sha256')==row['immutable_receipt_sha256'] and type(proof.get('generation')) is int and proof['generation']==generation,'Native move proof binding differs')
+    _need(proof.get('frozen_binding_sha256')==_digest(_frozen(row)) and _hash(proof.get('operation_plan_sha256')),'Native move strategy/plan is not frozen')
+    original=_receipt(row['original_output_json'])
+    if stage in {'rename_intent','duplicate_cleanup_intent'}:
+        _need(proof.get('schema')=='books-output-native-move-intent-v1','Native move intent schema differs')
+        old=_old_copy(row,proof.get('original_location'))
+        native=_object(old.get('native'))
+        _need(native.get('identity')==old['identity'] and native.get('links')==1 and native.get('size')==original['size']
+            and type(native.get('attributes')) is int and not native['attributes']&(0x400|0x10),'Native move source is not a unique ordinary exact identity')
+        basis=_object(old.get('content_basis'))
+        _need(basis.get('kind') in {'fresh_full_held_hash','accepted_persisted_verification_cache'},'Native move full-content authority unavailable')
+        if basis['kind']=='accepted_persisted_verification_cache':
+            _need(basis.get('identity')==[native.get(k) for k in ('dev','ino','size','modified')] and _hash(basis.get('cache_record_sha256')),'Native move cached identity differs from held file')
+        target=_object(proof.get('target'))
+        _need(_path(target.get('root'))==_path(row['target_root']) and _path(target.get('final_path'))==_path(row['planned_destination']),'Move target differs from frozen binding')
+        _ancestry(target.get('parent_identity'),target['root'],target['final_path'])
+        _need(old['identity'][0]==target['parent_identity'][-1][1],'Native move crosses volumes')
+        _need(proof.get('no_replace') is True and proof.get('copy_fallback') is False,'Native move cannot replace or copy')
+        if strategy==DUPLICATE_STRATEGY:
+            saved=_object(row['destination_verification_json']);_final_proof(row,saved,saved['generation'])
+            final=_object(proof.get('destination_location'))
+            _need(all(_packed(final.get(k))==_packed(saved[k]) for k in ('root','final_path','sha256','size','identity','parent_identity')),'Duplicate cleanup destination differs from committed verified copy')
+            _need(old['identity']!=final['identity'],'Duplicate cleanup requires two different native files')
+            _need(basis['kind']=='fresh_full_held_hash' and final.get('content_basis',{}).get('kind')=='fresh_full_held_hash','Duplicate cleanup requires fresh full hashes of both held files')
+            _need(old['identity']==_proof_for(db,row,'copy_intent')['original_location']['identity'],'Duplicate cleanup old identity differs from original copy seal')
+        return proof
+    intent_stage='rename_intent' if strategy==RENAME_STRATEGY else 'duplicate_cleanup_intent'
+    intent=_proof_for(db,row,intent_stage)
+    _need(proof.get('intent_sha256')==_digest(intent) and proof['operation_plan_sha256']==intent['operation_plan_sha256'],'Native move intent chain differs')
+    if stage=='renamed':
+        _need(proof.get('schema')=='books-output-native-renamed-v1' and proof.get('old_absent') is True,'Renamed source absence not proven')
+        final=_object(proof.get('final'));_final_proof(row,final,generation)
+        _need(final['identity']==intent['original_location']['identity'],'Renamed output is not the exact original native file')
+        _need(final['parent_identity']==intent['target']['parent_identity'],'Renamed parent identity changed')
+        _need(final['final_publication'].get('no_replace') is True and final['final_publication'].get('copy_fallback') is False,'Rename publication fallback/replacement refused')
+    elif stage=='location_committed':
+        _final_proof(row,proof['final'],generation)
+        prior=_proof_for(db,row,'renamed')['final']
+        _need(all(_packed(prior[k])==_packed(proof['final'][k]) for k in ('root','final_path','sha256','size','identity','parent_identity','final_publication','media_validation')),'Rename changed before catalog commit')
+    elif stage=='duplicate_removed':
+        _need(proof.get('schema')=='books-output-duplicate-removed-v1' and proof.get('old_absent') is True,'Duplicate removal absence not proven')
+        _need(proof.get('basis') in {'exact_handle_disposition_closed','intent_bound_absence_with_verified_destination'},'Duplicate removal observation unavailable')
+        _need(proof.get('destination_location')==intent['destination_location'],'Duplicate cleanup protected destination changed')
+    elif stage=='complete':
+        _need(proof.get('schema')=='books-output-native-move-complete-v1' and proof.get('outcome')=='moved','Native move completion outcome differs')
+    else:raise PublicationRefused('invalid_publication_binding','Unknown native move phase')
+    return proof
+
+
+def _move_history(db,row,events):
+    selected=[(i,e) for i,e in enumerate(events) if e['to_stage'] in {'rename_intent','duplicate_cleanup_intent'}]
+    _need(len(selected)==1,'Native move strategy must be selected exactly once')
+    start,first=selected[0];strategy=_object(first['proof_json']).get('strategy')
+    _need(strategy in {RENAME_STRATEGY,DUPLICATE_STRATEGY},'Unknown native move strategy')
+    prefix=events[:start];_need(bool(prefix),'Native move original enrollment unavailable')
+    previous=prefix[-1]
+    prefix_row=dict(row,stage=previous['to_stage'],generation=previous['generation'])
+    if strategy==RENAME_STRATEGY:
+        _need(len(prefix)==1 and previous['to_stage']=='planned','Rename requires an untouched planned publication')
+        prefix_row['destination_verification_json']=None
+        graph=('planned','rename_intent','renamed','location_committed','complete')
+    else:
+        _need(previous['to_stage']=='complete' and _object(previous['proof_json']).get('outcome')=='copied_verified_original_retained','Duplicate cleanup requires exact prior retained-copy completion')
+        graph=('complete','duplicate_cleanup_intent','duplicate_removed','complete')
+    _copy_history(db,prefix_row,prefix)
+    _need(len(events)==row['generation']+1,'Native move journal is incomplete')
+    prior=previous['to_stage'];final_json=None
+    for offset,event in enumerate(events[start:]):
+        generation=start+offset
+        _need(event['generation']==generation and event['migration_id']==row['migration_id'] and event['from_stage']==prior,'Native move event generation differs')
+        _need(offset+1<len(graph) and event['to_stage']==graph[offset+1],'Native move event graph differs')
+        _move_phase(db,row,event['to_stage'],_object(event['proof_json']),generation-1,strategy)
+        if event['to_stage']=='location_committed':final_json=_packed(_object(event['proof_json'])['final'])
+        prior=event['to_stage']
+    _need(prior==row['stage'],'Native move current stage differs from journal')
+    if strategy==RENAME_STRATEGY:
+        _need(row['destination_verification_json']==final_json,'Native move final location differs from committed event')
+
+
+def _history(db,row):
+    if not move_strategy(db,row):return _copy_history(db,row)
+    cursor=db.execute("SELECT * FROM migration_events WHERE publication_id=? AND outcome='transition' ORDER BY event_id",(row['publication_id'],))
+    columns=[v[0] for v in cursor.description];events=[dict(zip(columns,tuple(v))) for v in cursor]
+    return _move_history(db,row,events)
+
+
+def move_transition(db,pubid,expected_generation,newstage,proof):
+    """Separate same-volume rename/explicit duplicate cleanup protocol. Never a copy bypass."""
+    db.execute('SAVEPOINT native_move_transition')
+    try:
+        row=_load(db,pubid);_need(row is not None and row['generation']==expected_generation,'Native move generation changed')
+        job,manifest,journal,lineage=_job(db,_fetch(db,'SELECT * FROM audio_jobs WHERE job_id=?',(row['job_id'],)),row['publication_kind'],_receipt(row['original_output_json']))
+        _binding(row,job,manifest,journal,_receipt(row['original_output_json']),row['publication_kind'],lineage);_history(db,row)
+        strategy=move_strategy(db,row) or _object(proof).get('strategy')
+        if strategy==RENAME_STRATEGY:edges={'planned':'rename_intent','rename_intent':'renamed','renamed':'location_committed','location_committed':'complete'}
+        elif strategy==DUPLICATE_STRATEGY:edges={'complete':'duplicate_cleanup_intent','duplicate_cleanup_intent':'duplicate_removed','duplicate_removed':'complete'}
+        else:raise PublicationRefused('invalid_publication_binding','Unknown native move strategy')
+        _need(edges.get(row['stage'])==newstage,'Illegal native move transition')
+        if newstage=='duplicate_cleanup_intent':
+            last=_fetch(db,"SELECT proof_json FROM migration_events WHERE publication_id=? AND outcome='transition' ORDER BY event_id DESC LIMIT 1",(pubid,))
+            _need(_object(last['proof_json']).get('outcome')=='copied_verified_original_retained' and not move_strategy(db,row),'Duplicate cleanup cannot repeat or change a completed move')
+        _move_phase(db,row,newstage,proof,expected_generation,strategy)
+        destination=_packed(proof['final']) if newstage=='location_committed' else row['destination_verification_json']
+        changed=db.execute('UPDATE output_relocations SET stage=?,destination_verification_json=?,generation=?,last_error=NULL,updated_utc=? WHERE publication_id=? AND generation=?',
+            (newstage,destination,expected_generation+1,_now(),pubid,expected_generation)).rowcount
+        _need(changed==1,'Native move generation changed')
+        updated=_load(db,pubid);_event(db,updated,row['stage'],newstage,'transition',proof)
+        _history(db,updated);db.execute('RELEASE native_move_transition');return copy.deepcopy(updated)
+    except BaseException:
+        db.execute('ROLLBACK TO native_move_transition');db.execute('RELEASE native_move_transition');raise
+
+
+def require_no_pending_moves(database):
+    """Read-only startup fence before inventory/queue recovery or producers.
+
+    Supported offline native-move reconciliation acquires the normal catalog
+    owner directly and does not construct Inventory or MergeService.
+    """
+    from pathlib import Path
+    path=Path(database)
+    if not path.exists():return
+    db=sqlite3.connect(path.absolute().as_uri()+'?mode=ro',uri=True,timeout=10)
+    try:
+        db.execute('PRAGMA query_only=ON')
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone():return
+        columns={v[1] for v in db.execute('PRAGMA table_info(output_relocations)')}
+        if not {'publication_id','stage'}.issubset(columns):return # Pre-protocol legacy catalogs cannot contain a native move.
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='migration_events'").fetchone():
+            _need('original_output_sha256' not in columns,'Publication recovery journal unavailable; preserve saved tasks before startup')
+            return
+        pending=db.execute("""SELECT r.publication_id FROM output_relocations r
+            WHERE r.stage IN ('rename_intent','renamed','duplicate_cleanup_intent','duplicate_removed')
+               OR (r.stage<>'complete' AND EXISTS(SELECT 1 FROM migration_events e
+                   WHERE e.publication_id=r.publication_id AND e.outcome='transition'
+                     AND e.to_stage IN ('rename_intent','duplicate_cleanup_intent')))
+            LIMIT 1""").fetchone()
+        if pending:raise PublicationRefused('native_move_pending','An output move needs recovery. Finish the reviewed offline move before opening Books Arranger; saved tasks and files are preserved.')
+    finally:db.close()
 
 
 def resolve(db,job,kind,original_receipt,verify=None):
