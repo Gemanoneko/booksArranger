@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.20.0] - 2026-10-21
+
+### Added
+
+- Author, shared-cycle and universe organization, with short-story collections placed under their applicable cycle or universe and unassigned collections retained in Сборники.
+- Additional audiobook source configuration and verified output-migration tooling that preserves publication, job and recovery bindings while checking destination copies before removing originals.
+- Preserved manual metadata evidence and explicit choices when metadata sources disagree.
+- Producer-recovery preparation and source-incarnation handling for replacement discovery. General serious-audio-damage classification remains inactive; recovery holds still require their recorded proofs.
+
+### Fixed
+
+- Bulk Retry distinguishes saved requests from created conversion jobs, reports waiting or blocked starts, and prevents superseded starts or cleanup work from continuing after Pause completes.
+- Catalog progress and scan writes use bounded database-only contention handling without replaying external media or metadata operations.
+- Narrow M4B admission barriers and a verified zero-audio-loss trailing ID3v1 repair are handled without changing original-source bindings.
+- Direct metadata resolution opens Manual review at the questions, and lifecycle counts remain accessible.
+
+These changes do not activate additional sources, migrate the existing library or clear recovery holds automatically.
+
 ## [v0.19.0] - 2026-10-19
 
 ### Added
