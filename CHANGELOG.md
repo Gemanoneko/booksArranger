@@ -1,12 +1,16 @@
 # Changelog
 
-## [v0.20.3] - 2026-10-21
+## [v0.20.3] - 2026-10-22
 
 ### Fixed
 
 - Automatic discovery resumes safely when a previous scan is interrupted and an additional source is configured, preventing the mixed resume/new-source path from aborting the scan.
 - Bulk Retry accepts eligible books in the Other reason group instead of refusing them because of the displayed group label.
 - Processing status clears stale Starting messages and keeps Pause, Continue and retry refusal feedback aligned with the current operation.
+
+### Changed
+
+- The build bootstrap Python pin is updated to the installed 3.14.9 so packaging starts again; the bundled runtime in the installer remains 3.14.8.
 
 ## [v0.20.2] - 2026-10-21
 
