@@ -182,9 +182,10 @@ class RetryStartFenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):c.resume()
     def test_pause_during_bulk_summary_prevents_new_event_and_receipt(self):
         s=service();s.inventory=SimpleNamespace(worker=None);s._save_bulk_receipt=Mock(return_value=True)
-        s.attention_summary=Mock(side_effect=lambda **_:(s.pause(),{'parent':{'group':'retry'}})[1])
+        s.attention_summary=Mock(side_effect=lambda **_:(s.pause(),{'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})[1])
         with patch.object(merge_service.threading,'Thread',FakeThread):
-            with self.assertRaises(StartRefused):s.retry_all()
+            with self.assertRaises(StartRefused) as caught:s.retry_all()
+        self.assertEqual(caught.exception.start_state,'stale','refusal must come from the Pause fence, not an empty target list')
         s._save_bulk_receipt.assert_not_called();self.assertEqual(FakeThread.created,[])
     def test_initial_receipt_save_holds_no_control_lock_and_pause_cancels_launch(self):
         s=service();s.inventory=SimpleNamespace(worker=None);s.attention_summary=Mock(return_value={'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})
