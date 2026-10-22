@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-PYTHON_SHA256 = '434b361fe0c5960d404974feed493db47f2603a1ace2574312104fbed0182c6f'
+PYTHON_SHA256 = 'e67f33a86fc64a07798a136af126f38a8e0d3c0a25787c635fb1678c2b66b12a'
 ROOT = Path(__file__).absolute().parent.parent
 # Bootstrap native API is self-contained; no checkout modules run until leased.
 K = ctypes.WinDLL('kernel32', use_last_error=True) if os.name == 'nt' else None
