@@ -10,6 +10,22 @@
 
 ### Fixed
 
+- M4B Retry now says "ready to retry" only after a passing dry run, shows "checking" or "can't open" otherwise, stops offering Retry on a book whose Retry was refused, accepts four exact M4B writer shapes that refused nine books, and is admitted on a catalog that never had an audio-staging folder.
+- A pending start now ends on Stop, Quit and the safety stops, and nothing starts once Quit has begun (previously a pass could start during Quit or past a disk-full hold).
+- A working file held open by another program reads "try again in a moment" and its row recovers once released, with no restart.
+- A refused Retry or Repair clear-first answers with the refreshed row, so the details panel no longer offers actions from before the press.
+- The Start over note promises "Let the app handle it" only when the button will appear.
+
+## [v0.19.0] - 2026-10-19
+
+### Added
+
+- Refused Retry follow-ups. Start over replaces Retry on a book whose saved review changed, and "Let the app handle it" (a single held M4B, with a Cancel-first confirmation) hands the book back to the automatic pass. The book keeps a "Started over" state with the live pass state, and the book list now fits a narrow window.
+- Leftover working files can be cleared or are reported as blocked, with a Clear working files action; Retry and Repair clear them first.
+- A pass started by Start over, a release or a pending start now shows its library scan.
+
+### Fixed
+
 - M4B Retry says "ready to retry" only after a passing dry run, shows "checking" or "can't open" otherwise, stops offering Retry on a book whose Retry was refused, accepts four exact M4B writer shapes that refused nine books, and is admitted on a catalog that never had an audio-staging folder.
 - A pending start now ends on Stop, Quit and the safety stops, and nothing starts once Quit has begun (previously a pass could start during Quit or past a disk-full hold).
 - A working file held open by another program reads "try again in a moment" and its row recovers once released, with no restart.
@@ -101,6 +117,7 @@
 
 - A book no longer needs tens of GB of free space to convert. Before, every track was turned into a full uncompressed WAV copy of the audio and all of them were kept until encoding, so a 1.3 GB, 22-hour book ("The Lost Symbol") asked for 62.7 GB. The audio is now decoded straight into the encoder, so the working space needed is about twice the size of the book's source files. Every byte given to the encoder is still checked against an independent full decode of the sources, and the finished audiobook is still verified before any original is touched. Measured on a 1-hour, 20-track book: peak working space went from 1.39 GB to 116 MB, and conversion time from 146 s to 74 s.
 - The book list loads much faster on a large library. On a 4,000-book test catalog: "Output needs attention" took 1.1 s instead of 7.4 s, "All candidates" 1.5 s instead of 6.5 s, and Held, Queued, Ready and Approved about 0.1 s instead of 2 to 10 s. While a different list is loading, the table says "Loading …" instead of showing the old list under the new filter.
+- Idle app no longer re-scans the catalog: indexed recovery lookups, page-scoped lists and quiet status; filter changes show Loading at once.
 - Idle app no longer re-scans the catalog: indexed recovery lookups, page-scoped lists and quiet status; filter changes show Loading at once.
 
 ### Added
