@@ -91,8 +91,11 @@ def offered(manifest):
         repairs = m4b_repair.approved_repairs(manifest)
     except ValueError:
         return False
+    # Only a job whose frozen cleanup policy retires the original after verification may consume it. A policy that
+    # keeps the sources (a manually approved M4B, a Retry child that keeps a retained checkpoint) keeps the copy flow.
     return (os.name == 'nt' and manifest.get('profile') == AUTOMATIC_PROFILE and len(sources) == 1
-            and Path(sources[0]['path']).suffix.lower() == '.m4b' and not manifest.get('replacement_id') and not repairs)
+            and Path(sources[0]['path']).suffix.lower() == '.m4b' and not manifest.get('replacement_id') and not repairs
+            and (manifest.get('cleanup_policy') or {}).get('enabled') is True)
 
 
 @contextlib.contextmanager

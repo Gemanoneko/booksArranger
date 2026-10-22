@@ -24,6 +24,7 @@ Every one of these must hold:
 - exactly one `.m4b` source;
 - no `replacement_id`;
 - no approved repair;
+- the frozen cleanup policy retires the original after verification (`cleanup_policy.enabled`). A policy that keeps the sources, such as a manually approved M4B or a Retry child that keeps a retained checkpoint, keeps the copy flow and its original;
 - `choose_automatic_encoding` returns `copy`/`aac`;
 - `plan()` succeeds with no repairs, padding, appended media or header patches;
 - the frozen chapters and the frozen encoding policy match;

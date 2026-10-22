@@ -58,6 +58,7 @@ class Fixture(unittest.TestCase):
                 'destination': str(destination or self.root / 'Sorted' / 'Writer John' / (path.stem + ' - John Writer.m4b')),
                 'profile': AUTOMATIC_PROFILE, 'encoding_policy': freeze_automatic_policy(sources), 'sources': sources,
                 'cover': {'path': str(cover), 'sha256': digest(cover), 'id': 'cover'}, 'comments': 'Original comment', 'chapters': [],
+                'cleanup_policy': {'enabled': True, 'empty_source_folders': True, 'recovery_retention_hours': 24, 'recovery_root': str(self.root / 'recovery')},
                 'source_chapters': source_chapters(path, self.root, self.stop, 1.5),
                 'metadata': {'title': 'The Book', 'canonical_author': 'John Writer', 'series': 'Saga', 'number': '2'}}
 
@@ -162,6 +163,19 @@ class FallbackTests(Fixture):
         self.assertFalse(inplace_m4b.offered(dict(manifest, replacement_id='r')))
         self.assertFalse(inplace_m4b.offered(dict(manifest, sources=manifest['sources'] * 2)))
         self.assertTrue(inplace_m4b.offered(manifest))
+
+    def test_sources_kept_by_policy_are_never_moved(self):
+        # A manually approved M4B and a Retry child with a retained checkpoint freeze cleanup off: the original stays.
+        source = self.media(); manifest = self.manifest(source); before = self.snapshot(source)
+        for policy in ({'enabled': False}, {}, None):
+            with self.subTest(policy=policy):
+                kept = dict(manifest, cleanup_policy=policy)
+                self.assertFalse(inplace_m4b.offered(kept))
+                self.assertIsNone(inplace_m4b.edit(kept, self.root / 'probe-stage', self.stop, lambda *a: None, self.session(kept)))
+        kept = dict(manifest, cleanup_policy={'enabled': False})
+        output, proof = create_private(kept, self.root / 'stage-kept', self.stop, in_place=self.session(kept))
+        self.assertIsInstance(output, Path); self.assertEqual(proof['encoding']['selection'], 'existing_m4b_audio_stream_copy')
+        self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows(), [])
 
     def test_existing_destination_other_volume_foreign_stream_and_read_only(self):
         source = self.media(); manifest = self.manifest(source)
