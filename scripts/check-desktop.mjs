@@ -64,7 +64,7 @@ sys.exit(not r.wasSuccessful() or bool(r.skipped) or r.testsRun!=len(inventory))
 function inventory(directory,relative=''){
  const files=[];
  for(const item of fs.readdirSync(path.join(directory,relative),{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
-  if(!relative&&['scratch','node_modules','.git'].includes(item.name))continue;
+  if(!relative&&['scratch','node_modules','.git','dist','build-cache'].includes(item.name))continue;
   const name=path.join(relative,item.name),file=path.join(directory,name),stat=fs.lstatSync(file);
   if(stat.isSymbolicLink())throw Error('Linked Python batch input');
   if(stat.isDirectory())files.push(...inventory(directory,name));

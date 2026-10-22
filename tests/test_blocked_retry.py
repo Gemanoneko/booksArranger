@@ -243,7 +243,7 @@ class ServiceTests(Base):
         while not self.q.runs and time.monotonic()<deadline:time.sleep(.01)
         self.assertEqual(self.q.runs[0][0],current)
         s=self.service()
-        s.attention_summary=lambda job_ids=None,retry=False:self.q.jobs.attention_summary(self.q.life.admission_clear,job_ids=job_ids,retry=retry)
+        s.attention_summary=lambda job_ids=None,retry=True:self.q.jobs.attention_summary(self.q.life.admission_clear,job_ids=job_ids,retry=retry)
         m=json.loads(self.q.row(first)['manifest']);answer=s.retry_blocked_job('Audiobooks',m['candidate_id'],1,first)
         self.assertTrue(answer['queued_next']);self.assertEqual(answer['position'],1)
         bulk=s.retry_all();s._retry_all_thread.join(5);self.assertFalse(s._retry_all_thread.is_alive())

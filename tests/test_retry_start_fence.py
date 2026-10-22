@@ -187,7 +187,7 @@ class RetryStartFenceTests(unittest.TestCase):
             with self.assertRaises(StartRefused):s.retry_all()
         s._save_bulk_receipt.assert_not_called();self.assertEqual(FakeThread.created,[])
     def test_initial_receipt_save_holds_no_control_lock_and_pause_cancels_launch(self):
-        s=service();s.inventory=SimpleNamespace(worker=None);s.attention_summary=Mock(return_value={'parent':{'group':'retry'}})
+        s=service();s.inventory=SimpleNamespace(worker=None);s.attention_summary=Mock(return_value={'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})
         waiting=threading.Event();release=threading.Event();saves=[];answers=[];errors=[]
         def save(run):
             acquired=merge_service._BULK_LOCK.acquire(blocking=False)
