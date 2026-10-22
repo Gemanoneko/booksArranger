@@ -319,6 +319,35 @@ class VerifiedFile:
         value=hashlib.sha256()
         for block in self.chunks():value.update(block)
         return value.hexdigest()
+    def _seek(self,offset):
+        kernel.SetFilePointerEx.argtypes=[wintypes.HANDLE,ctypes.c_longlong,ctypes.c_void_p,wintypes.DWORD];kernel.SetFilePointerEx.restype=wintypes.BOOL
+        if type(offset) is not int or offset<0 or not kernel.SetFilePointerEx(self.handle,offset,None,0):raise BoundaryError('Cannot position protected file')
+    def read_at(self,offset,count):
+        """Exactly count bytes at offset through this held handle (fewer only at end of file)."""
+        self._seek(offset);kernel.ReadFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p];kernel.ReadFile.restype=wintypes.BOOL
+        result=bytearray();buffer=ctypes.create_string_buffer(min(max(count,1),1024*1024));done=wintypes.DWORD()
+        while len(result)<count:
+            if not kernel.ReadFile(self.handle,buffer,min(len(buffer),count-len(result)),ctypes.byref(done),None):raise BoundaryError('Protected file read failed')
+            if not done.value:break
+            result+=buffer.raw[:done.value]
+        return bytes(result)
+    def write_at(self,offset,data):
+        """In-place metadata edit only (0.21.0): write all bytes at offset through this held handle."""
+        if not self.writable or not isinstance(data,bytes):raise BoundaryError('In-place write requires the owned write-capable handle')
+        self._seek(offset);kernel.WriteFile.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),ctypes.c_void_p];kernel.WriteFile.restype=wintypes.BOOL
+        view=memoryview(data);done=wintypes.DWORD()
+        while view:
+            block=bytes(view[:1024*1024])
+            if not kernel.WriteFile(self.handle,block,len(block),ctypes.byref(done),None) or done.value!=len(block):raise BoundaryError('In-place write failed')
+            view=view[len(block):]
+    def truncate(self,size):
+        """Undo of an in-place edit: cut the file back to its exact original length."""
+        if not self.writable:raise BoundaryError('Truncation requires the owned write-capable handle')
+        self._seek(size);kernel.SetEndOfFile.argtypes=[wintypes.HANDLE];kernel.SetEndOfFile.restype=wintypes.BOOL
+        if not kernel.SetEndOfFile(self.handle):raise BoundaryError('Cannot restore the original file length')
+    def refresh(self):
+        if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):raise BoundaryError('Cannot refresh protected file identity')
+        return self.facts()
     def flush(self):
         if not self.writable:raise BoundaryError('Recovery durability requires its owned write-capable handle')
         kernel.FlushFileBuffers.argtypes=[wintypes.HANDLE];kernel.FlushFileBuffers.restype=wintypes.BOOL

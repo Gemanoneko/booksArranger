@@ -368,6 +368,11 @@ class AudioJobs:
         3-minute start window. start_published_check() runs that same check after
         startup, and resume() repeats it before any new work.
         """
+        try:
+            import inplace_m4b
+            inplace_m4b.recover_all(self.database)  # undo interrupted in-place edits before a scan or attempt sees them
+        except Exception:
+            pass  # each open edit keeps its journal; _work_attempt refuses its source until it is undone
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='running' ORDER BY created, job_id"):
             if row["stage"] == "publishing":
                 change = self._settle(row)
@@ -1069,6 +1074,12 @@ class AudioJobs:
         job_id = row["job_id"]
         manifest = json.loads(row["manifest"])
         try:
+            import inplace_m4b
+            inplace_m4b.clear(self.database, manifest)
+        except Exception as error:
+            self._update(job_id, state='needs attention', reason=str(error) or type(error).__name__)
+            return True  # this source stays journaled; other books continue
+        try:
             import reacquire_sources
             with self._db() as db:reacquire_sources.require_admission(db,manifest['candidate_id'])
             if self.before_attempt:self.before_attempt(copy.deepcopy(row))
@@ -1118,6 +1129,8 @@ class AudioJobs:
             self._update(job_id, stage=stage, journal=json.dumps(journal, ensure_ascii=False))
         damage_assessment=None
         attempt_closed=False
+        import source_proofs
+        proofs=contextlib.ExitStack();proofs.enter_context(source_proofs.attempt(attempt))  # one full source hash per attempt
         try:
             try:
                 if self.revision_guard(copy.deepcopy(manifest)) is not True:
@@ -1152,6 +1165,7 @@ class AudioJobs:
                         if self.on_space_hold:self.on_space_hold()
                         return False # Preserve the rest of the queue without producing more attempts.
         finally:
+            proofs.close()  # fingerprints never outlive the attempt (cleanup proofs always hash in full)
             if self.after_attempt:
                 try:
                     self.after_attempt(job_id,attempt)

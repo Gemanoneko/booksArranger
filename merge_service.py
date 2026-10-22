@@ -171,6 +171,7 @@ class MergeService:
         self._approved_cache=None
         self._post_current=None
         self._validated_outputs={}
+        self._held_sources={}  # job_id -> sources its in-place publication holds deny-writers (review_backend held)
         self.cache_dir = ordinary(cache_dir)
         with DirectoryBoundary(self.cache_dir.anchor,self.cache_dir,create=True):pass
         self.stage_root = self.cache_dir / 'audio-staging'
@@ -2623,10 +2624,12 @@ class MergeService:
                 with connect(self.inventory.database) as db:raw=self.replacements.raw_job(db,manifest['job_id'])
                 frozen={k:v for k,v in manifest.items() if k!='attempt_id'}
                 return json.loads(raw['manifest'])==frozen and self._replacement_guard(relation)
-            current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True)
+            held=getattr(self,'_held_sources',{}).get(manifest['job_id'])  # only while this job's in-place publication holds its source
+            current=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,**({'held':held} if held else {}))
             # Only what the review decides is compared. The queue and the Retry/Repair admission add job-only fields
             # (JOB_ONLY_FIELDS); until 0.16.10 the m4b_repair binding made every Retry/Repair job fail here. The
-            # rebuild still re-hashes every source, and the repair binding is validated when the job runs.
+            # rebuild re-hashes every source in full at the attempt's first check (later checks in the same attempt
+            # compare its fingerprint, 0.21.0 source_proofs), and the repair binding is validated when the job runs.
             if manifest.get('retry_intent'):
                 import retry_intent
                 root=getattr(self.inventory,'output_root',None) or current.get('output_root',current['root'])
@@ -2642,7 +2645,10 @@ class MergeService:
 
     def _run_media(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
-        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working)
+        import inplace_m4b
+        session=None if manifest.get('replacement_id') else inplace_m4b.Session(self.inventory.database,manifest['job_id'],manifest['attempt_id'])
+        output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working,in_place=session)
+        if isinstance(output,inplace_m4b.Edited):return self._publish_in_place(manifest,output,validation,checkpoint)
         if manifest.get('replacement_id'):
             from replacement_media import verify_replacement
             validation=verify_replacement(manifest,validation,output,output.parent,stop)
@@ -2659,6 +2665,40 @@ class MergeService:
             else:checkpoint(stage,details)
         with ProtectedFiles([output]):
             publish(output,manifest,validation,stop,journal,lambda:self._guard(manifest),self._review_boundary(),report=lambda value:checkpoint('copying',{'progress':value}))
+        self._register(record['final_path'],manifest['job_id'],'output',record['sha256'],record['size'])
+        return record
+
+    def _publish_in_place(self,manifest,edited,validation,checkpoint):
+        """0.21.0: move the verified in-place edit by the 0.20.2 handle-bound no-copy rename, with the same durable
+        publication intent and guards as publish(). Every failure before the rename undoes the edit first."""
+        from native_io import rename_no_replace,RenamePostconditionError
+        from audio_pipeline import ValidationError
+        destination=ordinary(manifest['destination']);root=manifest.get('output_root',manifest['root']);renamed=False
+        if not hasattr(self,'_held_sources'):self._held_sources={}
+        self._held_sources[manifest['job_id']]={os.path.normcase(str(edited.path)):{'sha256':manifest['sources'][0]['sha256'],'source_chapters':validation['preserved_source_chapters']}}
+        try:
+            with DirectoryBoundary(root,destination.parent,create=True,rename_destination=True) as target:
+                if os.path.lexists(destination):raise FileExistsError('An audiobook already exists at this path; nothing was overwritten')
+                record=dict(job_id=manifest['job_id'],final_path=str(destination),owned_temp=str(edited.path),sha256=validation['sha256'],size=validation['size'],
+                    root=root,candidate_id=manifest['candidate_id'],candidate_revision=manifest['candidate_revision'],
+                    validation={'passed':True,**validation},parent_identity=target.identities)
+                checkpoint('publishing',copy.deepcopy(record))  # revision guard and durable publication intent
+                edited.session.record('publishing')
+                with self._review_boundary():
+                    if not self._guard(manifest):raise ValidationError('Candidate review changed — review required')
+                    target.revalidate()
+                    try:receipt=rename_no_replace(edited.handle,destination,edited.boundary,target,expected_identity=edited.handle.facts(),
+                        expected_size=validation['size'],expected_sha256=validation['sha256'])
+                    except RenamePostconditionError:
+                        renamed=True;raise
+                    renamed=True
+            edited.session.record('published',rename=receipt)
+        except BaseException as error:
+            if renamed:edited.session.record('publishing',postcondition=str(error)[:500])  # recovery and _settle prove the move
+            else:edited.undo()
+            raise
+        finally:
+            self._held_sources.pop(manifest['job_id'],None);edited.close()
         self._register(record['final_path'],manifest['job_id'],'output',record['sha256'],record['size'])
         return record
 

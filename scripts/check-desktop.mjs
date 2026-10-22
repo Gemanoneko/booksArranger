@@ -37,6 +37,7 @@ patterns.push('test_series_backfill.py','test_quicktime_chapters.py','test_inven
 patterns.push('test_series_fallbacks.py','test_openlibrary_index.py','test_public_work_identity.py');  // v0.18 source/ordinal, shared quotas, authenticated sparse imports
 patterns.push('test_bulk_retry_receipts.py','test_catalog_contention.py');
 patterns.push('test_retry_start_fence.py');
+patterns.push('test_inplace_m4b.py','test_source_proofs.py');  // v0.21.0 in-place single-M4B edit, attempt-scoped source fingerprints
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

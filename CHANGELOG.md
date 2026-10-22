@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.21.0] - 2026-10-22
+
+### Added
+
+- A single M4B whose audio is already kept as it is now has its new tags, cover and chapters written into the file itself, and is then moved into the sorted library by a same-volume rename, without copying the book. The result is the same file the existing flow publishes; the audio bytes never move.
+- Every in-place edit is journaled before its first write. Any failed check, a pause, or an interrupted run restores the exact original before the book continues, and the existing flow then runs unchanged. Books that need a repair or a re-encode, ALAC files, or a destination on another drive keep the existing flow.
+
+### Changed
+
+- The in-place path checks tags, cover, chapters, packets and the exact original bytes, but does not decode the audio (Sergei, 2026-10-22). Its source cleanup records the move as the original's retirement; no recovery copy is made.
+- Within one conversion, sources are hashed in full once at the first check; later checks in the same conversion compare size, modification time and file identity, and hash in full again only when one differs. Removing or retiring an original still hashes it in full first.
+
 ## [v0.20.3] - 2026-10-22
 
 ### Fixed

@@ -145,8 +145,8 @@ class CandidateReviewService:
             except (ValueError,OSError):return None
         return choice
 
-    def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False):
-        row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row)
+    def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False,held=None):
+        row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row); held=held or {}
         with connect(self.inventory.database) as db:row['manual_metadata_sources']=manual_metadata.records(db,row)
         facts=ctx.get('metadata_facts')
         if facts:
@@ -172,6 +172,7 @@ class CandidateReviewService:
                     if m.get('intentionally_retired'):continue
                     key=member_key(m['path'])
                     if key not in included:continue
+                    if os.path.normcase(os.path.abspath(m['path'])) in held:continue  # proven by its in-place publication
                     saved=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
                     if not unchanged_screen(stat,saved):track_ok=False;source_changed=True;break
             except (OSError,KeyError,ValueError):track_ok=False;source_changed=True
@@ -671,17 +672,28 @@ class CandidateReviewService:
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
             return self._write(row,ctx)
 
-    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None):
-        import reacquire_sources
+    def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None):
+        """held (0.21.0 in-place publication only): {normcase path: {'sha256','source_chapters'}} for a source the
+        converting job holds deny-writers after proving its reviewed bytes in full; its metadata edit changes size."""
+        import reacquire_sources,source_proofs
         with connect(self.inventory.database) as db:reacquire_sources.require_admission(db,id)
         with self.lock:
-            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending);ctx=self._context(row)
+            held=held or {}
+            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending,held=held);ctx=self._context(row)
             if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
             members={m['member_key']:m for m in row['members']};sources=[]
             for key in row['track_order']:
                 if key not in row['included']:continue
-                m=members[key];stored=ctx['source_hashes'][key];stat=fresh_stat(m['path'])
-                if not unchanged_screen(stat,stored) or (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
+                m=members[key];stored=ctx['source_hashes'][key];proof=held.get(os.path.normcase(os.path.abspath(m['path'])))
+                if proof is not None:
+                    if proof['sha256']!=stored['sha256']:raise ValueError('Source changed — review required')
+                else:
+                    stat=fresh_stat(m['path'])
+                    if not unchanged_screen(stat,stored):raise ValueError('Source changed — review required')
+                    # One full hash per attempt; later checks in it compare size, ns mtime, volume and file ID (source_proofs).
+                    if not source_proofs.unchanged(m['path'],stored['sha256'],stat):
+                        if (source_hash(m['path'],stat,stop) if stop is not None else source_hash(m['path'],stat))!=stored['sha256']:raise ValueError('Source changed — review required')
+                        source_proofs.remember(m['path'],stored['sha256'],stat)
                 sources.append({'path':m['path'],'size':stored['size'],'modified':stored['modified'],'sha256':stored['sha256'],'fingerprint':{'size':stored['size'],'modified':stored['modified']},'metadata':m['metadata']})
             cover=row['selected_cover'];cover=cover|{'path':str(self.cover_file(cover['id']))}
             comments=future_audio_tags(row['metadata'],row['review'])['COMMENTS']
@@ -702,5 +714,7 @@ class CandidateReviewService:
             if automatic_profile:
                 if len(sources)==1 and Path(sources[0]['path']).suffix.lower()=='.m4b':
                     from audio_pipeline import source_chapters
-                    manifest['source_chapters']=source_chapters(sources[0]['path'],self.cache,stop or threading.Event(),row['creation']['duration_seconds'])
+                    proof=held.get(os.path.normcase(os.path.abspath(sources[0]['path'])))
+                    # A held in-place source is open for DELETE (no reader may open it); its chapters were re-probed after the edit.
+                    manifest['source_chapters']=copy.deepcopy(proof['source_chapters']) if proof is not None else source_chapters(sources[0]['path'],self.cache,stop or threading.Event(),row['creation']['duration_seconds'])
             return manifest

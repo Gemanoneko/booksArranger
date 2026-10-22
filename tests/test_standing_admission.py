@@ -33,7 +33,10 @@ class StandingAdmissionTests(unittest.TestCase):
         fresh,job_id=self.f.service.approve_automatic(row,result,threading.Event(),self.f.client);self.f.wait()
         job=next(j for j in self.f.service.jobs.status()['jobs'] if j['job_id']==job_id)
         self.assertEqual(job['state'],'completed',job);self.assertEqual(job['output']['validation']['encoding']['mode'],'copy')
-        self.assertEqual([c['title'] for c in job['manifest']['source_chapters']],['First','Second']);self.assertGreater(job['output']['validation']['native_pcm_evidence']['sample_count'],0)
+        self.assertEqual([c['title'] for c in job['manifest']['source_chapters']],['First','Second'])
+        # 0.21.0: an eligible existing M4B is edited in place with a byte proof and no decode (Sergei, 2026-10-22).
+        validation=job['output']['validation'];self.assertEqual(validation['encoding']['selection'],'existing_m4b_in_place_metadata_edit')
+        self.assertTrue(validation['in_place']['all_retained_bytes_verified']);self.assertNotIn('native_pcm_evidence',validation)
         self.assertFalse(source.exists());self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'deleted')
         self.assertEqual(self.f.service.reviews.page(status='converted')['total'],1);self.assertTrue(self.f.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
     def test_fan_constituents_to_real_ready_and_unknown_staging_content_preserved(self):

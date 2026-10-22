@@ -521,7 +521,8 @@ class WorkingLifecycle:
         entries=self._files(attempt['job_id'],attempt['attempt_id'])
         snapshots={'source%05d'%i+Path(s['path']).suffix.lower():s for i,s in enumerate(manifest['sources'])}
         sources=[entry for entry in entries if entry['role']=='source']
-        if {entry['name'] for entry in sources}!=set(snapshots):
+        in_place=output['validation'].get('publication_mode')=='in_place'  # 0.21.0: the original was edited; no snapshot exists
+        if {entry['name'] for entry in sources}!=(set() if in_place else set(snapshots)):
             raise BoundaryError('Complete captured source snapshots are required')
         stage=self.stage_root/attempt['job_id']/attempt['attempt_id']
         paths=[entry['path'] for entry in entries]
@@ -537,7 +538,7 @@ class WorkingLifecycle:
             with os.scandir(stage) as names:
                 if any(item.name not in known or not item.is_file(follow_symlinks=False) for item in names):
                     raise BoundaryError('Unknown published attempt member preserved')
-            source_proof=storage.snapshot_source_safety(stack,attempt['job_id'],manifest,output,guard=self.guard)
+            source_proof=None if in_place else storage.snapshot_source_safety(stack,attempt['job_id'],manifest,output,guard=self.guard)
             prepared=[]
             artifacts=output['validation']['staging_artifacts']['files']
             for entry in sources:

@@ -38,6 +38,11 @@ def kept_reason(error):
     if 'Completed output' in text or 'Retention output identity changed' in text:return AUDIOBOOK_UNVERIFIED+text
     return text
 
+def moved(member):
+    """A 0.21.0 in-place original: retired by its journaled rename into the output, never copied to recovery."""
+    try:return json.loads(member['facts'] or '{}').get('disposition')=='renamed_into_output' and member['state']=='removed'
+    except (ValueError,TypeError,AttributeError):return False
+
 KEPT_FILES_TABLE='CREATE TABLE IF NOT EXISTS kept_files(job_id TEXT PRIMARY KEY,kept_at TEXT NOT NULL)'
 
 def kept_by_choice(db,job_ids=None):
@@ -66,6 +71,10 @@ class RecoveryRetention:
                 event=db.execute('SELECT completed_at FROM recovery_completion WHERE cleanup_id=?',(row['id'],)).fetchone()
                 completed=event[0] if event else ''
                 reason='';expires=''
+                if members and all(moved(r) for r in members):
+                    # 0.21.0 in-place edit: the original became the output; no recovery copy ever existed.
+                    db.execute('INSERT INTO recovery_retention VALUES(?,?,?,?,?,?,?,?,?)',(row['job_id'],row['id'],output['sha256'],completed,completed,'deleted','','in_place',completed))
+                    continue
                 try:
                     expires=(moment(completed)+timedelta(hours=HOURS)).isoformat()
                     if not members or any(r['state']!='removed' for r in members):raise ValueError('Original-track retirement is incomplete')
@@ -85,6 +94,7 @@ class RecoveryRetention:
         receipts={r['path']:r for r in self._rows("SELECT * FROM storage_cleanup_files WHERE job_id=? AND kind='recovery'",(job_id,))}
         count=0;size=0;removed=0;facts=[];uncertain=False
         for member in members:
+            if moved(member):removed+=1;continue  # nothing was ever copied for an in-place original
             path=Path(member['backup']);receipt=receipts.get(str(path))
             try:
                 value=path.lstat()

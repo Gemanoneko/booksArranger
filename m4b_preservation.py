@@ -621,7 +621,11 @@ def stream_candidate(source_plan,read_at,write,stopped=lambda:False):
         pad=bytes(source_plan.tail_padding);write(pad);candidate_hash.update(pad)
     if source_plan.appended_media:write(source_plan.appended_media);candidate_hash.update(source_plan.appended_media)
     write(source_plan.appended_movie);candidate_hash.update(source_plan.appended_movie)
-    receipt={'schema':'m4b-metadata-preservation-v1','source_sha256':source_hash.hexdigest(),'sha256':candidate_hash.hexdigest(),'size':source_plan.source_size+source_plan.tail_padding+len(source_plan.appended_media)+len(source_plan.appended_movie),'old_moov_offset':source_plan.movie_offset,'old_moov_size':source_plan.movie_size,'old_moov_sha256':source_plan.movie_sha256,'appended_moov_sha256':hashlib.sha256(source_plan.appended_movie).hexdigest(),'track_sha256':[t['sha256'] for t in source_plan.tracks],'source_offsets_preserved':True,'fast_start_preserved':False,'pcm_verified':False}
+    return receipt(source_plan,source_hash.hexdigest(),candidate_hash.hexdigest())
+
+def receipt(source_plan,source_sha256,sha256):
+    """The preservation receipt for these exact bytes; shared by the staged candidate and the 0.21.0 in-place edit."""
+    receipt={'schema':'m4b-metadata-preservation-v1','source_sha256':source_sha256,'sha256':sha256,'size':source_plan.source_size+source_plan.tail_padding+len(source_plan.appended_media)+len(source_plan.appended_movie),'old_moov_offset':source_plan.movie_offset,'old_moov_size':source_plan.movie_size,'old_moov_sha256':source_plan.movie_sha256,'appended_moov_sha256':hashlib.sha256(source_plan.appended_movie).hexdigest(),'track_sha256':[t['sha256'] for t in source_plan.tracks],'source_offsets_preserved':True,'fast_start_preserved':False,'pcm_verified':False}
     if source_plan.profile_notes:receipt['source_profile_notes']=[dict(r) for r in source_plan.profile_notes]
     if source_plan.repairs:receipt.update(tail_padding=source_plan.tail_padding,repairs=[dict(r) for r in source_plan.repairs],
         appended_media_sha256=hashlib.sha256(source_plan.appended_media).hexdigest() if source_plan.appended_media else None)

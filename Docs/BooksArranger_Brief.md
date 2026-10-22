@@ -4,6 +4,17 @@ Repository: https://github.com/Gemanoneko/booksArranger
 
 Books Arranger helps Sergei inventory and arrange his audiobook, podcast and text-book libraries. It produces verified Apple-compatible audiobooks with source-track navigation and recorded metadata evidence. Automatic public research can approve and enqueue a book only after all independent metadata, exact source scope/order, encoding and cover gates pass; uncertain books are held while other candidates continue. The original scanner milestone remains read-only. The current workflow verifies the audiobook before removing its exact included originals. Verified working files are removed after successful cleanup. Original-track recovery copies remain for 24 hours after source cleanup completes, then expire while the app runs; a selected-book button can permanently delete them sooner. Errors preserve remaining files for recovery. Podcasts, ebooks and unrelated siblings remain untouched. It never invents metadata matches.
 
+## In-place single-M4B edit and one full source hash per attempt — 0.21.0, 2026-10-22 (branch `codex/books-inplace-m4b`)
+
+The full design, measurements and tests are in `Docs/BooksArranger_InPlaceM4B_Design_2026-10-22.md`.
+
+| Decision | Reason | Revisit when |
+| --- | --- | --- |
+| An eligible single AAC M4B is edited in place: the copy flow's own preservation plan is applied to the original (new `moov` appended, old type set to `free`), then the file is moved by the 0.20.2 no-copy rename | Sergei, 2026-10-22: trade "original untouched until verified" for speed when the book needs no re-encode or repair. The output is byte-identical to the copy flow's, so there is no Apple Books regression | A device pilot shows the appended-`moov` layout misbehaving |
+| No decode on the in-place path; the byte proof (with the 4 type bytes reverted, the original extent equals the reviewed sha256) replaces PCM evidence, including in the source-cleanup contract | Sergei, 2026-10-22. Trade-off: undecodable frames inside a source are no longer flagged | Corrupted-source reports appear |
+| An undo journal (`inplace_edits`) is written before the first byte; recovery runs at startup and before any attempt; no full backup is made | Only 4 known bytes are overwritten; everything else is appended | Never; a full copy defeats the purpose |
+| Within one attempt, revision checks after the first full hash compare size, ns mtime, volume and file ID; deletion and retirement proofs still hash in full | Sergei, 2026-10-22, residual risk accepted (an identical size/mtime/ID change goes undetected by the skipped checks) | A change slips past the revision checks |
+
 ## Start over, leftover working files, Started over and the narrow table — 2026-10-19 (unreleased, branch `codex/books-electron-m1`)
 
 Judy's `BooksArranger_RefusedRetry_UX_2026-10-19.md`, follow-ups 2, 3 and 4, with Sergei's decisions of 2026-10-19 (Start over with automatic re-processing, O7 option A, O8, O9, O10, O12, O13, O14; Retry clears leftovers (A) and a Clear working files button (B)).

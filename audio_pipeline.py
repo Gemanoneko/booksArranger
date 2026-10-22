@@ -10,6 +10,7 @@ from metadata import audiobook_sort_title
 import m4b_preservation
 import m4b_repair
 import mp3_tag_repair
+import source_proofs
 MAX_IMAGE=8*1024*1024
 PRESERVATION_CANDIDATE_NAME='checked.m4b'
 INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac','.ogg':'ogg','.opus':'ogg','.wav':'wav','.wma':'asf','.png':'image2','.jpg':'image2','.jpeg':'image2'}
@@ -65,9 +66,16 @@ def fingerprint(path):
     return {'size':item.st_size,'modified':str(item.st_mtime_ns)}
 
 def same_source(item,stop,on_bytes=None):
-    current=fingerprint(item['path'])
-    if current!={'size':item['size'],'modified':str(item['modified'])} or digest(item['path'],stop,on_bytes)!=item['sha256']:
+    # A later check in the same attempt skips the re-read only on an identical size/ns mtime/volume/file ID (source_proofs).
+    before=source_proofs.stat_of(item['path'])
+    if {'size':before.st_size,'modified':str(before.st_mtime_ns)}!={'size':item['size'],'modified':str(item['modified'])}:
         raise ValidationError('Source changed — review required: '+item['path'])
+    if source_proofs.unchanged(item['path'],item['sha256'],before):
+        if on_bytes is not None:on_bytes(int(item['size']))  # the measured step is satisfied without re-reading
+        return
+    if digest(item['path'],stop,on_bytes)!=item['sha256']:
+        raise ValidationError('Source changed — review required: '+item['path'])
+    source_proofs.remember(item['path'],item['sha256'],before,source_proofs.stat_of(item['path']))
 
 def copy_owned(source,destination,expected,stop,on_bytes=None):
     destination=Path(destination)
@@ -431,8 +439,10 @@ def check_working_space(manifest, stage, stop):
         if not path.is_relative_to(ordinary(manifest['root'])) or path.suffix.lower() not in INPUT_FORMATS:
             raise ValidationError('Source is outside the supported audiobook boundary')
         with DirectoryBoundary(manifest['root'],path.parent),VerifiedFile(path) as held:
-            if held.facts()['size']!=item['size'] or str(held.facts()['modified'])!=str(item['modified']) or held.sha256()!=item['sha256']:
+            stat=source_proofs.stat_of(path)
+            if held.facts()['size']!=item['size'] or str(held.facts()['modified'])!=str(item['modified']) or not source_proofs.unchanged(path,item['sha256'],stat) and held.sha256()!=item['sha256']:
                 raise ValidationError('Source changed before working-space admission')
+            source_proofs.remember(path,item['sha256'],stat,source_proofs.stat_of(path))
             raw=probe(path,stage,stop);duration,profile=audio_info(raw)
             stream=next(s for s in raw['streams'] if s.get('codec_type')=='audio')
             profiles.append((*profile,stream.get('bit_rate'),stream.get('channel_layout')))
@@ -500,6 +510,10 @@ def snapshot_manifest(manifest,stage,stop,report=None):
             duration=_source_duration(manifest,item,alias,stage,stop,duration)
         durations.append(duration);copies.append(alias.name)
         step.update(index+1,index+1,force=True)
+    return copies,durations,protected_cover(manifest,stage,stop),profiles
+
+def protected_cover(manifest,stage,stop):
+    """The reviewed cover as an owned hash-checked stage copy, probed (and decoded for the automatic profile)."""
     cover=manifest['cover']
     cover_source=ordinary(cover['path'])
     if cover_source.stat().st_size>MAX_IMAGE:raise ValidationError('Selected cover exceeds8 MiB')
@@ -507,6 +521,8 @@ def snapshot_manifest(manifest,stage,stop,report=None):
     extension='.png' if cover_bytes.startswith(b'\x89PNG\r\n\x1a\n') else '.jpg' if cover_bytes.startswith(b'\xff\xd8\xff') else None
     if extension is None:raise ValidationError('Select one usable JPEG or PNG cover')
     cover_copy=stage/('cover'+extension)
+    # An in-place attempt that fell back already admitted this exact owned copy (and its probes) in this stage.
+    if os.path.lexists(cover_copy) and digest(cover_copy,stop)==cover['sha256']:return cover_copy
     copy_owned(cover_source,cover_copy,cover['sha256'],stop)
     image=probe(cover_copy,stage,stop)
     image_streams=[s for s in image.get('streams',[]) if s.get('codec_type')=='video']
@@ -514,15 +530,17 @@ def snapshot_manifest(manifest,stage,stop,report=None):
         raise ValidationError('Selected cover dimensions are invalid or too large')
     if manifest.get('profile')==AUTOMATIC_PROFILE:
         run_owned([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-protocol_whitelist','file','-f','image2','-i',str(cover_copy),'-map','0:v:0','-frames:v','1','-f','null','-'],stage,stop,30)
-    return copies,durations,cover_copy,profiles
+    return cover_copy
 
-def create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None):
+def create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None,in_place=None):
+    """in_place (0.21.0): an inplace_m4b.Session. An eligible single M4B is then edited in place and returned as an
+    inplace_m4b.Edited (held, verified, not yet moved); anything else continues with the copy flow below."""
     if artifact_observer is None:
-        return _create_private(manifest,stage_root,stop,progress)
+        return _create_private(manifest,stage_root,stop,progress,in_place=in_place)
     artifact_observer.begin(manifest)
     stage=ordinary(stage_root)/manifest['job_id']/manifest['attempt_id']
     attempt_context={'entered':False}
-    try:return _create_private(manifest,stage_root,stop,progress,artifact_observer,attempt_context)
+    try:return _create_private(manifest,stage_root,stop,progress,artifact_observer,attempt_context,in_place)
     finally:
         # Failure before entering generated_artifacts created no media producer.
         # Inside it, closed() always records either closed or uncertain first.
@@ -533,7 +551,7 @@ def create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_obs
                 if error is None:raise
 
 
-def _create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None,attempt_context=None):
+def _create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_observer=None,attempt_context=None,in_place=None):
     identity=manifest['job_id']
     if str(uuid.UUID(identity))!=identity:raise ValidationError('Invalid owned job identity')
     attempt=manifest.get('attempt_id') or str(uuid.uuid4())
@@ -554,6 +572,12 @@ def _create_private(manifest,stage_root,stop,progress=lambda *_:None,artifact_ob
             if stage.exists():raise BoundaryError('Existing attempt directory is not reused or overwritten')
             with DirectoryBoundary(job,stage,create=True),generated_artifacts(stage,artifact_observer,attempt_context) as generated:
                 progress('Checking sources',{})
+                if in_place is not None:
+                    import inplace_m4b
+                    edited=inplace_m4b.edit(manifest,stage,stop,progress,in_place)
+                    if edited is not None:
+                        edited.validation['staging_artifacts']={'attempt_id':attempt,'files':generated}
+                        return edited,edited.validation
                 report=lambda value:progress('Checking sources',{'progress':value})
                 copies,durations,cover,profiles=snapshot_manifest(manifest,stage,stop,report)
                 with ProtectedFiles([stage/name for name in copies]+[cover]):
@@ -831,6 +855,14 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
     executable=shutil.which('ffmpeg')
     if not executable:raise ValidationError('Installed ffmpeg is required for audiobook creation')
     if feed is None:write_generated(stage/'inputs.txt',''.join(f"file '{name}'\n" for name in copies))
+    review=manifest['metadata'];tags=approved_tags(manifest)
+    if encoding.get('mode')=='copy' and encoding.get('codec')=='aac' and len(original_copies)==1 and Path(original_copies[0]).suffix.lower()=='.m4b':
+        return _preserve_single_m4b(manifest,stage,original_copies[0],durations,cover,stop,progress,encoding,tags)
+    return _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed,executable,review,tags)
+
+
+def approved_tags(manifest):
+    """The approved audiobook tags for the reviewed book; one definition for every output path."""
     review=manifest['metadata'];comments=manifest.get('comments','')
     if review.get('series'):
         comments+=('\n' if comments else '')+f"Series: {review['series']}\nSeries number: {review.get('number','')}"
@@ -857,8 +889,17 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
         tags['sort_album']=tags['album']
         if str(review.get('number','')).isdigit() and 0<int(review['number'])<65536:
             tags['track']=str(int(review['number']))
-    if encoding.get('mode')=='copy' and encoding.get('codec')=='aac' and len(original_copies)==1 and Path(original_copies[0]).suffix.lower()=='.m4b':
-        return _preserve_single_m4b(manifest,stage,original_copies[0],durations,cover,stop,progress,encoding,tags)
+    return tags
+
+
+def preservation_tags(manifest,tags=None):
+    """Tags written by metadata preservation (copy flow and in-place edit): approved tags plus the sort title."""
+    tags=approved_tags(manifest) if tags is None else tags
+    sort_title=audiobook_sort_title(manifest['metadata'])
+    return tags|{'sort_name':sort_title} if sort_title!=manifest['metadata']['title'] else tags
+
+
+def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,original_copies,feed,executable,review,tags):
     output=stage/'checked.m4b'
     if feed is not None:source_input=['-protocol_whitelist','pipe','-format_whitelist','f64le','-f','f64le','-ar',str(encoding['sample_rate']),'-ac',str(encoding['channels']),'-i','pipe:0']
     else:source_input=['-protocol_whitelist','file','-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
@@ -933,8 +974,7 @@ def _encode_inputs(manifest,stage,copies,durations,cover,stop,progress,encoding,
 def _preserve_single_m4b(manifest,stage,name,durations,cover,stop,progress,encoding,tags):
     """One compressed candidate; no remux or chapter/timescale reconstruction."""
     source=stage/name;output=stage/PRESERVATION_CANDIDATE_NAME;expected=sum(durations)
-    sort_title=audiobook_sort_title(manifest['metadata'])
-    if sort_title!=manifest['metadata']['title']:tags=tags|{'sort_name':sort_title}
+    tags=preservation_tags(manifest,tags)
     chapters=source_chapters(source,stage,stop,expected)
     if manifest.get('source_chapters')!=chapters:
         raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')

@@ -206,11 +206,17 @@ class CleanupJobs:
             raise ValueError('The complete published output validation record is required')
         if str(tags.get('media_type'))!='2' or tags.get('title')!=meta.get('title') or tags.get('artist')!=meta.get('canonical_author'):
             raise ValueError('Validated audiobook kind, title and author do not match the reviewed book')
-        frames=v.get('source_pcm_frames',[]);rate=v.get('source_pcm_rate')
-        if len(frames)!=len(manifest['sources']) or not isinstance(rate,int) or rate<=0 or any(not isinstance(n,int) or n<=0 for n in frames):
-            raise ValueError('Exact selected-source decoded-audio validation is required')
-        if abs(float(v.get('decoded_duration',-1))-sum(frames)/rate)>float(v.get('duration_tolerance',0)):
-            raise ValueError('Decoded output does not match the selected source audio')
+        if v.get('publication_mode')=='in_place':
+            # 0.21.0, no decode (Sergei, 2026-10-22): the original itself became the output; its byte proof replaces PCM frames.
+            proof=v.get('in_place',{});reviewed=manifest['sources'][0]['sha256'] if len(manifest['sources'])==1 else None
+            if proof.get('all_retained_bytes_verified') is not True or proof.get('original_sha256')!=reviewed or v.get('metadata_preservation',{}).get('source_sha256')!=reviewed:
+                raise ValueError('Exact in-place byte proof of the selected source is required')
+        else:
+            frames=v.get('source_pcm_frames',[]);rate=v.get('source_pcm_rate')
+            if len(frames)!=len(manifest['sources']) or not isinstance(rate,int) or rate<=0 or any(not isinstance(n,int) or n<=0 for n in frames):
+                raise ValueError('Exact selected-source decoded-audio validation is required')
+            if abs(float(v.get('decoded_duration',-1))-sum(frames)/rate)>float(v.get('duration_tolerance',0)):
+                raise ValueError('Decoded output does not match the selected source audio')
         expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
         if [c.get('title') for c in v.get('chapters',[])]!=expected_chapters:raise ValueError('Validated chapter choice does not match this completed book')
     def status(self,job_id=None):
@@ -333,6 +339,7 @@ class CleanupJobs:
             if art.sha256()!=manifest['cover']['sha256']:raise BoundaryError('Reviewed cover bytes changed')
             with connect(self.database) as db:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
+            if out['validation'].get('publication_mode')=='in_place':return self._retire_moved(id,intent,manifest,out)
             self._set(id,'checking');held=[]
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
@@ -400,6 +407,23 @@ class CleanupJobs:
                     db.commit() # Keep the location-generation reservation through native closure and absence.
                     db.execute('BEGIN IMMEDIATE');self._retire(intent,source,{'facts':packed(facts)},db);db.commit()
             self._set(id,'completed')
+    def _retire_moved(self,id,intent,manifest,out):
+        """0.21.0 in-place edit: the original WAS the output (verified in full above). Its journaled no-copy rename is
+        its retirement; there is no recovery copy and no deletion. A file at the old name is preserved and blocks."""
+        import inplace_m4b
+        source=manifest['sources'][0];path=ordinary(source['path'])
+        moved=inplace_m4b.published_move(self.database,intent['job_id'],str(path)) if len(manifest['sources'])==1 else None
+        if moved is None:raise BoundaryError('In-place move receipt is missing; nothing retired')
+        if os.path.lexists(path):raise BoundaryError('A file at the moved original path was preserved')
+        facts={'disposition':'renamed_into_output','size':source['size'],'modified':source['modified'],'sha256':source['sha256'],
+               'final_path':moved['final_path'],'identity':moved['identity']}
+        with self.review_boundary(),connect(self.database) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if not self.guard(db,intent):raise BoundaryError('Completed source review changed before retirement')
+            db.execute('INSERT OR IGNORE INTO cleanup_members(cleanup_id,path,backup,facts,state) VALUES(?,?,?,?,?)',
+                       (id,str(path),str(self.root/id/('00000'+path.suffix.lower())),packed(facts),'removed'))
+            self._retire(intent,source,{'facts':packed(facts)},db);db.commit()
+        self._set(id,'completed')
     def _retire(self,intent,source,member,db=None):
         if db is None:
             with connect(self.database) as connection:return self._retire(intent,source,member,connection)
