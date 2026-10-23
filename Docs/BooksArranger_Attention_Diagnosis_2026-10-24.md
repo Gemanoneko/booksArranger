@@ -118,7 +118,7 @@ Observation, not acted on: the output is titled `Сказка`. The naming rule 
    - Control: on the unfixed code the run reads Needs attention.
 
 **Other tests run** (single modules via `unittest discover -p`, not the gate):
-- Passed: `test_automatic_processing` (65), `test_automatic_media` (10), `test_automatic_record_retry`, `test_iron_skazka`, `test_refused_retry`, `test_start_over`, `test_quiet_status`, `test_status_read_contention`, `test_inplace_m4b`, `test_split_books`, `test_working_lifecycle`, `test_merge_service`.
+- Passed: `test_automatic_processing` (63), `test_automatic_media` (10), `test_automatic_record_retry`, `test_iron_skazka`, `test_refused_retry`, `test_start_over`, `test_quiet_status`, `test_status_read_contention`, `test_inplace_m4b`, `test_split_books`, `test_working_lifecycle`, `test_merge_service`.
 - Failed identically on the unchanged code (7ecfeca, in a throwaway worktree), so they predate this work: `test_local_admission` (1 failure, an unexpected DuckDuckGo URL), `test_standing_admission` (3 errors, the fixture folder `scratch/source-fallback-2026-10-11` is missing outside the gate) and `test_catalog_paging` (1 error).
 - The full gate was not run here, because it copies the live `data/`.
 
