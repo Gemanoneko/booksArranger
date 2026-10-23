@@ -10,7 +10,7 @@ def reviewed(value):
     if 'output_root' not in result:result['output_root']=result['root']
     return result
 
-def bind(parent,fresh,output_root,*,retention=None):
+def bind(parent,fresh,output_root,*,retention=None,dispose=False):
     prior=json.loads(parent['manifest'])
     if any(key in prior or key in fresh for key in ('replacement_id','replacement_parent_job_id')):raise ValueError('Replacement destination requires its exact authorized lineage; generic route Retry is unavailable')
     if parent['state']!='needs attention' or parent.get('output') or json.loads(parent['journal']).get('publication_intent') or digest(prior)!=parent['manifest_hash']:raise ValueError('Failed parent publication/source binding changed')
@@ -19,9 +19,11 @@ def bind(parent,fresh,output_root,*,retention=None):
     approved=reviewed(fresh);routing=dict(approved['metadata'],organization_policy=POLICY)
     destination=frozen_plan(approved,output_root,routing)['path']
     target=copy.deepcopy(fresh);target['output_root']=str(output_root);target['destination']=destination
-    if retention:
+    if retention and not dispose:
         target['cleanup_policy']=dict(target['cleanup_policy'],enabled=False,empty_source_folders=False)
     binding={'schema':'books-explicit-retry-intent-v1','parent_job_id':parent['job_id'],'parent_manifest_hash':parent['manifest_hash'],'parent_journal_sha256':hashlib.sha256(parent['journal'].encode()).hexdigest(),'approved_manifest':approved,'approved_manifest_sha256':digest(approved),'routing_policy_version':POLICY,'routing_review':routing,'target_root':str(output_root),'destination':destination,'retained_checkpoint_id':retention}
+    # Ruling 5 (Sergei 2026-10-23): a boot-proved recovery child deletes the old attempt once verified, then cleans up normally.
+    if retention and dispose:binding['retained_disposal']=True
     target['retry_intent']=binding
     return target
 
@@ -33,7 +35,7 @@ def validate(manifest,current,output_root):
         routing=dict(approved['metadata'],organization_policy=POLICY)
         if binding['routing_review']!=routing or binding['destination']!=frozen_plan(approved,output_root,routing)['path']:return False
         expected=copy.deepcopy(approved);expected['output_root']=str(output_root);expected['destination']=binding['destination']
-        if binding.get('retained_checkpoint_id'):expected['cleanup_policy']=dict(expected['cleanup_policy'],enabled=False,empty_source_folders=False)
+        if binding.get('retained_checkpoint_id') and binding.get('retained_disposal') is not True:expected['cleanup_policy']=dict(expected['cleanup_policy'],enabled=False,empty_source_folders=False)
         return reviewed(manifest)==expected
     except (KeyError,TypeError,ValueError):return False
 
@@ -45,7 +47,7 @@ def guard(db,manifest,current,output_root):
     if not relation or json.loads(relation[0])!=binding:return False
     if binding.get('retained_checkpoint_id'):
         from producer_recovery import verify_retained
-        attempt=verify_retained(db,parent['job_id'],parent['attempt_id'])
+        attempt=verify_retained(db,parent['job_id'],parent['attempt_id'],('isolated_retained','disposing','disposed') if binding.get('retained_disposal') is True else ('isolated_retained',))
         if attempt['checkpoint_id']!=binding['retained_checkpoint_id']:return False
     return True
 

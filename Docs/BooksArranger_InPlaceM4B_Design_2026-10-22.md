@@ -25,6 +25,7 @@ Every one of these must hold:
 - no `replacement_id`;
 - no approved repair;
 - the frozen cleanup policy retires the original after verification (`cleanup_policy.enabled`). A policy that keeps the sources, such as a manually approved M4B or a Retry child that keeps a retained checkpoint, keeps the copy flow and its original;
+- the job is not a producer-recovery child (`retry_intent.retained_checkpoint_id`). Since 0.21.1 such a child may have cleanup enabled (Сказка, ruling 5), but its original stays a protected dependency of the retained attempt until the old files are removed, so it keeps the copy flow and is retired only by the normal source cleanup;
 - `choose_automatic_encoding` returns `copy`/`aac`;
 - `plan()` succeeds with no repairs, padding, appended media or header patches;
 - the frozen chapters and the frozen encoding policy match;

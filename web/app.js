@@ -227,7 +227,7 @@ function renderRows(force=false) {
         // One honest state per row: attention, a queued-next press, the Started over marker, or a saved-review hold.
         // (A book waiting its turn after Retry keeps its disabled "Queued" button, v0.16.12.)
         const shown=rowState(row);
-        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=technicalText(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
+        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
@@ -696,19 +696,29 @@ const rowActions={queued:{kind:'queued',label:'Queued',pending:'Queued',note:'',
   startover:{kind:'startover',label:'Start over',pending:'Starting over…',note:'Setting this job aside…',ready:"Set this failed job aside and send the book back to automatic processing. Starts automatic processing if it isn't running. Nothing is deleted.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Check the status above.'},
   combined:{kind:'combined',label:'Start over and let the app handle it',pending:'Starting over…',note:'Setting this job aside and discarding the saved review…',ready:"Set this failed job aside, discard this book's saved review (including any edits you made by hand), and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. The failed job and your audio files are kept.",endpoint:'/api/audiobook/startover',refused:'Start over was not accepted. Nothing was changed.',confirm:true},
   release:{kind:'release',label:'Let the app handle it',pending:'Discarding review…',note:'Discarding the saved review…',ready:"Discard this book's saved review, including any edits you made by hand, and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. Your audio files are not touched.",endpoint:'/api/audiobook/release',refused:"The review wasn't discarded. Select the row to read why.",confirm:true}};
+// Сказка (0.21.1 UX spec section 2): Convert… opens the confirmation; Confirm and convert saves it and queues the retry.
+rowActions.convert={kind:'convert',label:'Convert…',pending:'Starting…',note:'Saving your confirmation, then checking the book.',ready:'Confirm where this conversion ran, then convert this book. Opens a confirmation first.',endpoint:'/api/audiobook/confirm-convert',refused:'Conversion not started.'};
+const ORIGIN_STATEMENTS=['The interrupted conversion ran on this PC.','Since then, Windows and these files were not moved, copied, cloned or restored from a backup.'];
+const TAG_REPAIR_HINT='An MP3 file failed its audio check in an earlier app version. Retry checks it again.',AUTO_QUEUED_HINT='Queued by automatic processing. Nothing to do.';
+function deletionLine(capability){const d=capability?.disposal,bytes=d?.bytes;return `When the new conversion is verified, the old working files${Number.isSafeInteger(bytes) && bytes>0?` (about ${sizeText(bytes)})`:''} and the ${Number.isInteger(d?.originals) && d.originals>1?'originals':'original'} are deleted.`;}
 rowActions.prepare={kind:'prepare',label:'Prepare recovery',pending:'Preparing…',note:"Saving this book's recovery checkpoint. Audio files stay in place.",ready:"Save this job's recovery checkpoint without changing its audio files.",endpoint:'/api/audiobook/prepare-recovery'};
 function producerRecoveryOf(row){const value=row?.creation?.job?.attention?.producer_recovery;return value?.schema==='books-producer-recovery-capability-v1' && ['prepare','waiting_restart','ready','isolated_retained','unsupported'].includes(value.state)?value:null;}
 function producerRecoveryText(row){
   const capability=producerRecoveryOf(row);if(!capability)return null;
   const key=retryKey(row);
-  if(retryResult?.key===key && retryResult.producer && ((retryResult.snapshot && retryResult.snapshot!==JSON.stringify([capability.state,capability.checkpoint_id,capability.cause])) || (retryResult.transport && !recoveryDisconnected)))retryResult=null;
+  if(retryResult?.key===key && retryResult.producer && ((retryResult.snapshot && retryResult.snapshot!==JSON.stringify([capability.state,capability.checkpoint_id,capability.cause])) || (retryResult.transport && !recoveryDisconnected) || (retryResult.r2 && capability.can_confirm_origin!==true && capability.state!=='ready')))retryResult=null;
   if(retryPending?.key===key && retryPending.kind==='prepare')return {status:'Preparing recovery…',hint:rowActions.prepare.note};
-  if(retryResult?.key===key && retryResult.producer && retryResult.warn)return {status:retryResult.status,hint:retryResult.text,warn:true};
+  if(retryPending?.key===key && retryPending.kind==='convert')return {status:'Starting conversion…',hint:rowActions.convert.note};
+  if(readmissionOf(row)?.queued_next===true)return null;  // K4: the existing queued and checking words
+  if(retryResult?.key===key && retryResult.producer && (retryResult.warn || retryResult.status))return {status:retryResult.status,hint:retryResult.text,warn:!!retryResult.warn};
+  if(capability.cause==='restart_unproven')return {status:'Stopped — restart Windows first',hint:"Windows hasn't restarted since this conversion ran. Restart it, then reopen the app.",warn:true,tip:'The app confirms the old conversion ended by checking that Windows restarted after it. Your confirmation is kept; Retry appears after the restart.'};
+  if(['ready','isolated_retained'].includes(capability.state) && capability.can_retry===true && capability.basis==='boot_after_attempt')return {status:'Stopped — ready to retry',hint:deletionLine(capability)};
+  if(capability.cause==='origin_unproved' && capability.can_confirm_origin===true)return {status:'Stopped — needs your confirmation',hint:"The app can't tell where this conversion ran."};
   if(capability.state==='prepare')return {status:'Stopped — recovery check needed',hint:"The app cannot confirm that this book's conversion process ended. Prepare recovery to save a checkpoint."};
   if(capability.state==='waiting_restart')return typeof capability.checkpoint_id==='string' && capability.checkpoint_id?{status:'Restart verification needed',hint:'Recovery checkpoint saved. Use Restart in Windows, then reopen Books Arranger and choose Retry so the app can verify the restart. Restarting only the app will not help. A Windows restart may still need another recovery check.'}:{status:'Recovery stays blocked',hint:'The saved recovery checkpoint is unavailable. Files are retained.',warn:true};
   if(capability.state==='ready' || capability.state==='isolated_retained')return {status:capability.can_retry?'Stopped — ready for a new attempt':'Recovery stays blocked',hint:capability.can_retry?'Old working files are kept. Retry starts a new attempt after checking the original sources.':capability.reason,warn:!capability.can_retry};
   if(capability.cause==='origin_unproved')return {status:'Recovery stays blocked',hint:'The saved information cannot establish where this conversion ran. All files are retained.'+(capability.reason?' '+capability.reason:''),warn:true};
-  if(capability.cause==='startup_unavailable')return {status:'Recovery check unavailable',hint:'The app cannot verify this Windows startup. Files are retained; recovery stays blocked.'+(capability.reason?' '+capability.reason:''),warn:true};
+  if(capability.cause==='startup_unavailable')return {status:'Recovery check unavailable',hint:"The app can't read when Windows started, so it can't confirm the old conversion ended. Files are kept.",warn:true};
   if(capability.cause==='binding_mismatch')return {status:'Recovery checkpoint does not match',hint:'This book changed or the checkpoint belongs to another computer. Files are retained; recovery stays blocked.'+(capability.reason?' '+capability.reason:''),warn:true};
   return {status:'Recovery stays blocked',hint:capability.reason || 'Files are retained; recovery stays blocked.',warn:true};
 }
@@ -721,6 +731,7 @@ function renderProducerRetained(row){
   const saved=row?.producer_recovery_retained,valid=saved?.schema==='books-producer-retention-v1' && Array.isArray(saved.attempts);
   const section=$('producer-retained');if(!section)return;
   section.hidden=!valid && producerRecoveryOf(row)?.state!=='isolated_retained';
+  const removal=$('producer-retained-removal');if(removal)removal.hidden=!(valid && saved.attempts.some(item=>item?.removed_after_verification===true) || producerRecoveryOf(row)?.basis==='boot_after_attempt');
   setText('producer-retained-paths',valid?saved.attempts.map(item=>[item.path,item.attempt_id?'Attempt: '+item.attempt_id:'',item.reason].filter(value=>typeof value==='string' && value).join('\n')).join('\n\n'):'');
 }
 async function prepareProducerRecovery(row,origin=null){
@@ -768,6 +779,8 @@ function rowAction(row){
   const recovery=producerRecoveryOf(row);
   if(recovery){
     if(recovery.state==='prepare' && recovery.can_prepare===true)return {...rowActions.prepare,data:{allowed:true,reason:recovery.reason}};
+    if(recovery.state==='unsupported' && recovery.can_confirm_origin===true)return {...rowActions.convert,data:{allowed:true,reason:''}};
+    if(['ready','isolated_retained'].includes(recovery.state) && recovery.can_retry===true && recovery.basis==='boot_after_attempt' && job.retry?.allowed===true)return {...rowActions.retry,ready:'Start a new conversion. When it is verified, the old working files and the original are deleted.',note:'Checking the original sources for a new attempt…',data:job.retry};
     if(['ready','isolated_retained'].includes(recovery.state) && recovery.can_retry===true && job.retry?.allowed===true)return {...rowActions.retry,ready:'Check the original sources and start a new attempt. Keep the old working files.',note:'Checking the original sources for a new attempt…',data:job.retry};
     return null;
   }
@@ -786,6 +799,7 @@ function rowAction(row){
   if(refusal && refusalFix(refusal)==='update')return null;
   const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
   if(!data || typeof data!=='object' || typeof data.allowed!=='boolean')return null;
+  if(kind==='retry' && attention?.remedy?.kind==='tag_repair')return {...rowActions.retry,ready:'Check this MP3 again with this app version and queue its audiobook job.',data};
   // Retry and Repair clear leftover working files first (decisions A and O10): their tooltip and press note say so.
   const clears=workingOf(row)?.state==='cleanable' && data.allowed===true && CLEARS_FIRST[kind];
   return clears?{...rowActions[kind],ready:clears[0],note:clears[1],data}:{...rowActions[kind],data};
@@ -851,7 +865,7 @@ function updateRetry(){
   const text=clearing?'Clearing working files…':result?retryResult.text:mode==='ready'?'':title;
   if(button.textContent!==label)button.textContent=label;
   if(button.title!==title)button.title=title;
-  button.setAttribute('aria-label',label+': '+((copy.kind==='prepare'?row.title_clue || row.review?.title:row.review?.title || row.title_clue) || 'Book'));
+  button.setAttribute('aria-label',(label==='Convert…'?'Convert':label)+': '+((copy.kind==='prepare'?row.title_clue || row.review?.title:row.review?.title || row.title_clue) || 'Book'));
   // Pending keeps keyboard focus: aria-disabled with a disabled look, never the disabled attribute.
   if(mode==='pending')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=mode!=='ready' && mode!=='pending';
@@ -899,9 +913,9 @@ function updateRowRetries(){
     if(mode==='pending'){hint=retryPending?.checking?'Checking…':copy.note;clause='';warn=false;}
     if(clearPending(row)){hint='Clearing working files…';clause='';warn=false;}
     if(!shown && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
-    if(retryResult && retryResult.key===key && mode!=='pending' && !clearPending(row)){hint=retryResult.text;warn=retryResult.warn!==false;clause='';}
+    if(retryResult && retryResult.key===key && !retryResult.panelOnly && mode!=='pending' && !clearPending(row)){hint=retryResult.text;warn=retryResult.warn!==false;clause='';}
     setHint(entry.hint,hint,clause,warn);
-    statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==technicalText(row))entry.cell.title=technicalText(row);
+    statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==cellTip(row))entry.cell.title=cellTip(row);
     if(entry.clear)updateClearButton(entry.clear,row);
     if(!entry.button)continue;
     const gone=!action && mode!=='pending',hadFocus=gone && document.activeElement===entry.button;
@@ -910,7 +924,7 @@ function updateRowRetries(){
     const label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
     if(entry.button.textContent!==label)entry.button.textContent=label;
     if(entry.button.title!==title)entry.button.title=title;
-    entry.button.setAttribute('aria-label',label+': '+(row.title_clue || row.review?.title || 'Book'));
+    entry.button.setAttribute('aria-label',(label==='Convert…'?'Convert':label)+': '+(row.title_clue || row.review?.title || 'Book'));
     if(mode==='pending')entry.button.setAttribute('aria-disabled','true');else entry.button.removeAttribute('aria-disabled');
     entry.button.disabled=mode!=='ready' && mode!=='pending';
   }
@@ -947,6 +961,7 @@ async function retryJob(origin=null){
   const row=selectedRow,key=retryKey(row),job=key?row.creation.job:null,action=key?rowAction(row):null;
   if(!key || !action || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun || action.data.allowed!==true || $('retry-job').disabled)return;
   if(action.kind==='prepare')return prepareProducerRecovery(row,origin);
+  if(action.kind==='convert'){openConvertDialog(row,origin);return false;}
   if(['startover','combined','release'].includes(action.kind)){
     // Discarding a saved review deletes hand edits: one confirmation first (follow-up 3, section 4.4; follow-up 4, 3.3).
     if(action.confirm){openDiscardDialog(action.kind,[row],()=>restartPress(row,action,origin),origin?.button || $('retry-job'));return false;}
@@ -957,7 +972,7 @@ async function retryJob(origin=null){
   let answer=null,refreshed=null;
   try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);succeeded=true;}
   catch(error){
-    if(error.httpStatus){pressed.delete(key);refreshed=freshRow(error.body?.row,row);retryResult={key:retryKey(refreshed || row),text:error.message || action.refused,warn:true};if(error.httpStatus===409)retryEpoch++;}
+    if(error.httpStatus){pressed.delete(key);refreshed=freshRow(error.body?.row,row);retryResult=error.body?.cause==='origin_unconfirmed'?{key,producer:true,r2:true,status:'Stopped — needs your confirmation',text:'No confirmation is saved for this book.'}:{key:retryKey(refreshed || row),text:error.message || action.refused,warn:true};if(error.httpStatus===409)retryEpoch++;}
     else{
       // No reply in time: the press may still have landed. Check the book's queued state on the server
       // before saying anything; never show a scary error and re-enable a button for a request that worked.
@@ -1095,6 +1110,53 @@ async function clearWorking(origin=null){
   if(focused){if(origin?.row)focusRowButton(row.path,true);else{const retry=$('retry-job');(retry && !retry.hidden && !retry.disabled?retry:$('details-heading')).focus?.({preventScroll:true});}}
   return !!answer;
 }
+// Confirm where this conversion ran (Сказка): two statements, Cancel first and focused, its own four-stop Tab cycle.
+let convertConfirmation=null;
+function openConvertDialog(row,origin){
+  if(convertConfirmation || discardConfirmation)return;const capability=producerRecoveryOf(row);
+  convertConfirmation={path:row.path,key:retryKey(row),snapshot:JSON.stringify(capability),origin,button:origin?.button || $('retry-job')};
+  setText('convert-dialog-book',`${row.review?.title || row.title_clue || 'Book'} — ${row.review?.canonical_author || 'Author unavailable'}`);
+  $('convert-here').checked=false;$('convert-unmoved').checked=false;setText('convert-dialog-delete',deletionLine(capability));setText('convert-dialog-status','');convertReady();
+  $('convert-dialog').showModal?.();$('convert-cancel').focus?.();
+}
+function convertReady(){const ready=$('convert-here').checked===true && $('convert-unmoved').checked===true,go=$('convert-confirm');go.setAttribute('aria-disabled',String(!ready));go.title=ready?'Save your confirmation and start converting this book.':'Tick both statements first.';if(ready)setText('convert-dialog-status','');return ready;}
+function closeConvertDialog(restore=true){if(!convertConfirmation)return;const button=convertConfirmation.button;convertConfirmation=null;$('convert-dialog').close?.();if(restore)button?.focus?.({preventScroll:true});}
+function confirmConvert(event){
+  // The ruling needs Sergei's own press: a synthetic (untrusted) click does nothing.
+  if(!convertConfirmation || event?.isTrusted!==true)return;
+  if(!convertReady()){setText('convert-dialog-status','Tick both statements first.');return;}
+  const {path,key,snapshot,origin,button}=convertConfirmation;closeConvertDialog(false);button?.focus?.({preventScroll:true});
+  const row=rows.find(item=>item.path===path),capability=producerRecoveryOf(row);
+  if(!row || retryKey(row)!==key || JSON.stringify(capability)!==snapshot){if(capability)retryResult={key,producer:true,snapshot:JSON.stringify([capability.state,capability.checkpoint_id,capability.cause]),warn:true,status:'Conversion not started',text:'This book changed. Review its details and try again.'};controls();return;}
+  convertPress(row,origin);
+}
+async function convertPress(row,origin=null){
+  const key=retryKey(row),job=row?.creation?.job,capability=producerRecoveryOf(row);
+  if(!key || !job || capability?.can_confirm_origin!==true || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun)return false;
+  const snapshot=JSON.stringify([capability.state,capability.checkpoint_id,capability.cause]),focused=document.activeElement===(origin?.button || $('retry-job'));let answer=null;
+  retryPending={key,kind:'convert',note:rowActions.convert.note};retryResult=null;busy=true;controls();updateProducerRecoverySurface(row);
+  try{answer=await request('/api/audiobook/confirm-convert',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id,statements:[...ORIGIN_STATEMENTS]},PRESS_TIMEOUT);}
+  catch(error){
+    retryResult={key,producer:true,snapshot,transport:!error.httpStatus,warn:true,status:error.httpStatus?'Conversion not started':'Conversion status unknown',text:!error.httpStatus?'Could not confirm the request. Reconnect to check its saved state.':error.body?.cause==='book_changed'?error.message:'Nothing was changed. '+(error.message || '')};
+    if(!error.httpStatus)refreshFailed(error);
+  }
+  retryPending=null;busy=false;let fresh=row;const saved=answer?.producer_recovery;
+  if(answer?.job_id===job.job_id && answer.queued_next===true){
+    remember(key,'queued','retry',answer.position);retryEpoch++;fresh=queuedNext(row,answer);heldRow={path:row.path,index:rows.findIndex(item=>item.path===row.path),context:listContext(),row:fresh,until:Date.now()+PRESS_MEMORY};
+    retryResult={key,text:'Confirmed. Starting conversion.',warn:false,panelOnly:true};
+  }else if(answer?.job_id===job.job_id && saved?.schema==='books-producer-recovery-capability-v1')fresh={...row,creation:{...row.creation,job:{...job,attention:{...job.attention,producer_recovery:saved}}}};  // R1a/R1b: the confirmation is kept
+  rows=rows.map(item=>item.path===row.path?fresh:item);const entry=rowRetries.get(row.path);if(entry)entry.row=fresh;if(selectedRow?.path===row.path){if(answer?.queued_next===true)select(fresh,false);else selectedRow=fresh;}
+  controls();updateProducerRecoverySurface(fresh);
+  if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  controls();
+  if(focused && answer?.queued_next===true){if(origin?.row)focusRowButton(row.path);else $('details-heading').focus?.({preventScroll:true});}
+  return answer?.queued_next===true;
+}
+$('convert-cancel').addEventListener('click',()=>closeConvertDialog());
+$('convert-confirm').addEventListener('click',event=>confirmConvert(event));
+for(const id of ['convert-here','convert-unmoved']){$(id).addEventListener('change',()=>convertReady());$(id).addEventListener('keydown',event=>{if(event.key==='Enter')event.preventDefault?.();});}
+$('convert-dialog').addEventListener('cancel',event=>{event.preventDefault?.();closeConvertDialog();});
+$('convert-dialog').addEventListener('keydown',event=>{if(!convertConfirmation)return;if(event.key==='Escape'){event.preventDefault?.();closeConvertDialog();}else if(event.key==='Tab'){event.preventDefault?.();const order=['convert-cancel','convert-here','convert-unmoved','convert-confirm'].map(id=>$(id)),at=order.indexOf(document.activeElement);order[(at+(event.shiftKey?order.length-1:1)+order.length)%order.length].focus?.();}});
 // The confirmation before a saved review is discarded: the native modal dialog, Cancel first and focused.
 const DISCARD_COPY={
   release:{title:"Discard this book's saved review?",body:["This deletes the metadata, cover and track choices saved on this book, including any you made by hand. It can't be undone.",'Automatic processing then researches the book again and queues it if the match is safe. It starts if it isn\'t running. Your audio files are not touched.'],go:'Discard review',cancelTip:'Keep the saved review and leave this book held.',goTip:"Delete this book's saved review, then let automatic processing take the book. This can't be undone."},
@@ -1496,7 +1558,7 @@ function attentionText(row){
   if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:'The MP3 failed its full audio check. Keep this original, replace the source with a sound copy, then rescan this source. The affected file is listed in the details.',warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
-  if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):'The book is checked again before it runs.'};
+  if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
   const refusal=refusalOf(row),verb=refusal?.kind==='repair'?'Repair':'Retry',clause=clearsFirst(row);
   if(refusal && refusal.stale!==true){
     const cause=refusalCause(refusal),[refusedStatus,copy]=refusalCopy[cause],untouched=cause==='unsupported_file' && a.originals_untouched===true?' Originals are untouched.':'';
@@ -1517,7 +1579,7 @@ function attentionText(row){
     if(a.precheck==='passed')return {status:attentionCopy.retry[0],hint:`${verb} was refused${version?' in v'+version:''}. The app was updated, and this M4B now passes its check.`,clause};
     return {status:'Stopped — try again',hint:version?`${verb} was refused in v${version}; the app was updated since. It may work now.`:`${verb} was refused before the app was updated. It may work now.`,clause};
   }
-  return {status,hint:kind==='repair'?damageHint(a):kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint,clause};
+  return {status,hint:kind==='repair'?damageHint(a):kind==='retry' && a.remedy?.kind==='tag_repair'?TAG_REPAIR_HINT:kind==='unsupported' && a.originals_untouched===true?'Nothing to do for now. Originals are untouched.':hint,clause};
 }
 // " Retry clears leftover working files first." on a cleanable row whose Retry (or Repair) is enabled.
 function clearsFirst(row){const action=workingOf(row)?.state==='cleanable'?rowAction(row):null;return action?.data?.allowed===true && CLEARS_FIRST[action.kind]?CLEARS_FIRST[action.kind][2]:'';}
@@ -1561,7 +1623,7 @@ function heldText(row,marker=null){
 function releaseText(row){return releaseOf(row)?heldText(row):null;}
 function rowState(row){
   const attention=attentionText(row);if(attention)return attention;
-  const readmission=readmissionOf(row);if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:QUEUED_HINT};
+  const readmission=readmissionOf(row);if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.origin==='automatic'?AUTO_QUEUED_HINT:QUEUED_HINT};
   return restartText(row) || releaseText(row);
 }
 // The two folded columns, as the second line of the title cell (medium and compact bands).
@@ -1597,6 +1659,7 @@ function repairedText(repaired){
   const patched=Array.isArray(repaired?.patched)?repaired.patched:[];if(!patched.length)return '';
   return (repaired.applied===true?'Repaired: ':'Repair queued: ')+patchCopy(patched[0])+(patched.length>1?` +${patched.length-1} more`:'');
 }
+function cellTip(row){return producerRecoveryText(row)?.tip || technicalText(row);}
 function technicalText(row){
   const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
   if(typeof job.retry_parent_job_id==='string')details.push('Saved job retained: '+job.retry_parent_job_id);

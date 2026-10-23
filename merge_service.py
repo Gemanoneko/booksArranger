@@ -202,8 +202,8 @@ class MergeService:
         self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,repair_publication=self._repair_publication,repair_location_guard=self.publication_bindings.guard)
         from working_lifecycle import WorkingLifecycle
         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
-        from producer_recovery import ProducerRecovery
-        self.producer_recovery=ProducerRecovery(inventory.database,self.stage_root,active=lambda job,attempt:getattr(self,'_active_producer',None)==(job,attempt))
+        from producer_recovery import ProducerRecovery,windows_boot
+        self.producer_recovery=ProducerRecovery(inventory.database,self.stage_root,active=lambda job,attempt:getattr(self,'_active_producer',None)==(job,attempt),boot=windows_boot)
         self.jobs.before_attempt=self.working.admit
         self.jobs.attempt_boundary=self._attempt_boundary
         self.jobs.destination_policy=self._destination_policy
@@ -257,6 +257,57 @@ class MergeService:
     def producer_retention(self,candidate_id):
         return self.producer_recovery.retained(candidate_id)
 
+    # Сказка (0.21.1): the statement Sergei ticks, verbatim (rulings 6-7); the recorded claim carries exactly this text.
+    ORIGIN_STATEMENTS=('The interrupted conversion ran on this PC.','Since then, Windows and these files were not moved, copied, cloned or restored from a backup.')
+
+    def confirm_origin_and_convert(self,library,identity,revision,job_id,statements):
+        """Confirm and convert: save Sergei's origin statement (record_origin), prove the old producer ended by a later
+        Windows startup, and queue the recovery Retry, in one press. A failed proof keeps the statement (UX spec R1a)."""
+        from audio_jobs import RetryRefused,RETRY_SCANNING,RETRY_CLOSING
+        import producer_recovery
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        if list(statements)!=list(self.ORIGIN_STATEMENTS):raise ValueError('Both statements must be confirmed exactly as shown')
+        if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(RETRY_SCANNING.replace('Retry','Convert'))
+        if self.draining:raise RetryRefused(RETRY_CLOSING.replace('Retry','Convert'))
+        self._reacquire_admission(identity=identity)
+        changed='This book changed. Review its details and try again.'
+        if self.producer_recovery.status(job_id).get('can_confirm_origin') is not True:raise RetryRefused(changed,'book_changed')
+        try:parent=self._m4b_parent(job_id,identity,revision,lambda row:row['state']=='needs attention' and not row['output'])
+        except RetryRefused:parent=None
+        if parent is None:raise RetryRefused(changed,'book_changed')
+        self.producer_recovery.record_origin(job_id,{'actor':'user','claim':producer_recovery.CLAIM,'evidence':'Confirmed by the user in Books Arranger (Confirm and convert): '+' '.join(self.ORIGIN_STATEMENTS),'statements':list(self.ORIGIN_STATEMENTS)})
+        capability=self.producer_recovery.status(job_id);self.invalidate_status()
+        if capability['state']!='ready':return {'job_id':job_id,'accepted':False,'queued_next':False,'origin_recorded':True,'producer_recovery':capability}
+        result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
+        return {'job_id':job_id,'requeued':False,'origin_recorded':True,**result,'producer_recovery':capability}
+
+    def _finish_recovery_child(self,job_id):
+        """Ruling 5, in the worker right after the child's lease on the old files ends: remove them, then the child's
+        normal source cleanup. A refusal keeps the files and the original, with its reason."""
+        # Never raises into the worker: the child is published, and each refusal is recorded where its own step records it.
+        id=None;row=None;posting=self.__dict__.setdefault('_post_jobs',set());posting.add(job_id)
+        try:
+            row=next((job for job in self.jobs.status()['jobs'] if job['job_id']==job_id),None)
+            if not row or row['state']!='completed' or self.cleanup.status(job_id):return
+            try:self._dispose_retained(job_id);id=self.enroll_cleanup(job_id)['cleanup_id'];self.cleanup.current=id;self.cleanup.run_with_retry(id)
+            except Exception as error:
+                if id:self.cleanup.hold(id,error)
+                else:self._enrollment_attention(row,error)
+            finally:self.cleanup.current=None
+            self._prune_completed(job_id)  # then temporary files, in the normal order (_after_completed_work)
+        except Exception as error:self.storage_cleanup._diagnose(job_id,'',error)
+        finally:posting.discard(job_id)
+
+    def _dispose_retained(self,job_id):
+        """Ruling 5: a verified boot-proved recovery child removes its parent's old working files before its own source
+        cleanup is enrolled. Any refusal keeps the files and protects the original (_cleanup_guard), visibly."""
+        binding=(self.jobs._rows('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)) or [{'manifest':'{}'}])[0]
+        binding=json.loads(binding['manifest']).get('retry_intent') or {}
+        if binding.get('retained_disposal') is not True:return None
+        roots=[*self.inventory.roots.values(),*(self.inventory.all_source_roots() if hasattr(self.inventory,'all_source_roots') else ()),*([self.inventory.output_root] if getattr(self.inventory,'output_root',None) else [])]
+        try:return self.producer_recovery.dispose(binding['parent_job_id'],job_id,roots)
+        except (ValueError,OSError) as error:raise ValueError('Old working files of the interrupted attempt were kept, so the original is kept too: '+str(error)) from error
+
     def _destination_policy(self):
         import destination_admission
         sources=self.inventory.source_roots('Audiobooks') if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']]
@@ -292,9 +343,12 @@ class MergeService:
         with self.producer_recovery.protect_retained(binding['parent_job_id']) as retained:
             if retained['checkpoint_id']!=binding['retained_checkpoint_id']:raise ValueError('Retained producer checkpoint differs at attempt admission')
             yield
+        if binding.get('retained_disposal') is True:self._finish_recovery_child(row['job_id'])  # the write-deny lease has ended
 
     def _enroll_completed_without_start(self,job):
-        try:self.enroll_cleanup(job['job_id'])
+        try:
+            self._dispose_retained(job['job_id'])
+            self.enroll_cleanup(job['job_id'])
         except (ValueError,OSError) as error:self._enrollment_attention(job,error)
 
     def _enrollment_attention(self,job,error):
@@ -979,6 +1033,8 @@ class MergeService:
         self._prune_working(job_id)  # Publication is sufficient; retirement is independent.
         try:self.working.discharge_published(job_id,self.storage_cleanup,revisit=True)
         except (OSError,ValueError):pass  # Exact held reason stays in the working ledger.
+        # A boot-proved recovery child cleans up once its lease on the old files ends (_finish_recovery_child).
+        if (row['manifest'].get('retry_intent') or {}).get('retained_disposal') is True:return
         if row['manifest'].get('cleanup_policy',{}).get('enabled'):
             try:
                 enrolled=self.enroll_cleanup(job_id);id=enrolled['cleanup_id'];self.cleanup.current=id
@@ -1144,7 +1200,7 @@ class MergeService:
             for job_id,item in summary.items():
                 if isinstance(item.get('working'),dict) and item['working'].get('state')=='blocked':
                     item['producer_recovery']=recovery.status(job_id)
-                    if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''}
+                    if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''};item['group']='retry'  # one predicate: an enabled Retry the bulk path accepts
         if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) for item in summary.values())
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
@@ -1540,6 +1596,11 @@ class MergeService:
             if self._m4b_parent(job_id,identity,revision,lambda row:row['state']=='needs attention' and not row['output']) is None:raise ValueError('Recovery book changed')
             result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
             return {'job_id':job_id,'requeued':False,**result}
+        if capability.get('can_confirm_origin') is True:raise RetryRefused('No confirmation is saved for this book.','origin_unconfirmed')
+        from audio_jobs import tag_repair_retry
+        if self._m4b_parent(job_id,identity,revision,tag_repair_retry) is not None:
+            result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
+            return {'job_id':job_id,'requeued':False,**result}
         import destination_admission
         with self.jobs._db() as destination_db:
             destination_raw=destination_db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
@@ -1826,6 +1887,10 @@ class MergeService:
             manifest=json.loads(rows[0]['manifest'])
             if target and 'id' in target and (target['id']!=manifest['candidate_id'] or target['revision']!=manifest['candidate_revision']):return None
             try:
+                from audio_jobs import tag_repair_retry
+                recovery=(current.get('producer_recovery') or {}).get('state') in {'ready','isolated_retained'}
+                if kind=='retry' and self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),(lambda row:row['state']=='needs attention' and not row['output']) if recovery else tag_repair_retry) is not None:
+                    return 'next' if self._request_m4b_readmission(job_id,'retry').get('accepted') else None
                 if self._m4b_parent(job_id,manifest.get('candidate_id'),manifest.get('candidate_revision'),(m4b_repair.eligible if kind=='repair' else failed_m4b_retry.eligible)) is not None:
                     self._m4b_refusal_gate(job_id,kind)
                     self._clear_first(job_id,kind)
@@ -2031,7 +2096,7 @@ class MergeService:
         self.resume()
         return fresh,job
 
-    def _request_m4b_readmission(self,job_id,kind):
+    def _request_m4b_readmission(self,job_id,kind,origin=None):
         """A Retry/Repair click is accepted at once and runs right after the current book, in click order."""
         import m4b_readmission
         with self.jobs._lock:
@@ -2041,7 +2106,7 @@ class MergeService:
                 if existing and existing.get('queued_next'):
                     from audio_jobs import RetryRefused
                     raise RetryRefused('A retry request is already saved for this book.')
-                return m4b_readmission.request(db,job_id,kind,time.time())
+                return m4b_readmission.request(db,job_id,kind,time.time(),origin)
 
     def readmission_status(self,job_ids):
         """{job_id: queued_next/position or refusal} for the book list's shown jobs (read-only)."""
@@ -2072,7 +2137,16 @@ class MergeService:
         self._reacquire_admission(job_id=job_id)
         self._no_scan()
         from failed_m4b_retry import eligible
+        from audio_jobs import tag_repair_retry
+        import m4b_readmission
         parent=next(iter(self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))),None)
+        if parent and tag_repair_retry(parent):
+            # Iron Inferno: queued once, by itself; a request already saved, refused or admitted is never repeated.
+            with self.jobs._db() as db:known=m4b_readmission._exists(db) and db.execute('SELECT 1 FROM m4b_readmissions WHERE parent_job_id=?',(job_id,)).fetchone() is not None
+            if not known:
+                self._request_m4b_readmission(job_id,'retry','automatic')
+                if resume:self._resume_later()
+            return {'retryable':False,'requeued':False,'accepted':not known}
         if parent and eligible(parent):
             result=self._retry_preserved_m4b(parent,now)
             if result.get('requeued') and resume:self.resume()
@@ -2346,20 +2420,20 @@ class MergeService:
             return {'reason':'Prior working-file ownership requires attention: '+str(error),'cause':'file_problem'}
         return None
 
-    def _route_retry_manifest(self,parent,fresh,retention=None):
+    def _route_retry_manifest(self,parent,fresh,retention=None,dispose=False):
         import retry_intent
         root=getattr(self.inventory,'output_root',None) or fresh.get('output_root',fresh['root'])
-        return retry_intent.bind(parent,fresh,root,retention=retention)
+        return retry_intent.bind(parent,fresh,root,retention=retention,dispose=dispose)
 
     def _admit_new_retry(self,parent,recovery=False):
         """Worker-only normal approval/source checks, then a distinct immutable child."""
         try:
-            retained=None
+            retained=None;dispose=False
             if recovery:
                 capability=self.producer_recovery.status(parent['job_id'])
                 if capability['state']=='ready':capability=self.producer_recovery.isolate(parent['job_id'])
                 if capability['state']!='isolated_retained':raise ValueError(capability['reason'])
-                retained=capability['checkpoint_id']
+                retained=capability['checkpoint_id'];dispose=capability.get('basis')=='boot_after_attempt'
             else:self.working.admission_clear(parent)
             with contextlib.ExitStack() as retained_lease:
                 if retained:retained_lease.enter_context(self.producer_recovery.protect_retained(parent['job_id']))
@@ -2372,7 +2446,7 @@ class MergeService:
                     context=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(manifest['candidate_id'],)).fetchone()
                 if not group or not context:raise ValueError('Current approved review is unavailable')
                 fresh=self.reviews.build_manifest('Audiobooks',manifest['candidate_id'],manifest['candidate_revision'],allow_existing_job=True,stop=self.automatic.stop_event)
-                fresh=self._route_retry_manifest(parent,fresh,retained)
+                fresh=self._route_retry_manifest(parent,fresh,retained,dispose)
                 self._destination_preflight(fresh)
                 if destination_hold:
                     with connect(self.inventory.database) as destination_db:

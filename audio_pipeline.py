@@ -424,6 +424,7 @@ def _source_duration(manifest,item,path,stage,stop,duration):
         return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
     try:return decoded_duration(path,stage,stop,duration)
     except ValidationError as original:
+        if Path(path).suffix.lower()=='.mp3':original.tag_repair_checked=True  # this version weighed the tag repair (audio_jobs.tag_repair_retry)
         if Path(path).suffix.lower()!='.mp3' or not getattr(original,'media_decode_failed',False):raise
         try:return _mp3_tag_copy(manifest,item,path,stage,stop,duration)['duration']
         except ValidationError as repair:

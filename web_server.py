@@ -524,6 +524,18 @@ class Handler(BaseHTTPRequestHandler):
                 if getattr(error,'cause',None):self.refused(error,id);return
                 self.fail(409,str(error));return  # Nothing changed; the message is shown as written.
             self.response(202,result);return
+        if path=='/api/audiobook/confirm-convert':
+            # Confirm and convert (0.21.1, Сказка): Sergei's own ticked statements, verbatim; the same answers as Retry.
+            self.shape(data,{'library','id','revision','job_id','statements'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id']);statements=data['statements']
+            if not isinstance(statements,list) or len(statements)!=2 or not all(isinstance(item,str) for item in statements):raise ValueError('Both statements must be confirmed')
+            from audio_jobs import RetryRefused
+            try:result=self.server.merge.confirm_origin_and_convert(library,id,revision,job_id,statements)
+            except RetryRefused as error:
+                if getattr(error,'cause',None):self.refused(error,id);return
+                self.fail(409,str(error));return
+            self.response(202,result);return
         if path=='/api/audiobook/repair':
             # Repair button: the same request shape and answers as Retry.
             self.shape(data,{'library','id','revision','job_id'})
@@ -677,7 +689,7 @@ class Handler(BaseHTTPRequestHandler):
             data=self.body()
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
-                         '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/candidate/metadata-choice'}
+                         '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -712,9 +724,9 @@ class Handler(BaseHTTPRequestHandler):
                 if path in merge_routes:
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
-                    if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair'} and self.server.scan_active():
+                    if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING
-                        self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING);return
+                        self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING.replace('Retry','Convert') if path=='/api/audiobook/confirm-convert' else RETRY_SCANNING);return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':
                     self.fail(404,'No such Books Arranger control');return

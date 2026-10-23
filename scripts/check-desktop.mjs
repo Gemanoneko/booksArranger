@@ -38,6 +38,7 @@ patterns.push('test_series_fallbacks.py','test_openlibrary_index.py','test_publi
 patterns.push('test_bulk_retry_receipts.py','test_catalog_contention.py');
 patterns.push('test_retry_start_fence.py');
 patterns.push('test_inplace_m4b.py','test_source_proofs.py');  // v0.21.0 in-place single-M4B edit, attempt-scoped source fingerprints
+patterns.push('test_iron_skazka.py');  // v0.21.1 legacy MP3 tag-repair retry, Confirm and convert, no-restart proof, verified old-file removal
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))
@@ -94,7 +95,7 @@ const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
  child.stdout.on('data',capture(out));child.stderr.on('data',capture(err));child.on('error',e=>{error=e.message;});
  child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,out:Buffer.concat(out).toString('utf8'),err:Buffer.concat(err).toString('utf8')});});
 })));
-// Never return on one worker's failure while its sibling is still running.
+// Never return on one worker's failure while the others are still running.
 for(let i=0;i<results.length;i++){process.stdout.write(results[i].out);process.stderr.write(results[i].err);}
 for(const worker of workers)if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))throw Error('Python batch source changed during tests');
 if(overflow||results.some(r=>r.error||r.timedOut||r.status!==0))throw Error('Python batch failed, exceeded output cap or original deadline');

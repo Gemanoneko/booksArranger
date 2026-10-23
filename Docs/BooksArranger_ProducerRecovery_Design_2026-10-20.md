@@ -61,3 +61,51 @@ New producer_recovery.py owns explicit origin records, immutable checkpoint/proo
 Absent origin fact cannot Prepare or reconcile; sameboot/equal-or-higheruptime stays waiting; changed machine/systemvolume/catalog/attempt ancestry/manifest/fingerprint/ledger or current producer refuses; stale checkpoint/proof and replay refuse. Prepare leaves bytes/intents/producer/queue unchanged. Explicit accepted simulated fact+strictlower trusted fixture uptime yields only isolated_retained with every old file/intended receipt/hash unchanged, including an intentionally unknown old file. Retire/Clear refuses retained old artifacts. Normal source-revalidated newattempt uses a fresh UUID/path and preserves the complete old directory byte-for-byte; missing/changed originals still refuse. Save/CAS failure leaves producer/queue unchanged. Restart never queues a book. No test treats human input or source filename as native file ownership.
 
 This revision is a design proposal only at this checkpoint. No producer_recovery implementation, production fact, reboot, old-file adoption/isolation/deletion or automatic Retry has occurred.
+
+## 0.21.1 amendment: no-restart proof and verified removal (Sergei, 2026-10-23, rulings 4-7)
+
+This changes the reviewed proof rule above, so Senua reviews it. Code: `producer_recovery.py` (`windows_boot`, `attempt_times`, `boot_basis`, `_isolate_after_boot`, `dispose`, `verify_retained`), `merge_service.confirm_origin_and_convert` and `_finish_recovery_child`.
+
+**The second proof basis.** A producer process cannot outlive a Windows startup. So a startup that happened after every recorded activity of the attempt proves its producer is gone, with no checkpoint taken before the restart.
+- **The startup instant.** It is the wall clock now minus `GetTickCount64`. The counter is read before and after the clock, and the larger uptime is used, which gives the earlier startup.
+- **What cannot pass as a startup.** Sleep, hibernation and Fast Startup's kernel resume do not reset the counter, so none of them can pass. They only make the proof fail.
+- **The attempt's own times.** These are its `working_attempts` row, every `working_files` ledger row, the job's stage history, and every old file's write time from the native fence. File times count because the Сказка producer wrote files five minutes after its last catalog write.
+- **The margin.** The startup must follow the latest of these times by at least 10 minutes (`BOOT_MARGIN_MS`, slack for NTP corrections).
+- **When the proof fails.**
+  - No later startup gives `waiting_restart`/`restart_unproven` (R1a).
+  - An unreadable time, a malformed reading, or a recorded time later than the clock now gives `unsupported`/`startup_unavailable` (R1b).
+  - Both keep every file.
+
+**Residual trust, stated plainly.** This proof trusts the Windows clock.
+- **When it is wrong.** It is wrong in one case only. Within the same Windows session, the clock was moved forward after the attempt's last activity by more than the time between the real startup and that activity. Then the app would take a startup that happened before the attempt for one after it, and would treat a producer that may still be running as ended.
+- **What is not affected.**
+  - A clock change before the attempt shifts both sides equally.
+  - A backward change only makes the proof fail.
+  - Sleep, hibernation and Fast Startup cannot pass.
+- **The app cannot detect that clock change.** No independent record of the startup or the clock is checked. That is the trust added beside Sergei's origin statement, and it is the point for Senua to accept or refuse.
+- **What still holds if it is wrong.**
+  - The new conversion runs in its own attempt folder.
+  - The old files are held deny-write and deny-delete while it runs, so a live producer could not change them.
+  - Removal re-checks each file's identity and full hash against the isolation record, so a file a live producer changed is kept.
+- **For Сказка** the last write was 2026-10-19T09:55Z and the current startup 2026-10-22T05:07Z, 67 hours later.
+
+**Every other gate is kept.**
+- The origin statement still goes through `record_origin` (`actor: user`, the exact claim), now with Sergei's two statements verbatim.
+- The machine identity, the native fence and full hash at isolation, the same-scope compare-and-set, the current-producer check and the write-deny lease while the child runs are unchanged.
+- The proof is stored in the checkpoint (`basis: boot_after_attempt`, the boot reading, `started_ms`, `last_activity_ms`, `margin_ms`). `verify_retained` re-derives it from the saved reading and the saved scope and fence, so a tampered proof is refused.
+- The checkpoint path is unchanged. Without a boot provider (unit tests) Prepare is still offered. The app always passes `windows_boot`, so a new book never needs Prepare.
+- The statement is kept when the proof fails (UX spec R1a), so after a restart a plain Retry is enough (K3).
+
+**Removal after verification (ruling 5).** A recovery child admitted on the boot basis is bound with `retained_disposal: true`, and its source cleanup stays enabled.
+- **Copy flow only.** The child keeps the copy flow (`inplace_m4b.offered`). Its original stays a protected dependency of the retained attempt until the old files are removed, so it is never edited or moved in place.
+- **When removal runs.** When the child completes, `_finish_recovery_child` calls `dispose` right after the child's write-deny lease on the old files ends. The checkpoint-basis path never removes anything.
+- **What `dispose` checks.** A file is removed only when:
+  - the child is completed, its validation passed, and its saved retry relation binds this checkpoint;
+  - the folder is exactly `stage_root/<job>/<attempt>`, with no library root inside it or around it;
+  - the folder holds no name the ledger does not list, and its ownership marker matches the job;
+  - the file is a ledger name, held deny-write/delete while checked, with the same single-link native identity, attributes and full hash as at isolation.
+- **Interrupted removal.** The intent (`disposing`) is durable before the first removal, so an interrupted removal resumes. Only a file missing after that intent is accepted as already removed.
+- **Then normal cleanup.** `disposed` releases the original's protection, and the child's own source cleanup runs as for any converted book. As for every book since v0.16.8 (Sergei, 2026-10-18), its recovery copy is deleted as soon as the new book is verified; there is no 24-hour window.
+- **Any refusal** keeps every old file and the original, and records the reason on the child's source cleanup.
+- **Records left as isolated.** The ledger and attempt rows stay as they were isolated, so the proof chain stays verifiable. `retry_intent.guard` accepts `disposing`/`disposed` only for a disposal-bound child.
+- **The details panel.** "Old working files kept" adds "They are deleted once the new conversion is verified." only for such an attempt (`removed_after_verification`).

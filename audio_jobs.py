@@ -43,6 +43,8 @@ def _failure_details(error, stage, now=None):
         details['sqlite_errorname'] = getattr(error, 'sqlite_errorname', None)
     if isinstance(error, OSError) and type(error.errno) is int:
         details['errno'] = error.errno  # typed, so a full disk is told apart without reading the message
+    if getattr(error, 'tag_repair_checked', False) is True:
+        details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
     return details
 
 
@@ -60,6 +62,22 @@ def source_remedy(row,journal,manifest):
     if failure.get('exception_class')!='ValidationError' or failure.get('stage')!='checking sources' or not str(row.get('reason') or '').startswith('Full audio decode failed: '):return None
     if not isinstance(sources,list) or len(sources)!=1 or not isinstance(sources[0],dict) or not str(sources[0].get('path','')).lower().endswith('.mp3'):return None
     return {'kind':'replace_source','cause':'source_decode_failed','path':sources[0]['path'],'sha256':sources[0].get('sha256'),'original_retained':True}
+
+
+def tag_repair_retry(row):
+    """Iron Inferno (0.21.1): a single-MP3 full-decode failure recorded before the app had the trailing-tag repair.
+
+    Retry (or the automatic pass) admits one separate new job, whose check runs the existing repair. A failure recorded
+    since carries tag_repair_checked, and a Retry/Repair/replacement child never qualifies, so it is offered once."""
+    try:
+        journal, manifest = json.loads(row['journal']), json.loads(row['manifest'])
+        if row['state'] != 'needs attention' or row.get('output') or not isinstance(journal, dict) or not isinstance(manifest, dict) or 'publication_intent' in journal:
+            return False
+        if any(key in manifest for key in ('retry_intent', 'm4b_repair', 'replacement_id', 'replacement_parent_job_id')):
+            return False
+        return source_remedy(row, journal, manifest) is not None and 'tag_repair_checked' not in journal['failure']
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
 
 
 def failure_cause(row, journal):
@@ -764,6 +782,8 @@ class AudioJobs:
                 group, cause = {'refused': 'unsupported', 'unavailable': 'other', 'pending': 'checking'}.get(check, 'retry'), None
             elif single_m4b and isinstance(failure, dict) and failure.get('exception_class') == 'ValidationError':
                 group, cause = 'unsupported', None
+            elif tag_repair_retry(row):
+                group, cause = 'retry', None  # accepted now through the separate-job route, like an M4B Retry
             else:
                 group, cause = 'other', None
             # A refused M4B Retry/Repair (RefusedRetry spec): while its record is current, the row leaves Can retry
@@ -777,6 +797,7 @@ class AudioJobs:
                 group, cause, check = retry_refusal.group(refusal), None, None  # precedence: a current refusal first
             value = {'group': group, 'cause': cause, 'originals_untouched': row['output'] is None and row['job_id'] not in cleaned}
             remedy=source_remedy(row,journal,manifest)
+            if remedy and tag_repair_retry(row):remedy=dict(remedy,kind='tag_repair',cause='legacy_decode_failed')
             if remedy and value['originals_untouched']:value['remedy']=remedy
             if check in ('pending', 'unavailable', 'passed'):
                 value['precheck'] = check

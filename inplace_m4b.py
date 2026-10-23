@@ -194,7 +194,10 @@ def offered(manifest):
     # keeps the sources (a manually approved M4B, a Retry child that keeps a retained checkpoint) keeps the copy flow.
     return (os.name == 'nt' and manifest.get('profile') == AUTOMATIC_PROFILE and len(sources) == 1
             and Path(sources[0]['path']).suffix.lower() == '.m4b' and not manifest.get('replacement_id') and not repairs
-            and (manifest.get('cleanup_policy') or {}).get('enabled') is True)
+            and (manifest.get('cleanup_policy') or {}).get('enabled') is True
+            # A recovery child (0.21.1 ruling 5) keeps the copy flow: its original stays a protected dependency of the
+            # retained attempt until the old files are removed, so it is never edited or moved in place.
+            and not (manifest.get('retry_intent') or {}).get('retained_checkpoint_id'))
 
 
 @contextlib.contextmanager

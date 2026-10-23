@@ -34,14 +34,15 @@ def _order(db):
     """Read-only: no table yet means nothing is queued."""
     return [tuple(row) for row in db.execute(_ORDER)] if _exists(db) else []
 
-def request(db,parent_job_id,kind,now):
-    """Accept a Retry/Repair click (idempotent while queued). Caller checks static eligibility."""
+def request(db,parent_job_id,kind,now,origin=None):
+    """Accept a Retry/Repair click (idempotent while queued). Caller checks static eligibility. origin 'automatic': the
+    automatic pass queued it, so the row says nothing is needed (0.21.1)."""
     if kind not in KINDS:raise ValueError('Unknown re-admission kind')
     ensure(db);db.execute('BEGIN IMMEDIATE')
     row=db.execute('SELECT state FROM m4b_readmissions WHERE parent_job_id=?',(parent_job_id,)).fetchone()
     if not row or row[0]=='refused':
         seq=db.execute('SELECT COALESCE(MAX(seq),0)+1 FROM m4b_readmissions').fetchone()[0]
-        db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(parent_job_id,kind,seq,'queued',None,'',_stamp(now),_stamp(now)))
+        db.execute('INSERT OR REPLACE INTO m4b_readmissions VALUES(?,?,?,?,?,?,?,?)',(parent_job_id,kind,seq,'queued',None,json.dumps({'origin':origin}) if origin else '',_stamp(now),_stamp(now)))
     return describe(db,parent_job_id)
 
 def describe(db,job_id):
@@ -52,7 +53,7 @@ def describe(db,job_id):
         if job_id in (parent,child):
             saved=db.execute('SELECT detail FROM m4b_readmissions WHERE parent_job_id=?',(parent,)).fetchone()
             detail=json.loads(saved[0] or '{}') if saved else {}
-            return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child,'waiting_reason':detail.get('waiting_reason','')}
+            return {'accepted':True,'queued_next':True,'position':position,'kind':kind,'state':state,'parent_job_id':parent,'child_job_id':child,'waiting_reason':detail.get('waiting_reason',''),**({'origin':detail['origin']} if state=='queued' and detail.get('origin') else {})}
     row=db.execute('SELECT parent_job_id,kind,state,child_job_id,detail,updated FROM m4b_readmissions WHERE parent_job_id=? OR child_job_id=?',(job_id,job_id)).fetchone()
     if not row:return None
     parent,kind,state,child,detail,updated=tuple(row)
@@ -151,4 +152,4 @@ def _table_exists(db,name):return db.execute("SELECT 1 FROM sqlite_master WHERE 
 def record_waiting(db,reason):
     """A failed start preserves requests and records its real reason; never admits a child."""
     if not _exists(db):return
-    db.execute("UPDATE m4b_readmissions SET detail=? WHERE state='queued'",(json.dumps({'waiting_reason':str(reason)},ensure_ascii=False),))
+    db.execute("UPDATE m4b_readmissions SET detail=json_set(CASE WHEN json_valid(detail) THEN detail ELSE '{}' END,'$.waiting_reason',?) WHERE state='queued'",(str(reason),))
