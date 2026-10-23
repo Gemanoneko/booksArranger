@@ -7,11 +7,12 @@ mdat/audio byte moves, so the result is byte-identical to the copy flow's checke
 Eligibility is the copy flow's own route into metadata preservation (automatic profile, one .m4b
 whose AAC audio is stream-copied, no approved repair, a preservation plan that needs no repair), plus
 what an in-place edit needs (one ordinary link, a held deny-writers handle, a same-volume destination,
-no foreign named streams). Any refusal before the first written byte returns None and the copy flow
-runs unchanged. After the first write, every failure undoes the edit (a full-read proof that the file
-is still the edited original, then length, the 4 type bytes, write time and attributes, then a
-full-hash proof) before anything else. A crash leaves an inplace_edits row that recovery undoes, or
-proves moved, at startup and before any new attempt on that source.
+no foreign named streams). Any refusal before the first written byte returns None, and the copy flow
+then runs every one of its own checks (on a cover copy this attempt staged too, 0.21.0 F1). After the
+first write, every failure undoes the edit (a full-read proof that the file's original extent is still
+the reviewed original, then length, the 4 type bytes, write time and attributes, then a full-hash
+proof) before anything else. A crash leaves an inplace_edits row that recovery undoes, or proves
+moved, at startup and before any new attempt on that source.
 
 No decode is performed (Sergei, 2026-10-22). Audio integrity rests on the byte proof: with the 4
 type bytes reverted, the file's original extent hashes to the reviewed SHA-256, and the appended
@@ -42,7 +43,7 @@ OPEN = ('intended', 'written', 'publishing', 'unresolved')
 
 
 class Ineligible(Exception):
-    """Before any write: the copy flow runs unchanged."""
+    """Before any write: the copy flow then runs, with all of its own checks."""
 
 
 class Unresolved(ap.ValidationError):
@@ -61,6 +62,33 @@ def ensure(db):
     db.execute('CREATE TABLE IF NOT EXISTS inplace_edits(job_id TEXT,attempt_id TEXT,path TEXT,state TEXT,intent TEXT,detail TEXT,updated TEXT,PRIMARY KEY(job_id,attempt_id))')
 
 
+DAMAGED = 'The journal record of this edit is damaged; the file was not changed'
+# Every intent field recovery reads, with its type. A row of any other shape is unresolved on its own book, never an
+# exception that stops the engine from starting (0.21.0 M1).
+_SHAPE = {'path': str, 'root': str, 'destination': str, 'sha256': str, 'output_sha256': str,
+          'size': int, 'output_size': int, 'type_offset': int, 'modified': int, 'attributes': int}
+
+
+def _json_object(raw):
+    """One journal column as a JSON object; SQL NULL, text that is not JSON, or any other JSON value raises Unresolved."""
+    try:
+        value = json.loads(raw) if isinstance(raw, (str, bytes)) else None
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
+        raise Unresolved(DAMAGED)
+    return value
+
+
+def _intent(row):
+    """The journaled intent, its shape checked before recovery reads any field of it."""
+    intent = _json_object(row['intent'])
+    if any(type(intent.get(key)) is not kind for key, kind in _SHAPE.items()) or not (
+            0 <= intent['type_offset'] <= intent['size'] - 4 and intent['size'] < intent['output_size']):
+        raise Unresolved(DAMAGED)
+    return intent
+
+
 def _record(database, job_id, attempt_id, state, intent=None, detail=None):
     def write(db):
         ensure(db)
@@ -71,7 +99,11 @@ def _record(database, job_id, attempt_id, state, intent=None, detail=None):
             db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (job_id, attempt_id, intent['path'], state,
                        json.dumps(intent, sort_keys=True), json.dumps(detail or {}, sort_keys=True), _stamp()))
         else:
-            merged = json.loads(row['detail']) | (detail or {})
+            try:
+                kept = _json_object(row['detail'])
+            except Unresolved:  # a damaged detail never stops the row from settling; its text is kept as evidence (M1)
+                kept = {'damaged_detail': row['detail'] if isinstance(row['detail'], str) else repr(row['detail'])}
+            merged = kept | (detail or {})
             db.execute('UPDATE inplace_edits SET state=?,detail=?,updated=? WHERE job_id=? AND attempt_id=?',
                        (state, json.dumps(merged, sort_keys=True), _stamp(), job_id, attempt_id))
     transaction(database, write)
@@ -179,14 +211,13 @@ def _same_volume(handle, root, destination):
 
 
 def _edited_original(handle, intent):
-    """One full read before any undo write: [0, size) with the type reverted is the reviewed original, and a tail of the
-    full appended length is the planned moov. A shorter tail is an interrupted append, cut off by the undo."""
-    original = hashlib.sha256(); tail = hashlib.sha256(); offset = 0; revert = ((intent['type_offset'], b'moov'),)
+    """One full read before any undo write: [0, size) with the type reverted is the reviewed original. That alone proves
+    the undo (cut to size, revert the 4 type bytes) yields the exact original, so the bytes past size are not judged: an
+    append that is whole, torn, or zero-filled by a power loss at full length is cut off the same way (0.21.0 F12)."""
+    original = hashlib.sha256(); offset = 0; revert = ((intent['type_offset'], b'moov'),)
     for block in handle.chunks():
-        head = block[:max(0, intent['size'] - offset)]
-        original.update(mp._patched(head, offset, revert)); tail.update(block[len(head):]); offset += len(block)
-    return offset >= intent['size'] and original.hexdigest() == intent['sha256'] and (
-        offset != intent['output_size'] or tail.hexdigest() == intent['appended_sha256'])
+        original.update(mp._patched(block[:max(0, intent['size'] - offset)], offset, revert)); offset += len(block)
+    return offset >= intent['size'] and original.hexdigest() == intent['sha256']
 
 
 def _undo(handle, intent, same_identity=True):
@@ -325,6 +356,9 @@ def _edit(manifest, stage, stop, progress, session):
         _byte_proof(final, plan, intent, stop)
         if zone_identifier.streams(source) != [('::$DATA', intent['output_size'])]:
             raise ap.ValidationError('Additional filesystem streams appeared during the in-place edit')
+        # The copy flow's last check of its output, the same refusal (Sergei: the fast path runs every check the copy flow runs)
+        if ap.digest(manifest['cover']['path'], stop) != manifest['cover']['sha256']:
+            raise ap.ValidationError('Selected cover changed — review required')
         session.record('written', verified=_stamp())
         receipt = mp.receipt(plan, original, expected) | {'all_retained_bytes_verified': True}
         validation = {'profile': manifest['profile'], 'encoding': encoding | {'selection': SELECTION}, 'publication_mode': MODE,
@@ -382,15 +416,20 @@ def _prove_move(intent, final_path):
 
 
 def reconcile(database, row):
-    """Recovery for one open edit: undo it if the original is still at its path, else prove the move and record its receipt."""
+    """Recovery for one open edit: undo it if the original is still at its path, else prove the move and record its receipt.
+
+    'offline' (0.21.0 F13): the original's folder cannot be seen, as when the library share is not reconnected yet, so the
+    original is not proven missing. Nothing is recorded; the row stays open for the next start or attempt."""
     try:
-        intent = json.loads(row['intent']); path = ordinary(intent['path'])
+        intent = _intent(row); path = ordinary(intent['path'])
         if os.path.lexists(path):
             with DirectoryBoundary(intent['root'], path.parent), VerifiedFile(path, writable=True) as handle:
                 _undo(handle, intent, same_identity=False)
             state, detail = 'rolled_back', {'recovered': _stamp()}
         elif os.path.lexists(intent['destination']):
             state, detail = 'published', {'rename': _prove_move(intent, intent['destination']), 'recovered_move': _stamp()}
+        elif not os.path.isdir(path.parent):
+            return 'offline', {'folder': str(path.parent)}
         else:
             raise Unresolved('The edited original is missing and its destination does not hold it')
     except (ValueError, OSError) as error:
@@ -410,32 +449,50 @@ ATTENTION = 'An interrupted in-place metadata edit of this book could not be und
 
 def unresolved(database):
     """{job_id: attention reason} for every edit recovery could not settle."""
-    return {row['job_id']: ATTENTION + (json.loads(row['detail']).get('reason') or 'unknown reason')
-            for row in _rows(database, ' AND state=?', ('unresolved',))}
+    found = {}
+    for row in _rows(database, ' AND state=?', ('unresolved',)):
+        try:
+            reason = _json_object(row['detail']).get('reason')
+        except Unresolved as damaged:  # an 'unresolved' row recovery left untouched (offline) keeps its detail as found
+            reason = str(damaged)
+        found[row['job_id']] = ATTENTION + str(reason or 'unknown reason')
+    return found
 
 
 def clear(database, manifest):
-    """Before an attempt: no source of this job may carry an unresolved in-place edit."""
+    """Before an attempt: no source of this job may carry an unresolved in-place edit.
+
+    An edit whose folder cannot be seen ('offline') does not refuse the attempt: that attempt cannot read the source
+    either, and nothing writes to a source that differs from its review (an in-place edit first requires the reviewed
+    size, write time and hash; the copy flow only reads it). The next attempt or start that can see the folder settles it."""
     rows = _rows(database)
     if not rows:
         return
     names = {os.path.normcase(os.path.abspath(str(item.get('path', '')))) for item in manifest.get('sources', [])}
     for row in rows:
-        if os.path.normcase(row['path']) in names:
+        # This job's own rows, and any edit of one of its sources. A row whose path column is damaged is matched by its job
+        # alone, so it refuses only its own book's attempt, never another book's (0.21.0 M1).
+        if row['job_id'] == manifest.get('job_id') or isinstance(row['path'], str) and os.path.normcase(row['path']) in names:
             state, detail = reconcile(database, row)
             if state == 'unresolved':
                 raise Unresolved(ATTENTION + detail['reason'])
 
 
 def published_move(database, job_id, path):
-    """The journaled rename that retired this original into its output, or None."""
+    """The journaled rename that retired this original into its output, or None. A damaged row proves no move, so source
+    cleanup refuses this book on its own ("receipt is missing") instead of raising (0.21.0 M1)."""
     with connect(database) as db:
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inplace_edits'").fetchone():
             return None
         rows = [dict(r) for r in db.execute("SELECT * FROM inplace_edits WHERE job_id=? AND state='published'", (job_id,))]
     for row in rows:
-        rename = json.loads(row['detail']).get('rename') or {}
-        if os.path.normcase(row['path']) == os.path.normcase(path) and rename.get('old_absent') is True and os.path.normcase(rename.get('old_path', '')) == os.path.normcase(path):
+        try:
+            rename = _json_object(row['detail']).get('rename')
+        except Unresolved:
+            continue
+        if (isinstance(row['path'], str) and isinstance(rename, dict) and isinstance(rename.get('old_path'), str)
+                and isinstance(rename.get('final_path'), str) and 'identity' in rename and rename.get('old_absent') is True
+                and os.path.normcase(row['path']) == os.path.normcase(path) == os.path.normcase(rename['old_path'])):
             return rename
     return None
 
@@ -448,12 +505,12 @@ def confirm_move(database, job_id, path, final_path):
             return None
         rows = [dict(r) for r in db.execute("SELECT * FROM inplace_edits WHERE job_id=? AND state IN ('publishing','published','unresolved')", (job_id,))]
     for row in rows:
-        if os.path.normcase(row['path']) != os.path.normcase(path):
+        if not isinstance(row['path'], str) or os.path.normcase(row['path']) != os.path.normcase(path):
             continue
         try:
-            receipt = _prove_move(json.loads(row['intent']), final_path)
+            receipt = _prove_move(_intent(row), final_path)
         except (ValueError, OSError):
-            continue  # not this attempt's output; the caller refuses without a receipt
+            continue  # damaged, or not this attempt's output; the caller refuses without a receipt
         _record(database, job_id, row['attempt_id'], 'published', detail={'rename': receipt, 'recovered_move': _stamp()})
         return receipt
     return None

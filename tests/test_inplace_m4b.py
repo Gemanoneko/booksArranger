@@ -2,7 +2,7 @@
 
 Real AAC/ALAC fixtures through the installed FFmpeg; no decode is part of the edited path.
 """
-import base64, contextlib, copy, hashlib, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
+import ast, base64, contextlib, copy, hashlib, importlib, inspect, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,6 +10,7 @@ from unittest.mock import patch
 import audio_pipeline as ap
 import inplace_m4b
 import m4b_preservation as mp
+import m4b_repair
 import native_io
 from audio_pipeline import create_private, digest, fingerprint, run_owned, source_chapters, ValidationError
 from encoding_policy import AUTOMATIC_PROFILE, freeze_automatic_policy
@@ -246,6 +247,16 @@ class FallbackTests(Fixture):
         self.assertIn('cover dimensions', next(n for n in notes if 'in_place' in n)['in_place']['fallback'])  # in place fell back first
         self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows(), [])
 
+    def test_a_selected_cover_changed_during_the_edit_is_refused_as_the_copy_flow_refuses_it(self):
+        # Sergei, 2026-10-23: the fast path runs every check the copy flow runs. The copy flow re-reads the selected cover
+        # file after creating its output; the edit now does so after its writes, undoes, and the copy flow then refuses.
+        source = self.media(); before = self.snapshot(source); manifest = self.manifest(source)
+        def changed(point, handle=None):
+            if point == 'checked':Path(manifest['cover']['path']).write_bytes(PNG + b'changed')
+        with patch('inplace_m4b._fault', side_effect=changed), self.assertRaisesRegex(ValidationError, 'Selected cover changed'):
+            self.run_in_place(manifest)
+        self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows()[0]['state'], 'rolled_back')
+
     def test_post_write_check_failure_undoes_then_copy_flow_runs(self):
         source = self.media(); before = self.snapshot(source); manifest = self.manifest(source); actual = ap.copied_audio_evidence; calls = []
         def contradictory(*args, **kwargs):
@@ -271,6 +282,66 @@ class CrashRecoveryTests(Fixture):
                 self.assertEqual(inplace_m4b.recover_all(self.database)[-1][0], 'rolled_back')
                 self.assertEqual(self.snapshot(source), before)
                 inplace_m4b.clear(self.database, manifest)  # nothing open for this source any more
+
+    def test_a_torn_append_of_full_length_is_undone(self):
+        # Senua 0.21.0 F12: a power loss mid-append can persist the new length before its bytes (a zero-filled tail). The head
+        # proof alone shows the undo restores the reviewed original, so the tail is cut off whatever it holds.
+        source = self.media(); before = self.snapshot(source); manifest = self.manifest(source); self.crash('appended', manifest)
+        intent = json.loads(self.rows()[0]['intent'])
+        with open(source, 'r+b') as stream:stream.seek(intent['size']); stream.write(b'\0' * intent['appended_size'])
+        self.assertEqual(os.path.getsize(source), intent['output_size'])
+        self.assertEqual([state for state, _ in inplace_m4b.recover_all(self.database)], ['rolled_back'])
+        self.assertEqual(self.snapshot(source), before)
+
+    def test_cleanup_proves_a_move_only_with_the_old_path_absent_and_into_the_current_output(self):
+        # Senua 0.21.0 F14: three edges of confirm_move that no test needed (mutants N5, N9 and N10 survived).
+        source = self.media(); manifest = self.manifest(source); edited, validation = self.run_in_place(manifest)
+        final = Path(published(self.fake(), manifest, edited, validation, lambda *a: None)['final_path'])
+        def unreceipted(state):
+            with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+                detail = json.loads(db.execute('SELECT detail FROM inplace_edits').fetchone()[0]); detail.pop('rename', None)
+                db.execute('UPDATE inplace_edits SET state=?, detail=?', (state, json.dumps(detail)))
+        def confirmed(output):
+            return inplace_m4b.confirm_move(self.database, manifest['job_id'], str(source), str(output))
+        with self.subTest('N5: a file is at the old path'):
+            unreceipted('publishing'); shutil.copy2(final, source)
+            self.assertIsNone(confirmed(final)); self.assertEqual(self.rows()[0]['state'], 'publishing'); source.unlink()
+        with self.subTest('N9: startup recovery left the row unresolved'):
+            unreceipted('unresolved'); self.assertIsNotNone(confirmed(final)); self.assertEqual(self.rows()[0]['state'], 'published')
+        with self.subTest('N10: the output was relocated before its cleanup'):
+            unreceipted('publishing'); moved = final.with_name('Relocated.m4b'); final.rename(moved); receipt = confirmed(moved)
+            self.assertIsNotNone(receipt); self.assertEqual(os.path.normcase(receipt['final_path']), os.path.normcase(str(moved)))
+
+    def test_cleanup_refuses_a_damaged_row_on_its_own_book_instead_of_raising(self):
+        # Coordinator follow-up, 2026-10-23: published_move and confirm_move parsed rows with no shape check, so a damaged
+        # row raised TypeError/KeyError/AttributeError into source cleanup. It now proves no move, and cleanup refuses that
+        # book with its own reason.
+        from source_cleanup import CleanupJobs
+        source = self.root / 'Unsorted' / 'Book.m4b'; final = self.root / 'Sorted' / 'Book.m4b'
+        receipt = {'old_path': str(source), 'final_path': str(final), 'identity': [1, 2, 3], 'old_absent': True}
+        rows = {'published, detail JSON null': ('published', '{}', 'null', str(source)),
+                'published, detail SQL NULL': ('published', '{}', None, str(source)),
+                'published, rename not an object': ('published', '{}', json.dumps({'rename': ['x']}), str(source)),
+                'published, receipt without final path or identity': ('published', '{}', json.dumps({'rename': {'old_path': str(source), 'old_absent': True}}), str(source)),
+                'published, receipt without old path': ('published', '{}', json.dumps({'rename': dict(receipt, old_path=None)}), str(source)),
+                'published, path NULL': ('published', '{}', json.dumps({'rename': receipt}), None),
+                'publishing, intent damaged': ('publishing', '{}', '{}', str(source)),
+                'unresolved, intent and path NULL': ('unresolved', None, '{}', None)}
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            inplace_m4b.ensure(db)
+            for label, (state, intent, detail, path) in rows.items():
+                db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (label, 'attempt', path, state, intent, detail, 'x'))
+        retired = []
+        cleanup = SimpleNamespace(database=self.database, root=self.root / 'recovery', review_boundary=contextlib.nullcontext,
+                                  guard=lambda db, intent: True, _set=lambda *a: retired.append(a), _retire=lambda *a: retired.append(a))
+        for label in rows:
+            with self.subTest(row=label):
+                self.assertIsNone(inplace_m4b.published_move(self.database, label, str(source)))
+                self.assertIsNone(inplace_m4b.confirm_move(self.database, label, str(source), str(final)))
+                manifest = {'job_id': label, 'sources': [{'path': str(source), 'size': 1, 'modified': 1, 'sha256': '0' * 64}]}
+                with self.assertRaisesRegex(BoundaryError, 'In-place move receipt is missing; nothing retired'):
+                    CleanupJobs._retire_moved(cleanup, 'cleanup', {'job_id': label}, manifest, {'final_path': str(final)})
+        self.assertEqual(retired, [])
 
     def test_torn_type_patch_is_restored(self):
         source = self.media(); before = self.snapshot(source); manifest = self.manifest(source); self.crash('type_patched', manifest)
@@ -394,6 +465,76 @@ class RecoveryWiringTests(Fixture):
         self.assertEqual((self.job(jobs, job_id)['state'], self.job(jobs, job_id)['reason']), ('needs attention', inplace_m4b.ATTENTION + 'disk I/O error'))
         self.assertEqual(self.job(jobs, kept)['state'], 'pending')  # a book that is never edited in place just restarts
 
+    def test_startup_shows_a_damaged_journal_row_on_its_book_and_still_starts(self):
+        # Futaba 0.21.0 M1: a row of the wrong shape raised KeyError/TypeError out of startup, so the engine never started.
+        # Each damaged row is now unresolved on its own book; a damaged detail never blocks the undo of an intact intent.
+        source = self.media(); before = self.snapshot(source); first = self.queue()
+        intact = self.manifest(source); intact_id = self.enqueue(first, intact, 'running'); self.crash('appended', intact)
+        good = json.loads(self.rows()[0]['intent'])
+        rows = {'empty object': ('written', '{}', '{}'), 'JSON null': ('written', 'null', '{}'), 'SQL NULL': ('written', None, None),
+                'not JSON': ('written', 'not json', '{}'), 'JSON list': ('intended', '[]', '[]'),
+                # past the original's end: an unchecked undo would pass the head proof, then write 'moov' after the last byte
+                'type offset outside the original': ('written', json.dumps(dict(good, type_offset=good['size'])), '{}'),
+                'output not longer than the original': ('written', json.dumps(dict(good, output_size=good['size'])), '{}'),
+                'unresolved, folder unreachable, detail NULL': ('unresolved', json.dumps(dict(good, path=str(self.root / 'Gone' / 'Book.m4b'))), None)}
+        for key in ('path', 'root', 'destination', 'sha256', 'output_sha256', 'size', 'output_size', 'type_offset', 'modified', 'attributes'):
+            rows[key + ' missing'] = ('written', json.dumps({k: v for k, v in good.items() if k != key}), '{}')
+            rows[key + ' of the wrong type'] = ('written', json.dumps(dict(good, **{key: [good[key]]})), '{}')
+        manifests = {label: dict(copy.deepcopy(intact), job_id=str(uuid.uuid4()), attempt_id=str(uuid.uuid4()), candidate_id=str(uuid.uuid4())) for label in rows}
+        jobs = {label: self.enqueue(first, m, 'running') for label, m in manifests.items()}
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute("UPDATE inplace_edits SET detail='null'")  # the intact row's detail is damaged too
+            for label, (state, intent, detail) in rows.items():
+                db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (manifests[label]['job_id'], manifests[label]['attempt_id'], str(source), state, intent, detail, 'x'))
+        restarted = self.queue()  # the engine starts again
+        for label, job_id in jobs.items():
+            with self.subTest(row=label):
+                row = self.job(restarted, job_id)
+                self.assertEqual((row['state'], row['reason']), ('needs attention', inplace_m4b.ATTENTION + inplace_m4b.DAMAGED))
+        self.assertEqual(self.job(restarted, intact_id)['state'], 'pending'); self.assertEqual(self.snapshot(source), before)
+        kept = next(r for r in self.rows() if r['job_id'] == intact['job_id'])
+        self.assertEqual((kept['state'], json.loads(kept['detail'])['damaged_detail']), ('rolled_back', 'null'))
+
+    def test_startup_leaves_an_edit_in_an_unreachable_folder_open_and_undoes_it_once_reachable(self):
+        # Senua 0.21.0 F13: a library share not reconnected yet at startup is not a missing original. The book restarts with
+        # no attention, and the next start that can see the folder undoes the edit. A reachable folder that holds neither
+        # the original nor its destination is still reported missing.
+        source = self.media(); before = self.snapshot(source); manifest = self.manifest(source)
+        job_id = self.enqueue(self.queue(), manifest, 'running'); self.crash('type_patched', manifest)
+        folder = source.parent; away = folder.with_name('Unsorted offline'); folder.rename(away)
+        journaled = self.rows()[0]['state']; jobs = self.queue(); row = self.job(jobs, job_id)
+        self.assertEqual((row['state'], row['reason']), ('pending', 'Interrupted book restarts on explicit resume'))
+        self.assertEqual(self.rows()[0]['state'], journaled)  # still open, nothing recorded
+        inplace_m4b.clear(self.database, manifest); self.assertEqual(self.rows()[0]['state'], journaled)  # an attempt is not refused
+        away.rename(folder); self.queue()
+        self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows()[0]['state'], 'rolled_back')
+        gone = self.media('Gone.m4b'); missing = self.manifest(gone); gone_id = self.enqueue(jobs, missing, 'running')
+        self.crash('type_patched', missing); gone.rename(gone.with_name('Moved by hand.m4b'))
+        row = self.job(self.queue(), gone_id)
+        self.assertEqual((row['state'], row['reason']), ('needs attention', inplace_m4b.ATTENTION + 'The edited original is missing and its destination does not hold it'))
+
+    def test_a_damaged_row_refuses_only_its_own_books_attempt(self):
+        # Coordinator follow-up, 2026-10-23: clear() compared every open row's path column, so one row with a NULL path (and a
+        # damaged intent, which keeps it open) raised TypeError in every book's attempt. It now refuses its own book only.
+        seen = []
+        def runner(manifest, stop, checkpoint):
+            seen.append(manifest['job_id']); stop.set(); raise InterruptedError('Fixture stops at the runner')
+        jobs = self.queue(runner); damaged, other = self.manifest(self.media()), self.manifest(self.media('Other.m4b'))
+        damaged_id, other_id = self.enqueue(jobs, damaged), self.enqueue(jobs, other)
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            inplace_m4b.ensure(db)
+            db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (damaged['job_id'], damaged['attempt_id'], None, 'unresolved', '{}', '{}', 'x'))
+        for job_id in (other_id, damaged_id):
+            jobs._stop.clear(); jobs._work_attempt(self.job(jobs, job_id))
+        self.assertEqual(seen, [other['job_id']])  # the other book reached its runner; the damaged one never did
+        row = self.job(jobs, damaged_id)
+        self.assertEqual((row['state'], row['reason']), ('needs attention', inplace_m4b.ATTENTION + inplace_m4b.DAMAGED))
+
+    def test_startup_does_not_swallow_a_programming_error(self):
+        # Senua 0.21.0 F14 (N6): startup recovery catches only file-system, value and catalog errors; a bug still surfaces.
+        with patch('inplace_m4b.recover_all', side_effect=AttributeError('a programming error')):
+            with self.assertRaisesRegex(AttributeError, 'a programming error'):self.queue()
+
     def test_an_attempt_first_undoes_or_refuses_an_interrupted_edit_of_its_source(self):
         seen = []
         def runner(manifest, stop, checkpoint):
@@ -425,6 +566,136 @@ class ByteProofTests(Fixture):
         audio = plan.mdat_extents[0][0] + 5; output[audio] ^= 1; candidate.write_bytes(output)
         with VerifiedFile(candidate) as handle, self.assertRaisesRegex(ValidationError, 'changed retained source bytes'):
             inplace_m4b._byte_proof(handle, plan, intent, self.stop)
+
+
+def gate_table(modules=('audio_pipeline', 'm4b_preservation', 'm4b_repair', 'encoding_policy', 'source_proofs', 'inplace_m4b')):
+    """{(file, line): ['function: message', ...]}, every refusal guard in these modules as the code states it: an `if`
+    whose own body or final else raises, and every need(condition, message). Messages are their constant text."""
+    table = {}
+    def text(node, args):
+        found = next((a for a in args if isinstance(a, (ast.Constant, ast.JoinedStr, ast.BinOp))), node)
+        while isinstance(found, ast.BinOp):found = found.left
+        if isinstance(found, ast.JoinedStr):return ''.join(str(v.value) for v in found.values if isinstance(v, ast.Constant))
+        return str(found.value) if isinstance(found, ast.Constant) else ast.unparse(found) if found is not None else 're-raise'
+    def walk(node, function, path):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.If):
+                tail = [] if child.orelse[:1] and isinstance(child.orelse[0], ast.If) else child.orelse
+                raised = next((s for s in child.body + tail if isinstance(s, ast.Raise)), None)
+                if raised:table.setdefault((path, child.lineno), []).append(function + ': ' + text(raised.exc, getattr(raised.exc, 'args', ())))
+            elif isinstance(child, ast.Call) and getattr(child.func, 'id', getattr(child.func, 'attr', '')) == 'need' and len(child.args) == 2:
+                table.setdefault((path, child.lineno), []).append(function + ': ' + text(child.args[1], child.args[1:]))
+            walk(child, child.name if isinstance(child, (ast.FunctionDef, ast.ClassDef)) else function, path)
+    for name in modules:
+        path = inspect.getsourcefile(importlib.import_module(name)); walk(ast.parse(Path(path).read_text(encoding='utf-8')), '<module>', path)
+    return table
+
+
+@contextlib.contextmanager
+def gates_run(seen, paused=()):
+    """Add to `seen` every gate a run evaluates (its guard line executes), except while `paused` is non-empty. Through
+    sys.monitoring, every other line disables its own event after the first one, so the run keeps its normal speed."""
+    table = gate_table(); monitoring = sys.monitoring; tool = next(i for i in (3, 4) if monitoring.get_tool(i) is None)
+    def line(code, number):
+        gates = table.get((code.co_filename, number))
+        if gates is None or not paused:
+            seen.update(gates or ()); return monitoring.DISABLE
+    monitoring.use_tool_id(tool, 'in-place parity'); monitoring.restart_events()
+    monitoring.register_callback(tool, monitoring.events.LINE, line); monitoring.set_events(tool, monitoring.events.LINE)
+    try:yield seen
+    finally:
+        monitoring.set_events(tool, 0); monitoring.register_callback(tool, monitoring.events.LINE, None)
+        monitoring.free_tool_id(tool); monitoring.restart_events()
+
+
+NO_DECODE = 'no decode in place (Sergei, 2026-10-22): _byte_proof shows no audio byte moved'
+NO_STAGE = 'nothing is staged in place: no source snapshot, no candidate file'
+ONE_M4B = 'offered(): exactly one .m4b source in the automatic profile'
+# Every copy-flow gate the in-place edit does not evaluate itself, as 'function: message prefix' (a bare 'function: ' covers
+# machinery the edit has none of by design). The value is either 'in place: <the in-place gate doing its job>', which the
+# edit must evaluate, or why there is no such job in place. An entry that no longer matches a skipped gate fails too.
+COVERED = {
+    '_create_private: Frozen automatic encoding policy changed': 'in place: _edit: Frozen automatic encoding policy changed',
+    '_create_private: Protected cover differs from reviewed artwork': 'in place: _edit: Protected cover differs from reviewed artwork',
+    '_create_private: Protected snapshot differs from reviewed source bytes': 'in place: _edit: Source changed',
+    'snapshot_manifest: Protected snapshot differs from reviewed source bytes': 'in place: _edit: Source changed',
+    'snapshot_manifest: No reviewed source files are included': ONE_M4B,
+    'snapshot_manifest: This source format is not supported': ONE_M4B,
+    'snapshot_manifest: Existing M4B parts carry their own chapters': ONE_M4B,
+    'snapshot_manifest: Included files have incompatible': ONE_M4B,
+    'same_source: Source changed': 'in place: _edit: Source changed',  # and the source is held deny-writers until the move
+    'check_working_space: Source changed before working-space admission': 'in place: _edit: Source identity, links or attributes',
+    'check_working_space: Source is outside the supported audiobook boundary': ONE_M4B + '; DirectoryBoundary(root, source.parent) refuses',
+    'check_working_space: Destination is outside the audiobook library': 'in place: _edit: Destination is not a distinct library M4B',
+    'check_working_space: Audiobook destination root is unavailable': 'in place: _edit: Destination exists or is on another volume',
+    'check_working_space: Insufficient destination space': 'in place: _edit: Insufficient library space',
+    'check_working_space: Insufficient staging space': NO_STAGE,
+    'check_working_space: Insufficient working space': NO_STAGE,
+    'output_space_required: ': NO_STAGE,
+    'decoded_duration: ': NO_DECODE,
+    '_encode_inputs: Staging space changed': 'in place: _edit: Insufficient library space',
+    '_encode_inputs: Installed ffmpeg is required': 'the edit runs FFmpeg itself (probe, chapters, packet evidence) and falls back without it',
+    '_preserve_single_m4b: Existing M4B chapters differ': 'in place: _edit: Existing M4B chapters differ',
+    '_preserve_single_m4b: Protected cover differs from reviewed artwork': 'in place: _edit: Planned cover differs from reviewed artwork',
+    '_preserve_single_m4b: Insufficient space for the single metadata candidate': 'in place: _edit: Insufficient library space',
+    '_preserve_single_m4b: Preservation source differs from frozen bytes': 'in place: _edit: Source changed',
+    '_preserve_single_m4b: Preservation source identity changed': 'in place: _edit: In-place source identity changed after the edit',
+    '_preserve_single_m4b: Preservation candidate differs from its creation receipt': 'in place: _byte_proof: In-place edit changed retained source bytes',
+    '_preserve_single_m4b: Preserved candidate identity changed': 'in place: _byte_proof: In-place edit changed retained source bytes',
+    'stream_candidate: ': 'in place: _byte_proof: In-place edit changed retained source bytes',
+    'verify_candidate: ': 'in place: _byte_proof: In-place edit changed retained source bytes',
+    '_preserve_single_m4b: Preservation changed decoder, packets or presentation': 'in place: _edit: Preservation changed decoder, packets or presentation',
+    '_preserve_single_m4b: Preservation changed complete native decoded audio': NO_DECODE,
+    'result: Native M4B decoded frame proof is incomplete': NO_DECODE,
+    '_preserve_single_m4b: Preserved output audio profile is incorrect': 'in place: _edit: Preserved output audio profile is incorrect',
+    '_preserve_single_m4b: Preserved source chapter presentation changed': 'in place: _edit: Preserved source chapter presentation changed',
+    '_preserve_single_m4b: Preserved output approved metadata differs': 'in place: _edit: Preserved output approved metadata differs',
+    'confirm: Applied repair differs from the approved repair': 'in place: _edit: This book needs a repair',
+    # Found by this test on 2026-10-23 and closed the same day (Sergei: the fast path runs every check the copy flow runs).
+    '_preserve_single_m4b: Selected cover changed': 'in place: _edit: Selected cover changed',
+}
+
+
+class ParityTests(Fixture):
+    """Futaba 0.21.0 pattern alert: twice the in-place path skipped a check the copy flow makes for the same manifest (the
+    keep-sources policy, 8ba3af9; the cover gate after a fallback, 7321517). The copy flow's gate list is not copied here:
+    gate_table() reads every refusal guard out of the code, and a line tracer records which ones each run evaluates. A gate
+    added to the copy flow fails this test until the in-place path evaluates it too or COVERED states why it need not."""
+    def test_the_in_place_path_skips_no_gate_the_copy_flow_runs_for_the_same_manifest(self):
+        source = self.media(cover=True); twin = self.root / 'Unsorted' / 'Twin.m4b'; shutil.copy2(source, twin); (self.root / 'probe-stage').mkdir()
+        alone, eligible = self.manifest(twin, self.root / 'Sorted' / 'twin.m4b'), self.manifest(source)  # built outside every trace
+        with gates_run(set()) as copy_flow:create_private(alone, self.root / 'stage', self.stop)
+        with gates_run(set()) as edit:edited, validation = self.run_in_place(eligible)
+        self.assertIsInstance(edited, inplace_m4b.Edited); edited.undo(); edited.close()
+        skipped = copy_flow - edit
+        self.assertEqual(sorted(g for g in skipped if not any(g.startswith(key) for key in COVERED)), [], 'Copy-flow gates the edit skips')
+        self.assertEqual(sorted(key for key in COVERED if not any(g.startswith(key) for g in skipped)), [], 'Stale COVERED entries')
+        named = {value[len('in place: '):] for value in COVERED.values() if value.startswith('in place: ')}
+        self.assertEqual(sorted(gate for gate in named if not any(g.startswith(gate) for g in edit)), [], 'Named in-place gates that never ran')
+        # After the edit falls back, before its first write or after its undo, the copy flow runs every gate it runs alone.
+        def failed_check(point, handle=None):
+            if point == 'checked':raise ValidationError('Check failure (parity test)')
+        for when, seam, effect in (('before the first write', 'inplace_m4b._hashes', inplace_m4b.Ineligible('Fallback (parity test)')),
+                                   ('after the undo', 'inplace_m4b._fault', failed_check)):
+            with self.subTest(fallback=when):
+                inside = []; real = inplace_m4b.edit; manifest = self.manifest(source)
+                def edit_only(*args):
+                    inside.append(1)
+                    try:return real(*args)
+                    finally:inside.pop()
+                with patch(seam, side_effect=effect), patch('inplace_m4b.edit', side_effect=edit_only), gates_run(set(), inside) as after:
+                    output, proof = self.run_in_place(manifest)
+                self.assertEqual(proof['encoding']['selection'], 'existing_m4b_audio_stream_copy')
+                self.assertEqual(sorted(copy_flow - after), [], 'Copy-flow gates skipped after the fallback')
+        # Decided outside create_private, so no gate exists to trace: the copy flow keeps the original unless source cleanup
+        # is enrolled (merge_service: cleanup_policy.enabled), and keeps a replacement's or an approved repair's sources.
+        base = self.manifest(source); before = self.snapshot(source); journal = self.rows()
+        repair = {'schema': m4b_repair.SCHEMA, 'note': 'repair', 'repairs': [{'kind': mp.REPAIR_TAIL_OVERRUN}]}
+        for change in ({'cleanup_policy': {'enabled': False}}, {'cleanup_policy': {}}, {'cleanup_policy': None},
+                       {'replacement_id': 'replacement'}, {'m4b_repair': repair}):
+            with self.subTest(change=change):
+                result = inplace_m4b.edit(dict(base, **change), self.root / 'probe-stage', self.stop, lambda *a: None, self.session(base))
+                self.assertIsNone(result); self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows(), journal)
 
 
 class ServiceTests(unittest.TestCase):

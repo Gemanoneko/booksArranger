@@ -75,7 +75,7 @@ A `moov` after `mdat` is valid QuickTime/ISO-BMFF and matters only for progressi
 - every approved tag;
 - the packet and presentation evidence equals the evidence taken before the write.
 
-**Final audio-untouched proof.** This runs under a READ|DELETE handle, held deny-writers through the rename. With the 4 type bytes reverted, `[0, original size)` must hash to the reviewed sha256. The tail must equal the planned `moov`, and the whole file must equal the planned output sha256.
+**Final audio-untouched proof.** This runs under a READ|DELETE handle, held deny-writers through the rename. With the 4 type bytes reverted, `[0, original size)` must hash to the reviewed sha256. The tail must equal the planned `moov`, and the whole file must equal the planned output sha256. Last, as in the copy flow, the selected cover file is read again and must still hash to the reviewed cover ("Selected cover changed — review required"; Sergei, 2026-10-23: the fast path runs every check the copy flow runs). A refusal here undoes the edit, and the copy flow then refuses the same way.
 
 **Integrity trade-off of no decode.** The copy flow decodes the source in full (`-xerror`, refusing "Full audio decode failed") and compares the source and output PCM. The fast path does neither, so a source with bitstream corruption inside its AAC frames is published instead of being flagged. The PCM comparison itself carries no information here: identical `trak`, `mvhd` and `mdat` bytes give identical decoder input. That check never fired in 358 preserved books.
 
@@ -111,7 +111,7 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 ## 6. Crash, NAS drop and check failure after the write starts
 
 **In process.** Any failure after step 1, including a pause, undoes the edit:
-- before any write, prove the file is the edited original: the same native file ID (a writer reopened by path is checked too), and one full read in which `[0, original size)` with the type reverted hashes to the reviewed sha256 and a full-length tail hashes to the planned `moov`. A file that fails either proof is left exactly as found, and the row becomes `unresolved`;
+- before any write, prove the file is the edited original: the same native file ID (a writer reopened by path is checked too), and one full read in which `[0, original size)` with the type reverted hashes to the reviewed sha256. That proof alone shows the undo restores the exact original, so the bytes past the original size are cut off without being judged, whether whole, torn, or zero-filled at full length by a power loss (0.21.0 F12). A file that fails either proof is left exactly as found, and the row becomes `unresolved`;
 - truncate to the original size;
 - write `moov` back;
 - restore the ns write time and the attributes;
@@ -125,7 +125,8 @@ After the undo, the copy flow runs (a pause stops instead). An undo that cannot 
 |---|---|
 | The original is still at its path | Undo, always proving the content first (one full read, as above). A share may report a new file ID after reconnecting, so recovery does not require the same ID; the content proof decides → `rolled_back` |
 | The source path is absent and the destination hashes in full, under a deny-writers handle, to the planned output | `published`, with a recovered rename receipt that source cleanup accepts. A matching size alone proves nothing |
-| Anything else, including the library being offline | `unresolved`: the job needs attention, other books continue, and recovery is retried at the next start or attempt |
+| The original's folder cannot be seen, as when the library share is not reconnected yet (0.21.0 F13) | Nothing is recorded and the row stays open. The interrupted book restarts as usual, and the next start or attempt that can see the folder settles it. That attempt is not refused: it cannot read the source either, and nothing writes to a source that differs from its review |
+| Anything else: the folder is there but holds neither the original nor the planned output, or the journal row is damaged (0.21.0 M1) | `unresolved`: the job needs attention, other books continue, and recovery is retried at the next start or attempt |
 
 **Backup.** None is needed. Only the 4 known bytes are overwritten, and everything else lies past the original end of file. The journal row is the complete undo, so no full copy is ever made.
 
