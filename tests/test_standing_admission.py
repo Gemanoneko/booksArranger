@@ -68,7 +68,8 @@ class StandingAdmissionTests(unittest.TestCase):
 class FailedJobRetryTests(unittest.TestCase):
     def setUp(self):
         import tempfile
-        self.temp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'scratch'/'source-fallback-2026-10-11');self.addCleanup(self.temp.cleanup)
+        parent=Path(__file__).resolve().parents[1]/'scratch'/'source-fallback-2026-10-11';parent.mkdir(parents=True,exist_ok=True)  # the gate makes it too; a single-module run must not depend on that
+        self.temp=tempfile.TemporaryDirectory(dir=parent);self.addCleanup(self.temp.cleanup)
         self.guard=Mock(return_value=True);self.jobs=AudioJobs(Path(self.temp.name)/'queue.sqlite',Mock(),self.guard,Mock(return_value=True));self.addCleanup(self.jobs.close)
         self.job_id=str(uuid.uuid4());self.manifest={'job_id':self.job_id,'candidate_id':str(uuid.uuid4()),'candidate_revision':1,'sources':[{'path':'fixture.mp3','sha256':'a'*64,'fingerprint':{}}],'metadata':{},'destination':'fixture.m4b','profile':'fixture','evidence':{},'cover':{}}
         self.jobs.enqueue(self.manifest);self.journal={'history':[],'failure':{'at':100,'retryable':True,'exception_class':'OSError'}}
