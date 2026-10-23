@@ -35,7 +35,8 @@ class LocalAdmissionTests(unittest.TestCase):
         self.assertEqual(result['reasons'],[],result);return row,result
     def test_local_agreement_reaches_verified_ready_with_sources_retired_and_recovery_retained(self):
         row,result=self.research()
-        self.assertTrue(all('fantlab' in u or 'wikidata' in u or 'goodreads' in u for u in self.calls),self.calls)  # goodreads: the series gap (v0.16.11)
+        # goodreads: the series gap (v0.16.11); the DuckDuckGo "publisher" query: the series gap's primary-publisher lead (v0.18.0)
+        self.assertTrue(all('fantlab' in u or 'wikidata' in u or 'goodreads' in u or (u.startswith('https://html.duckduckgo.com/html/?q=') and u.endswith('+publisher')) for u in self.calls),self.calls)
         fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['job_id'],job_id);self.assertEqual(job['state'],'completed',job)
         self.assertTrue(job['output']['validation']['passed']);self.assertTrue(Path(job['output']['final_path']).is_file())
