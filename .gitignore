@@ -3,6 +3,8 @@ __pycache__/
 data/
 scratch/
 .venv/
+# Private real-media test fixtures (copyrighted bytes; local only, never committed or packaged)
+private-fixtures/
 
 # Desktop (Electron) build: dependencies, pinned runtime downloads, packaged output
 node_modules/
