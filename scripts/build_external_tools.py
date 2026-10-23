@@ -9,11 +9,11 @@ import os
 from pathlib import Path
 from native_io import BoundaryError,DirectoryBoundary,VerifiedFile,kernel,ordinary
 
-GIT_WRAPPER_SHA256='54bda91c773c6bba2b970424423cfcb80552d92dc6967d766f98931fe1251a54'
+GIT_WRAPPER_SHA256='3b64043b9e4dc225225f43ff9c1173b57493ff72e5b729accfae051eb160cca3'
 GIT=Path('C:/Program Files/Git/cmd/git.exe')
 GIT_ALIASES=(GIT,GIT.with_name('git-lfs.exe'))
 CORE=Path('C:/Program Files/Git/ucrt64/bin/git.exe')
-CORE_SHA256='b824434dfe3b5f9cf648af6c9cc8cb1f6a982cc6e13b6c6ebbe6533c7e51cc2e'
+CORE_SHA256='9c131f3052b17c8bbd1bce7211414cf589b85cbdbd74d0b0aa40e0a602d47930'
 CORE_ALIASES=tuple(CORE.with_name(name) for name in ('git.exe','git-upload-pack.exe','git-upload-archive.exe','git-receive-pack.exe'))
 CORE_DLLS={
  'libiconv-2.dll':'94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a',
