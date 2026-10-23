@@ -17,6 +17,8 @@ from pathlib import Path
 from scanner import connect
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, VerifiedDirectory, DirectoryNotEmptyError, DirectoryDispositionUnsupported, ordinary
 from source_cleanup import packed, stamp, single_stream
+# The MP3 trailing-tag repair's private copy and proof (audio_pipeline._mp3_tag_copy); exact producer receipts decide their bytes.
+TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 
 TERMINAL = {'removed', 'absent_after_intent'}
 
@@ -427,7 +429,7 @@ class StorageCleanup:
             stack.enter_context(DirectoryBoundary(job, attempt))
             for path in attempt.iterdir():
                 name = path.name
-                known = name in expected or name in {'cover.jpg', 'cover.png', 'checked.m4b', 'compatible.m4b', 'inputs.txt', 'chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)', name)
+                known = name in expected or name in {'cover.jpg', 'cover.png', 'checked.m4b', 'compatible.m4b', 'inputs.txt', 'chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)', name) or TAG_REPAIR.fullmatch(name)
                 from encoding_policy import AUTOMATIC_PROFILE
                 normalized=manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name) and recorded.get('attempt_id')==attempt.name and name in recorded.get('files',{})
                 known=bool(known or normalized)
@@ -477,7 +479,7 @@ class StorageCleanup:
     @staticmethod
     def working_name(manifest, name):
         """Shared finite disposable role policy; never includes source snapshots."""
-        disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name)
+        disposable=name in {'cover.jpg','cover.png','checked.m4b','compatible.m4b','inputs.txt','chapters.txt'} or re.fullmatch(r'[0-9a-f]{32}\.(stderr|decode-stderr|stdout|jpg|png)',name) or TAG_REPAIR.fullmatch(name)
         from encoding_policy import AUTOMATIC_PROFILE
         return bool(disposable or (manifest.get('profile')==AUTOMATIC_PROFILE and re.fullmatch(r'normalized[0-9]{5}\.wav',name)))
 

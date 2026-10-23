@@ -19,7 +19,9 @@ from native_io import BoundaryError, DirectoryBoundary as NativeBoundary, Verifi
 from source_cleanup import packed, stamp, single_stream
 
 TERMINAL = {'removed', 'absent_after_intent', 'not_created'}
-GENERATED = re.compile(r'(?:checked|compatible)\.m4b|normalized[0-9]{5}\.wav|(?:inputs|chapters)\.txt|[0-9a-f]{32}\.(?:stderr|stdout|decode-stderr|jpg|png)')
+# tag-repair-<hex>.mp3/.json: the MP3 trailing-tag repair's private copy and its proof (audio_pipeline._mp3_tag_copy). Until
+# 0.21.1 they were missing here, so every repair was refused as an unknown artifact before it could run.
+GENERATED = re.compile(r'(?:checked|compatible)\.m4b|normalized[0-9]{5}\.wav|(?:inputs|chapters)\.txt|[0-9a-f]{32}\.(?:stderr|stdout|decode-stderr|jpg|png)|tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 REFERENCE_TABLES = ('source_cleanup', 'cleanup_members', 'source_retirements',
                     'audiobook_replacements', 'audiobook_replacement_retirements',
                     'storage_cleanup_files', 'storage_cleanup_preserved',

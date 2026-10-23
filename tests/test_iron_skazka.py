@@ -1,7 +1,7 @@
 """0.21.1 Iron Inferno (legacy MP3 decode failure retried with the tag repair) and Сказка (Confirm and convert: the
 no-restart proof and the verified removal of the interrupted attempt's own files). Fixture catalogs only: no origin
 statement is ever recorded in a real catalog, and no real boot, library or Z: path is used."""
-import contextlib,json,os,sqlite3,time,unittest,uuid
+import contextlib,json,os,shutil,sqlite3,subprocess,time,unittest,uuid
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from unittest.mock import Mock,patch
@@ -178,6 +178,42 @@ class IronInferno(unittest.TestCase):
         self.assertEqual([job['state'] for job in child],['completed'],status);self.assertEqual(child[0]['manifest']['retry_intent']['parent_job_id'],parent['job_id'])
         self.assertTrue(child[0]['manifest']['cleanup_policy']['enabled']);self.assertEqual(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(parent['job_id'],))[0],parent)
         self.assertNotIn(parent['job_id'],self.service.attention_summary())
+
+    def repaired_retry(self,**patches):
+        # Iron's ID3v1 title holds CP1251 "яя" (0xFF 0xFF), a false frame sync that fails the strict decode. This tag does the
+        # same with a generic title. Until the ledger and cleanup admitted tag-repair-<hex>.mp3/.json, the repair was refused.
+        import mp3_tag_repair
+        ff=shutil.which('ffmpeg');source=self.sources[0];tag=b'TAG'+'Синяя книга'.encode('cp1251').ljust(30,b'\0')+b'\0'*60+b'2021'+b'\0'*30+b'\xff'
+        subprocess.run([ff,'-v','error','-y','-nostdin','-f','lavfi','-i','sine=frequency=440:duration=0.3','-ar','44100','-ac','1','-c:a','libmp3lame','-b:a','128k','-write_xing','0','-id3v2_version','0','-write_id3v1','0',str(source)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        source.write_bytes(source.read_bytes()+tag)
+        strict=subprocess.run([ff,'-hide_banner','-v','error','-xerror','-nostdin','-f','mp3','-i',str(source),'-map','0:a:0','-c:a','pcm_s16le','-f','s16le','pipe:1'],capture_output=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        self.assertNotEqual(strict.returncode,0);self.assertEqual(mp3_tag_repair.plan(source.read_bytes()).receipt()['removed_bytes'],128)  # it needs the repair
+        self.inv.launch('Audiobooks');self.inv.worker.join(30)
+        row,parent=self.failed()
+        with patch.object(self.service,'_resume_later'):self.assertTrue(self.service.retry_blocked_job('Audiobooks',row['id'],row['revision'],parent['job_id'])['queued_next'])
+        with contextlib.ExitStack() as held:
+            for name,value in patches.items():held.enter_context(patch.object(self.service,name,value))
+            self.service.jobs.resume();status=self.wait()
+        child=next(job for job in status['jobs'] if job['job_id']!=parent['job_id']);self.assertEqual(child['state'],'completed',status)
+        self.assertEqual([(p['removed_bytes'],p['decision'],p['affected_audio_seconds']) for p in child['output']['validation']['source_working_repairs']],[(128,'repairable',0)])
+        return child,source
+
+    def test_a_needed_tag_repair_converts_and_every_working_file_is_cleaned(self):
+        child,source=self.repaired_retry()
+        with self.service.jobs._db() as db:
+            attempt=db.execute('SELECT state FROM working_attempts WHERE job_id=?',(child['job_id'],)).fetchone()[0]
+            ledger={r[0]:r[1] for r in db.execute('SELECT name,state FROM working_files WHERE job_id=?',(child['job_id'],))}
+        self.assertEqual(attempt,'retired');self.assertEqual(sorted(n.rsplit('.',1)[1] for n in ledger if n.startswith('tag-repair-')),['json','mp3'])
+        self.assertTrue(all(state in ('removed','absent_after_intent') for state in ledger.values()),ledger)
+        self.assertEqual([p.name for p in (self.service.stage_root/child['job_id']).rglob('*') if p.is_file()],['ownership.json'])
+        self.assertFalse(source.exists());self.assertEqual(self.service.cleanup.status(child['job_id'])['state'],'completed')  # normal source cleanup
+
+    def test_staging_cleanup_alone_also_removes_the_repair_files(self):
+        # The fallback when the published working-file pass did not run (interrupted): StorageCleanup.run's staging check.
+        child,source=self.repaired_retry(_prune_working=lambda job_id:None)
+        storage=next(r for r in self.service.storage_cleanup.status() if r['job_id']==child['job_id'])
+        self.assertEqual(storage['state'],'completed',storage)
+        self.assertEqual([p.name for p in (self.service.stage_root/child['job_id']).rglob('tag-repair-*')],[])
 
     def test_automatic_pass_requests_once_and_bulk_accepts(self):
         import m4b_readmission
