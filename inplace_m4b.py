@@ -8,9 +8,10 @@ Eligibility is the copy flow's own route into metadata preservation (automatic p
 whose AAC audio is stream-copied, no approved repair, a preservation plan that needs no repair), plus
 what an in-place edit needs (one ordinary link, a held deny-writers handle, a same-volume destination,
 no foreign named streams). Any refusal before the first written byte returns None and the copy flow
-runs unchanged. After the first write, every failure undoes the edit (length, the 4 type bytes,
-write time and attributes, then a full-hash proof) before anything else. A crash leaves an
-inplace_edits row that recovery undoes at startup and before any new attempt on that source.
+runs unchanged. After the first write, every failure undoes the edit (a full-read proof that the file
+is still the edited original, then length, the 4 type bytes, write time and attributes, then a
+full-hash proof) before anything else. A crash leaves an inplace_edits row that recovery undoes, or
+proves moved, at startup and before any new attempt on that source.
 
 No decode is performed (Sergei, 2026-10-22). Audio integrity rests on the byte proof: with the 4
 type bytes reverted, the file's original extent hashes to the reviewed SHA-256, and the appended
@@ -177,19 +178,28 @@ def _same_volume(handle, root, destination):
         return target.identities[-1][1] == handle.info.volume
 
 
-def _undo(handle, intent, proven_identity=True):
-    """Restore the exact original: length, the 4 type bytes, write time and attributes; prove the reviewed hash."""
+def _edited_original(handle, intent):
+    """One full read before any undo write: [0, size) with the type reverted is the reviewed original, and a tail of the
+    full appended length is the planned moov. A shorter tail is an interrupted append, cut off by the undo."""
+    original = hashlib.sha256(); tail = hashlib.sha256(); offset = 0; revert = ((intent['type_offset'], b'moov'),)
+    for block in handle.chunks():
+        head = block[:max(0, intent['size'] - offset)]
+        original.update(mp._patched(head, offset, revert)); tail.update(block[len(head):]); offset += len(block)
+    return offset >= intent['size'] and original.hexdigest() == intent['sha256'] and (
+        offset != intent['output_size'] or tail.hexdigest() == intent['appended_sha256'])
+
+
+def _undo(handle, intent, same_identity=True):
+    """Restore the exact original: length, the 4 type bytes, write time and attributes; prove the reviewed hash.
+
+    Nothing is written until the file is proven to be the edited original (0.21.0 F3): always by its content against
+    the journal, and by its native identity too, except in recovery, where a share may report a new file ID after
+    reconnecting. A file that fails either proof is left exactly as found."""
     facts = handle.refresh()
     if not intent['size'] <= facts['size'] <= intent['output_size'] or facts['links'] != 1:
         raise Unresolved('The edited source has an unexpected length or alias; it was not changed')
-    if not proven_identity and facts['identity'] != intent['identity']:
-        # A share may report a new file ID after reconnecting: prove the content is our original before changing it.
-        digest = hashlib.sha256(); offset = 0
-        for block in handle.chunks():
-            head = block[:max(0, intent['size'] - offset)]
-            digest.update(mp._patched(head, offset, ((intent['type_offset'], b'moov'),))); offset += len(block)
-        if digest.hexdigest() != intent['sha256']:
-            raise Unresolved('The file at the original path is not the edited original; it was not changed')
+    if same_identity and facts['identity'] != intent['identity'] or not _edited_original(handle, intent):
+        raise Unresolved('The file at the original path is not the edited original; it was not changed')
     if facts['size'] != intent['size']:
         handle.truncate(intent['size'])
     if handle.read_at(intent['type_offset'], 4) != b'moov':
@@ -201,7 +211,8 @@ def _undo(handle, intent, proven_identity=True):
 
 
 def _undo_released(held, path, intent):
-    """Undo through a fresh writer: the rename's DELETE handle cannot also hold WRITE (its named proof shares DELETE only)."""
+    """Undo through a fresh writer: the rename's DELETE handle cannot also hold WRITE (its named proof shares DELETE only).
+    A writer reopened by path must be the journaled identity, and _undo proves its content before it writes."""
     if held.get('final') is not None:
         held['final'].__exit__(None, None, None); held['final'] = None
     writer = held.get('writer')
@@ -351,27 +362,56 @@ def _rows(database, where='', params=()):
         return [dict(row) for row in db.execute('SELECT * FROM inplace_edits WHERE state IN (?,?,?,?)' + where, OPEN + tuple(params))]
 
 
+def _prove_move(intent, final_path):
+    """The rename happened: the old path is absent and final_path holds exactly the planned output, fully hashed under a
+    deny-writers handle (0.21.0 F2; a matching size alone proved nothing, F7). Returns a receipt published_move accepts."""
+    old = ordinary(intent['path']); final = ordinary(final_path)
+    if os.path.lexists(old):
+        raise Unresolved('The edited original is still at its path; its move is not proven')
+    with VerifiedFile(final) as handle:
+        facts = handle.facts()
+        if facts['links'] != 1 or facts['size'] != intent['output_size'] or handle.sha256() != intent['output_sha256']:
+            raise Unresolved('The edited original is missing and its destination does not hold it')
+    if os.path.lexists(old):
+        raise Unresolved('The edited original is still at its path; its move is not proven')
+    return {'schema': 'books-in-place-recovered-move-v1', 'old_path': str(old), 'final_path': str(final),
+            'identity': facts['identity'], 'journaled_identity': intent['identity'], 'destination_native': facts,
+            'sha256': intent['output_sha256'], 'size': intent['output_size'], 'old_absent': True, 'copy_fallback': False,
+            'content_basis': 'Recovered: the full hash of the destination under a deny-writers handle equals the planned output',
+            'recovered': _stamp()}
+
+
 def reconcile(database, row):
-    """Recovery for one open edit: undo it if the original is still at its path, else confirm the move."""
-    intent = json.loads(row['intent']); path = ordinary(intent['path'])
+    """Recovery for one open edit: undo it if the original is still at its path, else prove the move and record its receipt."""
     try:
+        intent = json.loads(row['intent']); path = ordinary(intent['path'])
         if os.path.lexists(path):
             with DirectoryBoundary(intent['root'], path.parent), VerifiedFile(path, writable=True) as handle:
-                _undo(handle, intent, proven_identity=False)
+                _undo(handle, intent, same_identity=False)
             state, detail = 'rolled_back', {'recovered': _stamp()}
-        elif os.path.lexists(intent['destination']) and os.path.getsize(intent['destination']) == intent['output_size']:
-            state, detail = 'published', {'recovered_move': _stamp()}  # the job's own publication record proves the bytes
+        elif os.path.lexists(intent['destination']):
+            state, detail = 'published', {'rename': _prove_move(intent, intent['destination']), 'recovered_move': _stamp()}
         else:
             raise Unresolved('The edited original is missing and its destination does not hold it')
     except (ValueError, OSError) as error:
-        state, detail = 'unresolved', {'reason': str(error)[:500]}
+        state, detail = 'unresolved', {'reason': str(error)[:500] or type(error).__name__}
     _record(database, row['job_id'], row['attempt_id'], state, detail=detail)
     return state, detail
 
 
 def recover_all(database):
-    """Startup: undo every interrupted edit before a scan or a new attempt can see a changed original."""
+    """Startup: undo every interrupted edit before a scan or a new attempt can see a changed original. A row it cannot
+    settle stays journaled 'unresolved' (see unresolved()); a catalog it cannot read or write raises."""
     return [reconcile(database, row) for row in _rows(database)]
+
+
+ATTENTION = 'An interrupted in-place metadata edit of this book could not be undone yet: '
+
+
+def unresolved(database):
+    """{job_id: attention reason} for every edit recovery could not settle."""
+    return {row['job_id']: ATTENTION + (json.loads(row['detail']).get('reason') or 'unknown reason')
+            for row in _rows(database, ' AND state=?', ('unresolved',))}
 
 
 def clear(database, manifest):
@@ -384,7 +424,7 @@ def clear(database, manifest):
         if os.path.normcase(row['path']) in names:
             state, detail = reconcile(database, row)
             if state == 'unresolved':
-                raise Unresolved('An interrupted in-place metadata edit of this book could not be undone yet: ' + detail['reason'])
+                raise Unresolved(ATTENTION + detail['reason'])
 
 
 def published_move(database, job_id, path):
@@ -397,4 +437,23 @@ def published_move(database, job_id, path):
         rename = json.loads(row['detail']).get('rename') or {}
         if os.path.normcase(row['path']) == os.path.normcase(path) and rename.get('old_absent') is True and os.path.normcase(rename.get('old_path', '')) == os.path.normcase(path):
             return rename
+    return None
+
+
+def confirm_move(database, job_id, path, final_path):
+    """Cleanup, when no receipt was journaled (a crash or a rename postcondition error after the rename, before
+    startup recovery): prove the move into the job's current output, record its receipt and return it; else None."""
+    with connect(database) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='inplace_edits'").fetchone():
+            return None
+        rows = [dict(r) for r in db.execute("SELECT * FROM inplace_edits WHERE job_id=? AND state IN ('publishing','published','unresolved')", (job_id,))]
+    for row in rows:
+        if os.path.normcase(row['path']) != os.path.normcase(path):
+            continue
+        try:
+            receipt = _prove_move(json.loads(row['intent']), final_path)
+        except (ValueError, OSError):
+            continue  # not this attempt's output; the caller refuses without a receipt
+        _record(database, job_id, row['attempt_id'], 'published', detail={'rename': receipt, 'recovered_move': _stamp()})
+        return receipt
     return None

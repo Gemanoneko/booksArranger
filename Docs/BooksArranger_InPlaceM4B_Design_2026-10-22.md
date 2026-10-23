@@ -37,7 +37,7 @@ An in-place edit adds these requirements:
 - the destination is absent and on the same volume as the source;
 - the volume has free space for the appended `moov` plus 16 MiB.
 
-Any refusal returns `None` before the first written byte, and the copy flow runs unchanged in the same attempt. The fallback reason is recorded in the job history as `{'in_place': {'fallback': ...}}`.
+Any refusal returns `None` before the first written byte, and the copy flow runs in the same attempt with all of its checks. It may reuse the cover copy that the in-place attempt already put in the stage, but it repeats the cover's probe, dimension check and decode on that copy. A cover the in-place attempt refused is therefore refused again. The fallback reason is recorded in the job history as `{'in_place': {'fallback': ...}}`.
 
 ## 3. Edit mechanism and Apple Books
 
@@ -90,9 +90,9 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 
 ## 5. Move, records and cleanup
 
-**The move.** `merge_service._publish_in_place` records the same publication intent as `publish()`, then renames with `native_io.rename_no_replace`, the 0.20.2 handle-bound no-copy primitive. The publication goes through the same `checkpoint('publishing')` revision guard and the same guard under the review lock. `output_rename.RenameWorker` cannot be used, because it moves an existing publication generation.
+**The move.** `merge_service._publish_in_place` records the same publication intent fields as `publish()`, then renames with `native_io.rename_no_replace`, the 0.20.2 handle-bound no-copy primitive. The publication goes through the same `checkpoint('publishing')` revision guard and the same guard under the review lock. The order differs from `publish()`: the in-place path commits the publication intent before it takes the review lock, while `publish()` commits it inside the lock, after the guard. `output_rename.RenameWorker` cannot be used, because it moves an existing publication generation.
 
-**The guards.** After the edit, the size and mtime differ, and the DELETE handle makes the file unreadable to others. So `build_manifest` and `enrich` take a `held` map for this job's source:
+**The guards.** After the edit, the size and mtime differ. The held DELETE handle shares READ only, so it excludes every opener that does not share DELETE, which in practice is most programs. So `build_manifest` and `enrich` take a `held` map for this job's source:
 - the review data is compared as usual;
 - the source sha256 must still be the reviewed one;
 - the chapters come from the post-edit probe.
@@ -100,7 +100,7 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 **The handle.** The rename's named-file proof shares READ and DELETE only, so the held DELETE handle cannot also hold WRITE. An undo before the move releases it and reacquires a writer.
 
 **Records after the move.** `_check_output`, `verified_outputs`, completion and history are unchanged. Source cleanup gains `_retire_moved`:
-- it needs the job's `published` journal row and its rename receipt;
+- it needs the job's `published` journal row and its rename receipt. When a crash or a rename postcondition error after the rename left no receipt, it proves the move itself (`inplace_m4b.confirm_move`): the old path is absent and the job's current output hashes in full to the planned output. It then journals that receipt. Otherwise it refuses and retires nothing;
 - the old path must be absent;
 - it writes `cleanup_members` as `removed`, with `disposition: renamed_into_output` and no recovery copy, plus the `source_retirements` row;
 - recovery retention records the set as `deleted` by actor `in_place`;
@@ -111,6 +111,7 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 ## 6. Crash, NAS drop and check failure after the write starts
 
 **In process.** Any failure after step 1, including a pause, undoes the edit:
+- before any write, prove the file is the edited original: the same native file ID (a writer reopened by path is checked too), and one full read in which `[0, original size)` with the type reverted hashes to the reviewed sha256 and a full-length tail hashes to the planned `moov`. A file that fails either proof is left exactly as found, and the row becomes `unresolved`;
 - truncate to the original size;
 - write `moov` back;
 - restore the ns write time and the attributes;
@@ -118,12 +119,12 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 
 After the undo, the copy flow runs (a pause stops instead). An undo that cannot reproduce the reviewed sha256 raises `Unresolved` and leaves the row `unresolved`.
 
-**After a crash.** `AudioJobs._recover` calls `inplace_m4b.recover_all` at startup, before any scan, and `_work_attempt` calls `clear` before any attempt on that source:
+**After a crash.** `AudioJobs._recover` calls `inplace_m4b.recover_all` at startup, when the queue is constructed, before the first scan. `_work_attempt` calls `clear` before any attempt on that source. A startup recovery that cannot settle an edit, or cannot read or write the journal at all, is not ignored. The interrupted book is marked needs attention with the reason, through the queue's existing attention path. The pre-attempt `clear` still refuses that source until the edit is undone.
 
 | What recovery finds | Action |
 |---|---|
-| The original is still at its path | Undo, proving the content first when a share reports a new file ID → `rolled_back` |
-| The source path is absent and the destination holds the output size | `published`; the job's publication record (`_settle`) proves the bytes |
+| The original is still at its path | Undo, always proving the content first (one full read, as above). A share may report a new file ID after reconnecting, so recovery does not require the same ID; the content proof decides → `rolled_back` |
+| The source path is absent and the destination hashes in full, under a deny-writers handle, to the planned output | `published`, with a recovered rename receipt that source cleanup accepts. A matching size alone proves nothing |
 | Anything else, including the library being offline | `unresolved`: the job needs attention, other books continue, and recovery is retried at the next start or attempt |
 
 **Backup.** None is needed. Only the 4 known bytes are overwritten, and everything else lies past the original end of file. The journal row is the complete undo, so no full copy is ever made.
@@ -145,7 +146,9 @@ After the undo, the copy flow runs (a pause stops instead). An undo that cannot 
 - the marker-removal validation;
 - storage cleanup's check of retained originals;
 - the in-place pre-write hash and byte proof;
-- chapter repair and replacement flows, which run outside attempts.
+- chapter repair, which runs outside attempts.
+
+Replacement media jobs do run inside an attempt (`_work_attempt`), so their revision guards take the cut. That is harmless, because replacement sources are kept.
 
 The existing guard semantics settle why a cheap identity is not enough for those. `review_backend.py` says size and mtime only *screen* a reviewed source and its content hash *decides*, and that Windows file IDs are not stable on the library's SMB share. A cheap identity therefore cannot be proven sufficient for a deletion.
 
@@ -191,18 +194,24 @@ Across the about 770 eligible books (about 6,200 audio hours) this saves about 3
 
 ## 9. Tests
 
-`tests/test_inplace_m4b.py` (16 tests, in the check gate):
-- the eligible end-to-end path, byte-identical to the copy flow;
+`tests/test_inplace_m4b.py` (27 tests, in the check gate):
+- the eligible end-to-end path, byte-identical to the copy flow, whose byte proof satisfies the cleanup contract while a missing, unverified or foreign proof is refused;
 - tags, cover and chapters on the published file;
 - the download marker;
 - a publication failure undone;
-- every ineligibility with its fallback: ALAC, a repair, a replacement, an existing destination, another volume, a foreign stream, read-only, a planner refusal, a changed hash, changed chapters, a post-write check failure;
+- every ineligibility with its fallback: ALAC, a repair, a replacement, a policy that keeps the sources, an existing destination, another volume, a foreign stream, read-only, a planner refusal, a changed hash, changed chapters, a post-write check failure;
+- an oversized cover that makes the in-place attempt fall back is refused again by the copy flow;
 - a crash at each of 6 write steps, recovered;
 - a torn type patch;
-- a crash after the rename;
+- a real process kill after the rename, before its receipt: recovery proves the move and journals the receipt source cleanup requires;
+- a destination of the right size but the wrong bytes is never recorded as the move;
+- recovery and an in-process undo write nothing into a file rewritten in place (same file ID, foreign bytes);
+- source cleanup retires nothing without a receipt or a provable move;
 - an unprovable original that stays journaled and blocks;
+- the queue itself reaches recovery: at startup it undoes an interrupted edit, and it marks an edit it cannot undo, or a journal it cannot read, as needs attention on the interrupted book; before an attempt it undoes the edit, or refuses the book, before the runner sees the source;
 - the byte proof rejecting one changed audio byte;
-- the full `MergeService` run (automatic approval, in-place move, cleanup, retention, Converted count, restart).
+- the full `MergeService` run (automatic approval, in-place move, cleanup, retention, Converted count, restart);
+- the full `MergeService` run with a rename postcondition error after the OS rename: the book completes and its source cleanup completes.
 
 `tests/test_source_proofs.py` (6 tests):
 - an unchanged file skips the re-hash;

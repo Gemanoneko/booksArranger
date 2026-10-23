@@ -521,9 +521,10 @@ def protected_cover(manifest,stage,stop):
     extension='.png' if cover_bytes.startswith(b'\x89PNG\r\n\x1a\n') else '.jpg' if cover_bytes.startswith(b'\xff\xd8\xff') else None
     if extension is None:raise ValidationError('Select one usable JPEG or PNG cover')
     cover_copy=stage/('cover'+extension)
-    # An in-place attempt that fell back already admitted this exact owned copy (and its probes) in this stage.
-    if os.path.lexists(cover_copy) and digest(cover_copy,stop)==cover['sha256']:return cover_copy
-    copy_owned(cover_source,cover_copy,cover['sha256'],stop)
+    # An in-place attempt that fell back may already own this exact copy in this stage. Reuse the copy, never a skipped
+    # gate: the probe, dimension check or decode below may be the very refusal that made it fall back (0.21.0 F1).
+    if not (os.path.lexists(cover_copy) and digest(cover_copy,stop)==cover['sha256']):
+        copy_owned(cover_source,cover_copy,cover['sha256'],stop)
     image=probe(cover_copy,stage,stop)
     image_streams=[s for s in image.get('streams',[]) if s.get('codec_type')=='video']
     if len(image_streams)!=1 or image_streams[0].get('width',0)*image_streams[0].get('height',0)>16000000:

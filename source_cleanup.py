@@ -413,6 +413,9 @@ class CleanupJobs:
         import inplace_m4b
         source=manifest['sources'][0];path=ordinary(source['path'])
         moved=inplace_m4b.published_move(self.database,intent['job_id'],str(path)) if len(manifest['sources'])==1 else None
+        if moved is None and len(manifest['sources'])==1:
+            # A crash or rename postcondition error after the rename journaled no receipt: prove the move itself (0.21.0 F2).
+            moved=inplace_m4b.confirm_move(self.database,intent['job_id'],str(path),out['final_path'])
         if moved is None:raise BoundaryError('In-place move receipt is missing; nothing retired')
         if os.path.lexists(path):raise BoundaryError('A file at the moved original path was preserved')
         facts={'disposition':'renamed_into_output','size':source['size'],'modified':source['modified'],'sha256':source['sha256'],

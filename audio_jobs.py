@@ -368,11 +368,13 @@ class AudioJobs:
         3-minute start window. start_published_check() runs that same check after
         startup, and resume() repeats it before any new work.
         """
+        import inplace_m4b
+        failure = None
         try:
-            import inplace_m4b
             inplace_m4b.recover_all(self.database)  # undo interrupted in-place edits before a scan or attempt sees them
-        except Exception:
-            pass  # each open edit keeps its journal; _work_attempt refuses its source until it is undone
+            held = inplace_m4b.unresolved(self.database)
+        except (ValueError, OSError, sqlite3.Error) as error:
+            held = {}; failure = inplace_m4b.ATTENTION + (str(error) or type(error).__name__)
         for row in self._rows("SELECT * FROM audio_jobs WHERE state='running' ORDER BY created, job_id"):
             if row["stage"] == "publishing":
                 change = self._settle(row)
@@ -380,6 +382,13 @@ class AudioJobs:
                     self._update(row["job_id"], **change)
             else:
                 self._update(row["job_id"], state="pending", stage="queued", reason="Interrupted book restarts on explicit resume")
+                if failure and inplace_m4b.offered(json.loads(row["manifest"])):
+                    held[row["job_id"]] = failure  # the journal could not be read or settled: any of these may be edited
+        # 0.21.0 F4: an edit recovery could not settle shows on its interrupted book now, not only when Start reaches it.
+        # Each such edit keeps its journal, and _work_attempt still refuses its source until it is undone.
+        for job_id, reason in held.items():
+            with self._db() as db:
+                db.execute("UPDATE audio_jobs SET state='needs attention', reason=?, updated=? WHERE job_id=? AND state='pending'", (reason, _now(), job_id))
 
     def _settle(self, row, routine=False, stop=None, pace=None):
         """Recorded-output check for one completed or publishing row; returns its row change, if any.

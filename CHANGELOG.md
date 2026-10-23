@@ -5,7 +5,7 @@
 ### Added
 
 - A single M4B whose audio is already kept as it is now has its new tags, cover and chapters written into the file itself, and is then moved into the sorted library by a same-volume rename, without copying the book. The result is the same file the existing flow publishes; the audio bytes never move.
-- Every in-place edit is journaled before its first write. Any failed check, a pause, or an interrupted run restores the exact original before the book continues, and the existing flow then runs unchanged. Books that need a repair or a re-encode, ALAC files, or a destination on another drive keep the existing flow.
+- Every in-place edit is journaled before its first write. Any failed check, a pause, or an interrupted run restores the original's exact bytes, size and modification time before the book continues, and the existing flow then runs with all of its checks. A Windows download marker removed just before the move is not put back. A file that can no longer be proven to be the edited original is left as found, and its book needs attention. Books that need a repair or a re-encode, ALAC files, or a destination on another drive keep the existing flow.
 
 ### Changed
 
