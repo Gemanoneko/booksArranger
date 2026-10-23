@@ -39,7 +39,8 @@ class Paging(unittest.TestCase):
             self.assertEqual(self.inv.candidates('Audiobooks',1)['total'],127)
         path=self.rows[-1]['members'][0]['path']
         with connect(self.inv.database) as db:
-            metadata=json.loads(db.execute('SELECT metadata FROM files WHERE path=?',(path,)).fetchone()[0]);metadata['tags']['album']='Changed source clue'
+            # Not the album: since v0.9.0 the embedded album is part of the book's identity, so a new album is a new book.
+            metadata=json.loads(db.execute('SELECT metadata FROM files WHERE path=?',(path,)).fetchone()[0]);metadata['track_title']='Changed source clue'
             db.execute('UPDATE files SET metadata=? WHERE path=?',(json.dumps(metadata),path))
         import groups
         with patch('groups.build',wraps=groups.build) as build:
