@@ -69,6 +69,32 @@ class AutomaticMediaTests(unittest.TestCase):
         self.assertTrue(self.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
         self.assertTrue(all(not source.exists() for source in self.sources));self.assertEqual(self.service.state()['converted_total'],1)
 
+    def test_one_approval_reads_the_converted_set_once(self):
+        # Live 2026-10-24: each enrich inside one automatic approval recomputed the catalog's converted set
+        # (progress_books, 10-25 s on the real catalog) while holding group_lock, so one approval took minutes and
+        # the status poll and book list waited on it. The approval now computes the set once.
+        row,result=self.result();calls=[];original=self.service.progress_books
+        def counted(*args,**kwargs):
+            if not args and not kwargs:calls.append('enrich')  # state() passes its own inputs; enrich() passes none
+            return original(*args,**kwargs)
+        with patch.object(self.service,'progress_books',side_effect=counted):
+            fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client)
+        self.assertEqual(calls,['enrich'],'one converted set per approval')
+        local=self.service.reviews.page_local
+        self.assertFalse(getattr(local,'ready_scope',False));self.assertFalse(hasattr(local,'ready_ids'),'the set does not outlive the approval')
+        self.wait()
+        calls.clear()
+        with patch.object(self.service,'progress_books',side_effect=counted):
+            first=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
+            second=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
+        self.assertEqual(calls,['enrich','enrich'],'outside an approval each enrich reads the current set')
+        self.assertTrue(first['audiobook_ready'] and second['audiobook_ready'])
+        with self.service.reviews.ready_snapshot():
+            self.service.reviews.page_local.ready_ids={'page-owned'}
+            with self.service.reviews.ready_snapshot():pass
+            self.assertEqual(self.service.reviews.page_local.ready_ids,{'page-owned'},'a nested scope keeps the outer set')
+        self.assertFalse(hasattr(local,'ready_ids'))
+
     def test_custom_source_cover_is_allowed_and_stop_preserves_sources(self):
         row,result=self.result();result['work']['cover_url']='https://evil.example/cover.jpg'
         stop=threading.Event();stop.set()

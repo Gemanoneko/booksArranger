@@ -1,5 +1,6 @@
 from chapter_plan import prepare as prepare_chapters, names as chapter_names, available as chapters_available, default as chapters_default
 """Revision-bound candidate review. Source audio is opened read-only."""
+import contextlib
 import copy
 import datetime
 import hashlib
@@ -88,6 +89,24 @@ class CandidateReviewService:
                         manual_metadata.append(db,manual_metadata.capture(binding,json.loads(saved['review']),context.get('manual_note','')))
 
     def set_jobs(self,jobs):self.jobs=jobs
+
+    @contextlib.contextmanager
+    def ready_snapshot(self):
+        """One converted-books set for one operation on this thread.
+
+        enrich() reads the catalog's converted set from progress_books(): every job, cleanup and publication
+        record plus one library stat per converted book, 10-25 s each on the live catalog (measured
+        2026-10-24). An automatic approval enriched its one book seven times while it holds group_lock,
+        which the status poll and the book list wait on. Inside this scope the first enrich computes the set
+        and the later ones reuse it. A page's own ready_ids (already one per page) is left as it is."""
+        if getattr(self.page_local,'ready_ids',None) is not None or getattr(self.page_local,'ready_scope',False):
+            yield
+            return
+        self.page_local.ready_scope=True
+        try:yield
+        finally:
+            self.page_local.ready_scope=False
+            if hasattr(self.page_local,'ready_ids'):del self.page_local.ready_ids
 
     def _row(self,library,id,revision=None):
         if library!='Audiobooks':raise ValueError('Only Audiobooks have candidate review')
@@ -218,6 +237,7 @@ class CandidateReviewService:
         ready_ids=getattr(self.page_local,'ready_ids',None)
         if ready_ids is None:
             ready_ids=self.jobs.progress_books()['converted_ids'] if self.jobs and hasattr(self.jobs,'progress_books') else set()
+            if getattr(self.page_local,'ready_scope',False):self.page_local.ready_ids=ready_ids  # ready_snapshot(): reused
         row['audiobook_ready']=row['id'] in ready_ids
         audiobooks=getattr(self.page_local,'audiobooks',None)
         if audiobooks is not None and row['id'] in audiobooks:row['current_audiobook']=audiobooks[row['id']]

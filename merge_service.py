@@ -1931,7 +1931,10 @@ class MergeService:
         if local:primary=[s for s in result.get('sources',[]) if s.get('kind')=='local_agreement' and s.get('verified_identity')]
         else:primary=[s for s in result.get('sources',[]) if s.get('kind') in ('publisher_or_journal','recording_credit','collection_manifest') and s.get('verified_identity')]
         if not primary:raise ValueError('Author and work not independently verified')
-        with self.reviews.lock,self.inventory.group_lock:
+        # One converted-books set for the whole approval (ready_snapshot): each enrich below otherwise recomputed it
+        # under group_lock, minutes per approval on the live catalog, with the status poll and book list waiting.
+        snapshot=getattr(self.reviews,'ready_snapshot',None)
+        with self.reviews.lock,self.inventory.group_lock,(snapshot() if snapshot else contextlib.nullcontext()):
             current=self.reviews._row('Audiobooks',row['id'],row['revision']);ctx=self.reviews._context(current)
             if current['fingerprint']!=row['fingerprint']:raise ValueError('Source files changed')
             import metadata_choices
