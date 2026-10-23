@@ -10,14 +10,15 @@ what an in-place edit needs (one ordinary link, a held deny-writers handle, a sa
 no foreign named streams). Any refusal before the first written byte returns None, and the copy flow
 then runs every one of its own checks (on a cover copy this attempt staged too, 0.21.0 F1). After the
 first write, every failure undoes the edit (a full-read proof that the file's original extent is still
-the reviewed original, then length, the 4 type bytes, write time and attributes, then a full-hash
-proof) before anything else. A crash leaves an inplace_edits row that recovery undoes, or proves
-moved, at startup and before any new attempt on that source.
+the reviewed original, then length, the 4 type bytes, the download marker it removed, write time and
+attributes, then a full-hash proof) before anything else. A crash leaves an inplace_edits row that
+recovery undoes, or proves moved, at startup and before any new attempt on that source.
 
 No decode is performed (Sergei, 2026-10-22). Audio integrity rests on the byte proof: with the 4
 type bytes reverted, the file's original extent hashes to the reviewed SHA-256, and the appended
 bytes equal the plan.
 """
+import base64
 import contextlib
 import hashlib
 import json
@@ -63,10 +64,62 @@ def ensure(db):
 
 
 DAMAGED = 'The journal record of this edit is damaged; the file was not changed'
-# Every intent field recovery reads, with its type. A row of any other shape is unresolved on its own book, never an
-# exception that stops the engine from starting (0.21.0 M1).
-_SHAPE = {'path': str, 'root': str, 'destination': str, 'sha256': str, 'output_sha256': str,
-          'size': int, 'output_size': int, 'type_offset': int, 'modified': int, 'attributes': int}
+_FILETIME_EPOCH = 116444736000000000  # 100-ns ticks from 1601 to 1970, as VerifiedFile.facts and restore_metadata convert
+
+
+def _text(value):
+    return type(value) is str
+
+
+def _count(value):
+    return type(value) is int and value >= 0
+
+
+def _path(value):
+    try:
+        return type(value) is str and ordinary(value) is not None
+    except ValueError:
+        return False
+
+
+def _identity(value):
+    return type(value) is list and len(value) == 3 and all(_count(part) for part in value)
+
+
+def _write_time(value):
+    """A write time restore_metadata sets exactly: whole 100-ns ticks of a positive 64-bit FILETIME (0.21.1 m-4)."""
+    return type(value) is int and value % 100 == 0 and 0 < value // 100 + _FILETIME_EPOCH < 2 ** 63
+
+
+def _attributes(value):
+    """Attributes restore_metadata accepts: ARCHIVE and NORMAL only, as the edit requires of the original (0.21.1 m-4)."""
+    return type(value) is int and value >= 0 and not value & ~0xA0
+
+
+def _marker_bytes(value):
+    """A journaled download marker, base64 text of 1 to MAX_MARKER bytes, as its bytes; anything else is None."""
+    if type(value) is not str:
+        return None
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except ValueError:
+        return None
+    return raw if 0 < len(raw) <= zone_identifier.MAX_MARKER else None
+
+
+# Every field _edit writes into the intent, each with the values its undo can use. A row of any other shape is unresolved
+# on its own book, never an exception that stops the engine from starting (0.21.0 M1), and its undo writes nothing
+# (0.21.1 m-4). tests/test_inplace_m4b.py damages each key of a row the edit really wrote, so a new field fails it until
+# it is listed here (0.21.1 F15: 'identity' was read by recovery but missing from this list).
+_SHAPE = {'schema': lambda value: value == SCHEMA, 'job_id': _text, 'attempt_id': _text, 'path': _path, 'root': _path,
+          'destination': _path, 'identity': _identity, 'size': _count, 'modified': _write_time, 'attributes': _attributes,
+          'sha256': _text, 'type_offset': _count, 'appended_size': _count, 'appended_sha256': _text, 'output_size': _count,
+          'output_sha256': _text, 'zone_marker': lambda value: value is None or _marker_bytes(value) is not None}
+
+
+def _keyed(row):
+    """A row the journal can address. SQLite admits NULL, or any type, in this non-INTEGER primary key (0.21.1 F16)."""
+    return type(row['job_id']) is str and type(row['attempt_id']) is str
 
 
 def _json_object(raw):
@@ -80,11 +133,24 @@ def _json_object(raw):
     return value
 
 
+def _legacy_marker(detail):
+    """0.21.0 journaled the marker bytes only in their removal receipt. A detail it cannot read restores none, as 0.21.0."""
+    try:
+        receipt = _json_object(detail).get('zone_marker')
+    except Unresolved:
+        return None
+    value = receipt.get('marker_bytes_base64') if isinstance(receipt, dict) else None
+    raw = _marker_bytes(value)
+    return value if raw is not None and hashlib.sha256(raw).hexdigest() == receipt.get('marker_sha256') else None
+
+
 def _intent(row):
-    """The journaled intent, its shape checked before recovery reads any field of it."""
+    """The journaled intent, every field checked before recovery reads any of it or writes any byte."""
     intent = _json_object(row['intent'])
-    if any(type(intent.get(key)) is not kind for key, kind in _SHAPE.items()) or not (
-            0 <= intent['type_offset'] <= intent['size'] - 4 and intent['size'] < intent['output_size']):
+    if 'zone_marker' not in intent:  # a row 0.21.0 wrote
+        intent = intent | {'zone_marker': _legacy_marker(row['detail'])}
+    if any(key not in intent or not valid(intent[key]) for key, valid in _SHAPE.items()) or not (
+            intent['type_offset'] <= intent['size'] - 4 and intent['size'] < intent['output_size']):
         raise Unresolved(DAMAGED)
     return intent
 
@@ -192,11 +258,17 @@ def _covr(movie):
 
 
 def _marker(path, size):
+    """The original's download marker bytes, or None. They are journaled before the first write so every undo can put
+    them back (0.21.1 m-3); any other named stream refuses."""
     found = zone_identifier.streams(path)
     if found == [('::$DATA', size)]:
-        return False
+        return None
     if len(found) == 2 and {name for name, _ in found} == {'::$DATA', zone_identifier.MARKER}:
-        return True
+        with open(str(path) + ':Zone.Identifier', 'rb') as stream:
+            raw = stream.read(zone_identifier.MAX_MARKER + 1)
+        if 0 < len(raw) <= zone_identifier.MAX_MARKER:
+            return raw
+        raise Ineligible('Unknown download marker size preserved')
     raise Ineligible('Additional filesystem streams require review')
 
 
@@ -221,21 +293,28 @@ def _edited_original(handle, intent):
 
 
 def _undo(handle, intent, same_identity=True):
-    """Restore the exact original: length, the 4 type bytes, write time and attributes; prove the reviewed hash.
+    """Restore the exact original: length, the 4 type bytes, the download marker, write time and attributes; prove the
+    reviewed hash.
 
     Nothing is written until the file is proven to be the edited original (0.21.0 F3): always by its content against
     the journal, and by its native identity too, except in recovery, where a share may report a new file ID after
-    reconnecting. A file that fails either proof is left exactly as found."""
+    reconnecting. A file that fails either proof is left exactly as found. A marker the edit removed is put back from its
+    journaled bytes (0.21.1 m-3); one still present is left as it is."""
     facts = handle.refresh()
     if not intent['size'] <= facts['size'] <= intent['output_size'] or facts['links'] != 1:
         raise Unresolved('The edited source has an unexpected length or alias; it was not changed')
     if same_identity and facts['identity'] != intent['identity'] or not _edited_original(handle, intent):
         raise Unresolved('The file at the original path is not the edited original; it was not changed')
+    marker = _marker_bytes(intent['zone_marker'])
+    removed = marker is not None and zone_identifier.MARKER not in {name for name, _ in zone_identifier.streams(handle.path)}
     if facts['size'] != intent['size']:
         handle.truncate(intent['size'])
     if handle.read_at(intent['type_offset'], 4) != b'moov':
         handle.write_at(intent['type_offset'], b'moov')
-    handle.flush(); handle.restore_metadata(intent['modified'], intent['attributes']); handle.flush()
+    handle.flush()
+    if removed:  # before the write time: writing a named stream moves the file's own write time
+        zone_identifier.restore_marker(handle.path, marker)
+    handle.restore_metadata(intent['modified'], intent['attributes']); handle.flush()
     facts = handle.refresh()
     if facts['size'] != intent['size'] or str(facts['modified']) != str(intent['modified']) or handle.sha256() != intent['sha256']:
         raise Unresolved('The original bytes could not be proven after the undo')
@@ -320,7 +399,8 @@ def _edit(manifest, stage, stop, progress, session):
                   'modified': facts['modified'], 'attributes': facts['attributes'], 'sha256': original,
                   'type_offset': plan.movie_offset + 4, 'appended_size': len(plan.appended_movie),
                   'appended_sha256': hashlib.sha256(plan.appended_movie).hexdigest(),
-                  'output_size': facts['size'] + len(plan.appended_movie), 'output_sha256': expected}
+                  'output_size': facts['size'] + len(plan.appended_movie), 'output_sha256': expected,
+                  'zone_marker': base64.b64encode(marker).decode('ascii') if marker is not None else None}
         session.record('intended', intent)  # durable before the first written byte
     except BaseException:
         release(); raise
@@ -344,11 +424,15 @@ def _edit(manifest, stage, stop, progress, session):
             raise ap.ValidationError('Preservation changed decoder, packets or presentation')
         _fault('checked', writer)
         writer.__exit__(None, None, None); held['writer'] = None  # readers cannot share a DELETE handle; reacquire below
-        if marker:
+        if marker is not None:
             def same(base):
                 if base.facts()['identity'] != intent['identity'] or base.facts()['size'] != intent['output_size']:
                     raise BoundaryError('In-place source identity changed before its download marker removal')
-            zone_identifier.remove_marker(source, same, lambda receipt: session.record('written', zone_marker=receipt))
+            def persist(receipt):  # before the removal: only the marker the undo would put back is removed
+                if receipt['marker_bytes_base64'] != intent['zone_marker']:
+                    raise BoundaryError('Download marker changed during the in-place edit')
+                session.record('written', zone_marker=receipt)
+            zone_identifier.remove_marker(source, same, persist)
         final = held['final'] = VerifiedFile(source, delete=True).__enter__()  # READ|DELETE deny-writers, held through the rename
         _fault('reacquired')
         if final.facts()['identity'] != intent['identity'] or final.facts()['links'] != 1:
@@ -367,7 +451,7 @@ def _edit(manifest, stage, stop, progress, session):
                       'copied_audio_evidence': evidence, 'metadata_preservation': receipt, 'tags': actual_tags,
                       'in_place': {'schema': SCHEMA, 'original_sha256': original, 'original_size': intent['size'],
                                    'type_offset': intent['type_offset'], 'appended_sha256': intent['appended_sha256'],
-                                   'all_retained_bytes_verified': True, 'decoded': False, 'zone_marker_removed': bool(marker)},
+                                   'all_retained_bytes_verified': True, 'decoded': False, 'zone_marker_removed': marker is not None},
                       'checks': 'Output checks passed', 'device': 'Apple Books sync not checked'}
         held['final'] = None  # owned by the Edited from here
         return Edited(source, stack, boundary, final, validation, intent, session)
@@ -418,9 +502,13 @@ def _prove_move(intent, final_path):
 def reconcile(database, row):
     """Recovery for one open edit: undo it if the original is still at its path, else prove the move and record its receipt.
 
-    'offline' (0.21.0 F13): the original's folder cannot be seen, as when the library share is not reconnected yet, so the
-    original is not proven missing. Nothing is recorded; the row stays open for the next start or attempt."""
+    'offline' (0.21.0 F13): the journaled library root cannot be seen, as when its share is not reconnected yet, so the
+    original is not proven missing. Nothing is recorded; the row stays open for the next start or attempt. A visible root
+    without the book's folder (renamed or deleted) is a missing original (0.21.1 F17). A row the journal cannot address is
+    damaged; nothing is written or recorded, and unresolved() reports it on its own book (0.21.1 F16)."""
     try:
+        if not _keyed(row):
+            raise Unresolved(DAMAGED)
         intent = _intent(row); path = ordinary(intent['path'])
         if os.path.lexists(path):
             with DirectoryBoundary(intent['root'], path.parent), VerifiedFile(path, writable=True) as handle:
@@ -428,13 +516,14 @@ def reconcile(database, row):
             state, detail = 'rolled_back', {'recovered': _stamp()}
         elif os.path.lexists(intent['destination']):
             state, detail = 'published', {'rename': _prove_move(intent, intent['destination']), 'recovered_move': _stamp()}
-        elif not os.path.isdir(path.parent):
-            return 'offline', {'folder': str(path.parent)}
+        elif not os.path.isdir(intent['root']):
+            return 'offline', {'root': intent['root']}
         else:
             raise Unresolved('The edited original is missing and its destination does not hold it')
     except (ValueError, OSError) as error:
         state, detail = 'unresolved', {'reason': str(error)[:500] or type(error).__name__}
-    _record(database, row['job_id'], row['attempt_id'], state, detail=detail)
+    if _keyed(row):
+        _record(database, row['job_id'], row['attempt_id'], state, detail=detail)
     return state, detail
 
 
@@ -448,11 +537,13 @@ ATTENTION = 'An interrupted in-place metadata edit of this book could not be und
 
 
 def unresolved(database):
-    """{job_id: attention reason} for every edit recovery could not settle."""
+    """{job_id: attention reason} for every edit recovery could not settle, and every row it cannot address (F16)."""
     found = {}
-    for row in _rows(database, ' AND state=?', ('unresolved',)):
+    for row in _rows(database):
+        if type(row['job_id']) is not str or _keyed(row) and row['state'] != 'unresolved':
+            continue
         try:
-            reason = _json_object(row['detail']).get('reason')
+            reason = _json_object(row['detail']).get('reason') if _keyed(row) else DAMAGED
         except Unresolved as damaged:  # an 'unresolved' row recovery left untouched (offline) keeps its detail as found
             reason = str(damaged)
         found[row['job_id']] = ATTENTION + str(reason or 'unknown reason')
@@ -462,9 +553,9 @@ def unresolved(database):
 def clear(database, manifest):
     """Before an attempt: no source of this job may carry an unresolved in-place edit.
 
-    An edit whose folder cannot be seen ('offline') does not refuse the attempt: that attempt cannot read the source
+    An edit whose library root cannot be seen ('offline') does not refuse the attempt: that attempt cannot read the source
     either, and nothing writes to a source that differs from its review (an in-place edit first requires the reviewed
-    size, write time and hash; the copy flow only reads it). The next attempt or start that can see the folder settles it."""
+    size, write time and hash; the copy flow only reads it). The next attempt or start that can see the root settles it."""
     rows = _rows(database)
     if not rows:
         return
@@ -490,8 +581,8 @@ def published_move(database, job_id, path):
             rename = _json_object(row['detail']).get('rename')
         except Unresolved:
             continue
-        if (isinstance(row['path'], str) and isinstance(rename, dict) and isinstance(rename.get('old_path'), str)
-                and isinstance(rename.get('final_path'), str) and 'identity' in rename and rename.get('old_absent') is True
+        if (_keyed(row) and isinstance(row['path'], str) and isinstance(rename, dict) and isinstance(rename.get('old_path'), str)
+                and isinstance(rename.get('final_path'), str) and _identity(rename.get('identity')) and rename.get('old_absent') is True
                 and os.path.normcase(row['path']) == os.path.normcase(path) == os.path.normcase(rename['old_path'])):
             return rename
     return None
@@ -505,8 +596,8 @@ def confirm_move(database, job_id, path, final_path):
             return None
         rows = [dict(r) for r in db.execute("SELECT * FROM inplace_edits WHERE job_id=? AND state IN ('publishing','published','unresolved')", (job_id,))]
     for row in rows:
-        if not isinstance(row['path'], str) or os.path.normcase(row['path']) != os.path.normcase(path):
-            continue
+        if not _keyed(row) or not isinstance(row['path'], str) or os.path.normcase(row['path']) != os.path.normcase(path):
+            continue  # a row it cannot address cannot record a receipt either (F16)
         try:
             receipt = _prove_move(_intent(row), final_path)
         except (ValueError, OSError):

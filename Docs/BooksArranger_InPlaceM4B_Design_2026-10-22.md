@@ -33,7 +33,7 @@ Every one of these must hold:
 An in-place edit adds these requirements:
 - the file can be opened READ|WRITE while sharing read access only (so it is not read-only and nobody else is writing to it);
 - one link, and attributes limited to ARCHIVE or NORMAL;
-- no named streams other than the Windows download marker (Zone.Identifier), which the existing marker protocol removes before the move;
+- no named streams other than the Windows download marker (Zone.Identifier), which the existing marker protocol removes before the move. Its exact bytes are journaled in the intent before the first write, and every undo puts them back (0.21.1, Futaba m-3). A marker that changes after the intent is never removed;
 - the destination is absent and on the same volume as the source;
 - the volume has free space for the appended `moov` plus 16 MiB.
 
@@ -44,7 +44,7 @@ Any refusal returns `None` before the first written byte, and the copy flow runs
 The edit uses the studio's own planner, through one native handle. ffmpeg or mp4v2 would write a new file. AtomicParsley needs padding the library lacks. mutagen shifts `mdat` in place.
 
 Order:
-1. Commit an `inplace_edits` journal row. It holds the path, identity, size, ns mtime, attributes, the reviewed sha256, the type offset, and the planned `moov` and output sha256 and size.
+1. Commit an `inplace_edits` journal row. It holds the path, identity, size, ns mtime, attributes, the reviewed sha256, the type offset, the planned `moov` and output sha256 and size, and the download marker's bytes when the original has one (0.21.1).
 2. Append the planned `moov` at the original end of file, then `FlushFileBuffers`.
 3. Write `free` over the old `moov` type, then `FlushFileBuffers`.
 
@@ -114,8 +114,11 @@ The cleanup contract (`source_cleanup._validation_contract`) accepts `publicatio
 - before any write, prove the file is the edited original: the same native file ID (a writer reopened by path is checked too), and one full read in which `[0, original size)` with the type reverted hashes to the reviewed sha256. That proof alone shows the undo restores the exact original, so the bytes past the original size are cut off without being judged, whether whole, torn, or zero-filled at full length by a power loss (0.21.0 F12). A file that fails either proof is left exactly as found, and the row becomes `unresolved`;
 - truncate to the original size;
 - write `moov` back;
+- put back the download marker the edit removed, from its journaled bytes, as a new stream (0.21.1 m-3). A marker still present is left as it is. This comes before the write time, because writing a named stream moves the file's own write time;
 - restore the ns write time and the attributes;
 - re-read, and require the reviewed sha256.
+
+Every value the undo uses is checked before its first write: any field the edit writes missing or of another type, a write time `restore_metadata` cannot set exactly, or attributes other than ARCHIVE or NORMAL make the row damaged, and nothing is written (0.21.1 F15, m-4).
 
 After the undo, the copy flow runs (a pause stops instead). An undo that cannot reproduce the reviewed sha256 raises `Unresolved` and leaves the row `unresolved`.
 
@@ -125,8 +128,11 @@ After the undo, the copy flow runs (a pause stops instead). An undo that cannot 
 |---|---|
 | The original is still at its path | Undo, always proving the content first (one full read, as above). A share may report a new file ID after reconnecting, so recovery does not require the same ID; the content proof decides → `rolled_back` |
 | The source path is absent and the destination hashes in full, under a deny-writers handle, to the planned output | `published`, with a recovered rename receipt that source cleanup accepts. A matching size alone proves nothing |
-| The original's folder cannot be seen, as when the library share is not reconnected yet (0.21.0 F13) | Nothing is recorded and the row stays open. The interrupted book restarts as usual, and the next start or attempt that can see the folder settles it. That attempt is not refused: it cannot read the source either, and nothing writes to a source that differs from its review |
-| Anything else: the folder is there but holds neither the original nor the planned output, or the journal row is damaged (0.21.0 M1) | `unresolved`: the job needs attention, other books continue, and recovery is retried at the next start or attempt |
+| The journaled library root itself cannot be seen, as when the library share is not reconnected yet (0.21.0 F13; 0.21.1 F17) | Nothing is recorded and the row stays open. The interrupted book restarts as usual, and the next start or attempt that can see the library settles it. That attempt is not refused: it cannot read the source either, and nothing writes to a source that differs from its review |
+| Anything else: the library root is visible but neither the original nor the planned output is there, a book folder renamed or deleted included (0.21.1 F17); or the journal row is damaged (0.21.0 M1, 0.21.1 F15 and m-4) | `unresolved`: the job needs attention, other books continue, and recovery is retried at the next start or attempt |
+| A row whose `job_id` or `attempt_id` is not text, which SQLite allows in this primary key (0.21.1 F16) | Damaged. Nothing is written or recorded, since the journal cannot address the row. Its own book needs attention (found by job, or by its source path before an attempt), and no other book is affected. Source cleanup proves no move from it |
+
+A row written by 0.21.0 has no marker field. Its marker bytes then come from the marker removal receipt in its detail, when that is readable; otherwise no marker is put back, as in 0.21.0.
 
 **Backup.** None is needed. Only the 4 known bytes are overwritten, and everything else lies past the original end of file. The journal row is the complete undo, so no full copy is ever made.
 
@@ -195,7 +201,12 @@ Across the about 770 eligible books (about 6,200 audio hours) this saves about 3
 
 ## 9. Tests
 
-`tests/test_inplace_m4b.py` (27 tests, in the check gate):
+`tests/test_inplace_m4b.py` (40 tests, in the check gate):
+- damaged rows, generated (0.21.1, `DamagedRowTests`): from a row the edit really wrote, each key of its intent and of its detail (nested receipts included) is deleted and given a value of another type, and each key column is set NULL. Both world states (the edited original at its path; moved into its output) go through every reader: startup recovery, `clear()` before an attempt, and source cleanup's `published_move` and `confirm_move`. A damaged intent refuses only its own book with the damaged-record reason and writes nothing; a damaged detail never decides what the intent proves; the other book is unaffected. A field the edit starts writing is covered with no change to the test;
+- every undo puts back the download marker it removed: in process, after a crash, and for a row 0.21.0 wrote; a marker that changed after the intent is not removed;
+- a write time or attributes the undo cannot set writes nothing;
+- an unreachable library root leaves the edit open, while a renamed book folder or a file moved by hand is a missing original;
+- source cleanup retires an in-place book through the rename's own receipt, without proving the move again (0.21.1 F20);
 - the eligible end-to-end path, byte-identical to the copy flow, whose byte proof satisfies the cleanup contract while a missing, unverified or foreign proof is refused;
 - tags, cover and chapters on the published file;
 - the download marker;

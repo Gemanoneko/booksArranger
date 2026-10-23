@@ -110,6 +110,32 @@ def remove_marker(path,validate,persist):
     return True
 
 
+def restore_marker(path,raw):
+    """Undo of an in-place edit only (0.21.1): put back the exact marker bytes it journaled and removed.
+
+    Caller holds the base file deny-writers and deny-delete, so the name stays bound to it. The stream is created new
+    (never over an existing one) and must then hold exactly these bytes. Writing it moves the base write time, so the
+    caller restores that afterwards.
+    """
+    path=ordinary(path)
+    if not isinstance(raw,bytes) or not 0<len(raw)<=MAX_MARKER:raise BoundaryError('Unknown download marker size preserved')
+    handle=kernel.CreateFileW(str(path)+':Zone.Identifier',0x40000000|0x80000000,0,None,1,0x00200000,None)
+    if handle==ctypes.c_void_p(-1).value:raise BoundaryError('Cannot restore the download marker')
+    try:
+        kernel.WriteFile.argtypes=[W.HANDLE,ctypes.c_void_p,W.DWORD,ctypes.POINTER(W.DWORD),ctypes.c_void_p];kernel.WriteFile.restype=W.BOOL
+        kernel.FlushFileBuffers.argtypes=[W.HANDLE];kernel.FlushFileBuffers.restype=W.BOOL
+        count=W.DWORD()
+        if not kernel.WriteFile(handle,raw,len(raw),ctypes.byref(count),None) or count.value!=len(raw) or not kernel.FlushFileBuffers(handle):
+            raise BoundaryError('Cannot restore the download marker')
+        kernel.SetFilePointerEx.argtypes=[W.HANDLE,ctypes.c_longlong,ctypes.c_void_p,W.DWORD];kernel.SetFilePointerEx.restype=W.BOOL
+        kernel.ReadFile.argtypes=[W.HANDLE,ctypes.c_void_p,W.DWORD,ctypes.POINTER(W.DWORD),ctypes.c_void_p];kernel.ReadFile.restype=W.BOOL
+        buffer=ctypes.create_string_buffer(MAX_MARKER+1)
+        if not kernel.SetFilePointerEx(handle,0,None,0) or not kernel.ReadFile(handle,buffer,len(buffer),ctypes.byref(count),None) or buffer.raw[:count.value]!=raw:
+            raise BoundaryError('The restored download marker could not be proven')
+    finally:kernel.CloseHandle(handle)
+    if [size for name,size in streams(path) if name==MARKER]!=[len(raw)]:raise BoundaryError('The restored download marker could not be proven')
+
+
 @contextlib.contextmanager
 def readable_source_streams(path, original):
     """Read-only admission, distinct from deletion-grade single_stream.

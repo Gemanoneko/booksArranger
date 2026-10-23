@@ -12,6 +12,7 @@ import inplace_m4b
 import m4b_preservation as mp
 import m4b_repair
 import native_io
+import zone_identifier
 from audio_pipeline import create_private, digest, fingerprint, run_owned, source_chapters, ValidationError
 from encoding_policy import AUTOMATIC_PROFILE, freeze_automatic_policy
 from native_io import BoundaryError, VerifiedFile
@@ -19,6 +20,7 @@ from native_io import BoundaryError, VerifiedFile
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'inplace-m4b-tests'
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
 CHAPTERS = ';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=700\ntitle=First\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=700\nEND=1500\ntitle=Second\n'
+MARKER = b'[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.invalid/book.m4b\r\n'
 # Child process for a real kill: edit in place, publish, and park right after the OS rename, before its receipt is journaled.
 KILLED_AFTER_RENAME = r'''
 import contextlib, json, sys, threading, time
@@ -54,8 +56,8 @@ class Fixture(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=AREA); self.root = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup); self.database = str(self.root / 'catalog.sqlite3'); self.stop = threading.Event()
 
-    def media(self, name='Book.m4b', codec='aac', cover=False, chapters=True):
-        plain = self.root / ('plain-' + name); path = self.root / 'Unsorted' / name; path.parent.mkdir(exist_ok=True)
+    def media(self, name='Book.m4b', codec='aac', cover=False, chapters=True, folder=None):
+        plain = self.root / ('plain-' + name); path = Path(folder or self.root / 'Unsorted') / name; path.parent.mkdir(parents=True, exist_ok=True)
         run_owned([shutil.which('ffmpeg'), '-v', 'error', '-nostdin', '-n', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1.5',
                    '-ar', '44100', '-ac', '1', '-c:a', codec, '-metadata', 'title=Old title', str(plain)], self.root, self.stop, 30)
         extra = []
@@ -69,12 +71,12 @@ class Fixture(unittest.TestCase):
         run_owned(args, self.root, self.stop, 30)
         return path
 
-    def manifest(self, path, destination=None):
+    def manifest(self, path, destination=None, root=None):
         cover = self.root / 'approved.png'
         if not cover.exists():cover.write_bytes(PNG)
         sources = [{'path': str(path), **fingerprint(path), 'sha256': digest(path), 'metadata': {'tags': {}}}]
         return {'job_id': str(uuid.uuid4()), 'attempt_id': str(uuid.uuid4()), 'candidate_id': str(uuid.uuid4()), 'candidate_revision': 1,
-                'root': str(self.root), 'output_root': str(self.root),
+                'root': str(root or self.root), 'output_root': str(self.root),
                 'destination': str(destination or self.root / 'Sorted' / 'Writer John' / (path.stem + ' - John Writer.m4b')),
                 'profile': AUTOMATIC_PROFILE, 'encoding_policy': freeze_automatic_policy(sources), 'sources': sources,
                 'cover': {'path': str(cover), 'sha256': digest(cover), 'id': 'cover'}, 'comments': 'Original comment', 'chapters': [],
@@ -92,6 +94,21 @@ class Fixture(unittest.TestCase):
 
     def snapshot(self, path):
         return Path(path).read_bytes(), os.stat(path).st_mtime_ns
+
+    def stage(self, name):
+        stage = self.root / ('stage-' + name); stage.mkdir(); return stage
+
+    def mark(self, path, raw=MARKER):
+        """A browser's download marker on the file (it moves the file's write time, so call it before any snapshot)."""
+        with open(str(path) + ':Zone.Identifier', 'wb') as stream:stream.write(raw)
+
+    def exact(self, path):
+        """Everything an undo must give back: the bytes, the ns write time, and the download marker (None: no marker)."""
+        names = [name for name, _ in zone_identifier.streams(path)]; marker = None
+        self.assertLessEqual(set(names), {'::$DATA', zone_identifier.MARKER})
+        if zone_identifier.MARKER in names:
+            with open(str(path) + ':Zone.Identifier', 'rb') as stream:marker = stream.read()
+        return (*self.snapshot(path), marker)
 
     def run_in_place(self, manifest):
         return create_private(manifest, self.root / 'stage', self.stop, in_place=self.session(manifest))
@@ -167,6 +184,7 @@ class EligiblePathTests(Fixture):
         self.assertEqual(zone_identifier.streams(record['final_path']), [('::$DATA', validation['size'])])
         detail = json.loads(self.rows()[0]['detail'])
         self.assertEqual(base64.b64decode(detail['zone_marker']['marker_bytes_base64']), marker)
+        self.assertEqual(base64.b64decode(json.loads(self.rows()[0]['intent'])['zone_marker']), marker)  # before the first write
 
     def test_publication_failure_before_rename_restores_original(self):
         source = self.media(); before = self.snapshot(source); manifest = self.manifest(source)
@@ -343,6 +361,52 @@ class CrashRecoveryTests(Fixture):
                     CleanupJobs._retire_moved(cleanup, 'cleanup', {'job_id': label}, manifest, {'final_path': str(final)})
         self.assertEqual(retired, [])
 
+    def test_every_undo_puts_back_the_download_marker_it_removed(self):
+        # Futaba 0.21.0 m-3: the edit removes the marker before its last checks, and no undo put it back. Its bytes are now in
+        # the intent, journaled before the first write, and every undo restores them before the write time.
+        source = self.media(); self.mark(source); before = self.exact(source)
+        def cover_changed(point, handle=None):  # Futaba's repro B: the selected cover changes after the marker is gone
+            if point == 'reacquired':Path(manifest['cover']['path']).write_bytes(PNG + b'changed')
+        manifest = self.manifest(source)
+        with patch('inplace_m4b._fault', side_effect=cover_changed):
+            self.assertIsNone(inplace_m4b.edit(manifest, self.stage('cover'), self.stop, lambda *a: None, self.session(manifest)))
+        self.assertEqual(self.exact(source), before); self.assertEqual(self.rows()[-1]['state'], 'rolled_back')
+        changed = MARKER + b'ReferrerUrl=https://example.invalid/\r\n'; manifest = self.manifest(source)
+        def marker_changed(point, handle=None):  # only the marker the undo would put back is ever removed
+            if point == 'checked':self.mark(source, changed)
+        with patch('inplace_m4b._fault', side_effect=marker_changed):
+            self.assertIsNone(inplace_m4b.edit(manifest, self.stage('marker'), self.stop, lambda *a: None, self.session(manifest)))
+        self.assertEqual(self.exact(source), before[:2] + (changed,)); self.assertEqual(self.rows()[-1]['state'], 'rolled_back')
+        self.mark(source); before = self.exact(source); manifest = self.manifest(source)
+        self.crash('reacquired', manifest)  # Futaba's repro D: the process dies after the marker removal
+        row = next(r for r in self.rows() if r['job_id'] == manifest['job_id']); self.assertIsNone(self.exact(source)[2])
+        legacy = source.with_name('Journaled by 0.21.0.m4b'); shutil.copyfile(source, legacy)  # its intent has no marker
+        intent = {k: v for k, v in json.loads(row['intent']).items() if k != 'zone_marker'} | {'path': str(legacy)}
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', ('legacy', 'attempt', str(legacy), row['state'], json.dumps(intent), row['detail'], 'x'))
+        self.assertEqual([state for state, _ in inplace_m4b.recover_all(self.database)], ['rolled_back', 'rolled_back'])
+        self.assertEqual(self.exact(source), before); self.assertEqual(self.exact(legacy), before)
+
+    def test_a_write_time_or_attributes_its_undo_cannot_set_writes_nothing(self):
+        # Futaba 0.21.0 m-4: such values passed the type check, and the undo cut the file and patched its type before
+        # restore_metadata refused them. Every value the undo needs is now checked before its first write.
+        source = self.media(); manifest = self.manifest(source); self.crash('appended', manifest); good = json.loads(self.rows()[0]['intent'])
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:db.execute('DELETE FROM inplace_edits')
+        values = [('modified', good['modified'], 'rolled_back'), ('modified', 2 ** 70, 'unresolved'), ('modified', -5, 'unresolved'),
+                  ('modified', -116444736000000000 * 100, 'unresolved'), ('attributes', 2 ** 70, 'unresolved'),
+                  ('attributes', -1, 'unresolved'), ('attributes', 0x1, 'unresolved')]
+        for i, (key, value, expected) in enumerate(values):
+            with self.subTest(key=key, value=value):
+                path = source.with_name(f'Copy {i}.m4b'); shutil.copyfile(source, path); found = self.exact(path)
+                with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+                    db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (f'job {i}', 'attempt', str(path), 'written', json.dumps(dict(good, path=str(path), **{key: value})), '{}', 'x'))
+                inplace_m4b.recover_all(self.database); row = next(r for r in self.rows() if r['job_id'] == f'job {i}')
+                self.assertEqual(row['state'], expected)
+                if expected == 'unresolved':  # left exactly as found, with the damaged-record reason
+                    self.assertEqual(json.loads(row['detail'])['reason'], inplace_m4b.DAMAGED); self.assertEqual(self.exact(path), found)
+                else:  # the positive control: the same copy and row with a usable value is undone
+                    self.assertEqual(self.snapshot(path)[0], source.read_bytes()[:good['size']])
+
     def test_torn_type_patch_is_restored(self):
         source = self.media(); before = self.snapshot(source); manifest = self.manifest(source); self.crash('type_patched', manifest)
         intent = json.loads(self.rows()[0]['intent'])
@@ -468,6 +532,7 @@ class RecoveryWiringTests(Fixture):
     def test_startup_shows_a_damaged_journal_row_on_its_book_and_still_starts(self):
         # Futaba 0.21.0 M1: a row of the wrong shape raised KeyError/TypeError out of startup, so the engine never started.
         # Each damaged row is now unresolved on its own book; a damaged detail never blocks the undo of an intact intent.
+        # Whole-column damage and the bounds are here; each single key of a real row is DamagedRowTests' (0.21.1 F15).
         source = self.media(); before = self.snapshot(source); first = self.queue()
         intact = self.manifest(source); intact_id = self.enqueue(first, intact, 'running'); self.crash('appended', intact)
         good = json.loads(self.rows()[0]['intent'])
@@ -476,10 +541,7 @@ class RecoveryWiringTests(Fixture):
                 # past the original's end: an unchecked undo would pass the head proof, then write 'moov' after the last byte
                 'type offset outside the original': ('written', json.dumps(dict(good, type_offset=good['size'])), '{}'),
                 'output not longer than the original': ('written', json.dumps(dict(good, output_size=good['size'])), '{}'),
-                'unresolved, folder unreachable, detail NULL': ('unresolved', json.dumps(dict(good, path=str(self.root / 'Gone' / 'Book.m4b'))), None)}
-        for key in ('path', 'root', 'destination', 'sha256', 'output_sha256', 'size', 'output_size', 'type_offset', 'modified', 'attributes'):
-            rows[key + ' missing'] = ('written', json.dumps({k: v for k, v in good.items() if k != key}), '{}')
-            rows[key + ' of the wrong type'] = ('written', json.dumps(dict(good, **{key: [good[key]]})), '{}')
+                'unresolved, library root unreachable, detail NULL': ('unresolved', json.dumps(dict(good, path=str(self.root / 'Gone' / 'Book.m4b'), root=str(self.root / 'Gone'))), None)}
         manifests = {label: dict(copy.deepcopy(intact), job_id=str(uuid.uuid4()), attempt_id=str(uuid.uuid4()), candidate_id=str(uuid.uuid4())) for label in rows}
         jobs = {label: self.enqueue(first, m, 'running') for label, m in manifests.items()}
         with contextlib.closing(sqlite3.connect(self.database)) as db, db:
@@ -495,23 +557,27 @@ class RecoveryWiringTests(Fixture):
         kept = next(r for r in self.rows() if r['job_id'] == intact['job_id'])
         self.assertEqual((kept['state'], json.loads(kept['detail'])['damaged_detail']), ('rolled_back', 'null'))
 
-    def test_startup_leaves_an_edit_in_an_unreachable_folder_open_and_undoes_it_once_reachable(self):
+    def test_startup_leaves_an_edit_open_only_while_its_library_root_cannot_be_seen(self):
         # Senua 0.21.0 F13: a library share not reconnected yet at startup is not a missing original. The book restarts with
-        # no attention, and the next start that can see the folder undoes the edit. A reachable folder that holds neither
-        # the original nor its destination is still reported missing.
-        source = self.media(); before = self.snapshot(source); manifest = self.manifest(source)
-        job_id = self.enqueue(self.queue(), manifest, 'running'); self.crash('type_patched', manifest)
-        folder = source.parent; away = folder.with_name('Unsorted offline'); folder.rename(away)
+        # no attention, and the next start that can see the library undoes the edit. 0.21.1 F17: offline is the library root
+        # itself out of sight (this test used to rename the book folder, which is exactly the case it misread). A book
+        # folder renamed or deleted in a visible library, or a file moved by hand, is a missing original.
+        library = self.root / 'Library'; source = self.media(folder=library / 'Writer'); before = self.snapshot(source)
+        manifest = self.manifest(source, root=library); job_id = self.enqueue(self.queue(), manifest, 'running')
+        self.crash('type_patched', manifest); away = library.with_name('Library offline'); library.rename(away)
         journaled = self.rows()[0]['state']; jobs = self.queue(); row = self.job(jobs, job_id)
         self.assertEqual((row['state'], row['reason']), ('pending', 'Interrupted book restarts on explicit resume'))
         self.assertEqual(self.rows()[0]['state'], journaled)  # still open, nothing recorded
         inplace_m4b.clear(self.database, manifest); self.assertEqual(self.rows()[0]['state'], journaled)  # an attempt is not refused
-        away.rename(folder); self.queue()
+        away.rename(library); self.queue()
         self.assertEqual(self.snapshot(source), before); self.assertEqual(self.rows()[0]['state'], 'rolled_back')
-        gone = self.media('Gone.m4b'); missing = self.manifest(gone); gone_id = self.enqueue(jobs, missing, 'running')
-        self.crash('type_patched', missing); gone.rename(gone.with_name('Moved by hand.m4b'))
-        row = self.job(self.queue(), gone_id)
-        self.assertEqual((row['state'], row['reason']), ('needs attention', inplace_m4b.ATTENTION + 'The edited original is missing and its destination does not hold it'))
+        for label, gone_by_hand in (('book folder renamed', lambda path: path.parent.rename(path.parent.with_name('Renamed by hand'))),
+                                    ('file moved within its folder', lambda path: path.rename(path.with_name('Moved by hand.m4b')))):
+            with self.subTest(label):
+                gone = self.media(label + '.m4b', folder=library / label); missing = self.manifest(gone, root=library)
+                gone_id = self.enqueue(jobs, missing, 'running'); self.crash('type_patched', missing); gone_by_hand(gone)
+                row = self.job(self.queue(), gone_id)
+                self.assertEqual((row['state'], row['reason']), ('needs attention', inplace_m4b.ATTENTION + 'The edited original is missing and its destination does not hold it'))
 
     def test_a_damaged_row_refuses_only_its_own_books_attempt(self):
         # Coordinator follow-up, 2026-10-23: clear() compared every open row's path column, so one row with a NULL path (and a
@@ -552,6 +618,181 @@ class RecoveryWiringTests(Fixture):
                     self.assertTrue(self.job(jobs, job_id)['reason'].startswith(inplace_m4b.ATTENTION))
                 else:
                     self.assertEqual(seen, [before])  # the runner saw the restored original
+
+
+def key_paths(value, prefix=()):
+    """Every key of a journaled JSON object, the keys of nested objects included, as a tuple of keys."""
+    for key, inner in value.items():
+        yield prefix + (key,)
+        if isinstance(inner, dict):yield from key_paths(inner, prefix + (key,))
+
+
+def damaged(value, keys, how):
+    """A copy of value whose key at `keys` is deleted ('missing') or holds a value of another type."""
+    value = copy.deepcopy(value); parent = value
+    for key in keys[:-1]:parent = parent[key]
+    if how == 'missing':del parent[keys[-1]]
+    else:parent[keys[-1]] = 'x' if isinstance(parent[keys[-1]], list) else [parent[keys[-1]]]
+    return value
+
+
+RESTARTS = ('pending', 'Interrupted book restarts on explicit resume')
+REFUSED = ('needs attention', inplace_m4b.ATTENTION + inplace_m4b.DAMAGED)
+NO_RECEIPT = 'In-place move receipt is missing; nothing retired'
+
+
+class DamagedRowTests(Fixture):
+    """Futaba 0.21.0 M-1, Senua F15 and F16: damaged-row handling was fixed one field at a time, twice, because each test
+    listed the fields its fix knew. Every case here is generated from a row the edit really wrote: each key deleted, and
+    each given a value of another type (nested receipts included), plus a NULL key column. A field the edit starts writing
+    is covered with no change here. Both world states (the edited original at its path; moved into its output) go through
+    every reader: startup recovery, clear() before an attempt, and source cleanup's published_move and confirm_move.
+
+    A damaged intent refuses only its own book, with the damaged-record reason, and writes nothing. A damaged detail
+    never decides what the intact intent proves. The other book never notices, and no raw exception text appears."""
+    queue, enqueue, job = RecoveryWiringTests.queue, RecoveryWiringTests.enqueue, RecoveryWiringTests.job
+
+    def setUp(self):
+        super().setUp(); self.seen = []
+
+    def runner(self, manifest, stop, checkpoint):
+        path = manifest['sources'][0]['path']
+        self.seen.append((manifest['job_id'], self.exact(path) if os.path.exists(path) else None)); stop.set()
+        raise InterruptedError('Fixture stops at the runner')
+
+    def cases(self, row):
+        """[(label, kind, part, keys, how)]. 'valid': the intent still proves the outcome. 'damaged': refused on its own book.
+        'unaddressable' (attempt_id NULL) and 'orphan' (job_id NULL): the journal can settle neither (F16)."""
+        found = [('intact row', 'valid', None, (), None)]
+        for part in ('intent', 'detail'):
+            for keys in key_paths(json.loads(row[part])):
+                for how in ('missing', 'of another type'):
+                    # Without its marker key an intent reads as one 0.21.0 wrote, whose marker is in its removal receipt.
+                    valid = part == 'detail' or (keys, how) == (('zone_marker',), 'missing')
+                    found.append((part + ' ' + '.'.join(keys) + ' ' + how, 'valid' if valid else 'damaged', part, keys, how))
+        return found + [('attempt_id NULL', 'unaddressable', 'attempt_id', (), None), ('job_id NULL', 'orphan', 'job_id', (), None)]
+
+    def take(self, manifest):
+        """The row the edit wrote for this book, taken out of the journal so that each case is journaled on its own."""
+        row = next(r for r in self.rows() if r['job_id'] == manifest['job_id'])
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:db.execute('DELETE FROM inplace_edits WHERE job_id=?', (row['job_id'],))
+        return row
+
+    def place(self, manifest, row, case, path, state=None):
+        """Journal one case as a book of its own whose single source is `path`; returns that book's manifest."""
+        label, kind, part, keys, how = case
+        book = dict(copy.deepcopy(manifest), job_id=str(uuid.uuid4()), attempt_id=str(uuid.uuid4()), candidate_id=str(uuid.uuid4()))
+        book['sources'][0]['path'] = str(path)
+        intent = dict(json.loads(row['intent']), path=str(path), job_id=book['job_id'], attempt_id=book['attempt_id'])
+        detail = json.loads(row['detail'])
+        if 'rename' in detail:detail['rename']['old_path'] = str(path)
+        if part == 'intent':intent = damaged(intent, keys, how)
+        if part == 'detail':detail = damaged(detail, keys, how)
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('INSERT INTO inplace_edits VALUES(?,?,?,?,?,?,?)', (None if part == 'job_id' else book['job_id'], None if part == 'attempt_id' else book['attempt_id'],
+                       str(path), state or row['state'], json.dumps(intent), json.dumps(detail), 'x'))
+        return book
+
+    def other_book(self, first):
+        """Another book's interrupted edit (killed mid-append), running when the engine stopped."""
+        other = self.media('Other.m4b'); before = self.exact(other); manifest = self.manifest(other)
+        job_id = self.enqueue(first, manifest, 'running'); self.crash('appended', manifest)
+        return other, before, manifest, job_id
+
+    def retire(self, book):
+        """Source cleanup's in-place retirement of this book: 'completed' or its refusal, and the facts it retired."""
+        from source_cleanup import CleanupJobs
+        retired = []
+        cleanup = SimpleNamespace(database=self.database, root=self.root / 'recovery', review_boundary=contextlib.nullcontext,
+                                  guard=lambda db, intent: True, _set=lambda *a: None,
+                                  _retire=lambda intent, source, member, db=None: retired.append(json.loads(member['facts'])))
+        try:
+            CleanupJobs._retire_moved(cleanup, 'cleanup ' + book['job_id'], {'job_id': book['job_id']}, book, {'final_path': book['destination']})
+        except BoundaryError as error:
+            return str(error), retired
+        return 'completed', retired
+
+    def assert_attempts(self, jobs, placed, reached):
+        """clear() before each case's attempt: a valid one reaches its runner as `reached` says; every other is refused."""
+        for (label, kind, *_), book, path, found in placed:
+            with self.subTest(reader='attempt', case=label):
+                job_id = self.enqueue(jobs, book); jobs._stop.clear(); jobs._work_attempt(self.job(jobs, job_id))
+                seen = dict(self.seen)
+                if kind == 'valid':
+                    self.assertIn(book['job_id'], seen); reached(book, seen[book['job_id']])
+                else:
+                    self.assertNotIn(book['job_id'], seen); job = self.job(jobs, job_id)
+                    self.assertEqual((job['state'], job['reason']), REFUSED)
+                    if found is not None:self.assertEqual(self.exact(path), found)
+
+    def test_every_damaged_field_of_an_edit_left_at_its_original_path(self):
+        first = self.queue(); source = self.media(); self.mark(source); original = self.exact(source); manifest = self.manifest(source)
+        self.crash('reacquired', manifest)  # edited and its download marker removed, then the process died
+        row = self.take(manifest); cases = self.cases(row); other, other_before, other_manifest, other_id = self.other_book(first)
+        def copies(phase):  # each case edits its own copy, so a wrong write shows on that case alone
+            placed = []
+            for i, case in enumerate(cases):
+                path = source.with_name(f'{phase} {i}.m4b'); shutil.copyfile(source, path)
+                placed.append((case, self.place(manifest, row, case, path), path, self.exact(path)))
+            return placed
+        placed = copies('Startup'); ids = [self.enqueue(first, book, 'running') for _, book, _, _ in placed]
+        jobs = self.queue(self.runner)  # the engine starts again
+        for ((label, kind, *_), book, path, found), job_id in zip(placed, ids):
+            with self.subTest(reader='startup', case=label):
+                job = self.job(jobs, job_id)
+                self.assertEqual((job['state'], job['reason']), RESTARTS if kind in ('valid', 'orphan') else REFUSED)
+                self.assertEqual(self.exact(path), original if kind == 'valid' else found)  # bytes, write time and marker
+        job = self.job(jobs, other_id); self.assertEqual((job['state'], job['reason']), RESTARTS); self.assertEqual(self.exact(other), other_before)
+        self.assert_attempts(jobs, copies('Attempt'), lambda book, state: self.assertEqual(state, original))
+        jobs._stop.clear(); jobs._work_attempt(self.job(jobs, other_id)); self.assertEqual(self.seen[-1], (other_manifest['job_id'], other_before))
+        from source_cleanup import setup
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:setup(db)
+        edited = self.exact(source)
+        for case in cases:  # 'unresolved', so that confirm_move reads every one of them
+            with self.subTest(reader='cleanup', case=case[0]):
+                self.assertEqual(self.retire(self.place(manifest, row, case, source, 'unresolved')), (NO_RECEIPT, []))
+        self.assertEqual(self.exact(source), edited)
+
+    def test_every_damaged_field_of_an_edit_moved_into_its_output(self):
+        first = self.queue(); source = self.media(); self.mark(source); manifest = self.manifest(source)
+        edited, validation = self.run_in_place(manifest); published(self.fake(), manifest, edited, validation, lambda *a: None)
+        output = Path(manifest['destination']); kept = self.exact(output); row = self.take(manifest)
+        self.assertEqual(json.loads(row['detail'])['rename']['schema'], 'books-native-no-copy-rename-v1')
+        detail = json.loads(row['detail']); detail.pop('rename')
+        killed = dict(row, state='publishing', detail=json.dumps(detail))  # a process death between the rename and its receipt
+        cases = self.cases(killed); other, other_before, other_manifest, other_id = self.other_book(first)
+        def moved(phase):  # each case's original has its own (absent) old path; all of them moved into the one output
+            return [(case, self.place(manifest, killed, case, source.with_name(f'{phase} {i}.m4b')), None, None) for i, case in enumerate(cases)]
+        def receipt(book):
+            return inplace_m4b.published_move(self.database, book['job_id'], book['sources'][0]['path'])
+        placed = moved('Startup'); ids = [self.enqueue(first, book, 'running') for _, book, _, _ in placed]
+        jobs = self.queue(self.runner)  # the engine starts again
+        for ((label, kind, *_), book, _, _), job_id in zip(placed, ids):
+            with self.subTest(reader='startup', case=label):
+                job = self.job(jobs, job_id)
+                self.assertEqual((job['state'], job['reason']), RESTARTS if kind in ('valid', 'orphan') else REFUSED)
+                if kind == 'valid':self.assertEqual(os.path.normcase(receipt(book)['final_path']), os.path.normcase(str(output)))
+                else:self.assertIsNone(receipt(book))
+        job = self.job(jobs, other_id); self.assertEqual((job['state'], job['reason']), RESTARTS); self.assertEqual(self.exact(other), other_before)
+        self.assert_attempts(jobs, moved('Attempt'), lambda book, state: self.assertEqual(os.path.normcase(receipt(book)['final_path']), os.path.normcase(str(output))))
+        from source_cleanup import setup
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:setup(db)
+        for state, base in (('publishing', killed), ('published', row)):
+            for i, (label, kind, *rest) in enumerate(self.cases(base)):
+                with self.subTest(reader='cleanup', state=state, case=label):
+                    book = self.place(manifest, base, (label, kind, *rest), source.with_name(f'Cleanup {state} {i}.m4b'), state)
+                    outcome, retired = self.retire(book)
+                    # A published row's own receipt proves its move whatever its intent says; after a kill there is no
+                    # receipt, and a receipt cleanup cannot use is replaced, so the intent must prove the move again.
+                    if kind in ('unaddressable', 'orphan') or state == 'publishing' and kind != 'valid':
+                        self.assertEqual((outcome, retired), (NO_RECEIPT, []))
+                        continue
+                    self.assertEqual((outcome, len(retired)), ('completed', 1))
+                    self.assertEqual(os.path.normcase(retired[0]['final_path']), os.path.normcase(str(output)))
+                    self.assertTrue(isinstance(retired[0]['identity'], list) and len(retired[0]['identity']) == 3 and all(type(n) is int for n in retired[0]['identity']))
+                    if (state, label) == ('published', 'intact row'):  # Senua 0.21.0 F20: the rename's own receipt, not a second proof
+                        self.assertEqual(receipt(book)['schema'], 'books-native-no-copy-rename-v1')
+        self.assertEqual(self.exact(output), kept)
 
 
 class ByteProofTests(Fixture):
@@ -740,7 +981,11 @@ class ServiceTests(unittest.TestCase):
         from merge_service import MergeService
         original = self.source.read_bytes(); row = self.service.reviews.page()['rows'][0]
         result = PublicResearch(self.client).lookup(row, str(self.audio)); self.assertEqual(result['reasons'], [], result)
-        fresh, job_id = self.service.approve_automatic(row, result, threading.Event(), self.client); self.wait()
+        real = inplace_m4b.confirm_move; proved = []
+        def confirm(*args):
+            proved.append(args); return real(*args)
+        with patch('inplace_m4b.confirm_move', side_effect=confirm):
+            fresh, job_id = self.service.approve_automatic(row, result, threading.Event(), self.client); self.wait()
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         validation = job['output']['validation']; final = Path(job['output']['final_path'])
         self.assertEqual(validation['encoding']['selection'], inplace_m4b.SELECTION)
@@ -755,6 +1000,10 @@ class ServiceTests(unittest.TestCase):
         with connect_db(self.inv.database) as db:
             self.assertEqual(db.execute("SELECT state FROM inplace_edits").fetchall(), [('published',)])
             self.assertEqual(db.execute("SELECT state FROM source_retirements").fetchall(), [('removed',)])
+            # Senua 0.21.0 F20: cleanup retired the book through the rename's own receipt, not by proving the move again
+            # (a second full read of the output over the share, and a recovered receipt in place of the native one).
+            receipt = json.loads(db.execute('SELECT detail FROM inplace_edits').fetchone()[0])['rename']
+        self.assertEqual((proved, receipt['schema']), ([], 'books-native-no-copy-rename-v1'))
         self.service.close(); self.service = MergeService(self.inv, self.base / 'cache')
         self.assertEqual(self.service.jobs.status()['completed'], 1)
 

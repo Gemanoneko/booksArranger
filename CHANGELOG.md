@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.21.1] - 2026-10-23
+
+### Fixed
+
+- A damaged in-place edit record can no longer keep the app from starting, whichever of its fields is missing or wrong. Its book needs attention with a reason that says the record is damaged, nothing is written to its file, and other books carry on. A record with an empty key now affects only its own book, instead of giving every interrupted book a false reason at every start.
+- A book folder renamed or deleted after an interrupted in-place edit is reported on its book again as a missing original. Only a library that cannot be reached at all, such as a share that is not reconnected yet, leaves the edit open until the library is back.
+- Undoing an in-place edit, after a failed check or an interrupted run, now puts back the Windows download marker the edit removed, so the original is restored exactly. Edits recorded by 0.21.0 get their marker back too.
+- An undo checks the recorded modification time and attributes before it changes any byte. A record with values it could not restore is left as it is and needs attention, instead of being half undone.
+
 ## [v0.21.0] - 2026-10-23
 
 ### Added
