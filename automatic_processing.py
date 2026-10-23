@@ -507,6 +507,16 @@ class AutomaticProcessing:
             diagnostic['persistence_error_class']=type(persistence_error).__name__[:80]
             self.volatile_failure['reason']='Retry progress could not be saved; Start is unavailable.'
 
+    def _resume_queue(self):
+        """Resume saved queued work for this run. A Quit or Pause that began meanwhile refuses that queue start
+        (StartRefused 'closing' or 'stale'); for this worker that is a stop, so the run pauses with its work saved.
+        Live 2026-10-23: a Start racing Quit recorded 'Books is closing' as an automatic-processing failure."""
+        from audio_jobs import StartRefused
+        try:self.merge.resume()
+        except StartRefused as refused:
+            if getattr(refused,'start_state',None) in ('closing','stale') or self.stop_event.is_set():raise InterruptedError() from refused
+            raise
+
     def _work(self,id):
         row=None;identity=None;phase='unknown';research_failed=False;checkpoint={}
         try:
@@ -514,7 +524,7 @@ class AutomaticProcessing:
             if phase=='discovery':
                 # Existing queued jobs finish before a scan; never scan while encoding/cleanup runs.
                 if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):
-                    self.merge.resume()
+                    self._resume_queue()
                     while not self._idle_jobs():
                         if self.stop_event.wait(.2):raise InterruptedError()
                 saved=self.inventory.status('Audiobooks')
@@ -528,7 +538,7 @@ class AutomaticProcessing:
                 self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
-                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self.merge.resume()
+                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self._resume_queue()
                 if self._add_current_candidates(checkpoint):
                     self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             checkpoint['pending']=list(dict.fromkeys(checkpoint.get('pending',[])+checkpoint.get('deferred',[])))

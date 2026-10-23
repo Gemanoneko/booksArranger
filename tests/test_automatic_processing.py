@@ -463,6 +463,32 @@ class AutoTests(unittest.TestCase):
         restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
         self.assertIsNone(restarted.thread);self.assertEqual(restarted.status()['state'],'Paused');merge.approve_automatic.assert_not_called()
 
+    def quit_racing_start(self,refusal):
+        """A saved research run continued by Start while queued work exists, whose queue start is refused."""
+        from audio_jobs import StartRefused
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5)
+        candidate=inv.candidates('Audiobooks')['rows'][0];run_id=str(uuid.uuid4())
+        now=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()  # newest run: the one Start continues
+        with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Paused','research',json.dumps({'pending':[candidate['id']],'done':[]}),'',now,now))
+        merge.state=lambda:{'state':'Paused','queued':1}
+        merge.resume=Mock(side_effect=StartRefused(*refusal))
+        auto.start();return auto,merge,run_id,candidate,self.wait_auto(auto,stop_when_held=False)
+
+    def test_quit_racing_a_start_pauses_the_run_without_a_failure(self):
+        # Live 2026-10-23 20:30:53: Start, then Quit; the queue start the worker makes first was refused with
+        # 'Books is closing' and the run became Needs attention ("Automatic pass could not continue").
+        for refusal in (('closing','Books is closing; saved retry requests are retained.'),('stale','Start was superseded by Pause or closing.')):
+            with self.subTest(refusal=refusal[0]):
+                auto,merge,run_id,candidate,state=self.quit_racing_start(refusal)
+                merge.resume.assert_called_once();merge.approve_automatic.assert_not_called();self.assertEqual(auto._run_row()['id'],run_id)
+                self.assertEqual(state['state'],'Paused');self.assertIsNone(state['failure']);self.assertEqual(state['reason'],'Paused — pending work saved')
+                self.assertEqual(json.loads(auto._run_row()['checkpoint'])['pending'],[candidate['id']])
+                with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],0)
+
+    def test_other_queue_start_refusal_is_still_a_recorded_failure(self):
+        auto,merge,run_id,candidate,state=self.quit_racing_start(('blocked','Queue admission refused for a reason that is not a stop.'))
+        self.assertEqual(state['state'],'Needs attention');self.assertEqual(state['failure']['exception_class'],'StartRefused')
+
     def test_failure_checkpoint_refusal_blocks_retry_without_claiming_durability(self):
         import sqlite3
         auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5)
