@@ -5,6 +5,10 @@ import fs from 'node:fs';import path from 'node:path';import {createHash} from '
 import {pythonBatches,validatePythonReports,pythonWorkerLayout} from './python-check-batches.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'scripts/qa-runtime.json'),'utf8'));
+// The QA runtime is identified by the pinned hashes below; its folder is machine-local. BOOKS_QA_RUNTIME_ROOT names a
+// folder holding python/ and ffmpeg/ (the pinned default lived in a worktree that no longer exists).
+const runtimeRoot=process.env.BOOKS_QA_RUNTIME_ROOT;
+if(runtimeRoot){if(!path.isAbsolute(runtimeRoot))throw Error('BOOKS_QA_RUNTIME_ROOT must be an absolute path');fixture.python.path=path.join(runtimeRoot,'python','python.exe');fixture.ffmpeg.root=path.join(runtimeRoot,'ffmpeg');}
 const python=fixture.python.path,sha=fixture.python.sha256;
 for(const [name,expected] of Object.entries(fixture.ffmpeg.files)){const file=path.join(fixture.ffmpeg.root,name),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected.sha256)throw Error('Bundled QA media runtime differs');}
 if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)throw Error('QA Python runtime differs');

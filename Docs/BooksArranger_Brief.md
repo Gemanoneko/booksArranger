@@ -82,6 +82,8 @@ Python standard library: Tkinter desktop UI plus local HTTP/browser interface, S
 
 **Private MP3 gate fixture (2026-10-24).** The real-media case in `tests/test_mp3_tag_repair.py` (`ActualPrivateStagingTests`) runs only when `BOOKS_MP3_REAL_FIXTURE` is set to the absolute path of Iron Inferno's exact MP3 bytes. That fixture lives on this machine at `WIP/Books Arranger/private-fixtures/ba-mp3-fixture/fixture.mp3` (35,053,612 B, SHA-256 `e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed`). The folder is gitignored, it is not in the installer (`build.files` packages only `desktop/**`), and it does not sync to other machines. It used to sit in a session scratch folder (`shared/ba-mp3-fixture/`); that copy is gone. Run the gate in a separate worktree, not in this checkout: `scripts/check-desktop.mjs` copies every top-level folder except `scratch`, `node_modules`, `.git`, `dist` and `build-cache` into each worker, and here that includes the live `data/` catalog.
 
+**Gate QA runtime (2026-10-24).** `scripts/qa-runtime.json` pins the gate's Python and FFmpeg by SHA-256. Its default folder was the `electron-m1` worktree's `build-cache/runtime`, which is gone. Set `BOOKS_QA_RUNTIME_ROOT` to an absolute folder holding `python/` and `ffmpeg/`; the hashes are still checked. To make one: download the two archives in `desktop/runtime-pins.json` into `build-cache/downloads/<name>-<version>/` (check their SHA-256; `npm run pack` reuses them), extract the Python zip into `python/`, and copy FFmpeg's `bin/*.exe`, `bin/*.dll` and `LICENSE.txt` into `ffmpeg/`. The pinned `python.exe`, `ffmpeg.exe` and `ffprobe.exe` hashes match those archives exactly.
+
 ## Decision log
 
 | Decision | Reason | Revisit when |
