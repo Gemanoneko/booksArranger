@@ -1,6 +1,7 @@
 """Fixed Git alias holds: real requested handles only; mutation private only."""
 import contextlib,ctypes,hashlib,json,os,shutil,sys,tempfile,unittest
 from pathlib import Path
+from unittest import mock
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'scripts'))
 import build_external_tools as tools
 from native_io import BoundaryError,kernel
@@ -94,6 +95,11 @@ class GitAliasTests(unittest.TestCase):
         self.alias.rename(self.root/'unexpected.exe')
         with contextlib.ExitStack() as stack:
             with self.assertRaisesRegex(BoundaryError,'membership'):self.profile(stack)
+    def test_each_production_pin_names_its_own_file_when_it_differs(self):
+        # Read-only against the installed Git: one wrong pin at a time, so a re-pin is told which file moved.
+        for name,label in (('GIT_WRAPPER_SHA256','Fixed Git wrapper'),('CORE_SHA256','Fixed Git core')):
+            with self.subTest(name),mock.patch.object(tools,name,'0'*64),contextlib.ExitStack() as stack:
+                with self.assertRaisesRegex(BoundaryError,'^'+label+' hash/link profile differs$'):tools.retain_git(stack)
     def test_wrong_hash_refused(self):
         with contextlib.ExitStack() as stack:
             with self.assertRaisesRegex(BoundaryError,'hash/link'):tools._retain_profile(stack,self.primary,(self.primary,self.alias),'0'*64)

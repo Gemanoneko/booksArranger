@@ -49,20 +49,21 @@ def _native_aliases(path):
     if len(set(names))!=len(names):raise BoundaryError('Ambiguous fixed Git alias enumeration')
     return set(names)
 
-def _retain_profile(stack,primary,aliases,digest):
-    """Internal native fixture seam; production supplies only literal constants."""
+def _retain_profile(stack,primary,aliases,digest,label='Fixed Git wrapper'):
+    """Internal native fixture seam; production supplies only literal constants.
+    label names the profile in every refusal, so a failed re-pin says which file moved."""
     primary=ordinary(primary);aliases=tuple(ordinary(path) for path in aliases)
     expected={_name(path) for path in aliases}
     if len(aliases) not in (2,4) or len(expected)!=len(aliases) or _name(primary) not in expected or any(path.parent!=primary.parent for path in aliases):
-        raise BoundaryError('Fixed Git wrapper profile is invalid')
+        raise BoundaryError(label+' profile is invalid')
     stack.enter_context(DirectoryBoundary(primary.anchor,primary.parent))
     held=stack.enter_context(VerifiedFile(primary));facts=held.facts()
-    if facts['links']!=len(aliases) or held.sha256()!=digest:raise BoundaryError('Fixed Git wrapper hash/link profile differs')
-    if _native_aliases(primary)!=expected:raise BoundaryError('Fixed Git wrapper alias membership differs')
+    if facts['links']!=len(aliases) or held.sha256()!=digest:raise BoundaryError(label+' hash/link profile differs')
+    if _native_aliases(primary)!=expected:raise BoundaryError(label+' alias membership differs')
     for path in aliases:
         alias=stack.enter_context(VerifiedFile(path))
-        if alias.facts()!=facts:raise BoundaryError('Fixed Git wrapper aliases do not identify the same immutable file')
-    if _native_aliases(primary)!=expected or held.facts()!=facts:raise BoundaryError('Fixed Git wrapper profile drifted while acquiring holds')
+        if alias.facts()!=facts:raise BoundaryError(label+' aliases do not identify the same immutable file')
+    if _native_aliases(primary)!=expected or held.facts()!=facts:raise BoundaryError(label+' profile drifted while acquiring holds')
     return str(primary)
 
 def _retain_dependency(stack,primary,aliases,digest):
@@ -84,7 +85,7 @@ def _retain_dependency(stack,primary,aliases,digest):
 
 def retain_git(stack):
     capability=_retain_profile(stack,GIT,GIT_ALIASES,GIT_WRAPPER_SHA256)
-    _retain_profile(stack,CORE,CORE_ALIASES,CORE_SHA256)
+    _retain_profile(stack,CORE,CORE_ALIASES,CORE_SHA256,'Fixed Git core')
     for name,digest in CORE_DLLS.items():
         _retain_dependency(stack,CORE.parent/name,tuple(folder/name for folder in CORE_DLL_DIRS),digest)
     return capability
