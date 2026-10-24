@@ -283,7 +283,10 @@ function renderRows(force=false) {
   $('empty').hidden=rows.length>0;
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
-  const nothing=attentionList && !search?(stillChecking()?`Nothing needs your attention yet. Still checking ${plural(stillChecking(),'book','books')}.`:'Nothing needs your attention.'):'';
+  // Judy's copy check (must-fix): not running, the books are waiting, as the strip line above says.
+  const waiting=stillChecking(),running=state?.automatic_processing?.state==='Running';
+  const nothing=attentionList && !search?(!waiting?'Nothing needs your attention.':running?`Nothing needs your attention yet. Still checking ${plural(waiting,'book','books')}.`:
+    `Nothing needs your attention yet. ${plural(waiting,'book is','books are')} waiting to be checked.`):'';
   const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':
     view==='candidates' && filters[view]==='restarted' && !search?'No books are waiting after Start over. Books you start over appear here until automatic processing queues them.':nothing || `No ${unit} match these filters · ${label}.`;
   $('inventory').removeAttribute?.('aria-busy');
@@ -1340,7 +1343,7 @@ function renderAttentionGroups(){
   // Books automatic processing has not settled yet are counted, never silently missing (0.22.0 review B5.2).
   const sweep=$('attention-sweep');
   if(sweep){const n=stillChecking(),running=state?.automatic_processing?.state==='Running';
-    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked. Start automatic processing to check them.`;
+    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked. Start automatic processing to check ${n===1?'it':'them'}.`;
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
@@ -1845,7 +1848,6 @@ function holdSentence(kind,cause,f={}){
   if(kind==='order_unclear')return {no_tracks:'No file has a track number. The order comes from the file names.',
     some_missing:`${n(f.missing)} of ${n(f.total)} files ${n(f.missing)===1?'has':'have'} no track number.`,tied:'Some files share a track number.',
     gaps:"Track numbers skip or don't start at 1.",
-    // Not in Judy's sheet (measured common on the live catalog, 72 of 120 rows): for her review.
     conflict:'The file names and the track tags number the files differently.',odd_tracks:"Some track tags aren't plain numbers."}[cause] || "The app can't be sure of the playback order.";
   if(kind==='files_unclear')return {track_total:`The tags say ${n(f.tags_say)} tracks, but ${n(f.here)} ${n(f.here)===1?'file is':'files are'} here.`,
     disc_total:`The tags say ${n(f.tags_say)} discs, but ${n(f.here)} ${n(f.here)===1?'is':'are'} here.`,
@@ -1874,7 +1876,7 @@ function askTip(entry,kind){const hold=holdKind(askOf(entry.row));return kind===
 const ASK_PENDING={approve:['Approving...','Approving this book...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
-  changed:[null,'Changes found. The book is checked again.'],later:[null,'Changes found. The next library scan catalogues them.']};
+  changed:[null,'Changes found. The book is checked again.'],later:[null,'Changes found. The next library scan will pick them up.']};
 const ASK_REFUSED={approve:'Approve was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
 function askOf(row){const ask=row?.kind==='candidate'?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
 function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
@@ -2028,7 +2030,7 @@ function buildHoldList(entry){
   }
   more(shown.length);
   if(ask.cause==='mixed')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists]])if(Array.isArray(items) && items.length)
-    box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
+    box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name==='(none)'?(label==='Albums'?'No album':'No artist'):item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
 }
 function buildAskCell(row,td){
   const entry={row,cell:td,controls:[]};askRows.set(row.id,entry);

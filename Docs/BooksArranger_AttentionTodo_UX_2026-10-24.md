@@ -742,3 +742,38 @@ Accepted as built: 1a, 1b, 1c, 2 (plus its line), 3 (plus its line), 5 (plus `tr
 2. A "Join with the other parts" action for "Part of a bigger book" (same-title files beside it, a held set). The app has no manual regroup today; without it each of the 155 can only be filed as its own book or fixed on disk.
 3. For "Mixed recordings": a split action. Today he can only choose files, or approve them as one book.
 4. Up and Down arrows between rows (offer 2 of section 14), more useful now that 347 books are answered one by one.
+
+---
+
+# 0.22.0 copy check (2026-10-24, Judy)
+
+Basis: read-only look at branch `ender/0220` (worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0220`, HEAD 83601ed): `web/app.js`, `web/index.html`, `web/style.css`, `review_backend.py`, plus `todo_causes.py`, `groups.py` and `merge_service.scan_again` to confirm what the two new causes mean. Nothing launched. The counts (41 and 33 rows) are Ender's, not re-measured. Adds to part C of the 0.22.0 review; supersedes nothing.
+
+## 1. The two new Order unclear sentences
+
+| Cause | Sentence | Verdict |
+|---|---|---|
+| `conflict` | The file names and the track tags number the files differently. | **Approved verbatim.** |
+| `odd_tracks` | Some track tags aren't plain numbers. | **Approved verbatim.** |
+
+- `conflict` in the code: every file has a track tag, the tags run cleanly, but at least one file name starts with a different number than its tag. The sentence states exactly that evidence. I add no "the list follows the track tags" line: the list shows Sergei's saved order once he has saved one, so that line could become false.
+- `odd_tracks` in the code: all tags are clean sequences but at least one is not digits or digits/total (for example "1." or "01 of 12"). "Plain numbers" is accurate and short.
+- Both read correctly in an "Also:" line ("Also: the file names and the track tags number the files differently." / "Also: some track tags aren't plain numbers."), and both are one sentence, so the first-sentence rule holds.
+- Add both to the Order unclear table in B4 as causes 6 and 7. Ender deletes the code comment "Not in Judy's sheet ... for her review" (`holdSentence`).
+
+## 2. Spot-check of the build against the review
+
+**Matches verbatim, no action:** the three chip labels, tooltips, set (appended after Name taken, hidden at zero) and counting order; the Order unclear sentences (five from B4, "has"/"have" handled) and the "Playback order" list (label, `ol`, 5 names, folder in the title, "+ {n} more, listed in the details panel."); the Files unclear and Part of a bigger book sentences, `In` folder line, 3 names, flagged names first, Albums / Artists line; the Title field and basis lines on Part of a bigger book; the three Approve faces and tooltips; Change order and Choose files (tooltips, shown only on their chip, `ask-convert` at 152 x 32); Scan again (face, tooltip, pending); "Checked {time}. No change."; Retry selected hidden in every "Needs your answer" chip; bulk Approve only in the two old chips; the Other catch-all "Reason:" line; the strip's "Still checking" and "waiting to be checked" lines in both states; "On hold — see Needs attention"; the reader and Same author? "No choice" lines; "Couldn't copy. Select the text and press Ctrl+C."; the safety-refusal line. Approve does use a saved order (`track_actor` user), so the Change order and Choose files tooltips are true.
+
+**Must-fix (1)**
+
+1. **Empty list, automatic processing not running, books waiting.** The empty state reads "Nothing needs your attention yet. Still checking {n} books." but nothing is checking, and the strip line right above says the books are waiting. That is the build following my B5.2, which was wrong for this state. Replace in that state only (`renderRows`, `nothing`):
+   - not running: **Nothing needs your attention yet. {n} books are waiting to be checked.** (n = 1: "1 book is waiting to be checked.")
+   - running: unchanged, "Nothing needs your attention yet. Still checking {n} books."
+   - Check 6 now reads: empty list, both states, empty state and strip never contradict each other.
+
+**Nice-to-have (3)**
+
+1. **Mixed recordings, files with no tag.** The line reads "Albums: (none) (3 files) · Дюна (6 files)". Show **No album (3 files)** and **No artist (3 files)** (the UI maps the server's "(none)").
+2. **Scan again, a file renamed while a scan runs** (`ASK_DONE.later`): "Changes found. The next library scan catalogues them." is not in my sheet, uses a spelling the app doesn't (it says "cataloged") and a word Sergei doesn't use. Replace with **Changes found. The next library scan will pick them up.**
+3. **Strip line with one book, not running:** "1 book is waiting to be checked. Start automatic processing to check them." Say **... to check it.** for n = 1.

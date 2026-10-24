@@ -81,7 +81,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(statusCell(tr).children[0].textContent,'Changes found. The book is checked again.');assert.equal(get('retry-all-status').textContent,'Changes found. The book is checked again.');
   scanAnswer=()=>({ok:true,status:200,json:async()=>({found:false,changed:true,scan_started:false,scan_later:true})});
   tr=trOf('cand-o3');await buttonsOf(tr)[2].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(get('retry-all-status').textContent,'Changes found. The next library scan catalogues them.');scanAnswer=null;
+  assert.equal(get('retry-all-status').textContent,'Changes found. The next library scan will pick them up.');scanAnswer=null;
   // The audio-format gate is named in the refusal line (B5.4).
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Audio format needs an encoding decision',code:'format',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
@@ -91,16 +91,16 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const flagged=[{name:'Реклама.mp3',folder:'Z:\\Audiobooks\\Дюна',path:'x',flag:true}];
   const filesRows=[hold('f1','files_unclear','track_total',{tags_say:12,here:9}),hold('f2','files_unclear','disc_total',{tags_say:3,here:2}),hold('f3','files_unclear','one_of_many',{index:7,total:20}),
     hold('f4','files_unclear','lack_title',{missing:1,total:9},{flagged}),hold('f5','files_unclear','lack_title',{missing:2,total:9}),
-    hold('f6','files_unclear','mixed',{albums:[{name:'A',files:5},{name:'B',files:3},{name:'C',files:2},{name:'D',files:1}],artists:[]}),hold('f7','files_unclear','parts'),hold('f8','files_unclear','unknown')];
+    hold('f6','files_unclear','mixed',{albums:[{name:'A',files:5},{name:'(none)',files:3},{name:'C',files:2},{name:'D',files:1}],artists:[]}),hold('f9','files_unclear','mixed',{albums:[],artists:[{name:'P',files:2},{name:'(none)',files:1}]}),hold('f7','files_unclear','parts'),hold('f8','files_unclear','unknown')];
   paint(filesRows);
   assert.deepEqual(filesRows.map(r=>hint(trOf(r.id))),['The tags say 12 tracks, but 9 files are here.','The tags say 3 discs, but 2 are here.',"This file is tagged as track 7 of 20. The other tracks aren't here.",
     "1 of 9 files doesn't mention this book's title.","2 of 9 files don't mention this book's title.",'The files carry different albums or artists. They may be more than one book.',
-    "The parts of this set don't number cleanly.","The app can't be sure which files belong to this book."]);
+    'The files carry different albums or artists. They may be more than one book.',"The parts of this set don't number cleanly.","The app can't be sure which files belong to this book."]);
   tr=trOf('cand-f1');assert.deepEqual(texts(tr).filter(t=>/^In |\.mp3$|more, listed/.test(t)),['In Z:\\Audiobooks\\Колесо\\','01 Глава.mp3','02 Глава.mp3','03 Глава.mp3','+ 9 more, listed in the details panel.']);
   assert.deepEqual(buttonsOf(tr).slice(0,3).map(b=>b.textContent),['Approve these files','Choose files','Scan again']);
   assert.equal(buttonsOf(tr)[1].title,'Choose which files belong in the details panel. Save it there, then approve.');
   assert.ok(texts(trOf('cand-f4')).includes('Реклама.mp3'),'the file without the title is named first');
-  assert.ok(texts(trOf('cand-f6')).includes('Albums: A (5 files) · B (3 files) · C (2 files) + 1 more'));
+  assert.ok(texts(trOf('cand-f6')).includes('Albums: A (5 files) · No album (3 files) · C (2 files) + 1 more'));assert.ok(texts(trOf('cand-f9')).includes('Artists: P (2 files) · No artist (1 file)'),'copy check, nice-to-have 1');
 
   // Part of a bigger book: every cause; Title always shows; Approve as one book + Scan again, no list editing.
   const parts=[hold('p1','part_of_book','chapter'),hold('p2','part_of_book','numbered_part'),hold('p3','part_of_book','siblings',{beside:1}),hold('p4','part_of_book','siblings',{beside:3}),
@@ -137,9 +137,14 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // Still checking: the strip line in both states, and the empty list (B5.2).
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,todo_still_checking:1203},automatic_processing:{...state.automatic_processing,state:"Running"}};controls()');
   assert.equal(get('attention-sweep').textContent,'Still checking 1,203 books. More may appear here.');assert.equal(get('attention-sweep').hidden,false);
+  paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. Still checking 1,203 books.','running: checking');
   run('state={...state,automatic_processing:{...state.automatic_processing,state:"Idle"}};controls()');
   assert.equal(get('attention-sweep').textContent,'1,203 books are waiting to be checked. Start automatic processing to check them.');
-  paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. Still checking 1,203 books.');
+  // Judy's copy check (must-fix): not running, the empty list never says "checking" under a line that says "waiting".
+  paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. 1,203 books are waiting to be checked.');
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,todo_still_checking:1}};controls()');
+  assert.equal(get('attention-sweep').textContent,'1 book is waiting to be checked. Start automatic processing to check it.','one book: "it" (copy check, nice-to-have 3)');
+  paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. 1 book is waiting to be checked.');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,todo_still_checking:0}};controls()');assert.equal(get('attention-sweep').hidden,true,'hidden at zero');
   paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention.');
 
