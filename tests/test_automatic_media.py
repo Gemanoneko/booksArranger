@@ -69,37 +69,44 @@ class AutomaticMediaTests(unittest.TestCase):
         self.assertTrue(self.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
         self.assertTrue(all(not source.exists() for source in self.sources));self.assertEqual(self.service.state()['converted_total'],1)
 
-    def test_one_approval_reads_the_converted_set_once(self):
-        # Live 2026-10-24: each enrich inside one automatic approval recomputed the catalog's converted set
-        # (progress_books, 10-25 s on the real catalog) while holding group_lock, so one approval took minutes and
-        # the status poll and book list waited on it. The approval now computes the set once.
-        # Only this thread's reads are the approval's. The conversion worker that approve_automatic queues runs its own
-        # revision guard (build_manifest -> enrich -> progress_books) on its own thread, outside this approval's
-        # snapshot, and sometimes gets there before approve_automatic returns: counted process-wide, that read failed
-        # this test in 11 of 60 plain runs and 6 of 50 under load (2026-10-24); the approval itself read once in all 110.
+    def test_approval_and_conversion_read_no_converted_set(self):
+        # Live 2026-10-24 and Senua 0.21.2 F31: every enrich inside an automatic approval, and each of the converter's
+        # revision guards (build_manifest -> enrich), recomputed the catalog's converted set (progress_books: every job,
+        # cleanup and publication record, 10-25 s on the live catalog) under group_lock, which the status poll and the
+        # book list wait on. 0.21.1 read it 7 times per approval, 0.21.2 once, and the converter 4 times per book; nothing
+        # in either uses the audiobook_ready flag it feeds. Counted per thread: state() passes its own inputs and is not
+        # an enrich read.
         row,result=self.result();calls=[];original=self.service.progress_books;approver=threading.current_thread()
         def counted(*args,**kwargs):
-            # state() passes its own inputs; enrich() passes none
-            if not args and not kwargs:calls.append('enrich' if threading.current_thread() is approver else threading.current_thread().name)
+            if not args and not kwargs:calls.append('approval' if threading.current_thread() is approver else threading.current_thread().name)
             return original(*args,**kwargs)
         with patch.object(self.service,'progress_books',side_effect=counted):
             fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client)
-        self.assertEqual([c for c in calls if c=='enrich'],['enrich'],'one converted set per approval')
-        self.assertLessEqual(set(calls)-{'enrich'},{'BooksArrangerAudioJobs'},'any other read is the queued job\'s own revision guard')
-        local=self.service.reviews.page_local
-        self.assertFalse(getattr(local,'ready_scope',False));self.assertFalse(hasattr(local,'ready_ids'),'the set does not outlive the approval')
-        self.wait()
-        calls.clear()
+            self.assertFalse('audiobook_ready' in fresh,'the approval leaves the flag unset')
+            self.assertFalse(getattr(self.service.reviews.page_local,'ready_skip',False),'the scope ends with the approval')
+            self.wait()
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual((job['job_id'],job['state']),(job_id,'completed'),job)
+        self.assertEqual(calls.count('approval'),0,'no converted-set read in the approval')
+        self.assertEqual(calls.count('BooksArrangerAudioJobs'),0,'no converted-set read in the conversion (its revision guards)')
+        self.assertEqual(calls,[],'nothing else read it during the approval and conversion either')
+        # Outside an approval each enrich still reads the current set, and the page and inspector still show Ready.
         with patch.object(self.service,'progress_books',side_effect=counted):
             first=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
             second=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
-        self.assertEqual([c for c in calls if c=='enrich'],['enrich','enrich'],'outside an approval each enrich reads the current set')
+        self.assertEqual(calls,['approval','approval'],'one read per enrich outside an approval (this thread)')
         self.assertTrue(first['audiobook_ready'] and second['audiobook_ready'])
-        with self.service.reviews.ready_snapshot():
-            self.service.reviews.page_local.ready_ids={'page-owned'}
-            with self.service.reviews.ready_snapshot():pass
-            self.assertEqual(self.service.reviews.page_local.ready_ids,{'page-owned'},'a nested scope keeps the outer set')
-        self.assertFalse(hasattr(local,'ready_ids'))
+        self.assertTrue(self.service.reviews.page(status='converted')['rows'][0]['audiobook_ready'])
+        self.assertTrue(self.service.inspect('Audiobooks','candidates',fresh['id'])['inspector']['audiobook_ready'])
+        # build_manifest skips the read on any thread; a nested scope keeps the outer setting.
+        calls.clear()
+        with patch.object(self.service,'progress_books',side_effect=counted):
+            unready=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']),ready=False)
+            with self.service.reviews.without_ready():
+                with self.service.reviews.without_ready():pass
+                self.assertTrue(self.service.reviews.page_local.ready_skip,'a nested scope keeps the outer setting')
+                self.assertFalse('audiobook_ready' in self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id'])))
+        self.assertFalse('audiobook_ready' in unready);self.assertEqual(calls,[])
+        self.assertFalse(self.service.reviews.page_local.ready_skip)
 
     def test_custom_source_cover_is_allowed_and_stop_preserves_sources(self):
         row,result=self.result();result['work']['cover_url']='https://evil.example/cover.jpg'

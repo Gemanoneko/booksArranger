@@ -91,22 +91,16 @@ class CandidateReviewService:
     def set_jobs(self,jobs):self.jobs=jobs
 
     @contextlib.contextmanager
-    def ready_snapshot(self):
-        """One converted-books set for one operation on this thread.
+    def without_ready(self):
+        """No converted-books read on this thread for one operation (Senua 0.21.2 F31).
 
-        enrich() reads the catalog's converted set from progress_books(): every job, cleanup and publication
-        record plus one library stat per converted book, 10-25 s each on the live catalog (measured
-        2026-10-24). An automatic approval enriched its one book seven times while it holds group_lock,
-        which the status poll and the book list wait on. Inside this scope the first enrich computes the set
-        and the later ones reuse it. A page's own ready_ids (already one per page) is left as it is."""
-        if getattr(self.page_local,'ready_ids',None) is not None or getattr(self.page_local,'ready_scope',False):
-            yield
-            return
-        self.page_local.ready_scope=True
+        enrich() marks audiobook_ready from progress_books(): every job, cleanup and publication record plus one
+        library stat per converted book, 10-25 s on the live catalog (2026-10-24), under group_lock, which the status
+        poll and the book list wait on. An automatic approval decides nothing from that flag (creation, the context and
+        the files decide), so inside this scope enrich() leaves it unset. Nested scopes keep the outer setting."""
+        previous=getattr(self.page_local,'ready_skip',False);self.page_local.ready_skip=True
         try:yield
-        finally:
-            self.page_local.ready_scope=False
-            if hasattr(self.page_local,'ready_ids'):del self.page_local.ready_ids
+        finally:self.page_local.ready_skip=previous
 
     def _row(self,library,id,revision=None):
         if library!='Audiobooks':raise ValueError('Only Audiobooks have candidate review')
@@ -164,7 +158,9 @@ class CandidateReviewService:
             except (ValueError,OSError):return None
         return choice
 
-    def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False,held=None):
+    def enrich(self,row,check_sources=True,allow_existing_job=False,allow_automatic_pending=False,held=None,ready=True):
+        """ready=False (build_manifest, and every enrich inside without_ready()) skips the converted-books read and
+        leaves audiobook_ready unset; nothing that builds or guards a job reads it."""
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row); held=held or {}
         with connect(self.inventory.database) as db:row['manual_metadata_sources']=manual_metadata.records(db,row)
         facts=ctx.get('metadata_facts')
@@ -234,11 +230,10 @@ class CandidateReviewService:
         if automatic:
             if not facts:row['metadata_facts']=copy.deepcopy(automatic.get('metadata_facts'))
             if not row['duplicate_review']:row['duplicate_review']=copy.deepcopy(automatic.get('duplicate_review'))
-        ready_ids=getattr(self.page_local,'ready_ids',None)
-        if ready_ids is None:
-            ready_ids=self.jobs.progress_books()['converted_ids'] if self.jobs and hasattr(self.jobs,'progress_books') else set()
-            if getattr(self.page_local,'ready_scope',False):self.page_local.ready_ids=ready_ids  # ready_snapshot(): reused
-        row['audiobook_ready']=row['id'] in ready_ids
+        if ready and not getattr(self.page_local,'ready_skip',False):
+            ready_ids=getattr(self.page_local,'ready_ids',None)  # a page computes its set once (page())
+            if ready_ids is None:ready_ids=self.jobs.progress_books()['converted_ids'] if self.jobs and hasattr(self.jobs,'progress_books') else set()
+            row['audiobook_ready']=row['id'] in ready_ids
         audiobooks=getattr(self.page_local,'audiobooks',None)
         if audiobooks is not None and row['id'] in audiobooks:row['current_audiobook']=audiobooks[row['id']]
         elif self.jobs and hasattr(self.jobs,'current_audiobook'):row['current_audiobook']=self.jobs.current_audiobook(row['id'])
@@ -699,7 +694,8 @@ class CandidateReviewService:
         with connect(self.inventory.database) as db:reacquire_sources.require_admission(db,id)
         with self.lock:
             held=held or {}
-            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending,held=held);ctx=self._context(row)
+            # ready=False: the converter's revision guard (_guard) runs this up to four times per book under group_lock (F31).
+            row=self.enrich(self._row(library,id,revision),allow_existing_job=allow_existing_job,allow_automatic_pending=allow_automatic_pending,held=held,ready=False);ctx=self._context(row)
             if not row['creation']['can_create']:raise ValueError('; '.join(row['creation']['reasons']))
             members={m['member_key']:m for m in row['members']};sources=[]
             for key in row['track_order']:
