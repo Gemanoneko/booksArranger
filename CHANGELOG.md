@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.21.3] - 2026-10-24
+
+### Fixed
+
+- Two Макс Фрай M4B books with an empty padding box now convert; the audio is proven identical.
+- The converter no longer re-reads the whole library for every book. On a 200-book test, 194 books converted in 50 minutes instead of 138, and the longest list wait during approvals fell from 34 s to 11 s. The book list itself can still take several seconds on a large library.
+- Files gone from disk no longer count as read errors; they show as "No longer found".
+
+### Safety
+
+- Originals are removed only when the verified result is in the configured Audiobooks Sorted folder; automatic processing refuses to start without one.
+- Further hardening of the delete paths: the output is re-read right before each original is removed, a folder that is a direct child of a source root is never removed, a removed download marker is put back when cleanup stops, series backfill works only in the Sorted folder, and a recovery child's output is re-verified before the old attempt's files go. The source-removal suites now run in the gate.
+
 ## [v0.21.2] - 2026-10-24
 
 ### Fixed

@@ -1,7 +1,7 @@
 {
   "name": "books-arranger",
   "productName": "Books Arranger",
-  "version": "0.21.2",
+  "version": "0.21.3",
   "private": true,
   "description": "Inventory and arrange audiobook, podcast and ebook libraries",
   "main": "desktop/main.js",
