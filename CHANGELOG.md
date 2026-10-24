@@ -1,8 +1,32 @@
 # Changelog
 
-## [v0.21.3] - 2026-10-24
+## [v0.22.0] - 2026-10-25
+
+0.21.3 was never released; its changes ship here.
+
+### Added
+
+- Sergei's typed values are authoritative: what you type for a book's title, author or series is used as it is. A book on the to-do list can be accepted with Approve as is.
+- Lasting author rules: Sergei's answers about authors, such as which name is the author and which is a reader, are kept as rules and applied to later books.
+- One to-do list in "Output needs attention". It holds only books that need Sergei, sorted by reason, folder and title, with a typed reason and its actions on each row, including Keep as separate books for a set that looks like parts of one book.
+- The parts of one book in one folder are joined into one book. M4B parts are joined by re-encoding once, with their chapters kept; chapters also decide sets whose files are only numbered.
+- Two common Order unclear causes are named on the row.
+
+### Changed
+
+- Title and author from one local source are enough to identify a book.
+- A held book is researched again only when it changes.
+- The book list is faster: on a 200-book test with 50-99 books converted, the median wait fell from 13.3 s to 3.4 s. It no longer waits behind automatic approvals.
+- The Python gate runs on five workers.
 
 ### Fixed
+
+- Senua's review findings: the 0.21.3 findings F1-F4, F6 and F8, the early 0.22.0 review findings (G1-G6, m1-m5, m7-m9), and series backfill now names books relative to the folder they were published in.
+- A status computed without a catalog no longer fails on the to-do list.
+- The to-do row never proposes a suspected reader as the author.
+- Tests: a borrowed fixture no longer leaks its research patch, and the local-identity switch is restored after each test.
+
+### Fixed (from the unreleased 0.21.3)
 
 - Two Макс Фрай M4B books with an empty padding box now convert; the audio is proven identical.
 - The converter no longer re-reads the whole library for every book. On a 200-book test, 194 books converted in 50 minutes instead of 138, and the longest list wait during approvals fell from 34 s to 11 s. The book list itself can still take several seconds on a large library.
@@ -11,7 +35,7 @@
 ### Safety
 
 - Originals are removed only when the verified result is in the configured Audiobooks Sorted folder; automatic processing refuses to start without one.
-- Further hardening of the delete paths: the output is re-read right before each original is removed, a folder that is a direct child of a source root is never removed, a removed download marker is put back when cleanup stops, series backfill never changes a book outside the Sorted folder (in this version it renames nothing at all; 0.22.0 turns it on in Sorted), and a recovery child's output is re-verified before the old attempt's files go. The source-removal suites now run in the gate.
+- Further hardening of the delete paths: the output is re-read right before each original is removed, a folder that is a direct child of a source root is never removed, a removed download marker is put back when cleanup stops, series backfill never changes a book outside the Sorted folder (it renames nothing at all in this version; renaming in Sorted comes later), and a recovery child's output is re-verified before the old attempt's files go. The source-removal suites now run in the gate.
 
 ## [v0.21.2] - 2026-10-24
 
