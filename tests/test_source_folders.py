@@ -49,15 +49,17 @@ class SourceFolderTests(unittest.TestCase):
     @patch.object(VerifiedDirectory,'require_empty_disposition',return_value={'fixture_only_simulated_streamless_provider':True})
     def test_empty_source_ancestors_removed_bottom_up_root_output_preserved(self,_capability):
         self.retire();phases=[];status=self.storage.run_folders(self.job_id,phases.append)
-        self.assertEqual(phases,['folders']);self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],3)
-        self.assertFalse((self.library/'Author').exists());self.assertTrue(self.library.exists());self.assertIsNone(self.receipt(self.library));self.assert_output()
-        self.assertEqual(self.storage.run_folders(self.job_id)['removed'],3)
+        # Audit m2 (0.21.3): the book's own folders go; the author folder, a direct child of the source root, stays.
+        self.assertEqual(phases,['folders']);self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],2)
+        self.assertFalse((self.library/'Author'/'Old Book').exists());self.assertTrue((self.library/'Author').is_dir());self.assertEqual(list((self.library/'Author').iterdir()),[])
+        self.assertIsNone(self.receipt(self.library/'Author'),'never even a candidate');self.assertTrue(self.library.exists());self.assertIsNone(self.receipt(self.library));self.assert_output()
+        self.assertEqual(self.storage.run_folders(self.job_id)['removed'],2)
         self.assertEqual(len(self.storage.folder_status()),1)
     def test_nonempty_hidden_sidecar_cover_and_unselected_source_preserved(self):
         for name in ('.hidden','cover.jpg','unselected.mp3'):(self.folder/name).write_bytes(b'UNIQUE USER CONTENT')
         kernel.SetFileAttributesW(str(self.folder/'.hidden'),2)
         self.retire();status=self.storage.run_folders(self.job_id)
-        self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],0);self.assertEqual(status['retained'],3)
+        self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],0);self.assertEqual(status['retained'],2)  # Disc and Old Book; Author is no candidate (m2)
         for name in ('.hidden','cover.jpg','unselected.mp3'):self.assertEqual((self.folder/name).read_bytes(),b'UNIQUE USER CONTENT')
         self.assert_output()
     def test_directory_alternate_stream_is_nonempty_and_preserved(self):
@@ -192,7 +194,7 @@ class SourceFolderTests(unittest.TestCase):
         with patch.object(self.storage,'_folder_state',side_effect=crash):
             with self.assertRaisesRegex(RuntimeError,'simulated'):self.storage.run_folders(self.job_id)
         self.assertFalse(failed[0].exists());status=self.storage.run_folders(self.job_id)
-        self.assertEqual(status['state'],'completed');self.assertEqual(status['absent_after_intent'],1);self.assertEqual(status['removed'],2);self.assert_output()
+        self.assertEqual(status['state'],'completed');self.assertEqual(status['absent_after_intent'],1);self.assertEqual(status['removed'],1);self.assert_output()  # Disc, Old Book (m2)
     @patch.object(VerifiedDirectory,'require_empty_disposition',return_value={'fixture_only_simulated_streamless_provider':True})
     def test_crash_before_disposition_rejects_replaced_empty_directory(self,_capability):
         self.retire()
@@ -224,6 +226,6 @@ class SourceFolderTests(unittest.TestCase):
     def test_unrelated_sibling_prevents_ancestor_removal(self,_capability):
         self.retire();sibling=self.library/'Author'/'Other Book';sibling.mkdir();(sibling/'keep.txt').write_bytes(b'keep')
         status=self.storage.run_folders(self.job_id)
-        self.assertEqual(status['removed'],2);self.assertEqual(status['retained'],1);self.assertEqual((sibling/'keep.txt').read_bytes(),b'keep');self.assertTrue(self.library.exists())
+        self.assertEqual(status['removed'],2);self.assertEqual(status['retained'],0);self.assertEqual((sibling/'keep.txt').read_bytes(),b'keep');self.assertTrue(self.library.exists())  # Author is no candidate (m2)
 
 if __name__=='__main__':unittest.main()

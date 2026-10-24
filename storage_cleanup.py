@@ -668,7 +668,9 @@ class StorageCleanup:
             if not path.is_relative_to(root) or path==root or path.suffix.lower() not in formats:
                 raise BoundaryError('Retired source is outside its approved audiobook library')
             parent=path.parent
-            while parent!=root:
+            # Audit m2: never a direct child of the source root (the Unsorted folder, an author folder); only the
+            # book's own folders below it.
+            while parent!=root and parent.parent!=root:
                 if not parent.is_relative_to(root):raise BoundaryError('Source-folder ancestry escaped the library')
                 candidates.add(parent);parent=parent.parent
         return sorted(candidates,key=lambda p:(-len(p.parts),str(p).casefold()))
