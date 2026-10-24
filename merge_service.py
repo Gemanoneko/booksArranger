@@ -1998,6 +1998,12 @@ class MergeService:
             except (TypeError,ValueError):result=None
             if not isinstance(result,dict):result=None
             ask=result.get('ask') if result and exact and isinstance(result.get('ask'),dict) else None
+            hold=(result or {}).get('identity_hold') if result and record['state']=='Held' else None
+            if isinstance(hold,dict) and hold.get('kind')=='missing_parts' and result.get('research_version')==RESEARCH_VERSION:
+                # Rulings 19 and 10 (2026-10-24): the track numbers say parts of this book are missing; the row names them.
+                if (identity,fingerprint) in dismissed:coverage['removed']+=1
+                else:found[identity]={'group':'files_missing','reasons':[str(r) for r in result.get('reasons') or []][:8],'ask':None,'hold':hold}
+                continue
             if identity in gone:
                 # Missing files first; the identity question, if any, is answered on the same row ("Also:").
                 if (identity,fingerprint) in dismissed:coverage['removed']+=1
@@ -2061,7 +2067,13 @@ class MergeService:
             payload['same_author']={k:ask.get(k) for k in ('new','existing','existing_books','why')}
             payload['same_author']['count']=sum(1 for e in self.needs_you().values() if e['group']=='same_author' and (e.get('ask') or {}).get('new')==ask.get('new'))
         members=row.get('members') or []
-        if entry['group']=='files_missing' or any(m.get('missing') for m in members):
+        parts=(entry.get('hold') or {}) if (entry.get('hold') or {}).get('kind')=='missing_parts' else None
+        if parts and members:
+            # The parts the track numbers say are missing, named "Part 3 of 3" in the book's folder.
+            folder=os.path.dirname(members[0]['path']);total=int(parts.get('total') or len(members))
+            payload['missing']={'folders':[folder],'files':[os.path.join(folder,'Part %d of %d'%(int(n),total)) for n in parts.get('missing') or []],
+                                'present':len(members),'total':len(members)+len(parts.get('missing') or []),'parts':list(parts.get('missing') or [])}
+        elif entry['group']=='files_missing' or any(m.get('missing') for m in members):
             gone=[m for m in members if m.get('missing')]
             try:root=self.reviews._source_root(row)
             except (ValueError,OSError,KeyError):root=''
@@ -2349,16 +2361,14 @@ class MergeService:
                         # its own candidate); any other joined set is held as it is, every member kept together
                         # (Senua R2-M1). Either way this joined attempt is held with every source preserved.
                         chaptered={p:n for p,n in own_chapters.items() if n>1}
-                        if len(paths)>1 and chaptered:
-                            refile={p:n for p,n in chaptered.items() if current.get('split_book') and Path(p).suffix.lower()=='.m4b'}
-                            if not refile:raise ValueError('Book parts carry their own chapters; joining them would drop those chapters')
-                            from groups import setup_part_chapters
-                            sizes={m['path']:(m['size'],str(m['modified'])) for m in current['members']}
-                            with connect(self.inventory.database) as db:
-                                setup_part_chapters(db)
-                                for p,n in sorted(refile.items()):
-                                    db.execute('INSERT OR REPLACE INTO part_chapters VALUES(?,?,?,?,?,?)',(self.reviews._source_root(current),p,sizes[p][0],sizes[p][1],n,__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()))
-                            raise ValueError('Book parts carry their own chapters; each part becomes its own book')
+                        from split_books import joinable_parts
+                        # Rulings 19 and 19a: .m4b parts with their own chapters are joined, every part's chapters kept, when
+                        # each part is explicitly marked, when their chapters show one book (research: part_set 'join'), or
+                        # when Sergei approved them as one book. Otherwise nothing is joined and nothing is re-filed.
+                        joinable=all(Path(p).suffix.lower()=='.m4b' for p in paths) and (joinable_parts(gate_row['members'])
+                                  or (result.get('part_set') or {}).get('decision')=='join' or approved_by is not None)
+                        if len(paths)>1 and chaptered and not joinable:
+                            raise ValueError('Book parts carry their own chapters; joining them would drop those chapters')
                         part=(result['metadata_facts'].get('local_agreement') or {}).get('part_book') if local else None
                         if part:
                             # One part of a set is its own book only as a whole .m4b with its own chapters, kept in

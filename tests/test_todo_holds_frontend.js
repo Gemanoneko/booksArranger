@@ -112,6 +112,15 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   paint(parts);
   assert.deepEqual(parts.map(r=>hint(trOf(r.id))),['This file is named as one chapter.','The name marks this as one numbered part.','Another file beside it carries the same title.',
     '3 other files beside it carry the same title.','Part 2 of 5 of "Торадора!".',"The other files in this folder couldn't be checked.","The app can't tell if this is a whole book."]);
+  // Rulings 19 and 19a (2026-10-24): a set of .m4b parts their chapters don't settle; Approve as one book, files in the proposed order.
+  const sets=[hold('s1','part_of_book','set_seasons',{parts:3,hours:24.4}),hold('s2','part_of_book','set_book_words',{parts:2}),hold('s3','part_of_book','set_long',{parts:4,hours:32.2}),
+    hold('s4','part_of_book','set_authors',{parts:15}),hold('s5','part_of_book','set_unclear',{parts:2}),hold('s6','part_of_book','set_unreadable',{parts:2})];
+  paint(sets);
+  assert.deepEqual(sets.map(r=>hint(trOf(r.id))),['The files are seasons of a series. Approve them as one book only if they are one.','The files are named as books of a series. They may be one book or several.',
+    'Joined, these 4 files would run 32.2 hours. Check that they are one book.','The files credit different authors or readers. Check that they are one book.',
+    "These files may be the parts of one book. Their chapters don't settle it.","These files may be the parts of one book. Their chapters couldn't be read."]);
+  assert.deepEqual(buttonsOf(trOf('cand-s1')).slice(0,2).map(b=>b.textContent),['Approve as one book','Scan again']);
+  paint(parts);
   tr=trOf('cand-p1');assert.equal(walk(statusCell(tr)).filter(e=>e.type==='text')[0].value,'Колесо Времени','Title always shows here');
   assert.deepEqual(buttonsOf(tr).slice(0,2).map(b=>b.textContent),['Approve as one book','Scan again']);assert.ok(!buttonsOf(tr).some(b=>/Change order|Choose files/.test(b.textContent)));
 

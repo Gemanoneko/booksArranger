@@ -500,7 +500,7 @@ def snapshot_manifest(manifest,stage,stop,report=None):
         with ProtectedFiles([alias]):
             if digest(alias,stop,read)!=item['sha256']:raise ValidationError('Protected snapshot differs from reviewed source bytes')
             raw=probe(alias,stage,stop)
-            if joined_m4b and alias.suffix in ('.m4b','.m4a') and len(raw.get('chapters') or [])>1:
+            if joined_m4b and not manifest.get('part_chapters') and alias.suffix in ('.m4b','.m4a') and len(raw.get('chapters') or [])>1:
                 raise ValidationError('Existing M4B parts carry their own chapters; they must be arranged individually to preserve every source chapter plan')
             duration,profile=audio_info(raw)
             if manifest.get('profile')==LEGACY_PROFILE and compatibility is not None and compatibility!=profile:
@@ -700,6 +700,36 @@ def source_chapters(path,stage,stop,duration):
         if not isinstance(title,str):raise ValidationError('Existing M4B chapter title is invalid')
         result.append({'start':round(start*1000),'end':round(end*1000),'title':title});previous=end
     return result
+
+
+def part_chapter_name(member):
+    """Ruling 19a: the chapter a part without chapters of its own becomes is named after the part: its title tag (unless
+    it only repeats the album), else its file name."""
+    tags={str(k).casefold():str(v) for k,v in (member.get('metadata') or {}).get('tags',{}).items()}
+    title=' '.join(tags.get('title','').split())
+    return title if title and title.casefold()!=' '.join(tags.get('album','').split()).casefold() else Path(member['path']).stem
+
+
+def planned_chapter_titles(manifest):
+    """The chapter titles a joined-parts book carries (ruling 19a): every part's own chapters in order, a part without
+    chapters as one chapter named after it."""
+    return [c['title'] for part in manifest['part_chapters'] for c in (part['chapters'] or [{'title':part['name']}])]
+
+
+def joined_part_chapters(parts,durations):
+    """Ruling 19a: the chapters of the joined book in ms, contiguous. Part i starts where the parts before it end (their
+    decoded durations); each of its chapters keeps its title and its start within the part; a chapter ends where the next
+    one starts; a part without chapters is one chapter named after it; repeated titles stay separate chapters."""
+    starts=[];position=0.0
+    for part,duration in zip(parts,durations):
+        offset=round(position*1000);end=round((position+duration)*1000)
+        for chapter in part['chapters'] or [{'start':0,'title':part['name']}]:
+            start=min(max(offset+int(chapter['start']),offset),end-1)
+            if starts and start<=starts[-1]['start']:raise ValidationError('Part chapters cannot be placed in order in the joined book')
+            starts.append({'start':start,'title':str(chapter['title'])})
+        position+=duration
+    total=round(position*1000)
+    return [dict(item,end=starts[i+1]['start'] if i+1<len(starts) else total) for i,item in enumerate(starts)]
 
 
 def audio_packet_hash(path,stage,stop,duration):
@@ -913,6 +943,19 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
         raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
     if preserved:
         chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n';chapters=preserved
+        for chapter in chapters:
+            text+=f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={chapter['start']}\nEND={chapter['end']}\ntitle={ffmetadata_escape(chapter['title'])}\n"
+        write_generated(chapter_file,text)
+        args+=['-f','ffmetadata','-i',str(chapter_file),'-map_chapters','2']
+    elif manifest.get('part_chapters') is not None:
+        # Ruling 19a: joined .m4b parts, decoded and encoded once; every part's chapters, re-read from its protected
+        # snapshot, must equal the plan frozen when the book was approved.
+        parts=manifest['part_chapters']
+        if encoding.get('mode')!='normalize' or len(parts)!=len(original_copies):raise ValidationError('Joined part chapter plan must match the protected parts')
+        for part,name,duration in zip(parts,original_copies,durations):
+            if source_chapters(stage/name,stage,stop,duration)!=part['chapters']:raise ValidationError('Part chapters differ from the frozen plan')
+        chapters=joined_part_chapters(parts,durations)
+        chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n'
         for chapter in chapters:
             text+=f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={chapter['start']}\nEND={chapter['end']}\ntitle={ffmetadata_escape(chapter['title'])}\n"
         write_generated(chapter_file,text)

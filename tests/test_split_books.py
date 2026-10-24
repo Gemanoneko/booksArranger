@@ -99,7 +99,9 @@ class HoldTests(unittest.TestCase):
     """Gaps, duplicates, mixed recordings or narrators, volumes and own titles hold: the files stay separate."""
     def held(self,files,reason):
         built=groups.build(files)
-        self.assertFalse(split_scopes(built),list(built));self.assertEqual(len(built),len(files))
+        self.assertFalse(split_scopes(built),list(built))
+        # Rulings 19/19a (2026-10-24): a whole-.m4b set may be one part-set candidate, whose chapters decide in research.
+        self.assertTrue(all(len(g['members'])==1 or g.get('part_set') for g in built.values()),list(built))
         members=[groups.member(r) for r in files]
         _,holds=split_books.plan(members)
         self.assertTrue(any(reason in r for h in holds for r in h['reasons']),holds)
@@ -150,7 +152,9 @@ class ReviewFindingTests(unittest.TestCase):
     """Senua's (C1, M1, M2, M6, M7) and Futaba's (F1) cases on 3346da1: separate works never join."""
     def assert_not_grouped(self,files):
         built=groups.build(files)
-        self.assertFalse(split_scopes(built),list(built));self.assertEqual(len(built),len(files))
+        self.assertFalse(split_scopes(built),list(built))
+        # Rulings 19/19a (2026-10-24): never joined on its own; a whole-.m4b set may be one part set its chapters decide.
+        self.assertTrue(all(len(g['members'])==1 or g.get('part_set') for g in built.values()),list(built))
     def test_c1_a_title_on_one_part_only_still_holds_hunger_games(self):
         # Live tags: album "The Hungar games", tracks 1/3..3/3, a title on book 2 only; names "The Hunger Games 1..3".
         files=[row('Suzanne Collins/Suzanne Collins/The Hunger Games %d.m4b'%n,dict({'album':'The Hungar games','artist':'Suzanne Collins','track':'%d/3'%n},**({'title':'Book 2 Cathing Fire'} if n==2 else {})))
@@ -196,7 +200,7 @@ class ReviewFindingTests(unittest.TestCase):
             path=base/relative;metadata={'tags':tags,'probe':{'format':{'duration':'600'},'streams':[{'codec_type':'audio','codec_name':'aac','sample_rate':'44100','channels':1}]}}
             rows.append({'root':str(base),'path':str(path),'kind':'audiobook','size':10,'modified':10,'metadata':json.dumps(metadata,ensure_ascii=False),'error':'','missing':0})
         built=groups.build(rows)
-        self.assertFalse(split_scopes(built));self.assertEqual(len(built),2)
+        self.assertFalse(split_scopes(built))  # one part set at most (rulings 19/19a): research holds it, never joins it
         for group in built.values():
             fixture=catalogue(client.database,base,dict(group,fingerprint='private-fixture'))
             for other in built.values():catalogue(client.database,base,dict(other,fingerprint='private-fixture'))
@@ -271,7 +275,7 @@ class SplitAdmissionTests(unittest.TestCase):
         self.assertEqual(len(rows),1,[r['scope'] for r in rows]);self.row=rows[0];self.assertTrue(self.row.get('split_book'))
         from public_research import PublicResearch
         self.result=PublicResearch(self.client,leads=[]).lookup(self.row,str(self.audio))
-        self.assertEqual(self.result['reasons'],[],self.result)
+        if not chapters:self.assertEqual(self.result['reasons'],[],self.result)
     def wait(self):
         limit=time.monotonic()+60
         while self.service.state()['state'] in ('Running','Pausing') or self.service.state().get('queued') or self.service.state().get('cleanup_active'):
@@ -288,22 +292,19 @@ class SplitAdmissionTests(unittest.TestCase):
         self.assertTrue(all(not p.exists() for p in self.sources));self.assertEqual(self.service.cleanup.status(job_id)['recovery']['state'],'deleted')  # v0.16.8: deleted once verified
     def test_parts_with_their_own_chapters_are_held(self):
         self.build(chapters=True)
-        with self.assertRaises(ValueError) as raised:self.service.approve_automatic(self.row,self.result,threading.Event(),self.client)
+        # Rulings 19/19a (2026-10-24): the set's chapters decide. Chapters "A", "B" in each bare-numbered part settle
+        # nothing: "Part of a bigger book", with the proposed order and Approve as one book; never joined on its own.
+        self.assertEqual((self.result['part_set']['decision'],self.result['part_set']['basis']),('ask','unclear'))
+        self.assertIn('One part of a bigger book',self.result['reasons'])
+        with self.assertRaises(ValueError):self.service.approve_automatic(self.row,self.result,threading.Event(),self.client)
+        # Admission refuses joining own chapters without that decision (an identity-only result), and re-files nothing.
+        from public_research import PublicResearch
+        bare=PublicResearch(self.client,leads=[])._lookup(self.row,str(self.audio))
+        self.assertEqual(bare['reasons'],[],bare.get('reasons'))
+        with self.assertRaises(ValueError) as raised:self.service.approve_automatic(self.row,bare,threading.Event(),self.client)
         self.assertIn('carry their own chapters',str(raised.exception))
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(all(p.exists() for p in self.sources))
-        # Sergei 2026-10-13: never joined. The fact regroups the catalog: each part is its own candidate.
-        rows=self.service.reviews.page()['rows']
-        self.assertEqual(len(rows),2,[r['scope'] for r in rows]);self.assertFalse(any(r.get('split_book') for r in rows))
-        self.assertTrue(all(r['scope'].endswith('Part with its own chapters') and len(r['members'])==1 for r in rows))
-        # "Чужак 1" has no title of its own. Sergei 2026-10-24 (rulings 13 and 15): it is named after the set plus
-        # its number, automatically (before: held, "how to name it needs a rule").
-        from public_research import PublicResearch
-        for row in rows:
-            result=PublicResearch(self.client,leads=[]).lookup(row,str(self.audio))
-            self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertEqual(result['local_agreement']['part_book']['parts'],2)
-            self.assertIn('no title of its own',result['local_agreement']['title']['how'])
-            self.assertEqual(result['local_agreement']['title']['basis'],'number_rule')
-            self.assertIn(result['review']['title'],('Чужак 1','Чужак 2'));self.assertEqual(result['review']['series'],'')
+        self.assertEqual([len(r['members']) for r in self.service.reviews.page()['rows']],[2],'one candidate: nothing re-filed')
     def test_parts_whose_audio_profiles_differ_at_admission_are_held(self):
         self.build()
         import audio_pipeline
@@ -377,7 +378,8 @@ class PartBookTests(unittest.TestCase):
     """Sergei 2026-10-13: M4B parts with their own chapters are never joined; each part is its own book."""
     def test_imajica_parts_are_separate_books_named_from_evidence(self):
         rows=part_rows(IMAJICA_FOLDER,'Имаджика','Клайв Баркер',[(n,s,t) for n,(s,t) in enumerate(IMAJICA,1)])
-        built=groups.build(rows)
+        self.assertEqual([len(g['members']) for g in groups.build(rows).values()],[4],'one part set until its chapters are read (ruling 19)')
+        built=groups.build(rows,volumes=frozenset(r['path'] for r in rows))  # recorded as separate volumes
         self.assertEqual(len(built),4);self.assertFalse(split_scopes(built))
         titles=[]
         for index,r in enumerate(rows):
@@ -398,12 +400,12 @@ class PartBookTests(unittest.TestCase):
         parts=[(1,'01. Повелитель Хаоса','01. Повелитель Хаоса'),(2,'02. Элрик из Мелнибонэ','02. Элрик из Мелнибонэ')]
         rows=part_rows('Michael John Moorcock/Elric of Melniboné','Сага об Элрике','Майкл Муркок',parts)
         for index in (0,1):
-            local=agreement(candidate_of(groups.build(rows),rows[index]['path']),ROOT,siblings_of(rows,index),frozenset())
+            local=agreement(candidate_of(groups.build(rows,volumes=frozenset(r['path'] for r in rows)),rows[index]['path']),ROOT,siblings_of(rows,index),frozenset())
             self.assertFalse(local['accepted']);self.assertIn('parent work',local['fields']['title']['how'])
     def test_part_without_a_title_of_its_own_stays_held(self):
         parts=[(n,'Торадора! Том %d'%n,'Торадора! Том %d'%n) for n in (1,2,3)]
         rows=part_rows('Light Novels/Yuyuko Takemiya/Toradora!','Торадора!','Ююко Такэмия',parts)
-        local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
+        local=agreement(candidate_of(groups.build(rows,volumes=frozenset(r['path'] for r in rows)),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
         self.assertFalse(local['accepted']);self.assertTrue(local['part_book'])
         self.assertIn('no title of its own',local['fields']['title']['how'])
     def test_incoherent_set_is_not_a_part_book(self):
@@ -412,12 +414,14 @@ class PartBookTests(unittest.TestCase):
         local=agreement(candidate_of(groups.build(rows),rows[0]['path']),ROOT,siblings_of(rows,0),frozenset())
         self.assertIsNone(local['part_book']);self.assertFalse(local['accepted'])
         self.assertTrue(any('beside it' in c['detail'] for c in local['conflicts']),local['conflicts'])
-    def test_known_chaptered_parts_get_their_own_candidates(self):
+    def test_known_volumes_get_their_own_candidates(self):
+        # Rulings 19/19a (2026-10-24): own chapters no longer split a set (its chapters decide); recorded volumes do.
         files=[row('Stephen King/Чужак %d.m4b'%n,{'album':'Чужак','artist':'Стивен Кинг','title':'Чужак %d'%n,'track':'%d/2'%n}) for n in (1,2)]
         self.assertTrue(split_scopes(groups.build(files)))
-        built=groups.build(files,chaptered=frozenset(f['path'] for f in files))
+        self.assertTrue(split_scopes(groups.build(files,chaptered=frozenset(f['path'] for f in files))),'own chapters keep the set')
+        built=groups.build(files,volumes=frozenset(f['path'] for f in files))
         self.assertFalse(split_scopes(built));self.assertEqual(len(built),2)
-        self.assertTrue(all(s.endswith('\x1fPart with its own chapters') for s in built))
+        self.assertTrue(all(s.endswith('\x1fVolume of a series') for s in built))
         _,holds=split_books.plan([groups.member(f) for f in files],(),frozenset([files[0]['path']]))
         self.assertTrue(any('own chapters' in r for h in holds for r in h['reasons']),holds)
 
@@ -439,6 +443,11 @@ class PartBookAdmissionTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup);self.addCleanup(self.service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         self.client=PublicClient(self.inv.database,fetch=offline)
+        # Rulings 19/19a (2026-10-24): the set is one candidate until its chapters are read; these parts are recorded as
+        # separate volumes (as research records a volume set), so each is its own part book.
+        rows=self.service.reviews.page()['rows'];self.assertEqual([len(r['members']) for r in rows],[2])
+        from scanner import connect
+        with connect(self.inv.database) as db:groups.record_volumes(db,str(self.audio),rows[0]['members'],'fixture: separate volumes')
     def research(self,source):
         from public_research import PublicResearch
         rows=self.service.reviews.page()['rows']
@@ -493,24 +502,18 @@ class PartBookRound2Tests(unittest.TestCase):
     and only whole .m4b parts are re-filed or become part books (live tags of Оно and Мерзость)."""
     def chaptered_set(self,folder,album,artist,parts):
         files=[row('%s/%s.m4b'%(folder,stem),{'album':album,'artist':artist,'album_artist':artist,'title':title,'track':'%d/%d'%(n,len(parts))},duration=36000.0) for stem,title,n in parts]
-        built=groups.build(files,chaptered=frozenset(f['path'] for f in files))
-        self.assertFalse(split_scopes(built));self.assertEqual(len(built),len(files))
-        return files,built
-    def test_r2_c1_ono_every_part_keeps_its_parent_work(self):
+        return files,groups.build(files,chaptered=frozenset(f['path'] for f in files))
+    # Ruling 19a (Sergei 2026-10-24) replaces "each chaptered part is its own book" (2026-10-13) for parts that each carry an
+    # explicit part marker ("Часть 2"): they are one book, joined keeping every part's chapters (tests/test_m4b_join.py).
+    def test_r2_c1_ono_explicitly_marked_parts_are_one_book(self):
         files,built=self.chaptered_set('Stephen King/Оно','Оно','Кинг Стивен',ONO)
-        titles=[]
-        for index,f in enumerate(files):
-            local=agreement(candidate_of(built,f['path']),ROOT,siblings_of(files,index),frozenset())
-            self.assertTrue(local['accepted'],local['conflicts'])
-            n=ONO[index][2];self.assertEqual(local['series'],{'name':'Оно','number':str(n)});titles.append((n,local['fields']['title']['value']))
-        self.assertEqual(sorted(titles),[(1,'ТЕНЬ ПРОШЛОГО'),(2,'ИЮНЬ 1958 ГОДА. 1'),(3,'ИЮНЬ 1958 ГОДА. 2'),(4,'ВЗРОСЛЫЕ'),(5,'ИЮЛЬ 1958 ГОДА. 1'),(6,'ИЮЛЬ 1958 ГОДА. 2'),(7,'РИТУАЛ ЧУДЬ')])
-    def test_r2_c1_merzost_whole_set_held_when_one_part_has_no_title(self):
+        self.assertEqual(len(built),1);group=next(iter(built.values()))
+        self.assertTrue(group['split_book']);self.assertEqual([m['path'] for m in group['members']],[f['path'] for f in files],'in part order')
+        local=agreement(rendered(group),ROOT,[],frozenset())
+        self.assertTrue(local['accepted'],local['conflicts']);self.assertEqual(local['fields']['title']['value'],'Оно')
+    def test_r2_c1_merzost_explicitly_marked_parts_are_one_book(self):
         files,built=self.chaptered_set('Dan Simmons/Мерзость','Мерзость','Симмонс Дэн',MERZOST)
-        for index,f in enumerate(files):
-            local=agreement(candidate_of(built,f['path']),ROOT,siblings_of(files,index),frozenset())
-            self.assertFalse(local['accepted']);self.assertTrue(local['part_book'])
-            self.assertIn('only part of the book',local['fields']['title']['how'])
-        self.assertIn('whole set is held',agreement(candidate_of(built,files[0]['path']),ROOT,siblings_of(files,0),frozenset())['fields']['title']['how'])
+        self.assertEqual([len(g['members']) for g in built.values()],[3]);self.assertTrue(next(iter(built.values()))['split_book'])
     def test_r2_m1_m4a_is_never_a_part_book(self):
         rows=[row('%s/%s.m4a'%(IMAJICA_FOLDER,s),{'album':'Имаджика','artist':'Клайв Баркер','title':t,'track':'%d/4'%n}) for n,(s,t) in enumerate(IMAJICA,1)]
         for index,f in enumerate(rows):

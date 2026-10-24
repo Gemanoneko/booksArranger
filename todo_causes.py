@@ -140,6 +140,10 @@ def piece_cause(hold):
         return {'cause': 'part_set', 'index': piece.get('position'), 'total': piece.get('parts'), 'set': piece.get('set') or ''}
     if kind == 'unreadable':
         return {'cause': 'unreadable'}
+    if kind == 'set':
+        # Rulings 19 and 19a: a set of .m4b parts their chapters do not settle (part_sets.decide's basis is the cause).
+        cause = piece.get('cause') if piece.get('cause') in ('seasons', 'book_words', 'long', 'authors', 'unclear', 'unreadable') else 'unclear'
+        return {'cause': 'set_' + cause, 'parts': int(piece.get('parts') or 0), 'hours': piece.get('hours')}
     return {'cause': 'unknown'}
 
 

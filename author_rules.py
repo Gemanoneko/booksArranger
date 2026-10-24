@@ -108,16 +108,25 @@ class Rules:
         watch.seen, watch.folders = set(), set()
         return watch
 
+    SEEN_LIMIT, FOLDER_LIMIT = 500, 20
+
+    def record(self):
+        """What a research stores of a recording copy: the newest rule time and the credits and folders it asked about.
+        Never cut short: past the limits the lists are None, and any later rule researches the book again."""
+        seen = sorted(self.seen or ()) if len(self.seen or ()) <= self.SEEN_LIMIT else None
+        folders = sorted(self.folders or ()) if len(self.folders or ()) <= self.FOLDER_LIMIT else None
+        return {'rules_stamp': self.stamp, 'rules_seen': seen, 'rules_folders': folders}
+
     def changed_for(self, record):
         """True when a rule saved after the research in record decides one of the credits or folders it saw (or the
         record cannot tell: researched before 0.22.0's rule records). Equal generations: nothing changed."""
         if (record.get('rules_generation') or '') == self.generation:
             return False
-        stamp, seen = record.get('rules_stamp'), record.get('rules_seen')
-        if not isinstance(stamp, str) or not isinstance(seen, list):
+        stamp, seen, folders = record.get('rules_stamp'), record.get('rules_seen'), record.get('rules_folders')
+        if not isinstance(stamp, str) or not isinstance(seen, list) or not isinstance(folders, list):
             return True
         seen = set(seen)
-        folders = [str(f).casefold() for f in record.get('rules_folders') or [] if isinstance(f, str)]
+        folders = [str(f).casefold() for f in folders if isinstance(f, str)]
         for row in self.rules:
             if str(row.get('saved_utc') or '') <= stamp:
                 continue

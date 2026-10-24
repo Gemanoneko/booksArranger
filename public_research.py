@@ -602,6 +602,8 @@ class PublicResearch:
     def lookup(self,row,root,stop=None,progress=lambda *_:None):
         import manual_metadata
         entered=manual_metadata.proposals(row.get('_manual_metadata_sources',[]))
+        decision=self._part_set(row,root,stop)
+        if decision and decision['decision'] in ('volumes','missing'):return self._part_set_hold(row,root,decision)
         rules=self.rules()
         watch=rules.recording() if rules is not None and hasattr(rules,'recording') else None
         if self.__dict__.get('_watch') is None:self._watch=threading.local()
@@ -612,7 +614,17 @@ class PublicResearch:
         # review (G6) only when a new rule decides one of the credits or folders this research asked about.
         result['rules_generation']=rules.generation if rules else ''
         if watch is not None:
-            result['rules_stamp']=watch.stamp;result['rules_seen']=sorted(watch.seen)[:500];result['rules_folders']=sorted(watch.folders)[:20]
+            result.update(watch.record() if hasattr(watch,'record') else {})
+        if decision:
+            result['part_set']=decision
+            if decision['decision']=='ask':
+                # "Part of a bigger book" with the proposed order and "Approve as one book"; never joined on its own.
+                import local_identity
+                result['reasons']=list(dict.fromkeys(list(result.get('reasons') or [])+[local_identity.PIECE_REASON]))
+                hold=dict(result.get('identity_hold') or {'kind':'piece','detail':''})
+                if hold.get('kind')=='piece':hold['piece']={'piece':'set','cause':decision['basis'],'parts':len(row.get('members') or []),
+                                                            'hours':round(sum(float(m.get('duration') or 0) for m in row.get('members') or [])/3600,1)}
+                result['identity_hold']=hold;result['wait']=None
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
@@ -631,6 +643,31 @@ class PublicResearch:
                                        'reason':'Saved manual metadata disagrees with researched identity'}]
         return result
 
+    def _part_set(self,row,root,stop):
+        """Rulings 19 and 19a (Sergei 2026-10-24): whole .m4b parts of one set: their chapters decide whether they are one
+        book (part_sets.decide). None for any other row, an explicitly marked split book (joined) and a split book whose
+        parts carry no chapters (joined as before)."""
+        from pathlib import Path
+        import groups,part_sets,split_books
+        members=row.get('members') or []
+        if len(members)<2 or not (row.get('part_set') or row.get('split_book')) or any(Path(m['path']).suffix.lower()!='.m4b' for m in members):return None
+        if row.get('split_book') and split_books.joinable_parts(members):return None
+        # A split book of many files is a book's chapter files (Dan Brown's 108-155): joined as before, never probed one by one.
+        if row.get('split_book') and len(members)>groups.PART_SET_MAX:return None
+        chapters=part_sets.read_chapters([m['path'] for m in members],stop)
+        # A split book whose parts show no chapters is joined as before; admission probes every part again and refuses
+        # joining own chapters without a decision.
+        if row.get('split_book') and not any(chapters.values()):return None
+        return part_sets.decide(part_sets.parts_of(row,chapters))
+    def _part_set_hold(self,row,root,decision):
+        """Separate volumes are recorded (the catalog regroups them, each its own book, ruling 15); missing parts are a
+        Missing files row naming them. Either way this candidate is held with the reason."""
+        import groups
+        result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'wait':None,'part_set':decision}
+        if decision['decision']=='volumes':
+            with connect(self.client.database) as db:groups.record_volumes(db,root,row.get('members') or [],decision['basis'])
+            return result|{'reasons':['Separate books of a series'],'identity_hold':{'kind':'piece','detail':decision['basis'],'piece':{'piece':'volumes','parts':len(row.get('members') or [])}}}
+        return result|{'reasons':['Parts of this book are missing'],'identity_hold':{'kind':'missing_parts','missing':list(decision.get('missing') or []),'total':decision.get('total')}}
     def _lookup(self,row,root,stop=None,progress=lambda *_:None):
         stop=stop or threading.Event();budget={'remaining':12};all_clues=[c for m in row['members'] for c in clues(m,root)]
         candidates=[]

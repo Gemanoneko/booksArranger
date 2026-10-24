@@ -770,4 +770,15 @@ class CandidateReviewService:
                     proof=held.get(os.path.normcase(os.path.abspath(sources[0]['path'])))
                     # A held in-place source is open for DELETE (no reader may open it); its chapters were re-probed after the edit.
                     manifest['source_chapters']=copy.deepcopy(proof['source_chapters']) if proof is not None else source_chapters(sources[0]['path'],self.cache,stop or threading.Event(),row['creation']['duration_seconds'])
+                else:
+                    from groups import PART_SET_MAX
+                    chosen=[members[key] for key in row['track_order'] if key in row['included']]
+                    if 1<len(chosen)<=PART_SET_MAX and all(Path(m['path']).suffix.lower()=='.m4b' for m in chosen):
+                        # Rulings 19 and 19a: joined .m4b parts keep every part's own chapters, frozen here and proven again
+                        # on each protected snapshot; parts without any chapters (and a book's many chapter files) keep one
+                        # chapter per part as before.
+                        from audio_pipeline import source_chapters,part_chapter_name
+                        plan=[{'name':part_chapter_name(m),'chapters':source_chapters(m['path'],self.cache,stop or threading.Event(),float(m.get('duration') or 0))}
+                              for m in chosen]
+                        if any(part['chapters'] for part in plan):manifest['part_chapters']=plan
             return manifest

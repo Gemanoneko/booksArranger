@@ -230,7 +230,10 @@ class CleanupJobs:
                 raise ValueError('Exact selected-source decoded-audio validation is required')
             if abs(float(v.get('decoded_duration',-1))-sum(frames)/rate)>float(v.get('duration_tolerance',0)):
                 raise ValueError('Decoded output does not match the selected source audio')
-        expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
+        if 'part_chapters' in manifest:
+            from audio_pipeline import planned_chapter_titles
+            expected_chapters=planned_chapter_titles(manifest)  # ruling 19a: joined parts keep their own chapters
+        else:expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
         if [c.get('title') for c in v.get('chapters',[])]!=expected_chapters:raise ValueError('Validated chapter choice does not match this completed book')
     def status(self,job_id=None):
         rows=self._rows('SELECT * FROM source_cleanup'+(' WHERE job_id=?' if job_id else '')+' ORDER BY created', (job_id,) if job_id else ())

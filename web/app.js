@@ -1857,7 +1857,14 @@ function holdSentence(kind,cause,f={}){
     parts:"The parts of this set don't number cleanly."}[cause] || "The app can't be sure which files belong to this book.";
   if(kind==='part_of_book')return {chapter:'This file is named as one chapter.',numbered_part:'The name marks this as one numbered part.',
     siblings:n(f.beside)===1?'Another file beside it carries the same title.':`${n(f.beside)} other files beside it carry the same title.`,
-    part_set:`Part ${n(f.index)} of ${n(f.total)} of "${f.set || ''}".`,unreadable:"The other files in this folder couldn't be checked."}[cause] || "The app can't tell if this is a whole book.";
+    part_set:`Part ${n(f.index)} of ${n(f.total)} of "${f.set || ''}".`,unreadable:"The other files in this folder couldn't be checked.",
+    // Rulings 19 and 19a: a set of .m4b parts whose chapters don't settle it; the files show the proposed order.
+    set_seasons:'The files are seasons of a series. Approve them as one book only if they are one.',
+    set_book_words:'The files are named as books of a series. They may be one book or several.',
+    set_long:`Joined, these ${n(f.parts)} files would run ${Number(f.hours) || 0} hours. Check that they are one book.`,
+    set_authors:'The files credit different authors or readers. Check that they are one book.',
+    set_unclear:"These files may be the parts of one book. Their chapters don't settle it.",
+    set_unreadable:"These files may be the parts of one book. Their chapters couldn't be read."}[cause] || "The app can't tell if this is a whole book.";
   return '';
 }
 const HOLD_APPROVE={order_unclear:['Approve this order','Approve the order shown: convert if needed, rename, move to Audiobooks Sorted.'],

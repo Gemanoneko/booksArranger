@@ -65,6 +65,25 @@ def _tags(member):
     return {str(k).casefold(): v for k, v in member.get('metadata', {}).get('tags', {}).items()}
 
 
+# Ruling 19a (Sergei 2026-10-24): whole .m4b parts are joined into one book, keeping each part's chapters, only when every
+# part carries an explicit part marker in its file name or title tag ("Часть 2", "Part 2", "CD 2", "Глава 4") or sits in a
+# CD / part folder. Bare-numbered parts ("Чужак 2", "Торадора! 5") stay separate books (rulings 13 and 15); a volume or
+# book of a series ("Том 2", "Книга 1") and a track number are no part markers.
+EXPLICIT_PART = re.compile(r'(?<![^\W\d_])(?:часть|ч\.|глава|гл\.|chapter|ch\.|part|pt\.?|cd|disc|disk|диск)\s*[#№]?\s*(?:\d|[IVX]{1,5}(?![^\W\d_]))', re.I)
+PART_FOLDER_NAME = re.compile(r'\s*(?:cd|disc|disk|диск|часть|part)[ _.-]*\d{1,3}\s*', re.I)
+
+
+def explicit_part(member):
+    path = Path(member['path'])
+    return bool(EXPLICIT_PART.search(_nfc(path.stem)) or EXPLICIT_PART.search(_nfc(_tags(member).get('title') or ''))
+                or PART_FOLDER_NAME.fullmatch(_nfc(path.parent.name)))
+
+
+def joinable_parts(members):
+    """Ruling 19a: two or more whole .m4b parts that each carry an explicit part marker: joined with their chapters kept."""
+    return len(members) > 1 and all(Path(m['path']).suffix.lower() == '.m4b' and explicit_part(m) for m in members)
+
+
 def _nfc(value):
     return unicodedata.normalize('NFC', str(value or ''))
 

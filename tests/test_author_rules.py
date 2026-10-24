@@ -148,6 +148,17 @@ class RulesChangeResearchAgainTests(unittest.TestCase):
         generation[0]='g2'
         auto.start();case.wait_auto(auto);self.assertEqual(len(calls),2,'new rules: researched again');auto.close()
 
+    def test_g6_a_research_that_saw_too_many_names_to_record_is_always_researched_again(self):
+        rules=author_rules.Rules([]).recording()
+        name=lambda n:'Имя '+''.join(chr(0x430+(n//32**i)%32) for i in range(2))
+        for n in range(3):rules.same_as(name(n),'Папка')
+        record=rules.record()
+        self.assertEqual((record['rules_seen'],record['rules_folders']),(sorted(author_rules.key(name(n)) for n in range(3)),['Папка']))
+        for n in range(600):rules.same_as(name(n),'Папка')
+        record=dict(rules.record(),rules_generation='older')
+        self.assertIsNone(record['rules_seen'],'never cut short: a cut list could miss the name a new rule decides')
+        self.assertTrue(author_rules.Rules([]).changed_for(record))
+
     def test_g6_only_a_held_book_a_new_rule_names_is_researched_again(self):
         # Senua's 0.22.0 early review, G6: any new rule re-researched every held book.
         import test_automatic_processing as fixtures

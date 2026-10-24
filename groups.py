@@ -14,7 +14,10 @@ import split_books
 SAME_TITLE_VERSION = 'same-title-v2'  # v2: Senua's 0.22.0 review G1, G2
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
 SAME_ALBUM_VERSION = 'same-album-v2'  # v2: Senua's 0.22.0 review G3
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION
+# Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
+# other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
+M4B_PARTS_VERSION = 'm4b-parts-v2'
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION
 DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
 def setup(connection):
@@ -44,6 +47,7 @@ def setup(connection):
         for operation in ('INSERT','UPDATE','DELETE'):
             connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_retirements_{operation.lower()} AFTER {operation} ON source_retirements BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
     setup_part_chapters(connection)
+    setup_part_volumes(connection)
     setup_group_member_index(connection)
 
 
@@ -76,6 +80,28 @@ def chaptered_parts(connection,root):
     if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='part_chapters'").fetchone():return frozenset()
     return frozenset(r[0] for r in connection.execute("""SELECT c.path FROM part_chapters c JOIN files f ON f.root=c.root AND f.path=c.path
         WHERE c.root=? AND c.chapters>1 AND c.size=f.size AND c.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,)))
+
+def setup_part_volumes(connection):
+    """Ruling 19, 2026-10-24: .m4b files of one set found to be separate volumes of a series (part_sets.decide, from their
+    chapters): each is its own book (ruling 15 names it). A fact holds only while the file keeps its size and time;
+    any change to the facts regroups the catalog."""
+    connection.execute('CREATE TABLE IF NOT EXISTS part_volumes(root TEXT, path TEXT, size INTEGER, modified TEXT, basis TEXT NOT NULL, checked TEXT NOT NULL, PRIMARY KEY(root,path))')
+    for operation in ('INSERT','UPDATE','DELETE'):
+        connection.execute(f'CREATE TRIGGER IF NOT EXISTS book_part_volumes_{operation.lower()} AFTER {operation} ON part_volumes BEGIN UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1; END')
+
+def volume_parts(connection,root):
+    """Paths of catalogued files whose recorded separate-volume fact still matches the file."""
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='part_volumes'").fetchone():return frozenset()
+    return frozenset(r[0] for r in connection.execute("""SELECT v.path FROM part_volumes v JOIN files f ON f.root=v.root AND f.path=v.path
+        WHERE v.root=? AND v.size=f.size AND v.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,)))
+
+def record_volumes(connection,root,members,basis):
+    """Record the members of a set as separate volumes (their current size and time). Regroups the catalog."""
+    import datetime
+    connection.execute('CREATE TABLE IF NOT EXISTS part_volumes(root TEXT, path TEXT, size INTEGER, modified TEXT, basis TEXT NOT NULL, checked TEXT NOT NULL, PRIMARY KEY(root,path))')
+    now=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    for m in members:
+        connection.execute('INSERT OR REPLACE INTO part_volumes VALUES(?,?,?,?,?,?)',(root,m['path'],int(m['size']),str(m['modified']),str(basis)[:200],now))
 
 def retired_sources(connection,root):
     if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_retirements'").fetchone():return {}
@@ -303,6 +329,56 @@ def _folder_names_another_author(path,start,index):
         return not (same_person(who,start) or compare_names(who,start) or _shares_surname(who,start))
     return False
 
+PART_SET_MAX = 30
+# Split-rule refusals no chapter list can answer: the files stay books of their own.
+HARD_REFUSALS = ('parts are in different places', 'a part is unavailable or unreadable', 'mixed ', 'audio profile unknown',
+                 'a part has no known duration', 'duplicate part numbers', 'only one part', 'more than')
+
+def _part_sets(members,scopes,assigned,separate,taken):
+    """Ruling 19 (Sergei 2026-10-24, "parts of a bigger book are connected in the correct order"): the whole .m4b files of
+    one folder that share their album and artist tags and are each still a book of their own form one candidate, in the
+    order their track numbers (else the numbers in their names) give. Their chapters decide in research what it is
+    (part_sets.decide: one book, separate volumes, a question, or missing parts); files already found to be separate
+    volumes are left out, and so is a folder holding the same part twice (two copies of a name). A set the split rules
+    refuse for a reason the chapters cannot answer stays files of their own: different recordings (audio profiles,
+    readers or credits), duplicate or unplaced parts, unreadable parts; and so does a folder of more than PART_SET_MAX
+    files (chapter files of one book, the split rules' work). Returns [{'scope', 'members', 'positions', 'basis',
+    'book_name'}]."""
+    import unicodedata
+    counts=Counter(scopes.values())
+    clusters={}
+    for path,item in members.items():
+        if path in assigned or path in separate or Path(path).suffix.lower()!='.m4b' or counts[scopes[path]]!=1:continue
+        tags={k.casefold():' '.join(str(v).split()) for k,v in item['metadata'].get('tags',{}).items()}
+        album=unicodedata.normalize('NFC',tags.get('album','')).casefold()
+        if not album:continue
+        artist=unicodedata.normalize('NFC',tags.get('artist','')).casefold()
+        clusters.setdefault((split_books.unit(path)[0],album,artist),[]).append(item)
+    found=[]
+    for (unit,album,artist),items in sorted(clusters.items(),key=lambda kv:repr(kv[0])):
+        if len(items)<2:continue
+        if len(items)>PART_SET_MAX:continue
+        stems=[unicodedata.normalize('NFC',Path(m['path']).stem).casefold() for m in items]
+        if len(set(stems))!=len(stems):continue  # the same part twice (two copies under one name)
+        reasons=split_books.check(sorted(items,key=lambda m:m['path']))['reasons']
+        if any(r.startswith(HARD_REFUSALS) for r in reasons):continue
+        def number(value):
+            match=re.match(r'^\s*(\d{1,4})',str(value or ''))
+            return int(match[1]) if match else None
+        tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in items]
+        tracks=[(number(t.get('disc') or t.get('discnumber')) or 1,number(t.get('track') or t.get('tracknumber'))) for t in tags]
+        if all(t is not None for _,t in tracks) and len(set(tracks))==len(tracks):
+            positions,basis=tracks,'embedded track numbers'
+        else:
+            named=[re.findall(r'\d{1,4}',Path(m['path']).stem) for m in items]
+            positions=[(1,int(n[-1])) if n else None for n in named];basis='numbers in the file names'
+            if None in positions or len(set(positions))!=len(positions):continue
+        order=sorted(range(len(items)),key=lambda i:positions[i])
+        scope=unit+'\x1fPart set '+album+'\x1f'+artist
+        if scope in taken:continue
+        found.append({'scope':scope,'members':[items[i] for i in order],'positions':[positions[i] for i in order],'basis':basis,'book_name':''})
+    return found
+
 def _same_album_parts(members,scopes,assigned,chaptered,taken):
     """Ruling 19 (Sergei 2026-10-24, "parts of a bigger book are joined into that book"): files of one folder that carry
     the same album tag (a trailing CD / disc number aside) and name one author are one book, even when their author or
@@ -352,18 +428,19 @@ def _works(entries,scopes,album):
         if key in works:shown.setdefault(key,title)
     return [{'name':shown[key],'files':counts[key] or 1} for key in shown]
 
-def build(rows,protected=None,chaptered=frozenset()):
+def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     members={row['path']:member(row) for row in audio}
     scopes={path:assigned.get(path) or partition(item) for path,item in members.items()}
     # Only whole .m4b files (always single-file candidates by partition) are re-filed as their own
     # books; an .m4a may sit in a multi-file group and would be re-encoded (Senua R2-M1).
-    chaptered=frozenset(path for path in chaptered if Path(path).suffix.lower()=='.m4b')
+    # Rulings 19 and 19a (Sergei 2026-10-24): a whole .m4b part with its own chapters stays in its set; the set's chapters
+    # decide whether it is one book (part_sets.decide). Only files found to be separate volumes are books of their own:
+    # a new scope, so a running automatic pass picks each up (the 2026-10-13 rule filed every chaptered part alone).
+    chaptered=frozenset(path for path in volumes if Path(path).suffix.lower()=='.m4b')
     for path in chaptered:
-        # Its own book (Sergei 2026-10-13): a new scope, so a part that sat in a joined split book
-        # becomes a new candidate that a running automatic pass picks up.
-        if path in scopes and path not in assigned:scopes[path]=str(Path(path))+'\x1fPart with its own chapters'
+        if path in scopes and path not in assigned:scopes[path]=str(Path(path))+'\x1fVolume of a series'
     split={}
     taken=set(scopes.values())
     for found in _split_plan(members,scopes,assigned,chaptered):
@@ -380,6 +457,10 @@ def build(rows,protected=None,chaptered=frozenset()):
     for found in _same_album_parts(members,scopes,assigned,chaptered,taken|set(split)|set(sets)):
         for item in found['members']:scopes[item['path']]=found['scope']
         joined[found['scope']]=found
+    part_sets={}
+    for found in _part_sets(members,scopes,assigned,chaptered,taken|set(split)|set(sets)|set(joined)):
+        for item in found['members']:scopes[item['path']]=found['scope']
+        part_sets[found['scope']]=found
     for row in audio:
         buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
@@ -391,6 +472,12 @@ def build(rows,protected=None,chaptered=frozenset()):
         for path,item in members.items():
             neighbours.setdefault((split_books.unit(path)[::2],split_books.book_key(item)),[]).append(item)
     for scope,items in buckets.items():
+        if scope in part_sets and {r['path'] for r in items}=={m['path'] for m in part_sets[scope]['members']}:
+            group=_split_group(items,companions,scope,part_sets[scope]);parts=group.pop('split_book')
+            group['part_set']={'version':M4B_PARTS_VERSION,'parts':parts['parts'],'order_basis':parts['order_basis']}
+            group['grouping']='Parts of one folder that share their album and artist: their chapters decide whether they are one book (ruling 19)'
+            output[scope]=group
+            continue
         if scope in split:
             verdict=split[scope]
             if {r['path'] for r in items}=={m['path'] for m in verdict['members']}:
@@ -494,7 +581,7 @@ def sync(connection,root):
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
-    groups=build(rows,protected,chaptered_parts(connection,root))
+    groups=build(rows,protected,chaptered_parts(connection,root),volume_parts(connection,root))
     for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
     for scope,evidence in groups.items():
         if scope in frozen:continue
