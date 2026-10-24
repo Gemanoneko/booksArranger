@@ -47,6 +47,7 @@ patterns.push('test_retry_start_fence.py');
 patterns.push('test_inplace_m4b.py','test_source_proofs.py');  // v0.21.0 in-place single-M4B edit, attempt-scoped source fingerprints
 patterns.push('test_iron_skazka.py');  // v0.21.1 legacy MP3 tag-repair retry, Confirm and convert, no-restart proof, verified old-file removal
 patterns.push('test_local_admission.py','test_catalog_paging.py');  // local-agreement identity end to end; review paging/filters without source reads. Both broke unseen outside the gate (0cf4376, d2ff261)
+patterns.push('test_source_cleanup.py','test_source_folders.py','test_safety_boundaries.py','test_cleanup_scope.py');  // 0.21.3 audit M1: the source-removal suites (Sergei's deletion rule, rulings 2 and 1a)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

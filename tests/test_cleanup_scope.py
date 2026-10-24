@@ -23,7 +23,12 @@ class ScopeTests(unittest.TestCase):
         self.service.enroll_cleanup.assert_not_called()
     def test_only_exact_enrolled_identity_and_no_audio_continuation(self):
         self.service.start_historical_cleanup('approved')
-        self.service.cleanup.resume.assert_called_once_with(['owned'],follow_audio=False)
+        # Since the start fence, the resume also carries the press's admission check and generation token (audit M1:
+        # this suite was outside the gate, so the old expected call went stale unnoticed).
+        self.service.cleanup.resume.assert_called_once()
+        args,kwargs=self.service.cleanup.resume.call_args
+        self.assertEqual((args,set(kwargs)),((['owned'],),{'follow_audio','admission_check','admission_token'}))
+        self.assertIs(kwargs['follow_audio'],False);self.assertTrue(kwargs['admission_check'](),'the press that started it is still current')
         self.service.jobs.resume.assert_not_called()
     def test_scan_and_running_work_rejected(self):
         self.service.inventory.worker=SimpleNamespace(is_alive=lambda:True)
