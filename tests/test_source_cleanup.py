@@ -130,6 +130,36 @@ class CleanupTest(unittest.TestCase):
         with patch.object(VerifiedFile,'flush',side_effect=BoundaryError('reused flush denied')):
             with self.assertRaisesRegex(BoundaryError,'reused flush'):self.worker.run(self.id)
         self.assertTrue(all(Path(s['path']).exists() for s in self.sources))
+    # Audit m3: a download marker removed before the backups is put back when the run stops or holds with the original
+    # still in place; the original's bytes and write time come back exactly.
+    MARKER=b'[ZoneTransfer]' + bytes([13,10]) + b'ZoneId=3' + bytes([13,10])
+    def marked(self):
+        import zone_identifier,os
+        for s in self.sources:
+            with open(s['path']+':Zone.Identifier','wb') as stream:stream.write(self.MARKER)
+            os.utime(s['path'],ns=(int(s['modified']),int(s['modified'])))  # writing the stream moves the write time
+        return zone_identifier
+    def assert_marked(self,zone):
+        for s in self.sources:
+            p=Path(s['path']);self.assertIn((zone.MARKER,len(self.MARKER)),zone.streams(p))
+            with open(s['path']+':Zone.Identifier','rb') as stream:self.assertEqual(stream.read(),self.MARKER)
+            self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(),s['sha256']);self.assertEqual(p.stat().st_mtime_ns,int(s['modified']))
+    def test_markers_are_put_back_when_the_run_pauses_before_removal(self):
+        zone=self.marked();self.worker.stop.set();self.worker.run(self.id)
+        self.assertEqual(self.worker.status('test')['state'],'paused');self.assert_marked(zone)
+        with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM source_zone_marker_intents').fetchone()[0],2,'the receipts stay')
+        self.worker.stop.clear();self.worker.run(self.id)
+        self.assertEqual(self.worker.status('test')['removed'],2);self.assertTrue(all(not Path(s['path']).exists() for s in self.sources))
+    def test_markers_are_put_back_when_the_run_holds(self):
+        zone=self.marked();real=VerifiedFile.flush;calls=[]
+        def failed_second(handle):
+            calls.append(handle.path)
+            if len(calls)==2:raise BoundaryError('simulated storage flush failure')
+            return real(handle)
+        with patch.object(VerifiedFile,'flush',failed_second):
+            with self.assertRaisesRegex(BoundaryError,'flush failure'):self.worker.run(self.id)
+        self.assertGreaterEqual(len(calls),2,'positive control: it got past the marker removal');self.assert_marked(zone)
+
     def test_output_gone_before_a_removal_keeps_every_original(self):
         # Audit m1: the held handle blocks a delete over SMB, not one made on the NAS itself, so the output is read
         # again right before each removal. Here its path stops resolving once every recovery copy is made.

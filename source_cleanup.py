@@ -331,6 +331,32 @@ class CleanupJobs:
         if handle.sha256()!=source['sha256']:raise BoundaryError('Original bytes differ from reviewed sources')
         return facts
     def run(self,id):
+        # Audit m3: a download marker this run removed from an original that is still in place when the run stops or
+        # holds is put back from its receipt; only a removed original loses its marker.
+        marked={}
+        try:result=self._run(id,marked)
+        except BaseException:
+            self._put_back_markers(id,marked);raise
+        self._put_back_markers(id,marked)
+        return result
+    def _put_back_markers(self,id,marked):
+        """Best effort: the same file (native identity, size, single link) gets its exact marker bytes and write time back.
+        Anything that does not match is left as it is; the receipt in source_zone_marker_intents keeps the bytes."""
+        import base64
+        from zone_identifier import MARKER,restore_marker,streams
+        for path,(receipt,facts,root) in list(marked.items()):
+            try:
+                p=ordinary(path)
+                if not os.path.lexists(p):continue
+                with DirectoryBoundary(ordinary(root),p.parent),VerifiedFile(p,writable=True) as handle:
+                    now=handle.refresh()
+                    if now['identity']!=receipt['identity'] or now['size']!=facts['size'] or now['links']!=1:continue
+                    if MARKER in {name for name,_ in streams(p)}:continue
+                    restore_marker(p,base64.b64decode(receipt['marker_bytes_base64']))
+                    handle.restore_metadata(facts['modified'],facts['attributes']);handle.flush()
+                marked.pop(path,None)
+            except (BoundaryError,OSError,ValueError,KeyError):pass
+    def _run(self,id,marked):
         row=self._rows('SELECT * FROM source_cleanup WHERE id=?',(id,))[0];intent=json.loads(row['intent']);manifest=intent['manifest'];out=intent['output']
         source_root=ordinary(manifest['root'])
         frozen_root=ordinary(manifest.get('output_root',manifest['root']))
@@ -379,12 +405,15 @@ class CleanupJobs:
                     self._match(handle,source,json.loads(member['facts']) if member else None,approved)
                     with connect(self.database) as db:
                         if not self.guard(db,intent):raise BoundaryError('Reviewed source changed before download marker removal')
+                removed_marker={}
                 def persist_marker(receipt):
                     with connect(self.database) as db:
                         db.execute('INSERT OR IGNORE INTO source_zone_marker_intents VALUES(?,?,?,?,?)',(id,str(path),receipt['marker_sha256'],packed(receipt),stamp()))
+                    removed_marker['receipt']=receipt
                 remove_marker(path,validate_marker_base,persist_marker)
                 original=stack.enter_context(VerifiedFile(path,delete=True))
                 facts=self._match(original,source,json.loads(member['facts']) if member else None,approved);single_stream(path)
+                if removed_marker:marked[str(path)]=(removed_marker['receipt'],facts,str(source_root))
                 if not member:
                     if backup.exists():raise BoundaryError('Unknown recovery collision; originals retained')
                     with connect(self.database) as db:
@@ -419,7 +448,7 @@ class CleanupJobs:
                     if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
                         raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
                     single_stream(source['path'])
-                    original.dispose()
+                    original.dispose();marked.pop(str(ordinary(source['path'])),None)
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
                     original.__exit__(None,None,None)
                     if Path(source['path']).exists():raise BoundaryError('Disposition did not remove the verified name; no weaker deletion attempted')
