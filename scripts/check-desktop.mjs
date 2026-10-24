@@ -52,6 +52,7 @@ patterns.push('test_identity_v5.py');  // 0.22.0: title + author is enough (Serg
 patterns.push('test_sorted_wiring.py');  // Senua 0.21.3 F6: the production output-folder wiring, no fixture
 patterns.push('test_approve_as_is.py');  // 0.22.0: Sergei as a source and Approve as is (rulings 6a, 6b, 10, 11a)
 patterns.push('test_author_rules.py');  // 0.22.0: Sergei's lasting author rules (ruling 12) and his 2026-10-24 answers
+patterns.push('test_attention_list.py');  // 0.22.0: the one to-do list, its reasons, counts and stale rows (ruling 10)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

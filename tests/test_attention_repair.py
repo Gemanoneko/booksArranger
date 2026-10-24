@@ -144,7 +144,9 @@ class ClassificationTests(Base):
         self.assertIsNone(repair_record({'manifest':{'m4b_repair':{'schema':failed_m4b_retry.SCHEMA}}}),'a preserved-M4B retry child is no repair')
         silence={'schema':m4b_repair.SCHEMA,'note':'n','repairs':[{'kind':'truncated_final_frames','track_id':1,'first_frame':9,'frames':1,'replaced_ticks':1024,'timescale':44100,'silent_frame':'00c80007','description':'d'}]}
         self.assertEqual(repair_record({'manifest':{'m4b_repair':silence}})['patched'],[{'kind':'truncated_final_frames','frames':1,'replaced_ticks':1024,'timescale':44100}],'the amount the panel shows')
-        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6},'Reacquire follows Can repair and precedes Checking')
+        # 0.22.0 (ruling 10, Judy's to-do spec section 2): the "Needs your answer" reasons come first, Missing files first of all.
+        self.assertEqual(CandidateReviewService.ATTENTION_ORDER,{'files_missing':-5,'title_author':-4,'author_unclear':-3,'same_author':-2,'name_taken':-1,
+                                                                 'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6},'Reacquire follows Can repair and precedes Checking')
 
 
 class RetryRouteTests(Base):

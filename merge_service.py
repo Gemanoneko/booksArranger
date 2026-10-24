@@ -648,7 +648,16 @@ class MergeService:
             if phase=='originals':attention_row.update(completed=error.get('removed'),total=error.get('total'))
         totals=self._catalog_cached('totals',lambda:self.progress_books(raw_jobs,cleanups,storage,folders))
         self._converted_cache=(started,set(totals.get('converted_ids') or ()),token)
-        counts,cleanable=attention_counts(self.attention_summary(retry=False))
+        # One predicate feeds every count and every list (Judy 2026-10-24, section 1): stale job rows are not counted, and
+        # the books only Sergei can move on are counted beside the stopped jobs.
+        summary=self.attention_summary(retry=False)
+        try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
+        except (sqlite3.Error,OSError):pass
+        counts,cleanable=attention_counts(summary)
+        try:needs=self.needs_you()
+        except (sqlite3.Error,OSError,ValueError):needs={}
+        for entry in needs.values():counts[entry['group']]=counts.get(entry['group'],0)+1
+        for group in self.NEEDS_GROUPS:counts.setdefault(group,0)
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
@@ -1926,6 +1935,112 @@ class MergeService:
         if not hasattr(self,'publications'):return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}
         value=self.publications.describe(jobs if jobs is not None else self.jobs.status()['jobs'],identity)
         return {key:copy.deepcopy(value[key]) for key in ('state','reason','path','identity','publication_id','kind','tags_state') if key in value}
+
+    # ------------------------------------------------------------ the one to-do list (Judy 2026-10-24, rulings 10, 6a, 6b)
+    NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','name_taken')
+
+    def needs_you(self):
+        """{candidate id: {'group', 'reasons', 'ask'}} for every current book without a job that only Sergei can move on:
+        files gone from disk (files_missing), a question from the identity step (title_author, author_unclear,
+        same_author), a name already in Sorted (name_taken), or another hold that waits for a change (group 'other',
+        "Needs you"). Waits the app ends by itself (source waits, retry-later holds) are not listed; a book Sergei
+        removed from the list stays out until its files change. Read-only; cached on cheap catalog stamps."""
+        database=self.inventory.database
+        with connect(database) as db:
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'book_groups' not in have or 'automatic_candidates' not in have:return {}
+            stamp=(tuple(db.execute('SELECT count(*),max(attempted) FROM automatic_candidates').fetchone()),
+                   tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
+                   tuple(db.execute('SELECT count(*),max(updated) FROM audio_jobs').fetchone()) if 'audio_jobs' in have else (),
+                   tuple(db.execute('SELECT count(*) FROM attention_dismissals').fetchone()) if 'attention_dismissals' in have else ())
+            rules=__import__('author_rules').load(database)
+            cached=self.__dict__.get('_needs_cache')
+            if cached and cached[0]==(stamp,rules.generation if rules else ''):return copy.deepcopy(cached[1])
+            current={r['id']:(r['revision'],r['fingerprint']) for r in db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE superseded=0')}
+            jobs={r[0] for r in db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
+            dismissed={(r[0],r[1]) for r in db.execute('SELECT candidate_id,fingerprint FROM attention_dismissals')} if 'attention_dismissals' in have else set()
+            gone=set()
+            if 'catalog_group_members' in have:
+                gone={r[0] for r in db.execute('SELECT DISTINCT m.group_id FROM catalog_group_members m JOIN files f ON f.root=m.root AND f.path=m.path WHERE f.missing=1')}
+            held={r['id']:r for r in db.execute("SELECT id,revision,fingerprint,result FROM automatic_candidates WHERE state='Held'")}
+        found={}
+        for identity,(revision,fingerprint) in current.items():
+            if identity in jobs:continue
+            if identity in gone:
+                if (identity,fingerprint) not in dismissed:found[identity]={'group':'files_missing','reasons':['Files missing'],'ask':None}
+                continue
+            record=held.get(identity)
+            if not record or record['revision']!=revision or record['fingerprint']!=fingerprint:continue
+            try:result=json.loads(record['result'])
+            except (TypeError,ValueError):continue
+            reasons=[str(r) for r in result.get('reasons') or []][:8];ask=result.get('ask') if isinstance(result.get('ask'),dict) else None
+            if ask and ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
+                continue  # Sergei answered this name pair since: the book is researched again with the rule
+            if ask and ask.get('kind') in ('title_author','author_unclear','same_author'):found[identity]={'group':ask['kind'],'reasons':reasons,'ask':ask}
+            elif any('already exists at this path' in r for r in reasons):found[identity]={'group':'name_taken','reasons':reasons,'ask':None}
+            elif result.get('until_change'):found[identity]={'group':'other','reasons':reasons,'ask':None}
+        self.__dict__['_needs_cache']=((stamp,rules.generation if rules else ''),copy.deepcopy(found))
+        return found
+
+    def stale_attention(self,summary,jobs,converted):
+        """Judy's stale rule (section 1): a job is not listed when its book was converted since by another job, or when
+        its book is no longer current (regrouped); whatever older jobs say. One predicate for every count and list."""
+        if not summary:return {}
+        by_job={job['job_id']:job for job in jobs}
+        with connect(self.inventory.database) as db:
+            current={r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='book_groups'").fetchone() else None
+        kept={}
+        for job_id,item in summary.items():
+            job=by_job.get(job_id);candidate=(job or {}).get('manifest',{}).get('candidate_id')
+            if current is not None and candidate not in current:continue
+            if candidate in converted and (job or {}).get('state')!='completed':continue
+            kept[job_id]=item
+        return kept
+
+    def ask_payload(self,row,entry):
+        """Per book, one 'ask' object for the row (Judy's section 11): kind, fields with proposal and basis, author
+        candidates, the destination and whether it is taken, the missing files, the same-author pair."""
+        ask=copy.deepcopy(entry.get('ask') or {})
+        payload={'kind':entry['group'],'why':ask.get('why',''),'reasons':list(entry.get('reasons') or [])[:4],
+                 'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or []}
+        if entry['group']=='same_author':
+            payload['same_author']={k:ask.get(k) for k in ('new','existing','existing_books','why')}
+            payload['same_author']['count']=sum(1 for e in self.needs_you().values() if e['group']=='same_author' and (e.get('ask') or {}).get('new')==ask.get('new'))
+        members=row.get('members') or []
+        if entry['group']=='files_missing' or any(m.get('missing') for m in members):
+            gone=[m for m in members if m.get('missing')]
+            payload['missing']={'folders':sorted({str(Path(m['path']).parent) for m in gone}),'files':[m['path'] for m in gone],
+                                'present':sum(1 for m in members if not m.get('missing')),'total':len(members)}
+        if entry['group']!='files_missing' or payload['missing']['present']:
+            try:
+                preview=self.approval_preview(row['id'],row['revision'])
+                payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+                proposal=payload['fields']
+                proposal.setdefault('title',{'proposal':preview['title'],'basis':''});proposal.setdefault('author',{'proposal':'' if preview['author']=='Без автора' else preview['author'],'basis':''})
+            except (ValueError,OSError) as error:
+                payload['destination']={'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+        return payload
+
+    def scan_again(self,id,revision):
+        """Scan again (ruling 10): look for this book's missing files now. Changes and deletes nothing on disk; a file
+        that is back is catalogued again. {'found': bool, 'checked_utc'}."""
+        import datetime
+        receipt=self.inventory.refresh_candidate_sources('Audiobooks',id,revision,force=False)
+        found=receipt.get('state') in ('refreshed','unchanged')
+        if found:self.__dict__.pop('_needs_cache',None)
+        return {'found':found,'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':'' if found else receipt.get('reason','')}
+
+    def dismiss_attention(self,id,revision):
+        """Remove from list (ruling 10): a book with no audio file left stops being listed. No file is touched; a scan
+        that finds its files again (a new fingerprint) lists it again."""
+        import datetime
+        row=self.reviews._row('Audiobooks',id,revision)
+        if any(not m.get('missing') for m in row.get('members') or []):raise ValueError('This book still has audio files. Convert what\'s there instead.')
+        with connect(self.inventory.database) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS attention_dismissals(candidate_id TEXT NOT NULL,fingerprint TEXT NOT NULL,dismissed_utc TEXT NOT NULL,PRIMARY KEY(candidate_id,fingerprint))')
+            db.execute('INSERT OR IGNORE INTO attention_dismissals VALUES(?,?,?)',(id,row['fingerprint'],datetime.datetime.now(datetime.timezone.utc).isoformat()))
+        self.__dict__.pop('_needs_cache',None)
+        return {'removed':True}
 
     def _approval_result(self,id,revision,title=None,author=None):
         """(row, research result) of Approve with the values shown (typed values win); no network, read-only."""

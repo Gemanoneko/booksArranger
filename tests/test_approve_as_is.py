@@ -21,7 +21,8 @@ def tone(path,cover,**tags):
     return path
 
 
-class ApproveAsIsTests(unittest.TestCase):
+class ApproveFixture(unittest.TestCase):
+    """A separate Sorted folder, the production policy, offline research. No tests of its own: shared by suites."""
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=automatic_fixtures.AREA);self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.audio=self.base/'audio';self.audio.mkdir();self.sorted=self.base/'Audiobooks Sorted';self.sorted.mkdir()
@@ -44,6 +45,8 @@ class ApproveAsIsTests(unittest.TestCase):
     def research(self,row):
         return self.service.automatic.research.lookup(dict(row,_manual_metadata_sources=[]),str(self.audio),threading.Event())
 
+
+class ApproveAsIsTests(ApproveFixture):
     def test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used(self):
         sources=[tone(self.audio/'Unsorted'/'Утро снайпера'/('%02d.mp3'%n),self.cover,album='Утро снайпера',title='Глава %d'%n,track='%d/2'%n) for n in (1,2)]
         row=self.start()[0]

@@ -642,6 +642,14 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:row=None
                 self.response(409,{'error':str(error),'code':error.code,'row':row});return
             self.response(200,result);return
+        if path in ('/api/candidate/scan-again','/api/candidate/dismiss'):
+            # Missing files (ruling 10): look for them now, or stop listing a book with nothing left. Neither touches a file.
+            self.shape(data,{'library','id','revision'})
+            library,id,revision=self.candidate_identity(data)
+            try:result=self.server.merge.scan_again(id,revision) if path.endswith('/scan-again') else self.server.merge.dismiss_attention(id,revision)
+            except ValueError as error:
+                self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'});return
+            self.response(200,result);return
         if path in ('/api/candidate/approve','/api/candidate/approve-preview'):
             # Sergei's Approve and its "Goes to" line (rulings 6a, 6b, 10, 11a; Judy's attention to-do spec, section 5).
             self.shape(data,{'library','id','revision'},{'title','author'}|({'without_missing','choice'} if path.endswith('/approve') else set()))
@@ -708,7 +716,7 @@ class Handler(BaseHTTPRequestHandler):
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
-                         '/api/candidate/approve','/api/candidate/approve-preview'}
+                         '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -741,7 +749,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve','/api/candidate/scan-again'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING

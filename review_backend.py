@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import struct
 import subprocess
 import threading
@@ -293,7 +294,10 @@ class CandidateReviewService:
             questions=saved.get('metadata_questions') or self.metadata_questions(saved,self._context(saved))
             return {'row':saved,'unresolved_count':questions['unresolved_count'],'decision':prepared['record']}
 
-    ATTENTION_ORDER={'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
+    # Judy 2026-10-24, section 1: the "Needs your answer" set first (missing files first: deleted files can be recovered
+    # only while the recycle bin keeps them), then the Stopped set in its existing order.
+    ATTENTION_ORDER={'files_missing':-5,'title_author':-4,'author_unclear':-3,'same_author':-2,'name_taken':-1,
+                     'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
@@ -313,7 +317,8 @@ class CandidateReviewService:
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
         if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review','restarted'):raise ValueError('Unknown candidate status')
-        if group not in (None,'all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported') or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
+        if group not in (None,'all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported')+tuple(k for k in self.ATTENTION_ORDER if self.ATTENTION_ORDER[k]<0) \
+                or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
@@ -330,6 +335,11 @@ class CandidateReviewService:
                     if repaired:self.page_local.jobs[job['manifest']['candidate_id']]['repaired']=repaired
             if status=='output_attention' and hasattr(self.jobs,'attention_summary'):attention=self.jobs.attention_summary(retry=False)
         converted=(self.jobs.converted_ids() if hasattr(self.jobs,'converted_ids') else self.jobs.progress_books()['converted_ids']) if self.jobs and hasattr(self.jobs,'progress_books') else set()
+        needs={}
+        if status=='output_attention' and self.jobs and hasattr(self.jobs,'needs_you'):
+            # The one predicate (Judy 2026-10-24, section 1): stale job rows out, the books only Sergei can move on in.
+            if hasattr(self.jobs,'stale_attention') and job_rows is not None:attention=self.jobs.stale_attention(attention,job_rows,set(converted))
+            needs=self.jobs.needs_you()
         self.page_local.ready_ids=converted
         automatic=self.jobs.automatic.index() if self.jobs and hasattr(self.jobs,'automatic') and hasattr(self.jobs.automatic,'index') and status in ('held','recording_review','restarted') else None
         # Started over (RefusedRetry follow-up 3, section 2.3): books Start over or release sent back to automatic
@@ -340,14 +350,22 @@ class CandidateReviewService:
             return bool(not ctx.get('automatic_pending') and ctx.get('metadata_approved'))
         def group_of(cid):
             job=self.page_local.jobs.get(cid)
-            return (attention.get(job['job_id']) or {}).get('group','other') if job else None
+            if job:return (attention.get(job['job_id']) or {}).get('group','other')
+            return needs[cid]['group'] if cid in needs else None
+        filtered=status=='output_attention' and hasattr(self.jobs,'stale_attention') and job_rows is not None
+        def attention_listed(cid):
+            """Listed in Output needs attention: a job row the stale rule keeps (the summary holds every needs-attention
+            job, newest per book), or a book only Sergei can move on."""
+            job=self.page_local.jobs.get(cid)
+            if job:return job['job_id'] in attention if filtered else job['state']=='Output needs attention' or job['job_id'] in attention
+            return cid in needs
         ids=None
         if not direct and not search:
             # Cheap per-id prefilter; selected() below still decides every rendered row exactly.
             jobs=self.page_local.jobs
             if status=='jobs':ids={cid for cid,job in jobs.items() if job['state'] in ('Queued','Creating')}
             elif status=='created':ids={cid for cid,job in jobs.items() if job['state']=='Audiobook created'}
-            elif status=='output_attention':ids={cid for cid,job in jobs.items() if (job['state']=='Output needs attention' or job['job_id'] in attention) and group in (None,'all',group_of(cid))}
+            elif status=='output_attention':ids={cid for cid in set(jobs)|set(needs) if attention_listed(cid) and group in (None,'all',group_of(cid))}
             elif status=='converted':ids=set(converted)
             elif status in ('approved','ready'):ids={cid for cid in self.page_local.contexts if approved_context(cid)}
             elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if item['state']=='Held'}
@@ -377,7 +395,7 @@ class CandidateReviewService:
             if status=='jobs':return bool(job and job['state'] in ('Queued','Creating'))
             if status=='converted':return row['id'] in converted
             if status=='created':return bool(job and job['state']=='Audiobook created')
-            if status=='output_attention':return bool(job and (job['state']=='Output needs attention' or job['job_id'] in attention) and group in (None,'all',group_of(row['id'])))
+            if status=='output_attention':return bool(attention_listed(row['id']) and group in (None,'all',group_of(row['id'])))
             if status=='ready':
                 included=ctx.get('included',[])
                 if not approved or job or not ctx.get('source_coverage_confirmed') or not ctx.get('order_confirmed') or not ctx.get('source_hashes') or not included or row.get('conflicts') or not row.get('preview',{}).get('path'):return False
@@ -423,6 +441,11 @@ class CandidateReviewService:
             if job_rows is not None and self.jobs and hasattr(self.jobs,'current_audiobook'):
                 self.page_local.audiobooks={r['id']:self.jobs.current_audiobook(r['id'],jobs=job_rows) for r in chosen}
             rows=[self.enrich(r,check_sources=False) for r in chosen]
+            for row in rows:
+                if row['id'] in needs:
+                    # The shown page only: the question, its proposals and the destination (Judy's section 11).
+                    try:row['ask']=self.jobs.ask_payload(row,needs[row['id']])
+                    except (ValueError,OSError,sqlite3.Error) as error:row['ask']={'kind':needs[row['id']]['group'],'reasons':needs[row['id']]['reasons'],'fields':{},'candidates':[],'destination':{'path':'','taken':False,'reason':str(error)[:200]}}
             if self.jobs and hasattr(self.jobs,'restart_view'):self.jobs.restart_view(rows)  # Started over marker, release
         finally:
             del self.page_local.contexts;del self.page_local.jobs;del self.page_local.ready_ids

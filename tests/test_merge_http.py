@@ -102,6 +102,19 @@ class MergeHTTPTests(unittest.TestCase):
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         self.assertEqual(self.call('/api/candidate/approve',self.identity())[0],409,'never while scanning')
 
+    def test_scan_again_and_remove_from_list_routes(self):
+        # Ruling 10, missing files: look for them now, or stop listing a book with nothing left. Neither touches a file.
+        self.merge.scan_again=Mock(return_value={'found':False,'missing':2});self.merge.dismiss_attention=Mock(return_value={'dismissed':True})
+        status,body,_=self.call('/api/candidate/scan-again',self.identity())
+        self.assertEqual((status,body['found']),(200,False));self.merge.scan_again.assert_called_once_with(ID,1)
+        status,body,_=self.call('/api/candidate/dismiss',self.identity())
+        self.assertEqual((status,body['dismissed']),(200,True));self.merge.dismiss_attention.assert_called_once_with(ID,1)
+        self.merge.dismiss_attention=Mock(side_effect=ValueError('Candidate changed; reload evidence before reviewing'))
+        self.assertEqual(self.call('/api/candidate/dismiss',self.identity())[1]['code'],'changed')
+        self.assertEqual(self.call('/api/candidate/dismiss',self.identity()|{'extra':1})[0],400)
+        self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        self.assertEqual(self.call('/api/candidate/scan-again',self.identity())[0],409,'never while scanning')
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)
