@@ -2,7 +2,7 @@
 
 Real AAC/ALAC fixtures through the installed FFmpeg; no decode is part of the edited path.
 """
-import ast, base64, contextlib, copy, hashlib, importlib, inspect, json, os, shutil, sqlite3, stat, subprocess, sys, tempfile, threading, time, unittest, uuid
+import ast, base64, contextlib, copy, hashlib, importlib, inspect, json, os, shutil, sqlite3, stat, struct, subprocess, sys, tempfile, threading, time, unittest, uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -193,6 +193,61 @@ class EligiblePathTests(Fixture):
             published(fake, manifest, edited, validation, lambda *a: None)
         self.assertEqual(self.snapshot(source), before); self.assertFalse(Path(manifest['destination']).exists())
         self.assertEqual(self.rows()[0]['state'], 'rolled_back'); self.assertEqual(fake._held_sources, {})
+
+    def test_zero_padding_box_is_admitted_by_both_paths_and_neither_output_carries_it(self):
+        # Макс Фрай 01 and 04 (Sergei, 2026-10-24): moov/udta holds a box whose type and payload are all zero bytes.
+        source = with_udta_child(self.media(cover=True), struct.pack('>I', 4096) + bytes(4092))
+        twin = self.root / 'Unsorted' / 'Twin.m4b'; shutil.copy2(source, twin); original = source.read_bytes()
+        audio = decoded(source, self.root, self.stop); dropped = [{'item': 'udta', 'removed': 'zero_padding', 'bytes': 4096}]
+        manifest = self.manifest(source); edited, validation = self.run_in_place(manifest)
+        self.assertIsInstance(edited, inplace_m4b.Edited, 'edited in place, not the copy-flow fallback')
+        self.assertEqual(validation['metadata_preservation']['metadata_dropped'], dropped)
+        final = Path(published(self.fake(), manifest, edited, validation, lambda *a: None)['final_path'])
+        data = bytearray(final.read_bytes()); at = validation['in_place']['type_offset']; data[at:at + 4] = b'moov'
+        self.assertEqual(bytes(data[:len(original)]), original, 'every original byte is where it was')
+        checked, proof = create_private(self.manifest(twin, self.root / 'Sorted' / 'twin.m4b'), self.root / 'stage-copy', self.stop)
+        self.assertEqual(proof['encoding']['selection'], 'existing_m4b_audio_stream_copy')
+        self.assertEqual(proof['metadata_preservation']['metadata_dropped'], dropped)
+        self.assertEqual(digest(checked), digest(final))
+        for output in (final, checked):
+            udta = [box for box in mp.boxes(live_movie(output).payload) if box.kind == b'udta'][0]
+            self.assertFalse([box for box in mp.boxes(udta.payload) if mp.blank(box)], 'the output movie has no zero box')
+            self.assertEqual(decoded(output, self.root, self.stop), audio, 'decoded audio identical to the source')
+
+    def test_zero_padding_with_a_non_zero_byte_is_still_refused_by_both_paths(self):
+        source = with_udta_child(self.media(), struct.pack('>I', 4096) + bytes(4091) + b'\1'); manifest = self.manifest(source)
+        notes = []
+        self.assertIsNone(inplace_m4b.edit(manifest, self.stage('probe'), self.stop, lambda stage, info: notes.append(info), self.session(manifest)))
+        self.assertIn('Unsupported structural box', notes[-1]['in_place']['fallback'])
+        with self.assertRaisesRegex(ValidationError, 'M4B preservation requires review: Unsupported structural box'):self.run_in_place(manifest)
+
+
+def with_udta_child(path, child):
+    """Put child first in the file's moov/udta; chunk offsets are shifted when moov precedes mdat. Returns path."""
+    data = path.read_bytes(); top = mp.boxes(data); kinds = [box.kind for box in top]
+    delta = len(child) if kinds.index(b'moov') < kinds.index(b'mdat') else 0
+    def rebuild(payload, depth):
+        parts = []
+        for box in mp.boxes(payload):
+            if box.kind in (b'trak', b'mdia', b'minf', b'stbl'):parts.append(mp.build(box.kind, rebuild(box.payload, depth + 1)))
+            elif box.kind in (b'stco', b'co64') and delta:
+                width = 4 if box.kind == b'stco' else 8; p = box.payload
+                parts.append(mp.build(box.kind, p[:8] + b''.join((int.from_bytes(p[a:a + width], 'big') + delta).to_bytes(width, 'big') for a in range(8, len(p), width))))
+            elif box.kind == b'udta' and depth == 0:parts.append(mp.build(b'udta', child + box.payload))
+            else:parts.append(box.raw)
+        return b''.join(parts)
+    path.write_bytes(b''.join(mp.build(b'moov', rebuild(box.payload, 0)) if box.kind == b'moov' else box.raw for box in top))
+    return path
+
+
+def live_movie(path):
+    return [box for box in mp.boxes(Path(path).read_bytes()) if box.kind == b'moov'][0]
+
+
+def decoded(path, directory, stop):
+    """SHA-256 of the complete decoded audio (lossless float PCM); a decode error fails the run."""
+    return run_owned([shutil.which('ffmpeg'), '-v', 'error', '-nostdin', '-xerror', '-i', str(path), '-map', '0:a:0', '-c:a', 'pcm_f32le',
+                      '-f', 'hash', '-hash', 'sha256', '-'], directory, stop, 60).strip()
 
 
 class FallbackTests(Fixture):

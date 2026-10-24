@@ -2,8 +2,9 @@
 
 No decoder, remuxer, filesystem opening or publication occurs here. Every original
 track and mdat byte remains at its original offset. Only approved Apple metadata
-items change, and blank metadata is dropped in two exact shapes (clean_items, recorded in
-the receipt); the prior moov becomes same-extent free and a new moov is appended.
+items change, and blank metadata is dropped in three exact shapes (clean_items and
+udta_padding, recorded in the receipt); the prior moov becomes same-extent free and a new
+moov is appended.
 
 Writer-family allowances are exact observed shapes, never wider tolerances. Damage
 repair is a separate explicit mode (plan(repair=...)): the caller names each repair
@@ -430,12 +431,24 @@ def clean_items(found):
         items.append(item)
     return items,dropped
 
+def udta_padding(up):
+    """(children, dropped) for moov/udta: one zero padding box is dropped (Sergei, 2026-10-24).
+
+    The shape is blank(): an intact 32-bit size field, then a type and payload that are all zero bytes. Seen in
+    Макс Фрай 01 and 04 beside the real meta (70,903 and 100,381 bytes), where a tagger blanked an old meta in place;
+    every audio sample of both books lies in mdat, outside it. Only moov/udta's own children are checked here, and
+    only one such box is admitted. A zero box anywhere else, two of them, or one with a non-zero byte is still refused.
+    """
+    padding=[b for b in up if blank(b)]
+    need(len(padding)<=1,'Unsupported structural box')
+    return [b for b in up if not blank(b)],[{'item':'udta','removed':'zero_padding','bytes':b.size} for b in padding]
+
 def rewrite_metadata(movie,tags,cover):
     """(new movie bytes, dropped blank metadata) for the approved tags and cover."""
     desired=approved_items(tags,cover);parts=boxes(movie.payload);udta=one(parts,b'udta',True)
     # 'tags' is Nero's private tag store (meta values, cvrx cover copy, one tseg per chapter);
-    # it is kept verbatim like chpl.
-    up=boxes(udta.payload) if udta else [];profile(up,{b'meta',b'chpl',b'cprt',b'tags'})
+    # it is kept verbatim like chpl. A zero padding box is not copied into the new moov (udta_padding).
+    up,padding=udta_padding(boxes(udta.payload) if udta else []);profile(up,{b'meta',b'chpl',b'cprt',b'tags'})
     nero=one(up,b'tags',True)
     if nero:profile(boxes(nero.payload),{b'meta',b'cvrx',b'tseg'})
     meta=one(up,b'meta',True)
@@ -455,7 +468,7 @@ def rewrite_metadata(movie,tags,cover):
     newmeta=build(b'meta',bytes(4)+metadata_children,meta.header==16 if meta else False)
     newudta=build(b'udta',b''.join(newmeta if i.kind==b'meta' else i.raw for i in up)+(newmeta if meta is None else b''),udta.header==16 if udta else False)
     payload=b''.join(newudta if i.kind==b'udta' else i.raw for i in parts)+(newudta if udta is None else b'')
-    return repack(movie,payload),dropped
+    return repack(movie,payload),padding+dropped
 
 @dataclass(frozen=True)
 class Plan:

@@ -697,4 +697,39 @@ class ObservedWriterShapeTests(unittest.TestCase):
                blank_child(41)+atom(b'data',bytes(4))]  # no type/locale
         for mix in mixes:self.refused(with_items(fixture(),atom(b'aART',mix)),'Blank metadata child beside other content')
 
+    # Rule 5 (Sergei, 2026-10-24): one zero padding box directly in moov/udta, before meta as in Макс Фрай 01 and 04
+    # (70,903 and 100,381 bytes there). It is dropped from the new moov and recorded; nothing else zero is admitted.
+    def test_zero_padding_box_in_movie_udta_dropped_and_recorded(self):
+        for size in (8,ZERO_PADDING_SIZE):
+            with self.subTest(size=size):
+                source=with_udta_child(fixture(),blank_child(size))
+                p,candidate,receipt=self.accepted(source)
+                udta=next(b for b in boxes(unpack(candidate)[b'moov'].payload) if b.kind==b'udta')
+                self.assertEqual([b.kind for b in boxes(udta.payload)],[b'meta'],'the new moov does not carry the box')
+                self.assertEqual([b.kind for b in ilst_items(candidate)],[b'sonm',b'\xa9nam'])
+                expected=[{'item':'udta','removed':'zero_padding','bytes':size}]
+                self.assertEqual(list(p.metadata_dropped),expected);self.assertEqual(receipt['metadata_dropped'],expected)
+                from failed_m4b_retry import profile_proof
+                self.assertEqual(profile_proof(p,'b'*64)['metadata_dropped'],expected,'the admission proof records it too')
+    def test_zero_padding_near_misses_refused(self):
+        self.accepted(with_udta_child(fixture(),blank_child(ZERO_PADDING_SIZE)))  # positive control
+        one_byte=blank_child(ZERO_PADDING_SIZE)[:-1]+b'\1'  # zero type, one non-zero payload byte
+        unknown=struct.pack('>I',ZERO_PADDING_SIZE)+b'XTRA'+bytes(ZERO_PADDING_SIZE-8)  # zero payload, unknown type
+        for child in (one_byte,unknown):
+            self.refused(with_udta_child(fixture(),child),'Unsupported structural box')
+        self.refused(with_udta_child(fixture(),blank_child(64)+blank_child(64)),'Unsupported structural box')  # two of them
+        extended=struct.pack('>I',1)+bytes(4)+struct.pack('>Q',64)+bytes(48)  # 64-bit size: not the observed header
+        self.refused(with_udta_child(fixture(),extended),'Unsupported structural box')
+        # Anywhere but moov/udta: inside meta, inside ilst, directly in moov, in a track's udta.
+        self.refused(change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m+blank_child(64)))),'Unsupported structural box')
+        self.refused(with_items(fixture(),blank_child(64)),'EOF-sized boxes unsupported')  # as an ilst item it reads as boxes of size 0
+        self.refused(change_movie(fixture(),lambda p:p+blank_child(64)),'Unsupported structural box')
+        self.refused(with_track_udta(fixture(),atom(b'udta',blank_child(64))),'Unsupported track-local user data')
+
+ZERO_PADDING_SIZE=70903
+
+def with_udta_child(source,child):
+    """The movie udta with child placed before meta, where both Макс Фрай books carry it."""
+    return change_movie(source,lambda p:nested(p,b'udta',lambda u:child+u))
+
 if __name__=='__main__':unittest.main()
