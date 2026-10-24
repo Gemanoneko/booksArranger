@@ -38,6 +38,27 @@ Not built: the "{done} of {k}" progress beside the bulk button (one call, it ans
 
 Focused checks: `python -B -m unittest discover -s tests -p test_start_over.py`; `test_working_clear.py`; `test_staging_root_retry.py`; `node tests/test_startover_frontend.js`.
 
+## Conversion freeze (Senua 0.21.2 F31) — 0.21.3, 2026-10-24 (branch `ender/0213`)
+
+| Decision | Alternatives rejected | Revisit when |
+| --- | --- | --- |
+| `build_manifest` (and with it the converter's revision guard, up to 4 times per book) and every enrich inside an automatic approval (`without_ready()`) skip the converted-books read; `audiobook_ready` is left unset there. The page (one read per page) and the inspector keep it. Measured with Futaba's 0.21.2 method (200 generated two-track MP3 books, every public source answering 503, one automatic run, 3000 s, page-cadence poller): reads per approval 1.0 to 0, converter reads per book 4.0 to 0, approvals median 5.61 to 4.76 s (max 21.4 to 10.4 s), 138 to 194 books converted in the budget. The book list still takes seconds: at matched converted counts its median barely moves (1.70/1.70, 5.28/5.07, 5.23/6.06 s for 0-49, 50-99, 100-138 converted), because each page computes its own converted set, which grows with the library | Caching the converted set across operations (stale-data risk); keeping the approval's one read | The book list's own read is next (it is now the slow part) |
+
+## Deletion rule and delete-path fixes — 0.21.3, 2026-10-24 (branch `ender/0213`)
+
+Sergei's rulings 2 and 1a (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`): a source book is removed only when its result is verified and present in `Z:\Audiobooks Sorted`; a book that is not done stays unchanged. Senua's audit: `Docs/BooksArranger_DeletePaths_Audit_2026-10-24.md`.
+
+| Decision | Alternatives rejected | Revisit when |
+| --- | --- | --- |
+| **C2.** One rule, `source_config.require_sorted`: the effective output (after any relocation binding) must be inside the configured output folder, and that folder must be set and neither be nor overlap any source or library root. `CleanupJobs` checks it at enrolment, before the first recovery copy, and again inside the removal transaction before each original's disposal, each time from the live configuration (`MergeService.output_policy`). A `CleanupJobs` without a policy removes nothing. Automatic processing refuses to start without such a folder (start block `output`); that covers the repo launchers and a missing `audiobook-sources.json`. The in-place path is offered, and its rename made, only into that folder; otherwise the copy flow runs and its sources stay | Trusting the job's frozen output root (it is the source root when none is configured); refusing manual conversion too (not asked; its sources are kept anyway) | A second output folder is configured |
+| **C1 exemption (Sergei, ruling 2b).** The in-place M4B fast path stays: it rewrites tags inside an original that is not done and moves it into Sorted; the audio is never changed. Not to be raised again in reviews. Residual risk: an undo that cannot run (NAS drop) or cannot prove the file leaves the original edited (tags only) | Turning the path off (`offered()` False) | Sergei changes ruling 2b |
+| **m1.** Before each disposal the held output handle is re-read (size, links, identity) and the output path must still exist | Trusting the handle held since the run started (a delete on the NAS itself bypasses it) | — |
+| **m2.** Empty-folder removal never removes a direct child of a source root (the Unsorted folder, an author folder) | Walking up to the root | — |
+| **m3.** A download marker the copy flow removed from an original that is still in place when the run pauses or holds is put back from its receipt, with the original's write time | Removing the marker only right before the delete (would change the proven-on-Z: stream order) | — |
+| **m4.** Series backfill holds a book whose published file is not in the sorted output folder, and removes its own temporary file through a held handle. It still names relative to the source root, so books in Sorted stay held ("name does not follow"), as before | Switching it to the output root (turns the feature on for every book in Sorted: Sergei's call) | Sergei wants series backfill to rename books in Sorted |
+| **m5.** A recovery child's published output is hashed in full and held (`protected_output`) while the interrupted attempt's old files are removed | The catalog's completed and validation flags alone | — |
+| **M1.** `test_source_cleanup`, `test_source_folders`, `test_safety_boundaries` and `test_cleanup_scope` run in the gate; the stale `test_cleanup_scope` assertion is fixed | — | — |
+
 ## Refused M4B Retry and four exact writer shapes — 2026-10-19 (unreleased, branch `codex/books-electron-m1`)
 
 | Decision | Alternatives rejected | Revisit when |
