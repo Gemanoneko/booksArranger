@@ -11,7 +11,7 @@
 ### Safety
 
 - Originals are removed only when the verified result is in the configured Audiobooks Sorted folder; automatic processing refuses to start without one.
-- Further hardening of the delete paths: the output is re-read right before each original is removed, a folder that is a direct child of a source root is never removed, a removed download marker is put back when cleanup stops, series backfill works only in the Sorted folder, and a recovery child's output is re-verified before the old attempt's files go. The source-removal suites now run in the gate.
+- Further hardening of the delete paths: the output is re-read right before each original is removed, a folder that is a direct child of a source root is never removed, a removed download marker is put back when cleanup stops, series backfill never changes a book outside the Sorted folder (in this version it renames nothing at all; 0.22.0 turns it on in Sorted), and a recovery child's output is re-verified before the old attempt's files go. The source-removal suites now run in the gate.
 
 ## [v0.21.2] - 2026-10-24
 

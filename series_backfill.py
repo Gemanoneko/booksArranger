@@ -32,6 +32,12 @@ from pathlib import Path
 from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, ordinary, publish_no_replace
 from scanner import connect
 
+def published_root(manifest, output):
+    """The folder a book was published under: the output's own root, else the job's output root, else (books made
+    before 0.13.0 published into their library) the source root."""
+    return ordinary(output.get('root') or manifest.get('output_root') or manifest['root'])
+
+
 TABLE = ('CREATE TABLE IF NOT EXISTS series_backfill(job_id TEXT PRIMARY KEY,state TEXT NOT NULL,reason TEXT NOT NULL,'
          'record TEXT NOT NULL,updated TEXT NOT NULL)')
 FINAL = ('none', 'done', 'skipped', 'held')
@@ -373,7 +379,9 @@ class SeriesBackfill:
         review = dict(manifest['metadata'], series=found['name'], number=found['number'])
         facts = copy.deepcopy(manifest.get('metadata_facts'))
         old = ordinary(output['final_path'])
-        root = ordinary(manifest['root'])
+        # Senua 0.21.3 F5 / ruling 17 (Sergei 2026-10-24, series backfill on in Sorted): a book is named relative to the
+        # folder it was published in (the output root), not its source root, or every book in Sorted reads as misnamed.
+        root = published_root(manifest, output)
         current = propose('', str(root), 'audiobook', {}, manifest['metadata'], automatic_facts=facts)
         record = {'series': found['name'], 'number': found['number'], 'provider': found['provider'], 'source_url': found['source_url'],
                   'old_path': str(old), 'old_sha256': output['sha256'], 'old_size': output['size'],
@@ -595,7 +603,7 @@ class SeriesBackfill:
                 return  # recorded before a restart
             if output['final_path'] != record['old_path'] or output['sha256'] != record['old_sha256']:
                 raise Held('The book changed meanwhile')
-            root = ordinary(manifest['root'])
+            root = published_root(manifest, output)
             with DirectoryBoundary(root, new.parent) as boundary:
                 ancestry = [list(item) for item in boundary.identities]
             review = record['review']

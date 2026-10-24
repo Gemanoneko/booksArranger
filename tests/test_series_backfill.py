@@ -34,8 +34,11 @@ def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 class Library:
     """One published book in a private library and the catalog rows that describe it."""
-    def __init__(self,base,faststart=False):
+    def __init__(self,base,faststart=False,separate_sorted=False):
+        """separate_sorted: as installed, the source library and the Sorted output folder are different folders."""
         self.base=base;self.root=base/'library';self.db=base/'catalog.sqlite3';self.stage_root=base/'merge-cache'/'audio-staging';self.stage_root.mkdir(parents=True)
+        self.source_root=self.root
+        if separate_sorted:self.root=base/'Audiobooks Sorted';self.source_root.mkdir(parents=True)
         self.review={'title':TITLE,'canonical_author':AUTHOR,'author':AUTHOR,'original_language':'Russian','series':'','number':'','genre':'','topic':'','narrator':'','multi_author':False,'anthology':False}
         self.path=Path(propose('',str(self.root),'audiobook',{},self.review)['path']);self.path.parent.mkdir(parents=True)
         make_book(self.path,faststart)
@@ -50,7 +53,8 @@ class Library:
             from native_io import DirectoryBoundary
             with DirectoryBoundary(self.root,self.path.parent) as boundary:ancestry=[list(i) for i in boundary.identities]
             size=self.path.stat().st_size;digest=sha(self.path)
-            manifest={'job_id':self.job_id,'candidate_id':self.candidate,'candidate_revision':2,'root':str(self.root),'destination':str(self.path),'metadata':dict(self.review),'sources':[],'cover':{}}
+            manifest={'job_id':self.job_id,'candidate_id':self.candidate,'candidate_revision':2,'root':str(self.source_root),'destination':str(self.path),'metadata':dict(self.review),'sources':[],'cover':{}}
+            if separate_sorted:manifest['output_root']=str(self.root)
             self.output={'job_id':self.job_id,'root':str(self.root),'final_path':str(self.path),'size':size,'sha256':digest,'parent_identity':ancestry,
                          'validation':{'profile':AUTOMATIC_PROFILE,'duration':2.0,'sha256':digest,'size':size,'tags':{'title':TITLE,'artist':AUTHOR}}}
             text,manifest_hash=encoded(manifest)
@@ -67,7 +71,7 @@ class Library:
         s=MergeService.__new__(MergeService)
         s.inventory=SimpleNamespace(database=str(self.db),worker=None,roots={'Audiobooks':str(self.root)})
         # 0.21.3: the published book's library stands for the sorted output folder (sorted_fixture; rulings 2 and 1a).
-        s.output_policy=policy or (lambda:(str(self.root),()))
+        s.output_policy=policy or (lambda:(str(self.root),() if self.source_root==self.root else (str(self.source_root),)))
         s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None)
         s.stage_root=self.stage_root;s._validated_outputs={};s.invalidate_status=Mock()
         return s
@@ -157,6 +161,14 @@ class BackfillTests(unittest.TestCase):
             self.assertEqual(lib.state(backfill),('held','The audiobook is not in the sorted output folder; left as it is'));self.assert_unchanged(backfill)
         with connect(lib.db) as db:db.execute('DROP TABLE IF EXISTS series_backfill')
         backfill=lib.backfill();backfill.run_pass();self.assertEqual(lib.state(backfill),('done',''),'positive control: the book is in the sorted folder')
+    def test_a_book_in_a_separate_sorted_folder_gets_its_series_name_there(self):
+        # Senua 0.21.3 F5 / ruling 17: named relative to the source root, every Sorted book read as misnamed and was held.
+        lib=Library(Path(self.temp.name)/'separate',separate_sorted=True)
+        backfill=lib.backfill();backfill.run_pass()
+        self.assertEqual(lib.state(backfill),('done',''))
+        self.assertTrue(lib.target.exists());self.assertFalse(lib.path.exists())
+        self.assertTrue(lib.target.is_relative_to(lib.root),'renamed inside Sorted');self.assertFalse(any(lib.source_root.rglob('*')),'nothing written in the source folder')
+        self.assertEqual(json.loads(lib.row()['output'])['final_path'],str(lib.target))
     def test_own_temporary_file_is_removed_through_a_held_handle_only(self):
         lib=self.lib;temp=lib.path.parent/(series_backfill.TEMP_PREFIX+lib.job_id+'.m4b');temp.write_bytes(b'unproven partial')
         with patch.object(series_backfill.os,'unlink',side_effect=AssertionError('no pathname delete')):
