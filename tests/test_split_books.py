@@ -295,12 +295,15 @@ class SplitAdmissionTests(unittest.TestCase):
         rows=self.service.reviews.page()['rows']
         self.assertEqual(len(rows),2,[r['scope'] for r in rows]);self.assertFalse(any(r.get('split_book') for r in rows))
         self.assertTrue(all(r['scope'].endswith('Part with its own chapters') and len(r['members'])==1 for r in rows))
-        # "Чужак 1" has no title of its own: no evidence of what it is, so it stays held.
+        # "Чужак 1" has no title of its own. Sergei 2026-10-24 (rulings 13 and 15): it is named after the set plus
+        # its number, automatically (before: held, "how to name it needs a rule").
         from public_research import PublicResearch
         for row in rows:
             result=PublicResearch(self.client,leads=[]).lookup(row,str(self.audio))
-            self.assertTrue(result['reasons']);self.assertEqual(result['local_agreement']['part_book']['parts'],2)
+            self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertEqual(result['local_agreement']['part_book']['parts'],2)
             self.assertIn('no title of its own',result['local_agreement']['title']['how'])
+            self.assertEqual(result['local_agreement']['title']['basis'],'number_rule')
+            self.assertIn(result['review']['title'],('Чужак 1','Чужак 2'));self.assertEqual(result['review']['series'],'')
     def test_parts_whose_audio_profiles_differ_at_admission_are_held(self):
         self.build()
         import audio_pipeline
@@ -689,5 +692,17 @@ class VersionAndCheckpointTests(unittest.TestCase):
         self.assertEqual(AutomaticProcessing._add_current_candidates(fake,checkpoint),1)
         self.assertEqual(checkpoint['pending'],['old-pending','new-split'])
         self.assertEqual(AutomaticProcessing._add_current_candidates(fake,checkpoint),0)
+
+
+# 0.21.3: this module's admission fixtures publish inside their own library; see sorted_fixture (Sergei's
+# deletion rule). Without it the two conversion-then-cleanup cases kept their sources and failed.
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
 
 if __name__=='__main__':unittest.main()

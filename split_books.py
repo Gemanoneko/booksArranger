@@ -218,7 +218,7 @@ def book_name(members):
     return text(name) if re.search(r'[^\W\d_]{2}', name) else ''
 
 
-def check(members, others=(), media=True, durations=True, parts=False):
+def check(members, others=(), media=True, durations=True, parts=False, readers=True):
     """Decide whether these members are the parts of one book.
 
     members: candidate member dicts (path, filename, metadata, error, missing, duration);
@@ -228,7 +228,9 @@ def check(members, others=(), media=True, durations=True, parts=False):
     every part again and refuses differing profiles); durations=False skips the duration check
     for catalog siblings that carry tags only; parts=True asks whether the files are the
     numbered parts of one set while each may be its own book (Sergei 2026-10-13: an M4B part
-    with its own chapters), so a part's own title or volume number does not hold.
+    with its own chapters), so a part's own title or volume number does not hold; readers=False
+    (with parts=True only: every part is filed as its own book, v0.22.0) lets the parts name
+    different readers or recordings (the volumes of a series read by different people).
     Returns {'ok': bool, 'reasons': [...], 'positions': [(disc, track), ...] in member order,
              'basis': str, 'book_name': str}."""
     reasons = []
@@ -259,12 +261,15 @@ def check(members, others=(), media=True, durations=True, parts=False):
     if len(keys) != 1 or None in keys:
         reasons.append('parts name different books')
     tags = [_tags(m) for m in members]
+    separate = parts and not readers
     for name in SAME_TAGS:
+        if separate and name in ('composer', 'narrator', 'reader', 'performer', 'language'):
+            continue
         if len({norm(t.get(name)) for t in tags}) > 1:
             reasons.append('mixed %s tags (different authors, readers or recordings)' % name.replace('_', ' '))
     from local_identity import narrator_names
-    readers = {tuple(sorted(norm(n) for n in narrator_names([text(t.get(k)) for k in NARRATOR_TEXT]))) for t in tags}
-    if len(readers) > 1:
+    comment_readers = {tuple(sorted(norm(n) for n in narrator_names([text(t.get(k)) for k in NARRATOR_TEXT]))) for t in tags}
+    if len(comment_readers) > 1 and not separate:
         reasons.append('mixed narrators named in comments')
     # Every part is only a chapter or part of the book, judged from the file names and,
     # when they differ, the title tags.

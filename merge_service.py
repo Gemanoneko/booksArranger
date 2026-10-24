@@ -1963,9 +1963,10 @@ class MergeService:
                 # Any failure to read the folder contents holds this book; it never stops the run.
                 try:
                     siblings=folder_siblings(self.inventory.database,current,self.reviews._source_root(current))
-                    readers=catalog_index(self.inventory.database,self.reviews._source_root(current))['readers']
+                    index=catalog_index(self.inventory.database,self.reviews._source_root(current));readers=index['readers']
+                    rules=None
                 except Exception:raise ValueError("Folder contents could not be checked; local identity held") from None
-                revalidate(current,self.reviews._source_root(current),result['metadata_facts']['local_agreement'],siblings,readers)
+                revalidate(current,self.reviews._source_root(current),result['metadata_facts']['local_agreement'],siblings,readers,index,rules)
             reasons=source_gate(current,result['work'])
             if reasons:raise ValueError('; '.join(reasons))
             paths=[m['path'] for m in current['members']]

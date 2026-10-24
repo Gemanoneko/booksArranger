@@ -48,7 +48,10 @@ class CollectionTests(unittest.TestCase):
                 for id in WORKS:
                     if '/work/'+str(id)+'/extended' in url:return json.dumps(WORKS[id]).encode()
                 raise AssertionError('Unexpected fixture URL '+url)
-            result=PublicResearch(PublicClient(Path(temp)/'fixture.sqlite3',fetch=fetch,clock=lambda:100000),leads=[]).lookup(candidate(),'C:/books')
+            research=PublicResearch(PublicClient(Path(temp)/'fixture.sqlite3',fetch=fetch,clock=lambda:100000),leads=[])
+            # The fetched-collection path itself; since v0.22.0 identity never reaches it with local identity on.
+            research.local_agreement=False
+            result=research.lookup(candidate(),'C:/books')
             self.assertEqual(result['reasons'],[],result);self.assertEqual(result['metadata_facts']['collection']['component_count'],2)
             self.assertEqual(result['review']['canonical_author'],'John Writer; Other Writer')
             self.assertTrue(all(any('/work/'+str(id)+'/extended' in u for u in calls) for id in WORKS))

@@ -61,8 +61,9 @@ def cap_fantlab(database,now):
         db.executemany('INSERT INTO public_research_requests(host,at) VALUES(?,?)',[('api.fantlab.ru',now-1)]*100)
 
 class FallbackTests(unittest.TestCase):
-    # Internet-path cases pin local agreement off; test_local_identity reruns their holds with the default rule.
-    local_agreement_default=True
+    # v0.22.0 (Sergei 2026-10-24, title + author is enough): a production book never reaches the Internet
+    # identity path, so these cases pin local identity off to keep exercising that path itself.
+    local_agreement_default=False
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);self.now=[100000.0]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.

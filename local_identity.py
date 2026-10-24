@@ -834,6 +834,7 @@ def catalog_index(database, root):
             return dict(_INDEX[key], confirmed=confirmed_spellings(database))
         readers = set()
         uses = set()
+        tagged = set()
         root_key = norm(str(Path(root)))
         for path, metadata in db.execute("SELECT path,metadata FROM files WHERE root=? AND kind='audiobook'", (root,)):
             try:
@@ -844,6 +845,7 @@ def catalog_index(database, root):
             readers.update(text(n) for n in narrator_names([tags.get(k, '') for k in FREE_TEXT_TAGS]))
             folder = str(Path(path).parent)
             credits = [text(tags.get(k)) for k in AUTHOR_TAGS]
+            tagged.update(unicodedata.normalize('NFC', c) for c in credits if _person_like(c))
             for level in Path(path).parents:
                 if len(norm(str(level))) <= len(root_key):
                     break
@@ -856,7 +858,12 @@ def catalog_index(database, root):
     for spelling in spellings:
         for k in _spelling_keys(spelling):
             keys.setdefault(k, []).append(spelling)
-    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys}
+    # v5: names the library credits in author/artist TAGS (not folder names), read by looks_like_person().
+    tag_keys = {}
+    for spelling in tagged:
+        for k in _spelling_keys(spelling):
+            tag_keys.setdefault(k, []).append(spelling)
+    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys}
     if revision:
         _INDEX.clear()
         _INDEX[key] = index
@@ -1126,7 +1133,7 @@ def _part_core(value, set_title):
     return value if re.search(r'[^\W\d_]{2}', value) else ''
 
 
-def _part_book(row, root, siblings, components):
+def _part_book(row, root, siblings, components, numbered_names=False):
     """Sergei 2026-10-13: an M4B part that carries its own chapters is its own book, never
     joined (example: Clive Barker's Imajica folder of part files).
 
@@ -1156,7 +1163,9 @@ def _part_book(row, root, siblings, components):
     if not mates:
         return None
     group = sorted([member] + mates, key=lambda m: m['path'])
-    verdict = check(group, media=False, durations=False, parts=True)
+    # v5 (numbered_names): each part is filed as its own book, so parts read by different people
+    # (the volumes of a series) still form one numbered set.
+    verdict = check(group, media=False, durations=False, parts=True, readers=not numbered_names)
     if not verdict['ok']:
         return None
     index = group.index(member)
@@ -1173,26 +1182,91 @@ def _part_book(row, root, siblings, components):
         raw_title, stem = text(m_tags.get('title')), Path(m['filename']).stem
         own_tag, own_name = _part_core(raw_title, set_title), _part_core(stem, set_title)
         titles.append((own_tag if own_tag and own_name and title_key(own_tag) == title_key(own_name) else '', raw_title, stem))
+    numbered = set()
+    if numbered_names:
+        # Ruling 13 (Sergei 2026-10-24): a part with no title of its own is named after the set plus
+        # its number ("Торадора! 5"); the set is no longer held for it (ruling 15: automatic).
+        for i, (own, raw_title, stem) in enumerate(titles):
+            if not own and clean_title(set_title):
+                titles[i] = ('%s %d' % (clean_title(set_title), verdict['positions'][i][1]), raw_title, stem)
+                numbered.add(i)
     lacking = [verdict['positions'][i][1] for i, (own, _, _) in enumerate(titles) if not own]
     if not titles[index][0]:
         record['blocked'] = 'one part of a %d-part set "%s" with no title of its own: this may be only part of the book; how to name it needs a rule' % (len(group), set_title)
     elif lacking:
         record['blocked'] = 'part %d of the %d-part set "%s" has no title of its own: this may be only part of the book, so the whole set is held (never filed piecemeal)' % (lacking[0], len(group), set_title)
-    elif not lead:
+    elif not lead and not numbered_names:
+        # v5: one source is enough; the album tag itself names the parent work ("Сага об Элрике"
+        # in an "Elric of Melniboné" folder).
         record['blocked'] = 'no folder or file name repeats the set "%s": its parts would lose their parent work, so the whole set is held' % set_title
-    elif verdict['basis'] != 'embedded track numbers' or any(disc != 1 for disc, _ in verdict['positions']):
+    elif verdict['basis'] not in (('embedded track numbers', 'part numbers in the file names') if numbered_names else ('embedded track numbers',)) \
+            or any(disc != 1 for disc, _ in verdict['positions']):
+        # v5 (ruling 15): gap-free part numbers in the file names number a set as well as track tags.
         record['blocked'] = 'the parts of "%s" are not numbered by track tags on one disc, so the whole set is held' % set_title
     if record['blocked']:
         return record
     own, raw_title, stem = titles[index]
     record['title'] = {'state': 'green', 'value': own, 'how': 'own title of one part of a %d-part set: the title tag and the file name agree without the part number, volume marker and set name' % len(group),
                        'sources': [{'kind': 'embedded', 'field': 'title', 'value': raw_title}, {'kind': 'file name', 'value': stem}]}
+    if index in numbered:
+        record['title'] = {'state': 'one', 'value': own, 'basis': 'number_rule', 'how': 'Set name + part number (Sergei 2026-10-24, ruling 13): part %d of the %d-part set "%s" has no title of its own'
+                           % (verdict['positions'][index][1], len(group), set_title),
+                           'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': 'set numbering', 'value': str(verdict['positions'][index][1])}]}
+    elif numbered_names:
+        record['title']['basis'] = 'tag'
     record['series'] = {'state': 'green', 'value': set_title, 'how': 'the album shared by the set, repeated in the %s; each part is its own book of that parent work (Sergei 2026-10-13)' % lead['kind'],
-                        'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': lead['kind'], 'value': lead['value']}]}
+                        'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': lead['kind'], 'value': lead['value']}]} if lead else \
+        {'state': 'green', 'value': set_title, 'how': 'the album shared by the %d-part set (one source is enough, Sergei 2026-10-24); each part is its own book of that parent work' % len(group),
+         'sources': [{'kind': 'embedded', 'field': 'album', 'value': set_title}, {'kind': 'set numbering', 'value': '1-%d' % len(group)}]}
     track, _ = _number(tags.get('track') or tags.get('tracknumber'))
+    if numbered_names:
+        track = verdict['positions'][index][1]
     record['number'] = {'state': 'green', 'value': str(track), 'how': 'the part\'s track number, gap-free across the %d-part set' % len(group),
                         'sources': [{'kind': 'embedded', 'field': 'track', 'value': text(tags.get('track') or tags.get('tracknumber'))}, {'kind': 'set numbering', 'value': '1-%d' % len(group)}]}
+    if index in numbered:
+        # The name already carries the set and the number ("Торадора! 5"): no series folder or prefix on top.
+        record['series'] = record['number'] = None
     return record
+
+
+def _piece_conflicts(row, title, part, siblings, components, author='', numbered=False):
+    """Signs that this candidate is one piece of a bigger book (a chapter, a numbered part, a file
+    beside others with the same title). Shared by agreement() and identify(); every entry is forced.
+    numbered: the title is a ruling-13 "set name + number" name, so its trailing number is expected."""
+    conflicts = []
+    if title and not numbered and (PART_TITLE.search(clean_title(title)) or not re.search(r'[^\W\d_]{2}', clean_title(title))):
+        conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True, 'piece': 'part_title'})
+    elif title and not part and len(row.get('members', [])) == 1 and _chapter_only(row, title):
+        # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
+        # chapter of that book, even when no sibling chapter is catalogued.
+        conflicts.append({'field': 'title', 'detail': 'this single file is named or tagged as one chapter or part (%s); one chapter is not the whole book'
+                          % _chapter_only(row, title), 'force': True, 'piece': 'chapter'})
+    elif title and not part:
+        numbered_part = _numbered_part(title, components)
+        if numbered_part:
+            conflicts.append({'field': 'title', 'detail': '%s "%s" numbers this file as one part of "%s"; one part is not the whole book'
+                              % (numbered_part['kind'], numbered_part['value'], clean_title(title)), 'force': True, 'piece': 'numbered_part', 'component': numbered_part})
+    if siblings and any(s.get('unreadable') for s in siblings):
+        # Fail closed: without the folder contents a part of a larger book cannot be ruled out.
+        conflicts.append({'field': 'title', 'detail': 'the other files beside this book could not be checked', 'force': True, 'piece': 'unreadable'})
+    elif title and siblings and not part:
+        # Other audio files beside this candidate with the same title: it may be one part
+        # (chapter, disc, volume file) of a larger book, so its own files are not the whole book.
+        key = title_key(title)
+        base = title_key(title, True)
+        # A trailing year (1500-2099) is part of the title ("Метро 2033" beside "Метро 2034",
+        # "Иная 2001"), never a part number; a zero-padded "Дорога 0001" stays a part (Senua M6).
+        numbered = base != key and not re.search(r'(?<!\d)(?:1[5-9]\d\d|20\d\d)\s*$', clean_title(title))
+
+        def part_of_same(sibling):
+            names = [v for v in (sibling['tags'].get('album'), sibling['tags'].get('title'), Path(sibling['filename']).stem) if v]
+            return numbered and any(title_key(_index_stripped(v), True) == base for v in names)
+        same = [s for s in siblings if key in {title_key(v) for v in (s['tags'].get('album'), s['tags'].get('title')) if v}
+                or _supports_title(title, [{'kind': 'sibling', 'value': Path(s['filename']).stem, 'numbered': True}], author)
+                or part_of_same(s)]
+        if same:
+            conflicts.append({'field': 'title', 'detail': '%d other file(s) beside it carry this title; this may be only part of the book' % len(same), 'force': True, 'piece': 'siblings'})
+    return conflicts
 
 
 def agreement(row, root='', siblings=None, readers=None):
@@ -1248,38 +1322,7 @@ def agreement(row, root='', siblings=None, readers=None):
         conflicts.append({'field': 'author', 'detail': '"%s" is credited as a reader on other books in this library; held for review' % author['value'], 'force': True})
     marked = [n for n in _ancestors(row, root) if COLLECTION_FOLDER.search(n)]
     title_marked = bool(title and COLLECTION_TITLE.search(clean_title(title['value'])))
-    if title and (PART_TITLE.search(clean_title(title['value'])) or not re.search(r'[^\W\d_]{2}', clean_title(title['value']))):
-        conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True})
-    elif title and not part and len(row.get('members', [])) == 1 and _chapter_only(row, title['value']):
-        # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
-        # chapter of that book, even when no sibling chapter is catalogued.
-        conflicts.append({'field': 'title', 'detail': 'this single file is named or tagged as one chapter or part (%s); one chapter is not the whole book'
-                          % _chapter_only(row, title['value']), 'force': True})
-    elif title and not part:
-        numbered_part = _numbered_part(title['value'], components)
-        if numbered_part:
-            conflicts.append({'field': 'title', 'detail': '%s "%s" numbers this file as one part of "%s"; one part is not the whole book'
-                              % (numbered_part['kind'], numbered_part['value'], clean_title(title['value'])), 'force': True})
-    if siblings and any(s.get('unreadable') for s in siblings):
-        # Fail closed: without the folder contents a part of a larger book cannot be ruled out.
-        conflicts.append({'field': 'title', 'detail': 'the other files beside this book could not be checked', 'force': True})
-    elif title and siblings and not part:
-        # Other audio files beside this candidate with the same title: it may be one part
-        # (chapter, disc, volume file) of a larger book, so its own files are not the whole book.
-        key = title_key(title['value'])
-        base = title_key(title['value'], True)
-        # A trailing year (1500-2099) is part of the title ("Метро 2033" beside "Метро 2034",
-        # "Иная 2001"), never a part number; a zero-padded "Дорога 0001" stays a part (Senua M6).
-        numbered = base != key and not re.search(r'(?<!\d)(?:1[5-9]\d\d|20\d\d)\s*$', clean_title(title['value']))
-
-        def part_of_same(sibling):
-            names = [v for v in (sibling['tags'].get('album'), sibling['tags'].get('title'), Path(sibling['filename']).stem) if v]
-            return numbered and any(title_key(_index_stripped(v), True) == base for v in names)
-        same = [s for s in siblings if key in {title_key(v) for v in (s['tags'].get('album'), s['tags'].get('title')) if v}
-                or _supports_title(title['value'], [{'kind': 'sibling', 'value': Path(s['filename']).stem, 'numbered': True}], author['value'] if author else '')
-                or part_of_same(s)]
-        if same:
-            conflicts.append({'field': 'title', 'detail': '%d other file(s) beside it carry this title; this may be only part of the book' % len(same), 'force': True})
+    conflicts += _piece_conflicts(row, title['value'] if title else '', part, siblings, components, author['value'] if author else '')
     # Author first: a title written together with the author needs the author's words.
     if author:
         support = _supports_author(author['value'], components)
@@ -1391,6 +1434,478 @@ def agreement(row, root='', siblings=None, readers=None):
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
 
 
+# ---------------------------------------------------------------- v5: title + author is enough
+# Sergei 2026-10-24 (rulings 6, 6a, 13, 14, 15): a title and an author, each from ONE local source,
+# identify a book. Title: the album or title tag, else the file name, else the folder name. Author:
+# the author / album artist / artist tag, else "Author - Title" in the file or folder name, else a
+# folder named after a person. Nothing from the Internet decides identity. Four guards stay:
+#   1. a reader is never an author (tags, "читает", names in brackets, readers of other books,
+#      Sergei's not-author rules), in tags AND in file or folder names;
+#   2. parts stay together (grouping, groups.py); a chapter or part on its own is not a book;
+#   3. a collection word or an editor credit is not an author: Сборники / "Разные авторы";
+#   4. garbled tag text is not used.
+# What the files cannot settle goes to Sergei as a question (an 'ask'), never to the Internet.
+IDENTITY_VERSION = 'local-one-v5'
+KNOWN_AGREEMENT_VERSIONS = KNOWN_AGREEMENT_VERSIONS + (IDENTITY_VERSION,)
+EDITOR_MARKER = re.compile(r'(?<![^\W\d_])(?:под\s+ред\w*|ред\.|сост\.|составител\w*|составил\w*|edited\s+by|editors?|eds?\.)(?![^\W\d_])', re.I)
+BRACKETS = re.compile(r'[(\[]([^()\[\]]{3,80})[)\]]')
+ASK_REASONS = {'title_author': 'Title or author missing', 'author_unclear': 'Author unclear', 'same_author': 'Same author?'}
+# Tag "titles" that name the format or nothing at all ("Мр3-Книга" on Марк Твен's book).
+JUNK_TITLES = {'мр3книга', 'mp3книга', 'мп3книга', 'аудиокнига', 'аудиокниги', 'audiobook', 'audiobooks', 'audio', 'книга', 'book',
+               'unknown', 'untitled', 'безназвания', 'безимени', 'noname', 'unknowntitle', 'track', 'трек', 'новаякнига'}
+PIECE_REASON = 'One part of a bigger book'
+
+
+def garbled(value):
+    """Mojibake that cannot be used as a name or title: replacement characters, cp1251 text read as
+    Latin-1 ("Òåððè Ïðàò÷åòò") or UTF-8 read as cp1251 ("РўРµСЂСЂРё")."""
+    value = str(value or '')
+    if '�' in value:
+        return True
+    letters = [c for c in value if c.isalpha()]
+    if len(letters) >= 3 and script(value) != 'cyrillic':
+        if 2 * sum(1 for c in letters if 'À' <= c <= 'ÿ') >= len(letters):
+            return True
+    return bool(re.search('(?:[РС][Ѐ-Џѐ-џҐґ -¿‐-›№™]){2,}', value))
+
+
+def bracketed_people(values):
+    """Person names written in ( ) or [ ] in file or folder names: in this library a reader or an
+    uploader ("(Дружинин Степан)", "[Пухов Сергей]", "(чит. Капитан Абр и Nelly)"), never the author."""
+    found = []
+    for value in values:
+        for inner in BRACKETS.findall(unicodedata.normalize('NFC', str(value or ''))):
+            inner = NARRATOR_MARKER.sub(' ', inner)
+            for piece in re.split(r'\s*(?:,|;|&|/|\s+и\s+|\s+and\s+)\s*', inner):
+                piece = text(piece.strip(' .:-–—'))
+                if 2 <= len(words(piece)) <= 3 and not re.search(r'\d', piece) and norm(piece) not in NOT_PEOPLE \
+                        and norm(piece) not in CONTAINER_NAMES and not COLLECTION_FOLDER.search(piece) and not PART_FOLDER.search(piece):
+                    found.append(piece)
+    return found
+
+
+def _consistent(members, names):
+    """The one non-empty value every member that carries the tag agrees on, else '' (and whether
+    members disagree)."""
+    values = {text(_tags(m).get(n)) for m in members for n in names} - {''}
+    return (next(iter(values)), False) if len(values) == 1 else ('', len(values) > 1)
+
+
+def looks_like_person(value, index=None):
+    """A name shows it is a person by a known first name, an initial or a patronymic, or because
+    the library credits the same person in an author or artist tag elsewhere. Series, universe and
+    title words ("Колесо времени", "Malleus Maleficarum", "Часть Вторая") do not."""
+    value = clean_title(value)
+    tokens = value.split()
+    if not tokens or len(tokens) > 5 or re.search(r'\d', value) or norm(value) in NOT_PEOPLE or norm(value) in CONTAINER_NAMES or PART_FOLDER.search(value):
+        return False
+    if any(norm(t) in GIVEN_NAMES or INITIALS.match(t) or PATRONYMIC.fullmatch(norm(t)) for t in tokens):
+        return True
+    if index and index.get('tag_keys') and len(words(value)) >= 2:
+        return any(same_person(value, spelling) for k in _spelling_keys(value) for spelling in index['tag_keys'].get(k, ()))
+    return False
+
+
+def _shares_surname(a, b):
+    """The same surname (any script), first names aside: "Дж. Р.Р. Толкин" / "Джон Рональд Руэл Толкин"."""
+    left = [w for w in words(a) if len(w) >= 4 and norm(w) not in GIVEN_NAMES]
+    right = [w for w in words(b) if len(w) >= 4 and norm(w) not in GIVEN_NAMES]
+    return any(_pair(x, y) for x in left for y in right)
+
+
+def _person_folder(component, index=None):
+    """A folder whose whole name is a person (an author folder). Universe, series and container
+    folders ("Star Wars", "Dragonlance") are not people."""
+    value = clean_title(component['value'])
+    if not _person_like(value) or len(words(value)) > 4 or PEOPLE_SEPARATOR.search(value):
+        return ''
+    return value if looks_like_person(value, index) else ''
+
+
+def _clean_credit(value, title, who):
+    """An author tag as an author credit: a title in quotes or a bracketed note glued to the name is
+    removed ("Дэн Абнетт «Первый и Единственный»"), the book's own title glued to it too
+    ("Кинг___Легенда_о_пуле"), and so is a reader joined by a dash ("Александр Варго - Пухов Сергей").
+    Returns (credit, readers removed)."""
+    value = text(value)
+    value = text(re.sub(r'[«“"„][^«»“”"„]{2,120}[»”"“]', ' ', value))
+    value = text(re.sub(r'\s*[\[(][^\])]{0,80}[\])]', ' ', value))
+    spaced = text(value.replace('_', ' '))
+    if title and len(words(title)) >= 2 and title_key(title) != title_key(spaced) and title_key(title) in title_key(spaced):
+        # Remove the title's words (in order) from the credit; what is left is the name.
+        pattern = r'[\s._\-–—:]*'.join(re.escape(w) for w in re.findall(r'[^\W_]+', title))
+        rest = text(re.sub(pattern, ' ', spaced, flags=re.I).strip(' .,:;-–—'))
+        if rest and re.search(r'[^\W\d_]{2}', rest):
+            value = rest
+    pieces = [text(p) for p in re.split(r'\s+[-–—]\s+', value) if text(p)]
+    if len(pieces) > 1:
+        kept = [p for p in pieces if not who.why(p)]
+        if len(kept) == 1:
+            return kept[0], [p for p in pieces if p != kept[0]]
+    return value, []
+
+
+def _numbered_title(set_title, value):
+    """Ruling 13 (Sergei 2026-10-24): a numbered part with no title of its own is named after its
+    set plus its number: "Торадора! Том 5" in the set "Торадора!" -> "Торадора! 5"."""
+    from split_books import _arabic
+    numbers = re.findall(r'(?<!\d)(\d{1,3})(?!\d)', _arabic(clean_title(value))[-24:])
+    if not numbers or not clean_title(set_title):
+        return ''
+    return '%s %d' % (clean_title(set_title), int(numbers[-1]))
+
+
+class _Readers:
+    """Who reads in this library and this book (guard 1)."""
+
+    def __init__(self, own, bracketed, catalog, rules, folder):
+        self.own = [r for r in own if r]
+        self.bracketed = [r for r in bracketed if r]
+        self.catalog = catalog or ()
+        self.rules = rules
+        self.folder = folder
+
+    def why(self, name):
+        """'' when the name may be an author, else the plain reason it is a reader."""
+        if not name:
+            return ''
+        if self.rules is not None and self.rules.not_author(name, self.folder):
+            return 'Sergei: not an author (a reader, label or uploader)'
+        if any(same_person(name, r) for r in RULED_NARRATORS):
+            return 'a reader named in Sergei ruling 1 (2026-10-13)'
+        if any(compare_names(name, r) for r in self.own):
+            return 'credited as the reader of this book'
+        if any(compare_names(name, r) for r in self.bracketed):
+            return 'named in brackets in a file or folder name (a reader or uploader)'
+        if any(same_person(name, r) for r in self.catalog):
+            return 'credited as a reader on other books in this library'
+        return ''
+
+    def count(self, name):
+        return sum(1 for r in self.catalog if same_person(name, r)) if self.catalog else 0
+
+
+def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
+    """v5 identity record (title + author from one local source). Same shape as agreement(), plus
+    'ask' (a question for Sergei) or 'held' (a piece of a bigger book). Pure except for the rules
+    object (Sergei's author rules, already loaded) and index (catalog_index, already read)."""
+    members = row.get('members', [])
+    components = _path_components(row, root)
+    ancestors = _ancestors(row, root)
+    folder_text = '\\'.join(reversed(ancestors))
+    embedded = _embedded(row)
+    own_readers = list(embedded['readers']) + narrator_names([c['value'] for c in components] + ancestors[:2])
+    who = _Readers(own_readers, bracketed_people([c['value'] for c in components] + ancestors[:2]),
+                   readers if readers is not None else (index or {}).get('readers'), rules, folder_text)
+    ignored = []
+    conflicts = []
+    collection_credits = []
+    # ------------------------------------------------------------ title (one source is enough)
+    part = _part_book(row, root, siblings, components, numbered_names=True)
+    title = None
+    tag_title_author = ''
+    if part and part['title']:
+        title = dict(part['title'])
+    if title is None:
+        field = 'album' if len(members) > 1 or members and text(_tags(members[0]).get('album')) else 'title'
+        value, mixed = _consistent(members, ('album',)) if len(members) > 1 else (text(_tags(members[0]).get(field)), False) if members else ('', False)
+        if len(members) > 1 and not value and not mixed and row.get('numbered_set'):
+            # A same-title set (groups.py, guard 2): every file carries the one title tag.
+            titles = {title_key(_tags(m).get('title')) for m in members}
+            if len(titles) == 1 and '' not in titles:
+                field = 'title'
+                value = text(_tags(members[0]).get('title'))
+        if value and garbled(value):
+            ignored.append({'field': field, 'value': value, 'why': 'garbled text is not used'})
+            value = ''
+        if value and norm(value) in JUNK_TITLES:
+            ignored.append({'field': field, 'value': value, 'why': 'names the format, not the book'})
+            value = ''
+        if value and not mixed:
+            title = {'state': 'one', 'value': clean_title(value), 'basis': 'tag', 'how': 'the embedded %s tag' % field,
+                     'sources': [{'kind': 'embedded', 'field': field, 'value': value}]}
+            # "Ширли Джексон - Призрак дома на холме" in the title tag: the person before the dash is an
+            # author credit, the rest is the title.
+            parsed = filename_identity(value + '.x')
+            if parsed.get('author') and looks_like_person(parsed['author'], index) and re.search(r'[^\W\d_]{2}', parsed.get('title', '')):
+                title['value'] = clean_title(parsed['title'])
+                title['how'] += ' (the author named before the title is set aside)'
+                tag_title_author = parsed['author']
+    if title is None:
+        named = row.get('numbered_set') or {}
+        for component in components:
+            if component['kind'] in ('folder', 'parent folder'):
+                continue
+            parsed = filename_identity(component['value'] + '.x')
+            value = clean_title(_index_stripped(named.get('name') or parsed.get('title') or component['value']), component['numbered'])
+            if value and not garbled(value) and re.search(r'[^\W\d_]{2}', value):
+                title = {'state': 'one', 'value': value, 'basis': 'file_name', 'how': 'the %s' % component['kind'],
+                         'sources': [{'kind': component['kind'], 'value': component['value']}]}
+                break
+        if title is None and named.get('name') and not garbled(named['name']):
+            title = {'state': 'one', 'value': clean_title(named['name']), 'basis': 'file_name', 'how': 'the shared start of the file names',
+                     'sources': [{'kind': 'file names', 'value': named['name']}]}
+    if title is None:
+        for component in components:
+            if component['kind'] != 'folder':
+                continue
+            parsed = filename_identity(component['value'] + '.x')
+            value = clean_title(parsed.get('title') or component['value'])
+            if value and not garbled(value) and re.search(r'[^\W\d_]{2}', value) and norm(value) not in CONTAINER_NAMES:
+                title = {'state': 'one', 'value': value, 'basis': 'folder_name', 'how': 'the folder name',
+                         'sources': [{'kind': 'folder', 'value': component['value']}]}
+                break
+    if part and part['blocked']:
+        conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True, 'piece': 'part_set'})
+    pieces = _piece_conflicts(row, title['value'] if title else '', part, siblings, components, numbered=bool(title and title.get('basis') == 'number_rule'))
+    for piece in pieces:
+        if piece['piece'] == 'numbered_part' and title and title['basis'] == 'tag':
+            # Ruling 13: "Торадора! Том 5" with the title tag "Торадора!" is part 5, named after its set.
+            named = _numbered_title(title['value'], piece['component']['value'])
+            if named:
+                title = {'state': 'one', 'value': named, 'basis': 'number_rule', 'how': 'Set name + part number (Sergei 2026-10-24, ruling 13)',
+                         'sources': [title['sources'][0], {'kind': piece['component']['kind'], 'value': piece['component']['value']}]}
+                continue
+        conflicts.append(piece)
+    if len(members) == 1 and not part and title and Path(members[0]['path']).suffix.lower() == '.m4b' \
+            and any(c.get('piece') in ('part_title', 'numbered_part', 'siblings') for c in conflicts):
+        # Rulings 13 and 15: a whole .m4b numbered as one part of a set ("Незнакомцы 1.m4b",
+        # "Лучший экипаж Солнечной, Part 1.m4b") whose set cannot be proven is its own book, named
+        # after the set plus its number. Chapter files and unnumbered pieces stay held.
+        stem = clean_title(_index_stripped(Path(members[0]['filename']).stem))
+        tag_title = clean_title(text(_tags(members[0]).get('title')))
+        if TRAILING_PART.search(stem):
+            base = TRAILING_PART.sub('', tag_title) if TRAILING_PART.search(tag_title) else text(_tags(members[0]).get('album')) or TRAILING_PART.sub('', stem)
+            named = _numbered_title(base, stem)
+            if named and re.search(r'[^\W\d_]{2}', named):
+                conflicts = [c for c in conflicts if c.get('piece') not in ('part_title', 'numbered_part', 'siblings')]
+                title = {'state': 'one', 'value': named, 'basis': 'number_rule', 'how': 'Set name + part number (Sergei 2026-10-24, rulings 13 and 15)',
+                         'sources': [title['sources'][0], {'kind': 'file name', 'value': Path(members[0]['filename']).stem}]}
+    # ------------------------------------------------------------ author (one source is enough)
+    candidates = []  # {'name', 'source', 'basis', 'kind'} in order of preference
+
+    def offer(name, source, basis, kind):
+        name = text(name)
+        if not name:
+            return
+        if kind == 'tag' and not garbled(name):
+            name, dropped = _clean_credit(name, title['value'] if title else '', who)
+            for reader in dropped:
+                ignored.append({'field': source, 'value': reader, 'why': who.why(reader) or 'joined to the author credit'})
+            if not name:
+                return
+        if title and title_key(name) == title_key(title['value']):
+            # "Потаённое окно в потаённый сад" in the artist tag of that book: the title, not an author.
+            ignored.append({'field': source, 'value': name, 'why': 'the book title, not an author'})
+            return
+        if garbled(name):
+            ignored.append({'field': source, 'value': name, 'why': 'garbled text is not used'})
+            return
+        if norm(name) in NOT_PEOPLE or norm(name) in VARIOUS_AUTHORS or EDITOR_MARKER.search(name) or len(re.split(r'\s*[,;]\s*', name)) >= 3:
+            collection_credits.append(name)
+            ignored.append({'field': source, 'value': name, 'why': 'a collection, editor or several-author credit, never one author'})
+            return
+        if rules is not None and rules.collection(name, folder_text):
+            collection_credits.append(name)
+            ignored.append({'field': source, 'value': name, 'why': 'Sergei: a collection or anthology name, never one author'})
+            return
+        if NARRATOR_MARKER.search(name):
+            ignored.append({'field': source, 'value': name, 'why': 'reader/narrator credit, never the author'})
+            return
+        reason = who.why(name)
+        if reason:
+            ignored.append({'field': source, 'value': name, 'why': reason})
+            return
+        if any(same_person(name, c['name']) or compare_names(name, c['name']) for c in candidates if c['kind'] == kind):
+            return
+        candidates.append({'name': name, 'source': source, 'basis': basis, 'kind': kind})
+
+    for name in AUTHOR_TAGS:
+        value, mixed = _consistent(members, (name,))
+        if mixed:
+            ignored.append({'field': name, 'value': '', 'why': 'differs between files'})
+            continue
+        offer(value, {'album_artist': 'album artist tag', 'albumartist': 'album artist tag'}.get(name, name + ' tag'), 'tag', 'tag')
+    # Guard 3: a collection credit in the tags ("Сборник", "Разные авторы", an editor, a long list of
+    # authors) files the book as a collection unless a tag also names one person.
+    tag_collection = bool(collection_credits)
+    slots = []
+    unnamed = []  # author slots that do not look like a person: proposals for a question, never the author
+    if tag_title_author:
+        before = len(candidates)
+        offer(tag_title_author, 'title tag', 'tag', 'slot')
+        if len(candidates) > before:
+            candidates[-1]['person'] = True
+            slots.append(candidates[-1])
+    for component in components:
+        parsed = filename_identity(component['value'] + '.x')
+        claimed = parsed.get('author') or ''
+        if not claimed or row.get('numbered_set') and component['kind'] in ('file name', 'file names'):
+            # In a numbered set the shared start of the file names is the book, not its author.
+            continue
+        if not _claims_person(claimed) and not (norm(claimed) in NOT_PEOPLE or EDITOR_MARKER.search(claimed)):
+            continue
+        source = {'file name': 'file name', 'file names': 'file name', 'folder': 'folder name', 'parent folder': 'folder name'}[component['kind']]
+        before = len(candidates)
+        offer(claimed, source, 'file_name' if source == 'file name' else 'folder_name', 'slot')
+        if len(candidates) > before:
+            slot = candidates[-1]
+            # Only a slot that shows it is a person may contradict a tag. "Series - 01. Title" and
+            # "Title - Person" names put a non-person in the author slot: such a slot is never the
+            # author; any other slot is the author when no tag names one ("Author - Title" is the
+            # library's naming convention).
+            rest = text(parsed.get('title'))
+            slot['person'] = looks_like_person(slot['name'], index) or any(compare_names(slot['name'], c['name']) for c in candidates if c['kind'] == 'tag')
+            slot['plausible'] = slot['person'] or not (re.match(r'^\W*\d', rest) or looks_like_person(rest, index) or PART_FOLDER.search(slot['name'])
+                                                       or re.match(r'^\W*(?:часть|глава|part|chapter|том|книга|book|vol)', slot['name'], re.I))
+            if slot['person']:
+                slots.append(slot)
+            elif not slot['plausible']:
+                candidates.pop()
+                unnamed.append(slot)
+    for component in components:
+        if component['kind'] not in ('folder', 'parent folder') or filename_identity(component['value'] + '.x').get('author'):
+            continue
+        person = _person_folder(component, index)
+        if person and title and title_key(person) != title_key(title['value']):
+            offer(person, 'folder name', 'folder_name', 'folder')
+    for ancestor in ancestors[2:4]:
+        # A person-named author folder above the book's own folders ("Stephen King\Регуляторы\...").
+        person = _person_folder({'value': ancestor}, index)
+        if person:
+            offer(person, 'folder name', 'folder_name', 'folder')
+    tagged = [c for c in candidates if c['kind'] == 'tag']
+    author = None
+    ask = None
+    def same(a, b):
+        return bool(compare_names(a, b) or _shares_surname(a, b))
+    if len(tagged) > 1:
+        # Two people credited in the tags. One is the author when a file or folder name names it
+        # (and no name names the other).
+        named = [c for c in tagged if any(same(c['name'], s['name']) for s in candidates if s['kind'] != 'tag')]
+        if len(named) == 1:
+            author = named[0]
+            ignored += [{'field': c['source'], 'value': c['name'], 'why': 'not named in any file or folder name; a recording credit, not the author'} for c in tagged if c is not named[0]]
+        else:
+            ask = {'kind': 'author_unclear', 'why': 'two_people'}
+    elif tagged:
+        author = tagged[0]
+        if any(not same(s['name'], author['name']) for s in slots):
+            ask = {'kind': 'author_unclear', 'why': 'tag_and_name'}
+            author = None
+    elif not tag_collection:
+        if any(not same(a['name'], b['name']) for a in slots for b in slots):
+            ask = {'kind': 'author_unclear', 'why': 'names_differ'}
+        elif candidates:
+            author = candidates[0]
+    route = None
+    if author is None and ask is None and title:
+        marked = [n for n in ancestors if COLLECTION_FOLDER.search(n)]
+        signals = (['collection folder "%s"' % marked[0]] if marked else []) + \
+            (['collection title'] if COLLECTION_TITLE.search(title['value']) else []) + \
+            (['collection credit "%s"' % collection_credits[0]] if collection_credits else [])
+        if collection_credits or len(signals) >= 1 and any('reader' in i['why'] or 'brackets' in i['why'] or 'Sergei' in i['why'] for i in ignored) \
+                or len(signals) >= 2:
+            narrators = []
+            for value in own_readers + [i['value'] for i in ignored if 'reader' in i['why'] or 'brackets' in i['why'] or 'uploader' in i['why']]:
+                name = text(narrator_names([value])[0]) if NARRATOR_MARKER.search(value) and narrator_names([value]) else text(value)
+                if name and not any(same_person(name, n) for n in narrators) and norm(name) not in NOT_PEOPLE:
+                    narrators.append(name)
+            route = {'kind': 'narrator_collection', 'signals': signals or ['collection credit'], 'narrators': narrators[:4], 'credit': COLLECTION_LABEL,
+                     'credit_basis': 'tag "%s"' % collection_credits[0] if collection_credits else 'collection label (no author credit locally)'}
+    # Ruling 14: a credited person suspected to be a reader is a question for Sergei, never the author.
+    suspects = [{'name': i['value'], 'source': i['field']} for i in ignored if i['value'] and i['why'] in (
+        'credited as a reader on other books in this library', 'named in brackets in a file or folder name (a reader or uploader)')]
+    if author is None and ask is None and route is None:
+        ask = {'kind': 'author_unclear', 'why': 'reader'} if suspects and title else {'kind': 'title_author', 'why': 'author_missing' if title else 'both_missing'}
+    elif title is None and ask is None:
+        ask = {'kind': 'title_author', 'why': 'title_missing'}
+    if ask and ask['kind'] == 'title_author' and any('garbled' in i['why'] for i in ignored):
+        ask['why'] = 'garbled'
+    fields = {}
+    if title:
+        fields['title'] = {k: title[k] for k in ('state', 'value', 'basis', 'how', 'sources')}
+        if title['state'] == 'one' and title['basis'] == 'tag':
+            support = _title_support(title['value'], components, author['name'] if author else '')
+            if support:
+                # Shown for explanation only: one source is enough.
+                fields['title'].update(state='green', how=title['how'] + '; the %s agrees (%s)' % (support[0]['kind'], support[1]),
+                                       sources=title['sources'] + [{'kind': support[0]['kind'], 'value': support[0]['value']}])
+    else:
+        fields['title'] = {'state': 'grey', 'value': '', 'basis': '', 'how': 'no local source names it', 'sources': []}
+    if author:
+        how = {'tag': 'the %s' % author['source'], 'file_name': 'the author part of the file name', 'folder_name': 'the folder name'}[author['basis']]
+        state = 'one'
+        supported = [c for c in candidates if c is not author and compare_names(c['name'], author['name'])]
+        value = author['name']
+        if supported:
+            match = compare_names(author['name'], supported[0]['name'])
+            state = 'yellow' if match['match'] == 'cross' else 'green'
+            how += '; the %s agrees' % supported[0]['source']
+            fuller = max(supported, key=lambda c: len(_parts(c['name'])[0]))
+            if len(_parts(value)[0]) < 2 <= len(_parts(fuller['name'])[0]):
+                # A surname alone ("Кинг") gives way to the full name another source agrees on.
+                value = fuller['name']
+        author = dict(author, name=value)
+        fields['author'] = {'state': state, 'value': author['name'], 'basis': author['basis'], 'how': how,
+                            'sources': [{'kind': author['source'], 'value': author['name']}] + [{'kind': c['source'], 'value': c['name']} for c in supported[:2]],
+                            'partial': len(_parts(author['name'])[0]) < 2}
+    else:
+        fields['author'] = {'state': 'red' if ask and ask['kind'] == 'author_unclear' else 'grey', 'value': '', 'basis': '', 'how': 'no author',
+                            'sources': [{'kind': c['source'], 'value': c['name']} for c in candidates[:4]]}
+    piece = next((c for c in conflicts if c.get('piece')), None)
+    for name in ('series', 'number'):
+        value = embedded[name]
+        if not value:
+            fields[name] = {'state': 'grey', 'value': '', 'sources': [], 'how': 'no embedded %s tag' % name}
+            continue
+        target = embedded['series']['value'] if name == 'number' and embedded['series'] else value['value']
+        supported = next((c for c in components if norm(target) and norm(target) in norm(c['value']) and
+                          (name == 'series' or re.search(r'(?<!\d)0*' + re.escape(value['value'].lstrip('0') or '0') + r'(?!\d)', c['value']))), None)
+        fields[name] = ({'state': 'green', 'value': value['value'], 'sources': [value, {'kind': supported['kind'], 'value': supported['value']}],
+                         'how': 'embedded tag repeated in the %s' % supported['kind']} if supported else
+                        {'state': 'grey', 'value': value['value'], 'sources': [value], 'how': 'only the embedded tag names it'})
+    if part and part['series'] and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+        fields['series'], fields['number'] = part['series'], part['number']
+    series = {'name': fields['series']['value'], 'number': fields['number']['value']} if fields['series']['state'] == 'green' and fields['number']['state'] == 'green' else {}
+    accepted = bool(title and (author or route) and not ask and not piece)
+    gaps = []
+    if accepted and not route:
+        if script(fields['title']['value']) != 'latin':
+            gaps.append('original_title')
+        if not series:
+            gaps.append('series')
+        if fields['author'].get('partial'):
+            gaps.append('author_full')
+    if ask:
+        fallback = next((a for a in ancestors if norm(a) not in CONTAINER_NAMES and not DISC.fullmatch(a.strip())), '') if not title else ''
+        ask['fields'] = {'title': {'proposal': fields['title']['value'] or clean_title(fallback), 'basis': fields['title']['basis'] or ('folder_name' if fallback else '')},
+                         'author': {'proposal': author['name'] if author else '', 'basis': author['basis'] if author else ''}}
+        if ask['kind'] == 'title_author' and not author and unnamed:
+            # "Колесо времени - 01. Око мира": the name's author slot, offered for Sergei to confirm or correct.
+            ask['fields']['author'] = {'proposal': unnamed[0]['name'], 'basis': unnamed[0]['basis']}
+        if ask['kind'] == 'author_unclear':
+            pool = tagged + [s for s in candidates if s['kind'] != 'tag']
+            if ask['why'] == 'reader':
+                pool = [{'name': s['name'], 'source': {'album_artist': 'album artist tag', 'albumartist': 'album artist tag'}.get(s['source'], s['source'] if ' ' in s['source'] else s['source'] + ' tag')}
+                        for s in suspects]
+            listed = []
+            for c in pool:
+                if not any(same_person(c['name'], x['name']) for x in listed):
+                    listed.append({'name': c['name'], 'source': c['source'], 'reader_count': who.count(c['name'])})
+            # Preselect the best guess: a tag credit, never a reader of other books while another exists.
+            listed.sort(key=lambda c: (c['reader_count'] > 0, c['source'] not in ('artist tag', 'author tag'), c['source'] != 'album artist tag'))
+            ask['candidates'] = listed[:6]
+            ask['fields']['author']['proposal'] = listed[0]['name'] if listed else ''
+            ask['fields']['author']['basis'] = 'tag' if listed and listed[0]['source'].endswith('tag') else 'file_name' if listed and listed[0]['source'] == 'file name' else 'folder_name' if listed else ''
+    part_book = {'parts': part['parts'], 'position': part['position'], 'set_title': part['set_title'], 'members': list(part['members']),
+                 'requires_own_chapters': True} if part and not part['blocked'] else None
+    return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
+            'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
+            'held': piece['detail'] if piece and not ask else '',
+            'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
+
+
 def author_forms(record):
     """Every local spelling of the agreed author, as written."""
     forms = []
@@ -1421,17 +1936,20 @@ def summary(record):
     """Compact, explainable record stored with the metadata facts."""
     def field(name):
         value = record['fields'][name]
-        return {'state': value['state'], 'value': value['value'], 'how': value['how'],
-                'sources': [{k: s[k] for k in ('kind', 'field', 'value') if k in s} for s in value['sources'] if s][:4]}
-    return {'version': AGREEMENT_VERSION, 'title': field('title'), 'author': field('author'),
+        compact = {'state': value['state'], 'value': value['value'], 'how': value['how'],
+                   'sources': [{k: s[k] for k in ('kind', 'field', 'value') if k in s} for s in value['sources'] if s][:4]}
+        if value.get('basis'):
+            compact['basis'] = value['basis']
+        return compact
+    return {'version': record.get('version', AGREEMENT_VERSION), 'title': field('title'), 'author': field('author'),
             'series': field('series'), 'number': field('number'), 'gaps': list(record['gaps']),
             'ignored': [dict(i) for i in record['ignored']][:6], 'route': dict(record['route']) if record.get('route') else None,
             'part_book': dict(record['part_book']) if record.get('part_book') else None}
 
 
-def revalidate(row, root, recorded, siblings=None, readers=None):
-    """Re-derive agreement from the current row; refuse any drift."""
-    current = agreement(row, root, siblings, readers)
+def revalidate(row, root, recorded, siblings=None, readers=None, index=None, rules=None):
+    """Re-derive agreement (v5: identify()) from the current row; refuse any drift."""
+    current = identify(row, root, siblings, readers, index, rules) if recorded.get('version') == IDENTITY_VERSION else agreement(row, root, siblings, readers)
     if recorded.get('route'):
         if not current.get('route') or current['route']['kind'] != recorded['route']['kind'] or current['route']['narrators'] != recorded['route']['narrators'] \
                 or current['fields']['title']['value'] != recorded['title']['value']:

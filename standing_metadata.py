@@ -92,15 +92,17 @@ def validate_policy(row,review,facts):
     if identity not in (None,'local_agreement'):raise ValueError('Invalid identity provenance')
     if identity=='local_agreement':
         agreed=facts.get('local_agreement')
-        from local_identity import KNOWN_AGREEMENT_VERSIONS
+        from local_identity import KNOWN_AGREEMENT_VERSIONS,IDENTITY_VERSION
         # Books approved under an earlier agreement version keep validating (v0.15.0: v3 and v4).
         if not isinstance(agreed,dict) or agreed.get('version') not in KNOWN_AGREEMENT_VERSIONS:raise ValueError('Local identity agreement record invalid')
+        # v5 (Sergei 2026-10-24): one local source is enough for the title and the author.
+        states=('green','yellow','one') if agreed.get('version')==IDENTITY_VERSION else ('green','yellow')
         if agreed.get('route'):
             # Ruling 1 collection: the title agrees and the narrator is never the author credit.
             narrators=agreed['route'].get('narrators',[])
-            if agreed.get('title',{}).get('state')!='green' or not review.get('anthology') or (facts.get('collection') or {}).get('kind')!='narrator_collection' or review.get('canonical_author') in narrators:
+            if agreed.get('title',{}).get('state') not in (states if agreed.get('version')==IDENTITY_VERSION else ('green',)) or not review.get('anthology') or (facts.get('collection') or {}).get('kind')!='narrator_collection' or review.get('canonical_author') in narrators:
                 raise ValueError('Local collection record invalid')
-        elif any(agreed.get(k,{}).get('state') not in ('green','yellow') for k in ('title','author')):raise ValueError('Local identity agreement record invalid')
+        elif any(agreed.get(k,{}).get('state') not in states for k in ('title','author')):raise ValueError('Local identity agreement record invalid')
     elif basis=='local_agreement':raise ValueError('Local title provenance without local identity')
     if basis=='source_russian' and review.get('title')!=russian_source_title(row):raise ValueError('Russian source title changed or ambiguous')
     if facts.get('series_state')=='omitted_unknown' and (review.get('series') or review.get('number')):raise ValueError('Unknown series must be omitted')

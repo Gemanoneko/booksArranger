@@ -72,6 +72,11 @@ def source_gate(row,work):
     aliases={norm(v) for v in work.get('titles',[]) if norm(v)}
     author_aliases={norm(v) for v in work.get('author_aliases',[]) if norm(v)}
     local=work.get('identity_basis')=='local_agreement'
+    # v5 (Sergei 2026-10-24, title + author is enough): identity was decided once by
+    # local_identity.identify(), with readers, collection credits and garbled tags already set
+    # aside; a file name or tag that names a reader or another wording of the title no longer
+    # disagrees. Scope, order and format checks below are unchanged.
+    one_source=bool(local and work.get('identity_rule'))
     def same_title(raw):
         # Local agreement already compared these names segment by segment (brackets,
         # "Series 03. Title", "Title - 01" chapter names); other paths keep exact matching.
@@ -99,11 +104,30 @@ def source_gate(row,work):
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))
+    # A numbered set grouped by its shared file names (groups.py, guard 2) is one folder's book.
+    if one_source and common_folder and row.get('numbered_set'):folder_context=True
     for m in members:
         tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
         album=norm(tags.get('album'))
         # A split part's own name adds its number and chapter label to the book name.
         named=filename_identity(split['book_name']+'.x') if split and split['ok'] and split['book_name'] else {'title':'','author':''} if split else filename_identity(m['filename'])
+        if one_source:
+            # One title source is enough; each file still needs a name or tag that carries the book title
+            # (or, for a grouped numbered set, the set's shared name).
+            own=[v for v in (tags.get('album'),tags.get('title'),named.get('title'),named.get('author') if row.get('numbered_set') else '',Path(m['path']).parent.name) if v]
+            if not any(same_title(v) for v in own) and not (len(members)==1 or folder_context):reasons.append('Source membership uncertain')
+            if m.get('order_conflict'):reasons.append('Playback order uncertain')
+            if len(members)==1 and not work.get('part_book') and not work.get('numbered_part'):
+                denominator=re.fullmatch(r'\d+/(\d+)',str(tags.get('track') or tags.get('tracknumber') or '').strip())
+                if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
+                disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())
+                if disc_total and int(disc_total[1])>1:reasons.append('Source membership uncertain')
+            series=work.get('verified_series') or {}
+            for key in ('series','series-part','series_part'):
+                value=text(tags.get(key))
+                if value and series.get('name') and series.get('number') and norm(value)!=norm(series['name'] if key=='series' else series['number']):
+                    reasons.append('Source series or position conflicts with verified work')
+            continue
         if album and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
         if named.get('author'):
             filename_ok=(same_title(named['title']) if local else norm(named['title']) in aliases) and source_author(named['author'])

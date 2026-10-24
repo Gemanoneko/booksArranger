@@ -10,8 +10,9 @@ from metadata import propose, future_audio_tags
 from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
-# Changing the grouping algorithm re-syncs every root once (split books, v0.15.0).
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION
+# Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
+SAME_TITLE_VERSION = 'same-title-v1'
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION
 
 def setup(connection):
     connection.execute('''CREATE TABLE IF NOT EXISTS book_groups(
@@ -227,6 +228,55 @@ def _split_plan(members,scopes,assigned,chaptered=frozenset()):
     found,_=split_books.plan(eligible,blocked,chaptered)
     return found
 
+def _same_title_sets(members,scopes,assigned,chaptered,taken):
+    """Guard 2 (Sergei 2026-10-24, "parts stay together"): files of one folder that are each still a
+    book on their own become one book when
+      - every one carries the same title tag and the same author/artist tags and no album tag
+        (77 chapter files of "Пастушья корона", each tagged "Пастушья корона"), or
+      - every one is numbered at the start of its name and shares the part before " - "
+        ("01 Моногатари короткие истории - Вступление от переводчика"), and that shared part is
+        not a person (an author folder of "NN Author - Title" files holds separate books).
+    Whole .m4b files, protected files and parts with their own chapters are never joined here.
+    Returns [{'scope', 'members', 'name', 'basis'}]."""
+    from source_identity import filename_identity,norm
+    from local_identity import title_key,looks_like_person
+    counts=Counter(scopes[path] for path in scopes)
+    folders={}
+    for path,item in members.items():
+        if path in assigned or path in chaptered or Path(path).suffix.lower()=='.m4b' or counts[scopes[path]]!=1:continue
+        folders.setdefault(str(Path(path).parent),[]).append(item)
+    found=[]
+    for folder,items in folders.items():
+        if len(items)<2:continue
+        by_title={}
+        by_name={}
+        for item in items:
+            tags={k.casefold():str(v) for k,v in item['metadata'].get('tags',{}).items()}
+            if tags.get('album','').strip():continue
+            title=title_key(tags.get('title',''))
+            if title:
+                credit=tuple(norm(tags.get(k,'')) for k in ('author','album_artist','albumartist','artist'))
+                by_title.setdefault((title,credit),[]).append(item)
+            numbered=re.match(r'^\s*(\d{1,4})[ _.-]+',item['filename'])
+            parsed=filename_identity(item['filename'])
+            if numbered and parsed.get('author') and not looks_like_person(parsed['author']):
+                by_name.setdefault(norm(parsed['author']),[]).append((item,parsed['author']))
+        used=set()
+        for (title,_),group in sorted(by_title.items(),key=lambda kv:repr(kv[0])):
+            if len(group)<2:continue
+            scope=folder+'\x1fSame title '+title
+            if scope in taken:continue
+            name=' '.join(str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title','')).split())
+            found.append({'scope':scope,'members':group,'name':name,'basis':'same title tag'})
+            used.update(item['path'] for item in group)
+        for key,group in sorted(by_name.items()):
+            group=[(item,name) for item,name in group if item['path'] not in used]
+            if len(group)<2:continue
+            scope=folder+'\x1fNumbered set '+key
+            if scope in taken:continue
+            found.append({'scope':scope,'members':[item for item,_ in group],'name':group[0][1],'basis':'shared start of the numbered file names'})
+    return found
+
 def build(rows,protected=None,chaptered=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
@@ -247,6 +297,10 @@ def build(rows,protected=None,chaptered=frozenset()):
         if found['scope'] in taken:continue
         for item in found['members']:scopes[item['path']]=found['scope']
         split[found['scope']]=found
+    sets={}
+    for found in _same_title_sets(members,scopes,assigned,chaptered,taken|set(split)):
+        for item in found['members']:scopes[item['path']]=found['scope']
+        sets[found['scope']]=found
     for row in audio:
         buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
@@ -319,6 +373,11 @@ def build(rows,protected=None,chaptered=frozenset()):
                     from source_identity import filename_identity
                     group['title_clue']=filename_identity(group['members'][0]['filename'])['title']
                 output[selected_scope]=group
+    for scope,found in sets.items():
+        if scope in output:
+            output[scope]['numbered_set']={'version':SAME_TITLE_VERSION,'name':found['name'],'basis':found['basis']}
+            output[scope]['grouping']='One book (Sergei 2026-10-24, parts stay together): files of one folder with the '+found['basis']
+            if not output[scope]['title_evidence'] and found['name']:output[scope]['title_clue']=found['name']
     return output
 
 def current(connection,root):

@@ -185,11 +185,13 @@ class GapSearchTests(unittest.TestCase):
         self.catalog.fantlab=[{'work_id':43,'name':'Око Бога','rusname':'Око Бога','all_autor_name':'Other Writer','all_autor_rusname':'Другой Автор'}]
         result=self.lookup(SERGEI)
         self.assertEqual(result['reasons'],[]);self.assertEqual(result['review']['canonical_author'],'Rollins James');self.assertEqual(len([u for u in self.catalog.calls if '/extended' in u]),0)
-    def test_local_conflict_keeps_the_existing_research_path(self):
+    def test_a_folder_naming_another_book_of_the_same_author_gives_way_to_the_tag_title(self):
+        # Sergei 2026-10-24 (ruling 6): title + author is enough; the tag title wins over a differently
+        # worded name and nothing is searched on the Internet for identity (before: a red title and research).
         result=self.lookup([('Роллинс Джеймс - Песчаный дьявол/01.mp3',{'album':'Око Бога','artist':'Джеймс Роллинс','track':'1'})])
-        self.assertEqual(result['local_agreement']['title']['state'],'red');self.assertTrue(result['reasons'])
-        self.assertIsNone(result['review']);self.assertTrue(any('duckduckgo' in u for u in self.catalog.calls),self.catalog.calls)
-    def test_missing_full_author_name_is_searched_and_required(self):
+        self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertEqual(result['review']['title'],'Око Бога')
+        self.assertEqual(result['metadata_facts']['identity_basis'],'local_agreement')  # public calls only fill optional gaps
+    def test_missing_full_author_name_is_searched_but_never_required(self):
         files=[('Роллинс - Око Бога/01.mp3',{'album':'Око Бога','artist':'Роллинс','track':'1'})]
         self.catalog.closed={'api.fantlab.ru','www.wikidata.org'}
         self.catalog.openlibrary=[{'key':'/works/OL7W','title':'Око Бога','author_name':['Джеймс Роллинс']}]
@@ -199,7 +201,9 @@ class GapSearchTests(unittest.TestCase):
         self.catalog.openlibrary=[];self.catalog.closed|={'openlibrary.org','www.googleapis.com','itunes.apple.com'}
         with connect(self.client.database) as db:db.execute('DELETE FROM public_research_cache')
         result=self.lookup(files)
-        self.assertIn('Author full name not established',result['reasons']);self.assertIsNotNone(result['wait'])
+        # Sergei 2026-10-24: public sources only fill optional fields; a one-word author is an author ("Баошу").
+        self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertIsNone(result['wait'])
+        self.assertEqual(result['review']['canonical_author'],'Роллинс')
     def test_revalidation_refuses_changed_local_sources(self):
         result=self.lookup(SERGEI);recorded=result['metadata_facts']['local_agreement']
         revalidate(self.row,str(self.base),recorded)

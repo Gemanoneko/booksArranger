@@ -1,6 +1,6 @@
 """v0.14.0 review fixes (Senua C1-C3, M1-M4; Futaba F1-F10) with the real failing names as
 fixtures. Private fixtures only: no network, no live catalog, no library access."""
-import contextlib,json,sqlite3,tempfile,time,unittest,urllib.parse
+import contextlib,json,sqlite3,tempfile,time,unittest,urllib.error,urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 import groups
@@ -205,12 +205,24 @@ class M3CacheEviction(unittest.TestCase):
             self.assertNotIn('public_research_cache ',plan+' ')
 
 class M4DefaultRuleCoverage(unittest.TestCase):
-    """The research-path classes now run with the production default; their fixtures name the
-    author only in the tags. A fixture whose tag and file name agree is accepted locally."""
-    def test_m4_research_classes_run_with_the_default_rule(self):
+    """v0.22.0 (Sergei 2026-10-24): title + author from one source is enough, so the research-path
+    classes' tag-only fixtures are identified locally under the production default; those classes
+    pin local identity off to keep testing the Internet path itself."""
+    def test_m4_research_classes_pin_the_internet_path_and_the_default_identifies_their_fixture(self):
         import test_public_work_identity
-        self.assertTrue(automatic_fixtures.AutoTests.local_agreement_default)
-        self.assertTrue(test_public_work_identity.FallbackTests.local_agreement_default)
+        self.assertFalse(automatic_fixtures.AutoTests.local_agreement_default)
+        self.assertFalse(test_public_work_identity.FallbackTests.local_agreement_default)
+        self.assertTrue(PublicResearch.local_agreement)
+        temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(temp.cleanup);base=Path(temp.name)
+        def fetch(url,*_):
+            if 'api.fantlab.ru' in url or 'wikidata' in url:return b'[]' if 'fantlab' in url else b'{"search":[]}'
+            raise urllib.error.HTTPError(url,503,'private fixture',{},None)
+        client=PublicClient(base/'catalog.sqlite3',fetch=fetch,clock=lambda:100000.0)
+        row=next(iter(groups.build([automatic_fixtures.row(base/'A Book.mp3','A Book','John Writer')]).values()))|{'fingerprint':'private-fixture-fingerprint'}
+        from test_local_identity import catalogue
+        catalogue(client.database,base,row)
+        result=PublicResearch(client,leads=[]).lookup(row,str(base))
+        self.assertEqual(result['reasons'],[],result);self.assertEqual(result['metadata_facts']['identity_basis'],'local_agreement')
     def test_m4_agreeing_research_fixture_is_accepted_with_the_tag_author(self):
         temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(temp.cleanup);base=Path(temp.name);calls=[]
         def fetch(url,*_):

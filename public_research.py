@@ -447,6 +447,9 @@ class PublicResearch:
         from pathlib import Path
         self.client=client;self.leads=source_leads() if leads is None else leads
         self.local_index=Path(local_index) if local_index is not None else Path(client.database).parent/'openlibrary-index'
+    def rules(self):
+        """Sergei's lasting author rules; None while none are stored."""
+        return None
     def local_generation(self):
         from openlibrary_index import generation
         return generation(self.local_index)
@@ -611,10 +614,19 @@ class PublicResearch:
         # Only missing optional fields are searched; a local conflict keeps the research path.
         import local_identity
         siblings,index=self._siblings(row,root)
+        if self.local_agreement:
+            # Sergei 2026-10-24 (rulings 6, 6a): title + author from one local source identify the book.
+            # What the files cannot settle is a question for Sergei; the Internet never decides identity
+            # and a held book is not researched again until it changes (ruling 5, option B).
+            local=local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules())
+            result['local_agreement']=local_identity.summary(local)
+            if local.get('route'):return self._local_collection(row,local,result)
+            if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)
+            ask=local.get('ask')
+            reason=local_identity.ASK_REASONS[ask['kind']] if ask else local_identity.PIECE_REASON
+            return result|{'reasons':[reason],'ask':copy.deepcopy(ask),'identity_hold':{'kind':ask['kind'] if ask else 'piece','detail':local.get('held') or ''},'wait':None}
         local=local_identity.agreement(row,root,siblings,index['readers'] if index else None)
         result['local_agreement']=local_identity.summary(local)
-        if self.local_agreement and local.get('route'):return self._local_collection(row,local,result)
-        if local['accepted'] and self.local_agreement:return self._local_lookup(row,local,stop,budget,progress,result,index)
         if observed_candidate_count>3:return result|{'reasons':['Mixed recordings in this group']}
         attempt=row.get('_research_attempt',0)
         if type(attempt) is not int or not 0<=attempt<=100000:raise ValueError('Invalid research history')
@@ -828,6 +840,7 @@ class PublicResearch:
         work={'id':local_identity.work_id(local),'titles':local_identity.title_forms(local),'author_aliases':author_variants(sorted(c for c in credits if c)),
             'original_language':'','original_title':title,'policy_version':'standing-17-v1','full_author_verified':True,'source_surnames':[],'verified_series':{},
             'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,'recording_completeness':'unknown'}
+        if local.get('version')==local_identity.IDENTITY_VERSION:work['identity_rule']=local_identity.IDENTITY_VERSION
         collection={'kind':'narrator_collection','narrators':list(route['narrators']),'signals':list(route['signals']),'credit_basis':route['credit_basis']}
         summary=local_identity.summary(local)
         review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary)
@@ -873,7 +886,9 @@ class PublicResearch:
             if chosen:names=[chosen];name_source=catalog['source_url']
         names=[text(n) for n in names if text(n)]
         reasons=[]
-        if not names or len(local_identity.words(names[0]))<2 and fields['author'].get('partial'):
+        one_source=local.get('version')==local_identity.IDENTITY_VERSION
+        if not names or len(local_identity.words(names[0]))<2 and fields['author'].get('partial') and not one_source:
+            # v5 (Sergei 2026-10-24): a one-word author ("Баошу") is an author; a full name is optional.
             reasons.append('Author full name not established')
             names=names or [author]
         spelling=None
@@ -897,6 +912,10 @@ class PublicResearch:
             'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
             'source_surnames':[],'verified_series':series,'identity_basis':'local_agreement','cover_url':'','work_type':'','contained_story':False,
             'recording_completeness':'unknown','part_book':bool(part)}
+        if one_source:
+            work['identity_rule']=local_identity.IDENTITY_VERSION
+            # Rulings 13 and 15: a numbered part filed as its own book under "set name + number".
+            if fields['title'].get('basis')=='number_rule':work['numbered_part']=True
         preferred=title
         if language=='ru':preferred=catalog.get('title_native') or title
         elif language=='en':preferred=catalog.get('original_title') or title
@@ -912,6 +931,7 @@ class PublicResearch:
             value=agreed[name]
             return value['value']+' ('+value['how']+'; '+', '.join(s['kind']+(' '+s['field'] if s.get('field') else '')+' "'+s['value']+'"' for s in value['sources'])+')'
         basis='Local agreement '+local_identity.AGREEMENT_VERSION+' (Sergei decision 2026-10-12): embedded tags and file/folder names agree. Title: '+described('title')+'. Author: '+described('author')+'. No Internet confirmation required.'
+        if one_source:basis='Local identity '+local_identity.IDENTITY_VERSION+' (Sergei 2026-10-24: title + author is enough): title and author each from one local source, readers, collection credits and garbled tags excluded. Title: '+described('title')+'. Author: '+described('author')+'. No Internet confirmation required.'
         if part:basis+=' One part %d of a %d-part M4B set "%s", filed as its own book (Sergei 2026-10-13); it must carry its own chapters.'%(part['position'],part['parts'],part['set_title'])
         identity='Books Arranger local agreement '+local_identity.AGREEMENT_VERSION
         def evidence(field,value,url,why):

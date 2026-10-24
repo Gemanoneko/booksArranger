@@ -25,8 +25,9 @@ def fixture_payload(language='en',cycles=None):
         'image':'https://fantlab.ru/images/cover.jpg','translations':[]}
 
 class AutoTests(unittest.TestCase):
-    # Internet-path cases pin local agreement off; test_local_identity reruns their holds with the default rule.
-    local_agreement_default=True
+    # v0.22.0 (Sergei 2026-10-24, title + author is enough): a production book never reaches the Internet
+    # identity path, so these cases pin local identity off to keep exercising that path itself.
+    local_agreement_default=False
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.db=self.base/'catalog.sqlite3';self.controllers=[]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
