@@ -995,6 +995,11 @@ def canonical_author(agreed, forms, index, language=''):
         match = compare_names(value, agreed)
         if match and not match['subset'] and not match['expanded']:
             return True
+        # v0.22.0: a middle name written out on one side only ("Michael John Moorcock" / "Майкл Муркок"): the first name
+        # and the surname are both written in full on both sides, so it is the same person.
+        if match and match['subset'] and not match['expanded'] and min(len(_parts(value)[0]), len(_parts(agreed)[0])) >= 2 \
+                and abs(len(_parts(value)[0]) - len(_parts(agreed)[0])) == 1:
+            return True
         return middle_initial_same(value, agreed, library)
     counts = Counter()
     if index:
@@ -1484,6 +1489,33 @@ def bracketed_people(values):
     return found
 
 
+COMPILER = re.compile(r'(?<![^\W\d_])(?:в\s+обработке|в\s+пересказе|пересказ(?:ал[аи]?)?|обработк[аи]|сост(?:\.|авитель|авительница|авил[аи]?)|составлени[еяю]|retold\s+by|compiled\s+by|edited\s+by)\s*[:\-–—]?\s*', re.I)
+
+
+def _compiler_credit(members):
+    """The compiler or reteller a folk-tale collection credits in its tags ("в обработке А. Н. Толстого"), else ''."""
+    for member in members[:3]:
+        tags = _tags(member)
+        for name in ('composer', 'comment', 'description', 'synopsis', 'lyrics'):
+            value = unicodedata.normalize('NFC', str(tags.get(name) or ''))
+            match = COMPILER.search(value)
+            if not match:
+                continue
+            tail = re.split(r'[,;\n(\[|]|\s[-–—]\s|\.\s', value[match.end():], maxsplit=1)[0]
+            tokens = []
+            for token in tail.split():
+                if not re.fullmatch(r"[^\W\d_]+(?:[-'’.][^\W\d_]*)*\.?", token):
+                    break
+                tokens.append(token)
+            tokens = tokens[:4]
+            if tokens and len(tokens[-1]) > 2:
+                tokens[-1] = tokens[-1].rstrip('.')  # the sentence's full stop, never an initial
+            name_value = text(' '.join(tokens))
+            if len(words(name_value)) >= 2 and not NARRATOR_MARKER.search(name_value):
+                return name_value
+    return ''
+
+
 def _consistent(members, names):
     """The one non-empty value every member that carries the tag agrees on, else '' (and whether
     members disagree)."""
@@ -1542,6 +1574,14 @@ def _clean_credit(value, title, who):
         kept = [p for p in pieces if not who.why(p)]
         if len(kept) == 1:
             return kept[0], [p for p in pieces if p != kept[0]]
+    # The same name written twice ("Герберт Фрэнк Герберт Фрэнк", "Кинг Стивен; Кинг Стивен") is one credit.
+    parts = [text(p) for p in re.split(r'\s*[,;/]\s*', value) if text(p)]
+    if len(parts) > 1 and all(same_person(parts[0], p) for p in parts[1:]):
+        return parts[0], []
+    tokens = value.split()
+    half = len(tokens) // 2
+    if len(tokens) >= 4 and len(tokens) % 2 == 0 and same_person(' '.join(tokens[:half]), ' '.join(tokens[half:])):
+        return ' '.join(tokens[:half]), []
     return value, []
 
 
@@ -1683,11 +1723,23 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                          'sources': [title['sources'][0], {'kind': 'file name', 'value': Path(members[0]['filename']).stem}]}
     # ------------------------------------------------------------ author (one source is enough)
     candidates = []  # {'name', 'source', 'basis', 'kind'} in order of preference
+    folk = []  # folk-tale credits whose rule files the book under its compiler or reteller, if one is credited
 
     def offer(name, source, basis, kind):
         name = text(name)
         if not name:
             return
+        if rules is not None:
+            # Sergei's lasting answers (ruling 12) decide before any guess, garbled spellings included.
+            target = rules.same_as(name, folder_text)
+            if target:
+                if not any(same_person(target, c['name']) for c in candidates if c['kind'] == kind):
+                    candidates.append({'name': target, 'source': source, 'basis': basis, 'kind': kind, 'rule': rules.rule_id(name, folder_text), 'as_seen': name})
+                return
+            if rules.keep(name, folder_text):
+                if not any(same_person(name, c['name']) for c in candidates if c['kind'] == kind):
+                    candidates.append({'name': name, 'source': source, 'basis': basis, 'kind': kind, 'rule': rules.rule_id(name, folder_text)})
+                return
         if kind == 'tag' and not garbled(name):
             name, dropped = _clean_credit(name, title['value'] if title else '', who)
             for reader in dropped:
@@ -1707,6 +1759,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             return
         if rules is not None and rules.collection(name, folder_text):
             collection_credits.append(name)
+            if rules.options(name, folder_text).get('fallback') == 'compiler':
+                folk.append(name)
             ignored.append({'field': source, 'value': name, 'why': 'Sergei: a collection or anthology name, never one author'})
             return
         if NARRATOR_MARKER.search(name):
@@ -1716,8 +1770,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         if reason:
             ignored.append({'field': source, 'value': name, 'why': reason})
             return
-        if any(same_person(name, c['name']) or compare_names(name, c['name']) for c in candidates if c['kind'] == kind):
-            return
+        if any(same_person(name, c['name']) or compare_names(name, c['name']) or slip_same(name, c['name']) for c in candidates if c['kind'] == kind):
+            return  # one person; a one-letter slip ("Стейплз" / "Стейплс") included
         candidates.append({'name': name, 'source': source, 'basis': basis, 'kind': kind})
 
     for name in AUTHOR_TAGS:
@@ -1774,6 +1828,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         person = _person_folder({'value': ancestor}, index)
         if person:
             offer(person, 'folder name', 'folder_name', 'folder')
+    if folk:
+        # Folk tales (Sergei 2026-10-24): the compiler or reteller the files credit is the author, else Сборники.
+        compiler = _compiler_credit(members)
+        if compiler:
+            offer(compiler, 'compiler credit', 'tag', 'tag')
     tagged = [c for c in candidates if c['kind'] == 'tag']
     author = None
     ask = None
@@ -1798,6 +1857,13 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             ask = {'kind': 'author_unclear', 'why': 'names_differ'}
         elif candidates:
             author = candidates[0]
+    if author is None and ask is None and rules is not None:
+        # An answer about one of the book's own folders: «Гробница Саргераса» -> Brooks Robert, «Созвездие Льва» -> Сборники.
+        found = rules.folder_rule(ancestors)
+        if found and found[0] == 'same_as':
+            author = {'name': found[1], 'source': 'folder name', 'basis': 'rule', 'kind': 'folder', 'rule': found[2]}
+        elif found and found[0] == 'collection':
+            collection_credits.append('Sergei: a collection folder')
     route = None
     if author is None and ask is None and title:
         marked = [n for n in ancestors if COLLECTION_FOLDER.search(n)]
@@ -1834,7 +1900,10 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     else:
         fields['title'] = {'state': 'grey', 'value': '', 'basis': '', 'how': 'no local source names it', 'sources': []}
     if author:
-        how = {'tag': 'the %s' % author['source'], 'file_name': 'the author part of the file name', 'folder_name': 'the folder name'}[author['basis']]
+        how = {'tag': 'the %s' % author['source'], 'file_name': 'the author part of the file name', 'folder_name': 'the folder name',
+               'rule': 'Sergei\'s rule for the folder name'}[author['basis']]
+        if author.get('rule'):
+            how += '; Sergei\'s rule (ruling 12) for "%s"' % author.get('as_seen', author['name'])
         state = 'one'
         supported = [c for c in candidates if c is not author and compare_names(c['name'], author['name'])]
         value = author['name']
@@ -1849,7 +1918,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         author = dict(author, name=value)
         fields['author'] = {'state': state, 'value': author['name'], 'basis': author['basis'], 'how': how,
                             'sources': [{'kind': author['source'], 'value': author['name']}] + [{'kind': c['source'], 'value': c['name']} for c in supported[:2]],
-                            'partial': len(_parts(author['name'])[0]) < 2}
+                            'partial': len(_parts(author['name'])[0]) < 2 and not author.get('rule')}
+        if author.get('rule'):
+            fields['author']['rule'] = author['rule']
     else:
         fields['author'] = {'state': 'red' if ask and ask['kind'] == 'author_unclear' else 'grey', 'value': '', 'basis': '', 'how': 'no author',
                             'sources': [{'kind': c['source'], 'value': c['name']} for c in candidates[:4]]}
@@ -1904,6 +1975,34 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
             'held': piece['detail'] if piece and not ask else '',
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
+
+
+def same_author_question(name, forms, rules):
+    """Ruling 12: a new author folder name that looks like an author the library already has (another script, a
+    near spelling, a surname alone) is asked once: {'kind': 'same_author', 'new', 'existing', 'existing_books', 'why'}.
+    None when the name is known, Sergei answered it (same_as / keep), or nothing is close."""
+    if rules is None or not name:
+        return None
+    known = rules.known_authors
+    if name.casefold() in known or any(rules.keep(f) or rules.same_as(f) for f in [name] + list(forms)):
+        return None
+    best = None
+    for low, (existing, books) in known.items():
+        match = compare_names(name, existing)
+        if match and match['exact']:
+            # The same full name in the other script or another word order: the language rule already answered it
+            # (AuthorRulings 2026-10-24), so the book files under the folder the library has. Not a question.
+            return {'kind': 'merge', 'existing': existing}
+        why = ('translation' if match['match'] == 'cross' else 'near') if match else ''
+        if not why:
+            a, b = ' '.join(sorted(words(name))), ' '.join(sorted(words(existing)))
+            if slip_same(name, existing) or (script(a) == script(b) != 'other' and min(len(a), len(b)) >= 8 and _edits(a, b, 2) <= 2):
+                why = 'near'
+        if why and (best is None or books > best[2]):
+            best = (why, existing, books)
+    if not best:
+        return None
+    return {'kind': 'same_author', 'new': name, 'existing': best[1], 'existing_books': best[2], 'why': best[0]}
 
 
 def shown(record):
@@ -1978,6 +2077,8 @@ def summary(record):
                    'sources': [{k: s[k] for k in ('kind', 'field', 'value') if k in s} for s in value['sources'] if s][:4]}
         if value.get('basis'):
             compact['basis'] = value['basis']
+        if value.get('rule'):
+            compact['rule'] = value['rule']
         return compact
     return {'version': record.get('version', AGREEMENT_VERSION), 'title': field('title'), 'author': field('author'),
             'series': field('series'), 'number': field('number'), 'gaps': list(record['gaps']),

@@ -96,6 +96,8 @@ class AutomaticProcessing:
             db.execute('CREATE TABLE IF NOT EXISTS automatic_manual_drafts(id TEXT PRIMARY KEY,revision INTEGER,expires REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_errors(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,created TEXT NOT NULL,diagnostic TEXT NOT NULL)')
+            # Sergei's lasting author rules (ruling 12): the table, and his 2026-10-24 answers once.
+            __import__('author_rules').seed(db)
             prior=db.execute('SELECT * FROM automatic_runs ORDER BY created DESC LIMIT 1').fetchone()
             if prior and research_retry(dict(prior)):
                 failed=json.loads(prior['checkpoint'])['pending'][0]
@@ -174,8 +176,14 @@ class AutomaticProcessing:
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),
+        return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
+    def _rules_generation(self):
+        """The current author-rules generation ('' with none): a held book is researched again when it changes."""
+        rules=getattr(self.research,'rules',None)
+        try:value=rules() if callable(rules) else None
+        except Exception:value=None
+        return value.generation if value is not None else ''
     def _refresh_wait(self,row,previous):
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
@@ -595,7 +603,8 @@ class AutomaticProcessing:
                       if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                       self._update(id,checkpoint=json.dumps(checkpoint));continue
                   previous=self._refresh_wait(row,self.candidate(row))
-                  if previous and previous['state']=='Held' and previous.get('until_change') and previous.get('research_version')==RESEARCH_VERSION:
+                  if previous and previous['state']=='Held' and previous.get('until_change') and previous.get('research_version')==RESEARCH_VERSION \
+                          and previous.get('rules_generation','')==self._rules_generation():
                       # Sergei 2026-10-24, ruling 5 (option B): researched again only when something about it changes. A
                       # changed file list, size, time or tag, a renamed folder or a value Sergei saves gives the book a
                       # new revision or fingerprint (candidate() then reads nothing); new rules a new research version.

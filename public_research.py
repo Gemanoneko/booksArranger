@@ -450,8 +450,10 @@ class PublicResearch:
         self.client=client;self.leads=source_leads() if leads is None else leads
         self.local_index=Path(local_index) if local_index is not None else Path(client.database).parent/'openlibrary-index'
     def rules(self):
-        """Sergei's lasting author rules; None while none are stored."""
-        return None
+        """Sergei's lasting author rules (author_rules, ruling 12), read-only; None while the catalog has none."""
+        import author_rules
+        database=getattr(getattr(self,'client',None),'database',None)
+        return author_rules.load(database) if database else None
     def identity(self,row,root):
         """(identity record, catalog index) of one book from the files alone (v5), read-only."""
         import local_identity
@@ -595,6 +597,9 @@ class PublicResearch:
         import manual_metadata
         entered=manual_metadata.proposals(row.get('_manual_metadata_sources',[]))
         result=self._lookup(row,root,stop,progress)
+        rules=self.rules()
+        # A held book is researched again when Sergei's rules change (ruling 5, option B; ruling 12).
+        result['rules_generation']=rules.generation if rules else ''
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
@@ -930,7 +935,19 @@ class PublicResearch:
             names=names or [author]
         spelling=None
         from organization import NO_AUTHOR
-        if not reasons and names[0]!=NO_AUTHOR:
+        rules=self.rules() if one_source else None
+        if one_source and not reasons and not fields['author'].get('rule') and names[0]!=NO_AUTHOR and fields['author'].get('state') not in ('entered','approved'):
+            spelled,_=local_identity.canonical_author(names[0],authors+names,index,language)
+            question=local_identity.same_author_question(spelled,authors+names,rules)
+            if question and question['kind']=='merge':
+                # Same full name as an author the library has: that folder (the language rule's answer).
+                names=[question['existing']];question=None;fields=dict(fields,author=dict(fields['author'],rule='known-author'))
+            if question:
+                # Ruling 12: a new folder name that looks like an author the library has is asked once; the answer is a rule.
+                question['fields']={'title':{'proposal':title,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')}}
+                return result|{'reasons':[local_identity.ASK_REASONS['same_author']],'ask':question,'identity_hold':{'kind':'same_author','detail':''},'wait':None,
+                               'rules_generation':rules.generation if rules else ''}
+        if not reasons and names[0]!=NO_AUTHOR and not fields['author'].get('rule'):
             # Ruling 3 (Sergei 2026-10-13): one canonical spelling per author across the library.
             canonical,spelling=local_identity.canonical_author(names[0],authors+names,index,language)
             if spelling['spelling']!=names[0] or canonical!=names[0]:

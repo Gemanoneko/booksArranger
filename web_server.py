@@ -644,14 +644,15 @@ class Handler(BaseHTTPRequestHandler):
             self.response(200,result);return
         if path in ('/api/candidate/approve','/api/candidate/approve-preview'):
             # Sergei's Approve and its "Goes to" line (rulings 6a, 6b, 10, 11a; Judy's attention to-do spec, section 5).
-            self.shape(data,{'library','id','revision'},{'title','author'}|({'without_missing'} if path.endswith('/approve') else set()))
+            self.shape(data,{'library','id','revision'},{'title','author'}|({'without_missing','choice'} if path.endswith('/approve') else set()))
             library,id,revision=self.candidate_identity(data)
             title=self.text_value(data.get('title'),1000,nullable=True);author=self.text_value(data.get('author'),1000,nullable=True)
             if path.endswith('/approve-preview'):
                 self.response(200,{'preview':self.server.merge.approval_preview(id,revision,title,author)});return
-            without=data.get('without_missing',False)
+            without=data.get('without_missing',False);choice=data.get('choice')
             if type(without) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
-            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without)
+            if choice not in (None,'same','different'): raise ValueError('Same author? takes same or different')
+            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice)
             except ValueError as error:
                 text=str(error)
                 code='changed' if 'Candidate changed' in text or 'Source files changed' in text or 'evidence changed' in text else 'name_taken' if 'already exists' in text else 'title' if text=='Type a title first.' else 'refused'

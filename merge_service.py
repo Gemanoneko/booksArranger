@@ -1950,12 +1950,33 @@ class MergeService:
         return {'path':os.path.relpath(path,output_root) if path else '','absolute':path,'taken':bool(path and os.path.lexists(path)),
                 'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':'' if path else preview.get('reason','')}
 
-    def approve_book(self,id,revision,title=None,author=None,without_missing=False):
+    def answer_same_author(self,id,revision,choice):
+        """Ruling 12: Sergei's answer to this book's "Same author?" question becomes a lasting rule (same: the new name
+        files under the existing author; different: the new name is a separate author, never asked again). Returns the
+        author to file this book under. Only an explicit choice teaches a rule."""
+        import author_rules
+        if choice not in ('same','different'):raise ValueError('Choose Same author or Different author')
+        row=self.reviews._row('Audiobooks',id,revision)
+        record=self.automatic.candidate(row) or {}
+        question=record.get('ask') or {}
+        if question.get('kind')!='same_author':raise ValueError('This book has no Same author? question. Nothing was changed.')
+        title=(((question.get('fields') or {}).get('title') or {}).get('proposal') or row.get('title_clue') or '')
+        with connect(self.inventory.database) as db:
+            author_rules.setup(db)
+            if choice=='same':author_rules.append(db,'same_as',question['new'],target=question['existing'],actor='user',source='Sergei (Same author?)',question=title)
+            else:author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
+        return question['existing'] if choice=='same' else question['new']
+
+    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None):
         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
         Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
-        Convert what's there, leaving out the files missing from disk. Raises ValueError with the reason it is refused."""
+        Convert what's there, leaving out the files missing from disk. choice ('same' / 'different'): his answer to the
+        book's Same author? question, saved as a rule first (ruling 12). Raises ValueError with the reason it is refused."""
         import datetime
         if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
+        if choice is not None:
+            chosen=self.answer_same_author(id,revision,choice)
+            if author is None:author=chosen
         row,result=self._approval_result(id,revision,title,author)
         include=None
         if without_missing:
@@ -2036,7 +2057,7 @@ class MergeService:
                 try:
                     siblings=folder_siblings(self.inventory.database,current,self.reviews._source_root(current))
                     index=catalog_index(self.inventory.database,self.reviews._source_root(current));readers=index['readers']
-                    rules=None
+                    rules=__import__('author_rules').load(self.inventory.database)
                 except Exception:raise ValueError("Folder contents could not be checked; local identity held") from None
                 revalidate(current,self.reviews._source_root(current),result['metadata_facts']['local_agreement'],siblings,readers,index,rules)
             reasons=source_gate(gate_row,result['work'])

@@ -94,14 +94,14 @@ class ApproveAsIsTests(unittest.TestCase):
         self.assertEqual([Path(s['path']).name for s in job['manifest']['sources']],['01.mp3','02.mp3'])
 
     def test_saved_values_are_the_identity_without_any_other_source(self):
-        tone(self.audio/'Unsorted'/'Гробница Саргераса'/'ГробницаСаргераса1.mp3',self.cover)
+        tone(self.audio/'Unsorted'/'Неизвестная запись'/'Запись1.mp3',self.cover)
         row=self.start()[0]
         self.assertTrue(self.research(row)['reasons'],'positive control: the files settle nothing')
-        with connect(self.inv.database) as db:manual_metadata.append(db,manual_metadata.capture(row,{'title':'Гробница Саргераса','canonical_author':'Robert Brooks'},''))
+        with connect(self.inv.database) as db:manual_metadata.append(db,manual_metadata.capture(row,{'title':'Тайная запись','canonical_author':'Robert Brooks'},''))
         with connect(self.inv.database) as db:sources=manual_metadata.records(db,row)
         result=self.service.automatic.research.lookup(dict(row,_manual_metadata_sources=sources),str(self.audio),threading.Event())
         self.assertEqual(result['reasons'],[],result.get('reasons'))
-        self.assertEqual((result['review']['title'],result['review']['canonical_author']),('Гробница Саргераса','Brooks Robert'))
+        self.assertEqual((result['review']['title'],result['review']['canonical_author']),('Тайная запись','Brooks Robert'))
         self.assertEqual(result['local_agreement']['author']['state'],'entered')
 
     def test_a_changed_source_after_the_preview_is_refused_and_nothing_moves(self):
