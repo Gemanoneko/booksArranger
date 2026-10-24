@@ -73,13 +73,19 @@ class AutomaticMediaTests(unittest.TestCase):
         # Live 2026-10-24: each enrich inside one automatic approval recomputed the catalog's converted set
         # (progress_books, 10-25 s on the real catalog) while holding group_lock, so one approval took minutes and
         # the status poll and book list waited on it. The approval now computes the set once.
-        row,result=self.result();calls=[];original=self.service.progress_books
+        # Only this thread's reads are the approval's. The conversion worker that approve_automatic queues runs its own
+        # revision guard (build_manifest -> enrich -> progress_books) on its own thread, outside this approval's
+        # snapshot, and sometimes gets there before approve_automatic returns: counted process-wide, that read failed
+        # this test in 11 of 60 plain runs and 6 of 50 under load (2026-10-24); the approval itself read once in all 110.
+        row,result=self.result();calls=[];original=self.service.progress_books;approver=threading.current_thread()
         def counted(*args,**kwargs):
-            if not args and not kwargs:calls.append('enrich')  # state() passes its own inputs; enrich() passes none
+            # state() passes its own inputs; enrich() passes none
+            if not args and not kwargs:calls.append('enrich' if threading.current_thread() is approver else threading.current_thread().name)
             return original(*args,**kwargs)
         with patch.object(self.service,'progress_books',side_effect=counted):
             fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client)
-        self.assertEqual(calls,['enrich'],'one converted set per approval')
+        self.assertEqual([c for c in calls if c=='enrich'],['enrich'],'one converted set per approval')
+        self.assertLessEqual(set(calls)-{'enrich'},{'BooksArrangerAudioJobs'},'any other read is the queued job\'s own revision guard')
         local=self.service.reviews.page_local
         self.assertFalse(getattr(local,'ready_scope',False));self.assertFalse(hasattr(local,'ready_ids'),'the set does not outlive the approval')
         self.wait()
@@ -87,7 +93,7 @@ class AutomaticMediaTests(unittest.TestCase):
         with patch.object(self.service,'progress_books',side_effect=counted):
             first=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
             second=self.service.reviews.enrich(self.service.reviews._row('Audiobooks',fresh['id']))
-        self.assertEqual(calls,['enrich','enrich'],'outside an approval each enrich reads the current set')
+        self.assertEqual([c for c in calls if c=='enrich'],['enrich','enrich'],'outside an approval each enrich reads the current set')
         self.assertTrue(first['audiobook_ready'] and second['audiobook_ready'])
         with self.service.reviews.ready_snapshot():
             self.service.reviews.page_local.ready_ids={'page-owned'}
