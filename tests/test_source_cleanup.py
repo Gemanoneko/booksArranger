@@ -12,6 +12,17 @@ from source_cleanup import CleanupJobs, packed
 from native_io import DirectoryBoundary, VerifiedFile, BoundaryError
 from scanner import connect
 
+class UnreachableOutputFolderTests(unittest.TestCase):
+    """Senua 0.21.3 F3: os.path.realpath raises OSError for some network errors (an NAS outage)."""
+    def test_an_unreachable_output_folder_reads_as_unavailable_and_never_raises(self):
+        import source_config
+        def down(path,*args,**kwargs):raise OSError(64,'The specified network name is no longer available')
+        with patch.object(source_config.os.path,'realpath',down):
+            self.assertEqual(source_config.sorted_problem('Z:\\Audiobooks Sorted',('Z:\\Audiobooks',)),'The output folder cannot be reached')
+            with self.assertRaisesRegex(ValueError,'cannot be reached; the source files are kept'):
+                source_config.require_sorted('Z:\\Audiobooks Sorted\\A\\B.m4b','Z:\\Audiobooks Sorted',('Z:\\Audiobooks',))
+        self.assertIn('The output folder cannot be reached; the source files are kept',source_config.CONFIGURATION_REFUSALS)
+
 class CleanupTest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='cleanup-',dir=Path(__file__).resolve().parents[1]/'scratch')
@@ -67,6 +78,44 @@ class CleanupTest(unittest.TestCase):
         with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
         self.assertEqual(len(list((self.base/'recovery'/self.id).glob('*.mp3'))),2,'positive control: it got to the removals')
         self.assert_all_kept()
+    def test_a_refusal_right_before_a_removal_records_no_removal_intent_and_restore_finds_no_collision(self):
+        # Senua 0.21.3 F2: before, the check ran after removal_intended was committed, so restore() met the
+        # still-present original as a collision ("Restore collision; existing file preserved").
+        real=self.policy
+        def changing():
+            value=real()
+            return (None,value[1]) if self.policy_calls>=3 else value  # enroll, run start, then the first removal
+        self.worker.output_policy=changing
+        with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
+        with connect(self.db) as db:states=[r[0] for r in db.execute('SELECT state FROM cleanup_members WHERE cleanup_id=?',(self.id,))]
+        self.assertEqual(sorted(states),['backup_verified','backup_verified'],'positive control: both recovery copies were made')
+        self.worker.restore(self.id)
+        self.assert_all_kept()
+    def test_a_cleanup_refused_for_a_missing_output_folder_runs_again_once_it_is_set(self):
+        # Senua 0.21.3 F1: before, the refusal parked the cleanup for good (needs_attention is terminal), even after
+        # the setting came back.
+        self.output_root=None
+        self.worker._work(follow_audio=False)
+        self.assertEqual(self.worker.status('test')['state'],'needs_attention');self.assertIn('No sorted output folder',self.worker.status('test')['reason'])
+        self.assert_all_kept()
+        self.output_root=str(self.sorted)
+        self.worker._work(follow_audio=False)
+        self.assertEqual(self.worker.status('test')['state'],'completed');self.assertEqual(self.worker.status('test')['removed'],2)
+    def test_a_cleanup_refused_because_its_output_is_outside_sorted_stays_parked(self):
+        # The F1 retry covers only the process configuration, never a book whose output really is elsewhere.
+        from source_config import CONFIGURATION_REFUSALS
+        self.assertNotIn('The audiobook is not in the sorted output folder; the source files are kept',CONFIGURATION_REFUSALS)
+    def test_startup_enrolment_without_an_output_folder_parks_nothing(self):
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        parked=[]
+        def refused(job_id):raise ValueError('No sorted output folder is set; the source files are kept')
+        fake=SimpleNamespace(_dispose_retained=lambda job_id:None,enroll_cleanup=refused,_enrollment_attention=lambda job,error:parked.append(str(error)))
+        MergeService._enroll_completed_without_start(fake,{'job_id':'j'})
+        self.assertEqual(parked,[],'the next start with the setting enrols the book')
+        def other(job_id):raise ValueError('Complete output validation is required')
+        fake.enroll_cleanup=other;MergeService._enroll_completed_without_start(fake,{'job_id':'j'})
+        self.assertEqual(parked,['Complete output validation is required'])
     def test_without_a_policy_nothing_is_removed(self):
         self.worker.output_policy=None
         with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
@@ -159,6 +208,22 @@ class CleanupTest(unittest.TestCase):
         with patch.object(VerifiedFile,'flush',failed_second):
             with self.assertRaisesRegex(BoundaryError,'flush failure'):self.worker.run(self.id)
         self.assertGreaterEqual(len(calls),2,'positive control: it got past the marker removal');self.assert_marked(zone)
+
+    def test_markers_a_killed_run_removed_are_put_back_by_the_next_run(self):
+        # Senua 0.21.3 F4: m3 put markers back only for a run that paused or held, never after a crash.
+        zone=self.marked();real=VerifiedFile.flush;calls=[]
+        def failed_second(handle):
+            calls.append(handle.path)
+            if len(calls)==2:raise BoundaryError('simulated storage flush failure')
+            return real(handle)
+        # The killed run: it removed the markers and never reached its own put-back.
+        with patch.object(VerifiedFile,'flush',failed_second),patch.object(CleanupJobs,'_put_back_markers',lambda *_:None):
+            with self.assertRaisesRegex(BoundaryError,'flush failure'):self.worker.run(self.id)
+        self.assertFalse(any(zone.MARKER in {n for n,_ in zone.streams(Path(s['path']))} for s in self.sources),'positive control: the markers are gone')
+        # The next run stops at its first review check, before it touches any marker itself.
+        self.good=False
+        with self.assertRaisesRegex(BoundaryError,'review changed'):self.worker.run(self.id)
+        self.assert_marked(zone)
 
     def test_output_gone_before_a_removal_keeps_every_original(self):
         # Audit m1: the held handle blocks a delete over SMB, not one made on the NAS itself, so the output is read

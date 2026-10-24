@@ -25,15 +25,30 @@ def _path(value):
     return value
 
 
+NO_OUTPUT = 'No sorted output folder is set'
+OVERLAP = 'The output folder overlaps a source folder'
+UNAVAILABLE = 'The output folder cannot be reached'
+KEPT = '; the source files are kept'
+# Senua 0.21.3 F1: refusals that say this PROCESS has no valid output folder (a repo launcher, a missing
+# audiobook-sources.json) or cannot reach it now (F3), not that the book's output is wrong. A cleanup refused
+# for one of them runs again.
+CONFIGURATION_REFUSALS = (NO_OUTPUT + KEPT, OVERLAP + KEPT, UNAVAILABLE + KEPT)
+
+
 def sorted_problem(output_root, sources):
     """'' when the output folder is set and neither is nor overlaps any source folder, else why not.
 
     Sergei, rulings 2 and 1a (2026-10-24): a source book is removed only when its verified result is in
     Z:\\Audiobooks Sorted, the configured output folder; a book that is not done stays unchanged in its source."""
     if not output_root:
-        return 'No sorted output folder is set'
-    if any(contains(output_root, source) or contains(source, output_root) for source in sources):
-        return 'The output folder overlaps a source folder'
+        return NO_OUTPUT
+    try:
+        if any(contains(output_root, source) or contains(source, output_root) for source in sources):
+            return OVERLAP
+    except OSError:
+        # Senua 0.21.3 F3: realpath raises for some network errors (an NAS outage); the state poll calls this on
+        # every uncached read. Unreachable fails safe: Start is blocked and nothing is removed.
+        return UNAVAILABLE
     return ''
 
 
@@ -41,9 +56,13 @@ def require_sorted(path, output_root, sources):
     """Raise ValueError unless path is inside the configured output folder and that folder is outside every source."""
     problem = sorted_problem(output_root, sources)
     if problem:
-        raise ValueError(problem + '; the source files are kept')
-    if not contains(path, output_root):
-        raise ValueError('The audiobook is not in the sorted output folder; the source files are kept')
+        raise ValueError(problem + KEPT)
+    try:
+        inside = contains(path, output_root)
+    except OSError:
+        raise ValueError(UNAVAILABLE + KEPT) from None
+    if not inside:
+        raise ValueError('The audiobook is not in the sorted output folder' + KEPT)
 
 
 @dataclass(frozen=True)

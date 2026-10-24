@@ -1081,6 +1081,28 @@ class ServiceTests(unittest.TestCase):
         self.service.close(); self.service = MergeService(self.inv, self.base / 'cache')
         self.assertEqual(self.service.jobs.status()['completed'], 1)
 
+    def test_destination_outside_the_sorted_folder_never_edits_the_original(self):
+        # Senua 0.21.3 F8: the guard in _run_media that offers the in-place session only for a destination in Sorted had
+        # no test; a mutant that offered it anyway survived (the module fixture counts the library as Sorted). Here the
+        # configured Sorted folder is elsewhere, so the copy flow must run and the original must never be touched.
+        from public_research import PublicResearch
+        from merge_service import MergeService
+        elsewhere = self.base / 'sorted'; elsewhere.mkdir()
+        original = self.source.read_bytes(); mtime = self.source.stat().st_mtime_ns
+        row = self.service.reviews.page()['rows'][0]; result = PublicResearch(self.client).lookup(row, str(self.audio)); self.assertEqual(result['reasons'], [], result)
+        offered = []; real = inplace_m4b.Session
+        def session(*args, **kwargs):
+            offered.append(args); return real(*args, **kwargs)
+        with patch.object(MergeService, 'output_policy', lambda service: (str(elsewhere), (str(self.audio),))), patch('inplace_m4b.Session', side_effect=session):
+            fresh, job_id = self.service.approve_automatic(row, result, threading.Event(), self.client); self.wait()
+        job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
+        self.assertNotEqual(job['output']['validation']['encoding'].get('selection'), inplace_m4b.SELECTION)
+        self.assertEqual(offered, [], 'no in-place session for a destination outside Sorted')
+        self.assertEqual(self.source.read_bytes(), original); self.assertEqual(self.source.stat().st_mtime_ns, mtime)
+        with connect_db(self.inv.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM inplace_edits').fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='inplace_edits'").fetchone() else 0, 0)
+            self.assertEqual(db.execute("SELECT count(*) FROM source_retirements").fetchone()[0] if db.execute("SELECT 1 FROM sqlite_master WHERE name='source_retirements'").fetchone() else 0, 0)
+
     def test_rename_postcondition_error_still_completes_source_cleanup(self):
         # Senua 0.21.0 F2 / Futaba M1 repro A: the OS renamed the book, then its postcondition proof raised, so no receipt was
         # journaled. The book completes and its cleanup proves the move itself instead of refusing forever.

@@ -310,7 +310,11 @@ class CleanupJobs:
             if worker.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
 
     def _work(self,selected=None,follow_audio=True,after_drain=None):
-        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (?,?,?)) ORDER BY created",('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')):
+        # Senua 0.21.3 F1: a cleanup refused only because this process had no valid output folder runs again here;
+        # every check runs again before any copy or removal, so a setting that is still missing refuses again.
+        from source_config import CONFIGURATION_REFUSALS
+        retried=('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')+CONFIGURATION_REFUSALS
+        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (%s)) ORDER BY created"%','.join('?'*len(retried)),retried):
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
             self.current=row['id']
@@ -333,12 +337,31 @@ class CleanupJobs:
     def run(self,id):
         # Audit m3: a download marker this run removed from an original that is still in place when the run stops or
         # holds is put back from its receipt; only a removed original loses its marker.
+        # Senua 0.21.3 F4: so is one an earlier run removed before it was killed (crash, power loss): its receipt stays
+        # in source_zone_marker_intents, and every run starts by putting such markers back.
+        self._put_back_markers(id,self._stale_markers(id))
         marked={}
         try:result=self._run(id,marked)
         except BaseException:
             self._put_back_markers(id,marked);raise
         self._put_back_markers(id,marked)
         return result
+    def _stale_markers(self,id):
+        """{path: (receipt, facts, root)} for every marker receipt of this cleanup; _put_back_markers restores only those
+        whose original is still in place, unchanged and without its marker."""
+        rows=self._rows('SELECT path,receipt FROM source_zone_marker_intents WHERE cleanup_id=?',(id,))
+        if not rows:return {}
+        cleanup=self._rows('SELECT intent FROM source_cleanup WHERE id=?',(id,))
+        if not cleanup:return {}
+        manifest=json.loads(cleanup[0]['intent'])['manifest'];sources={s['path']:s for s in manifest['sources']}
+        members={m['path']:m for m in self._rows('SELECT path,facts,state FROM cleanup_members WHERE cleanup_id=?',(id,))}
+        found={}
+        for row in rows:
+            source=sources.get(row['path']);member=members.get(row['path'])
+            if source is None or member and member['state'] in ('removed','disposition_set'):continue
+            facts=json.loads(member['facts']) if member and member['facts'] else {'size':source['size'],'modified':int(source['modified']),'attributes':None}
+            found[row['path']]=(json.loads(row['receipt']),facts,manifest['root'])
+        return found
     def _put_back_markers(self,id,marked):
         """Best effort: the same file (native identity, size, single link) gets its exact marker bytes and write time back.
         Anything that does not match is left as it is; the receipt in source_zone_marker_intents keeps the bytes."""
@@ -353,7 +376,8 @@ class CleanupJobs:
                     if now['identity']!=receipt['identity'] or now['size']!=facts['size'] or now['links']!=1:continue
                     if MARKER in {name for name,_ in streams(p)}:continue
                     restore_marker(p,base64.b64decode(receipt['marker_bytes_base64']))
-                    handle.restore_metadata(facts['modified'],facts['attributes']);handle.flush()
+                    attributes=facts['attributes'] if facts.get('attributes') is not None else now['attributes']
+                    handle.restore_metadata(facts['modified'],attributes);handle.flush()
                 marked.pop(path,None)
             except (BoundaryError,OSError,ValueError,KeyError):pass
     def _run(self,id,marked):
@@ -434,6 +458,9 @@ class CleanupJobs:
             for source,original,facts in held:
                 if self.stop.is_set():self._set(id,'paused');return
                 rb.revalidate();ob.revalidate()
+                # Senua 0.21.3 F2: the pure re-reads run before the removal intent is recorded too, so a refusal leaves no
+                # member in removal_intended (restore() reads that as a collision). They run again just before disposal.
+                self._sorted(final,BoundaryError);self._output_present(output,out,final)
                 with self.review_boundary(),connect(self.database) as db:
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before removal')
@@ -443,10 +470,7 @@ class CleanupJobs:
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
                     if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
                     self._sorted(final,BoundaryError)
-                    # Audit m1: the held handle blocks deletes over SMB, not on the NAS itself; re-read the output now.
-                    now=output.refresh()
-                    if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
-                        raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
+                    self._output_present(output,out,final)
                     single_stream(source['path'])
                     original.dispose();marked.pop(str(ordinary(source['path'])),None)
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))
@@ -455,6 +479,12 @@ class CleanupJobs:
                     db.commit() # Keep the location-generation reservation through native closure and absence.
                     db.execute('BEGIN IMMEDIATE');self._retire(intent,source,{'facts':packed(facts)},db);db.commit()
             self._set(id,'completed')
+    @staticmethod
+    def _output_present(output,out,final):
+        """Audit m1: the held handle blocks deletes over SMB, not on the NAS itself; re-read the output now."""
+        now=output.refresh()
+        if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
+            raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
     def _retire_moved(self,id,intent,manifest,out):
         """0.21.0 in-place edit: the original WAS the output (verified in full above). Its journaled no-copy rename is
         its retirement; there is no recovery copy and no deletion. A file at the old name is preserved and blocks."""

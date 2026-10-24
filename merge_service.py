@@ -364,7 +364,12 @@ class MergeService:
         try:
             self._dispose_retained(job['job_id'])
             self.enroll_cleanup(job['job_id'])
-        except (ValueError,OSError) as error:self._enrollment_attention(job,error)
+        except (ValueError,OSError) as error:
+            # Senua 0.21.3 F1: a process started without a valid output folder enrols nothing and parks nothing;
+            # the next start with the setting enrols the book (its sources stay, rulings 2 and 1a).
+            from source_config import CONFIGURATION_REFUSALS
+            if str(error) in CONFIGURATION_REFUSALS:return
+            self._enrollment_attention(job,error)
 
     def _enrollment_attention(self,job,error):
         with connect(self.inventory.database) as db:
