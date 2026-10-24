@@ -414,6 +414,10 @@ class CleanupJobs:
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
                     if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
                     self._sorted(final,BoundaryError)
+                    # Audit m1: the held handle blocks deletes over SMB, not on the NAS itself; re-read the output now.
+                    now=output.refresh()
+                    if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
+                        raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
                     single_stream(source['path'])
                     original.dispose()
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))

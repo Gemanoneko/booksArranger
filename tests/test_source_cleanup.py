@@ -130,6 +130,16 @@ class CleanupTest(unittest.TestCase):
         with patch.object(VerifiedFile,'flush',side_effect=BoundaryError('reused flush denied')):
             with self.assertRaisesRegex(BoundaryError,'reused flush'):self.worker.run(self.id)
         self.assertTrue(all(Path(s['path']).exists() for s in self.sources))
+    def test_output_gone_before_a_removal_keeps_every_original(self):
+        # Audit m1: the held handle blocks a delete over SMB, not one made on the NAS itself, so the output is read
+        # again right before each removal. Here its path stops resolving once every recovery copy is made.
+        import os,source_cleanup
+        final=os.path.normcase(self.job['output']['final_path']);real=source_cleanup.os.path.lexists
+        with patch.object(source_cleanup.os.path,'lexists',side_effect=lambda p:False if os.path.normcase(str(p))==final else real(p)):
+            with self.assertRaisesRegex(BoundaryError,'gone before source removal'):self.worker.run(self.id)
+        self.assertEqual(len(list((self.base/'recovery'/self.id).glob('*.mp3'))),2,'positive control: it got to the removals')
+        self.assert_all_kept()
+
     def test_hardlink_alias_refused_before_removal(self):
         import os
         os.link(self.sources[0]['path'],self.library/'other-name.mp3')
