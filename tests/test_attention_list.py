@@ -37,6 +37,13 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         counts=self.counts();self.assertEqual((counts['title_author'],counts['author_unclear'],counts['other']),(1,1,1))
         self.assertEqual(sum(v for v in counts.values() if isinstance(v,int)),self.listed()[1],'All = the sum of the chips')
 
+    def test_inside_a_reason_books_sort_by_folder_then_title_with_numbers_in_natural_order(self):
+        # Judy's section 1: the parts of one set sit together, part 2 before part 10.
+        for n in (10,2,1):tone(self.audio/'Unsorted'/'Набор'/('Часть %d'%n)/'01.mp3',self.cover,album='Безымянная %d'%n)
+        self.start();self.research_all()
+        page=self.service.reviews.page(status='output_attention',group='title_author')
+        self.assertEqual([r['title_clue'] for r in page['rows']],['Безымянная 1','Безымянная 2','Безымянная 10'])
+
     def test_a_suspected_reader_is_never_the_proposed_author_on_the_row(self):
         # Ruling 14: the only credit is a person named in brackets (a reader or uploader). The row asks; its Author
         # field starts empty and Goes to shows Без автора, so "Approve as is" (single or bulk) never files a reader.

@@ -408,7 +408,12 @@ class CandidateReviewService:
             if direct:chosen=result['rows'];total=result['total']
             else:
                 chosen=[r for r in result['rows'] if selected(r)];total=len(chosen)
-                if status=='output_attention':chosen.sort(key=lambda r:self.ATTENTION_ORDER.get(group_of(r['id']),1))  # stable: scope order within a group
+                if status=='output_attention':
+                    # Judy 2026-10-24, section 1: by reason, then source folder, then title, numbers in natural order (the
+                    # parts of one set sit together: part 2 before part 10).
+                    import re
+                    natural=lambda text:[(0,int(t),'') if t.isdigit() else (1,0,t.casefold()) for t in re.split(r'(\d+)',str(text or ''))]
+                    chosen.sort(key=lambda r:(self.ATTENTION_ORDER.get(group_of(r['id']),1),natural(r.get('scope')),natural(r.get('title_clue'))))
                 if status=='restarted':chosen.sort(key=lambda r:restart.get(r['id'],9))
                 chosen=chosen[offset:offset+limit]
             # Per-book extras for the shown page only.
