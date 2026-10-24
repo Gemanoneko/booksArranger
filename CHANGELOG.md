@@ -22,6 +22,7 @@
 ### Fixed
 
 - Senua's review findings: the 0.21.3 findings F1-F4, F6 and F8, the early 0.22.0 review findings (G1-G6, m1-m5, m7-m9), and series backfill now names books relative to the folder they were published in.
+- "Keep as separate books" now really splits a set even when its details were saved. More doubtful part sets are asked about instead of joined: Эпизод/Том numbering, sets that name several works, generic titles like «Неизвестно», and credits naming three or more people.
 - A status computed without a catalog no longer fails on the to-do list.
 - The to-do row never proposes a suspected reader as the author.
 - Tests: a borrowed fixture no longer leaks its research patch, and the local-identity switch is restored after each test.
