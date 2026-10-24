@@ -272,6 +272,21 @@ class SkazkaConfirmAndConvert(unittest.TestCase):
         self.assertTrue(self.old.exists() and all(path.exists() for path in self.sources))
         with self.service.jobs._db() as db:self.assertEqual(db.execute('SELECT state FROM producer_recovery_checkpoints').fetchone()[0],'isolated_retained')
 
+    def test_a_changed_child_output_keeps_the_old_files_and_the_original(self):
+        # Audit m5: the old attempt's files go only after the child's published output is hashed again in full, not on
+        # the catalog's "completed, validation passed" flags alone. Here its bytes change right after publication.
+        from merge_service import MergeService
+        row,parent=self.interrupted();self.confirm(row,parent);real=MergeService._finish_recovery_child
+        def changed(service,job_id):
+            output=json.loads(service.jobs._rows('SELECT output FROM audio_jobs WHERE job_id=?',(job_id,))[0]['output'])
+            with open(output['final_path'],'r+b') as stream:stream.seek(64);byte=stream.read(1);stream.seek(64);stream.write(bytes([byte[0]^0xff]))
+            return real(service,job_id)
+        with patch.object(MergeService,'_finish_recovery_child',changed):self.service.jobs.resume();status=self.wait()
+        child=next(item for item in status['jobs'] if item['job_id']!=parent['job_id']);self.assertEqual(child['state'],'completed',status)
+        cleanup=self.service.cleanup.status(child['job_id']);self.assertEqual(cleanup['state'],'needs_attention');self.assertIn('original is kept',cleanup['reason'])
+        self.assertTrue(self.old.exists() and all(path.exists() for path in self.sources))
+        with self.service.jobs._db() as db:self.assertEqual(db.execute('SELECT state FROM producer_recovery_checkpoints').fetchone()[0],'isolated_retained')
+
     def test_refusals_change_nothing_and_a_failed_proof_keeps_the_statement(self):
         from audio_jobs import RetryRefused
         row,parent=self.interrupted();job=parent['job_id']

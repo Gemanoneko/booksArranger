@@ -316,7 +316,11 @@ class MergeService:
         binding=json.loads(binding['manifest']).get('retry_intent') or {}
         if binding.get('retained_disposal') is not True:return None
         roots=[*self.inventory.roots.values(),*(self.inventory.all_source_roots() if hasattr(self.inventory,'all_source_roots') else ()),*([self.inventory.output_root] if getattr(self.inventory,'output_root',None) else [])]
-        try:return self.producer_recovery.dispose(binding['parent_job_id'],job_id,roots)
+        try:
+            # Audit m5: the child's published output is hashed in full and held while the old files go, not taken from
+            # the catalog's flags alone.
+            with self.storage_cleanup.protected_output(job_id,guard=lambda:None):
+                return self.producer_recovery.dispose(binding['parent_job_id'],job_id,roots)
         except (ValueError,OSError) as error:raise ValueError('Old working files of the interrupted attempt were kept, so the original is kept too: '+str(error)) from error
 
     def _destination_policy(self):
