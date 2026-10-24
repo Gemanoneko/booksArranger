@@ -283,7 +283,7 @@ function renderRows(force=false) {
   $('empty').hidden=rows.length>0;
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
-  const nothing=attentionList && !search?'Nothing needs your attention.':'';
+  const nothing=attentionList && !search?(stillChecking()?`Nothing needs your attention yet. Still checking ${plural(stillChecking(),'book','books')}.`:'Nothing needs your attention.'):'';
   const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':
     view==='candidates' && filters[view]==='restarted' && !search?'No books are waiting after Start over. Books you start over appear here until automatic processing queues them.':nothing || `No ${unit} match these filters · ${label}.`;
   $('inventory').removeAttribute?.('aria-busy');
@@ -476,7 +476,7 @@ function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),se
   // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
   const approvable=bulkChip()?approveSelectable().items.length:0;
   $('batch-count').textContent=bulkChip()?`${selected.length} selected · ${approvable} can be approved as is`+(selected.length-approvable>0?` · ${selected.length-approvable} left out`:''):
-    attentionSelection()?`${selected.length} selected`+(waiting?` · ${waiting} already waiting for retry checks`:String())+(retryable>conditional || !conditional?` · ${retryable-conditional} new retries available`:'')+(conditional?` · ${conditional} can be checked again`:'')+(leftOut>0?` · ${leftOut} left out`:''):
+    needsChip()?`${selected.length} selected`:attentionSelection()?`${selected.length} selected`+(waiting?` · ${waiting} already waiting for retry checks`:String())+(retryable>conditional || !conditional?` · ${retryable-conditional} new retries available`:'')+(conditional?` · ${conditional} can be checked again`:'')+(leftOut>0?` · ${leftOut} left out`:''):
     filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
     `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');$('select-page').checked=visible.length>0 && selected.length===visible.length;$('select-page').indeterminate=selected.length>0 && selected.length<visible.length;controls();}
 function renderJobs(){
@@ -511,8 +511,9 @@ function activityStep(row,finishing){
   else if(row.kind==='series')step=row.step==='series updating'?'Writing the series into the audiobook':'Looking up the series';
   else step=typeof row.step_text==='string' && row.step_text?row.step_text:'Working';
   // A held row is not progressing (v0.16.8): it says so, with no bar, count or clock.
-  // A long or multi-line reason is technical text: it is never printed here (Judy 2026-10-24, section 4.6).
-  if(row.state==='attention')return 'On hold — '+(typeof row.reason==='string' && row.reason?(row.reason.length<=80 && !/[\r\n]/.test(row.reason)?row.reason:'see details'):step);
+  // A long or multi-line reason is technical text: it is never printed here (Judy 2026-10-24, section 4.6); the held book
+  // is listed under Output needs attention, so the line points there (0.22.0 review A6).
+  if(row.state==='attention')return 'On hold — '+(typeof row.reason==='string' && row.reason?(row.reason.length<=80 && !/[\r\n]/.test(row.reason)?row.reason:'see Needs attention'):step);
   if(row.state==='paused')return 'Paused - '+step;
   if(row.state==='pausing')return 'Pausing - '+step;
   return step;
@@ -1306,9 +1307,9 @@ function finishRetryAll(run){
   retryAllRun.ended=true;stripNote=retryReceiptText(run,false);
   setTimeout(async()=>{if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}controls();},0);
 }
-const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Missing title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
+const attentionLabels={all:'All',files_missing:'Missing files',title_author:'Missing title or author',author_unclear:'Author unclear',same_author:'Same author?',name_taken:'Name taken',part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear',retry:'Can retry',repair:'Can repair',reacquire:'Need to reacquire',checking:'Retry checks',changed:'Original changed',audiobook:'Audiobook problem',other:'Other',unsupported:'M4B not supported'};
 // All = the sum of these keys = the shortcut = the Jobs line (Judy 2026-10-24, section 2): the "Needs your answer" set first.
-const NEEDS_KEYS=['files_missing','title_author','author_unclear','same_author','name_taken'];
+const NEEDS_KEYS=['files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear'];  // 0.22.0 review (Judy, B3): three hold chips
 const attentionKeys=['all',...NEEDS_KEYS,'retry','repair','reacquire','checking','changed','audiobook','other','unsupported'];
 function attentionTotal(jobs){
   const counts=jobs?.attention_counts;
@@ -1336,6 +1337,11 @@ function renderAttentionGroups(){
   }
   // A set whose chips are all hidden hides its label too (the Stopped set always shows Can retry).
   if($('attention-set-needs'))$('attention-set-needs').hidden=NEEDS_KEYS.every(key=>$('group-'+key).hidden);
+  // Books automatic processing has not settled yet are counted, never silently missing (0.22.0 review B5.2).
+  const sweep=$('attention-sweep');
+  if(sweep){const n=stillChecking(),running=state?.automatic_processing?.state==='Running';
+    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked. Start automatic processing to check them.`;
+    if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const run=bulkRun(),running=run?.state==='running';
   if(retryAllRun && !retryAllRun.ended && run?.id===retryAllRun.id && !running)finishRetryAll(run);
   const all=$('retry-all'),confirm=retryAllConfirm,allLabel=`Retry all (${value('retry').toLocaleString()})`;
@@ -1374,13 +1380,14 @@ function conditionalRetries(items){return items.filter(item=>!!refusalCurrent(it
 function renderRetrySelected(){
   const shown=attentionSelection(),button=$('retry-selected'),count=shown?retrySelectable().length:0,confirm=retrySelectedConfirm;
   // In the two chips where Approve as is works, Retry selected hides (Judy 2026-10-24, section 5).
-  $('queue-books').hidden=shown;button.hidden=!shown || !!confirm || bulkChip();
+  $('queue-books').hidden=shown;button.hidden=!shown || !!confirm || needsChip();
   const label=`Retry selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
   button.title=count?`Request retries for these ${count.toLocaleString()} selected books. Each book is checked before a conversion job can be queued.`:'Select books that can be retried or repaired.';
   button.disabled=!count || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning() || retrySelectedRun;
-  const help=bulkChip()?'Approve as is uses the names shown on each row. Books that need a different action are left out.':shown?(conditionalRetries(retrySelectable())?'Previous attempts were refused. Check each book\'s reason before retrying.':'Only selected books that can be retried or repaired can request new checks.'):'Only ready selected revisions are queued. Candidates needing review remain selected.';
-  if($('batch-help').textContent!==help)$('batch-help').textContent=help;
-  $('retry-selected-confirm').hidden=!shown || !confirm || bulkChip();
+  // A "Needs your answer" chip without bulk Approve has no batch action, so no help line (0.22.0 review B3).
+  const help=bulkChip()?'Approve as is uses the names shown on each row. Books that need a different action are left out.':needsChip()?'':shown?(conditionalRetries(retrySelectable())?'Previous attempts were refused. Check each book\'s reason before retrying.':'Only selected books that can be retried or repaired can request new checks.'):'Only ready selected revisions are queued. Candidates needing review remain selected.';
+  if($('batch-help').textContent!==help)$('batch-help').textContent=help;$('batch-help').hidden=!help;
+  $('retry-selected-confirm').hidden=!shown || !confirm || needsChip();
   if(confirm){
     const question=`Request retries for ${confirm.items.length.toLocaleString()} selected books? Each book is checked before a conversion job can be queued.`+clearsClause(confirm.items.filter(item=>workingOf(item.row)?.state==='cleanable').length),go=`Request ${confirm.items.length.toLocaleString()} retries`;
     if($('retry-selected-question').textContent!==question)$('retry-selected-question').textContent=question;
@@ -1830,15 +1837,42 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   both_missing:['Title and author missing','No title or author in the tags, file name or folder name.'],garbled:['Tags unreadable',"The tags show garbled text, so they aren't used."],
   two_people:['Author unclear',"Two people are credited. The app can't tell who wrote it."],tag_and_name:['Author unclear','The tags and the folder name give different authors.'],
   names_differ:['Author unclear','The file name and the folder name give different authors.'],reader:['Author unclear',"The only name credited may be the reader. The app can't tell who wrote it."],
-  name_taken:['Name taken','A book with this name is already in Audiobooks Sorted.'],other:['Needs you','This book needs your decision. Select the row to read why.']};
+  name_taken:['Name taken','A book with this name is already in Audiobooks Sorted.'],other:['Needs you','This book needs your decision.']};
+// The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
+const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
+function holdSentence(kind,cause,f={}){
+  const n=value=>Number.isInteger(value)?value:Number(value) || 0;
+  if(kind==='order_unclear')return {no_tracks:'No file has a track number. The order comes from the file names.',
+    some_missing:`${n(f.missing)} of ${n(f.total)} files ${n(f.missing)===1?'has':'have'} no track number.`,tied:'Some files share a track number.',
+    gaps:"Track numbers skip or don't start at 1."}[cause] || "The app can't be sure of the playback order.";
+  if(kind==='files_unclear')return {track_total:`The tags say ${n(f.tags_say)} tracks, but ${n(f.here)} ${n(f.here)===1?'file is':'files are'} here.`,
+    disc_total:`The tags say ${n(f.tags_say)} discs, but ${n(f.here)} ${n(f.here)===1?'is':'are'} here.`,
+    one_of_many:`This file is tagged as track ${n(f.index)} of ${n(f.total)}. The other tracks aren't here.`,
+    lack_title:n(f.missing)===1?`1 of ${n(f.total)} files doesn't mention this book's title.`:`${n(f.missing)} of ${n(f.total)} files don't mention this book's title.`,
+    mixed:'The files carry different albums or artists. They may be more than one book.',parts:"The parts of this set don't number cleanly."}[cause] || "The app can't be sure which files belong to this book.";
+  if(kind==='part_of_book')return {chapter:'This file is named as one chapter.',numbered_part:'The name marks this as one numbered part.',
+    siblings:n(f.beside)===1?'Another file beside it carries the same title.':`${n(f.beside)} other files beside it carry the same title.`,
+    part_set:`Part ${n(f.index)} of ${n(f.total)} of "${f.set || ''}".`,unreadable:"The other files in this folder couldn't be checked."}[cause] || "The app can't tell if this is a whole book.";
+  return '';
+}
+const HOLD_APPROVE={order_unclear:['Approve this order','Approve the order shown: convert if needed, rename, move to Audiobooks Sorted.'],
+  files_unclear:['Approve these files','Approve the files shown as one book: convert if needed, rename, move to Audiobooks Sorted.'],
+  part_of_book:['Approve as one book','File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.']};
 const BASIS_LINES={number_rule:'Set name + part number.',file_name:'Title from the file name.',folder_name:'Title from the folder name.'};
-const ASK_LABELS={approve:'Approve',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list'};
+const ASK_LABELS={approve:'Approve',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list',order:'Change order',choose:'Choose files'};
 const ASK_TIPS={approve:'Approve with the values shown: convert if needed, rename, move to Audiobooks Sorted. Ctrl+Enter in a field does the same.',
   scan:"Look for the missing files in this book's folders. Nothing is changed or deleted.",convert:'Convert the files that are present and leave out the missing ones.',
-  remove:'Stop listing this book. No files are touched. A scan lists it again if its files return.'};
+  remove:'Stop listing this book. No files are touched. A scan lists it again if its files return.',
+  order:'Change the playback order in the details panel. Save it there, then approve.',choose:'Choose which files belong in the details panel. Save it there, then approve.'};
+const HOLD_SCAN_TIP="Check this book's folders again, for example after you rename or add files. Nothing is changed or deleted.";
+function holdKind(ask){return Object.hasOwn(HOLD_STATUS,ask?.kind || '')?ask.kind:'';}
+// The face and tooltip follow the chip, so the press says what is confirmed (B4 Buttons).
+function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind==='approve' && hold?HOLD_APPROVE[hold][0]:ASK_LABELS[kind];}
+function askTip(entry,kind){const hold=holdKind(askOf(entry.row));return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
 const ASK_PENDING={approve:['Approving...','Approving this book...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
-  found:[null,'Files found. The book is checked again.'],removed:[null,'Removed from the list. No files were touched.']};
+  found:[null,'Files found. The book is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
+  changed:[null,'Changes found. The book is checked again.'],later:[null,'Changes found. The next library scan catalogues them.']};
 const ASK_REFUSED={approve:'Approve was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
 function askOf(row){const ask=row?.kind==='candidate'?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
 function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
@@ -1854,6 +1888,8 @@ function askFieldPlan(ask){
   else if(kind==='author_unclear')plan={title:guess,author:'radio'};
   else if(kind==='same_author')plan={title:false,author:'same'};
   else if(kind==='name_taken')plan={title:true,author:'input'};
+  // Part of a bigger book always shows Title (the question is "is it a whole book, and what is it called?", B4).
+  else if(kind==='part_of_book')plan={title:true,author:!askProposal(ask,'author')?'input':null};
   plan.title=plan.title || !askProposal(ask,'title');
   return plan;
 }
@@ -1873,7 +1909,8 @@ function outputName(){const root=state?.audiobook_output_root;return typeof root
 function askInert(row){
   if(askTitleEmpty(row))return 'Type a title first.';
   if(askDestination(row)?.taken===true)return 'That name is taken. Change the title or author.';
-  if(dirty && (reviewRow || selectedRow)?.id===row.id)return 'Save or discard the edits in the details panel first.';
+  // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too).
+  if((dirty && (reviewRow || selectedRow)?.id===row.id) || (trackDirty && (trackDraft?.id ?? selectedRow?.id)===row.id))return 'Save or discard the edits in the details panel first.';
   return '';
 }
 function askText(row){
@@ -1883,10 +1920,17 @@ function askText(row){
     return present>0?{status:'Missing files',hint:`${gone.toLocaleString()} of ${total.toLocaleString()} files ${gone===1?'is':'are'} missing.`}:{status:'All files missing',hint:`All ${total.toLocaleString()} files are missing.`};
   }
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
+  if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,ask.facts || {})};
   const copy=ASK_COPY[['title_author','author_unclear'].includes(ask.kind)?ask.why:ask.kind] || ASK_COPY[{title_author:'both_missing',author_unclear:'two_people'}[ask.kind] || 'other'];
   return {status:copy[0],hint:copy[1]};
 }
-function askAlso(ask){const text=ask.also?ASK_COPY[ask.why]?.[1] || '':'';return text?'Also: '+text[0].toLowerCase()+text.slice(1):'';}
+// "Also:" takes the first sentence only (0.22.0 review A1a): "Also: the only name credited may be the reader."
+function askAlso(ask){
+  const text=!ask.also?'':Object.hasOwn(HOLD_STATUS,ask.also)?holdSentence(ask.also,ask.also_cause,ask.also_facts || {}):ASK_COPY[ask.why]?.[1] || '';
+  const first=text.split(/(?<=\.)\s/)[0];return first?'Also: '+first[0].toLowerCase()+first.slice(1):'';
+}
+// Other's catch-all: the app's own short reason, when it is one line of 80 characters or fewer (B3).
+function askReason(ask){const reason=typeof ask.reason==='string'?ask.reason.trim():'';return ask.kind==='other' && reason && reason.length<=80 && !/[\r\n]/.test(reason)?'Reason: '+reason:'';}
 function sameWhy(ask){
   const why=ask.same_author?.why,books=Number(ask.same_author?.existing_books) || 0;
   if(why==='translation')return 'Same name in another language.';
@@ -1951,6 +1995,8 @@ function buildAskFields(entry){
   other.addEventListener('input',()=>{d.other=other.value;d.choice='other';const radio=entry.controls.find(c=>c.type==='radio' && c.value==='other');if(radio)radio.checked=true;askChanged(entry,500);});
   other.addEventListener('blur',()=>askPreview(entry,0));
   entry.other=other;entry.controls.push(other);set.append(other);box.append(set);
+  // While nothing is chosen, say what Approve alone does (0.22.0 review A2 and A3).
+  entry.nochoice=node('p',plan.author==='same'?'No choice files it as written. Nothing is remembered.':'No choice files it under Без автора.','field-help ask-nochoice');box.append(entry.nochoice);
   if(plan.author==='same'){box.append(node('p','A choice is remembered for other books with these names.','field-help'));const count=Number(ask.same_author?.count) || 0;if(count>1)box.append(node('p',`Applies to ${count.toLocaleString()} books.`,'field-help'));}
 }
 // Missing files: the folder once on an "In" line, then each file name; up to 3 in the row (section 4.4).
@@ -1960,26 +2006,52 @@ function buildAskMissing(entry){
   for(const folder of folders){if(shown>=3)break;entry.missing.append(node('p','In '+folder,'path'));for(const file of files.filter(f=>parent(f)===folder)){if(shown>=3)break;entry.missing.append(node('p',file.slice(folder.length),'path'));shown++;}}
   if(files.length>shown)entry.missing.append(node('p',`+ ${(files.length-shown).toLocaleString()} more, listed in the details panel.`,'field-help'));
 }
+// The files Approve will use (0.22.0 review B4): Order unclear as a numbered "Playback order" list of 5, the others as an
+// "In" folder line and 3 names (files without the title first), then "+ n more, listed in the details panel." Mixed
+// recordings add the albums, or the artists when only they differ.
+function buildHoldList(entry){
+  const ask=askOf(entry.row),kind=holdKind(ask);if(!kind)return;
+  const files=(Array.isArray(ask.files)?ask.files:[]).filter(f=>typeof f?.name==='string'),count=Number(ask.file_count) || files.length;if(!files.length)return;
+  const box=entry.missing,more=shown=>{if(count>shown)box.append(node('p',`+ ${(count-shown).toLocaleString()} more, listed in the details panel.`,'field-help'));};
+  if(kind==='order_unclear'){
+    box.append(node('p','Playback order','field-help ask-list-label'));
+    const list=node('ol','','path ask-order');list.setAttribute('aria-label','Playback order');
+    for(const f of files.slice(0,5)){const item=node('li',f.name);item.title=f.folder || '';list.append(item);}
+    box.append(list);more(Math.min(5,files.length));return;
+  }
+  const flagged=ask.cause==='lack_title' && Array.isArray(ask.flagged) && ask.flagged.length?ask.flagged:null,shown=(flagged || files).slice(0,3);
+  for(const folder of [...new Set(shown.map(f=>f.folder || ''))]){
+    box.append(node('p','In '+folder+(/[\\/]$/.test(folder)?'':'\\'),'path'));
+    for(const f of shown.filter(item=>(item.folder || '')===folder))box.append(node('p',f.name,'path'));
+  }
+  more(shown.length);
+  if(ask.cause==='mixed')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists]])if(Array.isArray(items) && items.length)
+    box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
+}
 function buildAskCell(row,td){
   const entry={row,cell:td,controls:[]};askRows.set(row.id,entry);
   entry.hint=node('p','','field-help attention-hint');entry.hint.id='attention-hint-'+row.id;
   entry.also=node('p','','field-help attention-also');entry.why=node('p','','field-help ask-why');entry.fields=node('div','','ask-fields');entry.missing=node('div','','ask-missing');entry.dest=node('p','','goes-to');
   td.append(entry.hint,entry.also,entry.why,entry.fields,entry.missing,entry.dest);
-  buildAskFields(entry);buildAskMissing(entry);
+  buildAskFields(entry);buildAskMissing(entry);buildHoldList(entry);
   if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
   updateAskRow(entry);
 }
+// The row's buttons, primary first: Missing files: Scan again + Convert what's there or Remove from list; a hold row:
+// its Approve face + Change order (Order unclear) or Choose files (Files unclear) + Scan again; else Approve.
 function buildAskActions(row,buttons){
   const entry=askRows.get(row.id),ask=askOf(row);if(!entry)return;
-  const make=(kind,extra='')=>{const button=node('button',ASK_LABELS[kind],'quiet row-retry'+extra);button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
-    button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return button;};
-  if(ask.kind==='files_missing'){entry.primaryKind='scan';entry.secondKind=ask.missing?.present>0?'convert':'remove';entry.primary=make('scan');entry.second=make(entry.secondKind,entry.secondKind==='convert'?' ask-convert':'');}
-  else{entry.primaryKind='approve';entry.primary=make('approve');}
+  const hold=holdKind(ask),wide=hold || ask.kind==='files_missing'?' ask-convert':'';
+  const kinds=ask.kind==='files_missing'?['scan',ask.missing?.present>0?'convert':'remove']:hold?['approve',...({order_unclear:['order'],files_unclear:['choose']}[hold] || []),'scan']:['approve'];
+  entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
+    button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
+  entry.primaryKind=kinds[0];entry.primary=entry.buttons[0].button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
   updateAskRow(entry);
 }
 function askMode(row,kind){
   if(ended || recoveryDisconnected)return 'offline';
   if(askDone.has(row.id))return 'done';
+  if(kind==='order' || kind==='choose')return 'ready';  // they only open the details panel
   if(askPending?.id===row.id)return askPending.kind===kind?'pending':'busy';
   if(busy || askPending || askBulk || retryPending || bulkRunning() || recoverySubmitting || automaticRequest!==null || releaseRun)return 'busy';
   if((kind==='approve' || kind==='convert') && askInert(row))return 'inert';
@@ -1989,8 +2061,8 @@ function updateAskButton(entry,button,kind){
   if(!button)return;const row=entry.row,mode=askMode(row,kind),done=askDone.get(row.id),queued=done==='approve' || done==='convert';
   const gone=mode==='done' && button!==entry.primary,hadFocus=gone && document.activeElement===button;button.hidden=gone;
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
-  const label=mode==='done' && queued?'Queued':mode==='pending'?ASK_PENDING[kind][0]:ASK_LABELS[kind];
-  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',busy:'Another operation is in progress.',inert:askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:ASK_TIPS[kind]}[mode];
+  const label=mode==='done' && queued?'Queued':mode==='pending'?ASK_PENDING[kind][0]:askLabel(entry,kind);
+  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',busy:'Another operation is in progress.',inert:askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
@@ -2011,14 +2083,15 @@ function updateAskRow(entry){
   if(done){status=ASK_DONE[done]?.[0] || status;hint=ASK_DONE[done]?.[1] || hint;}
   else if(pending)hint=ASK_PENDING[pending][1];
   else if(result){hint=result.text;warn=true;}
-  else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+'. Not found.';
+  else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   statusInPlace(entry.cell,status);setHint(entry.hint,hint,clause,warn);
-  const also=done?'':askAlso(ask),why=done || ask.kind!=='same_author'?'':sameWhy(ask);
+  const also=done?'':askAlso(ask),why=done?'':ask.kind==='same_author'?sameWhy(ask):askReason(ask);
   if(entry.also.textContent!==also)entry.also.textContent=also;entry.also.hidden=!also;
   if(entry.why.textContent!==why)entry.why.textContent=why;entry.why.hidden=!why;
   entry.fields.hidden=!!done;entry.missing.hidden=!!done;
+  if(entry.nochoice)entry.nochoice.hidden=!!askDraft(row.id).choice;
   renderGoesTo(entry);
-  updateAskButton(entry,entry.primary,entry.primaryKind);updateAskButton(entry,entry.second,entry.secondKind);
+  for(const {kind,button} of entry.buttons || [])updateAskButton(entry,button,kind);
   const tip=cellTip(row);if(entry.cell.title!==tip)entry.cell.title=tip;
 }
 function updateAskRows(){for(const entry of askRows.values())updateAskRow(entry);}
@@ -2040,7 +2113,13 @@ function askPreview(entry,delay){
   if(delay>0)d.timer=setTimeout(send,delay);else return send();
 }
 function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKind==='convert'?'convert':null):entry.primaryKind;if(kind)return askPress(entry,kind);}
-function askErrorText(error,kind){if(!error.httpStatus)return 'Connection interrupted. Check the status above before trying again.';if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';return ASK_REFUSED[kind];}
+function askErrorText(error,kind){
+  if(!error.httpStatus)return 'Connection interrupted. Check the status above before trying again.';
+  if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';
+  // A safety gate is named (0.22.0 review B5.4).
+  if(error.body?.code==='format')return "The audio format needs a decision the app can't make yet. Select the row to read why.";
+  return ASK_REFUSED[kind];
+}
 function askClock(date){return String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
 // The strip line (a polite live region): stays until the chip or filter changes; Retry receipts do not overwrite it.
 function askNote(text){stripNote=text;retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};renderAttentionGroups();}
@@ -2054,9 +2133,18 @@ function askLeave(entry){
   }
   $('filter').focus?.({preventScroll:true});
 }
+// Change order / Choose files (0.22.0 review B4): select the row, open Manual review and move focus to its included-files
+// heading, where Include, Move up / Move down and Save track review already are. Approve then uses what he saved.
+function openTrackReview(entry){
+  const row=entry.row;select(row,selectedPath!==row.path);
+  if($('manual-review'))$('manual-review').open=true;
+  const heading=$('member-count');heading?.scrollIntoView?.({block:'start',behavior:'auto'});heading?.focus?.({preventScroll:true});
+}
 async function askPress(entry,kind){
-  const row=entry.row,id=row.id,button=kind===entry.primaryKind?entry.primary:entry.second;
-  if(!button || button.disabled || button.getAttribute?.('aria-disabled')==='true' || askPending || askBulk || askDone.has(id))return;
+  const row=entry.row,id=row.id,button=(entry.buttons || []).find(item=>item.kind===kind)?.button;
+  if(!button || button.disabled || button.getAttribute?.('aria-disabled')==='true' || askDone.has(id))return;
+  if(kind==='order' || kind==='choose')return openTrackReview(entry);
+  if(askPending || askBulk)return;
   const values=kind==='approve' || kind==='convert'?askValues(row):null,ask=askOf(row);
   askPending={id,kind};askResults.delete(id);controls();
   try{
@@ -2067,7 +2155,13 @@ async function askPress(entry,kind){
       askNote(values.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
     }else{
       const result=await request(kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss',{library:'Audiobooks',id,revision:row.revision},kind==='scan'?120000:PRESS_TIMEOUT);
-      if(kind==='scan' && result?.found!==true)askChecked.set(id,askClock(new Date()));
+      if(kind==='scan' && holdKind(ask)){
+        // A hold row: "Checked 14:32. No change." on the row, or the book leaves and is checked again (B4).
+        if(result?.changed===true){const later=result.scan_later===true;askDone.set(id,later?'later':'changed');askNote(ASK_DONE[later?'later':'changed'][1]);}
+        else if(result?.found===true)askChecked.set(id,askClock(new Date()));
+        else askResults.set(id,{text:ASK_REFUSED.scan});
+      }
+      else if(kind==='scan' && result?.found!==true)askChecked.set(id,askClock(new Date()));
       else{askDone.set(id,kind==='scan'?'found':'removed');askNote(kind==='scan'?'Files found. The book is checked again.':'Removed 1 book from the list. No files were touched.');}
     }
   }catch(error){
@@ -2084,6 +2178,9 @@ async function askPress(entry,kind){
 // Bulk "Approve as is (N)" (section 5): only in Missing title or author and Author unclear, selected rows only, never a
 // row with typed text, an inert Approve, or a reader as the author (ruling 14), always confirmed in a dialog.
 function bulkChip(){return attentionSelection() && (attentionGroup==='title_author' || attentionGroup==='author_unclear');}
+function stillChecking(){const n=state?.audiobook_jobs?.todo_still_checking;return Number.isInteger(n) && n>0?n:0;}
+// Every "Needs your answer" chip: Retry selected hides there (0.22.0 review B3); bulk Approve stays only in bulkChip().
+function needsChip(){return attentionSelection() && NEEDS_KEYS.includes(attentionGroup);}
 function readerRisk(row){const ask=askOf(row),author=askProposal(ask,'author');return ask.kind==='author_unclear' && (!author || ask.why==='reader' || (ask.candidates || []).some(c=>c?.name===author && c.reader_count>0));}
 function approveSelectable(){
   if(!bulkChip())return {items:[],selected:0};
@@ -2139,7 +2236,7 @@ $('attention-shortcut').addEventListener('click',()=>{
 $('copy-technical').addEventListener('click',async()=>{
   const text=$('automatic-technical').textContent || '';
   try{const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw Error('no clipboard');await clipboard.writeText(text);setText('copy-technical-status','Copied.');}
-  catch(error){setText('copy-technical-status','Copy is unavailable here. Select the text instead.');}
+  catch(error){setText('copy-technical-status',"Couldn't copy. Select the text and press Ctrl+C.");}  // 0.22.0 review A1d
 });
 
 controls();

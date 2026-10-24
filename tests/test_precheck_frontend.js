@@ -84,7 +84,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   // The Checking strip group: after Can repair, counted in All, hidden at zero.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
   assert.match(html,/id="group-repair"[^>]*>[^<]*<\/button><button id="group-reacquire"[^>]* hidden>Need to reacquire · 0<\/button><button id="group-checking" type="button" class="quiet attention-group" aria-pressed="false" title="Show saved retry requests waiting for checks and books whose retry checks are running\." hidden>Checking · 0<\/button>/);
-  assert.deepEqual([...run('attentionKeys')],['all','files_missing','title_author','author_unclear','same_author','name_taken','retry','repair','reacquire','checking','changed','audiobook','other','unsupported']);
+  assert.deepEqual([...run('attentionKeys')],['all','files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear','retry','repair','reacquire','checking','changed','audiobook','other','unsupported']);
   run('attentionGroup="all"');
   counts({retry:2,repair:0,checking:3,changed:0,audiobook:0,other:1,unsupported:0});
   assert.equal(get('group-checking').textContent,'Retry checks · 3');assert.equal(get('group-checking').hidden,false);assert.equal(get('group-all').textContent,'All · 6');

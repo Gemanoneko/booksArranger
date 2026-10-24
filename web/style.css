@@ -100,3 +100,9 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 #approve-dialog button{min-height:32px;min-width:96px;white-space:normal}
 #approve-dialog-list{max-height:40vh;overflow:auto;border:1px solid var(--border);border-radius:5px;padding:8px;color:var(--text)}
 #approve-dialog-list p{margin:0}
+/* 0.22.0 review (Judy 2026-10-24, B4): the hold rows' file lists, the "No choice" lines, the strip's Still checking line. */
+.ask-list-label{margin:6px 0 0}
+.ask-order{margin:2px 0 0;padding-left:28px;color:var(--text)}
+.ask-order li{overflow-wrap:anywhere}
+.ask-nochoice{margin:4px 0 0}
+#attention-sweep{flex-basis:100%;margin:2px 0 0}
