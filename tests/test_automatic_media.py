@@ -18,6 +18,9 @@ def artwork():
 
 class AutomaticMediaTests(unittest.TestCase):
     def setUp(self):
+        # v0.22.0: these fixtures are identified from their tags alone (Sergei 2026-10-24, title + author is enough); the
+        # cases build their results through the Internet identity path, so they pin local identity off.
+        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.audio=self.base/'audio';self.audio.mkdir();self.cover=artwork();self.cover_path=self.base/'art.png';self.cover_path.write_bytes(self.cover)
         self.sources=[]
         for index in (1,2):

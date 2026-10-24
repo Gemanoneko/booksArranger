@@ -60,6 +60,9 @@ class LocalPolicyRecheckTests(unittest.TestCase):
             auto.start();state=fx.wait_auto(auto)
             self.assertEqual(calls,[row['id']]);self.assertEqual(state['state'],'Paused')
             with connect(inv.database) as db:self.assertEqual(m.records(db,row)[0]['values']['title'],'Human source retained')
-        finally:fx.tearDown()
+        finally:
+            # The borrowed setUp starts a class-wide patch of PublicResearch.local_agreement; without its cleanups it leaked
+            # into every later module of the same process (0.22.0 gate, batch 0).
+            fx.tearDown();fx.doCleanups()
 
 if __name__=='__main__':unittest.main()
