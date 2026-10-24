@@ -502,12 +502,14 @@ class MergeService:
         with leftover working files (they can go without a catalog commit, removed outside the app)."""
         return WORKING_MAX_AGE if self.__dict__.get('_working_listed') else QUIET_MAX_AGE
 
-    def cleanup_statuses(self,job_ids):
+    def cleanup_statuses(self,job_ids,max_age=30.0):
         """Book list: each shown book's cleanup status, reused from the last status computation while it is under
-        5 s old or the app has stayed quiet since (one status costs about 30 ms per book on the real catalog)."""
+        max_age old or the app has stayed quiet since (one status costs about 30 ms per book on the real catalog). Book
+        list speed (Sergei 2026-10-24, ruling 18): 30 s, not 5 s, as for converted_ids(); the page polls the status every
+        0.8 s, and under load one status computation takes longer than 5 s, so the page read every job's status again."""
         kept=self.__dict__.get('_cleanup_kept')
         age=time.monotonic()-kept[0] if kept else -1
-        if kept and (0<=age<5.0 or 0<=age<QUIET_MAX_AGE and kept[1] is not None and kept[1]==self._quiet_token()):
+        if kept and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and kept[1] is not None and kept[1]==self._quiet_token()):
             return {job_id:copy.deepcopy(kept[2].get(job_id)) for job_id in job_ids}
         return {job_id:self.cleanup.status(job_id) for job_id in job_ids}
 
@@ -667,9 +669,13 @@ class MergeService:
             'published_check':value.get('published_check'),'attention_counts':counts,'working_cleanable':cleanable,'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
 
-    def converted_ids(self,max_age=5.0):
-        """Converted candidate ids, reused from the last status computation when fresh, or while the app has stayed
-        quiet since it (the book list asks on every change; recomputing costs seconds on the real catalog)."""
+    def converted_ids(self,max_age=30.0):
+        """Converted candidate ids for the book list: the set the last status computation produced, while it is under
+        max_age old or the app has stayed quiet since it. The page polls the status every 0.8 s, so that set is at most
+        one status computation old, the same moment as the Jobs counts. Book list speed (Sergei 2026-10-24, ruling 18):
+        the list no longer computes its own set once that one is 5 s old; that read waited for group_lock behind every
+        automatic approval and costs 10-25 s on the live catalog. Only with no recent set (no status poll for 30 s)
+        does the list compute it."""
         cached=getattr(self,'_converted_cache',None)
         age=time.monotonic()-cached[0] if cached else -1
         if cached and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and len(cached)>2 and cached[2] is not None and cached[2]==self._quiet_token()):return set(cached[1])

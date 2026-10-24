@@ -636,6 +636,15 @@ class Inventory:
 
     def candidates(self,label,limit=100,offset=0,search='',status='all',ids=None):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
+        # Book list speed (Sergei 2026-10-24, ruling 18): when the stored groups are current the page is a plain read
+        # of one SQLite snapshot (WAL), so it no longer waits for group_lock, which an automatic approval holds for
+        # seconds (cover extraction, track review, the job). Only a page that must rebuild the groups takes the lock.
+        roots=self.source_roots(label)
+        with connect(self.database) as connection:
+            connection.execute('BEGIN')
+            if all(groups.current(connection,root) for root in roots):
+                return self._candidate_page(connection,roots,limit,offset,search,status,ids)
+            connection.execute('ROLLBACK')
         with self.group_lock,connect(self.database) as connection:
             # v0.16.12: a plain read when the stored groups are current, so the page (11-13 s on the live catalog)
             # no longer holds the write lock every other write waited behind, a Retry press included.
@@ -643,16 +652,19 @@ class Inventory:
             roots=self.source_roots(label)
             if not all(groups.current(connection,root) for root in roots):
                 connection.execute('ROLLBACK');connection.execute('BEGIN IMMEDIATE')  # the groups are rebuilt: that writes
-            import reacquire_sources
-            archived=[item['candidate_id'] for root in roots for item in reacquire_sources.markers(connection,root) if item['state']=='archived']
-            if len(roots)==1:
-                result=groups.page(connection,roots[0],limit,offset,search,status,self._coverage(connection,roots[0]),ids=ids)
-                return dict(result,reacquire_archives=archived)
-            # One transaction, one global ordering/filter/pagination. Each source
-            # is grouped independently; no tracks cross a durable root boundary.
-            result=groups.page_sources(connection,roots,limit,offset,search,status,
-                {root:self._coverage(connection,root) for root in roots},ids=ids)
+            return self._candidate_page(connection,roots,limit,offset,search,status,ids)
+
+    def _candidate_page(self,connection,roots,limit,offset,search,status,ids):
+        import reacquire_sources
+        archived=[item['candidate_id'] for root in roots for item in reacquire_sources.markers(connection,root) if item['state']=='archived']
+        if len(roots)==1:
+            result=groups.page(connection,roots[0],limit,offset,search,status,self._coverage(connection,roots[0]),ids=ids)
             return dict(result,reacquire_archives=archived)
+        # One transaction, one global ordering/filter/pagination. Each source
+        # is grouped independently; no tracks cross a durable root boundary.
+        result=groups.page_sources(connection,roots,limit,offset,search,status,
+            {root:self._coverage(connection,root) for root in roots},ids=ids)
+        return dict(result,reacquire_archives=archived)
 
     def _coverage(self,connection,root):
         current=connection.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
