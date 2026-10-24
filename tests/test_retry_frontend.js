@@ -51,10 +51,11 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
 (async()=>{
   run('state='+JSON.stringify(backend));
   // C1: the status line leads with the job's own reason, not "Audiobook job already exists".
-  const row=blocked();assert.equal(run('candidateStatus('+JSON.stringify(row)+')'),'Needs attention — '+JOB_REASON);
+  // Judy 2026-10-24, section 4.6: a stopped job's own text is technical; the status says so and the text is in Technical details.
+  const row=blocked();assert.equal(run('candidateStatus('+JSON.stringify(row)+')'),'Stopped — see details');
   assert.equal(run('candidateStatus('+JSON.stringify(blocked({},{reason:''}))+')'),'Needs attention — Audiobook job already exists; inspect its current status','positive control: no job reason falls back as before');
   assert.equal(run('candidateStatus('+JSON.stringify(blocked({creation:{status:'Audiobook created',reasons:[],job:{job_id:'job-a',state:'Audiobook created',reason:'old note'}},status:'Audiobook created',audiobook_ready:true}))+')'),'Audiobook Ready','a finished job never leads with its reason');
-  show(row);assert.equal(get('automatic-result-status').textContent,'Needs attention — '+JOB_REASON);assert.equal(get('output-status').textContent,'Needs attention — '+JOB_REASON);
+  show(row);assert.equal(get('automatic-result-status').textContent,'Stopped — see details');assert.equal(get('output-status').textContent,'Stopped — see details');assert.equal(get('automatic-technical').textContent,'Technical detail: '+JOB_REASON);
 
   // State 2, ready: one primary button, accessible name starts with the visible label, no note.
   assert.equal(block.hidden,false);assert.equal(button.disabled,false);assert.equal(button.textContent,'Retry');assert.equal(button.title,READY);
@@ -115,9 +116,9 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
 
   // Focus on Retry does not freeze the status line; focus elsewhere in the section still does (positive control).
   show(row);document.activeElement=button;const changed=blocked({},{reason:'A newer saved reason'});context.fixture=changed;run('rows=[fixture];select(fixture,false)');
-  assert.equal(get('automatic-result-status').textContent,'Needs attention — A newer saved reason');
+  assert.equal(get('automatic-technical').textContent,'Technical detail: A newer saved reason');
   const link=new Element('fixture-link');get('automatic-sources').append(link);document.activeElement=link;context.fixture=blocked({},{reason:'Hidden while reading sources'});run('rows=[fixture];select(fixture,false)');
-  assert.equal(get('automatic-result-status').textContent,'Needs attention — A newer saved reason');document.activeElement=null;
+  assert.equal(get('automatic-technical').textContent,'Technical detail: A newer saved reason');document.activeElement=null;
 
   // v0.16.6: after 202 the panel shows the requeued job at once, and no book list requested before the answer repaints it.
   run("pressed.clear()");retryOverride=null;show(row);inventoryRows=[row];let fresh;inventoryOverride=()=>new Promise(resolve=>{fresh=resolve;});document.activeElement=button;
@@ -136,7 +137,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   show(row);inventoryRows=[row];let old;inventoryOverride=()=>new Promise(resolve=>{old=resolve;});const pending=run('refresh(true)');await new Promise(resolve=>setImmediate(resolve));
   context.fixture=queued(row);run('retryEpoch++;rows=[fixture];select(fixture,false)');old({ok:true,json:async()=>({rows:[row],total:1})});inventoryOverride=null;
   assert.equal(await pending,false);assert.match(get('automatic-result-status').textContent,/^Queued/);
-  run("pressed.clear()");show(queued(row));inventoryRows=[row];assert.equal(await run('refresh(true)'),true,'positive control: a list requested after the answer is painted');assert.match(get('automatic-result-status').textContent,/^Needs attention/);
+  run("pressed.clear()");show(queued(row));inventoryRows=[row];assert.equal(await run('refresh(true)'),true,'positive control: a list requested after the answer is painted');assert.match(get('automatic-result-status').textContent,/^Stopped — see details/);
   // A 409 also asks for a fresh book list, and its message names no missing action.
   retryOverride=async()=>({ok:false,status:409,json:async()=>({error:refused})});show(row);inventoryRows=[row];const sentBefore=calls.length;const epoch=run('retryEpoch');await run('retryJob()');
   assert.equal(run('retryEpoch'),epoch+1);assert.ok(calls.slice(sentBefore).some(call=>call.route.startsWith('/api/inventory')));assert.doesNotMatch(note.textContent,/Refresh/);retryOverride=null;

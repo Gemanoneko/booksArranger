@@ -84,7 +84,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   // The Checking strip group: after Can repair, counted in All, hidden at zero.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
   assert.match(html,/id="group-repair"[^>]*>[^<]*<\/button><button id="group-reacquire"[^>]* hidden>Need to reacquire · 0<\/button><button id="group-checking" type="button" class="quiet attention-group" aria-pressed="false" title="Show saved retry requests waiting for checks and books whose retry checks are running\." hidden>Checking · 0<\/button>/);
-  assert.deepEqual([...run('attentionKeys')],['all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported']);
+  assert.deepEqual([...run('attentionKeys')],['all','files_missing','title_author','author_unclear','same_author','name_taken','retry','repair','reacquire','checking','changed','audiobook','other','unsupported']);
   run('attentionGroup="all"');
   counts({retry:2,repair:0,checking:3,changed:0,audiobook:0,other:1,unsupported:0});
   assert.equal(get('group-checking').textContent,'Retry checks · 3');assert.equal(get('group-checking').hidden,false);assert.equal(get('group-all').textContent,'All · 6');
@@ -101,14 +101,15 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   assert.equal(text(repair('unknown')).status,'Stopped — repair refused');
   assert.equal(text(m4bRow('rt',{attention:{group:'other',cause:null,originals_untouched:true},readmission:refusal('unknown')})).status,'Stopped — retry refused','positive control: a Retry says retry');
   // Superseded by follow-up 2, section 2.2: a working-files record no longer decides the row (its natural state shows).
-  assert.equal(text(repair('working_files')).hint,'Select the row to read why.');
+  assert.equal(text(repair('working_files')).hint,'The conversion stopped. Select the row to read the technical message.');
   assert.equal(text(repair('file_problem')).hint,"Repair was refused: the previous check stopped. Read the recorded reason before you repair.");
   for(const cause of ['unknown','working_files','file_problem','source_changed','unsupported_file']){const lines=text(repair(cause));assert.doesNotMatch(lines.status+' '+lines.hint,/retry/i,cause);}
 
   // 3c: the absolute working folder is in Technical detail only (panel and hover title), for working_files only.
   const waiting=m4bRow('w',{attention:{group:'other',cause:null,originals_untouched:true,working_folder:FOLDER},retry:{allowed:false,reason:NOT_YET},readmission:refusal('working_files')});
   paint([waiting]);tr=rowOf('w');
-  assert.equal(statusCell(tr).title,'Technical detail: Failed M4B retained: fixture; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
+  // Judy 2026-10-24, section 4.6: the cell tooltip is the first 200 characters; the whole message is in Technical details.
+  {const full='Technical detail: Failed M4B retained: fixture; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER;assert.equal(statusCell(tr).title,full.length>200?full.slice(0,200)+'…':full);assert.ok(full.length>200,'positive control: this message is long');}
   assert.ok(!statusCell(tr).children[0].textContent.includes('audio-staging'),'never in the hint');
   context.fixture=waiting;run('select(fixture,true);controls()');
   assert.match(get('automatic-technical').textContent,/; working folder: C:\\Users\\fixture\\.*\\job-w$/);

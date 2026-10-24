@@ -31,7 +31,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   const status=row=>run('candidateStatus('+JSON.stringify(row)+')');
   assert.equal(status(retry),'Stopped — ready to retry');assert.equal(status(space),'Stopped — not enough disk space');
   assert.equal(status(unsupported),"Can't convert — M4B not supported");assert.equal(status(other),'Stopped — see details');assert.equal(status(repair),'Damaged — can repair');
-  assert.match(status(blocked({},{attention:undefined})),/^Needs attention — /,'older data without a class falls back');
+  assert.equal(status(blocked({},{attention:undefined})),'Stopped — see details','older data without a class: raw text never prints (Judy 2026-10-24)');
 
   // Rows: short status, hint line, technical detail on hover; Retry or Repair first, only with API data.
   context.fixture=[retry,space,unsupported,other,repair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
@@ -42,7 +42,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(actionButtons(trs[0])[0].className.split(' ').includes('quiet'),true,'row actions are quiet; the accent fill is for Retry all');
   assert.equal(statusCell(trs[1]).children[0].textContent,'Not enough free disk space yet. Free up space, then retry.','an unavailable reason replaces the hint');assert.equal(actionButtons(trs[1])[0].disabled,true);
   assert.equal(statusCell(trs[2]).children[0].textContent,'Nothing to do for now. Originals are untouched.');assert.notEqual(actionButtons(trs[2])[0].textContent,'Retry','no button, not even a disabled one');
-  assert.equal(statusCell(trs[3]).children[0].textContent,'Select the row to read why.');assert.notEqual(actionButtons(trs[3])[0].textContent,'Retry');
+  assert.equal(statusCell(trs[3]).children[0].textContent,'The conversion stopped. Select the row to read the technical message.');assert.notEqual(actionButtons(trs[3])[0].textContent,'Retry');
   // Damaged: the damage line, Repair and never Retry; the technical note joins the hover detail.
   assert.equal(statusCell(trs[4]).children[0].textContent,'The chapter list points to a missing part. Repair removes that pointer.');
   assert.equal(statusCell(trs[4]).title,'Technical detail: raw reason r — '+DANGLING.description);
@@ -193,7 +193,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   context.fixture=retry;run('automaticResultKey=null;renderAutomaticResult(fixture)');
   assert.equal(get('automatic-result-hint').textContent,'Safe to retry now.');assert.equal(get('automatic-result-hint').hidden,false);
   assert.equal(get('automatic-technical').textContent,'Technical detail: raw reason a');assert.equal(get('automatic-repaired').hidden,true);
-  context.fixture=blocked({},{attention:undefined});run('automaticResultKey=null;renderAutomaticResult(fixture)');assert.equal(get('automatic-technical').hidden,true);
+  context.fixture=blocked({},{attention:undefined});run('automaticResultKey=null;renderAutomaticResult(fixture)');assert.equal(get('automatic-technical').hidden,false);assert.equal(get('automatic-technical').textContent,'Technical detail: '+JOB_REASON,'no typed cause: its text is in Technical details only (Judy 2026-10-24)');
   // The details-panel action reads Repair for a damaged book.
   show(damaged('p'));run('controls()');assert.equal(get('retry-job').textContent,'Repair');assert.equal(get('retry-job').title,'Patch the damage found in this book, then queue its audiobook job.');
 

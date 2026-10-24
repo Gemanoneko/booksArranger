@@ -9,6 +9,7 @@ harness=harness.slice(0,harness.indexOf('(async()=>{'));
 harness+=String.raw`
 Object.defineProperty(Element.prototype,'firstChild',{get(){const element=this;return element.textContent?{nodeType:3,get nodeValue(){return element.textContent;},set nodeValue(value){element.textContent=value;}}:null;}});
 const M4B_REASON='M4B preservation requires review: Unsupported structural box';
+const tip=text=>text.length>200?text.slice(0,200)+'…':text;  // Judy 2026-10-24, section 4.6: the first 200 characters
 const FOLDER='C:\\Users\\fixture\\AppData\\Local\\Books Arranger\\data\\merge-cache\\audio-staging\\job-w';
 const MB637=637*1024*1024;
 function refusal(cause,extra={}){
@@ -267,7 +268,7 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(clear.textContent,'Clear working files');assert.equal(clear.disabled,false);assert.equal(clear.getAttribute('aria-label'),'Clear working files: Title cw');
   assert.equal(clear.title,'Delete the working files an earlier attempt left behind. Originals are not touched. Frees about 637 MB.');
   assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','View metadata','Source folders'],'Retry, Clear, then navigation');
-  assert.equal(statusCell(tr).title,'Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
+  assert.equal(statusCell(tr).title,tip('Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER));
   // Repair: the same rule with its own verb.
   const repairable=m4bRow('rw',{retry:undefined,repair:{allowed:true,reason:''},attention:{group:'repair',cause:null,originals_untouched:true,damage:[{kind:'dangling_chapter_reference'}],working:{state:'cleanable',bytes:10,reason:'r'}}});
   paint([repairable]);tr=rowOf('rw');
@@ -326,7 +327,7 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(statusCell(tr).textContent,"Stopped — can't clear working files");
   assert.equal(statusCell(tr).children[0].textContent,"Working files from an earlier attempt are still present, and the app can't clear them safely right now.");
   assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['View metadata','Source folders']);
-  assert.equal(statusCell(tr).title,'Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
+  assert.equal(statusCell(tr).title,tip('Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER));
   const unreachable={...blockedRow,creation:{...blockedRow.creation,job:{...blockedRow.creation.job,attention:{...blockedRow.creation.job.attention,working:{state:'blocked',stops:true,cause:'originals_unreachable',reason:'r'}}}}};
   assert.equal(text(unreachable).hint,"Working files from an earlier attempt are still present, and the app can't clear them while the original files can't be reached. Check that the library drive is connected.");
   // An old working-files record with no files: the natural row, nothing about cleanup (Minor 3).

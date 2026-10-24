@@ -104,8 +104,8 @@ const settle=(ms=30)=>new Promise(resolve=>setTimeout(resolve,ms));
 
   // Jobs panel (section 10, O2): the same total as All when the server sends the counts; the old count otherwise.
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:1,attention_counts:{retry:2,repair:1,changed:1,audiobook:1,other:0,unsupported:1}}})+';renderJobs()');
-  assert.match(get('jobs-status').textContent,/ · 6 output issues$/);
-  run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:4}})+';renderJobs()');assert.match(get('jobs-status').textContent,/ · 4 output issues$/);
+  assert.match(get('jobs-status').textContent,/ · 6 need attention$/);
+  run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:4}})+';renderJobs()');assert.match(get('jobs-status').textContent,/ · 4 need attention$/);
   // Empty source folders hold nothing: the server sends no folder note, so the panel shows none.
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Completed',queued:0,failed:0,folder_cleanup_notes:[]}})+';renderJobs()');
   assert.doesNotMatch(get('jobs-help').textContent,/Empty source folders/);

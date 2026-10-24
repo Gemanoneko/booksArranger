@@ -70,3 +70,33 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 }
 
 #root{white-space:pre-wrap}
+
+/* The one to-do list (Judy, AttentionTodo UX 2026-10-24): two labelled chip sets, the row's fields, Goes to, the bulk dialog. */
+#attention-groups .attention-set{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+#attention-shortcut{color:var(--warning)}
+#attention-shortcut,#approve-selected{min-height:32px}
+#approve-selected{min-width:96px}
+#approve-selected[aria-disabled=true],#approve-selected[aria-disabled=true]:hover,#approve-confirm[aria-disabled=true],#approve-confirm[aria-disabled=true]:hover{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+.table-scroll.tall{max-height:max(430px,calc(100vh - 160px))}
+.ask-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:6px}
+.ask-field{display:flex;flex-direction:column;gap:2px;min-width:0;color:var(--text)}
+.ask-field input,.ask-other{min-height:32px;min-width:160px;width:100%;max-width:420px;box-sizing:border-box}
+.ask-basis{margin:2px 0 0}
+.ask-choice{border:0;padding:0;margin:6px 0 0;min-width:0}
+.ask-choice legend{padding:0;color:var(--text)}
+.ask-radio{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:32px;color:var(--text);overflow-wrap:anywhere}
+.ask-radio input[type=radio]{width:24px;height:24px;min-width:24px;margin:0;flex:none;padding:0;accent-color:var(--accent)}
+.goes-to{margin:6px 0 0}
+.goes-to .goes-label{color:var(--muted);margin-right:8px;font-size:13px}
+.goes-to.taken .goes-label{color:var(--warning)}
+.goes-to .path,.ask-missing .path{color:var(--text);margin:0}
+.ask-missing{margin-top:4px}
+.row-actions .ask-convert{min-width:152px;white-space:normal}
+#technical-details pre{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,Consolas,monospace}
+#technical-details .toolbar button{min-height:32px;min-width:96px}
+#approve-dialog{width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px}
+#approve-dialog::backdrop{background:rgb(0 0 0 / .65)}
+#approve-dialog p{overflow-wrap:anywhere}
+#approve-dialog button{min-height:32px;min-width:96px;white-space:normal}
+#approve-dialog-list{max-height:40vh;overflow:auto;border:1px solid var(--border);border-radius:5px;padding:8px;color:var(--text)}
+#approve-dialog-list p{margin:0}
