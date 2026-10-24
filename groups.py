@@ -12,7 +12,10 @@ from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
 SAME_TITLE_VERSION = 'same-title-v1'
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION
+# Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
+SAME_ALBUM_VERSION = 'same-album-v1'
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION
+DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
 def setup(connection):
     connection.execute('''CREATE TABLE IF NOT EXISTS book_groups(
@@ -277,6 +280,34 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
             found.append({'scope':scope,'members':[item for item,_ in group],'name':group[0][1],'basis':'shared start of the numbered file names'})
     return found
 
+def _same_album_parts(members,scopes,assigned,chaptered,taken):
+    """Ruling 19 (Sergei 2026-10-24, "parts of a bigger book are joined into that book"): files of one folder that carry
+    the same album tag (a trailing CD / disc number aside) and name one author are one book, even when their author or
+    album-artist tags are spelled differently or the album-artist tag names the readers (which split them by partition).
+    The order is not decided here: the source gate checks the joined book's numbering, and an unclear order or a gap is
+    a question on its row with the joined order. Never joined: whole .m4b files (their own chapters would be lost),
+    protected or chaptered files, files whose author tags name different people (an anthology, mixed recordings) and
+    files in different folders or sources. Returns [{'scope', 'members', 'name', 'basis'}]."""
+    from source_identity import norm
+    from local_identity import same_person,compare_names
+    found=[];albums={}
+    for path,item in members.items():
+        if path in assigned or path in chaptered or Path(path).suffix.lower()=='.m4b' or '\x1fAlbum ' not in scopes[path]:continue
+        tags={k.casefold():str(v) for k,v in item['metadata'].get('tags',{}).items()}
+        album=' '.join(str(tags.get('album') or '').split())
+        key=norm(DISC_SUFFIX.sub('',album)) or norm(album)
+        if key:albums.setdefault((scopes[path].split('\x1fAlbum ')[0],key),[]).append((item,album,tags))
+    for (base,key),entries in sorted(albums.items(),key=lambda kv:repr(kv[0])):
+        if len({scopes[item['path']] for item,_,_ in entries})<2:continue  # already one book
+        # The author credit of each file (author, else artist); the album-artist tag often names the readers.
+        credits=list(dict.fromkeys(c for c in (' '.join(str(tags.get('author') or tags.get('artist') or '').split()) for _,_,tags in entries) if c))
+        if any(not (norm(a)==norm(b) or same_person(a,b) or compare_names(a,b)) for a in credits for b in credits):continue  # several authors: never joined
+        scope=base+'\x1fSame album '+key
+        if scope in taken:continue
+        name=DISC_SUFFIX.sub('',entries[0][1]).strip() or entries[0][1]
+        found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author (the parts of one book)'})
+    return found
+
 def build(rows,protected=None,chaptered=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
@@ -301,6 +332,10 @@ def build(rows,protected=None,chaptered=frozenset()):
     for found in _same_title_sets(members,scopes,assigned,chaptered,taken|set(split)):
         for item in found['members']:scopes[item['path']]=found['scope']
         sets[found['scope']]=found
+    joined={}
+    for found in _same_album_parts(members,scopes,assigned,chaptered,taken|set(split)|set(sets)):
+        for item in found['members']:scopes[item['path']]=found['scope']
+        joined[found['scope']]=found
     for row in audio:
         buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
@@ -378,6 +413,10 @@ def build(rows,protected=None,chaptered=frozenset()):
             output[scope]['numbered_set']={'version':SAME_TITLE_VERSION,'name':found['name'],'basis':found['basis']}
             output[scope]['grouping']='One book (Sergei 2026-10-24, parts stay together): files of one folder with the '+found['basis']
             if not output[scope]['title_evidence'] and found['name']:output[scope]['title_clue']=found['name']
+    for scope,found in joined.items():
+        if scope in output:
+            output[scope]['joined_parts']={'version':SAME_ALBUM_VERSION,'name':found['name'],'basis':found['basis']}
+            output[scope]['grouping']='One book (Sergei 2026-10-24, ruling 19): files of one folder with the '+found['basis']
     return output
 
 def current(connection,root):

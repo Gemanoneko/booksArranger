@@ -1,0 +1,53 @@
+"""Ruling 19 (Sergei 2026-10-24): the parts of a bigger book are joined into that book, in one folder, when they carry
+the same album and name one author; an anthology and other folders are never joined (numbered .m4b parts without
+chapters of their own were already joined by split_books; parts with their own chapters stay separate books). Real private
+audio fixtures, the grouping and the identity steps; no network."""
+import subprocess, shutil, unittest
+from pathlib import Path
+
+import test_approve_as_is
+from test_approve_as_is import tone
+
+
+class JoinPartsTests(test_approve_as_is.ApproveFixture):
+    def books(self):
+        rows = self.start()
+        return sorted((row['title_clue'], sorted(m['filename'] for m in row['members'])) for row in rows)
+
+    def research_all(self):
+        outcomes = {}
+        for row in self.service.reviews.page()['rows']:
+            result = self.research(row)
+            outcomes[tuple(sorted(m['filename'] for m in row['members']))] = result.get('reasons') or []
+        return outcomes
+
+    def test_one_book_split_by_two_spellings_of_its_author_is_joined(self):
+        tone(self.audio / 'Unsorted' / 'Тихий ветер' / '01.mp3', self.cover, album='Тихий ветер', artist='Иван Петров', track='1/2')
+        tone(self.audio / 'Unsorted' / 'Тихий ветер' / '02.mp3', self.cover, album='Тихий ветер', artist='Петров Иван', track='2/2')
+        self.assertEqual(self.books(), [('Тихий ветер', ['01.mp3', '02.mp3'])], 'positive control: before ruling 19 these were two "Part of a bigger book" rows')
+        self.assertEqual(self.research_all(), {('01.mp3', '02.mp3'): []}, 'the joined book is identified and converts')
+
+    def test_readers_in_the_album_artist_tag_do_not_split_the_book(self):
+        for n in (1, 2, 3):
+            extra = {'album_artist': 'Михаил Прокопов, Анна Прокопова'} if n == 2 else {}
+            tone(self.audio / 'Unsorted' / 'Плюшевая голова' / ('%d.mp3' % n), self.cover, album='Плюшевая голова', artist='Влад Райбер', track='%d/3' % n, **extra)
+        self.assertEqual(self.books(), [('Плюшевая голова', ['1.mp3', '2.mp3', '3.mp3'])])
+
+    def test_cd_numbers_in_the_album_do_not_split_the_book(self):
+        tone(self.audio / 'Unsorted' / 'Good Omens' / 'CD1 - 01.mp3', self.cover, album='Good Omens CD1', artist='Neil Gaiman', track='1')
+        tone(self.audio / 'Unsorted' / 'Good Omens' / 'CD2 - 01.mp3', self.cover, album='Good Omens CD2', artist='Neil Gaiman', track='1')
+        self.assertEqual([files for _, files in self.books()], [['CD1 - 01.mp3', 'CD2 - 01.mp3']])
+
+    def test_an_anthology_and_other_folders_are_never_joined(self):
+        # Different authors under one album: separate stories, never one author's book.
+        tone(self.audio / 'Unsorted' / 'Самая страшная книга' / '03.mp3', self.cover, album='Самая страшная книга', artist='Станислав Миллер')
+        tone(self.audio / 'Unsorted' / 'Самая страшная книга' / '04.mp3', self.cover, album='Самая страшная книга', artist='Максим Кабир')
+        # The same album in two folders.
+        tone(self.audio / 'Unsorted' / 'A' / 'Книга.mp3', self.cover, album='Книга', artist='Анна Смирнова')
+        tone(self.audio / 'Unsorted' / 'B' / 'Книга.mp3', self.cover, album='Книга', artist='Анна Смирнова')
+        files = [files for _, files in self.books()]
+        self.assertEqual(sorted(files), sorted([['03.mp3'], ['04.mp3'], ['Книга.mp3'], ['Книга.mp3']]))
+
+
+if __name__ == '__main__':
+    unittest.main()

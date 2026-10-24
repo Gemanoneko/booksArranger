@@ -124,7 +124,7 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
 
     def test_part_of_a_bigger_book_beside_files_with_the_same_title(self):
         tone(self.audio / 'Unsorted' / 'Тихий ветер' / '01.mp3', self.cover, album='Тихий ветер', artist='Иван Петров', track='1/2')
-        tone(self.audio / 'Unsorted' / 'Тихий ветер' / '02.mp3', self.cover, album='Тихий ветер', artist='Петров Иван', track='2/2')
+        tone(self.audio / 'Unsorted' / 'Тихий ветер' / '02.mp3', self.cover, album='Тихий ветер', artist='Анна Смирнова', track='2/2')  # another author: never joined (ruling 19)
         self.start(); self.research_all()
         causes = sorted((row['ask']['cause'], row['ask']['facts']) for row in self.service.reviews.page(status='output_attention', group='part_of_book')['rows'])
         self.assertEqual(causes, [('chapter', {}), ('siblings', {'beside': 1})])

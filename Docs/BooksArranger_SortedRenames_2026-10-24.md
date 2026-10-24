@@ -48,25 +48,26 @@ Books: the .m4b files in the folder now (Z: listing). "Target has": books alread
 
 ### C. Folder language rule
 
-| From | To | Books | Target has | Why | |
-| --- | --- | ---: | ---: | --- | --- |
-| Max Fray | Фрай Макс | 12 | 0 | writes in Russian | sure |
-| Хаггард Генри Райдер | Haggard H. Rider | 1 | 0 | English writer (Sergei's example) | sure |
-| Фаррер Мэтью | Farrer Matthew | 1 | 0 | English writer (Sergei's example) | sure |
-| Бром Джеральд | Brom Gerald | 1 | 0 | American writer | check |
-| Данн Кэтрин | Dunn Katherine | 1 | 0 | American writer | check |
-| Клэпхем Марк | Clapham Mark | 1 | 0 | British writer | check |
-| Колфер Йон | Colfer Eoin | 1 | 0 | Irish writer | check |
-| Кэмпбелл Рэмси | Campbell Ramsey | 4 | 0 | British writer | check |
-| Леббон Тим | Lebbon Tim | 1 | 0 | British writer | check |
-| Лиготти Томас | Ligotti Thomas | 1 | 0 | American writer | check |
-| Райаниеми Ханну | Rajaniemi Hannu | 1 | 0 | Finnish, writes in English | check |
-| Сафон Карлос Руис | Ruiz Zafón Carlos | 1 | 0 | Spanish writer | check |
-| Файлс Джемма | Files Gemma | 1 | 0 | Canadian writer | check |
-| Хоар Энди | Hoare Andy | 1 | 0 | British writer | check |
-| Хокинг Люси и Хокинг Стивен | Hawking Lucy and Stephen | 1 | 0 | English writers; joint folder like «Moor and Kuttner» | check |
-| Хокинг Стивен, Млодинов Леонард | Hawking and Mlodinow | 1 | 0 | English writers; joint folder like «Moor and Kuttner» | check |
+| From | To | Books | Target has | Why | Writes in Russian? | |
+| --- | --- | ---: | ---: | --- | --- | --- |
+| Max Fray | Фрай Макс | 12 | 0 | writes in Russian | Yes | sure |
+| Хаггард Генри Райдер | Haggard H. Rider | 1 | 0 | English writer (Sergei's example) | No (English) | sure |
+| Фаррер Мэтью | Farrer Matthew | 1 | 0 | English writer (Sergei's example) | No (English) | sure |
+| Бром Джеральд | Brom Gerald | 1 | 0 | American writer | No (English) | check |
+| Данн Кэтрин | Dunn Katherine | 1 | 0 | American writer | No (English) | check |
+| Клэпхем Марк | Clapham Mark | 1 | 0 | British writer | No (English) | check |
+| Колфер Йон | Colfer Eoin | 1 | 0 | Irish writer | No (English) | check |
+| Кэмпбелл Рэмси | Campbell Ramsey | 4 | 0 | British writer | No (English) | check |
+| Леббон Тим | Lebbon Tim | 1 | 0 | British writer | No (English) | check |
+| Лиготти Томас | Ligotti Thomas | 1 | 0 | American writer | No (English) | check |
+| Райаниеми Ханну | Rajaniemi Hannu | 1 | 0 | Finnish, writes in English | No (English) | check |
+| Сафон Карлос Руис | Ruiz Zafón Carlos | 1 | 0 | Spanish writer | No (Spanish) | check |
+| Файлс Джемма | Files Gemma | 1 | 0 | Canadian writer | No (English) | check |
+| Хоар Энди | Hoare Andy | 1 | 0 | British writer | No (English) | check |
+| Хокинг Люси и Хокинг Стивен | Hawking Lucy and Stephen | 1 | 0 | English writers; joint folder like «Moor and Kuttner» | No (English) | check |
+| Хокинг Стивен, Млодинов Леонард | Hawking and Mlodinow | 1 | 0 | English writers; joint folder like «Moor and Kuttner» | No (English) | check |
 
+"Writes in Russian?" (Sergei, ruling 22: rename to English only for authors who do not write in Russian): from each author's known writing language, the same knowledge as the "Why" column; no source was looked up. Applied with the rename pass (ruling 21, later).
 Not renamed (the rule is already met, or they are not author folders): `Сборники`, `Warhammer 40K`, `Дозоры Сергея Лукьяненко`, the Russian authors in Cyrillic, the English authors in Latin, and first-name-first Latin folders such as «Tove Jansson» or «Juliet E. McKenna» (word order was not asked).
 
 Future books already follow these targets: `author_rules` (commit d85888b) maps every spelling above that Sergei ruled on to its target, so a new Pratchett, Barker, Haggard, Farrer or Max Fray book lands in the target folder even before the old folder is renamed. The "check" rows are not in `author_rules` until Sergei confirms them.

@@ -171,6 +171,11 @@ def source_gate(row,work):
     if len(members)>1:
         tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in members]
         albums={norm(t.get('album')) for t in tags};artists={norm(t.get('artist')) for t in tags}
+        if len(artists)>1 and local:
+            # Ruling 19 (joined parts): one person spelled two ways ("Иван Петров" / "Петров Иван") is one artist.
+            from local_identity import same_person,compare_names
+            spelled=list(dict.fromkeys(text(t.get('artist')) for t in tags))
+            if '' not in spelled and all(same_person(spelled[0],v) or compare_names(spelled[0],v) for v in spelled[1:]):artists={artists.pop()}
         if (len(albums)!=1 or not next(iter(albums),'')) and not (standing and folder_context) or len(artists)>1:reasons.append('Mixed recordings in this group')
         filename_positions=[]
         for m in members:

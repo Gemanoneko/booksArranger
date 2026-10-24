@@ -1778,8 +1778,15 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     for name in AUTHOR_TAGS:
         value, mixed = _consistent(members, (name,))
         if mixed:
-            ignored.append({'field': name, 'value': '', 'why': 'differs between files'})
-            continue
+            # Ruling 19 (joined parts): one person spelled two ways ("Иван Петров" / "Петров Иван") is one credit, in its
+            # most common spelling; different people stay "differs between files".
+            spellings = [text(_tags(m).get(name)) for m in members if text(_tags(m).get(name))]
+            distinct = list(dict.fromkeys(spellings))
+            if all(same_person(distinct[0], v) or compare_names(distinct[0], v) for v in distinct[1:]):
+                value = max(distinct, key=lambda v: (spellings.count(v), -distinct.index(v)))
+            else:
+                ignored.append({'field': name, 'value': '', 'why': 'differs between files'})
+                continue
         offer(value, {'album_artist': 'album artist tag', 'albumartist': 'album artist tag'}.get(name, name + ' tag'), 'tag', 'tag')
     # Guard 3: a collection credit in the tags ("Сборник", "Разные авторы", an editor, a long list of
     # authors) files the book as a collection unless a tag also names one person.
