@@ -63,9 +63,11 @@ class Library:
         self.original=sha(self.path)
         self.target=Path(propose('',str(self.root),'audiobook',{},dict(self.review,series='Нормальное аномальное',number='10'))['path'])
 
-    def merge(self):
+    def merge(self,policy=None):
         s=MergeService.__new__(MergeService)
         s.inventory=SimpleNamespace(database=str(self.db),worker=None,roots={'Audiobooks':str(self.root)})
+        # 0.21.3: the published book's library stands for the sorted output folder (sorted_fixture; rulings 2 and 1a).
+        s.output_policy=policy or (lambda:(str(self.root),()))
         s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None)
         s.stage_root=self.stage_root;s._validated_outputs={};s.invalidate_status=Mock()
         return s
@@ -145,6 +147,24 @@ class BackfillTests(unittest.TestCase):
         # A second pass changes nothing.
         backfill.run_pass();self.assertTrue(lib.target.exists());self.assertEqual(json.loads(lib.row()['output'])['sha256'],output['sha256'])
 
+    def test_a_book_outside_the_sorted_folder_is_left_as_it_is(self):
+        # Audit m4: no temp file, rename or delete inside a source folder: the output folder unset, the book's folder
+        # also a source, and the book outside the output folder.
+        lib=self.lib
+        for policy in (lambda:(None,(str(lib.root),)),lambda:(str(lib.root),(str(lib.root),)),lambda:(str(lib.base/'sorted'),(str(lib.root),))):
+            with connect(lib.db) as db:db.execute('DROP TABLE IF EXISTS series_backfill')
+            backfill=lib.backfill(lib.merge(policy));backfill.run_pass()
+            self.assertEqual(lib.state(backfill),('held','The audiobook is not in the sorted output folder; left as it is'));self.assert_unchanged(backfill)
+        with connect(lib.db) as db:db.execute('DROP TABLE IF EXISTS series_backfill')
+        backfill=lib.backfill();backfill.run_pass();self.assertEqual(lib.state(backfill),('done',''),'positive control: the book is in the sorted folder')
+    def test_own_temporary_file_is_removed_through_a_held_handle_only(self):
+        lib=self.lib;temp=lib.path.parent/(series_backfill.TEMP_PREFIX+lib.job_id+'.m4b');temp.write_bytes(b'unproven partial')
+        with patch.object(series_backfill.os,'unlink',side_effect=AssertionError('no pathname delete')):
+            series_backfill.SeriesBackfill._dispose_temporary(temp)
+        self.assertFalse(temp.exists())
+        other=lib.path.parent/'not-ours.m4b';other.write_bytes(b'user file')
+        with self.assertRaisesRegex(series_backfill.BoundaryError,'Not a series-update temporary file'):series_backfill.SeriesBackfill._dispose_temporary(other)
+        self.assertEqual(other.read_bytes(),b'user file')
     def test_a_name_collision_leaves_the_book_as_it_is(self):
         lib=self.lib;lib.target.write_bytes(b'someone else');backfill=lib.backfill();backfill.run_pass()
         state,reason=lib.state(backfill);self.assertEqual(state,'held');self.assertIn('already exists',reason)

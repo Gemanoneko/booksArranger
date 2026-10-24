@@ -380,6 +380,12 @@ class SeriesBackfill:
                   'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
                   'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
         try:
+            # Audit m4: files change only in the sorted output folder, never inside a source folder (rulings 2 and 1a).
+            if hasattr(self.merge, '_require_sorted'):
+                try:
+                    self.merge._require_sorted(old)
+                except ValueError:
+                    raise Held('The audiobook is not in the sorted output folder; left as it is') from None
             if not current.get('path') or os.path.normcase(current['path']) != os.path.normcase(str(old)):
                 raise Held("The audiobook's name does not follow the app's naming; left as it is")
             if facts:
@@ -654,7 +660,7 @@ class SeriesBackfill:
         with connect(self.database) as db:
             db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)', (str(temp), job_id, 'temporary', '', 0))
         if temp.exists():
-            os.unlink(temp)  # our own unproven file from an interrupted pass
+            self._dispose_temporary(temp)  # our own unproven file from an interrupted pass
 
     def _discard_temp(self, job_id, record):
         temp = record.get('temp')
@@ -662,10 +668,24 @@ class SeriesBackfill:
             return
         try:
             if Path(temp).exists():
-                os.unlink(temp)
+                self._dispose_temporary(Path(temp))
             self._forget_temporary(job_id, Path(temp))
-        except OSError:
+        except (OSError, ValueError):
             pass
+
+    @staticmethod
+    def _dispose_temporary(temp):
+        """Audit m4: the app's own temporary file goes through a held handle of that exact single-link file, with its
+        folder held, never by a pathname delete."""
+        temp = ordinary(temp)
+        if not temp.name.startswith(TEMP_PREFIX) or temp.suffix.lower() != '.m4b':
+            raise BoundaryError('Not a series-update temporary file; kept')
+        with DirectoryBoundary(temp.parent, temp.parent), VerifiedFile(temp, delete=True) as handle:
+            if handle.facts()['links'] != 1:
+                raise BoundaryError('The temporary file has another filesystem alias; kept')
+            handle.dispose()
+        if os.path.lexists(temp):
+            raise BoundaryError('The temporary file could not be removed')
 
     def _forget_temporary(self, job_id, temp):
         with connect(self.database) as db:
