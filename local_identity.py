@@ -1456,8 +1456,13 @@ EDITOR_MARKER = re.compile(r'(?<![^\W\d_])(?:под\s+ред\w*|ред\.|сос�
 BRACKETS = re.compile(r'[(\[]([^()\[\]]{3,80})[)\]]')
 ASK_REASONS = {'title_author': 'Title or author missing', 'author_unclear': 'Author unclear', 'same_author': 'Same author?'}
 # Tag "titles" that name the format or nothing at all ("Мр3-Книга" on Марк Твен's book).
+# The one shared list of generic titles: grouping (groups.py) and naming both read it. Senua's 0.22.0 review, N4 added the
+# "unknown" and "new recording" families; groups._same_title_sets also checks the file names for a title no list knows.
 JUNK_TITLES = {'мр3книга', 'mp3книга', 'мп3книга', 'аудиокнига', 'аудиокниги', 'audiobook', 'audiobooks', 'audio', 'книга', 'book',
-               'unknown', 'untitled', 'безназвания', 'безимени', 'noname', 'unknowntitle', 'track', 'трек', 'новаякнига'}
+               'unknown', 'untitled', 'безназвания', 'безимени', 'noname', 'unknowntitle', 'track', 'трек', 'новаякнига',
+               'неизвестно', 'неизвестный', 'неизвестная', 'неизвестное', 'неизвестен', 'неизвестна', 'названиенеизвестно',
+               'нетназвания', 'беззаголовка', 'новаязапись', 'запись', 'аудиозапись', 'голосоваязапись', 'аудио', 'аудиотрек',
+               'notitle', 'title', 'unknownalbum', 'unknowntrack', 'newrecording', 'recording', 'voicerecording', 'audiotrack'}
 PIECE_REASON = 'One part of a bigger book'
 
 
@@ -1816,11 +1821,16 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             if not name:
                 return
             pieces = [text(p) for p in re.split(r'\s+[-–—]\s+', name) if text(p)]
-            if len(pieces) == 2 and all(_person_like(p) for p in pieces):
+            people = [p for p in pieces if _person_like(p)]
+            if len(people) >= 2:
                 # Senua's 0.22.0 review, G4 (ruling 14): "Author - Reader" where neither name is a known reader credits two
                 # people. Never the whole string; a file or folder name that names one decides it, else it is asked.
+                # N5: the same for three or more names ("Варго - Сидоров - Петрова"); a piece that is no person is set aside.
                 for piece in pieces:
-                    offer(piece, source, basis, kind)
+                    if piece in people:
+                        offer(piece, source, basis, kind)
+                    else:
+                        ignored.append({'field': source, 'value': piece, 'why': 'not a person, between dashes in a credit naming several people'})
                 return
         if title and title_key(name) == title_key(title['value']):
             # "Потаённое окно в потаённый сад" in the artist tag of that book: the title, not an author.

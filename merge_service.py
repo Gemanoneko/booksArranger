@@ -2112,7 +2112,7 @@ class MergeService:
         title=((payload.get('fields') or {}).get('title') or {}).get('proposal','')
         def cause(kind):
             if kind=='order_unclear':return todo_causes.order_cause(chosen)
-            if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')),works=(row.get('joined_parts') or {}).get('works'))
+            if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')),works=(row.get('joined_parts') or {}).get('works') or row.get('album_works'))
             if kind=='part_of_book':return todo_causes.piece_cause(entry.get('hold'))
             return {}
         found=cause(entry['group'])

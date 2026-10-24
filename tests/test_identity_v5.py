@@ -130,6 +130,18 @@ class ReaderIsNeverAnAuthor(unittest.TestCase):
         self.assertTrue(record['accepted'],record);self.assertEqual(record['fields']['author']['value'],'Александр Варго')
 
 
+    def test_review_n5_a_dash_joining_three_people_is_never_filed_whole(self):
+        # Senua's 0.22.0 review, N5: G4's split handled exactly two names; three were accepted whole as the author.
+        credit='Александр Варго - Иван Сидоров - Мария Петрова'
+        row=book(member('Unsorted/Гример.m4b',album='Гример',album_artist=credit))
+        record=identify(row,ROOT,[],())
+        self.assertFalse(record['accepted'],record);self.assertEqual(record['ask']['kind'],'author_unclear')
+        self.assertNotIn(' - ',local_identity.shown(record)['author'])
+        row=book(member('Варго Александр/Гример.m4b',album='Гример',album_artist=credit))
+        record=identify(row,ROOT,[],())
+        self.assertTrue(record['accepted'],record);self.assertEqual(record['fields']['author']['value'],'Александр Варго')
+
+
 class CollectionsAndGarbledTags(unittest.TestCase):
     def test_collection_credit_files_the_book_under_collections_even_in_an_author_folder(self):
         row=book(member('George R. R. Martin/Миры Джорджа Мартина 1.m4b',album='Миры Джорджа Мартина 1',artist='Сборник'))
@@ -298,6 +310,43 @@ class PartsStayTogether(unittest.TestCase):
         row=dict(book(*members),numbered_set={'version':'same-title-v1','name':'Аудиокнига','basis':'same title tag'})
         record=identify(row,ROOT,[],())
         self.assertNotEqual(local_identity.norm(record['fields']['title']['value']),'аудиокнига',record['fields']['title'])
+
+    def test_review_n4_other_generic_title_tags_never_join_or_name_books(self):
+        # Senua's 0.22.0 review, N4: G2 was a word list; "Неизвестно" and "Новая запись" still joined two King books into one
+        # book titled "Неизвестно" that converted on its own.
+        for junk in ('Неизвестно','Новая запись','Нет названия','Unknown title'):
+            files=[('Unsorted/Кинг/Кинг - %s.mp3'%name,{'title':junk,'artist':'Стивен Кинг','track':str(n)}) for n,name in enumerate(('Оно','Мизери'),1)]
+            self.assertEqual(len(groups.build(self.rows(files))),2,junk)
+            members=[member('Unsorted/Кинг/Кинг - %s.mp3'%name,title=junk,artist='Стивен Кинг') for name in ('Оно','Мизери')]
+            row=dict(book(*members),numbered_set={'version':'same-title-v2','name':junk,'basis':'same title tag'})
+            record=identify(row,ROOT,[],())
+            self.assertNotEqual(local_identity.norm(record['fields']['title']['value']),local_identity.norm(junk),record['fields']['title'])
+            one=identify(book(member('Unsorted/Кинг/Кинг - Оно.mp3',title=junk,artist='Стивен Кинг')),ROOT,[],())
+            self.assertEqual(one['fields']['title']['value'],'Оно','a single file is named from its file name, not the generic tag')
+        # A generic title tag no list knows: the file names name two works, so the files stay separate books.
+        files=[('Unsorted/Кинг/Кинг - %s.mp3'%name,{'title':'Запись с диктофона','artist':'Стивен Кинг','track':str(n)}) for n,name in enumerate(('Оно','Мизери'),1)]
+        self.assertEqual(len(groups.build(self.rows(files))),2)
+        # Positive control: chapter files of one title still join (the Pratchett case, the one live same-title set).
+        files=[('Unsorted/Кинг/Оно %02d.mp3'%n,{'title':'Оно','artist':'Стивен Кинг'}) for n in (1,2,3)]
+        self.assertEqual([len(g['members']) for g in groups.build(self.rows(files)).values()],[3])
+
+    def test_review_n6_one_album_and_artist_whose_title_tags_name_two_books_is_held(self):
+        # Senua's 0.22.0 review, N6: G3's works check covered only the new same-album join. One folder, album "Ведьмак",
+        # one artist, no album artist: one partition group, accepted as "Ведьмак" and converted on its own.
+        files=[('Unsorted/Ведьмак/%02d.mp3'%n,{'album':'Ведьмак','artist':'Анджей Сапковский','track':str(n),'title':title})
+               for n,title in enumerate(('Последнее желание 1','Последнее желание 2','Меч предназначения 1','Меч предназначения 2'),1)]
+        built=groups.build(self.rows(files))
+        self.assertEqual(len(built),1,list(built));group=next(iter(built.values()))
+        self.assertTrue(group.get('source_partition_uncertain'),'held: never converted on its own')
+        self.assertEqual(group['album_works'],[{'name':'Последнее желание','files':2},{'name':'Меч предназначения','files':2}])
+        self.assertIn('Source membership uncertain',source_gate(dict(group,id='g',revision=1,fingerprint='f'),{'titles':['Ведьмак'],'author_aliases':['Анджей Сапковский'],'identity_basis':'local_agreement','identity_rule':IDENTITY_VERSION,'policy_version':'standing-17-v1'}))
+        import todo_causes
+        self.assertEqual(todo_causes.files_cause(group['members'],['Source membership uncertain'],'Ведьмак',works=group['album_works'])['cause'],'works')
+        # Positive controls: chapter titles, or one work in parts, are one book with no hold.
+        for titles in (('Глава 1','Глава 2','Глава 3','Глава 4'),('Ведьмак 1','Ведьмак 2','Ведьмак 3','Ведьмак 4'),('Последнее желание 1','Последнее желание 2','Последнее желание 3','Последнее желание 4')):
+            files=[('Unsorted/Ведьмак/%02d.mp3'%n,{'album':'Ведьмак','artist':'Анджей Сапковский','track':str(n),'title':title}) for n,title in enumerate(titles,1)]
+            group=next(iter(groups.build(self.rows(files)).values()))
+            self.assertFalse(group.get('source_partition_uncertain'),titles);self.assertFalse(group.get('album_works'),titles)
 
     def witcher(self,disc_titles=(('Последнее желание','Чтец Один'),('Меч предназначения','Чтец Два'))):
         files=[]

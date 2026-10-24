@@ -11,9 +11,9 @@ from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
-SAME_TITLE_VERSION = 'same-title-v2'  # v2: Senua's 0.22.0 review G1, G2
+SAME_TITLE_VERSION = 'same-title-v3'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check)
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
-SAME_ALBUM_VERSION = 'same-album-v2'  # v2: Senua's 0.22.0 review G3
+SAME_ALBUM_VERSION = 'same-album-v3'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
 M4B_PARTS_VERSION = 'm4b-parts-v2'
@@ -316,6 +316,10 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
         used=set()
         for (title,_),group in sorted(by_title.items(),key=lambda kv:repr(kv[0])):
             if len(group)<2:continue
+            # Senua's 0.22.0 review, N4: a generic title tag no list knows ("Запись с диктофона" on "Кинг - Оно" and
+            # "Кинг - Мизери") joins nothing when the file names name two or more works besides the tag's own.
+            tagged=norm(work_name(str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title',''))))
+            if len({norm(work_name(filename_identity(item['filename']).get('title') or '')) for item in group}-{'',tagged})>1:continue
             scope=folder+'\x1fSame title '+title
             if scope in taken:continue
             name=' '.join(str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title','')).split())
@@ -585,6 +589,20 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
                 # G3: never converted on its own; the row lists the works so Sergei can approve or choose the files.
                 output[scope]['source_partition_uncertain']=True
                 output[scope].setdefault('conflicts',[]).append('The title tags name more than one book: '+'; '.join(w['name'] for w in found['works'][:4]))
+    # Senua's 0.22.0 review, N6: G3's works check for a plain album group too (one folder, one album, one artist: "Последнее
+    # желание 1/2" and "Меч предназначения 1/2" under the album "Ведьмак"). Held as Files unclear listing the works; never
+    # converted on its own. Reviewed, approved or queued groups and the other grouping routes keep their own rules.
+    from source_identity import norm
+    from local_identity import work_name
+    for scope,group in output.items():
+        if scope in protected or scope in split or scope in sets or scope in joined or scope in part_sets:continue
+        if '\x1fAlbum ' not in scope or len(group['members'])<2 or group.get('source_partition_uncertain'):continue
+        entries=[(m,'',{k.casefold():str(v) for k,v in m['metadata'].get('tags',{}).items()}) for m in sorted(group['members'],key=lambda m:m['path'])]
+        album=' '.join(entries[0][2].get('album','').split())
+        works=_works(entries,{m['path']:scope for m in group['members']},norm(work_name(DISC_SUFFIX.sub('',album).strip() or album)))
+        if works:
+            group['album_works']=works;group['source_partition_uncertain']=True
+            group.setdefault('conflicts',[]).append('The title tags name more than one book: '+'; '.join(w['name'] for w in works[:4]))
     return output
 
 def current(connection,root):
