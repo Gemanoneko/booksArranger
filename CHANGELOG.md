@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Automatic processing no longer stalls on an approval. The set of converted books is now computed once per approval instead of on every enrichment step.
+- An automatic approval reads the list of converted books once instead of seven times. On a 200-book test catalog approvals took about 40% less time and the book list waited about half as long during them. The book list still pauses for seconds while a book converts; that is not changed in this version.
 - Pressing Start at the same moment as Quit or Pause now pauses the automatic run, instead of failing it.
 - The build guard is re-pinned to Git for Windows 2.56.0.3, so `npm run pack` starts again. A Git core pin mismatch now names the core, not the wrapper.
 
