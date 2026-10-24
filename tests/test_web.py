@@ -383,5 +383,16 @@ class WindowlessMainTests(unittest.TestCase):
                 with self.assertRaises(OSError):web_server.main(['--database',str(database)],ready=ready)
             server.server_close.assert_called_once();ready.assert_not_called();server.serve_forever.assert_not_called()
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':
     unittest.main()

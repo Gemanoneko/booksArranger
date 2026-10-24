@@ -34,7 +34,8 @@ manifest = json.loads(open(sys.argv[3], encoding='utf-8').read()); real = native
 def park(*args, **kwargs):
     real(*args, **kwargs); print('RENAMED', flush=True); time.sleep(300)
 edited, validation = create_private(manifest, sys.argv[5], threading.Event(), in_place=inplace_m4b.Session(sys.argv[4], manifest['job_id'], manifest['attempt_id']))
-fake = SimpleNamespace(_held_sources={}, _review_boundary=contextlib.nullcontext, _guard=lambda manifest: True, _register=lambda *args: None)
+fake = SimpleNamespace(_held_sources={}, _review_boundary=contextlib.nullcontext, _guard=lambda manifest: True, _register=lambda *args: None,
+                       _require_sorted=lambda path: None)
 with patch('native_io.rename_no_replace', side_effect=park):
     MergeService._publish_in_place(fake, manifest, edited, validation, lambda *args: None)
 print('NOT KILLED', flush=True)
@@ -115,7 +116,7 @@ class Fixture(unittest.TestCase):
 
     def fake(self):
         return SimpleNamespace(_held_sources={}, _review_boundary=contextlib.nullcontext, _guard=lambda manifest: True,
-                               _register=lambda *args: None)
+                               _register=lambda *args: None, _require_sorted=lambda path: None)
 
     def crash(self, point, manifest):
         def fault(name, handle=None):
@@ -193,6 +194,24 @@ class EligiblePathTests(Fixture):
             published(fake, manifest, edited, validation, lambda *a: None)
         self.assertEqual(self.snapshot(source), before); self.assertFalse(Path(manifest['destination']).exists())
         self.assertEqual(self.rows()[0]['state'], 'rolled_back'); self.assertEqual(fake._held_sources, {})
+
+    def test_rename_outside_the_sorted_folder_is_refused_and_the_edit_undone(self):
+        # Sergei, rulings 2 and 1a (2026-10-24; in-place kept by ruling 2b): the rename retires the source path, so it
+        # is made only into the configured output folder outside every source. Here the output folder is the source
+        # folder itself, as with no output folder configured.
+        source = self.media(); before = self.snapshot(source); manifest = self.manifest(source)
+        edited, validation = self.run_in_place(manifest); fake = self.fake()
+        from merge_service import MergeService
+        fake.output_policy = lambda: (str(self.root), (str(self.root),))
+        fake._require_sorted = lambda path: MergeService._require_sorted(fake, path)
+        with self.assertRaisesRegex(ValueError, 'overlaps a source folder'):
+            published(fake, manifest, edited, validation, lambda *a: None)
+        self.assertEqual(self.snapshot(source), before); self.assertFalse(Path(manifest['destination']).exists())
+        self.assertEqual(self.rows()[0]['state'], 'rolled_back')
+        sorted_root = self.root / 'Sorted'; sorted_root.mkdir(exist_ok=True)
+        fake.output_policy = lambda: (str(sorted_root), (str(self.root / 'Unsorted'),))  # positive control: the same rule admits Sorted
+        again = self.manifest(source); edited, validation = self.run_in_place(again)
+        self.assertTrue(Path(published(fake, again, edited, validation, lambda *a: None)['final_path']).is_file())
 
     def test_zero_padding_box_is_admitted_by_both_paths_and_neither_output_carries_it(self):
         # Макс Фрай 01 and 04 (Sergei, 2026-10-24): moov/udta holds a box whose type and payload are all zero bytes.
@@ -1085,6 +1104,17 @@ class ServiceTests(unittest.TestCase):
 def connect_db(path):
     with contextlib.closing(sqlite3.connect(path)) as db:yield db
 
+
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
 
 if __name__ == '__main__':
     unittest.main()

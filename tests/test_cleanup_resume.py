@@ -2,6 +2,7 @@
 
 Actual Windows handle fixtures on private files under scratch/; no real library, catalog or media tools.
 """
+from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import contextlib,hashlib,json,sqlite3,sys,tempfile,threading,time,unittest,uuid
 from datetime import datetime,timedelta
 from pathlib import Path
@@ -64,7 +65,7 @@ class Book:
         self.extra=[]
 
     def cleanup_jobs(self):
-        jobs=CleanupJobs(self.db,self.recovery_root,lambda db,intent:True,contextlib.nullcontext)
+        jobs=CleanupJobs(self.db,self.recovery_root,lambda db,intent:True,contextlib.nullcontext,output_policy=library_is_sorted(self.library))
         if hasattr(self,'extra'):self.extra.append(jobs)
         return jobs
 
@@ -428,5 +429,16 @@ class InlineAndStartTests(Base):
         self.assertLess(time.monotonic()-started,1.0);self.assertEqual(len(calls),1)
         self.assertEqual(b.row()['state'],'paused')
 
+
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
 
 if __name__=='__main__':unittest.main()

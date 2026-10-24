@@ -214,4 +214,15 @@ class QueuedReplacementRoute(unittest.TestCase):
         parent=dict(row,state='needs attention');fresh=dict(manifest,job_id=str(uuid.uuid4()))
         with self.assertRaisesRegex(ValueError,'Replacement destination'):bind(parent,fresh,str(self.library))
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

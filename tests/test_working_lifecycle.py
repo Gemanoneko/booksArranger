@@ -65,4 +65,15 @@ class WorkingLifecycleTests(unittest.TestCase):
         self.assertIn('destination space',job['reason']);stage=self.f.service.stage_root/job_id/job['attempt_id']
         self.assertEqual(list(stage.glob('source*.mp3')),[]);self.assertTrue(all(source.exists() for source in self.f.sources))
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

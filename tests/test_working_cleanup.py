@@ -111,4 +111,15 @@ class WorkingCleanupTests(unittest.TestCase):
         wav=self.normalized();other=self.job/str(uuid.uuid4());other.mkdir();path=other/wav.name;path.write_bytes(wav.read_bytes())
         self.storage.working_files(self.job_id,normalized_only=True);self.assertTrue(path.exists())
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

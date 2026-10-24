@@ -1,4 +1,5 @@
 """Actual private Windows snapshot disposition, not media/codec proof."""
+from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import contextlib
 import hashlib
 import json
@@ -88,7 +89,7 @@ class PublishedSnapshotTests(unittest.TestCase):
                 'sha256':sha,'size':size,'parent_identity':parent_identity,'validation':validation}
         self.queue._update(self.job_id,state='completed',output=json.dumps(output),journal=json.dumps({'publication_intent':output}))
         self.life.terminal(self.job_id,attempt)
-        self.cleanup=CleanupJobs(self.db,self.base/'recovery',lambda *args:True,contextlib.nullcontext)
+        self.cleanup=CleanupJobs(self.db,self.base/'recovery',lambda *args:True,contextlib.nullcontext,output_policy=library_is_sorted(self.library))
         self.storage=StorageCleanup(self.db,self.stage_root,self.cleanup.root)
         with connect(self.db) as db:
             db.execute('CREATE TABLE IF NOT EXISTS owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')

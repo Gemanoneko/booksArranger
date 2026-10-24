@@ -1,4 +1,5 @@
 """Windows-only disposable fixtures; no real library/service operations."""
+from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import contextlib, hashlib, json, os, subprocess, sys, tempfile, unittest, uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -30,7 +31,7 @@ class SourceFolderTests(unittest.TestCase):
         self.output={'job_id':self.job_id,'final_path':str(self.final),'owned_temp':str(self.library/'absent.partial'),'size':self.final.stat().st_size,'sha256':sha,'parent_identity':parent_identity,'validation':validation}
         self.queue=AudioJobs(self.db,None,None,lambda r:True);self.queue.enqueue(self.manifest);self.queue._update(self.job_id,state='completed',stage='completed',output=json.dumps(self.output))
         with connect(self.db) as db:db.execute('CREATE TABLE owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
-        self.source=CleanupJobs(self.db,self.base/'source-recovery',lambda db,intent:True,contextlib.nullcontext)
+        self.source=CleanupJobs(self.db,self.base/'source-recovery',lambda db,intent:True,contextlib.nullcontext,output_policy=library_is_sorted(self.library))
         self.stage_root=self.base/'merge-cache/audio-staging';self.stage_root.mkdir(parents=True)
         self.job=self.stage_root/self.job_id;self.job.mkdir();(self.job/'ownership.json').write_text(packed({'job_id':self.job_id,'manifest':self.manifest}),encoding='utf-8')
         self.storage=StorageCleanup(self.db,self.stage_root,self.source.root)

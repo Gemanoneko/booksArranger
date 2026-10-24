@@ -196,15 +196,27 @@ class AutomaticProcessing:
         return self.candidate(row)
     def _start_block_reason(self,state,*,jobs=None,scanning=None,server_closing=False):
         return self._start_block(state,jobs=jobs,scanning=scanning,server_closing=server_closing)[1]
+    def _output_problem(self):
+        """The same policy source removal reads (MergeService.output_policy), else the inventory's own settings."""
+        from source_config import sorted_problem
+        policy=getattr(self.merge,'output_policy',None)
+        value=policy() if callable(policy) else None
+        if isinstance(value,tuple) and len(value)==2:return sorted_problem(*value)
+        inventory=self.inventory
+        return sorted_problem(getattr(inventory,'output_root',None),inventory.all_source_roots() if hasattr(inventory,'all_source_roots') else ())
     def _start_block(self,state,*,jobs=None,scanning=None,server_closing=False):
         """(kind, reason) of what stops Start now, or (None, ''). kind: 'closing', 'failure', 'stopping', 'running',
-        'scan', 'conversion' or 'unknown'; 'conversion', 'scan' and 'stopping' clear by themselves (CLEARS)."""
+        'scan', 'conversion', 'output' or 'unknown'; 'conversion', 'scan' and 'stopping' clear by themselves (CLEARS)."""
         # This is a read-only snapshot, with no new lock acquisition. In
         # particular, never take merge/scanner locks while holding self.lock.
         if self.closed or server_closing or self._server_closing():return 'closing','The local server is stopping or stopped. Start is unavailable.'
         if self.volatile_failure:return 'failure','Automatic processing cannot restart because its failure record could not be saved.'
         if state=='Stopping':return 'stopping','Automatic processing is stopping. Wait for it to finish stopping.'
         if state=='Running' or self.thread and self.thread.is_alive():return 'running','Automatic processing is already running.'
+        # Sergei, rulings 2 and 1a (2026-10-24): done books go to Audiobooks Sorted. Without a separate output folder
+        # (the repo launchers, a missing audiobook-sources.json) a run would publish into a source folder.
+        problem=self._output_problem()
+        if problem:return 'output',problem+'. Set the Audiobooks Sorted output folder to start automatic processing.'
         if scanning is None:
             worker=getattr(self.inventory,'worker',None)
             scanning=bool(worker and worker.is_alive())

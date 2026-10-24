@@ -22,7 +22,7 @@ class BusyTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(dir=AREA)
         self.database=Path(self.temp.name)/'private.sqlite3'
         self.holders=[];self.threads=[]
-        self.auto=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database)),research=object())
+        self.auto=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database,output_root=str(Path(self.database).parent/'sorted'))),research=object())
         self.run='private-run'
         self.checkpoint=json.dumps({'pending':['private-book'],'done':['completed-1','completed-2','completed-3','completed-4']})
         with scanner.connect(self.database) as db:
@@ -74,7 +74,7 @@ class BusyTests(unittest.TestCase):
         self.auto._update(self.run,state='Paused',checkpoint=self.checkpoint)
         self.assertEqual(self.saved()['state'],'Paused')
     def test_restart_keeps_saved_progress_paused_never_starts_worker(self):
-        second=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database)),research=object())
+        second=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database,output_root=str(Path(self.database).parent/'sorted'))),research=object())
         saved=self.saved();self.assertEqual(saved['state'],'Paused');self.assertEqual(saved['checkpoint'],self.checkpoint)
         self.assertIsNone(second.thread);self.assertTrue(saved['restart_paused'])
     def test_persistent_busy_bounded_and_checkpoint_unchanged(self):
@@ -168,7 +168,7 @@ class BusyTests(unittest.TestCase):
         saved=self.saved();self.assertEqual(saved['state'],'Paused')
         final=json.loads(saved['checkpoint']);self.assertIn(identity,final['pending']);self.assertEqual(final['done'][:4],checkpoint['done'])
         self.assertIsNone(self.auto.volatile_failure);self.auto.inventory.stop.assert_called();self.auto.merge.pause.assert_called()
-        second=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database)),research=object())
+        second=AutomaticProcessing(SimpleNamespace(inventory=SimpleNamespace(database=self.database,output_root=str(Path(self.database).parent/'sorted'))),research=object())
         self.assertEqual(self.saved()['state'],'Paused');self.assertIsNone(second.thread)
     def test_atomic_pause_exhaustion_never_claims_saved_or_resets_candidate(self):
         with scanner.connect(self.database) as db:db.execute('INSERT INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',('private-book',1,'private','Researching','{}',None,'1','1'))

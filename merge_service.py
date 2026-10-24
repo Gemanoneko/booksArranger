@@ -192,7 +192,7 @@ class MergeService:
         self.retirement.stop=self.jobs._stop
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
         self.jobs.postprocessing=self._finish_replacement
-        self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard)
+        self.cleanup = CleanupJobs(inventory.database,self.cache_dir.parent/'source-recovery',self._cleanup_guard,self._review_boundary,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,output_policy=lambda:self.output_policy())
         self.cleanup.stop=self.jobs._stop
         # Pause and Stop set the shared stop; a Quit drain does not, so it is checked separately.
         self.cleanup.interrupt=lambda:self.draining or self.jobs._drain.is_set()
@@ -280,6 +280,17 @@ class MergeService:
         if capability['state']!='ready':return {'job_id':job_id,'accepted':False,'queued_next':False,'origin_recorded':True,'producer_recovery':capability}
         result=self._request_m4b_readmission(job_id,'retry');self._resume_later()
         return {'job_id':job_id,'requeued':False,'origin_recorded':True,**result,'producer_recovery':capability}
+
+    def output_policy(self):
+        """(configured output folder or None, every source and library root), read live (Sergei, rulings 2 and 1a)."""
+        inventory=self.inventory
+        sources=inventory.all_source_roots() if hasattr(inventory,'all_source_roots') else tuple(getattr(inventory,'roots',{}).values())
+        return getattr(inventory,'output_root',None),tuple(sources)
+
+    def _require_sorted(self,path):
+        """ValueError unless path is in the configured output folder, which is set and outside every source."""
+        from source_config import require_sorted
+        require_sorted(str(path),*self.output_policy())
 
     def _finish_recovery_child(self,job_id):
         """Ruling 5, in the worker right after the child's lease on the old files ends: remove them, then the child's
@@ -2724,7 +2735,9 @@ class MergeService:
     def _run_media(self, manifest, stop, checkpoint):
         stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
         import inplace_m4b
-        session=None if manifest.get('replacement_id') else inplace_m4b.Session(self.inventory.database,manifest['job_id'],manifest['attempt_id'])
+        try:self._require_sorted(manifest['destination']);sorted_destination=True
+        except ValueError:sorted_destination=False  # the copy flow then runs, and its cleanup keeps the sources (C2)
+        session=None if manifest.get('replacement_id') or not sorted_destination else inplace_m4b.Session(self.inventory.database,manifest['job_id'],manifest['attempt_id'])
         output, validation=create_private(manifest,self.stage_root,stop,lambda stage,info:checkpoint(stages[stage],info),artifact_observer=self.working,in_place=session)
         if isinstance(output,inplace_m4b.Edited):return self._publish_in_place(manifest,output,validation,checkpoint)
         if manifest.get('replacement_id'):
@@ -2764,6 +2777,9 @@ class MergeService:
                 edited.session.record('publishing')
                 with self._review_boundary():
                     if not self._guard(manifest):raise ValidationError('Candidate review changed — review required')
+                    # The rename retires the source path: only into the configured output folder (rulings 2 and 1a).
+                    try:self._require_sorted(destination)
+                    except ValueError as problem:raise ValidationError(str(problem)) from None
                     target.revalidate()
                     try:receipt=rename_no_replace(edited.handle,destination,edited.boundary,target,expected_identity=edited.handle.facts(),
                         expected_size=validation['size'],expected_sha256=validation['sha256'])

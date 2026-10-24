@@ -511,9 +511,12 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(record['exception_class'],'AttributeError');self.assertEqual(record['message'],"'NoneType' object has no attribute 'get'")
         self.assertNotIn('PRIVATE_FIELD',json.dumps(record));self.assertTrue(record['stack'])
 
-    def fake_merge(self,lookup=None):
+    def fake_merge(self,lookup=None,output_root=True):
         audio=self.base/'audio';audio.mkdir(exist_ok=True);path=audio/'John Writer – A Book.mp3';path.write_bytes(b'fixture only')
-        inv=Inventory(self.db,{'Audiobooks':str(audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')},lambda p,k,s:json.loads(row(p,'A Book')['metadata']))
+        # A separate sorted output folder, as the installed app has (Sergei, rulings 2 and 1a, 2026-10-24).
+        sorted_root=self.base/'sorted';sorted_root.mkdir(exist_ok=True)
+        inv=Inventory(self.db,{'Audiobooks':str(audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')},lambda p,k,s:json.loads(row(p,'A Book')['metadata']),
+                      output_root=str(sorted_root) if output_root is True else output_root)
         state={'state':'Completed','queued':0};reviews=SimpleNamespace(_context=lambda row:{},_row=lambda lib,id,revision=None:inv.candidate(lib,id))
         merge=SimpleNamespace(inventory=inv,reviews=reviews,_no_scan=lambda:None,state=lambda:dict(state),pause=lambda:state.update(state='Paused'),resume=Mock(),candidate_status=lambda id:None)
         merge.approve_automatic=Mock(side_effect=lambda row,result,stop,client:(row,'fixture-job'))
@@ -529,6 +532,17 @@ class AutoTests(unittest.TestCase):
             if stop_when_held and state['automatic_retry_enabled'] and state['research']['held'] and not state['research']['waiting']:auto.stop()
             auto.thread.join(.01)
         self.assertFalse(auto.thread.is_alive());return auto.status()
+    def test_start_is_refused_without_a_separate_sorted_output_folder(self):
+        # Rulings 2 and 1a (2026-10-24): the repo launchers and a missing audiobook-sources.json run with no output folder,
+        # so a run would publish into a source folder. Start is refused, with the reason, and nothing runs.
+        for output_root,reason in ((None,'No sorted output folder is set'),(str(self.base/'audio'/'Sorted'),'The output folder overlaps a source folder')):
+            with self.subTest(output_root=output_root):
+                auto,merge,inv=self.fake_merge(output_root=output_root);status=auto.status()
+                self.assertFalse(status['can_start']);self.assertEqual(status['start_block'],{'kind':'output','clears':False})
+                self.assertTrue(status['start_block_reason'].startswith(reason),status['start_block_reason'])
+                with self.assertRaisesRegex(ValueError,reason):auto.start()
+                self.assertIsNone(auto.thread);merge.approve_automatic.assert_not_called();auto.close()
+        auto,merge,inv=self.fake_merge();status=auto.status(jobs=merge.state());self.assertTrue(status['can_start'],'positive control: '+status['start_block_reason']);auto.close()
     def test_construction_and_inventory_only_never_approve(self):
         auto,merge,inv=self.fake_merge();self.assertEqual(auto.status()['state'],'Idle');merge.approve_automatic.assert_not_called();inv.launch('Audiobooks');inv.worker.join(5);merge.approve_automatic.assert_not_called();auto.close()
     def test_uncertain_work_is_revisited_until_user_stop(self):

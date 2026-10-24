@@ -150,4 +150,15 @@ class ZoneCleanupIntegrationTests(unittest.TestCase):
             with self.assertRaises((BoundaryError,PermissionError)):f.retire()
         self.assertTrue(source.exists());self.assertTrue((f.source.root/f.cleanup_id/'00000.mp3').is_file())
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

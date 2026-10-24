@@ -120,4 +120,15 @@ class RetryIntent(unittest.TestCase):
         self.assertTrue(validate(child,fresh,str(self.base/'sorted')))
         altered=copy.deepcopy(child);altered['destination']=str(self.base/'elsewhere.m4b');self.assertFalse(validate(altered,fresh,str(self.base/'sorted')))
         altered=copy.deepcopy(child);altered['cleanup_policy']['enabled']=False;self.assertFalse(validate(altered,fresh,str(self.base/'sorted')))
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

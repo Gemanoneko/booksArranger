@@ -80,7 +80,10 @@ def single_stream(path):
 
 
 class CleanupJobs:
-    def __init__(self,database,recovery_root,guard,review_boundary,output_location=None,output_location_guard=None):
+    def __init__(self,database,recovery_root,guard,review_boundary,output_location=None,output_location_guard=None,output_policy=None):
+        # output_policy() -> (configured output folder or None, every source/library root), read live at each check.
+        # Without one nothing is removed (Sergei, rulings 2 and 1a, 2026-10-24: only a book whose result is in Sorted).
+        self.output_policy=output_policy
         self.output_location_guard=output_location_guard
         self.output_location=output_location
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
@@ -177,6 +180,13 @@ class CleanupJobs:
         with connect(self.database) as db:
             now=stamp();db.execute('UPDATE source_cleanup SET state=?,reason=?,updated=? WHERE id=?',(state,reason,now,id))
             if state=='completed':db.execute('INSERT OR IGNORE INTO recovery_completion SELECT id,job_id,? FROM source_cleanup WHERE id=?',(now,id))
+    def _sorted(self,path,error=ValueError):
+        """The deletion rule (rulings 2 and 1a): the effective output is inside the configured output folder, which is
+        set and outside every source. Read from the live configuration at each check."""
+        from source_config import require_sorted
+        output_root,sources=self.output_policy() if self.output_policy else (None,())
+        try:require_sorted(str(path),output_root,sources)
+        except ValueError as problem:raise error(str(problem)) from None
     def enroll(self,job,binding,historical=False):
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')
         manifest=job['manifest'];output=job['output']
@@ -191,6 +201,9 @@ class CleanupJobs:
                 raise ValueError('Only selected verified audiobook originals are eligible')
             if str(path).casefold() in paths:raise ValueError('Duplicate selected source path')
             paths.append(str(path).casefold())
+        with connect(self.database) as db:
+            setup(db);prior=db.execute('SELECT id FROM source_cleanup WHERE job_id=?',(job['job_id'],)).fetchone()
+        if not prior:self._sorted((self.output_location(output)[0] if self.output_location else output)['final_path'])
         id=str(uuid.uuid4());intent={'id':id,'job_id':job['job_id'],'manifest':manifest,'output':output,'binding':binding,'actor':'assistant','created':stamp(),'recovery_identity':self.root_identity,'historical':historical}
         with connect(self.database) as db:
             setup(db)
@@ -340,6 +353,7 @@ class CleanupJobs:
             with connect(self.database) as db:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
             if out['validation'].get('publication_mode')=='in_place':return self._retire_moved(id,intent,manifest,out)
+            self._sorted(final,BoundaryError)  # before any copy or marker change; again before each disposal below
             self._set(id,'checking');held=[]
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
@@ -399,6 +413,7 @@ class CleanupJobs:
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before disposition')
                     if self.output_location_guard and not self.output_location_guard(db,intent['output'],intent.get('_location_envelope'),require_transaction=True):raise BoundaryError('Current output location changed before source disposition')
+                    self._sorted(final,BoundaryError)
                     single_stream(source['path'])
                     original.dispose()
                     db.execute("UPDATE cleanup_members SET state='disposition_set' WHERE cleanup_id=? AND path=?",(id,source['path']))

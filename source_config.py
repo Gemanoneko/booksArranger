@@ -25,6 +25,27 @@ def _path(value):
     return value
 
 
+def sorted_problem(output_root, sources):
+    """'' when the output folder is set and neither is nor overlaps any source folder, else why not.
+
+    Sergei, rulings 2 and 1a (2026-10-24): a source book is removed only when its verified result is in
+    Z:\\Audiobooks Sorted, the configured output folder; a book that is not done stays unchanged in its source."""
+    if not output_root:
+        return 'No sorted output folder is set'
+    if any(contains(output_root, source) or contains(source, output_root) for source in sources):
+        return 'The output folder overlaps a source folder'
+    return ''
+
+
+def require_sorted(path, output_root, sources):
+    """Raise ValueError unless path is inside the configured output folder and that folder is outside every source."""
+    problem = sorted_problem(output_root, sources)
+    if problem:
+        raise ValueError(problem + '; the source files are kept')
+    if not contains(path, output_root):
+        raise ValueError('The audiobook is not in the sorted output folder; the source files are kept')
+
+
 @dataclass(frozen=True)
 class SourceConfig:
     audiobook_sources: tuple

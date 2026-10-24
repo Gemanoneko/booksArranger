@@ -20,18 +20,57 @@ class CleanupTest(unittest.TestCase):
         for i in range(2):
             p=self.library/(str(i)+'.mp3');p.write_bytes(bytes([65+i])*2048);stat=p.stat()
             self.sources.append({'path':str(p),'size':stat.st_size,'modified':str(stat.st_mtime_ns),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-        final=self.library/'book.m4b';final.write_bytes(b'validated fixture output')
-        with DirectoryBoundary(self.library,final.parent) as boundary:identity=boundary.identities
-        self.job={'job_id':'test','state':'completed','manifest':{'root':str(self.library),'sources':self.sources,'cover':{'path':str(final),'sha256':hashlib.sha256(final.read_bytes()).hexdigest()}},
-            'output':{'final_path':str(final),'size':final.stat().st_size,'sha256':hashlib.sha256(final.read_bytes()).hexdigest(),'parent_identity':identity,'validation':{'passed':True}}}
+        # Sergei, rulings 2 and 1a (2026-10-24): the output is in the sorted folder, outside the source library. Until
+        # 0.21.3 this fixture published into the library itself and its originals were still removed (audit C2).
+        self.sorted=self.base/'sorted';self.sorted.mkdir();self.output_root=str(self.sorted);self.policy_calls=0
+        final=self.sorted/'book.m4b';final.write_bytes(b'validated fixture output')
+        with DirectoryBoundary(self.sorted,final.parent) as boundary:identity=boundary.identities
+        self.job={'job_id':'test','state':'completed','manifest':{'root':str(self.library),'output_root':str(self.sorted),'sources':self.sources,'cover':{'path':str(final),'sha256':hashlib.sha256(final.read_bytes()).hexdigest()}},
+            'output':{'root':str(self.sorted),'final_path':str(final),'size':final.stat().st_size,'sha256':hashlib.sha256(final.read_bytes()).hexdigest(),'parent_identity':identity,'validation':{'passed':True}}}
         self.job['manifest'].update(profile='fixture',metadata={'title':'Fixture','canonical_author':'Author'},chapters=[])
         self.job['output']['validation'].update(checks='Output checks passed',profile='fixture',sha256=self.job['output']['sha256'],size=final.stat().st_size,
             tags={'media_type':'2','title':'Fixture','artist':'Author'},source_pcm_frames=[100,100],source_pcm_rate=100,decoded_duration=2,duration_tolerance=.01,chapters=[])
         with connect(self.db) as db:db.execute('CREATE TABLE owned_artifacts(path TEXT PRIMARY KEY,job_id TEXT,kind TEXT,sha256 TEXT,size INTEGER)')
-        self.worker=CleanupJobs(self.db,self.base/'recovery',lambda db,intent:self.good,contextlib.nullcontext)
+        self.worker=CleanupJobs(self.db,self.base/'recovery',lambda db,intent:self.good,contextlib.nullcontext,output_policy=self.policy)
         self.id=self.worker.enroll(self.job,{})
+    def policy(self):
+        self.policy_calls+=1
+        return self.output_root,(str(self.library),)
     def tearDown(self):
         self.worker.close();self.temp.cleanup()
+    def assert_all_kept(self):
+        self.assertTrue(all(Path(s['path']).exists() for s in self.sources))
+        self.assertEqual(self.worker.status('test')['removed'],0)
+    # Sergei, rulings 2 and 1a (2026-10-24): a source is removed only when its verified result is in the sorted folder.
+    def test_output_in_the_source_library_is_not_enrolled(self):
+        inside=json.loads(packed(self.job));inside['job_id']='inside';final=self.library/'book.m4b';final.write_bytes(b'validated fixture output')
+        inside['output'].update(final_path=str(final),root=str(self.library));inside['manifest']['output_root']=str(self.library)
+        with self.assertRaisesRegex(ValueError,'not in the sorted output folder'):self.worker.enroll(inside,{})
+    def test_no_output_folder_keeps_every_original(self):
+        self.output_root=None
+        with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
+        self.assert_all_kept();self.assertFalse(list((self.base/'recovery').rglob('*.mp3')),'refused before any copy')
+        with self.assertRaisesRegex(ValueError,'No sorted output folder'):self.worker.enroll(dict(self.job,job_id='another'),{})
+    def test_output_folder_overlapping_a_source_keeps_every_original(self):
+        for overlapping in (str(self.base),str(self.library),str(self.library/'Sorted')):
+            with self.subTest(output=overlapping):
+                self.output_root=overlapping
+                with self.assertRaisesRegex(BoundaryError,'overlaps a source'):self.worker.run(self.id)
+                self.assert_all_kept()
+    def test_rule_is_read_again_before_each_removal(self):
+        # The configuration changes after every recovery copy is made and before the first removal.
+        real=self.policy
+        def changing():
+            value=real()
+            return (None,value[1]) if self.policy_calls>=3 else value  # enroll, run start, then the first removal
+        self.worker.output_policy=changing
+        with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
+        self.assertEqual(len(list((self.base/'recovery'/self.id).glob('*.mp3'))),2,'positive control: it got to the removals')
+        self.assert_all_kept()
+    def test_without_a_policy_nothing_is_removed(self):
+        self.worker.output_policy=None
+        with self.assertRaisesRegex(BoundaryError,'No sorted output folder'):self.worker.run(self.id)
+        self.assert_all_kept()
     def test_actual_removal_and_exact_restore(self):
         self.worker.run(self.id)
         self.assertEqual(self.worker.status('test')['removed'],2)

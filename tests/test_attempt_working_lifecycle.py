@@ -3,6 +3,7 @@
 Producer tests launch only this capsule's pinned Python with fixed inline code.
 They exercise actual owned cancellation/disposition, not codec correctness.
 """
+from sorted_fixture import library_is_sorted  # 0.21.3: fixtures publish inside their library
 import errno
 import base64
 import contextlib
@@ -199,7 +200,7 @@ class WorkingLifecycleTests(unittest.TestCase):
         self.queue._update(self.job_id,state='completed',output=json.dumps(output),journal=json.dumps({'publication_intent':output}))
         # The fixture supplies an already validated durable output contract;
         # this is actual native cleanup proof, not a claim of codec/media QA.
-        cleanup=CleanupJobs(self.db,self.base/'recovery',lambda *args:True,contextlib.nullcontext)
+        cleanup=CleanupJobs(self.db,self.base/'recovery',lambda *args:True,contextlib.nullcontext,output_policy=library_is_sorted(self.library))
         try:
             storage=StorageCleanup(self.db,self.stage_root,cleanup.root)
             Path(str(self.source)+':Zone.Identifier').write_bytes(b'[ZoneTransfer]\nZoneId=3')

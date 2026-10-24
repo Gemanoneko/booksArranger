@@ -218,3 +218,14 @@ class MigrationCompletenessTests(unittest.TestCase):
         receipt=_completeness_receipt(self.census(),outcomes)
         self.assertEqual(receipt['accounted_candidates'],3)
         self.assertFalse(any(row['outcome']=='moved' for row in receipt['outcomes']))
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+

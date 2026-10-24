@@ -88,4 +88,15 @@ class FailedJobRetryTests(unittest.TestCase):
     def test_changed_frozen_source_review_never_requeues_failed_job(self):
         self.guard.return_value=False;self.assertFalse(self.jobs.retry_failed(self.job_id,3700)['retryable']);self.assertEqual(self.jobs.status()['jobs'][0]['state'],'needs attention')
 
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+
 if __name__=='__main__':unittest.main()

@@ -28,6 +28,7 @@ class RelocatedCleanupTests(unittest.TestCase):
         f.storage.output_location=self.bindings.current;f.storage.output_location_guard=self.bindings.guard
         f.source.output_location=self.bindings.current;f.source.output_location_guard=self.bindings.guard
         self.old=Path(f.output['final_path']);self.target=f.base/'sorted';self.target.mkdir();self.final=self.target/'book.m4b'
+        f.source.output_policy=lambda:(str(self.target),(str(f.library),))  # relocated into the sorted folder, outside the source (rulings 2 and 1a)
         self.final.write_bytes(self.old.read_bytes())
         helper=ledger_fixture.PublicationLocationsTests();helper.original=json.loads(p._packed(f.output))
         with DirectoryBoundary(self.target,self.final.parent) as b,VerifiedFile(self.final) as file:
@@ -65,3 +66,14 @@ class RelocatedCleanupTests(unittest.TestCase):
         with self.assertRaisesRegex(BoundaryError,'native identity'):self.f.storage.run(self.f.job_id)
         self.assertTrue((self.f.stage/'checked.m4b').exists())
         self.assertTrue(all(Path(s['path']).exists() for s in self.f.sources))
+
+# 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
+def setUpModule():
+    global _sorted_fixture
+    from sorted_fixture import patch_merge_service
+    _sorted_fixture = patch_merge_service()
+
+
+def tearDownModule():
+    _sorted_fixture.stop()
+

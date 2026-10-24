@@ -26,7 +26,7 @@ class AutomaticRecordRetryTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(dir=AREA)
         self.database=Path(self.temp.name)/'private.sqlite3'
         self.holders=[];self.threads=[]
-        self.inventory=SimpleNamespace(database=self.database,roots={'Audiobooks':str(Path(self.temp.name)/'sources')},worker=None,stop=Mock())
+        self.inventory=SimpleNamespace(database=self.database,roots={'Audiobooks':str(Path(self.temp.name)/'sources')},output_root=str(Path(self.temp.name)/'sorted'),worker=None,stop=Mock())
         self.merge=SimpleNamespace(inventory=self.inventory,state=Mock(return_value={'state':'Completed','queued':0,'cleanup_active':False}),_no_scan=Mock(),pause=Mock(),approve_automatic=Mock(),candidate_status=Mock(return_value=None))
         self.research=SimpleNamespace(lookup=Mock(),client=object())
         self.auto=AutomaticProcessing(self.merge,research=self.research)
