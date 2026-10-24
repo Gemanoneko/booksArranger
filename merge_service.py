@@ -1951,7 +1951,8 @@ class MergeService:
         same_author), a name already in Sorted (name_taken), or another hold that waits for a change (group 'other',
         "Needs you"). Waits the app ends by itself (source waits, retry-later holds) are not listed; a book Sergei
         removed from the list stays out until its files change. Read-only; cached on cheap catalog stamps."""
-        database=self.inventory.database
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return {}  # no catalog (a status computed without one): nothing to list
         with connect(database) as db:
             have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if 'book_groups' not in have or 'automatic_candidates' not in have:return {}
@@ -1995,8 +1996,10 @@ class MergeService:
         """Judy's stale rule (section 1): a job is not listed when its book was converted since by another job, or when
         its book is no longer current (regrouped); whatever older jobs say. One predicate for every count and list."""
         if not summary:return {}
+        database=getattr(getattr(self,'inventory',None),'database',None)
+        if not database:return summary
         by_job={job['job_id']:job for job in jobs}
-        with connect(self.inventory.database) as db:
+        with connect(database) as db:
             current={r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='book_groups'").fetchone() else None
         kept={}
         for job_id,item in summary.items():
