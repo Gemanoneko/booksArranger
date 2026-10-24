@@ -54,6 +54,7 @@ patterns.push('test_approve_as_is.py');  // 0.22.0: Sergei as a source and Appro
 patterns.push('test_author_rules.py');  // 0.22.0: Sergei's lasting author rules (ruling 12) and his 2026-10-24 answers
 patterns.push('test_attention_list.py');  // 0.22.0: the one to-do list, its reasons, counts and stale rows (ruling 10)
 patterns.push('test_list_speed.py');  // 0.22.0: the book list never waits for group_lock behind an approval (ruling 18)
+patterns.push('test_todo_holds.py');  // 0.22.0 review: the three hold rows, their causes, saved order, coverage (Judy)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

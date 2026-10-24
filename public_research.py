@@ -666,7 +666,9 @@ class PublicResearch:
             if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)
             ask=local.get('ask')
             reason=local_identity.ASK_REASONS[ask['kind']] if ask else local_identity.PIECE_REASON
-            return result|{'reasons':[reason],'ask':copy.deepcopy(ask),'identity_hold':{'kind':ask['kind'] if ask else 'piece','detail':local.get('held') or ''},'wait':None}
+            hold={'kind':ask['kind'] if ask else 'piece','detail':local.get('held') or ''}
+            if not ask and local.get('piece'):hold['piece']=copy.deepcopy(local['piece'])  # the typed cause of the to-do row
+            return result|{'reasons':[reason],'ask':copy.deepcopy(ask),'identity_hold':hold,'wait':None}
         local=local_identity.agreement(row,root,siblings,index['readers'] if index else None)
         result['local_agreement']=local_identity.summary(local)
         if observed_candidate_count>3:return result|{'reasons':['Mixed recordings in this group']}

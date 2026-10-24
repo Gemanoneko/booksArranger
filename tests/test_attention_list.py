@@ -33,8 +33,8 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         ask=rows['Утро снайпера']['ask'];self.assertEqual(ask['kind'],'title_author')
         self.assertEqual(ask['destination']['path'],str(Path('Без автора')/'Утро снайпера.m4b'));self.assertFalse(ask['destination']['taken'])
         rows,_=self.listed('author_unclear');self.assertEqual(list(rows),['Тайна']);self.assertEqual([c['name'] for c in rows['Тайна']['ask']['candidates']],['Лев Толстой','Антон Чехов'])
-        rows,_=self.listed('other');self.assertEqual(list(rows),['Брат мой'])
-        counts=self.counts();self.assertEqual((counts['title_author'],counts['author_unclear'],counts['other']),(1,1,1))
+        rows,_=self.listed('order_unclear');self.assertEqual(list(rows),['Брат мой'])  # 0.22.0 review (Judy, B3): its own chip, not "Needs you" under Other
+        counts=self.counts();self.assertEqual((counts['title_author'],counts['author_unclear'],counts['order_unclear'],counts['other']),(1,1,1,0))
         self.assertEqual(sum(v for v in counts.values() if isinstance(v,int)),self.listed()[1],'All = the sum of the chips')
 
     def test_inside_a_reason_books_sort_by_folder_then_title_with_numbers_in_natural_order(self):

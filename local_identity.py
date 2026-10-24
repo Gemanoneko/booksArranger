@@ -1270,7 +1270,7 @@ def _piece_conflicts(row, title, part, siblings, components, author='', numbered
                 or _supports_title(title, [{'kind': 'sibling', 'value': Path(s['filename']).stem, 'numbered': True}], author)
                 or part_of_same(s)]
         if same:
-            conflicts.append({'field': 'title', 'detail': '%d other file(s) beside it carry this title; this may be only part of the book' % len(same), 'force': True, 'piece': 'siblings'})
+            conflicts.append({'field': 'title', 'detail': '%d other file(s) beside it carry this title; this may be only part of the book' % len(same), 'force': True, 'piece': 'siblings', 'count': len(same)})
     return conflicts
 
 
@@ -1696,7 +1696,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                          'sources': [{'kind': 'folder', 'value': component['value']}]}
                 break
     if part and part['blocked']:
-        conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True, 'piece': 'part_set'})
+        conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True, 'piece': 'part_set',
+                          'position': part['position'], 'parts': part['parts'], 'set': part['set_title']})
     pieces = _piece_conflicts(row, title['value'] if title else '', part, siblings, components, numbered=bool(title and title.get('basis') == 'number_rule'))
     for piece in pieces:
         if piece['piece'] == 'numbered_part' and title and title['basis'] == 'tag':
@@ -1974,6 +1975,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
             'held': piece['detail'] if piece and not ask else '',
+            # Judy 2026-10-24 (0.22.0 review, B4): the typed cause of a "Part of a bigger book" row and its numbers.
+            'piece': {k: piece[k] for k in ('piece', 'count', 'position', 'parts', 'set') if k in piece} if piece and not ask else None,
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
 
 

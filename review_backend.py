@@ -296,7 +296,8 @@ class CandidateReviewService:
 
     # Judy 2026-10-24, section 1: the "Needs your answer" set first (missing files first: deleted files can be recovered
     # only while the recycle bin keeps them), then the Stopped set in its existing order.
-    ATTENTION_ORDER={'files_missing':-5,'title_author':-4,'author_unclear':-3,'same_author':-2,'name_taken':-1,
+    # 0.22.0 review (Judy 2026-10-24, B3): the three hold chips follow Name taken in the same set.
+    ATTENTION_ORDER={'files_missing':-8,'title_author':-7,'author_unclear':-6,'same_author':-5,'name_taken':-4,'part_of_book':-3,'files_unclear':-2,'order_unclear':-1,
                      'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):

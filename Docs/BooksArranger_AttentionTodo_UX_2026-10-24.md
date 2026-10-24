@@ -503,3 +503,242 @@ Accessible names: "Approve: {title clue}", "Scan again: {title clue}", "Convert 
 **Not changed here:** the Stopped set's own actions and bulk buttons; the Manual review panel; the filter's name; Files-view behaviour (MissingFiles spec).
 
 Design basis: Hick (five chips in two labelled sets, zero chips hidden, one primary per row), Fitts (the fields and Approve sit in the row, no panel round trip), Jakob (native fields, radios, dialog, title tooltips), NN/g error prevention (confirm only where moves and removal follow; Enter never approves; a taken name blocks Approve), visibility of status (counts agree everywhere, progress stays findable), plain-language recovery (one sentence, details collapsed); WCAG 2.2 AA 1.4.3, 1.4.11, 2.1.1, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
+
+---
+
+# 0.22.0 review (2026-10-24, Judy)
+
+Basis: read-only look at branch `ender/0220` (worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0220`): `web/app.js` (to-do code L1823-2146, `activityStep` L503), `web/index.html`, `web/style.css`, commit 43d962d, and the backend that decides what is listed and what Approve does: `merge_service.needs_you` (L1948), `ask_payload` (L2012), `approve_book` (L2105), `approve_automatic` (L2139), `source_identity.source_gate` (L56), `local_identity.PIECE_REASON` (L1461), `review_backend.tracks` (L702). Nothing launched, no live catalog opened. The counts (1,248 / 347 / 271 / 155 / 143 / 39 / 10) are Ender's and Jane's, not re-measured here. Geometry is target geometry for Futaba. Spec only: no code.
+
+**This section supersedes, in this file:** section 4.2 last bullet ("always sends a default"), section 4.3 "Choosing ... approves the book", section 5 "no order step" (for the Order unclear rows only), check 7, and offer 4 of section 14 (answered in part B).
+
+## A. The six departures
+
+| # | Departure | Verdict |
+|---|---|---|
+| 1a | Copy: "The only name credited may be the reader. The app can't tell who wrote it." | Accept. One fix for the "Also:" line (below). |
+| 1b | Copy: "The file name and the folder name give different authors." | Accept. |
+| 1c | Copy: "Remove from list was not accepted. Nothing was changed." | Accept. Fills a hole in my sheet. |
+| 1d | Copy: "Copy is unavailable here. Select the text instead." | **Change** to "Couldn't copy. Select the text and press Ctrl+C." |
+| 2 | Reader-only rows: nothing preselected, Approve files under Без автора | Accept, plus one visible line. |
+| 3 | Same author?: a choice does not approve, Approve must be pressed | Accept. My spec was wrong. |
+| 4 | "Needs you" rows count under Other and offer Approve | **Change.** Not specific enough. See part B. |
+| 5 | Row and panel drafts not shared, Approve inert while the panel has unsaved edits | Accept, and extend to unsaved track edits. |
+| 6 | Activity line: long or multi-line reason reads "On hold — see details" | Accept the rule. **Change** the words. |
+
+**1a.** Evidence plus consequence, in plain words. The "Also:" line is built from the same sentence (`askAlso`), so the second sentence breaks the "Also: {one sentence}" form. In an "Also:" line use the first sentence only: "Also: the only name credited may be the reader."
+
+**1d.** "here" says nothing. The fix is to name the key. Status line only, no timer, as for "Copied.".
+
+**2. Reader-only rows.** Ruling 14 beats my "never left without a value", and ruling 11a agrees: Без автора is the last resort, used when Sergei gives no author. The radios list the suspected reader with its evidence ("artist tag · reader on 9 other books"), so he can still pick that name on purpose. Add one line under the radio group, shown only while nothing is chosen (`field-help`): **No choice files it under Без автора.** Without it, an unselected radio group reads as "nothing will happen" and the Goes to line is the only hint. Bulk stays closed to these rows (`readerRisk`), as ruling 14 says "including bulk".
+
+**3. Same author?** Accept. Native radios change on arrow keys, so approving on change would file a book (and later remove its source) while he is still arrowing. Approve after choosing is right. Behaviour: choose "Same author" or "Different author", press Approve: the rule is saved, the book is filed, every book with that name pair leaves in the same refresh ("Applies to {n} books." stays above Approve; the strip says "Remembered. {n} books continue."). Approve with no choice files it as written and teaches nothing. Add one line under the group, shown only while nothing is chosen: **No choice files it as written. Nothing is remembered.** Sergei expects his answer to be kept, so the row must say that pressing Approve alone is not an answer. Check 7 now reads: choose, press Approve, rule recorded, pair cleared.
+
+**5. Drafts.** Accept (the fallback in section 3). `askInert` tests `dirty` only. Add `trackDirty` (unsaved order or include edits in the panel): same inert state, same tooltip "Save or discard the edits in the details panel first." This matters more now (part B: Change order and Choose files live in the panel). Futaba adds: save a Title in the panel, then compare the row's Title field with the panel. Both must show the saved value.
+
+**6. Activity line.** The rule is right (no wall of text in the Jobs panel). "see details" points at nothing: the activity row is not clickable and has no details. The held book is listed under Needs attention, so point there: **On hold — see Needs attention**. Residual risk: a reason of 80 characters or fewer still prints raw ("Errno 13 Permission denied ..." fits). The real fix is the same typed cause the row uses; use it here when the API sends one, and keep the length rule as the fallback. Futaba searches the Jobs panel for the technical markers of check 3.
+
+## B. The 347 held books
+
+### B1. What the code does today
+
+All four holds follow the same path and end on the same row:
+
+| Hold (count) | Produced by | Listed as | Row today |
+|---|---|---|---|
+| One part of a bigger book (155) | `local_identity` piece (`identity_hold.kind='piece'`) | group `other` ("until change") | Needs you |
+| Playback order uncertain (143) | `source_gate` | `other` | Needs you |
+| Source membership uncertain (39) | `source_gate` | `other` | Needs you |
+| Mixed recordings (10) | `source_gate` | `other` | Needs you |
+
+The row says "Needs you / This book needs your decision. Select the row to read why." with Approve, in the **Stopped** set. The server sends `reasons`, but the UI uses them only for a tooltip and the Technical details disclosure.
+
+### B2. Is "Needs you" under Other specific enough? No
+
+1. **Wrong place.** Other sits in the Stopped set ("Show books that stopped for another reason"), next to Retry all and Retry selected. These books did not stop. They ask a question. Sergei looks for questions under "Needs your answer".
+2. **One sentence for four different problems.** The real reason is two actions away (select the row, read the panel). Ruling 10 says "explain exactly what is wrong". 271 identical rows cannot be worked through.
+3. **The only option is Approve, with nothing shown that it approves.** Approve overrides these holds (ruling 6b; `approve_automatic` keeps only the safety reasons) and converts the app's file set in the app's order. The approval note even records "in the order shown", but no order is shown. A wrong order or a stray file inside a finished audiobook cannot be repaired once the source is removed (ruling 2). Ruling 6b stays as it is: Approve still approves as is. The row must show what "as is" is.
+4. **No real second option.** He cannot reorder, drop a file or re-check the folder from the row.
+
+### B3. What is needed: three chips, specific rows, real options
+
+**Three chips** join the "Needs your answer" set, appended after Name taken, hidden at zero:
+
+| Chip | Tooltip | Holds |
+|---|---|---|
+| Part of a bigger book · N | Show books that may be only one part of a bigger book. | the 155 |
+| Files unclear · N | Show books where the app isn't sure which files belong. | source membership (39) and mixed recordings (10) |
+| Order unclear · N | Show books where the app isn't sure of the playback order. | the 143 |
+
+Keys: `part_of_book`, `files_unclear`, `order_unclear`, added to `attentionKeys` and `NEEDS_KEYS`, so All, the shortcut and the Jobs line still equal the sum. Membership and mixed share one chip because they ask the same thing ("are these the right files?") and share the same options; Hick prefers three chips to four. A book with several reasons counts once, in this order: Part of a bigger book, Files unclear, Order unclear. The next reason shows as an "Also:" line when it is answered on the same row (its list shows too).
+
+**Other** keeps the Stopped jobs. A hold the app cannot classify stays there as a catch-all, never as a mystery: status "Needs you", sentence "This book needs your decision.", and a line **Reason: {first reason}** when that reason is 80 characters or fewer and one line (the app's own short phrase). Acceptance: on a copy of the live catalog, "Needs you" rows = 0, or each one is named in Futaba's report.
+
+**Not in bulk.** None of the three chips offers "Approve as is". A bulk press cannot confirm an order, a file set or a name. Retry selected also hides in every "Needs your answer" chip, not only the two bulk chips (today it shows a dead "Retry selected (0)" in Missing files, Same author?, Name taken and the new chips).
+
+### B4. The rows
+
+Layout follows sections 3 and 4: status, sentence, optional Also line, fields or list, Goes to, buttons. Face and tooltip of the primary button depend on the chip, so the press says what is being confirmed.
+
+**Order unclear** (`order_unclear`)
+
+```
+[ ] Колесо Времени 3  ·  Роберт Джордан  ·  12 audio files
+    Order unclear                                    [ Approve this order ] [ Change order ]
+    3 of 12 files have no track number.              [ Scan again ] [ View metadata ] [ Open folder ]
+    Playback order
+      1. 01 Пролог.mp3
+      2. 02 Глава 1.mp3
+      3. Глава 2.mp3
+      4. Глава 3.mp3
+      5. Глава 4.mp3
+      + 7 more, listed in the details panel.
+    Goes to  Audiobooks Sorted\Джордан Роберт\Колесо Времени 3 - Джордан Роберт.m4b
+```
+
+The list is an `ol` named "Playback order": the first 5 file names (name only, folder in the title), then "+ {n} more, listed in the details panel." It is the order Approve will use.
+
+| Cause | Sentence |
+|---|---|
+| No file has a track number | No file has a track number. The order comes from the file names. |
+| Some have none | {k} of {n} files have no track number. |
+| Tied | Some files share a track number. |
+| Gap or not starting at 1 | Track numbers skip or don't start at 1. |
+| Unknown | The app can't be sure of the playback order. |
+
+**Files unclear** (`files_unclear`)
+
+```
+[ ] Дюна  ·  Фрэнк Герберт  ·  9 audio files
+    Files unclear                                    [ Approve these files ] [ Choose files ]
+    The tags say 12 tracks, but 9 files are here.    [ Scan again ] [ View metadata ] [ Open folder ]
+    In  Z:\Audiobooks\Дюна\
+        01 Пролог.mp3
+        02 Глава 1.mp3
+        03 Глава 2.mp3
+        + 6 more, listed in the details panel.
+    Goes to  Audiobooks Sorted\Герберт Фрэнк\Дюна - Герберт Фрэнк.m4b
+```
+
+| Cause | Sentence | Extra line |
+|---|---|---|
+| Track total differs | The tags say {n} tracks, but {m} files are here. | |
+| Disc total differs | The tags say {n} discs, but {m} are here. | |
+| One file of many | This file is tagged as track {x} of {n}. The other tracks aren't here. | |
+| Files lack the title | {k} of {n} files don't mention this book's title. ({k}=1: "1 of {n} files doesn't mention this book's title.") | the flagged names replace the first 3 names |
+| Mixed recordings | The files carry different albums or artists. They may be more than one book. | **Albums:** {A} ({a} files) · {B} ({b} files), up to 3, then "+ {n} more"; **Artists:** the same way when only artists differ |
+| Parts don't number | The parts of this set don't number cleanly. | |
+| Unknown | The app can't be sure which files belong to this book. | |
+
+**Part of a bigger book** (`part_of_book`)
+
+```
+[ ] Глава 5  ·  Unknown  ·  1 audio file
+    Part of a bigger book                            [ Approve as one book ] [ Scan again ]
+    This file is named as one chapter.               [ View metadata ] [ Open folder ]
+    Title [ Метро 2033 ]
+          Title from the folder name.
+    In  Z:\Audiobooks\Метро\
+        Глава 5.mp3
+    Goes to  Audiobooks Sorted\Без автора\Метро 2033.m4b
+```
+
+The Title field always shows here (the question is "is it a whole book, and what is it called?"), prefilled, with its basis line. Author fields follow the existing rules (section 3). Files list: up to 3 names, as for Missing files.
+
+| Cause | Sentence |
+|---|---|
+| Named as a chapter | This file is named as one chapter. |
+| Numbered part | The name marks this as one numbered part. |
+| Same title beside it | {n} other files beside it carry the same title. (n=1: "Another file beside it carries the same title.") |
+| Part of a held set | Part {i} of {n} of "{set}". |
+| Folder not checked | The other files in this folder couldn't be checked. |
+| Unknown | The app can't tell if this is a whole book. |
+
+The status already says "Part of a bigger book", so the sentence gives only the evidence (copy standard: only what is crucial).
+
+**Buttons**
+
+| Control | Face | Tooltip | Pending |
+|---|---|---|---|
+| Approve (Order unclear) | Approve this order | Approve the order shown: convert if needed, rename, move to Audiobooks Sorted. | Approving... / Approving this book... |
+| Approve (Files unclear) | Approve these files | Approve the files shown as one book: convert if needed, rename, move to Audiobooks Sorted. | same |
+| Approve (Part of a bigger book) | Approve as one book | File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted. | same |
+| Change order | Change order | Change the playback order in the details panel. Save it there, then approve. | none (it moves focus) |
+| Choose files | Choose files | Choose which files belong in the details panel. Save it there, then approve. | none |
+| Scan again (any of the three) | Scan again | Check this book's folders again, for example after you rename or add files. Nothing is changed or deleted. | Scanning... / Scanning this book's folders... |
+
+- Faces are at least 152 x 32 (as Convert what's there), labels wrap, never truncate. Accessible names start with the visible face ("Approve this order: {title clue}").
+- **Change order** and **Choose files** select the row, open Manual review and move focus to the "Included audio files" heading. The panel already has Include checkboxes, Move up and Move down, and Save track review (`/api/candidate/tracks`). Order unclear shows Change order; Files unclear shows Choose files; Part of a bigger book shows neither.
+- **This only works if Approve uses what he saved.** My reading of the code: `approve_automatic` ends in `reviews.tracks(..., keys, included, ...)` with `keys` taken from the row's members in catalog order, which overwrites a saved `track_order` and `included`. Ender confirms. The requirement: when Sergei saved an order or a file selection in the panel (`track_actor` user), Approve uses it. If that cannot ship in 0.22.0, drop the two buttons and add this line under the list instead: **To change it, rename the files, then press Scan again.**
+- **Scan again on rows that are not missing:** the result line after an unchanged check is "Checked 14:32. No change." (replaces on each scan). If the folder changed, the row leaves and the strip says "Changes found. The book is checked again."
+- Approve for a hold row keeps every other rule of section 5: safety gates stay, source removed only after the verified output is in Audiobooks Sorted.
+
+**API (names assumed, Ender confirms).** Per book one `ask` with `kind` in `part_of_book | files_unclear | order_unclear`, `cause` (typed, from the members already in the row: no new research), `also`, `files` (the order Approve will use: `{name, folder, track, disc, flag}`, first 6) and `file_count`, `albums` / `artists` `[{name, files}]` for mixed, the numbers each sentence needs (`missing`, `total`, `tags_say`, `here`, `index`, `set`, `beside`), and `reason` (first server reason, for the Other catch-all). The UI maps cause to copy; an unknown cause uses the "Unknown" sentence.
+
+### B5. Gaps in coverage of the 347
+
+1. **347 vs 271.** 76 books are unaccounted for. `needs_you()` lists a held book only when its record has `until_change`, matches the book's current revision and fingerprint, and the book has no job at all (`identity in jobs` skips it). Any of the three silently drops a book. Ender names where each of the 76 sits (which chip, or which condition drops it) before the build goes to Futaba.
+2. **The list is empty while the first sweep runs.** Held books saved before 0.22.0 have no `until_change`, and "Waiting for source" books are not in the list at all. Research v5 re-checks all of them once (about 3 minutes each; the 2026-10-24 diagnosis estimated about 3 days). Until then the list shows "Nothing needs your attention." while 1,200+ books are undecided: false, and ruling 10 says nothing is blocked silently. Add one line in the strip (`field-help`, hidden at zero), `n` = `automatic_processing.research.waiting + researching`:
+   - running: **Still checking {n} books. More may appear here.**
+   - not running: **{n} books are waiting to be checked. Start automatic processing to check them.**
+   - empty list with `n` above zero: **Nothing needs your attention yet. Still checking {n} books.** (replaces "Nothing needs your attention.")
+3. **Retry-later holds that repeat** are not listed (section 1: waits the app ends by itself). A hold that fails the same way on every retry (the Iron Inferno "destination unavailable" 24 h hold) does not end by itself. Offer 1 below.
+4. **Refusals by the three safety gates** read "Approve was not accepted. Nothing was changed." (`askErrorText` ignores the server's reason). Minor: map "Source files changed" to the existing "This book changed. Review its details and try again." and give "Audio format needs an encoding decision" its own line: **The audio format needs a decision the app can't make yet. Select the row to read why.** Same commit if cheap.
+
+## C. Copy sheet additions
+
+| Where | String |
+|---|---|
+| Chips and tooltips | Part of a bigger book · N / Files unclear · N / Order unclear · N, with the tooltips in B3 |
+| Reader-only, nothing chosen | No choice files it under Без автора. |
+| Same author?, nothing chosen | No choice files it as written. Nothing is remembered. |
+| Also line, reader | Also: the only name credited may be the reader. |
+| Copy details failed | Couldn't copy. Select the text and press Ctrl+C. |
+| Activity line | On hold — see Needs attention |
+| Other catch-all | Needs you / This book needs your decision. / Reason: {reason} |
+| Order list label | Playback order |
+| Scan again, unchanged | Checked {time}. No change. |
+| Scan again, changed | Changes found. The book is checked again. |
+| Sweep line | Still checking {n} books. More may appear here. / {n} books are waiting to be checked. Start automatic processing to check them. |
+| Empty, still checking | Nothing needs your attention yet. Still checking {n} books. |
+| Fallback when the order cannot change in the app | To change it, rename the files, then press Scan again. |
+| Safety refusal | The audio format needs a decision the app can't make yet. Select the row to read why. |
+
+Sentences and button faces for the three chips are in B4.
+
+## D. Checks for Futaba (committed build, seeded fixture, nothing on Z:)
+
+1. **Fixture:** one book per cause in B4 (5 order, 7 files, 6 part, plus the unknowns), one reader-only book, one Same author? book. Each shows its own sentence, list and buttons. Control: on the as-built branch the four holds show "Needs you".
+2. **End to end, not just a pressable button:** Approve one fixture each of Order unclear, Files unclear (mixed), Files unclear (track total) and Part of a bigger book. Each reaches a verified output in Audiobooks Sorted. The output's chapter order equals the row's list. The source is removed only afterwards.
+3. **Saved order:** reorder in the panel, Save track review, Approve: the output follows the saved order. Control: the as-built branch ignores it. Unsaved order edits in the panel: Approve is inert with its tooltip.
+4. **Counts:** All = the sum of every chip = the shortcut = the Jobs line, including the three new keys, and after each action within one poll.
+5. **Coverage (read-only copy of the live catalog, no research run):** list the books per chip; "Needs you" under Other = 0 or each named; the 76 are each accounted for; every current Held book with `until_change` is listed or its drop reason is named. Report the numbers.
+6. **Sweep line:** with waiting books and an empty list, the empty state and strip read as in B5.2, in both states (running, not running).
+7. **Retry selected** is hidden in every "Needs your answer" chip and present in All. "Approve as is" exists only in the two bulk chips, never in the three new ones.
+8. **Departure checks:** reader-only book: nothing selected, the line shows, an untouched Approve lands in Без автора, bulk never lists it. Same author?: choosing does not approve; arrow keys through the radios never press Approve; choose + Approve records the rule and clears the pair; Approve with no choice records nothing.
+9. **Copy:** every string verbatim, "Also:" for a reader row has one sentence, the Copy failure line appears with the clipboard blocked, the activity line reads "On hold — see Needs attention" for a multi-line reason.
+10. **Rects** at 1440, 1024, 700 and 200% zoom, with and without the dialog: the new rows (five-name lists, five buttons) do not overlap, no horizontal scroll, focus ring not clipped, buttons at least 152 x 32.
+11. **Tooltips** on every new control in the packaged window.
+
+## E. Changes Ender must make
+
+1. Replace "Needs you" for the four holds with the three chips and rows of B3 and B4 (typed causes, file lists, the face and tooltip per chip). Other keeps stopped jobs plus the catch-all with its "Reason:" line.
+2. Make Approve use the order and file selection Sergei saved in the panel; add `trackDirty` to the inert test. If that is out for 0.22.0, ship without Change order and Choose files and use the fallback line.
+3. Account for the 76 (347 minus 271) and every silent drop in `needs_you()` before QA. Add the sweep line and the new empty state (B5.2).
+4. Copy: "Also:" takes the first sentence; "Couldn't copy. Select the text and press Ctrl+C."; "On hold — see Needs attention"; the two "No choice ..." lines under the Author unclear radios (while nothing is chosen) and the Same author? radios.
+5. Hide Retry selected in every "Needs your answer" chip.
+6. Same commit if cheap: the safety-refusal lines of B5.4.
+7. Update tests: `test_todo_frontend.js` has `other:0`, so "Needs you" rows were never tested. Add one fixture per cause.
+
+Accepted as built: 1a, 1b, 1c, 2 (plus its line), 3 (plus its line), 5 (plus `trackDirty`), the rule of 6.
+
+## F. Questions and offers
+
+**Question for Sergei (one word)**
+1. Allow a bulk "Approve as is" for "Order unclear" (143 books)? The row shows each order, but a bulk press confirms none of them, and a wrong order cannot be repaired after the source is gone. Judy's recommendation: no. (no / yes)
+
+**Offers (not specced)**
+1. List a retry-later hold that failed the same way three times, so a stuck book is never hidden behind a timer.
+2. A "Join with the other parts" action for "Part of a bigger book" (same-title files beside it, a held set). The app has no manual regroup today; without it each of the 155 can only be filed as its own book or fixed on disk.
+3. For "Mixed recordings": a split action. Today he can only choose files, or approve them as one book.
+4. Up and Down arrows between rows (offer 2 of section 14), more useful now that 347 books are answered one by one.

@@ -656,8 +656,8 @@ class MergeService:
         try:summary=self.stale_attention(summary,raw_jobs,set(totals.get('converted_ids') or ()))
         except (sqlite3.Error,OSError):pass
         counts,cleanable=attention_counts(summary)
-        try:needs=self.needs_you()
-        except (sqlite3.Error,OSError,ValueError):needs={}
+        try:needs,coverage=self._todo()
+        except (sqlite3.Error,OSError,ValueError):needs,coverage={},dict(self.NO_COVERAGE)
         for entry in needs.values():counts[entry['group']]=counts.get(entry['group'],0)+1
         for group in self.NEEDS_GROUPS:counts.setdefault(group,0)
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
@@ -666,7 +666,7 @@ class MergeService:
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'published_check':value.get('published_check'),'attention_counts':counts,'working_cleanable':cleanable,'attention_row':attention_row,
+            'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
 
     def converted_ids(self,max_age=30.0):
@@ -1943,54 +1943,88 @@ class MergeService:
         return {key:copy.deepcopy(value[key]) for key in ('state','reason','path','identity','publication_id','kind','tags_state') if key in value}
 
     # ------------------------------------------------------------ the one to-do list (Judy 2026-10-24, rulings 10, 6a, 6b)
-    NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','name_taken')
+    # Judy 2026-10-24 (0.22.0 review, B3): the three hold chips join "Needs your answer"; Other keeps stopped jobs and a
+    # catch-all for a hold the app cannot classify.
+    NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear')
+    ASK_GROUPS=('title_author','author_unclear','same_author')
+    NO_COVERAGE={'listed':0,'still_checking':0,'removed':0,'with_job':0}
 
     def needs_you(self):
-        """{candidate id: {'group', 'reasons', 'ask'}} for every current book without a job that only Sergei can move on:
-        files gone from disk (files_missing), a question from the identity step (title_author, author_unclear,
-        same_author), a name already in Sorted (name_taken), or another hold that waits for a change (group 'other',
-        "Needs you"). Waits the app ends by itself (source waits, retry-later holds) are not listed; a book Sergei
-        removed from the list stays out until its files change. Read-only; cached on cheap catalog stamps."""
+        """{candidate id: {'group', 'reasons', 'ask', 'also', 'hold'}} for every current book without a job that only
+        Sergei can move on: files gone from disk (files_missing), a question from the identity step (title_author,
+        author_unclear, same_author), a name already in Sorted (name_taken), one of the three holds (part_of_book,
+        files_unclear, order_unclear; a book with several counts once, in that order, the next as 'also'), or a hold the
+        app cannot classify ('other', "Needs you"). Read-only; cached on cheap catalog stamps. todo_coverage() says
+        where every other current book is."""
+        return self._todo()[0]
+
+    def todo_coverage(self):
+        """Where every current book is (Judy 2026-10-24, 0.22.0 review B5): {'listed', 'still_checking', 'removed',
+        'with_job'}. still_checking counts the books automatic processing researches again before they can be listed
+        or filed: never researched yet, researching, waiting for a source, a retry-later hold, or a record from an older
+        research version, older author rules, or a book whose files or saved values changed since."""
+        return self._todo()[1]
+
+    def _todo(self):
         database=getattr(getattr(self,'inventory',None),'database',None)
-        if not database:return {}  # no catalog (a status computed without one): nothing to list
+        if not database:return {},dict(self.NO_COVERAGE)  # no catalog (a status computed without one): nothing to list
         with connect(database) as db:
             have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            if 'book_groups' not in have or 'automatic_candidates' not in have:return {}
+            if 'book_groups' not in have or 'automatic_candidates' not in have:return {},dict(self.NO_COVERAGE)
             stamp=(tuple(db.execute('SELECT count(*),max(attempted) FROM automatic_candidates').fetchone()),
+                   tuple(db.execute('SELECT count(*),total(revision) FROM book_groups WHERE superseded=0').fetchone()),
                    tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
                    tuple(db.execute('SELECT count(*),max(updated) FROM audio_jobs').fetchone()) if 'audio_jobs' in have else (),
                    tuple(db.execute('SELECT count(*) FROM attention_dismissals').fetchone()) if 'attention_dismissals' in have else ())
-            rules=__import__('author_rules').load(database)
+            rules=__import__('author_rules').load(database);generation=rules.generation if rules else ''
             cached=self.__dict__.get('_needs_cache')
-            if cached and cached[0]==(stamp,rules.generation if rules else ''):return copy.deepcopy(cached[1])
+            if cached and cached[0]==(stamp,generation):return copy.deepcopy(cached[1]),dict(cached[2])
             current={r['id']:(r['revision'],r['fingerprint']) for r in db.execute('SELECT id,revision,fingerprint FROM book_groups WHERE superseded=0')}
             jobs={r[0] for r in db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
             dismissed={(r[0],r[1]) for r in db.execute('SELECT candidate_id,fingerprint FROM attention_dismissals')} if 'attention_dismissals' in have else set()
             gone=set()
             if 'catalog_group_members' in have:
                 gone={r[0] for r in db.execute('SELECT DISTINCT m.group_id FROM catalog_group_members m JOIN files f ON f.root=m.root AND f.path=m.path WHERE f.missing=1')}
-            held={r['id']:r for r in db.execute("SELECT id,revision,fingerprint,result FROM automatic_candidates WHERE state='Held'")}
-        found={}
+            records={r['id']:r for r in db.execute('SELECT id,revision,fingerprint,state,result FROM automatic_candidates')}
+        import todo_causes
+        from public_research import RESEARCH_VERSION
+        found={};coverage=dict(self.NO_COVERAGE)
         for identity,(revision,fingerprint) in current.items():
-            if identity in jobs:continue
-            record=held.get(identity)
-            try:result=json.loads(record['result']) if record and record['revision']==revision and record['fingerprint']==fingerprint else None
+            if identity in jobs:coverage['with_job']+=1;continue  # queued, converting, converted or a stopped job (listed as Stopped)
+            record=records.get(identity)
+            same_files=bool(record and record['fingerprint']==fingerprint);exact=bool(same_files and record['revision']==revision)
+            try:result=json.loads(record['result']) if same_files else None
             except (TypeError,ValueError):result=None
-            ask=result.get('ask') if isinstance(result,dict) and isinstance(result.get('ask'),dict) else None
+            if not isinstance(result,dict):result=None
+            ask=result.get('ask') if result and exact and isinstance(result.get('ask'),dict) else None
             if identity in gone:
                 # Missing files first; the identity question, if any, is answered on the same row ("Also:").
-                if (identity,fingerprint) not in dismissed:
-                    found[identity]={'group':'files_missing','reasons':['Files missing'],'ask':ask,'also':ask['kind'] if ask and ask.get('kind') in ('title_author','author_unclear') else None}
+                if (identity,fingerprint) in dismissed:coverage['removed']+=1
+                else:found[identity]={'group':'files_missing','reasons':['Files missing'],'ask':ask,'also':ask['kind'] if ask and ask.get('kind') in ('title_author','author_unclear') else None}
                 continue
-            if result is None:continue
+            if result is None or record['state']!='Held':coverage['still_checking']+=1;continue
             reasons=[str(r) for r in result.get('reasons') or []][:8]
-            if ask and ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
-                continue  # Sergei answered this name pair since: the book is researched again with the rule
-            if ask and ask.get('kind') in ('title_author','author_unclear','same_author'):found[identity]={'group':ask['kind'],'reasons':reasons,'ask':ask}
-            elif any('already exists at this path' in r for r in reasons):found[identity]={'group':'name_taken','reasons':reasons,'ask':None}
-            elif result.get('until_change'):found[identity]={'group':'other','reasons':reasons,'ask':None}
-        self.__dict__['_needs_cache']=((stamp,rules.generation if rules else ''),copy.deepcopy(found))
-        return found
+            if reasons==['Manual draft retained']:
+                # His saved review holds the book; automatic processing only looks again (Held filter: Let the app handle it).
+                found[identity]={'group':'other','reasons':reasons,'ask':None};continue
+            if exact and any('already exists at this path' in r for r in reasons):
+                found[identity]={'group':'name_taken','reasons':reasons,'ask':None};continue
+            settled=bool(result.get('until_change') and result.get('research_version')==RESEARCH_VERSION and (result.get('rules_generation') or '')==generation)
+            if not settled:coverage['still_checking']+=1;continue  # automatic processing researches it again first
+            if result.get('ask'):
+                # A question needs the exact revision: a value Sergei saved since (6a) is researched again first.
+                if not ask or ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
+                    coverage['still_checking']+=1;continue
+                if ask.get('kind') in self.ASK_GROUPS:found[identity]={'group':ask['kind'],'reasons':reasons,'ask':ask};continue
+            kinds=todo_causes.holds(result)
+            if kinds:
+                # The same files: an order or file choice he saved in the panel (a new revision) keeps the row listed.
+                found[identity]={'group':kinds[0],'also':kinds[1] if len(kinds)>1 else None,'reasons':reasons,'ask':None,'hold':result.get('identity_hold')}
+            elif exact:found[identity]={'group':'other','reasons':reasons,'ask':None}
+            else:coverage['still_checking']+=1
+        coverage['listed']=len(found)
+        self.__dict__['_needs_cache']=((stamp,generation),copy.deepcopy(found),dict(coverage))
+        return found,coverage
 
     def stale_attention(self,summary,jobs,converted):
         """Judy's stale rule (section 1): a job is not listed when its book was converted since by another job, or when
@@ -2039,16 +2073,66 @@ class MergeService:
                 fields['author']=dict(author,proposal=shown_author,basis=author.get('basis','') if author.get('proposal')==shown_author else '')
             except (ValueError,OSError) as error:
                 payload['destination']={'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+        if entry['group'] in ('part_of_book','files_unclear','order_unclear','other'):self._hold_payload(row,entry,payload)
         return payload
 
+    def _hold_payload(self,row,entry,payload):
+        """The three hold rows (Judy 2026-10-24, 0.22.0 review B4): the typed cause and the numbers its sentence needs
+        (from the row's own members and the recorded hold: no research, no file access), and the files Approve will use
+        in its order: the order and files Sergei saved in the panel, else every file in the catalog's order. Other's
+        catch-all gets its first reason."""
+        import todo_causes
+        members=row.get('members') or [];reasons=list(entry.get('reasons') or [])
+        payload['reason']=reasons[0] if reasons else ''
+        saved=(row.get('review_context') or {}).get('track_actor')=='user'
+        order=row.get('track_order') if saved else None;included=row.get('included') if saved else None
+        listed=todo_causes.files(members,order,included)
+        chosen=[m for m in members if m['path'] in {f['path'] for f in listed}];by_path={m['path']:m for m in chosen}
+        chosen=[by_path[f['path']] for f in listed]
+        title=((payload.get('fields') or {}).get('title') or {}).get('proposal','')
+        def cause(kind):
+            if kind=='order_unclear':return todo_causes.order_cause(chosen)
+            if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')))
+            if kind=='part_of_book':return todo_causes.piece_cause(entry.get('hold'))
+            return {}
+        found=cause(entry['group'])
+        payload['cause']=found.get('cause','');payload['facts']={k:v for k,v in found.items() if k not in ('cause','flagged')}
+        flagged=set(found.get('flagged') or ())
+        if entry.get('also'):
+            also=cause(entry['also']);payload['also_cause']=also.get('cause','');payload['also_facts']={k:v for k,v in also.items() if k not in ('cause','flagged')}
+            flagged|=set(also.get('flagged') or ())
+        listed=todo_causes.files(chosen,None,None,flagged)  # chosen is already in Approve's order
+        payload['files']=listed[:6];payload['file_count']=len(listed);payload['flagged']=[f for f in listed if f['flag']][:6]
+        payload['saved_tracks']=saved
+
     def scan_again(self,id,revision):
-        """Scan again (ruling 10): look for this book's missing files now. Changes and deletes nothing on disk; a file
-        that is back is catalogued again. {'found': bool, 'checked_utc'}."""
+        """Scan again: read this book's files again now. Changes and deletes nothing on disk. Missing files (ruling 10):
+        a file that is back is catalogued again ('found'). A hold row (Judy 2026-10-24, 0.22.0 review B4): 'changed' when
+        a file changed (the book is then checked again), and when a file is gone or renamed a scan of the book's source
+        starts so the new names are catalogued ('scan_started'), unless automatic processing or a scan owns discovery
+        ('scan_later'). {'found', 'changed', 'scan_started', 'scan_later', 'checked_utc', 'reason'}."""
         import datetime
+        try:listed_missing=any(m.get('missing') for m in self.inventory.candidate('Audiobooks',id)['members'])
+        except (ValueError,KeyError,TypeError):listed_missing=False
         receipt=self.inventory.refresh_candidate_sources('Audiobooks',id,revision,force=False)
-        found=receipt.get('state') in ('refreshed','unchanged')
-        if found:self.__dict__.pop('_needs_cache',None)
-        return {'found':found,'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':'' if found else receipt.get('reason','')}
+        state=receipt.get('state');found=state in ('refreshed','unchanged')
+        gone=not listed_missing and state=='held' and receipt.get('hold_code')=='source_unavailable'
+        started=later=False
+        if gone:
+            automatic=getattr(self,'automatic',None)
+            owned=automatic is not None and automatic.status()['state'] in ('Running','Stopping')
+            worker=getattr(self.inventory,'worker',None)
+            if owned or worker is not None and worker.is_alive():later=True
+            else:
+                try:self.inventory.launch_source(self.inventory.source_root_for_candidate(id));started=True
+                except ValueError:later=True
+        if state=='refreshed':
+            # The groups take the changed files now, so the book leaves the list at this answer, not one poll later.
+            try:self.inventory.candidate('Audiobooks',id)
+            except ValueError:pass  # regrouped: the old id is no longer current
+        if found or started:self.__dict__.pop('_needs_cache',None)
+        return {'found':found,'changed':state=='refreshed' or gone,'scan_started':started,'scan_later':later,
+                'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':'' if found or gone else receipt.get('reason','')}
 
     def dismiss_attention(self,id,revision):
         """Remove from list (ruling 10): a book with no audio file left stops being listed. No file is touched; a scan
@@ -2123,6 +2207,11 @@ class MergeService:
         if not result.get('work') or not result.get('review'):raise ValueError('Approve was not accepted. Nothing was changed.')
         approval=result['approval']
         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
+        ctx=self.reviews._context(row)
+        if ctx.get('track_actor')=='user' and isinstance(ctx.get('track_order'),list) and isinstance(ctx.get('included'),list):
+            # The order and files he saved in the panel (approve_automatic applies the same choice).
+            by_key={member_key(m['path']):m['path'] for m in row['members']}
+            files=[by_key[k] for k in ctx['track_order'] if k in ctx['included'] and k in by_key and (include is None or by_key[k] in include)]
         approved_by={'actor':'user','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'values':{'title':approval['title'],'author':approval['author']},
                      'typed':list(approval['typed']),'collection':approval['collection'],'files':files,'without_missing':bool(include)}
         result['reasons']=[]
@@ -2179,12 +2268,23 @@ class MergeService:
                 metadata_choices.admission(self.reviews.metadata_questions(decision_row,ctx),result['review'])
                 if self.automatic.manual_draft(current):raise ValueError('Manual draft retained')
             if self.candidate_status(row['id']):raise ValueError('Audiobook job already exists')
+            # Judy 2026-10-24 (0.22.0 review B4): Sergei's Approve uses the order and the files he saved in the panel
+            # (track_actor 'user', this revision); without them, every file in the catalog's order, as before.
+            saved=None
+            if approved_by is not None and ctx.get('track_actor')=='user':
+                keys=[member_key(m['path']) for m in current['members']];order=ctx.get('track_order');chosen=ctx.get('included')
+                if isinstance(order,list) and sorted(order)==sorted(keys) and isinstance(chosen,list) and chosen and set(chosen)<=set(keys):saved=(order,chosen)
             if include is not None:
                 # Convert what's there (ruling 10): only the present files named by the press; the left-out ones are reported.
                 chosen=[m for m in current['members'] if m['path'] in include]
                 if not chosen or len(chosen)!=len(include) or any(m.get('missing') or m.get('error') for m in chosen):raise ValueError('Source files changed')
                 gate_row=dict(current,members=chosen)
             else:gate_row=current
+            if saved:
+                by_key={member_key(m['path']):m for m in gate_row['members']}
+                ordered=[by_key[k] for k in saved[0] if k in saved[1] and k in by_key]
+                if not ordered:raise ValueError('Source files changed')
+                gate_row=dict(gate_row,members=ordered)
             if approved_by is not None:pass  # Sergei's values are the identity (bound to this fingerprint above)
             elif local:
                 from local_identity import revalidate,folder_siblings,catalog_index
@@ -2319,11 +2419,11 @@ class MergeService:
                         context=self.reviews._context(fresh);context['duplicate_review']=copy.deepcopy(result.get('duplicate_review'));context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
                         if approved_by is not None:context['user_approval']=copy.deepcopy(approved_by)
                         fresh=self.reviews._write(fresh,context,bump=False)
-                        keys=[m['member_key'] for m in fresh['members']]
-                        included=[m['member_key'] for m in fresh['members'] if m['path'] in paths]
+                        keys=list(saved[0]) if saved else [m['member_key'] for m in fresh['members']]
+                        included=[k for k in keys if k in {m['member_key'] for m in fresh['members'] if m['path'] in paths}]
                         if stop.is_set():raise InterruptedError()
                         fresh=self.reviews.tracks('Audiobooks',fresh['id'],fresh['revision'],keys,included,True,True,len(included)>1,actor=actor,keep_pending=approved_by is not None,
-                            evidence_note=('Approved by you: the files shown, in the order shown'+(' (missing files left out)' if include is not None else '')+'; every included file SHA256 verified.') if approved_by is not None else 'Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop)
+                            evidence_note=('Approved by you: the files shown, in the order shown'+(' (the order and files you saved)' if saved else '')+(' (missing files left out)' if include is not None else '')+'; every included file SHA256 verified.') if approved_by is not None else 'Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop)
                         with self.automatic.lock:
                             if stop.is_set() or approved_by is None and self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
                             context=self.reviews._context(fresh);context['metadata_approved']=True
