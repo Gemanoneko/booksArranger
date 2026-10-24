@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.21.2] - 2026-10-24
+
+### Fixed
+
+- Automatic processing no longer stalls on an approval. The set of converted books is now computed once per approval instead of on every enrichment step.
+- Pressing Start at the same moment as Quit or Pause now pauses the automatic run, instead of failing it.
+- The build guard is re-pinned to Git for Windows 2.56.0.3, so `npm run pack` starts again. A Git core pin mismatch now names the core, not the wrapper.
+
+### Changed
+
+- The QA gate now refuses a checkout that holds a live `data/` folder, so it can never run against the real catalog.
+- Test fixes: the gate runs the local-admission and catalog-paging tests and finds its pinned QA runtime through `BOOKS_QA_RUNTIME_ROOT`; the standing-admission retry fixtures make their own scratch folder; the local-admission host check allows the v0.18.0 series publisher query; the catalog-paging invalidation case changes a track title, not the album; the one-approval case counts only the approving thread's reads.
+
 ## [v0.21.1] - 2026-10-23
 
 ### Fixed
