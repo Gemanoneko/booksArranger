@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS} from '../scripts/python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds} from '../scripts/python-check-batches.mjs';
 const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.py','test_gamma.py'];
 const reports=()=>pythonBatches(patterns).map((p,batch)=>({batch,patterns:p,ids:p.map(x=>'case.'+x),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
 test('both short worker layouts retain the original fallback prerequisite',()=>{
- assert.equal(PYTHON_WORKERS,3);
+ assert.equal(PYTHON_WORKERS,4);  // 0.22.0: three no longer fit the 540 s deadline
  for(let i=0;i<PYTHON_WORKERS;i++){const layout=pythonWorkerLayout(i);assert.equal(layout.relative,'scratch/'+i);assert.deepEqual(layout.requiredDirectories,['scratch/tmp','scratch/source-fallback-2026-10-11']);}
  assert.throws(()=>pythonWorkerLayout(PYTHON_WORKERS));assert.throws(()=>pythonWorkerLayout(-1));assert.throws(()=>pythonWorkerLayout(1.5));assert.throws(()=>pythonWorkerLayout('../escape'));
 });
@@ -20,7 +20,7 @@ test('server conflicts remain serial and every declared pattern appears exactly 
 test('measured heavy modules spread longest first; serial modules stay together; declared order is kept',()=>{
  const declared=['test_alpha.py','test_desktop_host.py','test_inplace_m4b.py','test_beta.py','test_automatic_media.py','test_web.py','test_series_backfill.py','test_gamma.py'];
  const b=pythonBatches(declared);
- assert.deepEqual(b,[['test_alpha.py','test_desktop_host.py','test_beta.py','test_web.py','test_series_backfill.py','test_gamma.py'],['test_inplace_m4b.py'],['test_automatic_media.py']]);
+ assert.deepEqual(b,[['test_alpha.py','test_desktop_host.py','test_beta.py','test_web.py','test_gamma.py'],['test_inplace_m4b.py'],['test_automatic_media.py'],['test_series_backfill.py']]);
  assert.deepEqual(pythonBatches([...declared]),b,'deterministic');
  for(const batch of b)assert.deepEqual(batch,declared.filter(p=>batch.includes(p)),'each worker keeps the declared order');
  assert.throws(()=>pythonBatches(['test_a.py','test_b.py']),/Invalid/);  // fewer modules than workers
@@ -30,6 +30,9 @@ test('the real inventory projects every worker under the deadline from its measu
  const real=new Function(source.split(/\r?\n/).filter(l=>/^(const patterns=|patterns\.push\()/.test(l)).join('\n')+'\nreturn patterns;')();
  const b=pythonBatches(real);assert.equal(b.length,PYTHON_WORKERS);assert.deepEqual(b.flat().sort(),[...real].sort());
  assert(b[0].includes('test_desktop_host.py')&&b[0].includes('test_merge_http.py'));assert.equal(b.filter(batch=>batch.includes('test_inplace_m4b.py')).length,1);
+ // The projection itself (0.22.0: placement alone never caught three workers running past the deadline): every worker's
+ // measured seconds stay under 80 % of the 540 s deadline, leaving room for the copy and for four workers at once.
+ const loads=projectedSeconds(b);assert.equal(loads.length,PYTHON_WORKERS);assert(Math.max(...loads)<=0.8*540,'projected worker seconds '+loads.join(', '));
 });
 test('duplicate and malformed patterns cannot silently change discovery',()=>{assert.throws(()=>pythonBatches([...patterns,patterns[0]]));assert.throws(()=>pythonBatches(['../test_a.py','test_b.py']));});
 test('actual complete occurrence count is summed without deduplicating loader IDs',()=>{const r=reports();r[0].ids[1]=r[0].ids[0];assert.equal(validatePythonReports(patterns,pythonBatches(patterns),r).count,patterns.length);});

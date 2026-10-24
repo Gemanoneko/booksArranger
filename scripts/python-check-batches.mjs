@@ -1,18 +1,25 @@
-// Pure plan/accounting for three isolated workers inside the canonical owner Job.
+// Pure plan/accounting for four isolated workers inside the canonical owner Job.
 const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py','test_web.py','test_merge_http.py','test_blocked_retry.py','test_status_snapshot.py','test_status_read_contention.py','test_startup_published_check.py','test_producer_recovery_http.py','test_attention_repair.py']);
 // 0.21.1: two workers no longer fit the 540 s deadline (2026-10-23, both concurrent: 499 s and 601 s, the real MP3
 // fixture case not included). A third worker gets the same isolated copy, cwd and TEMP as the others. Modules are
 // placed longest first on the least-loaded worker by these measured seconds (unlisted modules weigh 2); serial server
 // modules stay together on worker 0, and each worker keeps the declared order. Only placement changes: every pattern
 // still runs exactly once, and every report must be complete.
-const measuredSeconds={'test_inplace_m4b.py':283,'test_automatic_media.py':76,'test_series_backfill.py':68,'test_automatic_media_policy.py':60,
-  'test_migration_planning.py':56,'test_destination_admission.py':55,'test_standing_admission.py':38,'test_working_lifecycle.py':38,'test_retry_intent.py':36,
-  'test_iron_skazka.py':31,'test_working_precision.py':30,'test_automatic_processing.py':30,'test_output_migration.py':23,'test_replacement_jobs.py':21,
-  'test_source_proofs.py':20,'test_progress_rows.py':18,'test_recovery_retention.py':17,'test_relocated_chapter_repair.py':15,'test_derived_migration.py':14,
-  'test_cleanup_resume.py':14,'test_mp3_tag_repair.py':13,'test_m4b_preservation.py':12,'test_attempt_working_lifecycle.py':11,
-  'test_source_folders.py':7,'test_source_cleanup.py':3,  // 0.21.3 audit M1, measured alone with the pinned Python (2026-10-24)
-  'test_approve_as_is.py':31,'test_sorted_wiring.py':9,'test_attention_list.py':5,'test_list_speed.py':2};  // 0.22.0, measured alone (2026-10-24)
-export const PYTHON_WORKERS=3;
+// 0.22.0: three workers no longer fit either (2026-10-24 evening: one worker 495 s, the other two past the 540 s
+// deadline). Every gate module timed alone with the pinned Python, one after another on an idle 32-core machine, sums
+// to 1,461 s (the heavy suites 15-45 % above their 0.21 weights, 0.22.0 suites added). A fourth worker; the weights
+// below are those times, rounded up, for every module of 5 s or more.
+const measuredSeconds={'test_inplace_m4b.py':338,'test_automatic_media.py':111,'test_series_backfill.py':87,'test_iron_skazka.py':72,'test_approve_as_is.py':71,
+  'test_destination_admission.py':69,'test_automatic_media_policy.py':63,'test_migration_planning.py':55,'test_standing_admission.py':51,'test_working_lifecycle.py':45,
+  'test_retry_intent.py':37,'test_automatic_processing.py':36,'test_working_precision.py':36,'test_output_migration.py':33,'test_source_proofs.py':24,
+  'test_sorted_wiring.py':20,'test_replacement_jobs.py':19,'test_local_admission.py':19,'test_progress_rows.py':18,'test_mp3_tag_repair.py':17,'test_source_folders.py':16,
+  'test_attempt_working_lifecycle.py':15,'test_local_identity_fixes.py':14,'test_derived_migration.py':14,'test_relocated_chapter_repair.py':13,'test_m4b_preservation.py':12,
+  'test_recovery_retention.py':12,'test_catalog_paging.py':12,'test_published_snapshot_lifecycle.py':10,'test_attention_list.py':9,'test_cleanup_resume.py':9,
+  'test_storage_cleanup.py':9,'test_review_backend.py':8,'test_startup_published_check.py':7,'test_web.py':7,'test_sqlite_busy.py':7,'test_source_cleanup.py':6,
+  'test_desktop_host.py':6,'test_blocked_retry.py':5,'test_list_speed.py':2};
+export const PYTHON_WORKERS=4;
+// What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
+export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}
 export function pythonWorkerLayout(index){
   if(!Number.isInteger(index)||index<0||index>=PYTHON_WORKERS)throw Error('Unknown Python worker');
   return {relative:'scratch/'+index,requiredDirectories:['scratch/tmp','scratch/source-fallback-2026-10-11']};
