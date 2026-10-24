@@ -123,6 +123,21 @@ class MergeHTTPTests(unittest.TestCase):
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         self.assertEqual(self.call('/api/candidate/scan-again',self.identity())[0],409,'never while scanning')
 
+    def test_keep_separate_route_follows_scan_agains_rules(self):
+        # Judy's "Keep as separate books" spec: the row's revision must match, a refusal names nothing changed, and the
+        # press waits while a library scan runs, as Scan again does.
+        self.merge.keep_separate=Mock(return_value={'kept':4})
+        status,body,_=self.call('/api/candidate/keep-separate',self.identity())
+        self.assertEqual((status,body['kept']),(200,4));self.merge.keep_separate.assert_called_once_with(ID,1)
+        self.merge.keep_separate=Mock(side_effect=ValueError('Candidate changed; reload evidence before reviewing'))
+        self.assertEqual(self.call('/api/candidate/keep-separate',self.identity())[1]['code'],'changed')
+        self.merge.keep_separate=Mock(side_effect=ValueError('These files are not a set of parts. Nothing was changed.'))
+        self.assertEqual(self.call('/api/candidate/keep-separate',self.identity())[1]['code'],'refused')
+        self.assertEqual(self.call('/api/candidate/keep-separate',self.identity()|{'extra':1})[0],400)
+        self.merge.keep_separate=Mock(return_value={'kept':4})
+        self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        self.assertEqual(self.call('/api/candidate/keep-separate',self.identity())[0],409,'never while scanning');self.merge.keep_separate.assert_not_called()
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)

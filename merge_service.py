@@ -2154,6 +2154,28 @@ class MergeService:
         return {'found':found,'changed':state=='refreshed' or gone,'scan_started':started,'scan_later':later,
                 'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':'' if found or gone else receipt.get('reason','')}
 
+    def keep_separate(self,id,revision):
+        """Judy's "Keep as separate books" (2026-10-25): Sergei's answer "these are separate books" to a "Part of a bigger book"
+        set row. Records each file (its size and time) as its own book in the separate-volumes store and touches no file;
+        it approves nothing: each new book is checked again like any other. Remembered per file until it changes.
+        Returns {'kept': n}. Raises ValueError for a changed row ('Candidate changed...') or a row that is not an asked set."""
+        import datetime,groups
+        row=self.reviews._row('Audiobooks',id,revision)
+        members=row.get('members') or []
+        entry=self.needs_you().get(id) or {}
+        hold=(entry.get('hold') or {}).get('piece') or {}
+        if entry.get('group')!='part_of_book' or hold.get('piece')!='set' or len(members)<2 or not (row.get('part_set') or row.get('split_book')):
+            raise ValueError('These files are not a set of parts asked about. Nothing was changed.')
+        root=self.reviews._source_root(row)
+        with connect(self.inventory.database) as db:
+            groups.record_volumes(db,root,members,groups.KEPT_BASIS+' on '+datetime.date.today().isoformat())
+        # The catalog regroups now (each file its own candidate), so the row leaves at this answer, not one poll later. A
+        # committed sync: Inventory.candidate() rolls its sync back when the candidate is gone.
+        with self.inventory.group_lock,connect(self.inventory.database) as db:
+            db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
+        self.__dict__.pop('_needs_cache',None)
+        return {'kept':len(members)}
+
     def dismiss_attention(self,id,revision):
         """Remove from list (ruling 10): a book with no audio file left stops being listed. No file is touched; a scan
         that finds its files again (a new fingerprint) lists it again."""
@@ -2370,7 +2392,8 @@ class MergeService:
                         if len(paths)>1 and chaptered and not joinable:
                             raise ValueError('Book parts carry their own chapters; joining them would drop those chapters')
                         part=(result['metadata_facts'].get('local_agreement') or {}).get('part_book') if local else None
-                        if part:
+                        # A file Sergei kept as its own book ("Keep as separate books") is a whole book, not one part of a set.
+                        if part and not (current.get('volume_of_set') or {}).get('kept'):
                             # One part of a set is its own book only as a whole .m4b with its own chapters, kept in
                             # copy mode (never re-encoded), and only when EVERY part of the set carries its own
                             # chapters: a set is never published piecemeal (Senua R2-C1, R2-M1).

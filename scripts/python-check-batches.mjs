@@ -20,7 +20,7 @@ const measuredSeconds={'test_inplace_m4b.py':338,'test_automatic_media.py':111,'
   'test_storage_cleanup.py':9,'test_review_backend.py':8,'test_startup_published_check.py':7,'test_web.py':7,'test_sqlite_busy.py':7,'test_source_cleanup.py':6,
   'test_desktop_host.py':6,'test_blocked_retry.py':5,'test_list_speed.py':2,'test_todo_holds.py':20,'test_join_parts.py':8,
   // Senua's 0.22.0 early review: m7 gates test_split_books and test_collection_identity; the review fixes add Approve cases (71 -> 100 s).
-  'test_split_books.py':60,'test_collection_identity.py':7,'test_m4b_join.py':25,'test_part_sets.py':48};
+  'test_split_books.py':60,'test_collection_identity.py':7,'test_m4b_join.py':25,'test_part_sets.py':62};
 export const PYTHON_WORKERS=5;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}

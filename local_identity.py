@@ -1768,6 +1768,28 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 conflicts = [c for c in conflicts if c.get('piece') not in ('part_title', 'numbered_part', 'siblings')]
                 title = {'state': 'one', 'value': named, 'basis': 'number_rule', 'how': 'Set name + part number (Sergei 2026-10-24, rulings 13 and 15)',
                          'sources': [title['sources'][0], {'kind': 'file name', 'value': Path(members[0]['filename']).stem}]}
+    if len(members) == 1 and (row.get('volume_of_set') or {}).get('kept'):
+        # Kept as separate books by Sergei (Judy's spec, 2026-10-25): the set question is answered, so this file never
+        # returns as one part of a bigger book for it. Title from its own tag, else its file name, else set name + part number.
+        conflicts = [c for c in conflicts if c.get('piece') not in ('part_title', 'numbered_part', 'siblings', 'part_set')]
+        tags = _tags(members[0])
+        album = clean_title(text(tags.get('album')))
+        album_key = title_key(work_name(album) or album)
+
+        def own(value):
+            value = clean_title(_index_stripped(value))
+            named = work_name(value) if value and not garbled(value) else ''
+            return value if named and title_key(named) != album_key else ''
+        stem = Path(members[0]['filename']).stem
+        tag_title, name_title = own(text(tags.get('title'))), own(stem)
+        number = re.match(r'^\s*(\d{1,4})', str(tags.get('track') or tags.get('tracknumber') or '')) or re.search(r'(\d{1,4})\D*$', stem)
+        if tag_title:
+            title = {'state': 'one', 'value': tag_title, 'basis': 'tag', 'how': 'the embedded title tag', 'sources': [{'kind': 'embedded', 'field': 'title', 'value': tag_title}]}
+        elif name_title:
+            title = {'state': 'one', 'value': name_title, 'basis': 'file_name', 'how': 'the file name', 'sources': [{'kind': 'file name', 'value': stem}]}
+        elif album and number and (not title or title_key(title['value']) == album_key):
+            title = {'state': 'one', 'value': '%s %d' % (album, int(number[1])), 'basis': 'number_rule', 'how': 'Set name + part number (rulings 13 and 15)',
+                     'sources': [{'kind': 'embedded', 'field': 'album', 'value': album}, {'kind': 'file name', 'value': stem}]}
     # ------------------------------------------------------------ author (one source is enough)
     candidates = []  # {'name', 'source', 'basis', 'kind'} in order of preference
     folk = []  # folk-tale credits whose rule files the book under its compiler or reteller, if one is credited

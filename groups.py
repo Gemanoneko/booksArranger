@@ -95,6 +95,14 @@ def volume_parts(connection,root):
     return frozenset(r[0] for r in connection.execute("""SELECT v.path FROM part_volumes v JOIN files f ON f.root=v.root AND f.path=v.path
         WHERE v.root=? AND v.size=f.size AND v.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,)))
 
+KEPT_BASIS='Kept separate by you'
+
+def kept_parts(connection,root):
+    """The recorded volumes Sergei kept separate himself ("Keep as separate books"), still matching their files."""
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='part_volumes'").fetchone():return frozenset()
+    return frozenset(r[0] for r in connection.execute("""SELECT v.path FROM part_volumes v JOIN files f ON f.root=v.root AND f.path=v.path
+        WHERE v.root=? AND v.basis LIKE ? AND v.size=f.size AND v.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,KEPT_BASIS+'%')))
+
 def record_volumes(connection,root,members,basis):
     """Record the members of a set as separate volumes (their current size and time). Regroups the catalog."""
     import datetime
@@ -440,7 +448,7 @@ def shown_grouping(text):
     match=_OLD_GROUPING.match(text)
     return 'One book: files of one folder with the '+match[1]+'.' if match else text
 
-def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
+def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     members={row['path']:member(row) for row in audio}
@@ -556,6 +564,10 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
             output[scope]['numbered_set']={'version':SAME_TITLE_VERSION,'name':found['name'],'basis':found['basis']}
             output[scope]['grouping']='One book: files of one folder with the '+found['basis']+'.'
             if not output[scope]['title_evidence'] and found['name']:output[scope]['title_clue']=found['name']
+    for scope,group in output.items():
+        if scope.endswith('\x1fVolume of a series') and len(group['members'])==1:
+            # Its own book: the set question was answered (kept: by Sergei's "Keep as separate books", else by its chapters).
+            group['volume_of_set']={'kept':group['members'][0]['path'] in kept}
     for scope,found in joined.items():
         if scope in output:
             output[scope]['joined_parts']={'version':SAME_ALBUM_VERSION,'name':found['name'],'basis':found['basis'],'works':found['works']}
@@ -593,7 +605,7 @@ def sync(connection,root):
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
-    groups=build(rows,protected,chaptered_parts(connection,root),volume_parts(connection,root))
+    groups=build(rows,protected,chaptered_parts(connection,root),volume_parts(connection,root),kept_parts(connection,root))
     for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
     for scope,evidence in groups.items():
         if scope in frozen:continue

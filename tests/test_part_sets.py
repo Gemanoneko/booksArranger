@@ -179,6 +179,88 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         self.assertEqual([c['title'] for c in job['output']['validation']['chapters']], ['s01e01', 's01e02', 's02e01', 's02e02'])
 
+    def seasons(self, names=('Black Star Season 1', 'Black Star Season 2')):
+        folder = self.folder('Чёрная звезда')
+        return [part(folder / (name + '.m4b'), 'Чёрная звезда', n, [(0, 500, 's0%de01' % n), (500, 1000, 's0%de02' % n)], album='Чёрная звезда',
+                     artist='Еспер Эрсгорд', total=len(names)) for n, name in enumerate(names, 1)]
+
+    def asked(self):
+        row = self.start()[0]
+        self.service.automatic._record(row, 'Held', dict(self.research(row), until_change=True), None)
+        listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
+        self.assertEqual([r['ask']['cause'] for r in listed], ['set_seasons'], 'positive control: asked as one set')
+        return listed[0]
+
+    def test_keep_as_separate_books_records_each_file_and_approves_nothing(self):
+        # Judy's "Keep as separate books" spec (2026-10-25).
+        sources = self.seasons()
+        before = [(p.stat().st_size, p.stat().st_mtime_ns) for p in sources]
+        row = self.asked()
+        self.assertEqual((self.service.todo_coverage()['listed'], self.service.todo_coverage()['still_checking']), (1, 0))
+        self.assertEqual(self.service.keep_separate(row['id'], row['revision']), {'kept': 2})
+        self.assertEqual([(p.stat().st_size, p.stat().st_mtime_ns) for p in sources], before, 'no file touched')
+        self.assertEqual(list(self.sorted.iterdir()), [], 'nothing filed'); self.assertEqual(self.service.jobs.status()['jobs'], [])
+        # Confirm 2: the new books count as "Still checking" at the next poll; the set row is gone.
+        coverage = self.service.todo_coverage()
+        self.assertEqual((coverage['listed'], coverage['still_checking']), (0, 2), coverage)
+        rows = self.rows(); self.assertEqual(sorted(len(r['members']) for r in rows), [1, 1])
+        # Confirm 1: neither file comes back as "Part of a bigger book" for this set.
+        for new in rows:
+            result = self.research(new)
+            self.assertNotIn('One part of a bigger book', result['reasons'], (new['title_clue'], result['reasons']))
+            self.assertIsNone(result.get('part_set'))
+        # Remembered per file: a library scan with the files unchanged forms no set again.
+        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1])
+
+    def test_kept_files_without_a_number_or_a_title_of_their_own_never_return_as_parts(self):
+        sources = self.seasons(names=('Тёмный лес', 'Холодный ветер'))
+        row = self.asked()
+        self.service.keep_separate(row['id'], row['revision'])
+        titles = []
+        for new in self.rows():
+            result = self.research(new)
+            self.assertNotIn('One part of a bigger book', result['reasons'], result['reasons'])
+            titles.append(result['local_agreement']['title']['value'])
+        self.assertEqual(sorted(titles), ['Тёмный лес', 'Холодный ветер'], 'the title from its file name')
+
+    def test_a_kept_file_is_a_whole_book_at_admission_not_one_part_of_a_set(self):
+        # One kept file carries a single chapter: as one part of a set it would be refused ("one part is not the whole
+        # book"); kept by Sergei it is a book of its own and converts like any other.
+        folder = self.folder('Чёрная звезда')
+        part(folder / 'Black Star Season 1.m4b', 'Чёрная звезда', 1, [(0, 500, 's01e01'), (500, 1000, 's01e02')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=2)
+        second = part(folder / 'Black Star Season 2.m4b', 'Чёрная звезда', 2, [(0, 1000, 's02e01')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=2)
+        row = self.asked()
+        self.service.keep_separate(row['id'], row['revision'])
+        new = next(r for r in self.rows() if r['members'][0]['path'] == str(second))
+        result = self.research(new)
+        self.assertEqual(result['reasons'], [], result['reasons'])
+        self.service.approve_automatic(new, result, threading.Event(), self.service.automatic.research.client); self.wait()
+        job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
+
+    def test_a_kept_file_that_changes_is_judged_alone_and_the_set_is_not_asked_again(self):
+        sources = self.seasons(names=('Black Star Season 1', 'Black Star Season 2', 'Black Star Season 3'))
+        row = self.asked()
+        self.service.keep_separate(row['id'], row['revision'])
+        sources[0].unlink(); part(sources[0], 'Чёрная звезда', 1, [(0, 400, 's01e01'), (400, 1000, 's01e02')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=3, seconds=2)
+        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1, 1], 'one changed file alone forms no set')
+
+    def test_keep_refuses_anything_but_an_asked_set_and_a_stale_row(self):
+        tone = test_approve_as_is.tone
+        tone(self.audio / 'Unsorted' / 'Тайна' / 'Тайна.mp3', self.cover, album='Тайна', artist='Лев Толстой')
+        self.seasons()
+        rows = self.start()
+        single = next(r for r in rows if len(r['members']) == 1)
+        with self.assertRaises(ValueError): self.service.keep_separate(single['id'], single['revision'])
+        held = next(r for r in rows if len(r['members']) == 2)
+        self.service.automatic._record(held, 'Held', dict(self.research(held), until_change=True), None)
+        with self.assertRaisesRegex(ValueError, 'changed'): self.service.keep_separate(held['id'], held['revision'] + 1)
+        from scanner import connect
+        with connect(self.inv.database) as db:
+            recorded = db.execute("SELECT count(*) FROM sqlite_master WHERE name='part_volumes'").fetchone()[0] and db.execute('SELECT count(*) FROM part_volumes').fetchone()[0]
+        self.assertEqual(recorded, 0, 'nothing recorded')
+
     def test_missing_parts_are_a_missing_files_row_and_convert_whats_there_joins_the_rest(self):
         for n in (1, 2):
             part(self.folder('Dean Koontz') / ('Незнакомцы %d.m4b' % n), 'Незнакомцы %d' % n, n, [(0, 500, 'Глава %d' % (2 * n - 1)), (500, 1000, 'Глава %d' % (2 * n))],

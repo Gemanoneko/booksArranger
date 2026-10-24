@@ -20,11 +20,12 @@ const files=(n,folder='Z:\\Audiobooks\\Колесо')=>Array.from({length:Math.m
 function hold(name,kind,cause,facts={},extra={}){return askRow(name,{kind,also:null,why:'',reasons:['x'],fields:named,candidates:[],cause,facts,files:files(12),file_count:12,flagged:[],saved_tracks:false,reason:'',destination:dest('Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'),...extra});}
 const COUNTS={files_missing:1,title_author:0,author_unclear:1,same_author:1,name_taken:0,part_of_book:6,files_unclear:7,order_unclear:5,retry:1,repair:0,reacquire:0,checking:0,changed:0,audiobook:0,other:1,unsupported:0};
 backend={...backend,audiobook_output_root:ROOT,audiobook_jobs:{...backend.audiobook_jobs,attention_counts:COUNTS,todo_still_checking:0}};
-let scanAnswer=null,approveAnswer=null;const baseFetch=context.fetch;
+let scanAnswer=null,approveAnswer=null,keepAnswer=null;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{
   const data=options?.body?JSON.parse(options.body):undefined;
   if(route==='/api/candidate/scan-again'){calls.push({route,options});return scanAnswer?scanAnswer(data):{ok:true,status:200,json:async()=>({found:true,changed:false})};}
   if(route==='/api/candidate/approve'){calls.push({route,options});return approveAnswer?approveAnswer(data):{ok:true,status:200,json:async()=>({approved:true,job_id:'j',row:{}})};}
+  if(route==='/api/candidate/keep-separate'){calls.push({route,options});return keepAnswer?keepAnswer(data):{ok:true,status:200,json:async()=>({kept:4})};}
   if(route==='/api/candidate/approve-preview'){calls.push({route,options});return {ok:true,status:200,json:async()=>({preview:{path:'x.m4b',taken:false}})};}
   return baseFetch(route,options);
 };
@@ -124,21 +125,45 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.deepEqual(sets.map(r=>hint(trOf(r.id))),['Season or episode numbers in the names or chapters suggest separate books.','The names or chapters number the files as books, so they may be separate books.',
     'Together these 4 files run 32.2 hours, which is long for one book.','The files credit different authors or readers, so they may be separate books.',
     "The chapters don't show whether these files make one book.","The chapters couldn't be read, so the app can't tell whether these files make one book."]);
-  assert.deepEqual(buttonsOf(trOf('cand-s1')).slice(0,2).map(b=>b.textContent),['Approve as one book','Scan again']);
+  assert.deepEqual(buttonsOf(trOf('cand-s1')).slice(0,3).map(b=>b.textContent),['Approve as one book','Keep as separate books','Scan again']);
   // N2: the proposed join order is a numbered "Playback order" list of 5, then "+ n more, listed in the details panel."
   tr=trOf('cand-s1');assert.ok(texts(tr).includes('Playback order'),'label: '+texts(tr).join(' | '));
   {const list=walk(statusCell(tr)).find(e=>e.className==='path ask-order');assert.ok(list,'a numbered list');assert.equal(list.children.length,5);assert.ok(texts(tr).includes('+ 7 more, listed in the details panel.'),'more: '+texts(tr).join(' | '));}
   // N3: the Approve tooltip of a set says the join re-encodes; another Part of a bigger book row keeps its own.
   assert.equal(buttonsOf(tr)[0].title,'Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.');
+  // Keep as separate books (Judy's spec, 2026-10-25): second on all six set causes, its tooltip and accessible name; the
+  // destination line reads "As one book" there.
+  for(const r of sets){const b=buttonsOf(trOf(r.id));assert.deepEqual(b.slice(0,3).map(x=>x.textContent),['Approve as one book','Keep as separate books','Scan again'],r.id);}
+  {const keep=buttonsOf(tr)[1];assert.equal(keep.title,'Make each file shown its own book. Nothing is joined. Each book is checked again.');
+   assert.equal(keep.getAttribute('aria-label'),'Keep as separate books: Title s1');assert.ok(keep.className.includes('ask-convert'));}
+  assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-label').textContent,'As one book');
+  // An unsaved panel edit makes Keep inert; a missing title (the join's test) does not.
+  run('trackDirty=true;trackDraft={id:"cand-s1"};controls()');
+  assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[1].title,'Save or discard the edits in the details panel first.');
+  run('trackDirty=false;trackDraft=null;controls()');assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),null);
+  // The press: no values, the row says it, the strip counts the books, the row is done.
+  {const sent=calls.filter(c=>c.route==='/api/candidate/keep-separate').length;
+   await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
+   const posts=calls.filter(c=>c.route==='/api/candidate/keep-separate');assert.equal(posts.length,sent+1);
+   assert.deepEqual(JSON.parse(posts.at(-1).options.body),{library:'Audiobooks',id:'cand-s1',revision:2});
+   assert.equal(statusCell(tr).children[0].textContent,'Kept as separate books. Each is checked again.');
+   assert.equal(get('retry-all-status').textContent,'Kept as 4 separate books. Each is checked again.');}
+  // Refused: its own line; the row stays.
+  keepAnswer=()=>({ok:false,status:409,json:async()=>({error:'not a set',code:'refused'})});tr=trOf('cand-s2');
+  await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(statusCell(tr).children[0].textContent,'Keep as separate books was not accepted. Nothing was changed.');keepAnswer=null;
   paint(parts);
   tr=trOf('cand-p1');assert.equal(walk(statusCell(tr)).filter(e=>e.type==='text')[0].value,'Колесо Времени','Title always shows here');
   assert.equal(buttonsOf(tr)[0].title,'File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.');
+  assert.ok(!buttonsOf(tr).some(b=>b.textContent==='Keep as separate books'),'not on a single-file part');
+  assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-label').textContent,'Goes to');
   assert.ok(!walk(statusCell(tr)).some(e=>e.className==='path ask-order'),'a single part keeps its file lines');
   // N4, N5: a part set's missing parts come from its track tags; the "+ n more" pointer names no panel that lacks them.
   const partsGone=(name,missing,total)=>askRow(name,{kind:'files_missing',also:null,why:'',reasons:['Parts of this book are missing'],fields:named,candidates:[],
     missing:{folders:['Z:\\Audiobooks\\Незнакомцы'],files:missing.map(n=>'Z:\\Audiobooks\\Незнакомцы\\Part '+n+' of '+total),present:total-missing.length,total,parts:missing},destination:dest('Кунц Дин\\Незнакомцы.m4b')});
   const gone=[partsGone('m1',[3],3),partsGone('m2',[2,3],3),partsGone('m3',[2,3,4,5],12)];paint(gone);
   assert.deepEqual(gone.map(r=>hint(trOf(r.id))),["The track tags say there are 3 parts, but part 3 isn't here.","The track tags say there are 3 parts, but 2 aren't here.","The track tags say there are 12 parts, but 4 aren't here."]);
+  assert.ok(!gone.some(r=>buttonsOf(trOf(r.id)).some(b=>b.textContent==='Keep as separate books')),'not on missing parts');
   assert.ok(texts(trOf('cand-m1')).includes('Part 3 of 3'),'part: '+texts(trOf('cand-m1')).join(' | '));
   assert.ok(texts(trOf('cand-m3')).includes('+ 1 more.'),'more1: '+texts(trOf('cand-m3')).join(' | '));assert.ok(!texts(trOf('cand-m3')).some(t=>/details panel/.test(t)));
   paint(parts);

@@ -1872,8 +1872,10 @@ const HOLD_APPROVE={order_unclear:['Approve this order','Approve the order shown
   files_unclear:['Approve these files','Approve the files shown as one book: convert if needed, rename, move to Audiobooks Sorted.'],
   part_of_book:['Approve as one book','File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.']};
 const BASIS_LINES={number_rule:'Set name + part number.',file_name:'Title from the file name.',folder_name:'Title from the folder name.'};
-const ASK_LABELS={approve:'Approve',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list',order:'Change order',choose:'Choose files'};
+const ASK_LABELS={approve:'Approve',separate:'Keep as separate books',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list',order:'Change order',choose:'Choose files'};
 const ASK_TIPS={approve:'Approve with the values shown: convert if needed, rename, move to Audiobooks Sorted. Ctrl+Enter in a field does the same.',
+  // Keep as separate books (Judy 2026-10-25): the other answer to a set row; it records, approves nothing, touches no file.
+  separate:'Make each file shown its own book. Nothing is joined. Each book is checked again.',
   scan:"Look for the missing files in this book's folders. Nothing is changed or deleted.",convert:'Convert the files that are present and leave out the missing ones.',
   remove:'Stop listing this book. No files are touched. A scan lists it again if its files return.',
   order:'Change the playback order in the details panel. Save it there, then approve.',choose:'Choose which files belong in the details panel. Save it there, then approve.'};
@@ -1885,11 +1887,11 @@ function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind=
 const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
 function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
-const ASK_PENDING={approve:['Approving...','Approving this book...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
+const ASK_PENDING={approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
-  found:[null,'Files found. The book is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
+  found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
   changed:[null,'Changes found. The book is checked again.'],later:[null,'Changes found. The next library scan will pick them up.']};
-const ASK_REFUSED={approve:'Approve was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
+const ASK_REFUSED={approve:'Approve was not accepted. Nothing was changed.',separate:'Keep as separate books was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
 function askOf(row){const ask=row?.kind==='candidate'?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
 function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
 function askName(row){return row.title_clue || row.review?.title || 'Book';}
@@ -1925,7 +1927,11 @@ function outputName(){const root=state?.audiobook_output_root;return typeof root
 function askInert(row){
   if(askTitleEmpty(row))return 'Type a title first.';
   if(askDestination(row)?.taken===true)return 'That name is taken. Change the title or author.';
-  // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too).
+  return askPanelEdits(row);
+}
+// Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
+// only test Keep as separate books takes: the Title field and a taken name belong to the join.
+function askPanelEdits(row){
   if((dirty && (reviewRow || selectedRow)?.id===row.id) || (trackDirty && (trackDraft?.id ?? selectedRow?.id)===row.id))return 'Save or discard the edits in the details panel first.';
   return '';
 }
@@ -2063,7 +2069,7 @@ function buildAskCell(row,td){
 function buildAskActions(row,buttons){
   const entry=askRows.get(row.id),ask=askOf(row);if(!entry)return;
   const hold=holdKind(ask),wide=hold || ask.kind==='files_missing'?' ask-convert':'';
-  const kinds=ask.kind==='files_missing'?['scan',ask.missing?.present>0?'convert':'remove']:hold?['approve',...({order_unclear:['order'],files_unclear:['choose']}[hold] || []),'scan']:['approve'];
+  const kinds=ask.kind==='files_missing'?['scan',ask.missing?.present>0?'convert':'remove']:setCause(ask)?['approve','separate','scan']:hold?['approve',...({order_unclear:['order'],files_unclear:['choose']}[hold] || []),'scan']:['approve'];
   entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
     button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
   entry.primaryKind=kinds[0];entry.primary=entry.buttons[0].button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
@@ -2076,6 +2082,7 @@ function askMode(row,kind){
   if(askPending?.id===row.id)return askPending.kind===kind?'pending':'busy';
   if(busy || askPending || askBulk || retryPending || bulkRunning() || recoverySubmitting || automaticRequest!==null || releaseRun)return 'busy';
   if((kind==='approve' || kind==='convert') && askInert(row))return 'inert';
+  if(kind==='separate' && askPanelEdits(row))return 'inert';
   return 'ready';
 }
 function updateAskButton(entry,button,kind){
@@ -2083,7 +2090,7 @@ function updateAskButton(entry,button,kind){
   const gone=mode==='done' && button!==entry.primary,hadFocus=gone && document.activeElement===button;button.hidden=gone;
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
   const label=mode==='done' && queued?'Queued':mode==='pending'?ASK_PENDING[kind][0]:askLabel(entry,kind);
-  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',busy:'Another operation is in progress.',inert:askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
+  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',busy:'Another operation is in progress.',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
@@ -2093,7 +2100,8 @@ function updateAskButton(entry,button,kind){
 function renderGoesTo(entry){
   const dest=askDestination(entry.row),line=entry.dest,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
   line.hidden=!path;if(!path)return;
-  const taken=dest.taken===true && !askDone.has(entry.row.id),label=taken?'Already there':'Goes to',key=JSON.stringify([label,path]);
+  // On a set row the path is true only for Approve as one book (Keep is the other answer): "As one book" (Judy 2026-10-25).
+  const taken=dest.taken===true && !askDone.has(entry.row.id),label=taken?'Already there':setCause(askOf(entry.row))?'As one book':'Goes to',key=JSON.stringify([label,path]);
   if(line.dataset.key!==key){line.replaceChildren();line.append(node('span',label,'goes-label'),node('span',path,'path'));line.dataset.key=key;}
   line.title=dest.absolute || path;line.classList?.toggle?.('taken',taken);
 }
@@ -2177,6 +2185,12 @@ async function askPress(entry,kind){
       askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);
       const settled=Math.max(1,Number(ask.same_author?.count) || 1);
       askNote(values.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
+    }else if(kind==='separate'){
+      // Keep as separate books: no values; the Title typed on the row is dropped with the row.
+      const result=await request('/api/candidate/keep-separate',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);
+      const kept=Number(result?.kept) || (row.members || []).length;
+      askDone.set(id,'separate');askDrafts.delete(id);selectedBooks.delete(id);
+      askNote(`Kept as ${kept.toLocaleString()} separate books. Each is checked again.`);
     }else{
       const result=await request(kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss',{library:'Audiobooks',id,revision:row.revision},kind==='scan'?120000:PRESS_TIMEOUT);
       if(kind==='scan' && holdKind(ask)){
