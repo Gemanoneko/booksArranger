@@ -67,7 +67,8 @@ class FallbackTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);self.now=[100000.0]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
-        research_path=patch.object(PublicResearch,'local_agreement',self.local_agreement_default);research_path.start();self.addCleanup(research_path.stop)
+        import research_switch
+        research_switch.pin(self,self.local_agreement_default)
         self.fixture=FallbackFixture();self.client=PublicClient(self.base/'catalog.sqlite3',fetch=self.fixture.fetch,clock=lambda:self.now[0]);cap_fantlab(self.client.database,self.now[0])
         class ClockStop:
             def is_set(_self):return False

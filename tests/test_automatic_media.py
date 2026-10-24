@@ -20,7 +20,10 @@ class AutomaticMediaTests(unittest.TestCase):
     def setUp(self):
         # v0.22.0: these fixtures are identified from their tags alone (Sergei 2026-10-24, title + author is enough); the
         # cases build their results through the Internet identity path, so they pin local identity off.
-        research_path=patch.object(PublicResearch,'local_agreement',False);research_path.start();self.addCleanup(research_path.stop)
+        # Restored by tearDown too: test_working_lifecycle and test_standing_admission borrow setUp()/tearDown() without
+        # the cleanups (tests/research_switch.py).
+        import research_switch
+        research_switch.pin(self,False)
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.audio=self.base/'audio';self.audio.mkdir();self.cover=artwork();self.cover_path=self.base/'art.png';self.cover_path.write_bytes(self.cover)
         self.sources=[]
         for index in (1,2):
@@ -37,7 +40,9 @@ class AutomaticMediaTests(unittest.TestCase):
             if 'fantlab.ru/images/cover.jpg' in url:return self.cover
             raise AssertionError('Unexpected fixture public URL')
         self.client=PublicClient(self.inv.database,fetch=fetch)
-    def tearDown(self):self.service.close();self.temp.cleanup()
+    def tearDown(self):
+        import research_switch
+        research_switch.restore_pin(self);self.service.close();self.temp.cleanup()
     def result(self):
         row=self.service.reviews.page()['rows'][0];result=PublicResearch(self.client).lookup(row,str(self.audio));self.assertEqual(result['reasons'],[],result);return row,result
     def wait(self):

@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
 import groups
+import research_switch
 from scanner import Inventory,connect
 from source_identity import source_gate,clues,filename_identity
 from public_research import PublicClient,PublicResearch,ResearchWait,allowed_url,parse_page,credited_pair,strict_json,APP_LIMIT_REASON,LEGACY_APP_LIMIT_REASON,SOURCE_PAUSE_REASON
@@ -31,8 +32,10 @@ class AutoTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);self.db=self.base/'catalog.sqlite3';self.controllers=[]
         # These cases exercise the Internet research path; local agreement is tested in test_local_identity.
-        research_path=patch.object(PublicResearch,'local_agreement',self.local_agreement_default);research_path.start();self.addCleanup(research_path.stop)
+        # Restored by tearDown too: other modules borrow setUp()/tearDown() without the cleanups (tests/research_switch.py).
+        research_switch.pin(self,self.local_agreement_default)
     def tearDown(self):
+        research_switch.restore_pin(self)
         for auto in self.controllers:auto.close()
         self.temp.cleanup()
     def candidate(self,title='A Book',author='John Writer'):
