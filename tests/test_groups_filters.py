@@ -111,6 +111,38 @@ class GroupFilterTests(unittest.TestCase):
         self.assertEqual(inventory.status('Audiobooks')['unresolved_errors'],125)
         self.assertEqual(inventory.rows('Audiobooks',100,0,'Healthy','errors',page=True)['total'],0)
 
+    def test_gone_files_are_not_read_errors(self):
+        # Judy, MissingFiles UX 2026-10-24 (Sergei's ruling): read error = error AND not gone, for the status count, the
+        # Files "Read errors" filter and the candidates "Source read errors" filter. A gone file shows "No longer found".
+        import groups
+        inventory=Inventory(self.database,self.roots,self.reader)
+        present=self.catalog('audio/Present/bad.m4b',error='moov atom not found')
+        gone_error=self.catalog('audio/Gone/old.m4b',error='moov atom not found')
+        gone_clean=self.catalog('audio/Gone/clean.m4b')
+        self.catalog('audio/Mixed/01.mp3',{'album':'Mixed','artist':'Writer','track':'1/2'})
+        mixed_gone=self.catalog('audio/Mixed/02.mp3',{'album':'Mixed','artist':'Writer','track':'2/2'},error='moov atom not found')
+        status=lambda:inventory.status('Audiobooks')['unresolved_errors']
+        self.assertEqual(status(),3,'positive control: before anything is gone, all three errors count')
+        with connect(self.database) as connection:
+            connection.executemany('UPDATE files SET missing=1 WHERE path=?',[(gone_error,),(gone_clean,),(mixed_gone,)])
+        self.assertEqual(status(),1)
+        errors=inventory.rows('Audiobooks',100,0,'','errors',page=True)
+        self.assertEqual(([r['path'] for r in errors['rows']],errors['total']),([present],1),'count and list agree')
+        self.assertEqual((errors['rows'][0]['preview']['confidence'],errors['rows'][0]['preview']['reason']),('Read error','moov atom not found'))
+        gone=inventory.rows('Audiobooks',100,0,'','missing',page=True)
+        self.assertEqual(sorted(r['path'] for r in gone['rows']),sorted([gone_error,gone_clean,mixed_gone]))
+        for row in gone['rows']:
+            self.assertEqual((row['preview']['confidence'],row['preview']['reason']),('No longer found','Not found in the last complete scan.'))
+        self.assertEqual(next(r for r in gone['rows'] if r['path']==gone_error)['error'],'moov atom not found','the old error stays in the catalog')
+        # Candidates: a book whose only flagged member is gone is not listed; a present unreadable member is.
+        def flagged(result):return sorted(p for row in result['rows'] for p in [m['path'] for m in row['members']] if p in (present,gone_error,mixed_gone))
+        self.assertEqual(flagged(inventory.candidates('Audiobooks',100,0,'','errors')),[present])
+        with connect(self.database) as connection:
+            self.assertEqual(flagged(groups.page_sources(connection,[self.roots['Audiobooks']],100,0,'','errors')),[present],'the multi-source page agrees')
+            connection.execute('UPDATE files SET missing=0 WHERE path=?',(mixed_gone,))
+        self.assertEqual(status(),2,'a file back and still unreadable counts again')
+        self.assertEqual(flagged(inventory.candidates('Audiobooks',100,0,'','errors')),sorted([present,mixed_gone]))
+
     def test_reuse_new_changed_error_retry_and_failure_scope(self):
         good=self.file('audio/Book/good.mp3')
         bad=self.file('audio/Book/bad.mp3')

@@ -2946,7 +2946,8 @@ class MergeService:
         metadata=json.loads(source['metadata']) if isinstance(source['metadata'],str) else source['metadata']
         cover={'status':'No embedded cover','label':'Source cover'}
         if source.get('missing') or source.get('error'):
-            cover={'status':'Cover could not be read','error':source.get('error') or 'Source is missing','label':'Source cover'}
+            # A gone file's old read error stays in the catalog, not on screen (MissingFiles UX 2026-10-24).
+            cover={'status':'Cover could not be read','error':'Source is missing' if source.get('missing') else source.get('error'),'label':'Source cover'}
         else:
             try:
                 root=source.get('root',self.inventory.roots['Audiobooks'])

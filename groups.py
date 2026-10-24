@@ -414,7 +414,7 @@ def page(connection,root,limit=100,offset=0,search='',status='all',coverage=Fals
         return {'rows':[render(row,root,coverage,retired) for row in rows],'total':total}
     values=[render(row,root,coverage,retired) for row in connection.execute('SELECT * FROM book_groups WHERE root=? AND superseded=0 ORDER BY scope',(root,))]
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
-      'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),
+      'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
     if status not in filters:raise ValueError('Unknown candidate status')
     values=[row for row in values if filters[status](row) and search.casefold() in (' '.join([row['title_clue'],row['scope']]+[item['path'] for item in row['members']])).casefold()]
@@ -445,7 +445,7 @@ def page_sources(connection,roots,limit=100,offset=0,search='',status='all',cove
     values=[render(row,row['root'],coverage.get(row['root'],False),retirements[row['root']]) for row in records]
     if total is not None:return {'rows':values,'total':total}
     filters={'all':lambda row:True,'review':lambda row:not row['metadata_approved'],
-      'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] for item in row['members']),
+      'approved':lambda row:row['metadata_approved'],'errors':lambda row:any(item['error'] and not item['missing'] for item in row['members']),
       'changed':lambda row:row['changed']}
     if status not in filters:raise ValueError('Unknown candidate status')
     values=[row for row in values if filters[status](row) and search.casefold() in

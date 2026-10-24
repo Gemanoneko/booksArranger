@@ -169,7 +169,9 @@ class Inventory:
                 row=connection.execute('SELECT * FROM jobs WHERE root=?',(root,)).fetchone()
                 count=connection.execute('SELECT count(*) FROM files WHERE root=?',(root,)).fetchone()[0]
                 pending=connection.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
-                unresolved=connection.execute("SELECT count(*) FROM files WHERE root=? AND error<>''",(root,)).fetchone()[0]
+                # A read error is a file with an error that is not marked gone (Judy, MissingFiles UX 2026-10-24): a gone file
+                # cannot be re-read, and only a scan that finished with no errors marks one gone.
+                unresolved=connection.execute("SELECT count(*) FROM files WHERE root=? AND error<>'' AND missing=0",(root,)).fetchone()[0]
                 issues=connection.execute("SELECT path,error,time FROM scan_outcomes WHERE root=? AND generation=? AND directory=1 AND outcome='error' ORDER BY path",(root,row['generation'] if row else 0)).fetchall()
         except sqlite3.Error as error:
             if matching:
@@ -608,13 +610,15 @@ class Inventory:
                 if len(destinations.get(destination,[])) > 1 or (occupied and occupied != row['path']):
                     row['preview'] = {'path':row['preview']['path'],'confidence':'Collision review','reason':'Destination is shared by another catalog file; preserve all editions and resolve before future arranging'}
             if row['missing'] or row['error']:
-                row['preview'] = {'path': '', 'confidence': 'Unavailable' if row['missing'] else 'Read error', 'reason': row['error'] or 'Missing in last complete scan'}
+                # Gone wins over an old error: the error text stays in the catalog, not on screen (MissingFiles UX 2026-10-24).
+                row['preview'] = ({'path': '', 'confidence': 'No longer found', 'reason': 'Not found in the last complete scan.'} if row['missing'] else
+                                  {'path': '', 'confidence': 'Read error', 'reason': row['error']})
             row['error_time']=failures.get(row['path'],{}).get('time','')
             row['saved_snapshot']=bool(row['error'] and row['metadata'].get('method'))
             if row['kind'] == 'audiobook':
                 row['tag_preview'] = future_audio_tags(row['metadata'],row['review'] if not row['missing'] and not row['error'] else None)
             rows.append(row)
-        filters={'all':lambda row:True,'errors':lambda row:bool(row['error']),
+        filters={'all':lambda row:True,'errors':lambda row:bool(row['error']) and not row['missing'],
             'review':lambda row:row['preview']['confidence']=='Needs review',
             'preview':lambda row:bool(row['preview']['path']) and not row['error'] and not row['missing'],
             'missing':lambda row:bool(row['missing'])}

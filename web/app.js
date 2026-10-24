@@ -140,6 +140,9 @@ async function action(route, data) {
   catch(error) { message(error.message); }
   finally { busy=false; controls(); }
 }
+// One rule (Judy, MissingFiles UX 2026-10-24): a read error is an error on a file that is not gone. A gone file's old error
+// stays in the catalog, never on screen; the server's counts and filters use the same predicate.
+function readError(row){return row.error && !row.missing ? row.error : '';}
 function select(row, reset) {
   $('manual-review').hidden=false;
   const changing=selectedPath!==row.path;
@@ -158,13 +161,13 @@ function select(row, reset) {
   $('language').textContent=row.metadata.edition_language || 'Unknown';
   $('series-clue').textContent=`${row.metadata.series || 'Unknown'} / ${row.metadata.number || 'Unknown'}`;
   $('genre-clue').textContent=row.metadata.genre || 'Unknown';
-  $('notes').textContent=[...(row.metadata.notes || []),row.error].filter(Boolean).join(' · ');
+  $('notes').textContent=[...(row.metadata.notes || []),readError(row)].filter(Boolean).join(' · ');
   $('tags').textContent=JSON.stringify(row.metadata.tags || {},null,2);
-  $('read-error').hidden=!row.error;
+  $('read-error').hidden=!readError(row);
   $('read-error-path').textContent=row.path;
   $('read-error-time').textContent=row.error_time ? `Last failed read: ${row.error_time}` : 'Last failed read time was not recorded.';
-  $('read-error-message').textContent=row.error || '';
-  $('read-error-action').textContent=row.error?.startsWith('File changed during read') ? 'The file changed while its metadata was being read. Let copying finish, then start scanning to retry it.' : row.size===0 && row.kind==='audiobook' && row.metadata.notes?.includes('Metadata read failed; source file untouched') ? 'This audio file is empty. Replace it with a complete copy, then start scanning.' : 'Start scanning to retry unreadable files.';
+  $('read-error-message').textContent=readError(row);
+  $('read-error-action').textContent=readError(row).startsWith('File changed during read') ? 'The file changed while its metadata was being read. Let copying finish, then start scanning to retry it.' : row.size===0 && row.kind==='audiobook' && row.metadata.notes?.includes('Metadata read failed; source file untouched') ? 'This audio file is empty. Replace it with a complete copy, then start scanning.' : 'Start scanning to retry unreadable files.';
   $('tags-heading').textContent=row.saved_snapshot?'Saved metadata snapshot':'Existing tag snapshot';
   $('candidate-details').hidden=!candidate;$('candidate-approval').hidden=!candidate;
   if(candidate){
@@ -219,7 +222,7 @@ function renderRows(force=false) {
     const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;tr.setAttribute('role','row');
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
     if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');td.setAttribute('role','cell');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
-    const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',row.error ? `Read error · ${row.error.split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
+    const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',readError(row) ? `Read error · ${readError(row).split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
     for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;td.setAttribute('role','cell');
       // Medium and compact bands fold the two clue columns into a second line of the title cell (follow-up 3, section 5).
       if(row.kind==='candidate' && index===0)td.append(node('p',titleFacts(row),'field-help title-facts'));
