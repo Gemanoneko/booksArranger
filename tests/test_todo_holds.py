@@ -140,11 +140,44 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
                 result = self.research(row); self.service.automatic._record(row, 'Held', dict(result, until_change=True), None)
             elif row['title_clue'] == 'Старый дом':
                 # Held before 0.22.0: no until_change, an older research version. Automatic processing researches it again.
-                self.service.automatic._record(row, 'Held', {'reasons': ['Playback order uncertain'], 'research_version': 'standing-20-v1'}, None)
+                # (_record stamps the current version, so the older app's record is written as it left it.)
+                self.service.automatic._record(row, 'Held', {'reasons': ['Playback order uncertain']}, None)
+                with connect(self.inv.database) as db:
+                    db.execute("UPDATE automatic_candidates SET result=json_set(result,'$.research_version','standing-20-v1') WHERE id=?", (row['id'],))
         coverage = self.service.todo_coverage()
         self.assertEqual((coverage['listed'], coverage['still_checking'], coverage['removed'], coverage['with_job']), (2, 2, 0, 0), coverage)
         self.assertEqual(coverage['listed'] + coverage['still_checking'], len(rows), 'every current book is somewhere')
         self.assertEqual(self.service.state()['todo_still_checking'], 2)
+
+    def test_g5_a_book_refused_at_the_approval_step_is_listed(self):
+        # Senua's 0.22.0 early review, G5 (rulings 10 and 5): an admission refusal is recorded Held with a retry time and no
+        # until-change marking (automatic_processing: approve_automatic raised). It was counted as "Still checking" forever.
+        tone(self.audio / 'Unsorted' / 'Тайна' / 'Тайна.mp3', self.cover, album='Тайна', artist='Лев Толстой')
+        row = self.start()[0]
+        result = self.research(row)
+        self.assertEqual(result['reasons'], [], 'positive control: identified, so automatic processing would approve it')
+        refused = dict(result, reasons=['Verified metadata exceeds the supported Windows output path length'])
+        self.service.automatic._record(row, 'Held', refused, self.service.automatic.clock() + 900)
+        self.assertEqual(list(self.listed('other')), ['Тайна'])
+        self.assertEqual(self.service.todo_coverage()['still_checking'], 0)
+
+    def test_g6_a_new_author_rule_keeps_the_list_and_checks_again_only_the_books_it_names(self):
+        # Senua's 0.22.0 early review, G6: one unrelated Same author? answer emptied the whole list until a full pass.
+        import author_rules
+        self.order_book()  # Око мира, Роберт Джордан: Order unclear
+        tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера')  # a question
+        for n in (1, 2):
+            tone(self.audio / 'Unsorted' / 'Дюна' / ('%02d.mp3' % n), self.cover, album='Дюна', artist='Фрэнк Герберт', track='%d/12' % n)
+        self.start(); self.research_all()
+        self.assertEqual(self.service.todo_coverage()['listed'], 3)
+        with connect(self.inv.database) as db:
+            author_rules.append(db, 'keep', 'Совсем Другой Человек', actor='user', source='test')
+        self.assertEqual((self.service.todo_coverage()['listed'], self.service.todo_coverage()['still_checking']), (3, 0), 'an unrelated rule: every row stays')
+        with connect(self.inv.database) as db:
+            author_rules.append(db, 'not_author', 'Роберт Джордан', actor='user', source='test')
+        coverage = self.service.todo_coverage()
+        self.assertEqual((coverage['listed'], coverage['still_checking']), (2, 1), coverage)
+        self.assertNotIn('Око мира', self.listed(), 'the book the new rule names is checked again')
 
     def test_scan_again_on_a_hold_row_says_whether_anything_changed(self):
         paths = self.order_book()

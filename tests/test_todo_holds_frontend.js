@@ -72,7 +72,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   run('trackDirty=false;trackDraft=null;controls()');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
   // Approve this order sends the row as shown.
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2});
+  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'},'with the Goes to line shown (m1)');
   // Scan again on a hold row: unchanged -> "Checked hh:mm. No change."; changed -> the book leaves and is checked again.
   tr=trOf('cand-o2');await buttonsOf(tr)[2].handlers.click({stopPropagation(){}});await tick();
   assert.match(hint(tr),/^3 of 12 files have no track number\. Checked \d\d:\d\d\. No change\.$/);
@@ -101,6 +101,10 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(buttonsOf(tr)[1].title,'Choose which files belong in the details panel. Save it there, then approve.');
   assert.ok(texts(trOf('cand-f4')).includes('Реклама.mp3'),'the file without the title is named first');
   assert.ok(texts(trOf('cand-f6')).includes('Albums: A (5 files) · No album (3 files) · C (2 files) + 1 more'));assert.ok(texts(trOf('cand-f9')).includes('Artists: P (2 files) · No artist (1 file)'),'copy check, nice-to-have 1');
+  // Senua's 0.22.0 review, G3: one album whose title tags name two books.
+  paint([hold('f10','files_unclear','works',{works:[{name:'Последнее желание',files:2},{name:'Меч предназначения',files:2}]})]);
+  assert.equal(hint(trOf('cand-f10')),'The title tags name more than one book.');
+  assert.ok(texts(trOf('cand-f10')).includes('Books: Последнее желание (2 files) · Меч предназначения (2 files)'),texts(trOf('cand-f10')).join(' | '));
 
   // Part of a bigger book: every cause; Title always shows; Approve as one book + Scan again, no list editing.
   const parts=[hold('p1','part_of_book','chapter'),hold('p2','part_of_book','numbered_part'),hold('p3','part_of_book','siblings',{beside:1}),hold('p4','part_of_book','siblings',{beside:3}),

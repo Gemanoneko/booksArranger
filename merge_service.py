@@ -702,6 +702,7 @@ class MergeService:
             self.draining=True;self._start_generation=self.__dict__.get('_start_generation',0)+1
             pending=self.__dict__.get('_retry_all_stop')
             if pending:pending.set()
+            for press in list(self.__dict__.get('_approve_stops',())):press.set()
         self.jobs.drain()
 
     def drained(self):
@@ -2004,13 +2005,20 @@ class MergeService:
                 continue
             if result is None or record['state']!='Held':coverage['still_checking']+=1;continue
             reasons=[str(r) for r in result.get('reasons') or []][:8]
+            if not reasons:coverage['still_checking']+=1;continue
             if reasons==['Manual draft retained']:
                 # His saved review holds the book; automatic processing only looks again (Held filter: Let the app handle it).
                 found[identity]={'group':'other','reasons':reasons,'ask':None};continue
             if exact and any('already exists at this path' in r for r in reasons):
                 found[identity]={'group':'name_taken','reasons':reasons,'ask':None};continue
-            settled=bool(result.get('until_change') and result.get('research_version')==RESEARCH_VERSION and (result.get('rules_generation') or '')==generation)
-            if not settled:coverage['still_checking']+=1;continue  # automatic processing researches it again first
+            # Senua's 0.22.0 review, G5 (rulings 10 and 5): a held book with a reason is listed whether or not it waits for a
+            # change (a refusal at the approval step is retried on a timer and was never listed). Still checking: a record
+            # from an older research version (researched once more after an update) or one a newer author rule decides (G6:
+            # only the books whose credits or folders the rule names; every other row stays listed).
+            version=result.get('research_version')
+            if version and version!=RESEARCH_VERSION:coverage['still_checking']+=1;continue
+            if 'rules_generation' in result and (result.get('rules_generation') or '')!=generation and (rules is None or not hasattr(rules,'changed_for') or rules.changed_for(result)):
+                coverage['still_checking']+=1;continue
             if result.get('ask'):
                 # A question needs the exact revision: a value Sergei saved since (6a) is researched again first.
                 if not ask or ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
@@ -2092,7 +2100,7 @@ class MergeService:
         title=((payload.get('fields') or {}).get('title') or {}).get('proposal','')
         def cause(kind):
             if kind=='order_unclear':return todo_causes.order_cause(chosen)
-            if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')))
+            if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')),works=(row.get('joined_parts') or {}).get('works'))
             if kind=='part_of_book':return todo_causes.piece_cause(entry.get('hold'))
             return {}
         found=cause(entry['group'])
@@ -2146,7 +2154,7 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'removed':True}
 
-    def _approval_result(self,id,revision,title=None,author=None):
+    def _approval_result(self,id,revision,title=None,author=None,chosen=None):
         """(row, research result) of Approve with the values shown (typed values win); no network, read-only."""
         def bounded(value,name):
             if value is None:return None
@@ -2154,20 +2162,25 @@ class MergeService:
             return value
         title,author=bounded(title,'title'),bounded(author,'author')
         row=self.reviews._row('Audiobooks',id,revision)
-        result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author)
+        result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**({'chosen':chosen} if chosen is not None else {}))
         return row,result
+
+    def _approval_destination(self,row,result):
+        """(path relative to the output folder, absolute path, reason when there is none) Approve files this result as."""
+        review=dict(result['review'],organization_policy='books-hierarchy-v2')
+        output_root=self.reviews._output_root(row,review)
+        preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=result.get('metadata_facts'))
+        path=preview.get('path') or ''
+        return (os.path.relpath(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
     def approval_preview(self,id,revision,title=None,author=None):
         """Judy's "Goes to" line: what Approve would file this book as, with these values. {'path' relative to the output
         folder, 'absolute', 'taken' (a file already there: never overwritten), 'title', 'author', 'reason'}. Read-only."""
         row,result=self._approval_result(id,revision,title,author)
-        review=dict(result['review'],organization_policy='books-hierarchy-v2')
-        output_root=self.reviews._output_root(row,review)
-        preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=result.get('metadata_facts'))
-        path=preview.get('path') or ''
+        relative,path,reason=self._approval_destination(row,result)
         approval=result['approval']
-        return {'path':os.path.relpath(path,output_root) if path else '','absolute':path,'taken':bool(path and os.path.lexists(path)),
-                'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':'' if path else preview.get('reason','')}
+        return {'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
+                'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':reason}
 
     def answer_same_author(self,id,revision,choice):
         """Ruling 12: Sergei's answer to this book's "Same author?" question becomes a lasting rule (same: the new name
@@ -2186,17 +2199,24 @@ class MergeService:
             else:author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
         return question['existing'] if choice=='same' else question['new']
 
-    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None):
+    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None):
         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
         Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
         Convert what's there, leaving out the files missing from disk. choice ('same' / 'different'): his answer to the
-        book's Same author? question, saved as a rule first (ruling 12). Raises ValueError with the reason it is refused."""
+        book's Same author? question, saved as a rule first (ruling 12) and used as the author (not a typed value). path:
+        the "Goes to" line the row showed (relative to the output folder); a different destination now refuses (Senua's
+        0.22.0 review, m1: the path shown is the path used). Raises ValueError with the reason it is refused."""
         import datetime
         if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
+        chosen=None
         if choice is not None:
             chosen=self.answer_same_author(id,revision,choice)
-            if author is None:author=chosen
-        row,result=self._approval_result(id,revision,title,author)
+            if author is not None:chosen=None
+        row,result=self._approval_result(id,revision,title,author,chosen)
+        if path is not None and result.get('review'):
+            relative,_,_=self._approval_destination(row,result)
+            if os.path.normcase(os.path.normpath(relative or '.'))!=os.path.normcase(os.path.normpath(str(path) or '.')):
+                raise ValueError('Destination changed since it was shown: it is now '+(relative or 'not set')+'. Nothing was changed.')
         include=None
         if without_missing:
             present=[m['path'] for m in row['members'] if not m.get('missing') and not m.get('error')]
@@ -2215,7 +2235,12 @@ class MergeService:
         approved_by={'actor':'user','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'values':{'title':approval['title'],'author':approval['author']},
                      'typed':list(approval['typed']),'collection':approval['collection'],'files':files,'without_missing':bool(include)}
         result['reasons']=[]
-        fresh,job=self.approve_automatic(row,result,threading.Event(),self.automatic.research.client,approved_by=approved_by,include=include)
+        # Senua's 0.22.0 review, m4: closing or draining the app stops a press still checking the files (hashes, probes).
+        stop=threading.Event();presses=self.__dict__.setdefault('_approve_stops',set());presses.add(stop)
+        if self.draining or self.__dict__.get('_closing'):stop.set()
+        try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include)
+        except InterruptedError:raise ValueError('Books Arranger is closing. The book was not approved.') from None
+        finally:presses.discard(stop)
         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
         return {'row':fresh,'job_id':job}
@@ -3257,6 +3282,7 @@ class MergeService:
             self._closing=True;self._start_generation=self.__dict__.get('_start_generation',0)+1
             pending=self.__dict__.get('_retry_all_stop')
             if pending:pending.set()
+            for press in list(self.__dict__.get('_approve_stops',())):press.set()
         backfill=self.__dict__.get('series_backfill')
         if backfill is not None:backfill.close()
         for name in ('_repair_stop','_retry_all_stop'):

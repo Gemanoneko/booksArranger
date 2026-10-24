@@ -11,9 +11,9 @@ from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
-SAME_TITLE_VERSION = 'same-title-v1'
+SAME_TITLE_VERSION = 'same-title-v2'  # v2: Senua's 0.22.0 review G1, G2
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
-SAME_ALBUM_VERSION = 'same-album-v1'
+SAME_ALBUM_VERSION = 'same-album-v2'  # v2: Senua's 0.22.0 review G3
 GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION
 DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
@@ -240,15 +240,19 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
         ("01 Моногатари короткие истории - Вступление от переводчика"), and that shared part is
         not a person (an author folder of "NN Author - Title" files holds separate books).
     Whole .m4b files, protected files and parts with their own chapters are never joined here.
+    Senua's 0.22.0 review: a junk or garbled title tag ("Аудиокнига", "Без имени") joins nothing (G2); the shared start
+    is checked against the people the library credits, a bare surname included (G1); and numbered files whose file-name
+    titles name different works ("01 Сапковский - Последнее желание", "02 Сапковский - Меч предназначения") are joined
+    only when their folder names an author who is not the shared start (Monogatari: "Нисио Исин - Monogatari Series").
     Returns [{'scope', 'members', 'name', 'basis'}]."""
     from source_identity import filename_identity,norm
-    from local_identity import title_key,looks_like_person
+    from local_identity import title_key,looks_like_person,clean_title,garbled,JUNK_TITLES,tag_index,work_name
     counts=Counter(scopes[path] for path in scopes)
     folders={}
     for path,item in members.items():
         if path in assigned or path in chaptered or Path(path).suffix.lower()=='.m4b' or counts[scopes[path]]!=1:continue
         folders.setdefault(str(Path(path).parent),[]).append(item)
-    found=[]
+    found=[];index=None
     for folder,items in folders.items():
         if len(items)<2:continue
         by_title={}
@@ -256,14 +260,16 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
         for item in items:
             tags={k.casefold():str(v) for k,v in item['metadata'].get('tags',{}).items()}
             if tags.get('album','').strip():continue
-            title=title_key(tags.get('title',''))
+            raw=tags.get('title','')
+            title='' if garbled(raw) or norm(clean_title(raw)) in JUNK_TITLES else title_key(raw)
             if title:
                 credit=tuple(norm(tags.get(k,'')) for k in ('author','album_artist','albumartist','artist'))
                 by_title.setdefault((title,credit),[]).append(item)
             numbered=re.match(r'^\s*(\d{1,4})[ _.-]+',item['filename'])
             parsed=filename_identity(item['filename'])
-            if numbered and parsed.get('author') and not looks_like_person(parsed['author']):
-                by_name.setdefault(norm(parsed['author']),[]).append((item,parsed['author']))
+            start=parsed.get('author') or ''
+            if numbered and start and not garbled(start) and norm(clean_title(start)) not in JUNK_TITLES:
+                by_name.setdefault(norm(start),[]).append((item,start,parsed.get('title') or ''))
         used=set()
         for (title,_),group in sorted(by_title.items(),key=lambda kv:repr(kv[0])):
             if len(group)<2:continue
@@ -273,12 +279,29 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
             found.append({'scope':scope,'members':group,'name':name,'basis':'same title tag'})
             used.update(item['path'] for item in group)
         for key,group in sorted(by_name.items()):
-            group=[(item,name) for item,name in group if item['path'] not in used]
+            group=[entry for entry in group if entry[0]['path'] not in used]
             if len(group)<2:continue
+            start=group[0][1]
+            if index is None:index=tag_index(m['metadata'].get('tags') for m in members.values())
+            if looks_like_person(start,index,surname=True):continue  # an author folder of "NN Author - Title" books
+            works={norm(work_name(title)) for _,_,title in group}-{''}
+            if len(works)>1 and not _folder_names_another_author(group[0][0]['path'],start,index):continue
             scope=folder+'\x1fNumbered set '+key
             if scope in taken:continue
-            found.append({'scope':scope,'members':[item for item,_ in group],'name':group[0][1],'basis':'shared start of the numbered file names'})
+            found.append({'scope':scope,'members':[item for item,_,_ in group],'name':start,'basis':'shared start of the numbered file names'})
     return found
+
+def _folder_names_another_author(path,start,index):
+    """True when the file's folder or its parent names an author ("Нисио Исин - Monogatari Series - Сто историй") who is
+    not the shared start of its file names: the start is then the book, not the author."""
+    from source_identity import filename_identity
+    from local_identity import looks_like_person,_person_like,same_person,compare_names,_shares_surname,clean_title
+    for folder in (Path(path).parent.name,Path(path).parent.parent.name):
+        parsed=filename_identity(folder+'.x')
+        who=clean_title(parsed['author'] if parsed.get('author') else folder)
+        if not who or not (looks_like_person(who,index) or parsed.get('author') and _person_like(who)):continue
+        return not (same_person(who,start) or compare_names(who,start) or _shares_surname(who,start))
+    return False
 
 def _same_album_parts(members,scopes,assigned,chaptered,taken):
     """Ruling 19 (Sergei 2026-10-24, "parts of a bigger book are joined into that book"): files of one folder that carry
@@ -289,7 +312,7 @@ def _same_album_parts(members,scopes,assigned,chaptered,taken):
     protected or chaptered files, files whose author tags name different people (an anthology, mixed recordings) and
     files in different folders or sources. Returns [{'scope', 'members', 'name', 'basis'}]."""
     from source_identity import norm
-    from local_identity import same_person,compare_names
+    from local_identity import same_person,compare_names,work_name
     found=[];albums={}
     for path,item in members.items():
         if path in assigned or path in chaptered or Path(path).suffix.lower()=='.m4b' or '\x1fAlbum ' not in scopes[path]:continue
@@ -305,8 +328,29 @@ def _same_album_parts(members,scopes,assigned,chaptered,taken):
         scope=base+'\x1fSame album '+key
         if scope in taken:continue
         name=DISC_SUFFIX.sub('',entries[0][1]).strip() or entries[0][1]
-        found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author (the parts of one book)'})
+        found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author (the parts of one book)',
+                      'works':_works(sorted(entries,key=lambda e:e[0]['path']),scopes,norm(work_name(name)))})
     return found
+
+def _works(entries,scopes,album):
+    """Senua's 0.22.0 review, G3: the works the title tags of one album's files name, part numbers aside. A work is a
+    title that two or more files carry ("Последнее желание 1", "Последнее желание 2") or the one title every file of an
+    original group carries; chapter labels and the album's own title are not works. Two or more works: the files may be
+    several books (the Ведьмак disc case), so the joined book is held as Files unclear. Returns [{'name', 'files'}] or []."""
+    from source_identity import norm
+    from local_identity import work_name
+    named=[];per_scope={}
+    for item,_,tags in entries:
+        title=work_name(tags.get('title') or '');key=norm(title)
+        named.append((key,title));per_scope.setdefault(scopes[item['path']],set()).add(key)
+    counts=Counter(key for key,_ in named if key and key!=album)
+    works={key for key,n in counts.items() if n>=2}
+    works|={next(iter(keys)) for keys in per_scope.values() if len(keys)==1 and next(iter(keys)) not in ('',album)}
+    if len(works)<2:return []
+    shown={}
+    for key,title in named:
+        if key in works:shown.setdefault(key,title)
+    return [{'name':shown[key],'files':counts[key] or 1} for key in shown]
 
 def build(rows,protected=None,chaptered=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
@@ -415,8 +459,12 @@ def build(rows,protected=None,chaptered=frozenset()):
             if not output[scope]['title_evidence'] and found['name']:output[scope]['title_clue']=found['name']
     for scope,found in joined.items():
         if scope in output:
-            output[scope]['joined_parts']={'version':SAME_ALBUM_VERSION,'name':found['name'],'basis':found['basis']}
+            output[scope]['joined_parts']={'version':SAME_ALBUM_VERSION,'name':found['name'],'basis':found['basis'],'works':found['works']}
             output[scope]['grouping']='One book (Sergei 2026-10-24, ruling 19): files of one folder with the '+found['basis']
+            if found['works']:
+                # G3: never converted on its own; the row lists the works so Sergei can approve or choose the files.
+                output[scope]['source_partition_uncertain']=True
+                output[scope].setdefault('conflicts',[]).append('The title tags name more than one book: '+'; '.join(w['name'] for w in found['works'][:4]))
     return output
 
 def current(connection,root):

@@ -148,5 +148,24 @@ class RulesChangeResearchAgainTests(unittest.TestCase):
         generation[0]='g2'
         auto.start();case.wait_auto(auto);self.assertEqual(len(calls),2,'new rules: researched again');auto.close()
 
+    def test_g6_only_a_held_book_a_new_rule_names_is_researched_again(self):
+        # Senua's 0.22.0 early review, G6: any new rule re-researched every held book.
+        import test_automatic_processing as fixtures
+        case=fixtures.AutoTests('test_uncertain_work_is_revisited_until_user_stop');case.setUp();self.addCleanup(case.doCleanups);self.addCleanup(case.tearDown)
+        def rule(rule_id,kind,credit,saved):
+            return {'rule_id':rule_id,'kind':kind,'credit_key':author_rules.key(credit),'credit_as_seen':credit,'target':'','scope':'','options':'{}',
+                    'actor':'user','source':'test','question':'','saved_utc':saved}
+        rows=[rule('r1','keep','Иван Петров','2026-10-24T10:00:00+00:00')];calls=[]
+        def lookup(row,*_):
+            calls.append(1);rules=author_rules.Rules(rows)
+            return {'reasons':['Title or author missing'],'sources':[],'ask':{'kind':'title_author'},'rules_generation':rules.generation,
+                    'rules_stamp':rules.stamp,'rules_seen':[author_rules.key('John Writer')],'rules_folders':['']}
+        auto,merge,inv=case.fake_merge(lookup);auto.research.rules=lambda:author_rules.Rules(rows)
+        auto.start();case.wait_auto(auto);self.assertEqual(len(calls),1)
+        rows.append(rule('r2','keep','Совсем Другой','2026-10-24T11:00:00+00:00'))
+        auto.start();case.wait_auto(auto);self.assertEqual(len(calls),1,'a rule naming nobody in this book: not researched again')
+        rows.append(rule('r3','not_author','John Writer','2026-10-24T12:00:00+00:00'))
+        auto.start();case.wait_auto(auto);self.assertEqual(len(calls),2,'a rule naming its credit: researched again');auto.close()
+
 
 if __name__=='__main__':unittest.main()

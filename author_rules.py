@@ -13,6 +13,7 @@ path fragment ("Легенды школы №4 г. Пензы"); a rule applies 
 UPDATE and DELETE (triggers); a changed mind is a newer row for the same credit and scope, and the newest wins.
 """
 import contextlib
+import copy
 import datetime
 import hashlib
 import json
@@ -95,8 +96,41 @@ class Rules:
             if name and name.casefold() not in self.known_authors:
                 self.known_authors[name.casefold()] = (name, 0)
         self.generation = hashlib.sha256(json.dumps(sorted((r['rule_id'], r['kind'], r['target'], r['scope']) for r in self.rules)).encode()).hexdigest()[:16]
+        # The newest rule's time: a research records it, and a rule saved after it is a new rule for that book.
+        self.stamp = max((str(r.get('saved_utc') or '') for r in rows), default='')
+        self.seen = None
+        self.folders = None
+
+    def recording(self):
+        """A copy that records every credit and folder it is asked about (Senua's 0.22.0 review, G6): a research stores
+        them, and a later rule re-researches only the books whose names it matches (changed_for)."""
+        watch = copy.copy(self)
+        watch.seen, watch.folders = set(), set()
+        return watch
+
+    def changed_for(self, record):
+        """True when a rule saved after the research in record decides one of the credits or folders it saw (or the
+        record cannot tell: researched before 0.22.0's rule records). Equal generations: nothing changed."""
+        if (record.get('rules_generation') or '') == self.generation:
+            return False
+        stamp, seen = record.get('rules_stamp'), record.get('rules_seen')
+        if not isinstance(stamp, str) or not isinstance(seen, list):
+            return True
+        seen = set(seen)
+        folders = [str(f).casefold() for f in record.get('rules_folders') or [] if isinstance(f, str)]
+        for row in self.rules:
+            if str(row.get('saved_utc') or '') <= stamp:
+                continue
+            if row['credit_key'] != '*' and row['credit_key'] not in seen:
+                continue
+            if not row['scope'] or any(row['scope'].casefold() in folder for folder in folders):
+                return True
+        return False
 
     def _rule(self, name, folder, kinds):
+        if self.seen is not None:
+            self.seen.add(key(name))
+            self.folders.add(str(folder or ''))
         folder = str(folder or '').casefold()
         found = None
         for row in self.by_key.get(key(name), []) + self.by_key.get('*', []):
@@ -138,6 +172,8 @@ class Rules:
     def folder_rule(self, folders):
         """A same_as or collection rule named after one of the book's own folders ("Гробница Саргераса" ->
         Brooks Robert): (kind, target, rule_id) or None. Only folder-specific answers count, never credit '*'."""
+        if self.seen is not None:
+            self.seen.update(key(name) for name in folders)
         for name in folders:
             for row in self.by_key.get(key(name), []):
                 if row['kind'] in ('same_as', 'collection') and not row['scope']:

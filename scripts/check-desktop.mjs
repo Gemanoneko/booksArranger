@@ -2,7 +2,7 @@
 // Pure-node handoff graph; the outer protocol-2 supervisor owns its descendants.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawnSync,spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout} from './python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
@@ -56,6 +56,7 @@ patterns.push('test_attention_list.py');  // 0.22.0: the one to-do list, its rea
 patterns.push('test_list_speed.py');  // 0.22.0: the book list never waits for group_lock behind an approval (ruling 18)
 patterns.push('test_todo_holds.py');  // 0.22.0 review: the three hold rows, their causes, saved order, coverage (Judy)
 patterns.push('test_join_parts.py');  // 0.22.0: ruling 19, the parts of one book in one folder are joined
+patterns.push('test_split_books.py','test_collection_identity.py');  // Senua 0.22.0 early review m7: changed in 0.22.0, were outside the gate
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))
@@ -103,6 +104,7 @@ const workers=batches.map((batch,i)=>{
 });
 let outputBytes=0,overflow=false;
 const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
+ const started=performance.now();
  const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
  for(const key of Object.keys(env))if(/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(key))delete env[key];
  const out=[],err=[];let error=null,timedOut=false;
@@ -110,10 +112,11 @@ const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
  const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));
  const capture=chunks=>data=>{outputBytes+=data.length;if(outputBytes>16*1024*1024){overflow=true;child.kill();return;}chunks.push(data);};
  child.stdout.on('data',capture(out));child.stderr.on('data',capture(err));child.on('error',e=>{error=e.message;});
- child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,out:Buffer.concat(out).toString('utf8'),err:Buffer.concat(err).toString('utf8')});});
+ child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,seconds:(performance.now()-started)/1000,out:Buffer.concat(out).toString('utf8'),err:Buffer.concat(err).toString('utf8')});});
 })));
 // Never return on one worker's failure while the others are still running.
 for(let i=0;i<results.length;i++){process.stdout.write(results[i].out);process.stderr.write(results[i].err);}
+const workerSeconds=workerSecondsReport(batches,results.map(r=>r.seconds));for(const line of workerSeconds.lines)console.log(line);
 for(const worker of workers)if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))throw Error('Python batch source changed during tests');
 if(overflow||results.some(r=>r.error||r.timedOut||r.status!==0))throw Error('Python batch failed, exceeded output cap or original deadline');
 const reports=results.map(r=>{const matches=[...r.out.matchAll(/^BOOKS_PYTHON_BATCH_RESULT (.+)$/gm)];if(matches.length!==1)throw Error('Python batch completion missing or duplicated');return JSON.parse(matches[0][1]);});
@@ -121,4 +124,4 @@ const pythonCount=validatePythonReports(patterns,batches,reports).count;
 console.log('Integrated Python cases: '+pythonCount);
 const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
 for(const name of frontendScripts)run(process.execPath,[path.join('tests',name)]);
-console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:8}));
+console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:8,python_worker_seconds:workerSeconds.real}));

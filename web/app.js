@@ -1853,7 +1853,8 @@ function holdSentence(kind,cause,f={}){
     disc_total:`The tags say ${n(f.tags_say)} discs, but ${n(f.here)} ${n(f.here)===1?'is':'are'} here.`,
     one_of_many:`This file is tagged as track ${n(f.index)} of ${n(f.total)}. The other tracks aren't here.`,
     lack_title:n(f.missing)===1?`1 of ${n(f.total)} files doesn't mention this book's title.`:`${n(f.missing)} of ${n(f.total)} files don't mention this book's title.`,
-    mixed:'The files carry different albums or artists. They may be more than one book.',parts:"The parts of this set don't number cleanly."}[cause] || "The app can't be sure which files belong to this book.";
+    mixed:'The files carry different albums or artists. They may be more than one book.',works:'The title tags name more than one book.',
+    parts:"The parts of this set don't number cleanly."}[cause] || "The app can't be sure which files belong to this book.";
   if(kind==='part_of_book')return {chapter:'This file is named as one chapter.',numbered_part:'The name marks this as one numbered part.',
     siblings:n(f.beside)===1?'Another file beside it carries the same title.':`${n(f.beside)} other files beside it carry the same title.`,
     part_set:`Part ${n(f.index)} of ${n(f.total)} of "${f.set || ''}".`,unreadable:"The other files in this folder couldn't be checked."}[cause] || "The app can't tell if this is a whole book.";
@@ -2029,7 +2030,7 @@ function buildHoldList(entry){
     for(const f of shown.filter(item=>(item.folder || '')===folder))box.append(node('p',f.name,'path'));
   }
   more(shown.length);
-  if(ask.cause==='mixed')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists]])if(Array.isArray(items) && items.length)
+  if(ask.cause==='mixed' || ask.cause==='works')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists],['Books',ask.facts?.works]])if(Array.isArray(items) && items.length)
     box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name==='(none)'?(label==='Albums'?'No album':'No artist'):item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
 }
 function buildAskCell(row,td){
@@ -2153,7 +2154,9 @@ async function askPress(entry,kind){
   askPending={id,kind};askResults.delete(id);controls();
   try{
     if(values){
-      await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{})},PRESS_TIMEOUT);
+      // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
+      const shown=askDestination(row)?.path;
+      await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{})},PRESS_TIMEOUT);
       askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);
       const settled=Math.max(1,Number(ask.same_author?.count) || 1);
       askNote(values.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
@@ -2170,8 +2173,9 @@ async function askPress(entry,kind){
     }
   }catch(error){
     askResults.set(id,{text:askErrorText(error,kind)});
-    // A gate refused it (for example Name taken): the row shows that gate, with his typed values kept.
-    if(error.body?.code==='name_taken'){askDraft(id).previewKey=null;askPreview(entry,0);}
+    // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
+    // his typed values kept.
+    if(error.body?.code==='name_taken' || error.body?.code==='changed'){askDraft(id).previewKey=null;askPreview(entry,0);}
     if(!error.httpStatus)refreshFailed(error);
   }finally{askPending=null;}
   // Read before the buttons update: a focused button that becomes disabled drops focus to the page.
@@ -2200,7 +2204,7 @@ function renderApproveSelected(){
 }
 function openApproveDialog(){
   const {items,selected}=approveSelectable();if(!items.length || approveConfirm)return;
-  approveConfirm={items};const n=items.length,left=selected-n;
+  approveConfirm={items,paths:new Map(items.map(row=>[row.id,askDestination(row)?.path]))};const n=items.length,left=selected-n;
   setText('approve-dialog-title',`Approve ${plural(n,'book','books')} as is?`);
   $('approve-dialog-list').replaceChildren(...items.map(row=>{const dest=askDestination(row),line=node('p',outputName()+'\\'+dest.path);line.title=dest.absolute || '';return line;}));
   setText('approve-dialog-left',left>0?`${plural(left,'selected book is','selected books are')} left out. ${left===1?'It needs':'They need'} a different action.`:'');$('approve-dialog-left').hidden=!(left>0);
@@ -2215,8 +2219,9 @@ async function runApproveSelected(){
   for(const row of items){
     if(ended || recoveryDisconnected)break;
     askPending={id:row.id,kind:'approve'};updateAskRows();
-    try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision},PRESS_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
-    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(error.body?.code==='name_taken' && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
+    const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
+    try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{})},PRESS_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
+    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if((error.body?.code==='name_taken' || error.body?.code==='changed') && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
     finally{askPending=null;}
   }
   askBulk=false;

@@ -449,8 +449,12 @@ class PublicResearch:
         from pathlib import Path
         self.client=client;self.leads=source_leads() if leads is None else leads
         self.local_index=Path(local_index) if local_index is not None else Path(client.database).parent/'openlibrary-index'
+        self._watch=threading.local()  # the recording rules of a lookup() on each thread (Senua's 0.22.0 review, G6)
     def rules(self):
-        """Sergei's lasting author rules (author_rules, ruling 12), read-only; None while the catalog has none."""
+        """Sergei's lasting author rules (author_rules, ruling 12), read-only; None while the catalog has none. Inside
+        lookup() on this thread: the recording copy, so the research knows which credits and folders it asked about."""
+        watch=getattr(self.__dict__.get('_watch'),'rules',None)
+        if watch is not None:return watch
         import author_rules
         database=getattr(getattr(self,'client',None),'database',None)
         return author_rules.load(database) if database else None
@@ -459,11 +463,12 @@ class PublicResearch:
         import local_identity
         siblings,index=self._siblings(row,root)
         return local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules()),index
-    def approved(self,row,root,title=None,author=None):
+    def approved(self,row,root,title=None,author=None,chosen=None):
         """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
         typed values winning (None: nothing typed; '' for the author: no author), with no Internet request, so the
         destination shown before the press is exactly the one used. An empty author files a collection under
-        Сборники when the row is one, else under Без автора. Raises ValueError('Type a title first.')."""
+        Сборники when the row is one, else under Без автора. chosen: the author his Same author? answer gives (not a
+        typed value, Senua's 0.22.0 review m3). Raises ValueError('Type a title first.')."""
         import local_identity
         from organization import NO_AUTHOR
         record,index=self.identity(row,root)
@@ -472,11 +477,12 @@ class PublicResearch:
         if title is not None and text(title):typed.add('title')
         if author is not None and text(author):typed.add('author')
         final_title=text(title) if 'title' in typed else shown['title']
-        final_author=text(author) if author is not None else shown['author']
+        final_author=text(author) if author is not None else text(chosen) if chosen is not None else shown['author']
         if not final_title:raise ValueError('Type a title first.')
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
-        settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection)
+        settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
+                                       folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
@@ -596,10 +602,17 @@ class PublicResearch:
     def lookup(self,row,root,stop=None,progress=lambda *_:None):
         import manual_metadata
         entered=manual_metadata.proposals(row.get('_manual_metadata_sources',[]))
-        result=self._lookup(row,root,stop,progress)
         rules=self.rules()
-        # A held book is researched again when Sergei's rules change (ruling 5, option B; ruling 12).
+        watch=rules.recording() if rules is not None and hasattr(rules,'recording') else None
+        if self.__dict__.get('_watch') is None:self._watch=threading.local()
+        self._watch.rules=watch
+        try:result=self._lookup(row,root,stop,progress)
+        finally:self._watch.rules=None
+        # A held book is researched again when Sergei's rules change (ruling 5, option B; ruling 12); since Senua's 0.22.0
+        # review (G6) only when a new rule decides one of the credits or folders this research asked about.
         result['rules_generation']=rules.generation if rules else ''
+        if watch is not None:
+            result['rules_stamp']=watch.stamp;result['rules_seen']=sorted(watch.seen)[:500];result['rules_folders']=sorted(watch.folders)[:20]
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
@@ -660,7 +673,8 @@ class PublicResearch:
                 title=entered[0].get('title') or shown['title'];author=entered[0].get('authors') or shown['author']
                 typed={name for name,value in (('title',entered[0].get('title')),('author',entered[0].get('authors'))) if value}
                 if title and (author or shown['collection']):
-                    local=local_identity.settled(local,title,author,'entered',typed,collection=not author and shown['collection'])
+                    local=local_identity.settled(local,title,author,'entered',typed,collection=not author and shown['collection'],rules=self.rules(),
+                                                 folder='\\'.join(reversed(local_identity._ancestors(row,root))))
             result['local_agreement']=local_identity.summary(local)
             if local.get('route'):return self._local_collection(row,local,result)
             if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)

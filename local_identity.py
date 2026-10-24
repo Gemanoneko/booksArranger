@@ -1523,10 +1523,12 @@ def _consistent(members, names):
     return (next(iter(values)), False) if len(values) == 1 else ('', len(values) > 1)
 
 
-def looks_like_person(value, index=None):
+def looks_like_person(value, index=None, surname=False):
     """A name shows it is a person by a known first name, an initial or a patronymic, or because
     the library credits the same person in an author or artist tag elsewhere. Series, universe and
-    title words ("Колесо времени", "Malleus Maleficarum", "Часть Вторая") do not."""
+    title words ("Колесо времени", "Malleus Maleficarum", "Часть Вторая") do not. surname: a single
+    word is a person too when it is the surname of a name the library credits ("Сапковский" beside
+    "Анджей Сапковский"; Senua's 0.22.0 review, G1)."""
     value = clean_title(value)
     tokens = value.split()
     if not tokens or len(tokens) > 5 or re.search(r'\d', value) or norm(value) in NOT_PEOPLE or norm(value) in CONTAINER_NAMES or PART_FOLDER.search(value):
@@ -1535,7 +1537,47 @@ def looks_like_person(value, index=None):
         return True
     if index and index.get('tag_keys') and len(words(value)) >= 2:
         return any(same_person(value, spelling) for k in _spelling_keys(value) for spelling in index['tag_keys'].get(k, ()))
+    if surname and index and index.get('tag_keys') and len(words(value)) == 1 and len(value) >= 4:
+        return any(_shares_surname(value, spelling) for k in _spelling_keys(value) for spelling in index['tag_keys'].get(k, ()))
     return False
+
+
+def tag_index(tag_sets):
+    """The 'tag_keys' part of catalog_index() from tag dicts already in memory (groups.build has the catalog rows):
+    every person-like author or artist credit, by blocking key."""
+    tagged = set()
+    for tags in tag_sets:
+        tags = {str(k).casefold(): v for k, v in (tags or {}).items()}
+        tagged.update(unicodedata.normalize('NFC', c) for c in (text(tags.get(k)) for k in AUTHOR_TAGS) if _person_like(c))
+    keys = {}
+    for spelling in tagged:
+        for k in _spelling_keys(spelling):
+            keys.setdefault(k, []).append(spelling)
+    return {'tag_keys': keys}
+
+
+# Words that label a part or a chapter, never a work of its own ("Глава 3", "Эпизод 2 Глава 01-02", "Предисловие переводчика").
+PART_WORDS = frozenset('''глава главы гл часть части ч chapter chap part pt track трек пролог эпилог prologue epilogue эпизод episode
+том vol volume книга book диск disc disk cd предисловие послесловие вступление введение intro introduction outro начало конец финал
+от автора переводчика переводчик история истории рассказ рассказы и первая вторая третья четвертая пятая шестая седьмая восьмая
+девятая десятая первый второй третий i ii iii iv v vi vii viii ix x'''.split())
+TRAILING_POSITION = re.compile(r'(?:[\s_.,:;-]*(?:ч|часть|part|pt|глава|chapter|cd|disc|диск|том|vol|книга|book)?\.?\s*\d{1,4}(?:\s*[-/]\s*\d{1,4})?)\s*$', re.I)
+
+
+def work_name(value):
+    """The work a title tag or a file-name title names, its position and part number aside ("1.1 Психическая атака" and
+    "Последнее желание 2" -> "Психическая атака", "Последнее желание"); '' for a chapter or part label, a junk title
+    ("Аудиокнига", "Без имени") or garbled text. Senua's 0.22.0 review (G1, G3): files naming two works are two books."""
+    value = clean_title(value)
+    if not value or garbled(value) or norm(value) in JUNK_TITLES:
+        return ''
+    value = re.sub(r'^\s*\d[\d.\-_ ]*', '', value)
+    for _ in range(3):
+        value = TRAILING_POSITION.sub('', value).strip(' .,:;-–—_')
+    tokens = re.findall(r'[^\W\d_]+', value.casefold().replace('ё', 'е'))
+    if not tokens or all(t in PART_WORDS for t in tokens) or norm(value) in JUNK_TITLES:
+        return ''
+    return text(value)
 
 
 def _shares_surname(a, b):
@@ -1672,7 +1714,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 title['how'] += ' (the author named before the title is set aside)'
                 tag_title_author = parsed['author']
     if title is None:
-        named = row.get('numbered_set') or {}
+        named = dict(row.get('numbered_set') or {})
+        if named.get('name') and (garbled(named['name']) or norm(clean_title(named['name'])) in JUNK_TITLES):
+            # Senua's 0.22.0 review, G2: a set named by a junk title tag ("Аудиокнига", "Без имени") has no name.
+            ignored.append({'field': 'title', 'value': named['name'], 'why': 'names the format, not the book'})
+            named['name'] = ''
         for component in components:
             if component['kind'] in ('folder', 'parent folder'):
                 continue
@@ -1746,6 +1792,13 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             for reader in dropped:
                 ignored.append({'field': source, 'value': reader, 'why': who.why(reader) or 'joined to the author credit'})
             if not name:
+                return
+            pieces = [text(p) for p in re.split(r'\s+[-–—]\s+', name) if text(p)]
+            if len(pieces) == 2 and all(_person_like(p) for p in pieces):
+                # Senua's 0.22.0 review, G4 (ruling 14): "Author - Reader" where neither name is a known reader credits two
+                # people. Never the whole string; a file or folder name that names one decides it, else it is asked.
+                for piece in pieces:
+                    offer(piece, source, basis, kind)
                 return
         if title and title_key(name) == title_key(title['value']):
             # "Потаённое окно в потаённый сад" in the artist tag of that book: the title, not an author.
@@ -2034,9 +2087,11 @@ def shown(record):
             'piece': record.get('held', '')}
 
 
-def settled(record, title, author, state, typed=(), collection=False):
+def settled(record, title, author, state, typed=(), collection=False, rules=None, folder='', answered=False):
     """A copy of the record whose identity is Sergei's (rulings 6a and 6b): state 'entered' for values he saved,
-    'approved' for an Approve. Typed fields get basis 'entered'. Questions, pieces and part sets are settled by him."""
+    'approved' for an Approve. Typed fields get basis 'entered'. Questions, pieces and part sets are settled by him.
+    rules: his same_as rules apply to the author as they do to a tag (Senua's 0.22.0 review, m2: typed "Терри Пратчетт"
+    goes to Pratchett Terry, not to a second folder). answered: the author is his Same author? answer (m3), not typed."""
     import copy
     record = copy.deepcopy(record)
     for name, value in (('title', title), ('author', author)):
@@ -2044,9 +2099,19 @@ def settled(record, title, author, state, typed=(), collection=False):
             continue
         old = record['fields'][name]
         basis = 'entered' if name in typed else (old.get('basis') or 'entered')
+        how = 'Entered by you' if name in typed else 'Your Same author? answer' if name == 'author' and answered else 'Shown on the row'
+        rule = ''
+        if name == 'author' and rules is not None and text(value):
+            target = rules.same_as(text(value), folder)
+            if target:
+                rule = rules.rule_id(text(value), folder)
+                how += '; Sergei\'s rule (ruling 12) for "%s"' % text(value)
+                value = target
         record['fields'][name] = {'state': state, 'value': text(value), 'basis': basis,
-                                  'how': ('Entered by you' if name in typed else 'Shown on the row') + ('; approved by you (Sergei 2026-10-24, ruling 6b)' if state == 'approved' else ' (Sergei 2026-10-24, ruling 6a)'),
+                                  'how': how + ('; approved by you (Sergei 2026-10-24, ruling 6b)' if state == 'approved' else ' (Sergei 2026-10-24, ruling 6a)'),
                                   'sources': [{'kind': 'entered by you' if name in typed else 'approval', 'value': text(value)}], 'partial': False}
+        if rule:
+            record['fields'][name]['rule'] = rule
     if not collection:
         record['route'] = None
     record.update(accepted=True, ask=None, conflicts=[], held='', part_book=None, gaps=[])

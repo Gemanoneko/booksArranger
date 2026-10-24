@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds} from '../scripts/python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds,workerSecondsReport} from '../scripts/python-check-batches.mjs';
 const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.py','test_gamma.py'];
 const reports=()=>pythonBatches(patterns).map((p,batch)=>({batch,patterns:p,ids:p.map(x=>'case.'+x),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
 test('both short worker layouts retain the original fallback prerequisite',()=>{
@@ -33,6 +33,15 @@ test('the real inventory projects every worker under the deadline from its measu
  // The projection itself (0.22.0: placement alone never caught three workers running past the deadline): every worker's
  // measured seconds stay under 80 % of the 540 s deadline, leaving room for the copy and for four workers at once.
  const loads=projectedSeconds(b);assert.equal(loads.length,PYTHON_WORKERS);assert(Math.max(...loads)<=0.8*540,'projected worker seconds '+loads.join(', '));
+});
+test('the gate prints every worker\'s real seconds beside its projection (Senua 0.22.0 early review, m5)',async()=>{
+ const b=pythonBatches(patterns),report=workerSecondsReport(b,[431.24,402.5,388,12.04]);
+ assert.deepEqual(report.real,[431.2,402.5,388,12]);assert.deepEqual(report.projected,projectedSeconds(b));
+ assert.equal(report.lines.length,PYTHON_WORKERS);assert.match(report.lines[0],/^Python worker 0: 431\.2 s real, \d+ s projected, 540 s deadline$/);
+ assert.throws(()=>workerSecondsReport(b,[1,2,3]),/worker/);assert.throws(()=>workerSecondsReport(b,[1,2,3,NaN]),/worker/);
+ const fs=await import('node:fs');const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
+ assert.match(source,/workerSecondsReport\(batches,results\.map\(r=>r\.seconds\)\)/,'the gate reports the measured times');
+ assert.match(source,/python_worker_seconds:/,'and records them in its pass line');
 });
 test('duplicate and malformed patterns cannot silently change discovery',()=>{assert.throws(()=>pythonBatches([...patterns,patterns[0]]));assert.throws(()=>pythonBatches(['../test_a.py','test_b.py']));});
 test('actual complete occurrence count is summed without deduplicating loader IDs',()=>{const r=reports();r[0].ids[1]=r[0].ids[0];assert.equal(validatePythonReports(patterns,pythonBatches(patterns),r).count,patterns.length);});

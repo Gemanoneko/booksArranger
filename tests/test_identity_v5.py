@@ -118,6 +118,17 @@ class ReaderIsNeverAnAuthor(unittest.TestCase):
         result=Catalog(self,[row],[reader_elsewhere('Пухов Сергей',2)]).lookup(row)
         self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertEqual(result['review']['canonical_author'],'Варго Александр')
 
+    def test_g4_a_dash_joining_two_unknown_people_is_asked_never_filed_whole(self):
+        # Senua's early 0.22.0 review (2026-10-24), G4 / ruling 14: an "Author - Reader" tag whose reader the library does not know.
+        row=book(member('Unsorted/Гример.m4b',album='Гример',album_artist='Александр Варго - Иван Сидоров'))
+        record=identify(row,ROOT,[],())
+        self.assertFalse(record['accepted']);self.assertEqual((record['ask']['kind'],record['ask']['why']),('author_unclear','two_people'))
+        self.assertNotIn(' - ',local_identity.shown(record)['author'])
+        # A folder that names one of them decides it.
+        row=book(member('Варго Александр/Гример.m4b',album='Гример',album_artist='Александр Варго - Иван Сидоров'))
+        record=identify(row,ROOT,[],())
+        self.assertTrue(record['accepted'],record);self.assertEqual(record['fields']['author']['value'],'Александр Варго')
+
 
 class CollectionsAndGarbledTags(unittest.TestCase):
     def test_collection_credit_files_the_book_under_collections_even_in_an_author_folder(self):
@@ -254,6 +265,63 @@ class PartsStayTogether(unittest.TestCase):
     def test_files_with_different_title_tags_stay_separate(self):
         files=[('Сборник/%s.mp3'%name,{'title':'Рассказ %s'%name,'artist':'Автор Один'}) for name in ('Альфа','Бета')]
         self.assertEqual(len(groups.build(self.rows(files))),2)
+
+    # Senua's early 0.22.0 review (2026-10-24), G1-G3: three ways two books became one group that converts on its own.
+    def test_g1_numbered_books_under_a_bare_surname_stay_separate_books(self):
+        # "Сапковский" is no known first name; the file-name titles name two books.
+        files=[('Unsorted/Ведьмак/%02d Сапковский - %s.mp3'%(n,name),{}) for n,name in enumerate(('Последнее желание','Меч предназначения'),1)]
+        self.assertEqual(len(groups.build(self.rows(files))),2)
+
+    def test_g1_a_surname_the_library_credits_elsewhere_is_a_person(self):
+        files=[('Unsorted/Дозоры/%02d Лукьяненко - Часть %d.mp3'%(n,n),{}) for n in (1,2)]
+        built=groups.build(self.rows(files))
+        self.assertEqual([len(g['members']) for g in built.values()],[2],'positive control: with no credit elsewhere the shared start names the book')
+        files.append(('Other/Черновик/01.mp3',{'artist':'Сергей Лукьяненко','album':'Черновик'}))
+        self.assertEqual(sorted(len(g['members']) for g in groups.build(self.rows(files)).values()),[1,1,1])
+
+    def test_g1_numbered_files_with_different_titles_join_only_when_their_folder_names_another_author(self):
+        names=('Вступление от переводчика','Буфет Хитаги','Песня Цубасы')
+        files=[('Unsorted/Сборник/%02d Моногатари короткие истории - %s.mp3'%(n,name),{}) for n,name in enumerate(names,1)]
+        self.assertEqual(len(groups.build(self.rows(files))),3,'no folder names the author: the shared start may be one')
+        files=[('Unsorted/Сапковский Анджей - Ведьмак/%02d Сапковский - %s.mp3'%(n,name),{}) for n,name in enumerate(names,1)]
+        self.assertEqual(len(groups.build(self.rows(files))),3,'the folder names the shared start as the author')
+
+    def test_g2_a_junk_title_tag_never_joins_books(self):
+        files=[('Unsorted/Кинг/Кинг - %s.mp3'%name,{'title':'Аудиокнига','artist':'Стивен Кинг','track':str(n)}) for n,name in enumerate(('Оно','Мизери'),1)]
+        self.assertEqual(len(groups.build(self.rows(files))),2)
+        # Live catalog 2026-10-24: 5 Сборник folders of stories each tagged "Без имени".
+        files=[('Unsorted/Ужасы. Сборник рассказов/Сборник/%s.mp3'%name,{'title':'Без имени'}) for name in ('Бритва','Сепсис','Оплата')]
+        self.assertEqual(len(groups.build(self.rows(files))),3)
+
+    def test_g2_a_junk_set_name_is_never_the_title(self):
+        members=[member('Unsorted/Кинг/Кинг - %s.mp3'%name,title='Аудиокнига',artist='Стивен Кинг') for name in ('Оно','Мизери')]
+        row=dict(book(*members),numbered_set={'version':'same-title-v1','name':'Аудиокнига','basis':'same title tag'})
+        record=identify(row,ROOT,[],())
+        self.assertNotEqual(local_identity.norm(record['fields']['title']['value']),'аудиокнига',record['fields']['title'])
+
+    def witcher(self,disc_titles=(('Последнее желание','Чтец Один'),('Меч предназначения','Чтец Два'))):
+        files=[]
+        for disc,(work,reader) in enumerate(disc_titles,1):
+            for n in (1,2):
+                files.append(('Unsorted/Ведьмак/%d-%d.mp3'%(disc,n),{'album':'Ведьмак','artist':'Анджей Сапковский','album_artist':reader,'disc':str(disc),'track':str(n),'title':'%s %d'%(work,n)}))
+        return files
+
+    def test_g3_one_album_whose_title_tags_name_two_books_is_held_as_files_unclear(self):
+        built=groups.build(self.rows(self.witcher()))
+        self.assertEqual(len(built),1,list(built));group=next(iter(built.values()))
+        self.assertTrue(group['source_partition_uncertain'],'held: never converted on its own')
+        self.assertEqual(group['joined_parts']['works'],[{'name':'Последнее желание','files':2},{'name':'Меч предназначения','files':2}])
+        self.assertIn('Source membership uncertain',source_gate(dict(group,id='g',revision=1,fingerprint='f'),{'titles':['Ведьмак'],'author_aliases':['Анджей Сапковский'],'identity_basis':'local_agreement','identity_rule':IDENTITY_VERSION,'policy_version':'standing-17-v1'}))
+
+    def test_g3_chapter_titles_and_one_work_in_parts_still_join_without_a_hold(self):
+        files=[('Unsorted/Плюшевая голова/%d.mp3'%n,dict({'album':'Плюшевая голова','artist':'Влад Райбер','album_artist':'Михаил Прокопов','track':str(n),'title':title},
+               **({'album_artist':'Михаил Прокопов, Анна Прокопова'} if n==4 else {}))) for n,title in enumerate(('Цапка','Призрак пустого вагона','Нектохеты ч.1','Нектохеты ч.2'),1)]
+        built=groups.build(self.rows(files))
+        self.assertEqual(len(built),1,list(built));group=next(iter(built.values()))
+        self.assertFalse(group.get('source_partition_uncertain'));self.assertEqual(group['joined_parts'].get('works',[]),[])
+        # One book per disc, each disc a single file with its own title: still two works.
+        built=groups.build(self.rows([(p,t) for p,t in self.witcher() if p.endswith('-1.mp3')]))
+        self.assertTrue(next(iter(built.values()))['source_partition_uncertain'])
 
 
 class QuestionsOpenTheEditor(unittest.TestCase):

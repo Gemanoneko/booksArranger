@@ -115,4 +115,78 @@ class ApproveAsIsTests(ApproveFixture):
         self.assertEqual(self.service.jobs.status()['jobs'],[]);self.assertTrue(source.exists())
 
 
+class ReviewFindingsTests(ApproveFixture):
+    """Senua's early 0.22.0 review (2026-10-24): m1, m2, m3, m4 and m9."""
+    def two_files(self,album,artist=None):
+        tags={'artist':artist} if artist else {}
+        return [tone(self.audio/'Unsorted'/album/('%02d.mp3'%n),self.cover,album=album,title='Глава %d'%n,track='%d/2'%n,**tags) for n in (1,2)]
+
+    def test_m1_approve_refuses_a_destination_other_than_the_goes_to_line_shown(self):
+        import author_rules
+        self.two_files('Тихий дом','Иван Петров')
+        row=self.start()[0]
+        shown=self.service.approval_preview(row['id'],row['revision'])['path']
+        self.assertEqual(Path(shown).parts[0],'Петров Иван','positive control')
+        with connect(self.inv.database) as db:author_rules.append(db,'same_as','Иван Петров',target='Petrov Ivan',actor='user',source='test')
+        with self.assertRaisesRegex(ValueError,'Destination changed'):self.service.approve_book(row['id'],row['revision'],path=shown)
+        self.assertEqual(self.service.jobs.status()['jobs'],[],'nothing queued')
+        now=self.service.approval_preview(row['id'],row['revision'])['path'];self.assertEqual(Path(now).parts[0],'Petrov Ivan')
+        self.service.approve_book(row['id'],row['revision'],path=now);self.wait()
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
+        self.assertEqual(Path(job['output']['final_path']),self.sorted/now,'the path shown is the path used')
+
+    def test_m2_a_typed_or_entered_author_goes_through_sergeis_same_as_rules(self):
+        self.two_files('Мор')
+        row=self.start()[0]
+        preview=self.service.approval_preview(row['id'],row['revision'],author='Терри Пратчетт')
+        self.assertEqual(Path(preview['path']).parts[0],'Pratchett Terry','typed: the same folder the tags go to (ruling 12)')
+        with connect(self.inv.database) as db:manual_metadata.append(db,manual_metadata.capture(row,{'title':'Мор','canonical_author':'Терри Пратчетт'},''))
+        with connect(self.inv.database) as db:sources=manual_metadata.records(db,row)
+        result=self.service.automatic.research.lookup(dict(row,_manual_metadata_sources=sources),str(self.audio),threading.Event())
+        self.assertEqual(result['review']['canonical_author'],'Pratchett Terry','entered: the same folder')
+
+    def test_m3_a_same_author_choice_is_not_saved_as_entered_by_you(self):
+        from unittest import mock
+        self.two_files('Часы','Dean Koonts')
+        row=self.start()[0]
+        with mock.patch.object(self.service,'answer_same_author',return_value='Koontz Dean'):
+            approved=self.service.approve_book(row['id'],row['revision'],choice='same')
+        self.wait()
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
+        self.assertEqual(job['manifest']['metadata']['canonical_author'],'Koontz Dean')
+        with connect(self.inv.database) as db:entered=manual_metadata.records(db,approved['row'])
+        self.assertEqual([e for e in entered if 'canonical_author' in (e.get('values') or {})],[],'his answer is a rule, not a typed value')
+
+    def test_m4_closing_the_app_stops_an_approve_in_progress(self):
+        from unittest import mock
+        import audio_pipeline
+        self.two_files('Долгая книга','Иван Петров')
+        row=self.start()[0];started=threading.Event();outcome={}
+        def slow(path,cache,stop=None):
+            started.set()
+            if stop is None or not stop.wait(20):raise AssertionError('the press was never told to stop')
+            raise InterruptedError()
+        def press():
+            try:self.service.approve_book(row['id'],row['revision'])
+            except BaseException as error:outcome['error']=error
+        with mock.patch.object(audio_pipeline,'probe',slow):
+            worker=threading.Thread(target=press);worker.start()
+            self.assertTrue(started.wait(30));t0=time.monotonic();self.service.drain();worker.join(30)
+        self.assertLess(time.monotonic()-t0,5,'Quit does not wait behind the press')
+        self.assertIsInstance(outcome.get('error'),ValueError,outcome);self.assertIn('closing',str(outcome['error']))
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+
+    def test_m9_approves_second_safety_filter_refuses_an_unreadable_file_found_at_the_gate(self):
+        # approve_book's first check passes; the gate inside approve_automatic then finds the file unreadable.
+        from unittest import mock
+        import source_identity
+        self.two_files('Тихо','Иван Петров')
+        row=self.start()[0];real=source_identity.source_gate
+        def gate(gate_row,work):return real(gate_row,work)+['Playback order uncertain','Source files unavailable or unreadable']
+        with mock.patch.object(source_identity,'source_gate',gate):
+            with self.assertRaises(ValueError) as caught:self.service.approve_book(row['id'],row['revision'])
+        self.assertEqual(str(caught.exception),'Source files unavailable or unreadable','only the safety reason; his approval overrides the order hold')
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+
+
 if __name__=='__main__':unittest.main()

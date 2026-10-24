@@ -48,6 +48,23 @@ class JoinPartsTests(test_approve_as_is.ApproveFixture):
         files = [files for _, files in self.books()]
         self.assertEqual(sorted(files), sorted([['03.mp3'], ['04.mp3'], ['Книга.mp3'], ['Книга.mp3']]))
 
+    def test_two_books_of_one_series_on_their_own_discs_are_held_as_files_unclear(self):
+        # Senua's 0.22.0 early review, probe A / G3: this converted on its own into "Ведьмак" and removed all four originals.
+        for disc, (work, reader) in enumerate((('Последнее желание', 'Чтец Один'), ('Меч предназначения', 'Чтец Два')), 1):
+            for n in (1, 2):
+                tone(self.audio / 'Unsorted' / 'Ведьмак' / ('%d-%d.mp3' % (disc, n)), self.cover, album='Ведьмак', artist='Анджей Сапковский',
+                     album_artist=reader, disc=str(disc), track=str(n), title='%s %d' % (work, n))
+        self.assertEqual([len(files) for _, files in self.books()], [4])
+        outcomes = self.research_all()
+        self.assertIn('Source membership uncertain', outcomes[('1-1.mp3', '1-2.mp3', '2-1.mp3', '2-2.mp3')], 'held: never converted on its own')
+        row = self.service.reviews.page()['rows'][0]
+        self.service.automatic._record(row, 'Held', dict(self.research(row), until_change=True), None)
+        listed = self.service.reviews.page(status='output_attention', group='files_unclear')['rows']
+        self.assertEqual(len(listed), 1)
+        ask = listed[0]['ask']
+        self.assertEqual((ask['kind'], ask['cause']), ('files_unclear', 'works'))
+        self.assertEqual(ask['facts']['works'], [{'name': 'Последнее желание', 'files': 2}, {'name': 'Меч предназначения', 'files': 2}])
+
 
 if __name__ == '__main__':
     unittest.main()

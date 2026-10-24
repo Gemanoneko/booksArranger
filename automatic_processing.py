@@ -177,13 +177,21 @@ class AutomaticProcessing:
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
+                'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
                 'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
-        rules=getattr(self.research,'rules',None)
-        try:value=rules() if callable(rules) else None
-        except Exception:value=None
+        value=self._rules()
         return value.generation if value is not None else ''
+    def _rules(self):
+        rules=getattr(self.research,'rules',None)
+        try:return rules() if callable(rules) else None
+        except Exception:return None
+    def rules_changed_for(self,record):
+        """Senua's 0.22.0 review, G6: True when a rule saved since this research decides a credit or folder it saw."""
+        rules=self._rules();generation=rules.generation if rules is not None else ''
+        if (record.get('rules_generation') or '')==generation:return False
+        return rules.changed_for(record) if rules is not None and hasattr(rules,'changed_for') else True
     def _refresh_wait(self,row,previous):
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
@@ -604,7 +612,7 @@ class AutomaticProcessing:
                       self._update(id,checkpoint=json.dumps(checkpoint));continue
                   previous=self._refresh_wait(row,self.candidate(row))
                   if previous and previous['state']=='Held' and previous.get('until_change') and previous.get('research_version')==RESEARCH_VERSION \
-                          and previous.get('rules_generation','')==self._rules_generation():
+                          and not self.rules_changed_for(previous):
                       # Sergei 2026-10-24, ruling 5 (option B): researched again only when something about it changes. A
                       # changed file list, size, time or tag, a renamed folder or a value Sergei saves gives the book a
                       # new revision or fingerprint (candidate() then reads nothing); new rules a new research version.

@@ -83,11 +83,14 @@ def _counted(members, *names):
     return [{'name': name or '(none)', 'files': n} for name, n in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
 
 
-def files_cause(members, reasons, title='', split=False):
-    """{'cause': track_total | disc_total | one_of_many | lack_title | mixed | parts | unknown, the numbers its sentence
-    needs, 'flagged' (paths without the title), 'albums' / 'artists' ([{name, files}] for mixed)}"""
+def files_cause(members, reasons, title='', split=False, works=None):
+    """{'cause': works | track_total | disc_total | one_of_many | lack_title | mixed | parts | unknown, the numbers its
+    sentence needs, 'flagged' (paths without the title), 'albums' / 'artists' ([{name, files}] for mixed), 'works'
+    ([{name, files}]: the books the title tags of a joined album name, Senua's 0.22.0 review G3)}"""
     reasons = [str(r) for r in reasons or []]
     here = len(members)
+    if MEMBERSHIP in reasons and isinstance(works, list) and len(works) > 1:
+        return {'cause': 'works', 'works': [{'name': str(w.get('name') or ''), 'files': int(w.get('files') or 0)} for w in works[:8]]}
     if MEMBERSHIP in reasons:
         if here == 1:
             total = _total(_raw(members[0], 'track', 'tracknumber'))
