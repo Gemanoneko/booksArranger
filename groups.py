@@ -103,6 +103,15 @@ def kept_parts(connection,root):
     return frozenset(r[0] for r in connection.execute("""SELECT v.path FROM part_volumes v JOIN files f ON f.root=v.root AND f.path=v.path
         WHERE v.root=? AND v.basis LIKE ? AND v.size=f.size AND v.modified=CAST(f.modified AS TEXT) AND f.error='' AND f.missing=0""",(root,KEPT_BASIS+'%')))
 
+def separate_books(connection,root,paths):
+    """How many of these files are each a current book of its own ("Volume of a series") in the stored groups."""
+    count=0
+    for path in paths:
+        found=connection.execute("""SELECT g.scope,g.evidence FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id
+            WHERE c.root=? AND c.path=? AND g.root=? AND g.superseded=0""",(root,path,root)).fetchall()
+        if len(found)==1 and found[0]['scope'].endswith('\x1fVolume of a series') and [m['path'] for m in json.loads(found[0]['evidence'])['members']]==[path]:count+=1
+    return count
+
 def record_volumes(connection,root,members,basis):
     """Record the members of a set as separate volumes (their current size and time). Regroups the catalog."""
     import datetime

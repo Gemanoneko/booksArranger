@@ -2158,7 +2158,15 @@ class MergeService:
         """Judy's "Keep as separate books" (2026-10-25): Sergei's answer "these are separate books" to a "Part of a bigger book"
         set row. Records each file (its size and time) as its own book in the separate-volumes store and touches no file;
         it approves nothing: each new book is checked again like any other. Remembered per file until it changes.
-        Returns {'kept': n}. Raises ValueError for a changed row ('Candidate changed...') or a row that is not an asked set."""
+        Returns {'kept': n}, n the books the regroup really made. Raises ValueError for a changed row ('Candidate changed...'),
+        a row that is not an asked set, or a set the regroup did not split (nothing recorded, nothing changed).
+
+        Senua's 0.22.0 review, N1: a Save in the details panel (a saved review) protects the set's group, so its files never
+        became books of their own while Keep answered {'kept': 2}. Keep now drops the set's saved panel values with the set:
+        they describe the joined book, which no longer exists, so they are not carried to the new books (each is named from
+        its own tags or file name, Judy's spec 5.2; the "Entered by you" record of the Save stays under the old set). Save
+        stores no per-file value, so none is lost. A set with a job is never split. The press reports success only when
+        every file is its own book after the regroup; otherwise everything is rolled back and it is refused."""
         import datetime,groups
         row=self.reviews._row('Audiobooks',id,revision)
         members=row.get('members') or []
@@ -2167,14 +2175,22 @@ class MergeService:
         if entry.get('group')!='part_of_book' or hold.get('piece')!='set' or len(members)<2 or not (row.get('part_set') or row.get('split_book')):
             raise ValueError('These files are not a set of parts asked about. Nothing was changed.')
         root=self.reviews._source_root(row)
-        with connect(self.inventory.database) as db:
-            groups.record_volumes(db,root,members,groups.KEPT_BASIS+' on '+datetime.date.today().isoformat())
-        # The catalog regroups now (each file its own candidate), so the row leaves at this answer, not one poll later. A
-        # committed sync: Inventory.candidate() rolls its sync back when the candidate is gone.
+        refused='Keep as separate books was not accepted. Nothing was changed.'
+        # One transaction: record the files, drop the set's saved values, regroup, check the split; any failure rolls all
+        # of it back. The catalog regroups now, so the row leaves at this answer, not one poll later.
         with self.inventory.group_lock,connect(self.inventory.database) as db:
-            db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
+            db.execute('BEGIN IMMEDIATE')
+            current=db.execute('SELECT revision,superseded FROM book_groups WHERE root=? AND id=?',(root,id)).fetchone()
+            if current is None or current['superseded'] or current['revision']!=revision:raise ValueError('Candidate changed; reload evidence before reviewing')
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='audio_jobs'").fetchone() and any(
+                    json.loads(r[0]).get('candidate_id')==id for r in db.execute('SELECT manifest FROM audio_jobs')):raise ValueError(refused)
+            groups.record_volumes(db,root,members,groups.KEPT_BASIS+' on '+datetime.date.today().isoformat())
+            db.execute("UPDATE book_groups SET review='',approved=0 WHERE id=?",(id,))
+            groups.sync(db,root)
+            kept=groups.separate_books(db,root,[m['path'] for m in members])
+            if kept!=len(members):raise ValueError(refused)
         self.__dict__.pop('_needs_cache',None)
-        return {'kept':len(members)}
+        return {'kept':kept}
 
     def dismiss_attention(self,id,revision):
         """Remove from list (ruling 10): a book with no audio file left stops being listed. No file is touched; a scan

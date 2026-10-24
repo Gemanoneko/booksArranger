@@ -213,6 +213,38 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         self.inv.launch('Audiobooks'); self.inv.worker.join(10)
         self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1])
 
+    def test_keep_splits_a_set_whose_panel_values_were_saved(self):
+        # Senua's 0.22.0 review, N1: a Save in the details panel protected the set's group, so Keep recorded the files,
+        # answered {'kept': 2} and changed nothing; the set was asked again at the next research, and again after each Keep.
+        self.seasons()
+        row = self.asked()
+        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Еспер Эрсгорд'}, False, 'Panel Save')
+        listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
+        self.assertEqual([r['id'] for r in listed], [row['id']], 'positive control: still asked after the Save')
+        self.assertTrue(listed[0]['review'], 'positive control: the panel values are saved on the set')
+        self.assertEqual(self.service.keep_separate(listed[0]['id'], listed[0]['revision']), {'kept': 2})
+        rows = self.rows()
+        self.assertEqual(sorted(len(r['members']) for r in rows), [1, 1], 'really split: each file its own book')
+        # The set's saved values described the joined book: they are not carried to the new books.
+        self.assertEqual([r.get('review') for r in rows], [None, None])
+        for new in rows:
+            result = self.research(new)
+            self.assertNotIn('One part of a bigger book', result['reasons'], result['reasons'])
+        self.assertEqual(self.service.reviews.page(status='output_attention', group='part_of_book')['rows'], [])
+
+    def test_keep_never_reports_success_without_the_split(self):
+        # N1: whatever keeps the set together, Keep refuses with nothing recorded instead of answering "Kept as 2".
+        from unittest import mock
+        self.seasons()
+        row = self.asked()
+        with mock.patch('groups.sync'), self.assertRaisesRegex(ValueError, 'not accepted. Nothing was changed'):
+            self.service.keep_separate(row['id'], row['revision'])
+        from scanner import connect
+        with connect(self.inv.database) as db:
+            recorded = db.execute("SELECT count(*) FROM sqlite_master WHERE name='part_volumes'").fetchone()[0] and db.execute('SELECT count(*) FROM part_volumes').fetchone()[0]
+        self.assertEqual(recorded, 0, 'nothing recorded')
+        self.assertEqual([len(r['members']) for r in self.rows()], [2], 'the set is as it was')
+
     def test_kept_files_without_a_number_or_a_title_of_their_own_never_return_as_parts(self):
         sources = self.seasons(names=('Тёмный лес', 'Холодный ветер'))
         row = self.asked()
