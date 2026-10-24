@@ -48,10 +48,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
 
   // Order unclear: one sentence per cause, the "Playback order" list of 5, then "+ n more".
   const order=[hold('o1','order_unclear','no_tracks',{missing:12,total:12}),hold('o2','order_unclear','some_missing',{missing:3,total:12}),hold('o3','order_unclear','some_missing',{missing:1,total:12}),
-    hold('o4','order_unclear','tied'),hold('o5','order_unclear','gaps'),hold('o6','order_unclear','unknown')];
+    hold('o4','order_unclear','tied'),hold('o5','order_unclear','gaps'),hold('o6','order_unclear','unknown'),hold('o7','order_unclear','conflict'),hold('o8','order_unclear','odd_tracks')];
   paint(order);
   assert.deepEqual(order.map(r=>hint(trOf(r.id))),['No file has a track number. The order comes from the file names.','3 of 12 files have no track number.','1 of 12 files has no track number.',
-    'Some files share a track number.',"Track numbers skip or don't start at 1.","The app can't be sure of the playback order."]);
+    'Some files share a track number.',"Track numbers skip or don't start at 1.","The app can't be sure of the playback order.",
+    'The file names and the track tags number the files differently.',"Some track tags aren't plain numbers."]);
   let tr=trOf('cand-o1');
   assert.equal(run('candidateStatus(rows[0])'),'Order unclear');
   const list=walk(statusCell(tr)).find(e=>e.className==='path ask-order');assert.equal(list.getAttribute('aria-label'),'Playback order');

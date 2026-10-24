@@ -1844,7 +1844,9 @@ function holdSentence(kind,cause,f={}){
   const n=value=>Number.isInteger(value)?value:Number(value) || 0;
   if(kind==='order_unclear')return {no_tracks:'No file has a track number. The order comes from the file names.',
     some_missing:`${n(f.missing)} of ${n(f.total)} files ${n(f.missing)===1?'has':'have'} no track number.`,tied:'Some files share a track number.',
-    gaps:"Track numbers skip or don't start at 1."}[cause] || "The app can't be sure of the playback order.";
+    gaps:"Track numbers skip or don't start at 1.",
+    // Not in Judy's sheet (measured common on the live catalog, 72 of 120 rows): for her review.
+    conflict:'The file names and the track tags number the files differently.',odd_tracks:"Some track tags aren't plain numbers."}[cause] || "The app can't be sure of the playback order.";
   if(kind==='files_unclear')return {track_total:`The tags say ${n(f.tags_say)} tracks, but ${n(f.here)} ${n(f.here)===1?'file is':'files are'} here.`,
     disc_total:`The tags say ${n(f.tags_say)} discs, but ${n(f.here)} ${n(f.here)===1?'is':'are'} here.`,
     one_of_many:`This file is tagged as track ${n(f.index)} of ${n(f.total)}. The other tracks aren't here.`,

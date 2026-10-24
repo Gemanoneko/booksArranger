@@ -44,7 +44,9 @@ def holds(record):
 
 
 def order_cause(members):
-    """{'cause': no_tracks | some_missing | tied | gaps | unknown, 'missing', 'total'}"""
+    """{'cause': no_tracks | some_missing | tied | gaps | conflict | odd_tracks | unknown, 'missing', 'total'}
+    conflict: the file names and the track tags number the files differently; odd_tracks: a track tag is not a plain
+    number ("1.", "1-1"). Both measured common on the live catalog (2026-10-24: 40 and 32 of 120 rows)."""
     total = len(members)
     numbers = [_number(_raw(m, 'track', 'tracknumber')) for m in members]
     missing = sum(n is None for n in numbers)
@@ -62,6 +64,10 @@ def order_cause(members):
             return {'cause': 'gaps', 'missing': 0, 'total': total}
     if discs != list(range(1, len(discs) + 1)):
         return {'cause': 'gaps', 'missing': 0, 'total': total}
+    if any(m.get('order_conflict') for m in members):
+        return {'cause': 'conflict', 'missing': 0, 'total': total}
+    if any(not re.fullmatch(r'\s*\d+(?:\s*/\s*\d+)?\s*', _raw(m, 'track', 'tracknumber')) for m in members):
+        return {'cause': 'odd_tracks', 'missing': 0, 'total': total}
     return {'cause': 'unknown', 'missing': 0, 'total': total}
 
 
