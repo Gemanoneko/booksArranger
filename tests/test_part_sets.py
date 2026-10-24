@@ -73,6 +73,39 @@ class DecideTests(unittest.TestCase):
                                titles=['Миры Джорджа Мартина 1', 'Миры Джорджа Мартина 2'], hours=6)
         self.assertEqual(martin, ('ask', 'unclear'), 'a story collection split in two: the chapters do not settle it')
 
+    def test_review_n3_episodes_tomes_and_several_works_are_asked_never_joined(self):
+        # Senua's 0.22.0 review, N3: three routes joined where ruling 19b asks (season/episode markers; book or volume
+        # words; joins holding several works).
+        episodes = self.decision(['Эпизод %d' % n for n in range(1, 11)], ['Эпизод %d' % n for n in range(11, 21)], titles=['Тёмный город'] * 2, hours=3)
+        self.assertEqual(episodes, ('ask', 'seasons'), 'continuing episode numbers are episodes, not chapters')
+        tomes = self.decision(glavy(1, 10), glavy(11, 20), titles=['Собрание сочинений. Том 1', 'Собрание сочинений. Том 2'], hours=3)
+        self.assertEqual(tomes, ('ask', 'book_words'), '"Том 1 / 2" like "Книга 1 / 2"')
+        self.assertEqual(self.decision(glavy(1, 10), glavy(11, 20), titles=['Собрание сочинений. Книга 1', 'Собрание сочинений. Книга 2'], hours=3),
+                         ('ask', 'book_words'), 'the "Книга" twin, as before')
+        works = self.decision(['01. Начало', '02. Дорога'], ['03. Дом', '04. Сад'], ['05. Лес', '06. Река'], ['07. Поле', '08. Конец'],
+                              titles=['Альфа 1', 'Альфа 2', 'Бета', 'Гамма'], hours=3)
+        self.assertEqual(works, ('ask', 'works'), 'three works in four files')
+        # Positive controls: the same chapters under one work, an episode inside a chapter, and tome-named volumes.
+        self.assertEqual(self.decision(['01. Начало', '02. Дорога'], ['03. Дом', '04. Сад'], ['05. Лес', '06. Река'], ['07. Поле', '08. Конец'],
+                                       titles=['Альфа 1', 'Альфа 2', 'Альфа 3', 'Альфа 4'], hours=3), ('join', 'chapter numbering continues'))
+        self.assertEqual(self.decision(glavy(1, 10), glavy(11, 20), titles=['Собрание сочинений 1', 'Собрание сочинений 2'], hours=3)[0], 'join')
+        self.assertEqual(self.decision(['Глава 6. Эпизод 2', 'Глава 7. Эпизод 1'], ['Глава 7. Эпизод 2', 'Глава 8. Эпизод 1'], hours=3)[0], 'join')
+        self.assertEqual(self.decision(['Пролог'] + glavy(1, 5), glavy(1, 6), titles=['Торадора! Том 1', 'Торадора! Том 2'])[0], 'volumes')
+        # The work is a precise basis; the row shows the "chapters don't settle it" sentence for it.
+        import todo_causes
+        self.assertEqual(todo_causes.piece_cause({'piece': {'piece': 'set', 'cause': 'works', 'parts': 4}})['cause'], 'set_unclear')
+
+    def test_review_n9_a_file_starting_at_chapter_one_never_continues(self):
+        # Senua's 0.22.0 review, N9 (M18): "continues" needs the next file to start past chapter 1.
+        self.assertEqual(self.decision(['Вступление', 'Глава 1'], ['Глава 1', 'Глава 2'], titles=['Ночь'] * 2, hours=3), ('ask', 'unclear'))
+        self.assertEqual(self.decision(['Вступление', 'Глава 1'], ['Глава 2', 'Глава 3'], titles=['Ночь'] * 2, hours=3)[0], 'join', 'positive control')
+
+    def test_review_n9_every_file_ending_with_its_own_afterword_is_volumes_even_when_chapters_continue(self):
+        # Senua's 0.22.0 review, N9 (M22): the Toradora case passes through the restart rule; this one only the afterword rule decides.
+        found = self.decision(['Глава 5', 'Глава 6', 'Послесловие автора'], ['Глава 7', 'Глава 8', 'Послесловие автора'], titles=['Хроники'] * 2, hours=3)
+        self.assertEqual(found, ('volumes', 'each file ends with its own afterword'))
+        self.assertEqual(self.decision(['Глава 5', 'Глава 6'], ['Глава 7', 'Глава 8', 'Послесловие автора'], titles=['Хроники'] * 2, hours=3)[0], 'join', 'positive control')
+
     def test_missing_parts_are_named_strangers(self):
         found = part_sets.decide(parts(['Часть I. Глава 1', 'Глава 2'], ['Глава 3', 'Глава 4'], titles=['Незнакомцы 1', 'Незнакомцы 2'], tracks=['1/3', '2/3']))
         self.assertEqual((found['decision'], found['missing'], found['total']), ('missing', [3], 3))

@@ -10,9 +10,10 @@ split into files and only a few to be real volumes ("Торадора! Том 1-
   volumes   never joined: every file ends with its own author's afterword, every file starts its numbering again
             ("Глава 1" / "Пролог"), or every file names its own work; a volume of a series keeps ruling 15's naming;
   ask       "Part of a bigger book" with the proposed order and "Approve as one book", never joined on its own:
-            season/episode chapters (s01e10 -> s02e01), a joined book over 30 hours, book or volume words in the names
-            ("Книга первая", "Book 2": outside knowledge decides), several authors (a fairy-tale chest), and any set
-            the chapters do not settle (story collections "Миры Джорджа Мартина 1/2");
+            season/episode chapters (s01e10 -> s02e01, "Эпизод 10" -> "Эпизод 11"), a joined book over 30 hours, book or
+            volume words in the names ("Книга первая", "Book 2", "Том 2": outside knowledge decides), several authors (a
+            fairy-tale chest), files naming several works ("Альфа 1", "Альфа 2", "Бета"), and any set the chapters do not
+            settle (story collections "Миры Джорджа Мартина 1/2");
   missing   the track numbers say parts are missing ("Незнакомцы 1/3", "2/3"): a Missing files row naming them.
 
 Pure: decide() takes the parts in order with their tags, durations and chapter titles; no file or catalog access."""
@@ -40,6 +41,10 @@ TOME_WORDS = re.compile(r'(?<![^\W\d_])(?:том|volume|vol\.)\s*(?:[0-9]{1,3}|[
 END_MATTER = re.compile(r'(?<![^\W\d_])(?:эпилог|послесловие|afterword|epilogue|от автора)', re.I)
 AUTHOR_AFTERWORD = re.compile(r'(?<![^\W\d_])(?:послесловие автора|авторское послесловие|afterword|от автора)', re.I)
 SEASON = re.compile(r'(?<![^\W\d_])(?:s\d{1,2}\s*e\d{1,3}|season\s*\d|сезон\s*\d)', re.I)
+# Senua's 0.22.0 review, N3: an episode number that is not inside a chapter ("Эпизод 11", not "Глава 7. Эпизод 2") marks
+# episodes of a series, which ruling 19b asks about like seasons.
+EPISODE = re.compile(r'(?<![^\W\d_])(?:эпизод|episode)' + _TOKEN, re.I)
+CHAPTER_WORD_ONLY = re.compile(r'(?<![^\W\d_])(?:глава|гл\.|chapter|ch\.)', re.I)
 VOLUME_WORDS = re.compile(r'(?<![^\W\d_])(?:книга|book)\s*(?:[0-9]{1,3}|[ivxlc]{1,6}\b|первая|вторая|третья|четвертая|четвёртая|'
                           r'пятая|шестая|one|two|three)', re.I)
 AUTHOR_DASH = re.compile(r'^\s*([^\W\d_][^\W\d_.]+(?:\s+[^\W\d_][^\W\d_.]*\.?){1,3})\s+[-–—]\s+\S')
@@ -118,6 +123,12 @@ def chapter_number(title):
     return None
 
 
+def _episode(title):
+    """True for a title numbered as an episode and not as a chapter ("Эпизод 11", "Episode two")."""
+    title = _nfc(title)
+    return not CHAPTER_WORD_ONLY.search(title) and any(_value(token) is not None for token in EPISODE.findall(title))
+
+
 def _numbers(chapters):
     return [n for n in (chapter_number(c) for c in chapters) if n is not None]
 
@@ -155,12 +166,14 @@ def decide(parts):
     works = [_work(t or n) for t, n in zip(titles, names)]
     credited = [m[1].casefold() for c in chapters for m in (AUTHOR_DASH.match(t) for t in c) if m]
     caution = ''
-    if any(SEASON.search(t) for t in titles + names + [t for c in chapters for t in c]):
+    if any(SEASON.search(t) or _episode(t) for t in titles + names + [t for c in chapters for t in c]):
         caution = 'seasons'
     elif any(VOLUME_WORDS.search(t) for t in titles + names + [t for c in chapters for t in c[:3]]):
         caution = 'book_words'
     elif len({_nfc(p.get('credits') or '').casefold() for p in parts}) > 1 or len(set(credited)) > 1 and len(credited) * 2 >= sum(len(c) for c in chapters):
         caution = 'authors'  # several authors or readers credited: a disc set of tales, an anthology
+    elif any(TOME_WORDS.search(t) for t in titles + names):
+        caution = 'book_words'  # N3: "Том 1 / Том 2" like "Книга 1 / 2"; tome-named volumes that start again stay volumes below
     # Volumes of a series: never joined.
     if all(afterwords):
         return result('volumes', 'each file ends with its own afterword')
@@ -184,6 +197,10 @@ def decide(parts):
         return result('ask', caution)
     if sum(float(p.get('hours') or 0) for p in parts) > LONG_HOURS:
         return result('ask', 'long')
+    # N3: files naming two or more works (not one each: that is the volumes rule above) hold several works, so they are asked
+    # ("Альфа 1", "Альфа 2", "Бета", "Гамма"). The row shows the "chapters don't settle it" sentence (todo_causes).
+    if len({w for w in works if w}) > 1:
+        return result('ask', 'works')
     # One book split into files.
     def continues(before, after):
         return bool(before and after) and after[0] in (before[-1], before[-1] + 1) and after[0] > 1
