@@ -1966,14 +1966,17 @@ class MergeService:
         found={}
         for identity,(revision,fingerprint) in current.items():
             if identity in jobs:continue
-            if identity in gone:
-                if (identity,fingerprint) not in dismissed:found[identity]={'group':'files_missing','reasons':['Files missing'],'ask':None}
-                continue
             record=held.get(identity)
-            if not record or record['revision']!=revision or record['fingerprint']!=fingerprint:continue
-            try:result=json.loads(record['result'])
-            except (TypeError,ValueError):continue
-            reasons=[str(r) for r in result.get('reasons') or []][:8];ask=result.get('ask') if isinstance(result.get('ask'),dict) else None
+            try:result=json.loads(record['result']) if record and record['revision']==revision and record['fingerprint']==fingerprint else None
+            except (TypeError,ValueError):result=None
+            ask=result.get('ask') if isinstance(result,dict) and isinstance(result.get('ask'),dict) else None
+            if identity in gone:
+                # Missing files first; the identity question, if any, is answered on the same row ("Also:").
+                if (identity,fingerprint) not in dismissed:
+                    found[identity]={'group':'files_missing','reasons':['Files missing'],'ask':ask,'also':ask['kind'] if ask and ask.get('kind') in ('title_author','author_unclear') else None}
+                continue
+            if result is None:continue
+            reasons=[str(r) for r in result.get('reasons') or []][:8]
             if ask and ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
                 continue  # Sergei answered this name pair since: the book is researched again with the rule
             if ask and ask.get('kind') in ('title_author','author_unclear','same_author'):found[identity]={'group':ask['kind'],'reasons':reasons,'ask':ask}
@@ -2001,7 +2004,7 @@ class MergeService:
         """Per book, one 'ask' object for the row (Judy's section 11): kind, fields with proposal and basis, author
         candidates, the destination and whether it is taken, the missing files, the same-author pair."""
         ask=copy.deepcopy(entry.get('ask') or {})
-        payload={'kind':entry['group'],'why':ask.get('why',''),'reasons':list(entry.get('reasons') or [])[:4],
+        payload={'kind':entry['group'],'also':entry.get('also'),'why':ask.get('why',''),'reasons':list(entry.get('reasons') or [])[:4],
                  'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or []}
         if entry['group']=='same_author':
             payload['same_author']={k:ask.get(k) for k in ('new','existing','existing_books','why')}
@@ -2009,14 +2012,22 @@ class MergeService:
         members=row.get('members') or []
         if entry['group']=='files_missing' or any(m.get('missing') for m in members):
             gone=[m for m in members if m.get('missing')]
-            payload['missing']={'folders':sorted({str(Path(m['path']).parent) for m in gone}),'files':[m['path'] for m in gone],
+            try:root=self.reviews._source_root(row)
+            except (ValueError,OSError,KeyError):root=''
+            full=[m['path'] if not root or os.path.isabs(m['path']) else os.path.join(root,m['path']) for m in gone]
+            payload['missing']={'folders':sorted({os.path.dirname(p) for p in full}),'files':full,
                                 'present':sum(1 for m in members if not m.get('missing')),'total':len(members)}
         if entry['group']!='files_missing' or payload['missing']['present']:
             try:
                 preview=self.approval_preview(row['id'],row['revision'])
                 payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
-                proposal=payload['fields']
-                proposal.setdefault('title',{'proposal':preview['title'],'basis':''});proposal.setdefault('author',{'proposal':'' if preview['author']=='Без автора' else preview['author'],'basis':''})
+                # The proposals are the values Approve uses (local_identity.shown): a suspected reader is never proposed
+                # as the author (ruling 14), and an empty author files the book under Без автора.
+                from organization import NO_AUTHOR
+                fields=payload['fields']
+                fields['title']=dict(fields.get('title') or {'basis':''},proposal=preview['title'])
+                author=fields.get('author') or {'basis':''};shown_author='' if preview['author']==NO_AUTHOR else preview['author']
+                fields['author']=dict(author,proposal=shown_author,basis=author.get('basis','') if author.get('proposal')==shown_author else '')
             except (ValueError,OSError) as error:
                 payload['destination']={'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
         return payload

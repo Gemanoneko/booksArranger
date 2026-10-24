@@ -37,6 +37,16 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         counts=self.counts();self.assertEqual((counts['title_author'],counts['author_unclear'],counts['other']),(1,1,1))
         self.assertEqual(sum(v for v in counts.values() if isinstance(v,int)),self.listed()[1],'All = the sum of the chips')
 
+    def test_a_suspected_reader_is_never_the_proposed_author_on_the_row(self):
+        # Ruling 14: the only credit is a person named in brackets (a reader or uploader). The row asks; its Author
+        # field starts empty and Goes to shows Без автора, so "Approve as is" (single or bulk) never files a reader.
+        tone(self.audio/'Unsorted'/'Тайна'/'Тайна [Иван Петров].mp3',self.cover,album='Тайна',artist='Иван Петров')
+        self.start();self.research_all()
+        rows,_=self.listed('author_unclear');ask=rows['Тайна']['ask']
+        self.assertEqual((ask['why'],[c['name'] for c in ask['candidates']]),('reader',['Иван Петров']),'positive control: the reader is offered as a choice')
+        self.assertEqual(ask['fields']['author']['proposal'],'')
+        self.assertEqual(ask['destination']['path'],str(Path('Без автора')/'Тайна.m4b'))
+
     def test_missing_files_are_listed_first_and_remove_from_list_touches_no_file(self):
         sources=[tone(self.audio/'Unsorted'/'Iron Inferno'/('Iron Inferno %d.mp3'%n),self.cover,album='Iron Inferno',artist='Иван Петров',track='%d/2'%n) for n in (1,2)]
         self.start()
@@ -44,7 +54,9 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         for source in sources:shutil.copy2(source,backup/source.name);source.unlink()
         self.inv.launch('Audiobooks');self.inv.worker.join(10)
         rows,total=self.listed('files_missing');self.assertEqual(list(rows),['Iron Inferno'])
-        row=rows['Iron Inferno'];self.assertEqual(row['ask']['missing']['present'],0);self.assertEqual(len(row['ask']['missing']['files']),2)
+        row=rows['Iron Inferno'];self.assertEqual(row['ask']['missing']['present'],0)
+        self.assertEqual(row['ask']['missing']['files'],[str(s) for s in sources],'full paths, even with the folder gone')
+        self.assertEqual(row['ask']['missing']['folders'],[str(sources[0].parent)])
         self.assertEqual(self.counts()['files_missing'],1)
         self.assertFalse(self.service.scan_again(row['id'],row['revision'])['found'])
         self.service.dismiss_attention(row['id'],row['revision'])
