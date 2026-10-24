@@ -452,6 +452,34 @@ class PublicResearch:
     def rules(self):
         """Sergei's lasting author rules; None while none are stored."""
         return None
+    def identity(self,row,root):
+        """(identity record, catalog index) of one book from the files alone (v5), read-only."""
+        import local_identity
+        siblings,index=self._siblings(row,root)
+        return local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules()),index
+    def approved(self,row,root,title=None,author=None):
+        """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
+        typed values winning (None: nothing typed; '' for the author: no author), with no Internet request, so the
+        destination shown before the press is exactly the one used. An empty author files a collection under
+        Сборники when the row is one, else under Без автора. Raises ValueError('Type a title first.')."""
+        import local_identity
+        from organization import NO_AUTHOR
+        record,index=self.identity(row,root)
+        shown=local_identity.shown(record)
+        typed=set()
+        if title is not None and text(title):typed.add('title')
+        if author is not None and text(author):typed.add('author')
+        final_title=text(title) if 'title' in typed else shown['title']
+        final_author=text(author) if author is not None else shown['author']
+        if not final_title:raise ValueError('Type a title first.')
+        collection=not final_author and shown['collection']
+        if not final_author and not collection:final_author=NO_AUTHOR
+        settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection)
+        result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
+        result['local_agreement']=local_identity.summary(settled)
+        result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
+        result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown}
+        return result
     def local_generation(self):
         from openlibrary_index import generation
         return generation(self.local_index)
@@ -621,6 +649,13 @@ class PublicResearch:
             # What the files cannot settle is a question for Sergei; the Internet never decides identity
             # and a held book is not researched again until it changes (ruling 5, option B).
             local=local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules())
+            if entered and (entered[0].get('title') or entered[0].get('authors')):
+                # Ruling 6a: Sergei is a source; what he entered is the identity, with no other source needed.
+                shown=local_identity.shown(local)
+                title=entered[0].get('title') or shown['title'];author=entered[0].get('authors') or shown['author']
+                typed={name for name,value in (('title',entered[0].get('title')),('author',entered[0].get('authors'))) if value}
+                if title and (author or shown['collection']):
+                    local=local_identity.settled(local,title,author,'entered',typed,collection=not author and shown['collection'])
             result['local_agreement']=local_identity.summary(local)
             if local.get('route'):return self._local_collection(row,local,result)
             if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)
@@ -894,7 +929,8 @@ class PublicResearch:
             reasons.append('Author full name not established')
             names=names or [author]
         spelling=None
-        if not reasons:
+        from organization import NO_AUTHOR
+        if not reasons and names[0]!=NO_AUTHOR:
             # Ruling 3 (Sergei 2026-10-13): one canonical spelling per author across the library.
             canonical,spelling=local_identity.canonical_author(names[0],authors+names,index,language)
             if spelling['spelling']!=names[0] or canonical!=names[0]:

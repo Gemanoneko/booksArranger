@@ -1927,9 +1927,68 @@ class MergeService:
         value=self.publications.describe(jobs if jobs is not None else self.jobs.status()['jobs'],identity)
         return {key:copy.deepcopy(value[key]) for key in ('state','reason','path','identity','publication_id','kind','tags_state') if key in value}
 
+    def _approval_result(self,id,revision,title=None,author=None):
+        """(row, research result) of Approve with the values shown (typed values win); no network, read-only."""
+        def bounded(value,name):
+            if value is None:return None
+            if not isinstance(value,str) or len(value)>1000 or any(c in value for c in '\x00\r\n'):raise ValueError('The '+name+' must be one line of text')
+            return value
+        title,author=bounded(title,'title'),bounded(author,'author')
+        row=self.reviews._row('Audiobooks',id,revision)
+        result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author)
+        return row,result
+
+    def approval_preview(self,id,revision,title=None,author=None):
+        """Judy's "Goes to" line: what Approve would file this book as, with these values. {'path' relative to the output
+        folder, 'absolute', 'taken' (a file already there: never overwritten), 'title', 'author', 'reason'}. Read-only."""
+        row,result=self._approval_result(id,revision,title,author)
+        review=dict(result['review'],organization_policy='books-hierarchy-v2')
+        output_root=self.reviews._output_root(row,review)
+        preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=result.get('metadata_facts'))
+        path=preview.get('path') or ''
+        approval=result['approval']
+        return {'path':os.path.relpath(path,output_root) if path else '','absolute':path,'taken':bool(path and os.path.lexists(path)),
+                'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':'' if path else preview.get('reason','')}
+
+    def approve_book(self,id,revision,title=None,author=None,without_missing=False):
+        """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
+        Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
+        Convert what's there, leaving out the files missing from disk. Raises ValueError with the reason it is refused."""
+        import datetime
+        if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
+        row,result=self._approval_result(id,revision,title,author)
+        include=None
+        if without_missing:
+            present=[m['path'] for m in row['members'] if not m.get('missing') and not m.get('error')]
+            if not present:raise ValueError('No audio file of this book is left to convert')
+            include=set(present)
+        safety=[r for r in result.get('reasons',[]) if r in self.APPROVAL_SAFETY_REASONS and not (include and r=='Source files unavailable or unreadable')]
+        if safety:raise ValueError('; '.join(dict.fromkeys(safety)))
+        if not result.get('work') or not result.get('review'):raise ValueError('Approve was not accepted. Nothing was changed.')
+        approval=result['approval']
+        files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
+        approved_by={'actor':'user','at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'values':{'title':approval['title'],'author':approval['author']},
+                     'typed':list(approval['typed']),'collection':approval['collection'],'files':files,'without_missing':bool(include)}
+        result['reasons']=[]
+        fresh,job=self.approve_automatic(row,result,threading.Event(),self.automatic.research.client,approved_by=approved_by,include=include)
+        try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
+        except Exception:pass  # the job is queued; the automatic record only drives the list's status line
+        return {'row':fresh,'job_id':job}
+
+    # Sergei's Approve overrides every identity and confidence hold (ruling 6b); these source-gate reasons are safety and
+    # stay: unreadable or missing files, an audio format with no encoding decision, a changed collection binding.
+    APPROVAL_SAFETY_REASONS=('Source files unavailable or unreadable','Audio format needs an encoding decision','Collection source/component binding changed')
+
     @operation
-    def approve_automatic(self,row,result,stop,client):
-        """Private evidence-gated path. HTTP cannot submit an automatic approval."""
+    def approve_automatic(self,row,result,stop,client,approved_by=None,include=None):
+        """Private evidence-gated path. HTTP cannot submit an automatic approval.
+
+        approved_by (Sergei's Approve, rulings 6a, 6b and 11a; only approve_book passes it): {'actor':'user','at',
+        'values','typed','files'}. His approval is the identity: open metadata questions, the local-identity re-check,
+        drafts, part sets and the identity/order/membership reasons of the source gate no longer hold the book. Every
+        safety gate stays: changed or unreadable sources, the encoding decision, chapters that joining would drop, an
+        existing job, never overwriting a destination, media verification and source removal only after the result
+        is verified in Sorted. include: the member paths to convert (Convert what's there); None converts all."""
         from source_identity import source_gate,VERSION
         from public_research import allowed_url
         from review_backend import image_kind,source_hash,identity
@@ -1959,11 +2018,19 @@ class MergeService:
             current=self.reviews._row('Audiobooks',row['id'],row['revision']);ctx=self.reviews._context(current)
             if current['fingerprint']!=row['fingerprint']:raise ValueError('Source files changed')
             import metadata_choices
-            decision_row=dict(current,automatic=result)
-            metadata_choices.admission(self.reviews.metadata_questions(decision_row,ctx),result['review'])
-            if self.automatic.manual_draft(current):raise ValueError('Manual draft retained')
+            if approved_by is None:
+                decision_row=dict(current,automatic=result)
+                metadata_choices.admission(self.reviews.metadata_questions(decision_row,ctx),result['review'])
+                if self.automatic.manual_draft(current):raise ValueError('Manual draft retained')
             if self.candidate_status(row['id']):raise ValueError('Audiobook job already exists')
-            if local:
+            if include is not None:
+                # Convert what's there (ruling 10): only the present files named by the press; the left-out ones are reported.
+                chosen=[m for m in current['members'] if m['path'] in include]
+                if not chosen or len(chosen)!=len(include) or any(m.get('missing') or m.get('error') for m in chosen):raise ValueError('Source files changed')
+                gate_row=dict(current,members=chosen)
+            else:gate_row=current
+            if approved_by is not None:pass  # Sergei's values are the identity (bound to this fingerprint above)
+            elif local:
                 from local_identity import revalidate,folder_siblings,catalog_index
                 # Any failure to read the folder contents holds this book; it never stops the run.
                 try:
@@ -1972,13 +2039,14 @@ class MergeService:
                     rules=None
                 except Exception:raise ValueError("Folder contents could not be checked; local identity held") from None
                 revalidate(current,self.reviews._source_root(current),result['metadata_facts']['local_agreement'],siblings,readers,index,rules)
-            reasons=source_gate(current,result['work'])
+            reasons=source_gate(gate_row,result['work'])
+            if approved_by is not None:reasons=[r for r in reasons if r in self.APPROVAL_SAFETY_REASONS]
             if reasons:raise ValueError('; '.join(reasons))
-            paths=[m['path'] for m in current['members']]
+            paths=[m['path'] for m in gate_row['members']]
             with contextlib.ExitStack() as stack:
                 for parent in {str(Path(p).parent) for p in paths}:stack.enter_context(DirectoryBoundary(self.reviews._source_root(current),parent))
                 stack.enter_context(ProtectedFiles(paths))
-                for m in current['members']:
+                for m in gate_row['members']:
                     stat=Path(m['path']).stat()
                     if stat.st_size!=m['size'] or stat.st_mtime_ns!=int(m['modified']):raise ValueError('Source files changed')
                 if stop.is_set():raise InterruptedError()
@@ -2057,7 +2125,7 @@ class MergeService:
                                 context=self.reviews._context(fresh);context['cover_choices']=fresh['cover_choices']+[selected_cover]
                                 fresh=self.reviews._write(fresh,context,bump=False)
                                 result['metadata_facts']['cover']={'kind':'neutral'}
-                            self._recording_review(current,result,stop)
+                            self._recording_review(gate_row,result,stop)  # the files being converted
                         else:
                             covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
                             if len(covers)!=1:raise ValueError('Cover not verified')
@@ -2081,17 +2149,27 @@ class MergeService:
                                         if len(first)!=96*144*3 or len(set(first))<8 or first!=second:raise ValueError('Cover not verified')
                             result['sources'].append({'url':remote,'kind':'matching_cover','sha256':hash,'retrieved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),'verified_identity':True})
                             selected_cover=covers[0]
-                        if stop.is_set() or self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
+                        if stop.is_set() or approved_by is None and self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
                         note=('Automatically accepted local-agreement identity (Sergei decision 2026-10-12): embedded tags and file/folder names agree on title and author; only missing fields were searched, unknown optional facts are omitted. All observed sources remain the recording scope.' if local else
                             'Automatically accepted verified work identity and associated author credit under the approved standing rules; source-derived output names, omitted unknown facts and usable embedded/neutral artwork retain honest provenance. All observed sources remain the recording scope.' if standing else 'Automatically accepted fetched public work evidence and independent publisher/journal credit; exact embedded cover pixels match catalog artwork. Source scope remains the observed recording; external recording completeness unknown.')
-                        fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor='assistant',evidence=result['evidence'],automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'))
+                        actor='assistant';evidence=result['evidence'];typed={}
+                        if approved_by is not None:
+                            # Ruling 6b: Sergei's approval, recorded as his: who, when, the exact values, files and order shown.
+                            actor='user';typed={k:v for k,v in approved_by['values'].items() if k in approved_by['typed']}
+                            note='Approved by you on '+approved_by['at']+' (Sergei 2026-10-24, ruling 6b): "'+approved_by['values']['title']+'" by "'+(approved_by['values']['author'] or 'Разные авторы')+'", '+str(len(paths))+' file(s) in the order shown'+(' (typed: '+', '.join(sorted(approved_by['typed']))+')' if approved_by['typed'] else '')+'. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.'
+                            evidence=[dict(record,reviewer_actor='user',reviewer_identity='Sergei (Approve)',basis=note) for record in result['evidence']]
+                        fresh=self.reviews.save('Audiobooks',fresh['id'],fresh['revision'],result['review'],approve=True,manual_note=note,cover_id=selected_cover['id'],actor=actor,evidence=evidence,automatic_pending={'matcher_version':VERSION,'work_id':result['work']['id']},automatic_facts=result.get('metadata_facts'),
+                                              capture_manual=bool(typed),manual_source_values=({'title':typed['title']} if 'title' in typed else {})|({'canonical_author':typed['author']} if 'author' in typed else {}) if typed else None,user_approval=approved_by is not None)
                         context=self.reviews._context(fresh);context['duplicate_review']=copy.deepcopy(result.get('duplicate_review'));context['metadata_approved']=False;context['automatic_pending']={'matcher_version':VERSION,'work_id':result['work']['id']}
+                        if approved_by is not None:context['user_approval']=copy.deepcopy(approved_by)
                         fresh=self.reviews._write(fresh,context,bump=False)
                         keys=[m['member_key'] for m in fresh['members']]
+                        included=[m['member_key'] for m in fresh['members'] if m['path'] in paths]
                         if stop.is_set():raise InterruptedError()
-                        fresh=self.reviews.tracks('Audiobooks',fresh['id'],fresh['revision'],keys,keys,True,True,len(keys)>1,actor='assistant',evidence_note='Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop)
+                        fresh=self.reviews.tracks('Audiobooks',fresh['id'],fresh['revision'],keys,included,True,True,len(included)>1,actor=actor,keep_pending=approved_by is not None,
+                            evidence_note=('Approved by you: the files shown, in the order shown'+(' (missing files left out)' if include is not None else '')+'; every included file SHA256 verified.') if approved_by is not None else 'Automatic recording scope: consistent verified work album/source identity; embedded gap-free unique track/disc order, or one self-contained source. All observed source files selected and SHA256 verified; commercial recording completeness unknown.',stop=stop)
                         with self.automatic.lock:
-                            if stop.is_set() or self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
+                            if stop.is_set() or approved_by is None and self.automatic.manual_draft(fresh):raise InterruptedError() if stop.is_set() else ValueError('Manual draft retained')
                             context=self.reviews._context(fresh);context['metadata_approved']=True
                             # Pending metadata stays invisible to approval counts/public creation.
                             fresh=self.reviews._write(fresh,context,bump=False)

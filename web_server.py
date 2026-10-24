@@ -642,6 +642,23 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:row=None
                 self.response(409,{'error':str(error),'code':error.code,'row':row});return
             self.response(200,result);return
+        if path in ('/api/candidate/approve','/api/candidate/approve-preview'):
+            # Sergei's Approve and its "Goes to" line (rulings 6a, 6b, 10, 11a; Judy's attention to-do spec, section 5).
+            self.shape(data,{'library','id','revision'},{'title','author'}|({'without_missing'} if path.endswith('/approve') else set()))
+            library,id,revision=self.candidate_identity(data)
+            title=self.text_value(data.get('title'),1000,nullable=True);author=self.text_value(data.get('author'),1000,nullable=True)
+            if path.endswith('/approve-preview'):
+                self.response(200,{'preview':self.server.merge.approval_preview(id,revision,title,author)});return
+            without=data.get('without_missing',False)
+            if type(without) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
+            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without)
+            except ValueError as error:
+                text=str(error)
+                code='changed' if 'Candidate changed' in text or 'Source files changed' in text or 'evidence changed' in text else 'name_taken' if 'already exists' in text else 'title' if text=='Type a title first.' else 'refused'
+                try:row=reviews.enrich(reviews._row(library,id))
+                except ValueError:row=None
+                self.response(409,{'error':text,'code':code,'row':row});return
+            self.response(200,{'approved':True,'job_id':approved['job_id'],'row':approved['row']});return
         base={'library','id','revision'}
         if path=='/api/candidate/review':
             self.shape(data,base|{'review','approve'},{'manual_note','proposal_id','cover_id','actor','evidence'})
@@ -689,7 +706,8 @@ class Handler(BaseHTTPRequestHandler):
             data=self.body()
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
-                         '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice'}
+                         '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
+                         '/api/candidate/approve','/api/candidate/approve-preview'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -722,7 +740,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete'} and self.server.scan_active():
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING

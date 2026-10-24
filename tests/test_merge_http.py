@@ -82,6 +82,25 @@ class MergeHTTPTests(unittest.TestCase):
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         self.assertEqual(self.call(route,body)[0],409)
 
+    def test_approve_and_its_preview_routes(self):
+        # Rulings 6a/6b/10/11a: Approve with the values shown (typed values win) and the "Goes to" line before it.
+        self.merge.approval_preview=Mock(return_value={'path':'Без автора\\Тайна.m4b','absolute':'Z:\\S\\Без автора\\Тайна.m4b','taken':False,'title':'Тайна','author':'Без автора','collection':False,'reason':''})
+        self.merge.approve_book=Mock(return_value={'job_id':ID,'row':{'id':ID,'revision':3}})
+        self.reviews._row=Mock(return_value={'id':ID});self.reviews.enrich=Mock(return_value={'id':ID,'revision':2})
+        status,body,_=self.call('/api/candidate/approve-preview',self.identity()|{'title':'Тайна'})
+        self.assertEqual(status,200);self.assertEqual(body['preview']['path'],'Без автора\\Тайна.m4b');self.merge.approval_preview.assert_called_once_with(ID,1,'Тайна',None)
+        status,body,_=self.call('/api/candidate/approve',self.identity()|{'author':'Антон Чехов','without_missing':True})
+        self.assertEqual((status,body['job_id']),(200,ID));self.merge.approve_book.assert_called_once_with(ID,1,None,'Антон Чехов',without_missing=True)
+        self.merge.approve_book=Mock(side_effect=ValueError('An audiobook already exists at this path. Review it or choose a different reviewed destination.'))
+        status,body,_=self.call('/api/candidate/approve',self.identity())
+        self.assertEqual((status,body['code']),(409,'name_taken'));self.assertEqual(body['row'],{'id':ID,'revision':2})
+        self.merge.approve_book=Mock(side_effect=ValueError('Candidate changed; reload evidence before reviewing'))
+        self.assertEqual(self.call('/api/candidate/approve',self.identity())[1]['code'],'changed')
+        for bad in ({'without_missing':'yes'},{'title':'x'*1001},{'unknown':1}):
+            with self.subTest(bad=bad):self.assertEqual(self.call('/api/candidate/approve',self.identity()|bad)[0],400)
+        self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        self.assertEqual(self.call('/api/candidate/approve',self.identity())[0],409,'never while scanning')
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)

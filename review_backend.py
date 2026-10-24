@@ -195,13 +195,16 @@ class CandidateReviewService:
         if source_changed:reasons.append('Source changed — review required')
         if not metadata_ok:reasons.append('Approve canonical metadata with supporting evidence and choose a usable cover')
         if not track_ok:reasons.append('Review the exact source files and playback order')
-        reasons.extend(row.get('conflicts',[]))
+        # Ruling 6b: Sergei's Approve overrides the grouping's confidence holds (mixed clues, grouping evidence); the
+        # unavailable-file check on the files being converted stays below.
+        reasons.extend([] if ctx.get('user_approval') else row.get('conflicts',[]))
         if not included:reasons.append('Include at least one source audio file')
         prepare_chapters(row['members'])
         selected=[m for m in row['members'] if m['member_key'] in included]
         albums={str({k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}.get('album') or '').strip().casefold() for m in selected}
         if len(row['members'])>1 and (len(albums)!=1 or not next(iter(albums),'').strip()) and not facts:reasons.append('Establish one common book source context; loose files cannot establish recording membership')
-        if any(m.get('error') or m.get('missing') for m in row['members']):reasons.append('Source files unavailable or unreadable')
+        # Only the files being converted: Convert what's there (ruling 10) leaves the missing ones out of the tracks.
+        if any(m.get('error') or m.get('missing') for m in selected):reasons.append('Source files unavailable or unreadable')
         if len(selected)==1 and Path(selected[0]['path']).suffix.lower()=='.m4b' and not facts and not manual_metadata.approved(row,ctx):reasons.append('Single audiobook file')
         destination=row.get('preview',{}).get('path','')
         if not destination:reasons.append(row.get('preview',{}).get('reason') or 'Confirm output destination')
@@ -445,15 +448,19 @@ class CandidateReviewService:
             draft['organization_policy']='books-hierarchy-v2'
             return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=self._context(row).get('metadata_facts'))
 
-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None):
+    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False):
+        """user_approval: Sergei's Approve through the private admission (MergeService.approve_book, ruling 6b): the
+        user actor may carry the admission checkpoint and standing facts, and open metadata questions do not refuse."""
         with self.lock:
             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
             review=copy.deepcopy(review)
             review['organization_policy']='books-hierarchy-v2'
             ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
+            if not user_approval:ctx.pop('user_approval',None)  # a later save is not covered by an earlier Approve
+            private=actor=='assistant' or user_approval is True and actor=='user'
             if automatic_pending is not None:
-                if actor!='assistant' or not approve or not isinstance(automatic_pending,dict) or set(automatic_pending)!={'matcher_version','work_id'} or not all(isinstance(v,str) and v for v in automatic_pending.values()):raise ValueError('Invalid private automatic approval checkpoint')
+                if not private or not approve or not isinstance(automatic_pending,dict) or set(automatic_pending)!={'matcher_version','work_id'} or not all(isinstance(v,str) and v for v in automatic_pending.values()):raise ValueError('Invalid private automatic approval checkpoint')
                 ctx['automatic_pending']=copy.deepcopy(automatic_pending)
             if set(review)-set(TEXT_FIELDS)-{'multi_author','anthology','organization_policy'}:raise ValueError('Unknown canonical metadata field')
             for field in TEXT_FIELDS:
@@ -462,7 +469,7 @@ class CandidateReviewService:
             for field in ('multi_author','anthology'):
                 if type(review.setdefault(field,False)) is not bool:raise ValueError('Canonical routing choices must be explicit booleans')
             if automatic_facts is not None:
-                if actor!='assistant' or automatic_pending is None:raise ValueError('Standing policy is private to automatic admission')
+                if not private or automatic_pending is None:raise ValueError('Standing policy is private to automatic admission')
                 from standing_metadata import validate_policy
                 automatic_facts=validate_policy(row,review,automatic_facts)
             records=[]
@@ -488,7 +495,7 @@ class CandidateReviewService:
                 if ('original_language' in needed) and (not langs or any(v in ('','unknown','other','unverified') for v in langs)):raise ValueError('Establish the actual original-work language in evidence')
                 russian=any(v in ('russian','ru','rus','русский') for v in langs)
                 if 'original_language' in needed and russian!=(review.get('original_language')=='Russian'):raise ValueError('Original-work language contradicts cited evidence')
-            if approve:
+            if approve and not user_approval:
                 import metadata_choices
                 metadata_choices.admission(self.metadata_questions(row,ctx),review)
             if approve and (not manual_note.strip() or not (review.get('canonical_author') or '').strip()):raise ValueError('Confirm the author role and record metadata evidence')
@@ -665,10 +672,11 @@ class CandidateReviewService:
                 if digest(cached)!=hash:raise ValueError('Cached source cover bytes changed')
         return {'id':id,'thumbnail_url':'/api/cover?id='+id,'label':'Embedded/source cover — edition unverified','status':'Source cover','sha256':hash}
 
-    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None):
+    def tracks(self,library,id,revision,order,included,source_coverage_confirmed,order_confirmed,chapters,actor='user',evidence_note='',stop=None,keep_pending=False):
+        """keep_pending: Sergei's Approve (MergeService.approve_book) keeps its pending admission through this step."""
         with self.lock:
             row=self._row(library,id,revision);ctx=self._context(row);keys=self._keys(row);self._actor(actor,evidence_note)
-            if actor=='user':ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
+            if actor=='user' and not keep_pending:ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if not isinstance(order,list) or len(order)!=len(keys) or set(order)!=set(keys) or not isinstance(included,list) or len(set(included))!=len(included) or not set(included)<=set(keys):raise ValueError('Review the exact known member list and order')
             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
             if (source_coverage_confirmed or order_confirmed) and not evidence_note.strip():raise ValueError('Record the membership and order review basis')

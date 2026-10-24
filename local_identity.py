@@ -1906,6 +1906,44 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             'path': [{'kind': c['kind'], 'value': c['value']} for c in components]}
 
 
+def shown(record):
+    """The title and author a row shows for Approve (Judy 2026-10-24, section 3): the identity, else the question's
+    proposal. A suspected reader is never proposed (ruling 14): the author is then empty, which files the book under
+    Без автора only if Sergei approves without typing or choosing one (ruling 11a)."""
+    fields = record['fields']
+    ask = record.get('ask') or {}
+    proposal = ask.get('fields') or {}
+    title = fields['title']['value'] or (proposal.get('title') or {}).get('proposal', '')
+    title_basis = fields['title'].get('basis') or (proposal.get('title') or {}).get('basis', '')
+    author = fields['author']['value'] if record.get('accepted') else (proposal.get('author') or {}).get('proposal', '')
+    author_basis = fields['author'].get('basis') if record.get('accepted') else (proposal.get('author') or {}).get('basis', '')
+    candidates = list(ask.get('candidates') or [])
+    if ask.get('why') == 'reader' or any(c['name'] == author and c.get('reader_count') for c in candidates):
+        author, author_basis = '', ''
+    return {'title': title, 'title_basis': title_basis, 'author': author, 'author_basis': author_basis,
+            'collection': bool(record.get('route')), 'candidates': candidates, 'kind': ask.get('kind', ''), 'why': ask.get('why', ''),
+            'piece': record.get('held', '')}
+
+
+def settled(record, title, author, state, typed=(), collection=False):
+    """A copy of the record whose identity is Sergei's (rulings 6a and 6b): state 'entered' for values he saved,
+    'approved' for an Approve. Typed fields get basis 'entered'. Questions, pieces and part sets are settled by him."""
+    import copy
+    record = copy.deepcopy(record)
+    for name, value in (('title', title), ('author', author)):
+        if name == 'author' and collection:
+            continue
+        old = record['fields'][name]
+        basis = 'entered' if name in typed else (old.get('basis') or 'entered')
+        record['fields'][name] = {'state': state, 'value': text(value), 'basis': basis,
+                                  'how': ('Entered by you' if name in typed else 'Shown on the row') + ('; approved by you (Sergei 2026-10-24, ruling 6b)' if state == 'approved' else ' (Sergei 2026-10-24, ruling 6a)'),
+                                  'sources': [{'kind': 'entered by you' if name in typed else 'approval', 'value': text(value)}], 'partial': False}
+    if not collection:
+        record['route'] = None
+    record.update(accepted=True, ask=None, conflicts=[], held='', part_book=None, gaps=[])
+    return record
+
+
 def author_forms(record):
     """Every local spelling of the agreed author, as written."""
     forms = []
@@ -1952,8 +1990,16 @@ def revalidate(row, root, recorded, siblings=None, readers=None, index=None, rul
     current = identify(row, root, siblings, readers, index, rules) if recorded.get('version') == IDENTITY_VERSION else agreement(row, root, siblings, readers)
     if recorded.get('route'):
         if not current.get('route') or current['route']['kind'] != recorded['route']['kind'] or current['route']['narrators'] != recorded['route']['narrators'] \
-                or current['fields']['title']['value'] != recorded['title']['value']:
+                or current['fields']['title']['value'] != recorded['title']['value'] and recorded['title'].get('state') not in ('entered', 'approved'):
             raise ValueError('Local collection evidence changed')
+        return current
+    sergei = {name for name in ('title', 'author') if recorded.get(name, {}).get('state') in ('entered', 'approved')}
+    if sergei:
+        # Rulings 6a/6b: Sergei's values are the identity. They are bound to this book's fingerprint (validate_policy),
+        # so only the facts the files still decide are compared.
+        for name in ('series', 'number'):
+            if current['fields'][name]['state'] != recorded[name]['state'] or current['fields'][name]['value'] != recorded[name]['value']:
+                raise ValueError('Local identity evidence changed')
         return current
     if (current.get('part_book') or None) != (recorded.get('part_book') or None):
         raise ValueError('Local identity evidence changed')

@@ -7,6 +7,9 @@ import os
 from metadata import safe_name
 
 POLICY='books-hierarchy-v2'
+# Sergei 2026-10-24, rulings 11 and 11a: a book Sergei approves with no author anywhere, and none typed, is filed as
+# Без автора\<Title>.m4b (no author in the file name). It is the last resort: the app asks for the author first.
+NO_AUTHOR='Без автора'
 
 def plan(output_root,review,*,collection_fallback='legacy',facts=None):
     if not isinstance(output_root,str) or not os.path.isabs(output_root):raise ValueError('Output root must be absolute')
@@ -21,6 +24,11 @@ def plan(output_root,review,*,collection_fallback='legacy',facts=None):
     if type(collection)is not bool or type(multi)is not bool:raise ValueError('Routing choices must be explicit booleans')
     if not author:raise ValueError('Confirm the author credit')
     if not title and not (collection and (cycle or universe)):raise ValueError('Confirm the book title')
+    if author==NO_AUTHOR and not collection:
+        destination=os.path.join(output_root,NO_AUTHOR,safe_name(title)+'.m4b')
+        if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
+        return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
+                'accepted_routing':{'author':author,'cycle':'','universe':'','number':'','collection':False,'multi_author_cycle':False}}
     if multi and not (cycle or universe or collection):raise ValueError('Confirm the cycle or universe')
     folders=[]
     if universe:

@@ -50,6 +50,7 @@ patterns.push('test_local_admission.py','test_catalog_paging.py');  // local-agr
 patterns.push('test_source_cleanup.py','test_source_folders.py','test_safety_boundaries.py','test_cleanup_scope.py');  // 0.21.3 audit M1: the source-removal suites (Sergei's deletion rule, rulings 2 and 1a)
 patterns.push('test_identity_v5.py');  // 0.22.0: title + author is enough (Sergei 2026-10-24, rulings 6, 6a, 13, 14, 15)
 patterns.push('test_sorted_wiring.py');  // Senua 0.21.3 F6: the production output-folder wiring, no fixture
+patterns.push('test_approve_as_is.py');  // 0.22.0: Sergei as a source and Approve as is (rulings 6a, 6b, 10, 11a)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

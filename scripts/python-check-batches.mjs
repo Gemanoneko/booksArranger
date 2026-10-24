@@ -10,7 +10,8 @@ const measuredSeconds={'test_inplace_m4b.py':283,'test_automatic_media.py':76,'t
   'test_iron_skazka.py':31,'test_working_precision.py':30,'test_automatic_processing.py':30,'test_output_migration.py':23,'test_replacement_jobs.py':21,
   'test_source_proofs.py':20,'test_progress_rows.py':18,'test_recovery_retention.py':17,'test_relocated_chapter_repair.py':15,'test_derived_migration.py':14,
   'test_cleanup_resume.py':14,'test_mp3_tag_repair.py':13,'test_m4b_preservation.py':12,'test_attempt_working_lifecycle.py':11,
-  'test_source_folders.py':7,'test_source_cleanup.py':3};  // 0.21.3 audit M1, measured alone with the pinned Python (2026-10-24)
+  'test_source_folders.py':7,'test_source_cleanup.py':3,  // 0.21.3 audit M1, measured alone with the pinned Python (2026-10-24)
+  'test_approve_as_is.py':31,'test_sorted_wiring.py':9};  // 0.22.0, measured alone (2026-10-24)
 export const PYTHON_WORKERS=3;
 export function pythonWorkerLayout(index){
   if(!Number.isInteger(index)||index<0||index>=PYTHON_WORKERS)throw Error('Unknown Python worker');

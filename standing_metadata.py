@@ -96,7 +96,8 @@ def validate_policy(row,review,facts):
         # Books approved under an earlier agreement version keep validating (v0.15.0: v3 and v4).
         if not isinstance(agreed,dict) or agreed.get('version') not in KNOWN_AGREEMENT_VERSIONS:raise ValueError('Local identity agreement record invalid')
         # v5 (Sergei 2026-10-24): one local source is enough for the title and the author.
-        states=('green','yellow','one') if agreed.get('version')==IDENTITY_VERSION else ('green','yellow')
+        # 'entered' / 'approved': Sergei's saved values or his Approve (rulings 6a, 6b).
+        states=('green','yellow','one','entered','approved') if agreed.get('version')==IDENTITY_VERSION else ('green','yellow')
         if agreed.get('route'):
             # Ruling 1 collection: the title agrees and the narrator is never the author credit.
             narrators=agreed['route'].get('narrators',[])
