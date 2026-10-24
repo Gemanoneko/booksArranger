@@ -256,6 +256,15 @@ class PartsStayTogether(unittest.TestCase):
         self.assertEqual(len(groups.build(self.rows(files))),2)
 
 
+class QuestionsOpenTheEditor(unittest.TestCase):
+    def test_a_held_question_is_a_typed_metadata_hold(self):
+        import manual_metadata
+        for reason,fields in (('Title or author missing',['title','canonical_author']),('Author unclear',['canonical_author'])):
+            with self.subTest(reason=reason):
+                holds=manual_metadata.holds({'state':'Held','reasons':[reason],'metadata_holds':[]})
+                self.assertEqual(holds,[{'cause':'identity_uncertain','fields':fields,'reason':reason}])
+
+
 class SourceGateForOneSourceIdentity(unittest.TestCase):
     def test_a_reader_named_in_the_file_name_no_longer_disagrees(self):
         row=book(member('Brandon Sanderson/Брендон Сандерсон - Ритм войны (Дружинин Степан).m4b',album='Ритм войны',author='Степан Дружинин'))

@@ -86,6 +86,9 @@ def approved(row,ctx):
 _METADATA_HOLDS={
  'Sources disagree on the title or author':('metadata_conflict',['title','canonical_author']),
  'Book identity uncertain':('identity_uncertain',['title','canonical_author']),
+ # v0.22.0 questions for Sergei (rulings 6a and 14): the files did not settle the title or the author.
+ 'Title or author missing':('identity_uncertain',['title','canonical_author']),
+ 'Author unclear':('identity_uncertain',['canonical_author']),
  'Cover not verified':('cover_unverified',[]),
 }
 def holds(automatic):

@@ -58,7 +58,7 @@ class LocalPolicyRecheckTests(unittest.TestCase):
             old=auto.candidate(row);self.assertIsNone(auto._refresh_wait(row,old)['retry_at'])
             unrelated=dict(old,reasons=['Playback order uncertain']);self.assertEqual(auto._refresh_wait(row,unrelated)['retry_at'],unrelated['retry_at'])
             auto.start();state=fx.wait_auto(auto)
-            self.assertEqual(calls,[row['id']]);self.assertEqual(state['state'],'Paused')
+            self.assertEqual(calls,[row['id']]);self.assertEqual(state['state'],'Completed')  # ruling 5: held until changed
             with connect(inv.database) as db:self.assertEqual(m.records(db,row)[0]['values']['title'],'Human source retained')
         finally:
             # The borrowed setUp starts a class-wide patch of PublicResearch.local_agreement; without its cleanups it leaked

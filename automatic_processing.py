@@ -174,7 +174,8 @@ class AutomaticProcessing:
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
+        return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),
+                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
     def _refresh_wait(self,row,previous):
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         if previous and previous['state']=='Held' and previous.get('reasons')==['Sources disagree on the title or author'] and (previous.get('metadata_facts') or {}).get('identity_basis')=='local_agreement' and previous.get('local_source_gate_version')!=LOCAL_SOURCE_GATE_VERSION:
@@ -594,6 +595,13 @@ class AutomaticProcessing:
                       if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                       self._update(id,checkpoint=json.dumps(checkpoint));continue
                   previous=self._refresh_wait(row,self.candidate(row))
+                  if previous and previous['state']=='Held' and previous.get('until_change') and previous.get('research_version')==RESEARCH_VERSION:
+                      # Sergei 2026-10-24, ruling 5 (option B): researched again only when something about it changes. A
+                      # changed file list, size, time or tag, a renamed folder or a value Sergei saves gives the book a
+                      # new revision or fingerprint (candidate() then reads nothing); new rules a new research version.
+                      checkpoint['pending'].pop(0)
+                      if identity not in checkpoint['done']:checkpoint['done'].append(identity)
+                      continue
                   if previous and previous['state'] in ('Held','Waiting for source') and previous.get('retry_at') and previous['retry_at']>self.clock():
                       # Deferred source opportunities stay owned by this authorized worker.
                       deferred.append(identity)
@@ -648,10 +656,14 @@ class AutomaticProcessing:
                       # Eligible again on the next pass, which starts only once the queue drains.
                       self._record(row,'Waiting for source',dict(result,reasons=[GAP_DEFER_REASON],wait=None,gap_deferrals=deferrals+1),self.clock())
                       deferred.append(identity)
-                  elif result.get('reasons'):
-                      wait=result.get('wait');state='Waiting for source' if wait else 'Held'
-                      self._record(row,state,result,wait.get('retry_at') if wait else self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)))
+                  elif result.get('reasons') and result.get('wait'):
+                      wait=result['wait']
+                      self._record(row,'Waiting for source',result,wait.get('retry_at'))
                       deferred.append(identity)
+                  elif result.get('reasons'):
+                      # Ruling 5 (option B): the outcome follows from the files alone, so the book is held until it changes;
+                      # no retry time, no hourly or backoff research.
+                      self._record(row,'Held',dict(result,until_change=True),None)
                   else:
                       try:
                           fresh,job_id=self.merge.approve_automatic(row,result,self.stop_event,self.research.client)

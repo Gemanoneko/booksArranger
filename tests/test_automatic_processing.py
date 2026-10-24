@@ -264,7 +264,9 @@ class AutoTests(unittest.TestCase):
                 observed.append(auto.status());self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1);now[0]+=delay;return False
             return original(delay)
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
-        self.assertEqual(state['state'],'Paused');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
+        # Ruling 5 (option B, 2026-10-24): the second outcome holds the book until it changes, so the run completes
+        # instead of waiting on an uncertainty backoff.
+        self.assertEqual(state['state'],'Completed');self.assertEqual(len(calls),2);self.assertEqual(state['research']['held'],1)
         self.assertEqual(len(observed),1);waiting=observed[0]
         self.assertEqual((waiting['state'],waiting['phase'],waiting['next_retry_at']),('Running','waiting',100005));self.assertTrue(waiting['automatic_retry_enabled']);self.assertFalse(waiting['can_start']);self.assertTrue(waiting['can_stop']);self.assertIsNone(waiting['current'])
         self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['next_retry_at']);merge.approve_automatic.assert_not_called()
@@ -287,7 +289,7 @@ class AutoTests(unittest.TestCase):
                 auto.stop_event.set();return True
             wakes.append(state['next_retry_at']);now[0]+=delay;return False
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
-        self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
+        self.assertEqual(wakes,[100005,100020]);self.assertEqual(attempts,{'A Book':2,'B Book':2});self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()  # ruling 5: held until changed
     def test_stop_during_armed_wait_preserves_pending_and_restart_stays_paused(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
         auto.start();deadline=time.monotonic()+3
@@ -316,7 +318,7 @@ class AutoTests(unittest.TestCase):
                 auto.stop_event.set();return True
             self.assertTrue(state['automatic_retry_enabled']);now[0]+=delay;return False
         with patch.object(auto.stop_event,'wait',side_effect=advance):auto.start();state=self.wait_auto(auto,stop_when_held=False)
-        self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Paused');merge.approve_automatic.assert_not_called()
+        self.assertEqual(drained,[True]);self.assertEqual(len(visits),2);self.assertEqual(state['state'],'Completed');merge.approve_automatic.assert_not_called()  # ruling 5: held until changed
     def test_restart_of_waiting_running_checkpoint_does_not_arm_retry(self):
         auto,merge,inv=self.fake_merge();run_id=str(uuid.uuid4());now='2026-10-11T00:00:00Z'
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[str(uuid.uuid4())],'done':[]}),'Waiting for metadata sources',now,now))
@@ -414,7 +416,7 @@ class AutoTests(unittest.TestCase):
         auto.research.client=client
         auto.research.lookup=lambda current,root,stop,progress:research.lookup(current,root,stop,progress) if current['members'][0]['metadata']['tags']['album']==long_title else {'reasons':[],'work':WORK,'review':{},'sources':[]}
         auto.start();state=self.wait_auto(auto)
-        self.assertEqual(state['state'],'Paused');self.assertEqual(state['research']['held'],1)
+        self.assertEqual(state['state'],'Completed');self.assertEqual(state['research']['held'],1)  # ruling 5: held until changed
         merge.approve_automatic.assert_called_once();self.assertEqual(merge.approve_automatic.call_args.args[0]['members'][0]['metadata']['tags']['album'],'B Book')
         held=[auto.candidate(current) for current in inv.candidates('Audiobooks')['rows'] if current['members'][0]['metadata']['tags']['album']==long_title]
         self.assertEqual(len(held),1);self.assertEqual(held[0]['state'],'Held')
@@ -441,7 +443,7 @@ class AutoTests(unittest.TestCase):
         second.research.lookup=lambda *_:{'reasons':['Book identity uncertain'],'sources':[]}
         with patch.object(inv,'launch') as discovery:
             second.start();retried=self.wait_auto(second);discovery.assert_not_called()
-        self.assertEqual(second._run_row()['id'],run['id']);self.assertEqual(retried['state'],'Paused');self.assertEqual(retried['research']['held'],1)
+        self.assertEqual(second._run_row()['id'],run['id']);self.assertEqual(retried['state'],'Completed');self.assertEqual(retried['research']['held'],1)  # ruling 5
         merge.approve_automatic.assert_not_called()
 
     def test_historical_missing_failure_detail_is_not_invented_or_left_researching(self):
@@ -547,10 +549,24 @@ class AutoTests(unittest.TestCase):
     def test_construction_and_inventory_only_never_approve(self):
         auto,merge,inv=self.fake_merge();self.assertEqual(auto.status()['state'],'Idle');merge.approve_automatic.assert_not_called();inv.launch('Audiobooks');inv.worker.join(5);merge.approve_automatic.assert_not_called();auto.close()
     def test_uncertain_work_is_revisited_until_user_stop(self):
+        # Sergei 2026-10-24, ruling 5 (option B): an uncertain book is held until something about it changes. Before, it
+        # was revisited on a backoff timer (up to 24 h) until Stop, and the run never ended.
         auto,merge,inv=self.fake_merge();auto.start();status=self.wait_auto(auto)
-        self.assertEqual(status['state'],'Paused');self.assertEqual(status['research']['held'],1);merge.approve_automatic.assert_not_called()
-        checkpoint=json.loads(auto._run_row()['checkpoint']);self.assertEqual(len(checkpoint['pending']),1)
-        saved=auto.candidate(inv.candidates('Audiobooks')['rows'][0]);self.assertEqual(saved['research_attempt'],1);self.assertGreater(saved['retry_at'],time.time());self.assertEqual(saved['research_history'][0]['state'],'Held');auto.close()
+        self.assertEqual(status['state'],'Completed');self.assertEqual(status['research']['held'],1);merge.approve_automatic.assert_not_called()
+        checkpoint=json.loads(auto._run_row()['checkpoint']);self.assertEqual(checkpoint['pending'],[])
+        saved=auto.candidate(inv.candidates('Audiobooks')['rows'][0]);self.assertEqual(saved['research_attempt'],1);self.assertIsNone(saved['retry_at']);self.assertTrue(saved['until_change'])
+        self.assertEqual(saved['research_history'][0]['state'],'Held');auto.close()
+    def test_a_held_book_is_researched_again_only_when_it_changes(self):
+        calls=[]
+        def lookup(row,*_):calls.append(row['fingerprint']);return {'reasons':['Title or author missing'],'sources':[],'ask':{'kind':'title_author','why':'author_missing'}}
+        auto,merge,inv=self.fake_merge(lookup)
+        auto.start();self.assertEqual(self.wait_auto(auto)['state'],'Completed');self.assertEqual(len(calls),1)
+        auto.start();self.assertEqual(self.wait_auto(auto)['state'],'Completed')
+        self.assertEqual(len(calls),1,'unchanged: not researched again')
+        path=self.base/'audio'/'John Writer – A Book.mp3';path.write_bytes(b'fixture only, changed')
+        auto.start();self.assertEqual(self.wait_auto(auto)['state'],'Completed')
+        self.assertEqual(len(calls),2,'a changed file is researched again');self.assertNotEqual(calls[0],calls[1])
+        auto.close()
     def test_full_confident_decision_reaches_private_admission(self):
         auto,merge,inv=self.fake_merge(lambda *_:{'reasons':[],'work':WORK,'review':{},'sources':[]});auto.start();self.wait_auto(auto);merge.approve_automatic.assert_called_once();auto.close()
     def test_stop_saves_pending_and_restart_never_starts_it(self):
@@ -636,8 +652,10 @@ class AutoTests(unittest.TestCase):
         with patch.object(auto.stop_event,'wait',side_effect=wait):auto.start();state=self.wait_auto(auto,stop_when_held=False)
         self.assertTrue(fx.started.is_set(),'the next book started after the cleanup')
         self.assertEqual(fx.outcome,'completed','the just-started book was stopped by a between-books state')
-        self.assertEqual(pauses[:1],['user stop'],'the run paused the queue without a stop request')
-        self.assertEqual(state['state'],'Paused');self.assertGreaterEqual(len(waits),2)
+        # Ruling 5 (2026-10-24): with the held book held until it changes there is no later retry wait to Stop in, so the
+        # run completes; the guard is unchanged: nothing paused the queue without a stop request.
+        self.assertNotIn('no stop request',pauses,'the run paused the queue without a stop request')
+        self.assertEqual(state['state'],'Completed');self.assertGreaterEqual(len(waits),2)
     def test_stalled_queue_with_no_worker_still_pauses_the_run(self):
         # Safety kept: queued work that no converter or cleanup worker will pick up still ends the wait.
         auto,fx,user_stop,pauses=self.between_books_run(lambda fx:fx.admit())

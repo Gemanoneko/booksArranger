@@ -162,7 +162,8 @@ class AutomaticRecordRetryTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],0)
         self.assertEqual(candidate['state'],'Held');self.assertEqual(json.loads(candidate['result'])['research_attempt'],1)
         self.assertEqual(run['state'],'Paused');checkpoint=json.loads(run['checkpoint'])
-        self.assertIn(self.row['id'],checkpoint.get('pending',[])+checkpoint.get('deferred',[]));self.assertIn('protected-book',checkpoint['done'])
+        # Ruling 5 (2026-10-24): a held book is held until it changes, so it is done for this run, not deferred.
+        self.assertIn(self.row['id'],checkpoint['done']);self.assertIn('protected-book',checkpoint['done'])
 
     def test_running_and_pausing_audio_disable_start_without_changing_lifecycle(self):
         self.set_paused()

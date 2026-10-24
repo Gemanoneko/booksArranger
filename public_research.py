@@ -62,7 +62,9 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
     'discovery':{'html.duckduckgo.com','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'},'credit':CREDIT_HOSTS|{'fantlab.ru'}}
 
 # 18: local agreement identity and gap-only search; older results get one fresh pass.
-RESEARCH_VERSION='standing-20-v1'
+# standing-21-v1 (0.22.0): identity v5 and research only on change (Sergei 2026-10-24): every held or waiting book is
+# researched once more under the new rules, then only when it changes.
+RESEARCH_VERSION='standing-21-v1'
 
 class ChallengeDetected(ValueError):pass
 
