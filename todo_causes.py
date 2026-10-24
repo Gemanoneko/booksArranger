@@ -90,7 +90,8 @@ def files_cause(members, reasons, title='', split=False, works=None):
     reasons = [str(r) for r in reasons or []]
     here = len(members)
     if MEMBERSHIP in reasons and isinstance(works, list) and len(works) > 1:
-        return {'cause': 'works', 'works': [{'name': str(w.get('name') or ''), 'files': int(w.get('files') or 0)} for w in works[:8]]}
+        # Every work, so the row's "+ n more" is exact (Judy's part-sets copy check N1); bounded for the payload.
+        return {'cause': 'works', 'works': [{'name': str(w.get('name') or ''), 'files': int(w.get('files') or 0)} for w in works[:200]]}
     if MEMBERSHIP in reasons:
         if here == 1:
             total = _total(_raw(members[0], 'track', 'tracknumber'))

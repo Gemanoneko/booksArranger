@@ -404,7 +404,7 @@ def _same_album_parts(members,scopes,assigned,chaptered,taken):
         scope=base+'\x1fSame album '+key
         if scope in taken:continue
         name=DISC_SUFFIX.sub('',entries[0][1]).strip() or entries[0][1]
-        found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author (the parts of one book)',
+        found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author',
                       'works':_works(sorted(entries,key=lambda e:e[0]['path']),scopes,norm(work_name(name)))})
     return found
 
@@ -427,6 +427,18 @@ def _works(entries,scopes,album):
     for key,title in named:
         if key in works:shown.setdefault(key,title)
     return [{'name':shown[key],'files':counts[key] or 1} for key in shown]
+
+# The details panel prints a group's 'grouping' line (Judy's part-sets copy check, 2026-10-25): no names, dates or rule
+# numbers on screen. Groups stored by an earlier build keep their text until regrouped; shown_grouping() words them the same.
+PART_SET_GROUPING='Parts of one folder that share their album and artist. Their chapters decide whether they are one book.'
+_OLD_GROUPING=re.compile(r'^One book \((?:Sergei [^)]*)\): files of one folder with the (.*?)(?: \(the parts of one book\))?$')
+
+def shown_grouping(text):
+    """The grouping line as the details panel shows it, whichever build stored the group."""
+    text=str(text or '')
+    if text=='Parts of one folder that share their album and artist: their chapters decide whether they are one book (ruling 19)':return PART_SET_GROUPING
+    match=_OLD_GROUPING.match(text)
+    return 'One book: files of one folder with the '+match[1]+'.' if match else text
 
 def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
@@ -475,7 +487,7 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
         if scope in part_sets and {r['path'] for r in items}=={m['path'] for m in part_sets[scope]['members']}:
             group=_split_group(items,companions,scope,part_sets[scope]);parts=group.pop('split_book')
             group['part_set']={'version':M4B_PARTS_VERSION,'parts':parts['parts'],'order_basis':parts['order_basis']}
-            group['grouping']='Parts of one folder that share their album and artist: their chapters decide whether they are one book (ruling 19)'
+            group['grouping']=PART_SET_GROUPING
             output[scope]=group
             continue
         if scope in split:
@@ -542,12 +554,12 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset()):
     for scope,found in sets.items():
         if scope in output:
             output[scope]['numbered_set']={'version':SAME_TITLE_VERSION,'name':found['name'],'basis':found['basis']}
-            output[scope]['grouping']='One book (Sergei 2026-10-24, parts stay together): files of one folder with the '+found['basis']
+            output[scope]['grouping']='One book: files of one folder with the '+found['basis']+'.'
             if not output[scope]['title_evidence'] and found['name']:output[scope]['title_clue']=found['name']
     for scope,found in joined.items():
         if scope in output:
             output[scope]['joined_parts']={'version':SAME_ALBUM_VERSION,'name':found['name'],'basis':found['basis'],'works':found['works']}
-            output[scope]['grouping']='One book (Sergei 2026-10-24, ruling 19): files of one folder with the '+found['basis']
+            output[scope]['grouping']='One book: files of one folder with the '+found['basis']+'.'
             if found['works']:
                 # G3: never converted on its own; the row lists the works so Sergei can approve or choose the files.
                 output[scope]['source_partition_uncertain']=True

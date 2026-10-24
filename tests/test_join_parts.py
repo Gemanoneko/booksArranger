@@ -26,6 +26,14 @@ class JoinPartsTests(test_approve_as_is.ApproveFixture):
         tone(self.audio / 'Unsorted' / 'Тихий ветер' / '02.mp3', self.cover, album='Тихий ветер', artist='Петров Иван', track='2/2')
         self.assertEqual(self.books(), [('Тихий ветер', ['01.mp3', '02.mp3'])], 'positive control: before ruling 19 these were two "Part of a bigger book" rows')
         self.assertEqual(self.research_all(), {('01.mp3', '02.mp3'): []}, 'the joined book is identified and converts')
+        # A group stored by an earlier build: the details panel still shows the new wording (Judy's part-sets copy check).
+        import json
+        from scanner import connect
+        with connect(self.inv.database) as db:
+            for identity, evidence in db.execute('SELECT id,evidence FROM book_groups WHERE superseded=0').fetchall():
+                stored = dict(json.loads(evidence), grouping='One book (Sergei 2026-10-24, ruling 19): files of one folder with the same album and one author (the parts of one book)')
+                db.execute('UPDATE book_groups SET evidence=? WHERE id=?', (json.dumps(stored, ensure_ascii=False), identity))
+        self.assertEqual([row['grouping'] for row in self.service.reviews.page()['rows']], ['One book: files of one folder with the same album and one author.'])
 
     def test_readers_in_the_album_artist_tag_do_not_split_the_book(self):
         for n in (1, 2, 3):

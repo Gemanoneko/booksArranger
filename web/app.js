@@ -1858,13 +1858,14 @@ function holdSentence(kind,cause,f={}){
   if(kind==='part_of_book')return {chapter:'This file is named as one chapter.',numbered_part:'The name marks this as one numbered part.',
     siblings:n(f.beside)===1?'Another file beside it carries the same title.':`${n(f.beside)} other files beside it carry the same title.`,
     part_set:`Part ${n(f.index)} of ${n(f.total)} of "${f.set || ''}".`,unreadable:"The other files in this folder couldn't be checked.",
-    // Rulings 19 and 19a: a set of .m4b parts whose chapters don't settle it; the files show the proposed order.
-    set_seasons:'The files are seasons of a series. Approve them as one book only if they are one.',
-    set_book_words:'The files are named as books of a series. They may be one book or several.',
-    set_long:`Joined, these ${n(f.parts)} files would run ${Number(f.hours) || 0} hours. Check that they are one book.`,
-    set_authors:'The files credit different authors or readers. Check that they are one book.',
-    set_unclear:"These files may be the parts of one book. Their chapters don't settle it.",
-    set_unreadable:"These files may be the parts of one book. Their chapters couldn't be read."}[cause] || "The app can't tell if this is a whole book.";
+    // Rulings 19 and 19a: a set of .m4b parts its chapters don't settle (Judy's part-sets copy check, 2026-10-25: the
+    // evidence, then what it makes uncertain, in one sentence); the files show the proposed order.
+    set_seasons:'Season or episode numbers in the names or chapters suggest separate books.',
+    set_book_words:'The names or chapters number the files as books, so they may be separate books.',
+    set_long:`Together these ${n(f.parts)} files run ${Math.round((Number(f.hours) || 0)*10)/10} hours, which is long for one book.`,
+    set_authors:'The files credit different authors or readers, so they may be separate books.',
+    set_unclear:"The chapters don't show whether these files make one book.",
+    set_unreadable:"The chapters couldn't be read, so the app can't tell whether these files make one book."}[cause] || "The app can't tell if this is a whole book.";
   return '';
 }
 const HOLD_APPROVE={order_unclear:['Approve this order','Approve the order shown: convert if needed, rename, move to Audiobooks Sorted.'],
@@ -1880,7 +1881,10 @@ const HOLD_SCAN_TIP="Check this book's folders again, for example after you rena
 function holdKind(ask){return Object.hasOwn(HOLD_STATUS,ask?.kind || '')?ask.kind:'';}
 // The face and tooltip follow the chip, so the press says what is confirmed (B4 Buttons).
 function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind==='approve' && hold?HOLD_APPROVE[hold][0]:ASK_LABELS[kind];}
-function askTip(entry,kind){const hold=holdKind(askOf(entry.row));return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
+// A set of .m4b parts (cause set_*): the join always re-encodes once (ruling 19a, method A), so the tooltip says so (N3).
+const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
+function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
+function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
 const ASK_PENDING={approve:['Approving...','Approving this book...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
@@ -1929,6 +1933,9 @@ function askText(row){
   const ask=askOf(row);if(!ask)return null;
   if(ask.kind==='files_missing'){
     const total=Number(ask.missing?.total) || 0,present=Number(ask.missing?.present) || 0,gone=Math.max(0,total-present);
+    // Parts the track tags say exist but were never here (a part set, N4): where the claim comes from.
+    const parts=Array.isArray(ask.missing?.parts)?ask.missing.parts:null;
+    if(parts && parts.length)return {status:'Missing files',hint:parts.length===1?`The track tags say there are ${total.toLocaleString()} parts, but part ${Number(parts[0]).toLocaleString()} isn't here.`:`The track tags say there are ${total.toLocaleString()} parts, but ${parts.length.toLocaleString()} aren't here.`};
     return present>0?{status:'Missing files',hint:`${gone.toLocaleString()} of ${total.toLocaleString()} files ${gone===1?'is':'are'} missing.`}:{status:'All files missing',hint:`All ${total.toLocaleString()} files are missing.`};
   }
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
@@ -2016,7 +2023,8 @@ function buildAskMissing(entry){
   const missing=askOf(entry.row).missing,files=Array.isArray(missing?.files)?missing.files.filter(f=>typeof f==='string'):[];if(!files.length)return;
   const parent=path=>path.slice(0,Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/'))+1),folders=[...new Set(files.map(parent))];let shown=0;
   for(const folder of folders){if(shown>=3)break;entry.missing.append(node('p','In '+folder,'path'));for(const file of files.filter(f=>parent(f)===folder)){if(shown>=3)break;entry.missing.append(node('p',file.slice(folder.length),'path'));shown++;}}
-  if(files.length>shown)entry.missing.append(node('p',`+ ${(files.length-shown).toLocaleString()} more, listed in the details panel.`,'field-help'));
+  // A part set's missing parts are not in the details panel (never catalogued): no pointer there (N5).
+  if(files.length>shown)entry.missing.append(node('p',Array.isArray(missing.parts)?`+ ${(files.length-shown).toLocaleString()} more.`:`+ ${(files.length-shown).toLocaleString()} more, listed in the details panel.`,'field-help'));
 }
 // The files Approve will use (0.22.0 review B4): Order unclear as a numbered "Playback order" list of 5, the others as an
 // "In" folder line and 3 names (files without the title first), then "+ n more, listed in the details panel." Mixed
@@ -2025,7 +2033,8 @@ function buildHoldList(entry){
   const ask=askOf(entry.row),kind=holdKind(ask);if(!kind)return;
   const files=(Array.isArray(ask.files)?ask.files:[]).filter(f=>typeof f?.name==='string'),count=Number(ask.file_count) || files.length;if(!files.length)return;
   const box=entry.missing,more=shown=>{if(count>shown)box.append(node('p',`+ ${(count-shown).toLocaleString()} more, listed in the details panel.`,'field-help'));};
-  if(kind==='order_unclear'){
+  if(kind==='order_unclear' || setCause(ask)){
+    // A set of parts lists its proposed join order the same way (N2): a wrong order can't be repaired once the sources go.
     box.append(node('p','Playback order','field-help ask-list-label'));
     const list=node('ol','','path ask-order');list.setAttribute('aria-label','Playback order');
     for(const f of files.slice(0,5)){const item=node('li',f.name);item.title=f.folder || '';list.append(item);}
@@ -2128,6 +2137,7 @@ function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKi
 function askErrorText(error,kind){
   if(!error.httpStatus)return 'Connection interrupted. Check the status above before trying again.';
   if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';
+  if(error.body?.code==='moved')return 'The destination changed. Check the Goes to line and try again.';  // N7
   // A safety gate is named (0.22.0 review B5.4).
   if(error.body?.code==='format')return "The audio format needs a decision the app can't make yet. Select the row to read why.";
   return ASK_REFUSED[kind];
@@ -2182,7 +2192,7 @@ async function askPress(entry,kind){
     askResults.set(id,{text:askErrorText(error,kind)});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
-    if(error.body?.code==='name_taken' || error.body?.code==='changed'){askDraft(id).previewKey=null;askPreview(entry,0);}
+    if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
     if(!error.httpStatus)refreshFailed(error);
   }finally{askPending=null;}
   // Read before the buttons update: a focused button that becomes disabled drops focus to the page.
@@ -2228,7 +2238,7 @@ async function runApproveSelected(){
     askPending={id:row.id,kind:'approve'};updateAskRows();
     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
     try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{})},PRESS_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
-    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if((error.body?.code==='name_taken' || error.body?.code==='changed') && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
+    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
     finally{askPending=null;}
   }
   askBulk=false;

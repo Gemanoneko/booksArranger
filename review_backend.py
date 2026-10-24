@@ -163,6 +163,8 @@ class CandidateReviewService:
         """ready=False (build_manifest, and every enrich inside without_ready()) skips the converted-books read and
         leaves audiobook_ready unset; nothing that builds or guards a job reads it."""
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row); held=held or {}
+        from groups import shown_grouping
+        row['grouping']=shown_grouping(row.get('grouping'))  # no names or rule numbers in the panel, whichever build stored it
         with connect(self.inventory.database) as db:row['manual_metadata_sources']=manual_metadata.records(db,row)
         facts=ctx.get('metadata_facts')
         if facts:

@@ -777,3 +777,265 @@ Basis: read-only look at branch `ender/0220` (worktree `C:/Antigravity Projects/
 1. **Mixed recordings, files with no tag.** The line reads "Albums: (none) (3 files) · Дюна (6 files)". Show **No album (3 files)** and **No artist (3 files)** (the UI maps the server's "(none)").
 2. **Scan again, a file renamed while a scan runs** (`ASK_DONE.later`): "Changes found. The next library scan catalogues them." is not in my sheet, uses a spelling the app doesn't (it says "cataloged") and a word Sergei doesn't use. Replace with **Changes found. The next library scan will pick them up.**
 3. **Strip line with one book, not running:** "1 book is waiting to be checked. Start automatic processing to check them." Say **... to check it.** for n = 1.
+
+---
+
+# 0.22.0 part-sets copy check (2026-10-25, Judy)
+
+Basis: read-only look at branch `ender/0220` at ac08aa2 (worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0220`, matches `origin/ender/0220`): `web/app.js` (`holdSentence` L1846, `buildHoldList` L2024, `askText`, `askErrorText`, L180), `part_sets.py`, `groups.py` (`_part_sets`, `_works`, the `grouping` and `conflicts` strings), `todo_causes.py`, `merge_service.py` (`ask_payload`, `approve_book`, `scan_again`), `public_research.py` (`lookup`, `_part_set_hold`). Nothing launched. Rulings 19, 19a, 19b. Adds to the 0.22.0 review and the earlier copy check; supersedes nothing. The earlier copy check's fixes (empty state, "No album / No artist", "will pick them up", "to check it") are in the build and confirmed.
+
+**Result:** item 1 approved. Item 2: all six sentences replaced. Item 3 approved, with two small fixes. One must-fix found outside the three items. Seven nice-to-haves (N1 to N7), one offer.
+
+## 1. Files unclear, "The title tags name more than one book."
+
+| String | Verdict |
+|---|---|
+| The title tags name more than one book. | **Approved verbatim.** |
+| Books: {A} ({a} files) · {B} ({b} files) · {C} ({c} files) + {n} more | **Approved verbatim.** One file reads "(1 file)". |
+
+- The sentence is one fact, it is true by construction (`_works` returns two or more works or nothing), and it follows the row pattern of the other Files unclear causes: evidence only ("The tags say 12 tracks, but 9 files are here."). The consequence is carried by the row: the **Books:** line below names the books, and the buttons are **Approve these files** and **Choose files**, which is the real action here (pick the files of one book). "Books:" matches "Albums:" and "Artists:".
+- It reads correctly in an "Also:" line ("Also: the title tags name more than one book.").
+- **Nice-to-have N1.** The server sends at most 8 works (`todo_causes.files_cause`, `works[:8]`), so "+ {n} more" can never exceed 5 and undercounts a disc set with more than 8 works. Send the full list, or the total, so "+ n more" is exact.
+
+## 2. The six "Part of a bigger book" sentences for the ask cases
+
+The six causes are all of `part_sets.decide`'s ask outcomes. I found no seventh: "one part" cannot occur (a set has at least two files) and maps to the "unclear" sentence anyway. All six are **replaced**. Why:
+
+1. All six are two sentences. The row pattern is one. In three of them the second sentence is an instruction ("Check that they are one book." / "Approve them as one book only if they are one.") that tells Sergei nothing the status ("Part of a bigger book") and the button ("Approve as one book") don't. In two the first sentence restates the status ("These files may be the parts of one book."). The sixth (book words) carries a real consequence but in a second sentence.
+2. Two state a guess as a fact. "The files are seasons of a series" fires on any season or episode number in a file name, title tag or chapter title. "Named as books of a series" fires on any "Книга I" or "Book 2" and says nothing about a series.
+3. "Joined, these 4 files would run 32.2 hours." opens with a dangling "Joined,".
+
+Form of every replacement: **the evidence, then what it makes uncertain, in one sentence.** The status already says what kind of row it is.
+
+| Cause (code) | Built | Replace with |
+|---|---|---|
+| Seasons (`set_seasons`) | The files are seasons of a series. Approve them as one book only if they are one. | **Season or episode numbers in the names or chapters suggest separate books.** |
+| Over 30 hours (`set_long`) | Joined, these {n} files would run {h} hours. Check that they are one book. | **Together these {n} files run {h} hours, which is long for one book.** |
+| Book words (`set_book_words`) | The files are named as books of a series. They may be one book or several. | **The names or chapters number the files as books, so they may be separate books.** |
+| Several authors (`set_authors`) | The files credit different authors or readers. Check that they are one book. | **The files credit different authors or readers, so they may be separate books.** |
+| Chapters don't settle it (`set_unclear`) | These files may be the parts of one book. Their chapters don't settle it. | **The chapters don't show whether these files make one book.** |
+| Chapters unreadable (`set_unreadable`, the sixth, not in your list) | These files may be the parts of one book. Their chapters couldn't be read. | **The chapters couldn't be read, so the app can't tell whether these files make one book.** |
+
+- `{n}` is at least 2, so no singular case. `{h}` is the server's value rounded to one decimal, over 30 ("41.3 hours", "31 hours"); the word "hours" stays spelled out as everywhere else in the app.
+- The first four end in "separate books" on purpose: that is the doubt each one raises. "Book words" says "number the files as books" so it does not assert a series.
+- First-sentence rule for "Also:" lines: every replacement is one sentence, so it stands alone if it ever appears there (it cannot today: Part of a bigger book is first in the order).
+
+**Row pattern, checked for the six causes:**
+
+| Part of the pattern | Result |
+|---|---|
+| One sentence | As built: no (two each). After the replacements: yes. |
+| File list in order | **Yes.** `groups._part_sets` orders the members by track tag, else by the numbers in the file names, and the row lists them in that order: "In {folder}", 3 names, "+ {n} more, listed in the details panel." (the panel's Included audio files lists all of them, so that pointer is true). The list is not labelled as the join order: see N2. |
+| Faces | **Yes.** **Approve as one book** (ruling 19b's own words) and **Scan again**, 152 x 32, no Change order or Choose files. Tooltip: see N3. |
+| Status, Title field, "Goes to" | Unchanged and consistent. |
+
+## 3. Missing files, "Part 3 of 3" (incomplete part sets)
+
+| String | Verdict |
+|---|---|
+| In {folder} / Part {n} of {total} (one line per missing part, up to 3) | **Approved verbatim.** |
+
+- It names the exact thing that is missing (ruling 10) in the vocabulary of the rest of the chip ("Part {i} of {n} of ..."). The missing file was never catalogued, so its real name is unknown, and a number is the only true name. The lines agree with the sentence "{k} of {n} files {is/are} missing." because the server builds both from the same numbers.
+- Row pattern: one sentence, the list in ascending order, **Scan again** and **Convert what's there** (shown because at least one part is present). Both tooltips stay true: Convert uses the present members only (`approve_book`, `without_missing`).
+- **Nice-to-have N4.** The sentence reads like a file that vanished, but this one was never here and the app knows from the track tags. Sergei cannot judge a bad tag ("1/3" on a two-part book) without knowing where the claim comes from. For part-set rows only (`missing.parts` present), replace the sentence with **The track tags say there are {total} parts, but part {n} isn't here.** (several: **The track tags say there are {total} parts, but {k} aren't here.**). `{total}` is the declared total, else the highest track number.
+- **Nice-to-have N5.** More than 3 missing parts shows "+ {n} more, listed in the details panel." The panel lists catalogued members only, and a missing part is not one, so the pointer is false. For part-set rows use **+ {n} more.** (Reachable with four or more missing parts, for example 3 of 12 present.)
+
+## 4. Found outside the three items
+
+**Must-fix (1)**
+
+1. **Names and rule numbers on screen.** The details panel's evidence line (`#candidate-evidence`, `app.js` L180) prints the group's `grouping` text for every selected candidate, joined with " · ". Three new strings in `groups.py` break the copy standard (no names, no history, no doc references):
+   - L545: `One book (Sergei 2026-10-24, parts stay together): files of one folder with the {basis}`
+   - L550: `One book (Sergei 2026-10-24, ruling 19): files of one folder with the {basis}`
+   - L478: `Parts of one folder that share their album and artist: their chapters decide whether they are one book (ruling 19)`
+
+   Replace with:
+   - L545 and L550: **One book: files of one folder with the {basis}.** For L550 also drop the parenthesis from the basis, so it reads "...with the same album and one author." (the words "the parts of one book" repeat "One book").
+   - L478: **Parts of one folder that share their album and artist. Their chapters decide whether they are one book.**
+
+   Ender checks that stored groups pick up the new text: `groups.current` compares revisions only, so an existing group may keep the old string until it is regrouped. The older line "Per-file embedded/filename identity partition; recording remains unverified" is not new and is not touched here.
+
+**Nice-to-have (N2, N3, N6 and N7 here; N1, N4 and N5 are above)**
+
+- **N2. The join order is not labelled.** Ruling 19 says the app asks "with the proposed joined order". The three unnumbered names under "In {folder}" don't say they are that order, and a set can have up to 30 parts. For the six set causes use the Order unclear list: label **Playback order**, a numbered `ol`, the first 5 names, then "+ {n} more, listed in the details panel." (`buildHoldList`: the same branch as `order_unclear`, keyed on a cause that starts with `set_`.) A wrong order cannot be repaired after the source is removed (ruling 2).
+- **N3. Approve tooltip for the six set causes.** Built: "File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted." A join always re-encodes (ruling 19a, method A, a cost Sergei accepted), so "if needed" understates it. Use **Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.** Face unchanged. Other Part of a bigger book rows keep the built tooltip.
+- **N6. Chip tooltip.** "Show books that may be only one part of a bigger book." is wrong for a row of seven files. Use **Show books that may be parts of a bigger book.**
+- **N7. Refusal when the destination moved** (Senua m1: the shown path travels with the press). It maps to the "changed" code and reads "This book changed. Review its details and try again." The book didn't change, its destination did, and the row has already re-read its Goes to line. Give it its own code and line: **The destination changed. Check the Goes to line and try again.**
+
+## 5. Offer (not specced)
+
+1. **A "Keep as separate books" press on these rows.** Seasons, book words and several authors all say "may be separate books", but the only press is **Approve as one book**. If Sergei decides they are separate, the row has no answer for him and stays listed. The backend already records separate volumes for the automatic decision (`groups.record_volumes`), so the action may be cheap. Ruling 19b names only "Approve as one book", so this is Sergei's call: one word, yes or no.
+
+## 6. Changes Ender must make
+
+1. The six sentences of section 2 (`holdSentence`, `set_*`). Update `tests/test_todo_holds_frontend.js` L119-121, which asserts the old text.
+2. The three `grouping` strings of must-fix 1, and confirm stored groups pick them up.
+3. If taken: N1 (works total), N2 (numbered list), N3 (tooltip), N4 and N5 (part-set missing sentence and pointer), N6 (chip tooltip), N7 (destination refusal).
+
+## 7. Copy sheet additions (verbatim once built)
+
+| Where | String |
+|---|---|
+| Files unclear, works | The title tags name more than one book. / Books: {name} ({n} files) · ... + {n} more |
+| Part of a bigger book, sets | the six sentences of section 2 |
+| Missing files, part set, line | Part {n} of {total} |
+| Missing files, part set, sentence (N4) | The track tags say there are {total} parts, but part {n} isn't here. / ... but {k} aren't here. |
+| Missing files, part set, more (N5) | + {n} more. |
+| Approve tooltip, sets (N3) | Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted. |
+| Chip tooltip (N6) | Show books that may be parts of a bigger book. |
+| Destination moved (N7) | The destination changed. Check the Goes to line and try again. |
+| Details panel, grouping | One book: files of one folder with the {basis}. / Parts of one folder that share their album and artist. Their chapters decide whether they are one book. |
+
+## 8. Checks for Futaba (add to part D of the 0.22.0 review)
+
+1. **Fixture:** one set per cause (six), one works book (three or more works), one part set missing one part, one missing four or more. Each shows its own sentence, list and buttons verbatim.
+2. **Panel:** select each fixture. A search of the whole page text for `Sergei` and `ruling` finds nothing. Control: the unfixed branch shows both.
+3. **Order:** each set row's list matches the order of the joined output's chapters (the existing end-to-end check D2).
+4. **Missing parts:** the sentence's total, the "Part n of m" lines and the "+ n more" line agree; Scan again with the part restored removes the row; Convert what's there queues from the present parts.
+5. **Rects and tooltips** as D10 and D11 for the new rows (a set row with five names and two buttons; a Missing files row with three "Part n of m" lines).
+
+---
+
+# Keep as separate books — spec (2026-10-25, Judy)
+
+Basis: Jane's call under ruling 10 ("clear options to act upon"), taking offer 1 of the part-sets copy check. Sergei sees it in the morning and can veto it. Read-only look at branch `ender/0220` (worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0220`, HEAD ac08aa2): `web/app.js` (`buildAskActions`, `askMode`, `askInert`, `askPress`, the `ASK_*` tables, `renderGoesTo`), `web/style.css` (`.ask-convert`), `part_sets.decide`, `groups.py` (`record_volumes`, `volume_parts`, `build`, the four grouping steps), `public_research._part_set_hold`, `merge_service` (`_todo`, `scan_again`), `local_identity` L1757-1770. Nothing launched. Geometry is target geometry for Futaba. Spec only: no code. It adds a button to the set rows of the part-sets copy check, section 2, and supersedes nothing.
+
+**If Sergei vetoes it:** delete the button, the route and the strings of section 9. Nothing else depends on it.
+
+## 1. In brief
+
+1. A set row that says "may be separate books" gets a second answer, **Keep as separate books**, beside Approve as one book.
+2. It shows on all six set causes and nowhere else (section 4).
+3. It records the files as separate books and touches no file. Each file becomes its own book and is checked like any other. **It approves nothing.**
+4. The answer is remembered per file until the file changes.
+5. The row leaves on the press. The strip says how many books it became. The existing "Still checking" line carries the progress.
+6. No dialog, no bulk, no accelerator.
+
+## 2. The control
+
+| Part | String or rule |
+|---|---|
+| Face | Keep as separate books |
+| Tooltip | Make each file shown its own book. Nothing is joined. Each book is checked again. |
+| Pending face / hint | Keeping... / Keeping these files separate... |
+| Accessible name | Keep as separate books: {title clue} (the visible face comes first, WCAG 2.5.3) |
+| Refused | Keep as separate books was not accepted. Nothing was changed. |
+| Other refusals | Existing lines: "This book changed. Review its details and try again." (a file changed or was added since the row was listed), "Connection interrupted. Check the status above before trying again." |
+| Panel edits open | `aria-disabled`, tooltip "Save or discard the edits in the details panel first." Only that test of `askInert` applies: the Title-empty and Name-taken tests belong to the join, and Keep does not use the Title field. |
+| Style | `quiet row-retry ask-convert`, like its neighbours. No accent fill. |
+
+- The tooltip names the contrast with the button beside it ("Nothing is joined", where the other tooltip says the audio is re-encoded once) and says the press is not an approval ("checked again").
+- A press is one request at a time. While it runs, the row's other buttons are `aria-disabled` with the existing "Another operation is in progress."
+
+## 3. Where it sits
+
+Order in `.row-actions`: **Approve as one book, Keep as separate books, Scan again, View metadata, Open folder.**
+
+```
+[ ] Тёмная башня 1-4  ·  Стивен Кинг  ·  4 audio files
+    Part of a bigger book                      [ Approve as one book ] [ Keep as separate books ]
+    The names or chapters number the files     [ Scan again ] [ View metadata ] [ Open folder ]
+    as books, so they may be separate books.
+    Title  [ Тёмная башня               ]
+           Title from the folder name.
+    Playback order
+      1. Книга 1 - Стрелок.m4b
+      2. Книга 2 - Извлечение троих.m4b
+      3. Книга 3 - Бесплодные земли.m4b
+      4. Книга 4 - Колдун и кристалл.m4b
+    As one book  Audiobooks Sorted\Кинг Стивен\Тёмная башня - Кинг Стивен.m4b
+```
+
+- The two answers to one question are neighbours (Fitts, Hick). Approve stays first: it is the app's proposal, and the list and path shown are what it would do. Scan again follows, because it is a re-check, not an answer.
+- **Tab order of the row:** row, Select, Title, Approve as one book, Keep as separate books, Scan again, View metadata, Open folder. A native `button`: Enter and Space press it once, and `keydown` stops at the button as on its neighbours.
+- **No accelerator.** Ctrl+Enter stays Approve only: one shortcut, one meaning.
+- **Geometry:** at least 152 x 32. The face wraps to two lines and never truncates (`ask-convert`). Five buttons wrap inside `.row-actions` (max 280 px), as on the Order unclear rows. Nothing is absolutely positioned, there is no dialog and no popover, so nothing covers anything. "Keeping..." is shorter than the face, so the row does not resize.
+
+## 4. Which causes show it
+
+**Rule: the row asks whether these files are one book, and "no" is a real answer.** All six set causes (`ask.cause` starts with `set_`, so two or more `.m4b` files; `setCause`). One rule, no per-cause exceptions.
+
+| Cause | Shows | Why |
+|---|---|---|
+| Seasons | yes | The sentence says "separate books". |
+| Book words | yes | Same. |
+| Several authors | yes | Same. |
+| Over 30 hours | yes | "Long for one book" is the doubt. A real 31-hour book is why Approve stays. |
+| Chapters don't settle it | yes | Only he knows. Both answers are fair. |
+| Chapters unreadable | yes | The app can't tell, so he needs both answers. The press reads no chapters. Scan again is the re-read. |
+
+**Not shown** (hidden, not disabled: an action with nothing to act on is noise):
+- Single-file Part of a bigger book rows (chapter, numbered part, same title beside it, part of a held set, folder not checked). There is nothing to separate, and Approve as one book already files that one file as its own book.
+- Missing files rows of a part set. They have Convert what's there.
+- Files unclear (mixed recordings, title tags name more than one book) and Order unclear. Those are not whole `.m4b` sets, so this store does not cover them. The split action stays an offer (offer 2).
+
+## 5. What the press does
+
+1. **Records the set as separate books.** Per file: its size and modified time, basis "Kept separate by you", with the date. This is the store the automatic "separate volumes" decision already writes (`groups.record_volumes`, `volume_parts`). The catalog regroups by itself and each file becomes its own candidate (scope "Volume of a series"). No file is moved, tagged, re-encoded or deleted.
+2. **It approves nothing.** Ruling 6b makes Approve final for the one book he approves. This press only answers "one book or several?". Each new book goes through normal identity and the automatic queue:
+   - Title from its own tag, else its file name. A file with no title of its own is named set name + part number (rulings 13 and 15), with the basis line "Set name + part number."
+   - Author as always. A missing title or author, an unclear author, a taken name or a safety gate puts that book in this list under its own reason.
+3. **A "no" must not come back as four questions.** None of the files returns as "Part of a bigger book" for the question he just answered (named as a numbered part, same title beside it, part of a held set). My reading of `local_identity` L1757-1770: the numbered-part naming covers a single `.m4b` only when its file name ends in a part number. A kept-separate file needs the same treatment whatever its name. Ender confirms. A file still held for its own reason (its name is only a chapter label, say) returns under that reason, for example Missing title or author with the Title field filled in.
+4. Refusals and the busy rule are those of Scan again: the row's revision must match, and the press waits while a library scan runs (`scan_active`).
+
+## 6. Remembered
+
+Yes, and per file, not per row.
+- A file's fact holds while it keeps its size and modified time. All four grouping steps leave a recorded file alone (`_part_sets`, `_split_plan`, `_same_title_sets`, `_same_album_parts`), so the set is not formed again and not asked again. A restart, a library scan or a poll changes nothing.
+- A file that changes (re-tagged, replaced) or is renamed loses its fact and is judged alone. The other files stay separate. The set is asked again only if two or more unrecorded files of the folder form a set again, for example new parts that arrive together.
+- Nothing shows "remembered": no banner, no count, nothing to clear. It shows as the absence of the question.
+- **No way back in this build.** Until a book is filed nothing on disk has changed, so an undo is cheap to add later (offer 1). Once a book is filed, a merge belongs to the later rename pass (ruling 21), as for Имаджика and Зелёная миля.
+
+## 7. The row's exit and progress
+
+| Moment | Row | Strip line (polite live region) |
+|---|---|---|
+| Press | Face "Keeping...", hint "Keeping these files separate...", the row's other buttons `aria-disabled`, row size unchanged | none |
+| Done | Hint "Kept as separate books. Each is checked again." Fields, list and path hide. The row leaves at the answer or the next poll (the old candidate is no longer current). | Kept as {n} separate books. Each is checked again. |
+| Refused | Row stays, hint turns `--warning` with the refusal line, nothing recorded | none |
+
+- **Focus** after success is as after Approve: the next row's first working control, else the Status filter, `preventScroll`.
+- **The Title typed on this row is dropped with the row.** Keep does not use it, and a title for something that is no longer one book has no meaning. It does not block the press.
+- **Counts drop within one poll:** the Part of a bigger book chip, All, the shortcut and the Jobs line each lose the set. They change again only as new books need him.
+- **Progress needs no new surface.** The {n} new books count as "still checking" until researched, so the strip's existing line carries them: "Still checking {n} books. More may appear here." (running) or "{n} books are waiting to be checked. Start automatic processing to check them." (not running). A book that needs him appears in this list under its own reason. The rest are filed by the app and show under Audiobook Ready like any book. Ender confirms the new candidates count in that n at the next poll. The empty state "Nothing needs your attention yet. Still checking {n} books." stays true.
+
+## 8. Knock-on: the destination line
+
+On a row that offers Keep, the line's label reads **As one book** instead of "Goes to" (`renderGoesTo`). The path is true only for Approve as one book, and with two buttons "Goes to" reads as a promise for both. "Already there" (taken) is unchanged and every other row keeps "Goes to". The Title field and the "Playback order" list stay: they belong to the join.
+
+## 9. Copy sheet additions (verbatim once built)
+
+| Where | String |
+|---|---|
+| Face | Keep as separate books |
+| Tooltip | Make each file shown its own book. Nothing is joined. Each book is checked again. |
+| Pending face / hint | Keeping... / Keeping these files separate... |
+| Row hint, done | Kept as separate books. Each is checked again. |
+| Strip line, done | Kept as {n} separate books. Each is checked again. |
+| Refused | Keep as separate books was not accepted. Nothing was changed. |
+| Accessible name | Keep as separate books: {title clue} |
+| Destination label, rows with Keep | As one book |
+
+## 10. Changes Ender must make
+
+1. `app.js`: add `separate` to `ASK_LABELS`, `ASK_TIPS`, `ASK_PENDING`, `ASK_DONE` (status null) and `ASK_REFUSED`. `buildAskActions`: kinds `['approve','separate','scan']` when `setCause(ask)`. `askMode`: for `separate`, inert on the panel-edit test only (split it out of `askInert`). `askPress`: a branch for `separate` that sends no values, drops the row's draft and sets the strip line with n. `renderGoesTo`: the "As one book" label.
+2. Route `/api/candidate/keep-separate` with `{library, id, revision}`, answering `{kept: n}`. It re-reads the row at that revision (`changed` as Approve), refuses a row that is not a set hold, calls `groups.record_volumes` with the basis, clears `_needs_cache` as Scan again does, and follows Scan again's busy rule.
+3. Section 5.3: a kept-separate file never returns as Part of a bigger book for this set.
+4. Tests: one fixture per cause (the six of the part-sets check, 8.1), the press, the leave, the no-return, the per-file memory.
+
+## 11. Checks for Futaba (committed build, seeded fixture, nothing on Z:)
+
+1. **Fixture:** the six set causes, plus one single-file numbered-part row, one part set missing a part, one Order unclear and one Files unclear row. Keep is in second place on the six and nowhere else. Control: absent on the unfixed build.
+2. **Press on a four-file seasons set:** the four sources keep their size and time, nothing new appears in Audiobooks Sorted at the press, the row leaves within one poll, the strip line is verbatim with n = 4, and the chip, All, shortcut and Jobs line agree.
+3. **Four books:** four candidates, each with its own proposal. The "Still checking" count rises by 4 at the next poll, in both automatic states. A file with no title shows "{set} {number}" with "Set name + part number." Control: Approve as one book on a sibling fixture still joins.
+4. **No return:** none of the four comes back as Part of a bigger book. Fixture names with a trailing number and without.
+5. **Remembered:** after an app restart and a library scan with the files unchanged, the set is not listed again. Change one file's size or time: that file is judged alone, the other three stay separate, and no row for the set appears.
+6. **Refused:** a forced refusal reads the verbatim line, the row stays and nothing is recorded (the store is unchanged). A file added to the folder after the row was listed gives "This book changed...".
+7. **Pending and edits:** "Keeping..." shows, the other row buttons are `aria-disabled`, the row does not resize. With an unsaved panel edit Keep is inert with its tooltip. A Title typed on the row does not block it and is not used.
+8. **Keyboard, tooltip, rects:** Tab order of section 3; Enter and Space press once; the tooltip is present in the packaged window. At 1440, 1024, 700 and 200% zoom with five buttons: no two rects intersect, no horizontal scroll, focus ring not clipped, button at least 152 x 32, face wraps and never truncates.
+9. **Not in bulk:** Part of a bigger book has no bulk button (Retry selected and Approve as is are both absent).
+
+## 12. Offers (not specced)
+
+1. **Join again:** an undo on kept-separate books before they are filed (remove the file facts, regroup). Cheap now, impossible after filing.
+2. **The same answer for Files unclear** (mixed recordings, title tags name more than one book): these are not whole `.m4b` sets, so they need a split plan, not this store. Offer 3 of the 0.22.0 review.

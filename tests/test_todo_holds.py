@@ -31,6 +31,12 @@ class CauseTests(unittest.TestCase):
         self.assertEqual(todo_causes.order_cause([member('a/1.mp3', track='1.'), member('a/2.mp3', track='2')])['cause'], 'odd_tracks')
         self.assertEqual(todo_causes.order_cause([member('a/1.mp3', track='1'), member('a/2.mp3', track='2')])['cause'], 'unknown')
 
+    def test_every_work_is_sent_so_the_more_count_is_exact(self):
+        # Judy's part-sets copy check N1: "+ n more" counted only up to 8 works.
+        works = [{'name': 'Книга %d' % n, 'files': 2} for n in range(1, 13)]
+        found = todo_causes.files_cause([member('a/1.mp3'), member('a/2.mp3')], [todo_causes.MEMBERSHIP], works=works)
+        self.assertEqual((found['cause'], len(found['works'])), ('works', 12))
+
     def test_files_causes(self):
         M, X = todo_causes.MEMBERSHIP, todo_causes.MIXED
         total = todo_causes.files_cause([member('a/1.mp3', track='1/12'), member('a/2.mp3', track='2/12')], [M])

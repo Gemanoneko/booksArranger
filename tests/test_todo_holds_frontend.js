@@ -42,7 +42,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(get('group-part_of_book').textContent,'Part of a bigger book · 6');assert.equal(get('group-files_unclear').textContent,'Files unclear · 7');
   assert.equal(get('group-order_unclear').textContent,'Order unclear · 5');
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8');
-  for(const [key,tip] of [['part_of_book','Show books that may be only one part of a bigger book.'],['files_unclear',"Show books where the app isn't sure which files belong."],['order_unclear',"Show books where the app isn't sure of the playback order."]])
+  for(const [key,tip] of [['part_of_book','Show books that may be parts of a bigger book.'],['files_unclear',"Show books where the app isn't sure which files belong."],['order_unclear',"Show books where the app isn't sure of the playback order."]])
     assert.ok(html.includes('id="group-'+key+'" type="button" class="quiet attention-group" aria-pressed="false" title="'+tip+'" hidden>'),key);
   assert.equal(get('group-all').textContent,'All · 23');assert.equal(get('attention-shortcut').textContent,'Needs attention · 23');assert.match(get('jobs-status').textContent,/ · 23 need attention$/);
 
@@ -85,7 +85,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // The audio-format gate is named in the refusal line (B5.4).
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Audio format needs an encoding decision',code:'format',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,"The audio format needs a decision the app can't make yet. Select the row to read why.");approveAnswer=null;
+  assert.equal(statusCell(tr).children[0].textContent,"The audio format needs a decision the app can't make yet. Select the row to read why.");
+  // N7: the destination moved since the row showed it (Senua m1): its own line, not "This book changed".
+  approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Destination changed since it was shown: it is now X. Nothing was changed.',code:'moved',row:null})});
+  tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(statusCell(tr).children[0].textContent,'The destination changed. Check the Goes to line and try again.');approveAnswer=null;
 
   // Files unclear: every cause, the "In" folder line and 3 names (files without the title first), mixed albums.
   const flagged=[{name:'Реклама.mp3',folder:'Z:\\Audiobooks\\Дюна',path:'x',flag:true}];
@@ -116,12 +120,29 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const sets=[hold('s1','part_of_book','set_seasons',{parts:3,hours:24.4}),hold('s2','part_of_book','set_book_words',{parts:2}),hold('s3','part_of_book','set_long',{parts:4,hours:32.2}),
     hold('s4','part_of_book','set_authors',{parts:15}),hold('s5','part_of_book','set_unclear',{parts:2}),hold('s6','part_of_book','set_unreadable',{parts:2})];
   paint(sets);
-  assert.deepEqual(sets.map(r=>hint(trOf(r.id))),['The files are seasons of a series. Approve them as one book only if they are one.','The files are named as books of a series. They may be one book or several.',
-    'Joined, these 4 files would run 32.2 hours. Check that they are one book.','The files credit different authors or readers. Check that they are one book.',
-    "These files may be the parts of one book. Their chapters don't settle it.","These files may be the parts of one book. Their chapters couldn't be read."]);
+  // Judy's part-sets copy check (2026-10-25), section 2: the evidence, then what it makes uncertain, in one sentence.
+  assert.deepEqual(sets.map(r=>hint(trOf(r.id))),['Season or episode numbers in the names or chapters suggest separate books.','The names or chapters number the files as books, so they may be separate books.',
+    'Together these 4 files run 32.2 hours, which is long for one book.','The files credit different authors or readers, so they may be separate books.',
+    "The chapters don't show whether these files make one book.","The chapters couldn't be read, so the app can't tell whether these files make one book."]);
   assert.deepEqual(buttonsOf(trOf('cand-s1')).slice(0,2).map(b=>b.textContent),['Approve as one book','Scan again']);
+  // N2: the proposed join order is a numbered "Playback order" list of 5, then "+ n more, listed in the details panel."
+  tr=trOf('cand-s1');assert.ok(texts(tr).includes('Playback order'),'label: '+texts(tr).join(' | '));
+  {const list=walk(statusCell(tr)).find(e=>e.className==='path ask-order');assert.ok(list,'a numbered list');assert.equal(list.children.length,5);assert.ok(texts(tr).includes('+ 7 more, listed in the details panel.'),'more: '+texts(tr).join(' | '));}
+  // N3: the Approve tooltip of a set says the join re-encodes; another Part of a bigger book row keeps its own.
+  assert.equal(buttonsOf(tr)[0].title,'Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.');
   paint(parts);
   tr=trOf('cand-p1');assert.equal(walk(statusCell(tr)).filter(e=>e.type==='text')[0].value,'Колесо Времени','Title always shows here');
+  assert.equal(buttonsOf(tr)[0].title,'File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.');
+  assert.ok(!walk(statusCell(tr)).some(e=>e.className==='path ask-order'),'a single part keeps its file lines');
+  // N4, N5: a part set's missing parts come from its track tags; the "+ n more" pointer names no panel that lacks them.
+  const partsGone=(name,missing,total)=>askRow(name,{kind:'files_missing',also:null,why:'',reasons:['Parts of this book are missing'],fields:named,candidates:[],
+    missing:{folders:['Z:\\Audiobooks\\Незнакомцы'],files:missing.map(n=>'Z:\\Audiobooks\\Незнакомцы\\Part '+n+' of '+total),present:total-missing.length,total,parts:missing},destination:dest('Кунц Дин\\Незнакомцы.m4b')});
+  const gone=[partsGone('m1',[3],3),partsGone('m2',[2,3],3),partsGone('m3',[2,3,4,5],12)];paint(gone);
+  assert.deepEqual(gone.map(r=>hint(trOf(r.id))),["The track tags say there are 3 parts, but part 3 isn't here.","The track tags say there are 3 parts, but 2 aren't here.","The track tags say there are 12 parts, but 4 aren't here."]);
+  assert.ok(texts(trOf('cand-m1')).includes('Part 3 of 3'),'part: '+texts(trOf('cand-m1')).join(' | '));
+  assert.ok(texts(trOf('cand-m3')).includes('+ 1 more.'),'more1: '+texts(trOf('cand-m3')).join(' | '));assert.ok(!texts(trOf('cand-m3')).some(t=>/details panel/.test(t)));
+  paint(parts);
+  tr=trOf('cand-p1');
   assert.deepEqual(buttonsOf(tr).slice(0,2).map(b=>b.textContent),['Approve as one book','Scan again']);assert.ok(!buttonsOf(tr).some(b=>/Change order|Choose files/.test(b.textContent)));
 
   // Also: the next hold, first sentence only; Other's catch-all with its short reason.

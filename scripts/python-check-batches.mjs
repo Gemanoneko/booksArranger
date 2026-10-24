@@ -1,4 +1,4 @@
-// Pure plan/accounting for four isolated workers inside the canonical owner Job.
+// Pure plan/accounting for five isolated workers inside the canonical owner Job.
 const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py','test_web.py','test_merge_http.py','test_blocked_retry.py','test_status_snapshot.py','test_status_read_contention.py','test_startup_published_check.py','test_producer_recovery_http.py','test_attention_repair.py']);
 // 0.21.1: two workers no longer fit the 540 s deadline (2026-10-23, both concurrent: 499 s and 601 s, the real MP3
 // fixture case not included). A third worker gets the same isolated copy, cwd and TEMP as the others. Modules are
@@ -9,6 +9,8 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 // deadline). Every gate module timed alone with the pinned Python, one after another on an idle 32-core machine, sums
 // to 1,461 s (the heavy suites 15-45 % above their 0.21 weights, 0.22.0 suites added). A fourth worker; the weights
 // below are those times, rounded up, for every module of 5 s or more.
+// 2026-10-25: four workers reached 430 of the 432 s the projection allows (real 304-388 s); a fifth worker brings the
+// projection to about 345 s per worker, so new suites fit without recounting. The weights stay the measured times.
 const measuredSeconds={'test_inplace_m4b.py':338,'test_automatic_media.py':111,'test_series_backfill.py':87,'test_iron_skazka.py':72,'test_approve_as_is.py':100,
   'test_destination_admission.py':69,'test_automatic_media_policy.py':63,'test_migration_planning.py':55,'test_standing_admission.py':51,'test_working_lifecycle.py':45,
   'test_retry_intent.py':37,'test_automatic_processing.py':36,'test_working_precision.py':36,'test_output_migration.py':33,'test_source_proofs.py':24,
@@ -19,7 +21,7 @@ const measuredSeconds={'test_inplace_m4b.py':338,'test_automatic_media.py':111,'
   'test_desktop_host.py':6,'test_blocked_retry.py':5,'test_list_speed.py':2,'test_todo_holds.py':20,'test_join_parts.py':8,
   // Senua's 0.22.0 early review: m7 gates test_split_books and test_collection_identity; the review fixes add Approve cases (71 -> 100 s).
   'test_split_books.py':60,'test_collection_identity.py':7,'test_m4b_join.py':25,'test_part_sets.py':48};
-export const PYTHON_WORKERS=4;
+export const PYTHON_WORKERS=5;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}
 // Senua 0.22.0 early review, m5: the projection is a proxy (each module timed alone), so the gate prints what every worker

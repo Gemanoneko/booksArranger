@@ -306,6 +306,23 @@ class PartsStayTogether(unittest.TestCase):
                 files.append(('Unsorted/Ведьмак/%d-%d.mp3'%(disc,n),{'album':'Ведьмак','artist':'Анджей Сапковский','album_artist':reader,'disc':str(disc),'track':str(n),'title':'%s %d'%(work,n)}))
         return files
 
+    def test_the_grouping_line_names_no_person_or_ruling(self):
+        # Judy's part-sets copy check, must-fix 1: the details panel prints this line; no names, dates or rule numbers.
+        sets=[('Unsorted/Нисио Исин - Monogatari Series - Сто историй/%d Хякумоногатари - %s.mp3'%(n,t),{}) for n,t in ((1,'Предисловие переводчика'),(2,'Истории 1-17'))]
+        joined=[('Unsorted/Тихий ветер/%02d.mp3'%n,{'album':'Тихий ветер','artist':a,'track':str(n)}) for n,a in ((1,'Иван Петров'),(2,'Петров Иван'))]
+        parts=[('Нарния/3.%d. Хроники Нарнии. Конь и его мальчик.m4b'%n,{'album':'Конь и его мальчик','artist':'Клайв Льюис','title':'3.%d. Хроники Нарнии. Конь и его мальчик'%n,'track':'%d/2'%n}) for n in (1,2)]
+        lines=[next(iter(groups.build(self.rows(files)).values()))['grouping'] for files in (sets,joined)]
+        from test_split_books import row as catalog_row
+        lines.append(next(iter(groups.build([catalog_row(p,t) for p,t in parts]).values()))['grouping'])
+        self.assertEqual(lines,['One book: files of one folder with the shared start of the numbered file names.','One book: files of one folder with the same album and one author.',
+                                'Parts of one folder that share their album and artist. Their chapters decide whether they are one book.'])
+        # A group stored by an earlier build shows the same wording.
+        for old,new in (('One book (Sergei 2026-10-24, ruling 19): files of one folder with the same album and one author (the parts of one book)',lines[1]),
+                        ('One book (Sergei 2026-10-24, parts stay together): files of one folder with the same title tag','One book: files of one folder with the same title tag.'),
+                        ('Parts of one folder that share their album and artist: their chapters decide whether they are one book (ruling 19)',lines[2]),
+                        ('Per-file embedded/filename identity partition; recording remains unverified','Per-file embedded/filename identity partition; recording remains unverified')):
+            self.assertEqual(groups.shown_grouping(old),new)
+
     def test_g3_one_album_whose_title_tags_name_two_books_is_held_as_files_unclear(self):
         built=groups.build(self.rows(self.witcher()))
         self.assertEqual(len(built),1,list(built));group=next(iter(built.values()))

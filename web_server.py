@@ -665,7 +665,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as error:
                 text=str(error)
                 # Judy 2026-10-24 (0.22.0 review B5.4): a safety gate is named in the row's refusal line.
-                code='changed' if 'Candidate changed' in text or 'Source files changed' in text or 'evidence changed' in text or text.startswith('Destination changed') else 'name_taken' if 'already exists' in text else 'title' if text=='Type a title first.' else 'format' if 'Audio format needs an encoding decision' in text else 'refused'
+                code='changed' if 'Candidate changed' in text or 'Source files changed' in text or 'evidence changed' in text else 'moved' if text.startswith('Destination changed') else 'name_taken' if 'already exists' in text else 'title' if text=='Type a title first.' else 'format' if 'Audio format needs an encoding decision' in text else 'refused'
                 try:row=reviews.enrich(reviews._row(library,id))
                 except ValueError:row=None
                 self.response(409,{'error':text,'code':code,'row':row});return

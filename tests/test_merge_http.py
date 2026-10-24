@@ -96,7 +96,8 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'path':'Без автора\\Тайна.m4b'})[0],200)
         self.merge.approve_book.assert_called_once_with(ID,1,None,None,without_missing=False,choice=None,path='Без автора\\Тайна.m4b')
         self.merge.approve_book=Mock(side_effect=ValueError('Destination changed since it was shown: it is now X\\Y.m4b. Nothing was changed.'))
-        self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'path':'Без автора\\Тайна.m4b'})[1]['code'],'changed')
+        # Judy's part-sets copy check N7: its own code, so the row says the destination moved, not that the book changed.
+        self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'path':'Без автора\\Тайна.m4b'})[1]['code'],'moved')
         self.merge.approve_book=Mock(return_value={'job_id':ID,'row':{'id':ID,'revision':3}})
         self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'choice':'maybe'})[0],400)
         self.merge.approve_book=Mock(side_effect=ValueError('An audiobook already exists at this path. Review it or choose a different reviewed destination.'))
