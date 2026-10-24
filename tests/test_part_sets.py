@@ -131,6 +131,20 @@ class GroupingTests(unittest.TestCase):
         built = groups.build(rows, volumes=frozenset(r['path'] for r in rows))
         self.assertEqual(len(built), 2); self.assertTrue(all(scope.endswith('\x1fVolume of a series') for scope in built))
 
+    def test_review_n9_parts_of_different_recordings_are_never_a_set(self):
+        # Senua's 0.22.0 review, N9 (M19): admission re-checks audio profiles only for split books, and the automatic policy
+        # resamples mixed rates and channels, so this grouping refusal is the only guard against joining two recordings.
+        def files(profiles=(None, None), readers=('', '')):
+            from test_split_books import AAC
+            return [catalog_row('Pern/%s.m4b' % title, dict({'album': 'Перн', 'artist': 'Энн Маккефри', 'title': title, 'track': '%d/2' % n},
+                                **({'narrator': readers[n - 1]} if readers[n - 1] else {})), profile=profiles[n - 1] or AAC)
+                    for n, title in ((1, 'Песни Перна'), (2, 'Певица Перна'))]
+        self.assertEqual([bool(g.get('part_set')) for g in groups.build(files()).values()], [True], 'positive control: one recording is one set')
+        for label, rows in (('audio profiles differ', files(profiles=(None, ('aac', '22050', 2)))), ('readers differ', files(readers=('Чтец Один', 'Чтец Два')))):
+            with self.subTest(label):
+                built = groups.build(rows)
+                self.assertEqual(len(built), 2, list(built)); self.assertFalse(any(g.get('part_set') for g in built.values()))
+
     def test_the_same_part_twice_is_never_a_set(self):
         # Live 2026-10-24: "Неисповедимый путь 1.m4b" and "2.m4b" each sit twice in one folder, once with the "й" composed and
         # once decomposed (two copies of each file); joining them would play the book twice.
@@ -196,6 +210,9 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         result = self.research(rows[0])
         self.assertEqual((result['reasons'], result['part_set']['decision']), (['Separate books of a series'], 'volumes'))
         self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1], 'regrouped: each volume is its own book')
+        # Senua's 0.22.0 review, N9 (M21): volumes the chapters decided are not "kept by you", so each still takes the
+        # part-of-a-set rule at admission; only Sergei's Keep skips it (the Keep tests check the other side).
+        self.assertEqual([r.get('volume_of_set') for r in self.rows()], [{'kept': False}] * 2)
 
     def test_a_set_the_chapters_do_not_settle_is_asked_and_approved_as_one_book(self):
         for n in (1, 2):
@@ -237,6 +254,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         coverage = self.service.todo_coverage()
         self.assertEqual((coverage['listed'], coverage['still_checking']), (0, 2), coverage)
         rows = self.rows(); self.assertEqual(sorted(len(r['members']) for r in rows), [1, 1])
+        self.assertEqual([r.get('volume_of_set') for r in rows], [{'kept': True}] * 2, 'kept by Sergei')
         # Confirm 1: neither file comes back as "Part of a bigger book" for this set.
         for new in rows:
             result = self.research(new)
@@ -264,6 +282,19 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
             result = self.research(new)
             self.assertNotIn('One part of a bigger book', result['reasons'], result['reasons'])
         self.assertEqual(self.service.reviews.page(status='output_attention', group='part_of_book')['rows'], [])
+
+    def test_review_n9_keep_refuses_a_set_the_app_did_not_ask_about(self):
+        # Senua's 0.22.0 review, N9 (M07): the UI shows Keep only on asked set rows, so this server check is the only guard
+        # against a stale or hand-made request on a set the app has not asked about (here: not researched yet).
+        self.seasons()
+        row = self.start()[0]
+        self.assertEqual((len(row['members']), bool(row.get('part_set'))), (2, True), 'positive control: a set row')
+        with self.assertRaisesRegex(ValueError, 'not a set of parts asked about'):
+            self.service.keep_separate(row['id'], row['revision'])
+        from scanner import connect
+        with connect(self.inv.database) as db:
+            recorded = db.execute("SELECT count(*) FROM sqlite_master WHERE name='part_volumes'").fetchone()[0] and db.execute('SELECT count(*) FROM part_volumes').fetchone()[0]
+        self.assertEqual(recorded, 0, 'nothing recorded'); self.assertEqual([len(r['members']) for r in self.rows()], [2])
 
     def test_keep_never_reports_success_without_the_split(self):
         # N1: whatever keeps the set together, Keep refuses with nothing recorded instead of answering "Kept as 2".
