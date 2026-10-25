@@ -456,12 +456,15 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((self.shown(preview), preview['last_copy']), ([('Железный ад 1.mp3', 'audio'), ('source00000.mp3', 'working'), ('source00001.mp3', 'working')], 'some'))
 
     # ---------------------------------------------------------------- ruling 24: other files and folders left empty
-    def alone(self, folder=('Сборники', 'Новая плоть (2016)')):
+    def alone(self, folder=('Сборники', 'Новая плоть (2016)'), beside=None):
         """A three-part book alone in its folder, one part gone (a Missing files row), with a cover and a text file; by
-        default in Сборники, which is directly inside the source folder (Judy's update spec 2.1 example)."""
+        default in Сборники, which is directly inside the source folder (Judy's update spec 2.1 example). beside(place)
+        adds files before the first scan."""
         place = self.audio.joinpath(*folder)
         self.parts = [tone(place / ('Новая плоть %d.mp3' % n), self.cover, album='Новая плоть', artist='Иван Петров', track='%d/3' % n) for n in (1, 2, 3)]
         (place / 'cover.jpg').write_bytes(b'cover'); (place / 'info.txt').write_text('info', encoding='utf-8')
+        if beside:
+            beside(place)
         (self.sorted / 'Петров Иван').mkdir(); (self.sorted / 'Петров Иван' / 'Другая книга - Петров Иван.m4b').write_bytes(b'finished')
         self.start()
         self.parts[2].unlink()
@@ -586,6 +589,35 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         row = self.book()
         preview = self.service.delete_preview(row['id'], row['revision'])
         self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
+
+    def test_a_folder_whose_subfolder_holds_another_book_keeps_its_cover_and_text_files(self):
+        # Senua's N18, probe A: Кинг\Оно.mp3, Кинг\folder.jpg, Кинг\notes.txt and Кинг\Мизери\01.mp3, another book. Before,
+        # only the subfolder stayed and the cover and text file were listed to go; nothing says whose cover that is.
+        row, place = self.alone(beside=lambda place: tone(place / 'Мизери' / '01.mp3', self.cover, album='Мизери', artist='Стивен Кинг'))
+        self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 2}, 'the offer counts only the audio')
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
+        self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['cover.jpg', 'info.txt', 'Мизери'])
+        self.assertTrue((place / 'Мизери' / '01.mp3').is_file(), 'the other book untouched')
+
+    def test_a_subfolder_with_audio_no_book_holds_keeps_the_cover_and_text_files(self):
+        # N18: a subfolder holding a recording, here in a format the app does not convert, is no file of this book.
+        def bonus(place):
+            (place / 'Бонус').mkdir(); (place / 'Бонус' / 'Интервью.ape').write_bytes(b'MAC ' + bytes(64))
+        row, place = self.alone(beside=bonus)
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
+
+    def test_audio_in_a_format_the_app_does_not_convert_beside_the_book_stays(self):
+        # Senua's N18, probe B: Книга\Другая запись.ape beside the book was listed as one of its other files. It is
+        # audio, so the folder holds another recording: it, the cover and the text file stay.
+        row, place = self.alone(beside=lambda place: (place / 'Другая запись.ape').write_bytes(b'MAC ' + bytes(64)))
+        self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 2}, 'the offer counts only the audio')
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
+        self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['cover.jpg', 'info.txt', 'Другая запись.ape'])
 
     def test_a_cover_another_book_uses_stays_and_the_text_file_goes(self):
         # Ruling 24: a cover another book's job was made with is that book's too; it stays (and so does the folder), the
@@ -719,6 +751,95 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
         result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
         self.assertEqual((result['failed'], result['forgotten']), ([], True), 'control: with the proof whole, the press goes through')
+
+    def free(self, lock):
+        """True when another thread can take the lock now (the press's own thread could take an RLock it holds)."""
+        got = []
+        def probe():
+            got.append(lock.acquire(blocking=False))
+            if got[0]:
+                lock.release()
+        thread = threading.Thread(target=probe); thread.start(); thread.join()
+        return got[0]
+
+    def test_remove_this_copy_proves_before_it_takes_the_apps_locks(self):
+        # Senua's N19: the press hashed the copy and the audiobook holding operation_lock and group_lock, so the status poll
+        # (merge.state takes group_lock), Approve, Keep and the list waited for the whole proof. Now neither lock is held
+        # while it hashes; every proof still runs (each copy file, then the audiobook), and the press goes through.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        digest, valid, seen = audio_pipeline.digest, self.service._output_valid, []
+        def hashing(path, stop=None, on_bytes=None):
+            seen.append((Path(path).name, self.free(self.service.operation_lock), self.free(self.inv.group_lock)))
+            return digest(path, stop, on_bytes)
+        def checking(record, stop=None, pace=None):
+            seen.append((Path(record['final_path']).name, self.free(self.service.operation_lock), self.free(self.inv.group_lock)))
+            return valid(record, stop, pace)
+        with mock.patch.object(audio_pipeline, 'digest', hashing), mock.patch.object(self.service, '_output_valid', checking):
+            result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(seen, [('01.mp3', True, True), ('02.mp3', True, True), (final.name, True, True)], 'each proof once, no lock held')
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (3, [], True))
+        self.assertTrue(final.is_file())
+
+    def test_closing_the_app_stops_remove_this_copy_while_it_proves_and_nothing_is_deleted(self):
+        # N19: drain and close set every press's stop event; the copy's proof had its own, which nothing set, so Quit waited
+        # for the hashes and the press then went on to remove the copy. Now the proof stops and nothing is deleted.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        before, digest = listing(place), audio_pipeline.digest
+        def closing(path, stop=None, on_bytes=None):
+            self.service.drain()  # Quit, while the press reads the first file
+            return digest(path, stop, on_bytes)
+        with mock.patch.object(audio_pipeline, 'digest', closing), self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(refused.exception.code, 'busy')
+        self.assertEqual(listing(place), before, 'nothing deleted')
+
+    def test_closing_the_app_stops_the_copy_preview_too(self):
+        # N19: the preview proves the copy the same way; Quit no longer waits for its hashes either.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        digest = audio_pipeline.digest
+        def closing(path, stop=None, on_bytes=None):
+            self.service.drain()
+            return digest(path, stop, on_bytes)
+        with mock.patch.object(audio_pipeline, 'digest', closing):
+            preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        self.assertEqual(((preview['refusal'] or {}).get('code'), preview['files']), ('busy', []))
+
+    def test_a_copy_file_changed_after_its_proof_refuses_the_press(self):
+        # N19, every proof kept: the proof now runs before the press takes the locks, and under them each file it hashed
+        # must be unchanged since (size, time, identity). A copy file rewritten after its hash, same size: refused.
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        member = place / '01.mp3'; data = member.read_bytes()
+        valid = self.service._output_valid
+        def rewritten(record, stop=None, pace=None):
+            answer = valid(record, stop, pace)
+            member.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # after the copy's files were hashed
+            return answer
+        with mock.patch.object(self.service, '_output_valid', rewritten), self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(refused.exception.code, 'not_identical')
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['01.mp3', '02.mp3', 'cover.jpg'], 'nothing deleted')
+
+    def test_a_copy_offer_withheld_while_the_audiobook_was_away_comes_back_without_a_scan(self):
+        # Futaba's 0.22.0 QA, m-15: Confirm refused while the Sorted drive was away; the list read during the outage had
+        # no offer, and with the drive back the quiet app reused that page (no catalog commit) for up to 5 minutes: the
+        # button came back only after a scan or a restart. Now such a page is read again within WORKING_MAX_AGE.
+        copy, place, final = self.arranged_with_copy()
+        page = lambda: next(r for r in self.service.cached_page(100, 0, '', 'output_attention')['rows'] if r['id'] == copy['id'])
+        self.assertIn('copy', page()['ask'], 'positive control: the offer')
+        away = final.with_name('away.m4b'); final.rename(away)  # the drive goes
+        self.service.invalidate_status()  # the refused Confirm was a control: the next poll reads the list again
+        self.assertNotIn('copy', page()['ask'], 'no offer while the audiobook is out of reach')
+        away.rename(final)  # the drive is back: no catalog commit
+        self.assertNotIn('copy', page()['ask'], 'positive control: the quiet page is reused')
+        real = merge_service.time.monotonic
+        with mock.patch.object(merge_service.time, 'monotonic', side_effect=lambda: real() + merge_service.WORKING_MAX_AGE + 1):
+            self.assertIn('copy', page()['ask'], 'back within 30 s, no scan or restart')
 
     def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):
         copy, place, final = self.arranged_with_copy(possible=True)

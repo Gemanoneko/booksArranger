@@ -10,6 +10,10 @@ import groups
 from source_config import normalize_sources, contains as source_contains
 
 DEFAULT_ROOTS = {'Audiobooks': r'Z:\Audiobooks', 'Podcasts': r'Z:\Audiobooks\Podcasts', 'Ebooks': r'Y:\Books\Books'}
+# A file or folder whose catalog evidence changed while it was read (a regroup, a review saved) is read again, up to
+# HOLD_RETRIES more times, HOLD_WAIT seconds apart; then the scan stops, resumable, never "failed" (0.22.1).
+HOLD_RETRIES = 3
+HOLD_WAIT = 0.5
 
 def fresh_stat(path):
     """Fingerprint the opened source, without reading or modifying its contents."""
@@ -21,6 +25,9 @@ def _same_source(before, after):
         raise OSError('File changed during read; try a fresh scan after it finishes arriving; '
             f'before size={before.st_size}, modified_ns={before.st_mtime_ns}, identity={before.st_dev}:{before.st_ino}; '
             f'after size={after.st_size}, modified_ns={after.st_mtime_ns}, identity={after.st_dev}:{after.st_ino}')
+
+class _Held(Exception):
+    """A scan task whose catalog evidence changed under each of its reads (HOLD_RETRIES): the scan stops, resumable."""
 
 def _has_retirements(connection):
     return bool(connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_retirements'").fetchone())
@@ -267,9 +274,9 @@ class Inventory:
         self.stop_event.set()
 
     def _run(self, label, root, generation):
-        from catalog_contention import CatalogHold,file_token,remember_busy_failure,scan_guard,write
+        from catalog_contention import CatalogHold,file_token,is_busy,remember_busy_failure,scan_guard,write
         import contextlib,reacquire_sources
-        connection=None;task=None;expected=None
+        connection=None;task=None
         failures=getattr(self,'_catalog_failures',{});failures.pop(root,None);self._catalog_failures=failures
         reacquire_lease=contextlib.ExitStack()
         def pending(db):
@@ -277,6 +284,9 @@ class Inventory:
             if not row or row['generation']!=generation or row['state']!='scanning':return False
             if task:db.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=? AND state='running'",(root,generation,task['path']))
             return True
+        def current():
+            row=connection.execute('SELECT generation,state FROM jobs WHERE root=?',(root,)).fetchone()
+            return bool(row) and row['generation']==generation and row['state']=='scanning'
         try:
             connection=connect(self.database)
             source_boundary=reacquire_lease.enter_context(reacquire_sources.root_scan_lease(connection,root))
@@ -314,31 +324,46 @@ class Inventory:
                     db.execute("UPDATE queue SET state='running' WHERE root=? AND generation=? AND path=?",(root,generation,task['path']))
                     db.execute('UPDATE jobs SET current=? WHERE root=? AND generation=?',(task['path'],root,generation))
                 write(self.database,claim,self.stop_event)
-                path=task['path'];expected=file_token(connection,root,path)
-                try:
-                    if task['directory']:self._directory(connection,label,root,generation,path)
-                    else:self._file(connection,label,root,generation,path)
-                except (ScanStopped,InterruptedError):raise
-                except (CatalogHold,sqlite3.Error):raise
-                except (OSError,ValueError,TimeoutError) as error:
-                    # Database/CAS exceptions never enter this source-read error branch.
-                    message=str(error);kind,arrival=self._classify(label,root,path) if not task['directory'] else ('',False)
-                    def source_error(db):
-                        scan_guard(db,root,generation,path,task['directory'])
-                        if file_token(db,root,path)!=expected:raise CatalogHold('Catalog evidence changed during source error; review preserved')
-                        db.execute("UPDATE queue SET state='error' WHERE root=? AND generation=? AND path=?",(root,generation,path))
-                        db.execute('UPDATE jobs SET errors=errors+1,current=? WHERE root=? AND generation=?',(path+': '+message,root,generation))
-                        self._outcome(db,root,generation,path,task['directory'],message)
-                        if not task['directory']:
-                            db.execute('UPDATE jobs SET checked=checked+1 WHERE root=? AND generation=?',(root,generation))
-                            changed=db.execute("UPDATE files SET error=?,review='' WHERE root=? AND path=?",(message,root,path))
-                            if not changed.rowcount:db.execute("""INSERT INTO files(root,path,size,modified,seen,kind,arrival,metadata,error)
-                              VALUES(?,?,0,0,?,?,?,?,?)""",(root,path,generation,kind,int(arrival),json.dumps({'notes':['File unavailable or changed during read; inspect before arranging']}),message))
-                    write(self.database,source_error,self.stop_event)
+                path=task['path']
+                def read():
+                    expected=file_token(connection,root,path)
+                    try:
+                        if task['directory']:self._directory(connection,label,root,generation,path)
+                        else:self._file(connection,label,root,generation,path)
+                    except (ScanStopped,InterruptedError):raise
+                    except (CatalogHold,sqlite3.Error):raise
+                    except (OSError,ValueError,TimeoutError) as error:
+                        # Database/CAS exceptions never enter this source-read error branch.
+                        message=str(error);kind,arrival=self._classify(label,root,path) if not task['directory'] else ('',False)
+                        def source_error(db):
+                            scan_guard(db,root,generation,path,task['directory'])
+                            if file_token(db,root,path)!=expected:raise CatalogHold('Catalog evidence changed during source error; review preserved')
+                            db.execute("UPDATE queue SET state='error' WHERE root=? AND generation=? AND path=?",(root,generation,path))
+                            db.execute('UPDATE jobs SET errors=errors+1,current=? WHERE root=? AND generation=?',(path+': '+message,root,generation))
+                            self._outcome(db,root,generation,path,task['directory'],message)
+                            if not task['directory']:
+                                db.execute('UPDATE jobs SET checked=checked+1 WHERE root=? AND generation=?',(root,generation))
+                                changed=db.execute("UPDATE files SET error=?,review='' WHERE root=? AND path=?",(message,root,path))
+                                if not changed.rowcount:db.execute("""INSERT INTO files(root,path,size,modified,seen,kind,arrival,metadata,error)
+                                  VALUES(?,?,0,0,?,?,?,?,?)""",(root,path,generation,kind,int(arrival),json.dumps({'notes':['File unavailable or changed during read; inspect before arranging']}),message))
+                        write(self.database,source_error,self.stop_event)
+                for held in range(HOLD_RETRIES+1):
+                    try:
+                        read();break
+                    except CatalogHold as hold:
+                        # Futaba's 0.22.0 QA, O-6: after a dropped root came back, the first scan ended "failed"
+                        # (7 unresolved, "...changed during read; task remains pending"): one task whose catalog
+                        # evidence changed between its read and its save (the app regrouped, or a review was saved,
+                        # meanwhile) failed the whole scan. The task is read again with fresh evidence; one whose
+                        # evidence keeps changing stops the scan, resumable (_Held). A busy catalog (bounded retries
+                        # spent) or another generation's hold is raised as before.
+                        if is_busy(hold.__cause__) or not current():raise
+                        if held==HOLD_RETRIES:raise _Held()
+                        if self.stop_event.wait(HOLD_WAIT):raise ScanStopped()
             def stopped(db):
                 if pending(db):db.execute("UPDATE jobs SET state='stopped' WHERE root=? AND generation=? AND state='scanning'",(root,generation))
             write(self.database,stopped)
-        except (ScanStopped,InterruptedError):
+        except (ScanStopped,InterruptedError,_Held):
             try:
                 def stopped(db):
                     if pending(db):db.execute("UPDATE jobs SET state='stopped' WHERE root=? AND generation=? AND state='scanning'",(root,generation))

@@ -10,6 +10,11 @@ from pathlib import Path
 
 class BoundaryError(ValueError):pass
 
+class AncestorUnavailable(BoundaryError):
+    """A folder on the way to the destination is not there and may not be created here: the drive or share is away,
+    or the folder is gone. Still a BoundaryError (every caller refuses exactly as before); typed so a conversion that
+    lost its drive can be offered Retry once the folder is back (audio_jobs.failure_cause)."""
+
 class FileInUse(BoundaryError):
     """The exact file is open in another program without the sharing this check needs (ERROR_SHARING_VIOLATION).
     Still a BoundaryError: every caller keeps refusing exactly as before. It proves nothing unsafe about the file,
@@ -71,7 +76,7 @@ class DirectoryBoundary:
                 if index:current=current/parts[index]
                 if not current.exists():
                     if not self.create or not current.is_relative_to(self.root):
-                        raise BoundaryError('An inspected destination ancestor is unavailable')
+                        raise AncestorUnavailable('An inspected destination ancestor is unavailable')
                     current.mkdir()
                 if current.is_symlink() or os.path.isjunction(current):
                     raise BoundaryError('Destination ancestor is a symlink or junction')

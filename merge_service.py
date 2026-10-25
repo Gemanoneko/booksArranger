@@ -36,7 +36,7 @@ CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused
 QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
 WORKING_MAX_AGE=30.0 # The same bound while any listed row carries leftover working files: files removed outside the app
-# show within a minute, not five (RefusedRetry follow-up 2, section 2.6).
+# show within a minute, not five (RefusedRetry follow-up 2, section 2.6); or a book stopped by a drive that went away.
 WORKING_RECHECK=20.0 # Seconds a classified working folder is reused while its listing is unchanged (it stats the originals).
 CHECK_REFRESH=10.0 # Seconds between status refreshes while the M4B check pass finishes checks (follow-up 2, section 3).
 _QUIET_LOCK=threading.Lock()
@@ -509,17 +509,20 @@ class MergeService:
         return value
 
     def cached_page(self,limit,offset,search,status,group=None):
-        """The book list for polling: a quiet app reuses the identical page (see status_snapshot)."""
+        """The book list for polling: a quiet app reuses the identical page (see status_snapshot). A page the list marks
+        'recheck' (an offer withheld while its audiobook was out of reach: Futaba's 0.22.0 QA, m-15) is reused for
+        WORKING_MAX_AGE at most: a drive coming back is no catalog commit."""
         key=(limit,offset,search,status,group);token=self._quiet_token(True)
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_pages',{}).get(key)
-            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
         value=self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status)
+        recheck=isinstance(value,dict) and value.pop('recheck',False) is True
         if token is not None and self._quiet_token()==token:
             with _QUIET_LOCK:
                 pages=self.__dict__.setdefault('_quiet_pages',{})
                 if len(pages)>=16:pages.clear()
-                pages[key]=(token,time.monotonic(),copy.deepcopy(value))
+                pages[key]=(token,time.monotonic(),copy.deepcopy(value),WORKING_MAX_AGE if recheck else QUIET_MAX_AGE)
         return value
 
     def quiet_max_age(self):
@@ -1293,7 +1296,8 @@ class MergeService:
                 if isinstance(item.get('working'),dict) and item['working'].get('state')=='blocked':
                     item['producer_recovery']=recovery.status(job_id)
                     if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''};item['group']='retry'  # one predicate: an enabled Retry the bulk path accepts
-        if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) for item in summary.values())
+        # A drive that comes back (cause 'unreachable', 0.22.1) is no catalog commit either: its Retry shows within WORKING_MAX_AGE.
+        if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) or item.get('cause')=='unreachable' for item in summary.values())
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
@@ -2383,6 +2387,14 @@ class MergeService:
             else:author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
         self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
+
+    def retract_author_rule(self,rule_id):
+        """Senua's 0.22.0 review, m6: Sergei takes back one author rule, a seed included (author_rules.retract). Every held
+        book whose research it decided is researched again, so it is asked again. Touches no file. Raises ValueError
+        with nothing changed; returns {'retracted', 'requeued'}."""
+        import author_rules
+        with connect(self.inventory.database) as db:author_rules.retract(db,rule_id,actor='user',source='Sergei (taken back)')
+        return {'retracted':rule_id,'requeued':len(self._continue_after_rule())}
 
     def _continue_after_rule(self,skip=None):
         """Futaba's 0.22.0 QA, M-1: a run visits a book once, so a book whose question a new rule answers (the partner of a

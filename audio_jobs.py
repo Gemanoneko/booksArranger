@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import sqlite3
 import time
 import threading
@@ -43,12 +44,18 @@ def _failure_details(error, stage, now=None):
         details['sqlite_errorname'] = getattr(error, 'sqlite_errorname', None)
     if isinstance(error, OSError) and type(error.errno) is int:
         details['errno'] = error.errno  # typed, so a full disk is told apart without reading the message
+    if isinstance(error, OSError) and type(getattr(error, 'winerror', None)) is int:
+        details['winerror'] = error.winerror  # typed, so a drive or share that went away is told apart (UNREACHABLE)
     if getattr(error, 'tag_repair_checked', False) is True:
         details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
     return details
 
 
 REVISION_GUARD_REFUSAL = "Source changed — review required"  # the worker's own guard, before any work is published
+ANCESTOR_UNAVAILABLE = 'An inspected destination ancestor is unavailable'  # native_io.AncestorUnavailable's text
+# Windows errors of a drive or share that went away: the device not ready; a network path, name or network that is gone,
+# absent or unreachable; an unexpected network error; a semaphore timeout.
+UNREACHABLE = frozenset({21, 51, 53, 59, 64, 67, 121, 1222, 1231})
 
 
 def source_remedy(row,journal,manifest):
@@ -81,7 +88,8 @@ def tag_repair_retry(row):
 
 
 def failure_cause(row, journal):
-    """'busy', 'space' or 'source' when a recorded pre-publication failure is one a Retry can resolve; otherwise None.
+    """'busy', 'space', 'source' or 'unreachable' when a recorded pre-publication failure is one a Retry can resolve;
+    otherwise None.
 
     Typed where the record is typed (sqlite_errorcode, errno). Older records carry no code, so two
     exact, fixed shapes are accepted: SQLite's own SQLITE_BUSY text as the whole reason of an untyped
@@ -105,6 +113,34 @@ def failure_cause(row, journal):
     # before any work, so a source whose content really changed stops again with the same reason.
     if kind == 'ValueError' and row.get('reason') == REVISION_GUARD_REFUSAL:
         return 'source'
+    # 0.22.1 (Futaba's 0.22.0 QA, O-3): the drive or share of the job's folders went away while it ran, before anything
+    # was copied into Sorted (a failure in 'copying' may leave a partial file there, so it stays out). The worker runs
+    # every check again on a Retry, which is offered once every folder of the job is reachable (_retry_allowed). Typed
+    # (the class, or the Windows error); a record from before the typed class: the exact BoundaryError text.
+    if failure.get('stage') not in ('copying', 'publishing'):
+        winerror = failure.get('winerror')
+        if kind == 'AncestorUnavailable' or winerror in UNREACHABLE or kind == 'BoundaryError' and row.get('reason') == ANCESTOR_UNAVAILABLE:
+            return 'unreachable'
+        reason = str(row.get('reason') or '')
+        if winerror is None and kind in ('OSError', 'FileNotFoundError') and any(reason.startswith('[WinError %d] ' % code) for code in UNREACHABLE):
+            return 'unreachable'
+    return None
+
+
+def unreachable(manifest, reach=None):
+    """The first folder of this job the app cannot reach now, else None: the folder it publishes into (its output root),
+    then each source's folder. Read-only: one directory check each, never a file read. reach: {folder: reachable}, shared
+    by the rows of one list, so a drive that is away is asked once."""
+    output = manifest.get('output_root', manifest.get('root'))
+    if not output and manifest.get('destination'):
+        output = os.path.splitdrive(str(manifest['destination']))[0] + os.sep
+    folders = [output] + [os.path.dirname(str(s.get('path') or '')) for s in manifest.get('sources') or [] if isinstance(s, dict)]
+    reach = {} if reach is None else reach
+    for folder in dict.fromkeys(f for f in folders if f):
+        if folder not in reach:
+            reach[folder] = os.path.isdir(folder)
+        if not reach[folder]:
+            return folder
     return None
 
 
@@ -137,6 +173,7 @@ RETRY_CLOSING = 'Books Arranger is closing. Retry after it restarts.'
 RETRY_SCANNING = 'Scanning is running. Retry when it stops.'
 RETRY_QUEUED = 'Queued again by Retry.'
 RETRY_SPACE = 'Not enough free disk space yet. Free up space, then retry.'
+RETRY_UNREACHABLE = "Can't reach %s. Retry when it's connected again."  # the folder (audio_jobs.unreachable)
 # M4B Retry and Repair admit a new child job, and only while no audiobook is being created.
 RETRY_WORKER_BUSY = 'Retry can start when the current audiobook finishes.'
 REPAIR_WORKER_BUSY = 'Repair can start when the current audiobook finishes.'
@@ -681,14 +718,17 @@ class AudioJobs:
                 return None  # E7: the worker's archive step would refuse and hold the queue again
         return manifest
 
-    def _retry_allowed(self, row, cause, manifest, admission_clear, space_ready):
-        """E8: the cause is clear now. Read-only; returns (allowed, reason)."""
+    def _retry_allowed(self, row, cause, manifest, admission_clear, space_ready, reach=None):
+        """E8: the cause is clear now. Read-only; returns (allowed, reason). reach: one list's folder checks (unreachable)."""
         try:
             admission_clear(copy.deepcopy(row))
         except Exception:
             return False, RETRY_FILES_PRESENT
         if cause == 'space' and (space_ready is None or space_ready(manifest) is not True):
             return False, RETRY_SPACE
+        away = unreachable(manifest, reach) if cause == 'unreachable' else None
+        if away:
+            return False, RETRY_UNREACHABLE % away
         return True, ''
 
     def _m4b_working_clear(self, job_id):
@@ -751,7 +791,7 @@ class AudioJobs:
             readmission = m4b_readmission.status(db, [row['job_id'] for row in rows]) if rows else {}
             import reacquire_sources
             reacquire={row['job_id']:reacquire_sources.project(db,row['job_id']) for row in rows}
-        summary = {}
+        summary, reach = {}, {}
         worker = bool(self._thread and self._thread.is_alive())
         for row in rows:
             try:
@@ -824,7 +864,7 @@ class AudioJobs:
             elif retry and group == 'retry' and shapes[row['job_id']] is None:
                 value['retry'] = {'allowed': True, 'reason': ''}  # M4B: accepted now, runs right after the current book
             elif retry and group == 'retry' and admission_clear is not None:
-                allowed, reason = self._retry_allowed(row, cause, shapes[row['job_id']], admission_clear, space_ready)
+                allowed, reason = self._retry_allowed(row, cause, shapes[row['job_id']], admission_clear, space_ready, reach)
                 value['retry'] = {'allowed': allowed, 'reason': reason}
             # Leftover working files (Follow-up 2, section 2): cleanable rows keep their natural state and Retry/Repair
             # clear the files first; blocked files stop a row that would otherwise offer Retry or Repair (group Other, no

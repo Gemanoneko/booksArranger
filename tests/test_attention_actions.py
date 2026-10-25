@@ -2,7 +2,7 @@
 
 Private SQLite/folder fixtures and doubles; no library, catalog copy or media tools.
 """
-import copy,errno,json,sqlite3,sys,tempfile,threading,time,unittest,uuid
+import copy,errno,json,os,sqlite3,sys,tempfile,threading,time,unittest,uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
@@ -14,6 +14,7 @@ from automatic_processing import AutomaticProcessing
 from scanner import connect
 from scan_wait import finish_scan
 from test_blocked_retry import Queue,AREA
+import test_approve_as_is
 from web_server import activities
 
 
@@ -40,6 +41,27 @@ class CauseTests(unittest.TestCase):
         self.assertEqual(failure_cause(*self.failed(ValueError('Source changed — review required'))),'source')
         self.assertIsNone(failure_cause(*self.failed(ValueError('Source changed — review required: Z:/book/01.mp3'))))
         self.assertIsNone(failure_cause({'reason':'Source changed — review required'},{'failure':{'exception_class':'ValidationError'}}))
+    def test_a_drive_that_went_away_before_the_copy_into_sorted_is_unreachable(self):
+        # 0.22.1, Futaba's 0.22.0 QA, O-3: the conversion lost its drive; typed by class or Windows error, never the text.
+        import native_io
+        self.assertEqual(failure_cause(*self.failed(native_io.AncestorUnavailable('An inspected destination ancestor is unavailable'))),'unreachable')
+        gone=OSError(None,'The specified network name is no longer available',None,64)
+        self.assertEqual((_failure_details(gone,'creating')['winerror'],failure_cause(*self.failed(gone))),(64,'unreachable'))
+        old={'failure':{'exception_class':'BoundaryError','retryable':False,'stage':'checking'}}
+        self.assertEqual(failure_cause({'reason':'An inspected destination ancestor is unavailable'},old),'unreachable','a 0.22.0 record: the exact text')
+        legacy={'failure':{'exception_class':'OSError','retryable':True,'stage':'checking sources'}}
+        self.assertEqual(failure_cause({'reason':'[WinError 53] The network path was not found'},legacy),'unreachable')
+        for reason in ('Destination ancestor is a symlink or junction','An inspected destination ancestor is unavailable: x'):self.assertIsNone(failure_cause({'reason':reason},old),reason)
+        self.assertIsNone(failure_cause(*self.failed(OSError(None,'denied',None,5))),'access denied is not a drive away')
+        copying={'failure':_failure_details(gone,'copying')}
+        self.assertIsNone(failure_cause({'reason':str(gone)},copying),'a partial copy may be in Sorted: no Retry')
+    def test_the_boundary_types_a_missing_drive(self):
+        import native_io
+        drive=next(letter+':\\' for letter in 'QRSTUVWXYJKLMNOP' if not os.path.exists(letter+':\\'))
+        with self.assertRaises(native_io.AncestorUnavailable) as caught:
+            with native_io.DirectoryBoundary(drive+'Sorted',drive+'Sorted\\Author',create=True):pass
+        self.assertEqual(str(caught.exception),'An inspected destination ancestor is unavailable')
+        self.assertIsInstance(caught.exception,native_io.BoundaryError,'every caller refuses as before')
 
 
 class Base(unittest.TestCase):
@@ -89,6 +111,26 @@ class RetryResolvableTests(Base):
         self.q.jobs._stop.clear();self.q.guard=lambda manifest:True
         self.assertEqual(self.q.retry(job_id)['requeued'],True);self.q.jobs.resume();self.q.wait()
         self.assertEqual(self.q.runs[0][0],job_id,'with matching content the book runs')
+    def test_a_lost_drive_offers_retry_once_every_folder_is_back_and_requeues_the_same_job(self):
+        # O-3: before, "An inspected destination ancestor is unavailable" was group Other with no Retry for good.
+        import native_io
+        sorted_root=self.q.base/'nas'/'Sorted';sources=self.q.base/'library'
+        manifest=self.q.manifest(output_root=str(sorted_root),root=str(sources))
+        job_id,attempt=self.failed_job(native_io.AncestorUnavailable('An inspected destination ancestor is unavailable'),manifest=manifest,stage='checking')
+        away=audio_jobs.RETRY_UNREACHABLE%sorted_root
+        self.assertEqual(self.q.statuses(),{job_id:{'allowed':False,'reason':away}},'the drive is still away')
+        summary=self.q.jobs.attention_summary(self.q.life.admission_clear,lambda manifest:True)[job_id]
+        self.assertEqual((summary['group'],summary['cause']),('retry','unreachable'))
+        before=self.q.row(job_id)
+        with self.assertRaises(RetryRefused) as caught:self.q.retry(job_id)
+        self.assertEqual((str(caught.exception),self.q.row(job_id)),(away,before),'refused at the press, nothing changed')
+        sorted_root.mkdir(parents=True)
+        self.assertEqual(self.q.statuses(),{job_id:{'allowed':False,'reason':audio_jobs.RETRY_UNREACHABLE%sources}},'then each source folder')
+        sources.mkdir()
+        self.assertEqual(self.q.statuses(),{job_id:{'allowed':True,'reason':''}})
+        self.assertEqual(self.q.retry(job_id)['requeued'],True)
+        self.q.jobs.resume();self.q.wait()
+        self.assertEqual(self.q.runs[0][0],job_id);self.assertNotEqual(self.q.runs[0][1],attempt,'a new attempt of the same job')
     def test_other_failures_stay_ineligible(self):
         for error in (audio_jobs.RetryRefused('x'),ValueError('Source changed — review required: Z:/book/01.mp3'),OSError(errno.EACCES,'denied'),sqlite3.OperationalError('disk I/O error')):
             with self.subTest(error=repr(error)):
@@ -238,6 +280,41 @@ class StateTests(unittest.TestCase):
         s._recovery_idle=lambda:calls.append(1)
         self.assertIsNone(s._recovery_idle_reason());self.assertIsNone(s._recovery_idle_reason());self.assertEqual(len(calls),1)
         s._idle_cache=(time.monotonic()-2,None);s._recovery_idle_reason();self.assertEqual(len(calls),2)
+
+
+@unittest.skipUnless(os.name=='nt','the destination boundary is Windows-only')
+class DriveAwayTests(test_approve_as_is.ApproveFixture):
+    """Futaba's 0.22.0 QA, O-3, end to end: a real conversion whose Sorted drive goes away while it runs, before the
+    copy into Sorted. Before: group Other, "An inspected destination ancestor is unavailable", no Retry, ever."""
+    def test_a_conversion_that_lost_its_sorted_drive_offers_retry_once_it_is_back(self):
+        import merge_service
+        from test_approve_as_is import tone
+        nas=self.base/'nas';self.sorted=nas/'Audiobooks Sorted';self.sorted.mkdir(parents=True);away=self.base/'nas-away'
+        for n in (1,2):tone(self.audio/'Unsorted'/'Утро снайпера'/('%02d.mp3'%n),self.cover,album='Утро снайпера',artist='Иван Петров',title='Глава %d'%n,track='%d/2'%n)
+        row=self.start()[0]
+        real=merge_service.publish
+        def dropped(*args,**kwargs):
+            nas.rename(away)  # the drive goes while the book converts
+            return real(*args,**kwargs)
+        with patch.object(merge_service,'publish',dropped):
+            job_id=self.service.approve_book(row['id'],row['revision'])['job_id'];self.wait()
+        job=lambda:next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==job_id)
+        self.assertEqual((job()['state'],job()['reason']),('needs attention','An inspected destination ancestor is unavailable'))
+        attention=self.service.attention_summary([job_id])[job_id]
+        self.assertEqual((attention['group'],attention['cause']),('retry','unreachable'))
+        self.assertEqual(attention['retry'],{'allowed':False,'reason':audio_jobs.RETRY_UNREACHABLE%self.sorted},'the drive is still away')
+        self.service.attention_summary()
+        self.assertEqual(self.service.quiet_max_age(),merge_service.WORKING_MAX_AGE,'a quiet page is read again within 30 s, not 5 min')
+        away.rename(nas)
+        self.assertEqual(self.service.attention_summary([job_id])[job_id]['retry'],{'allowed':True,'reason':''},'back: Retry')
+        current=next(r for r in self.service.reviews.page(status='output_attention')['rows'] if r['id']==row['id'])  # the stopped row, as shown
+        self.assertEqual((current['creation']['job']['attention']['group'],current['creation']['job']['retry']),('retry',{'allowed':True,'reason':''}))
+        self.service.retry_blocked_job('Audiobooks',row['id'],current['revision'],job_id)
+        done,limit=[],time.monotonic()+60  # the Retry is admitted next, by the worker it starts
+        while not done and time.monotonic()<limit:
+            time.sleep(.1);done=[j for j in self.service.jobs.status()['jobs'] if j['state']=='completed' and j['manifest']['candidate_id']==row['id']]
+        self.assertEqual(len(done),1,'the Retry converted the book')
+        final=Path(done[0]['output']['final_path']);self.assertTrue(final.is_file() and final.is_relative_to(self.sorted))
 
 
 if __name__=='__main__':unittest.main()

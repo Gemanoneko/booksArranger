@@ -65,6 +65,13 @@ _TEXT = {'delete': {'refused': REFUSED, 'files_changed': "The folder doesn't mat
 _UNREACHABLE = ('[WinError 53]', '[WinError 51]', '[WinError 59]', '[WinError 64]', '[WinError 67]', '[WinError 121]',
                 '[WinError 1222]', '[WinError 1231]', '[WinError 3]')
 _SNAPSHOT = re.compile(r'source(\d{5})\.[^.\\/]+')
+# Senua's 0.22.0 review, N18: "the folder holds no other book" counts audio in any format the app might not read, not
+# only the formats it converts (metadata.AUDIO): a recording beside the book in .ape or .wv is another book's, not a
+# file of this one.
+SOUND = AUDIO | {'.ape', '.wv', '.mka', '.mp4', '.m4p', '.m4r', '.mp2', '.mpc', '.tta', '.tak', '.ofr', '.shn', '.ac3', '.dts',
+                 '.aif', '.aiff', '.aifc', '.alac', '.amr', '.awb', '.caf', '.oga', '.spx', '.ra', '.rm', '.ram', '.dsf', '.dff',
+                 '.webm', '.mkv', '.3gp', '.3ga'}
+_WALK = 2000  # entries read below one book folder before it counts as holding something else
 
 
 class DeleteRefused(ValueError):
@@ -274,11 +281,34 @@ def _guard(root, folder, guarded, text):
     guarded.add(_key(folder))
 
 
+def _below(entries, member_keys):
+    """True when a subfolder of the folder listed as entries holds audio (SOUND) that is not this book's, or cannot be
+    read through: every ordinary subfolder, down, never through a link or junction. Bounded: past _WALK entries the
+    folder counts as holding something else (its files stay)."""
+    pending, seen = [e.path for e in entries if e.is_dir(follow_symlinks=False) and not os.path.isjunction(e.path)], 0
+    while pending:
+        try:
+            with os.scandir(pending.pop()) as listing:
+                for entry in listing:
+                    seen += 1
+                    if seen > _WALK:
+                        return True
+                    if entry.is_dir(follow_symlinks=False):
+                        if not os.path.isjunction(entry.path):
+                            pending.append(entry.path)
+                    elif Path(entry.name).suffix.lower() in SOUND and _key(entry.path) not in member_keys:
+                        return True
+        except OSError:
+            return True
+    return False
+
+
 def _others(members, roots, output, holders, guarded, text):
     """Ruling 24: the other files of the book's own folders (cover, text, anything not audio), only when the folder holds
-    no other book: no audio file on disk that is not this book's, and nothing another book holds in it (a group member,
-    a job's source or cover, a reacquire record). One that another book holds stays, and so does anything the app
-    cannot place: a subfolder, a link, a file with a second name. ([other files], stay count, [(folder, root)])."""
+    no other book: no audio file on disk that is not this book's, in the folder or any subfolder, in any format (SOUND),
+    and nothing another book holds in it or below it (a group member, a job's source or cover, a reacquire record;
+    Senua's N18). One that another book holds stays, and so does anything the app cannot place: a subfolder, a link, a
+    file with a second name. ([other files], stay count, [(folder, root)])."""
     member_keys = {_key(m) for m in members}
     others, stay, folders = [], 0, []
     for folder in sorted({_key(Path(m).parent): str(Path(m).parent) for m in members}.values()):
@@ -296,7 +326,9 @@ def _others(members, roots, output, holders, guarded, text):
                 entries = list(listing)
         except OSError:
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
-        foreign = _key(f) in holders.folders or any(_key(e.path) not in member_keys and Path(e.name).suffix.lower() in AUDIO for e in entries)
+        inner = _key(f) + os.sep
+        foreign = (_key(f) in holders.folders or any(h.startswith(inner) for h in holders.folders)
+                   or any(_key(e.path) not in member_keys and Path(e.name).suffix.lower() in SOUND for e in entries) or _below(entries, member_keys))
         for entry in entries:
             key = _key(entry.path)
             if key in member_keys:
@@ -417,23 +449,41 @@ def _remove_folder(folder, root):
     return not os.path.lexists(folder)
 
 
-def _copy_proof(service, row, source, files, output, text):
+def _stamp(path):
+    """[size, modification time, volume, file id]: a file unchanged since it was hashed keeps all four."""
+    facts = os.stat(path)
+    return [facts.st_size, facts.st_mtime_ns, facts.st_dev, facts.st_ino]
+
+
+def _copy_proof(service, row, source, files, output, text, stop=None, proven=None):
     """Remove this copy: the proof, now (Judy's update spec, section 4). Every file of the copy, in order, has the size and
     SHA-256 of the matching source the audiobook was arranged from; then, last, the audiobook is where the app put it
-    with its recorded size and checksum (the full output check). No listed file is the audiobook's own file."""
+    with its recorded size and checksum (the full output check). No listed file is the audiobook's own file. stop: set
+    by drain and close; a stopped proof raises InterruptedError. proven: the press's own proof, made before it took the
+    app's locks (Senua's N19, see _prove): nothing is hashed again, and every file it hashed, the audiobook included,
+    must be unchanged since (size, modification time, native identity), the audiobook at the same place."""
     from audio_pipeline import digest
     sources = (source['job'].get('manifest') or {}).get('sources') or []
     members = row.get('members') or []
     mismatch = DeleteRefused('not_identical', 'These files no longer match the ones the audiobook was arranged from. Nothing was deleted.')
     if len(sources) != len(members):
         raise mismatch
-    stop = threading.Event()
+    stamps = {}
     for member, item in zip(members, sources):
         try:
-            if member.get('missing') or os.path.getsize(member['path']) != item.get('size') or digest(member['path'], stop) != item.get('sha256'):
+            if member.get('missing'):
                 raise mismatch
+            stamp = _stamp(member['path'])  # before the hash: a write during it changes the time
+            if proven is not None:
+                if stamp != proven['stamps'].get(_key(member['path'])):
+                    raise mismatch
+            elif stamp[0] != item.get('size') or digest(member['path'], stop) != item.get('sha256'):
+                raise mismatch
+            stamps[_key(member['path'])] = stamp
         except FileNotFoundError:
             raise mismatch
+        except InterruptedError:
+            raise
         except OSError:
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % Path(member['path']).anchor, root=Path(member['path']).anchor)
     name = _sorted_name(output)
@@ -441,25 +491,34 @@ def _copy_proof(service, row, source, files, output, text):
         raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % output, root=output)
     record, final = _sorted_record(service, source['output'])
     missing = DeleteRefused('sorted_missing', 'The audiobook is not where the app put it in %s. Nothing was deleted.' % name)
+    changed = DeleteRefused('sorted_changed', 'The audiobook in %s has changed since the app arranged it. Nothing was deleted.' % name)
     if not record or not os.path.lexists(final):
         raise missing
-    if not service._output_valid(source['output']):
+    try:
+        held = _stamp(final)
+    except OSError:
+        raise missing
+    if proven is not None:
+        if _key(final) != _key(proven['path']) or held != proven['stamps'].get(_key(final)) or record.get('sha256') != proven['record'].get('sha256'):
+            raise changed
+    elif not service._output_valid(source['output'], stop):
         if not os.path.lexists(final):
             raise missing
-        raise DeleteRefused('sorted_changed', 'The audiobook in %s has changed since the app arranged it. Nothing was deleted.' % name)
+        raise changed
     try:
-        held = os.stat(final)
-        if any((st.st_dev, st.st_ino) == (held.st_dev, held.st_ino) for st in (os.stat(f['path']) for f in files)):
+        if any(_stamp(f['path'])[2:] == held[2:] for f in files):
             raise DeleteRefused('refused', text)
     except OSError:
         raise missing
-    return {'path': final, 'size': record.get('size'), 'verified_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'record': record}
+    stamps[_key(final)] = held
+    verified = proven['verified_at'] if proven is not None else datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return {'path': final, 'size': record.get('size'), 'verified_at': verified, 'record': record, 'stamps': stamps}
 
 
-def plan(service, identity, revision, mode='delete'):
+def plan(service, identity, revision, mode='delete', stop=None, proven=None):
     """Read-only: what the press would remove now. {'files': [{'path', 'size', 'root', 'kind'}], 'bytes', 'folders':
     [(folder, root)], 'stay', 'last_copy', 'sorted', 'members', 'jobs', 'kind', 'row'}. Raises DeleteRefused with every
-    refusal check (the preview runs them before the confirm)."""
+    refusal check (the preview runs them before the confirm). stop and proven: see _copy_proof."""
     if mode not in MODES:
         raise DeleteRefused('refused', REFUSED)
     text = _TEXT[mode]['refused']
@@ -557,7 +616,7 @@ def plan(service, identity, revision, mode='delete'):
     gone = [w for w in working if w['original'] and not os.path.lexists(w['original'])]
     last_copy = None if not gone else 'some' if any(f['kind'] == 'audio' for f in files) else 'all'
     folders = _folders(book_folders, files, output)
-    proof = _copy_proof(service, row, source, files, output, text) if mode == 'copy' else None  # the audiobook last
+    proof = _copy_proof(service, row, source, files, output, text, stop, proven) if mode == 'copy' else None  # the audiobook last
     files += working
     return {'files': files, 'bytes': sum(f['size'] for f in files), 'folders': folders, 'stay': stay, 'last_copy': last_copy,
             'sorted': proof, 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
@@ -567,7 +626,8 @@ def preview(service, identity, revision, mode='delete'):
     """POST /api/candidate/delete-preview: {'files': [{'path', 'size', 'kind'}], 'bytes', 'folders': [path], 'stay':
     {'items'}, 'last_copy', 'kind', 'sorted': None | {'path', 'size', 'verified_at'}, 'refusal': None | {...}}."""
     try:
-        found = plan(service, identity, revision, mode)
+        with _stoppable(service) as stop:
+            found = plan(service, identity, revision, mode, stop)
     except DeleteRefused as refusal:
         return {'files': [], 'bytes': 0, 'folders': [], 'stay': {'items': 0}, 'last_copy': None, 'sorted': None, 'refusal': refusal.payload()}
     shown = found['sorted']
@@ -629,6 +689,34 @@ def _hold(found, output):
         yield
 
 
+@contextlib.contextmanager
+def _stoppable(service):
+    """A stop event for one proof, among the presses drain and close stop (merge_service's _approve_stops). A stopped
+    proof is refused 'busy': nothing was touched."""
+    stop = threading.Event()
+    presses = service.__dict__.setdefault('_approve_stops', set())
+    presses.add(stop)
+    if getattr(service, 'draining', False) or service.__dict__.get('_closing'):
+        stop.set()
+    try:
+        yield stop
+    except InterruptedError:
+        raise DeleteRefused('busy', BUSY) from None
+    finally:
+        presses.discard(stop)
+
+
+def _prove(service, identity, revision):
+    """Remove this copy, Senua's 0.22.0 review, N19: the press's proof hashes every file of the copy and the whole
+    audiobook in Sorted, often over the network. It ran holding the app's operation and group locks, so the status poll,
+    Approve, Keep and the list waited for it, and nothing could stop it: Quit waited for the hashes. Now it runs before
+    the press takes either lock, and drain and close stop it; under the locks the plan is made again from the catalog
+    and every file it hashed must be unchanged since (_copy_proof), then _hold checks the audiobook once more right
+    before the first file goes. The proof's 'sorted' entry."""
+    with _stoppable(service) as stop:
+        return plan(service, identity, revision, 'copy', stop=stop)['sorted']
+
+
 def _bounded(values):
     return isinstance(values, list) and len(values) <= 10000 and all(isinstance(p, str) and 1 <= len(p) <= 1000 for p in values)
 
@@ -640,8 +728,9 @@ def delete(service, identity, revision, paths, folders=None, mode='delete'):
     folders = [] if folders is None else folders
     if mode not in MODES or not _bounded(paths) or not _bounded(folders):
         raise DeleteRefused('refused', REFUSED)
+    proven = _prove(service, identity, revision) if mode == 'copy' else None  # before the locks (N19)
     with service.operation_lock, service.inventory.group_lock:
-        found = plan(service, identity, revision, mode)
+        found = plan(service, identity, revision, mode, proven=proven)
         same = sorted(_key(f['path']) for f in found['files']) == sorted(_key(p) for p in paths) and len(set(map(_key, paths))) == len(paths)
         if not same or sorted(_key(f) for f, _root in found['folders']) != sorted(_key(f) for f in folders):
             raise DeleteRefused('files_changed', _TEXT[mode]['files_changed'])
@@ -700,8 +789,9 @@ def present(service, row):
         with connect(service.inventory.database) as db:
             for folder, spelled in folders.items():
                 pattern = spelled.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '\\\\%'
-                rows = [r for r in db.execute("SELECT path,missing FROM files WHERE path LIKE ? ESCAPE '\\'", (pattern,)) if os.path.dirname(_key(r['path'])) == folder]
-                foreign = any(_key(r['path']) not in keys and Path(r['path']).suffix.lower() in AUDIO and not r['missing'] for r in rows)
+                under = list(db.execute("SELECT path,missing FROM files WHERE path LIKE ? ESCAPE '\\'", (pattern,)))  # the folder and below (N18)
+                rows = [r for r in under if os.path.dirname(_key(r['path'])) == folder]
+                foreign = any(_key(r['path']) not in keys and Path(r['path']).suffix.lower() in SOUND and not r['missing'] for r in under)
                 if not foreign:
                     count += sum(1 for r in rows if _key(r['path']) not in keys and not r['missing'])
             jobs = _jobs(db, row['id'])
