@@ -1287,3 +1287,280 @@ Strings of sections 3, 4 and 7 are verbatim there. Those with no other home:
 4. A "not repairable" verdict for multi-file audio failures (Stopped — see details), so those rows get the button too.
 
 Design basis: Fitts (the destructive button is the farthest target and never beside a primary), Hick (one button, three row kinds, no menu), Jakob (native dialog, the file list a user expects from "Delete"), NN/g error prevention (the confirm lists exactly what goes, Cancel is the default, Enter never confirms, a refusal shows before the confirm), visibility of status (outcome stated, never intent) and plain-language recovery (every failure names the file and the cause); WCAG 2.2 AA 1.4.3, 1.4.11, 2.1.1, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
+
+---
+
+# Delete book update and Remove this copy — spec (2026-10-25, Judy)
+
+Basis: rulings 24, 25 and 26 (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`, Sergei, 2026-10-25), the "Delete book — spec" above, and Futaba's m-3 (interim QA on b946ee7). Read-only look at branch `ender/0220d` at 4d9e687 (worktree `C:/Antigravity Projects/Worktrees/Books Arranger/fx0220d`): `web/app.js` L2193-2332 (the Delete block: `showDeleteState`, `DELETE_*`, `deleteConfirm`), `web/index.html` L152-165, the delete rules in `web/style.css`, `book_delete.py` (`plan`, `remove`, `delete`, `forget`), `recording_classification.py`, `merge_service._recording_review` and `_output_valid`. Nothing launched, no rects measured: geometry is target geometry for Futaba. Contrast is calculated from the `style.css` tokens, all on `--surface`: `--muted` 8.92:1, `--warning` 11.18:1, `--error` 9.12:1. Names and paths in the mockups are examples. Spec only: no code, not committed.
+
+**Supersedes**, in the Delete book spec above: section 4's Folder line "Other files in the folder stay." (now 2.2); section 5.7 "Never touched: covers, text and other files, the folder itself" (now ruling 24; still never touched: anything in Sorted, another book's file, a source folder); section 12 questions 1 and 2 (answered by rulings 24 and 25) and offer 1 (done: section 3). The "Duplicates: no" paragraph of section 2 stands for **Delete book**: a verified duplicate gets its own button, not that one.
+
+## 1. In brief
+
+1. **Delete book** now also removes the book's other files that belong only to it, the app's own working files for it, and each folder left empty (except one directly inside a source folder). The dialog lists all of it by path in labelled groups and says what stays.
+2. When the working files are the last copy of the audio (the originals are already gone), the dialog says so in one line above the count. It is the only case where the app deletes a last copy, and only on this press.
+3. **Remove this copy** is a second danger button in the same slot as Delete book. It shows only where the app holds proof that the files are an exact copy of an audiobook already in Audiobooks Sorted. Its dialog shows that audiobook (path, size, verified time) above the files that go.
+4. One dialog serves both, with the same states and safety rules: Cancel has focus, Enter never confirms, a refusal shows before the confirm, "Nothing was deleted" only for a typed refusal before the first file.
+5. Files go first, records last (unchanged). A folder that cannot be removed never keeps a book listed.
+
+**Vocabulary.** "Copy" always means the files being removed. The thing in Sorted is always "the audiobook". The app's own temporary files keep the name the app already uses: "working files".
+
+## 2. Delete book: what changes (rulings 24 and 26)
+
+### 2.1 What the press removes now
+
+| # | What | Rule | Counts as a file |
+|---|---|---|---|
+| 1 | The book's audio files | as before | yes |
+| 2 | Other files in its folder (cover, text, anything not audio) | only when the app can show they belong to this book alone: the folder holds no other book. Otherwise they stay. | yes |
+| 3 | The app's working files for it, on the app's own drive | always listed. Includes the last copy of the audio when the originals are gone (ruling 26). | yes |
+| 4 | Folders left empty by this press | the book's folder, then each parent that is now empty, up to but never including a folder directly inside a source folder. Never a source folder. A folder that was already empty is not touched. | no |
+
+Example: the book is in `Z:\Audiobooks\Сборники\Новая плоть (2016)\` and `Z:\Audiobooks` is the source folder. Its audio, `cover.jpg` and `info.txt` go, and `Новая плоть (2016)` is removed. `Сборники` is directly inside the source folder, so it stays.
+
+Unchanged: records go last, only when every file of rows 1 to 3 is gone. A folder is housekeeping, so one that cannot be removed is reported in the strip and never keeps the book listed. Nothing in Audiobooks Sorted, no other book's file and no source folder is ever touched.
+
+### 2.2 The dialog
+
+```
++-------------------------------------------------------------------+
+| Delete this book?                                                 |
+| Новая плоть — Сборник                                             |
+| 1 of 9 files is missing.                                          |
+|                                                                   |
+| These 10 files (1.4 GB) will be deleted from your disk. The app   |
+| can't undo this.                                                  |
+| +---------------------------------------------------------------+ |
+| | Audio files (8)                                               | |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)\01 - ... .m4b       | |
+| | ...                                                           | |
+| | Other files in this book's folder (2)                         | |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)\cover.jpg           | |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)\info.txt            | |
+| | Folders left empty are removed (1)                            | |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)                     | |
+| |                                              (scrolls, 40vh)  | |
+| +---------------------------------------------------------------+ |
+| The app forgets this book. If you get it again, it's found as a   |
+| new book. Nothing in Audiobooks Sorted is touched.                |
+|                                                                   |
+| [ Cancel ]                       [ Delete book and 10 files ]     |
++-------------------------------------------------------------------+
+```
+
+The last-copy case (ruling 26), changed lines only, with a stay line:
+
+```
+| Червь 19 — Джон МакКрэй                                           |
+| The audio is damaged and cannot be repaired safely.               |
+|                                                                   |
+| The originals are already gone. The app's working files are the   |
+| last copy of this book's audio.                  (--warning text) |
+| These 6 files (1.2 GB) will be deleted from your disk. The app    |
+| can't undo this.                                                  |
+| +---------------------------------------------------------------+ |
+| | The app's working files (6)                                   | |
+| | C:\...\working\Червь 19\part01.m4a                            | |
+| | ...                                                           | |
+| +---------------------------------------------------------------+ |
+| 2 other items stay where they are. They belong to other books, or |
+| the app can't tell whose they are.                                |
+```
+
+Changed strings (everything else in the Delete dialog stands):
+
+| Part | String |
+|---|---|
+| Group subhead, audio | Audio files ({n}) |
+| Group subhead, other files | Other files in this book's folder ({n}) |
+| Group subhead, working files | The app's working files ({n}) |
+| Group subhead, folders | Folders left empty are removed ({n}) |
+| When subheads show | when the list holds anything but audio files. With audio files only, the dialog is exactly as before (no subheads, no stay line). |
+| Last-copy line, all originals gone | The originals are already gone. The app's working files are the last copy of this book's audio. |
+| Last-copy line, some originals gone | Some originals are already gone. The app's working files hold the last copy of that audio. |
+| Stay line (replaces "Other files in the folder stay.") | {k} other items stay where they are. They belong to other books, or the app can't tell whose they are. / 1 other item stays where it is. It belongs to another book, or the app can't tell whose it is. Hidden when k is 0. |
+| List name (`aria-label`) | Files to delete (no folders listed) / Files and folders to delete |
+| Files line, No files line, Forget line, Cancel, Confirm, tooltips | unchanged. {n} and {size} count every file listed (audio, other, working), never folders. |
+
+**Placement and style.**
+- Order in the list: audio, other files, working files, folders; each group sorted by path; a group with nothing in it is absent. The subhead is a `p.delete-group` inside the existing scroll box: 13px, weight 600, `--muted` (8.92:1), 8px above, 2px below, no icon. The first one has no space above.
+- The last-copy line sits directly above the Files line, in `--warning` text (11.18:1). Its words carry the meaning, so colour is not the only carrier.
+- The stay line sits directly below the list, where the old folder line was. "Items" is deliberate: a subfolder the app cannot place also stays.
+
+### 2.3 After the press and when something fails
+
+| Outcome | String |
+|---|---|
+| Strip, success, no folder listed | unchanged: Deleted 1 book and {n} files ({size}). / Deleted 1 book and 1 file ({size}). / Deleted 1 book. No files were left on disk. |
+| Strip, success, folders removed | Deleted 1 book, {n} files ({size}) and 1 folder. / Deleted 1 book, {n} files ({size}) and {m} folders. / Deleted 1 book, 1 file ({size}) and 1 folder. |
+| Strip, a listed folder stayed | the sentence above, then: 1 folder stayed. / {s} folders stayed. (After the plain success line when none was removed.) |
+| Partial, dialog and strip | unchanged. {n} is every file listed. Any failed file, including a cover or a working file, keeps every record: the book stays listed. |
+| Failed working files, the "path" shown | The app's working files (replaces "Working files of an earlier attempt (job N)"; the cause line under it is the usual one) |
+
+The row's Delete book tooltip variants stand. `present` now counts every file the press would delete, so "No files are left to delete" stays true.
+
+## 3. Remove this copy (ruling 25)
+
+### 3.1 Which rows show it
+
+**The server decides.** It sends a typed offer only when it holds all of: the row's recording review is "identical verified" (every file matches, in order, a source of one audiobook); that audiobook is arranged and passed its output check; and the audiobook's file exists in Sorted. No offer, no button (hidden, not disabled).
+
+| Row | Shows | Why |
+|---|---|---|
+| Identical verified recording already arranged | **yes** | The app has the proof (ruling 2: a source goes only after its result is verified in Sorted). |
+| Possible duplicate recording / Held — Possible duplicate recording | no | Nothing proves it is the same recording. It may be a different reading, the only copy of it. |
+| Identical, but the arranged audiobook is unfinished or fails its check | no | There is nothing in Sorted to show. |
+| Distinct recording verified | no | Not a duplicate; it is arranged under its own name. |
+| Every other row | no | Delete book where its table says so. |
+
+A row never carries both Remove this copy and Delete book (a book with a missing file has no complete proof). Also hidden once the row is done, and inert (`aria-disabled`) with "Another operation is in progress." or "Local server unavailable." while a press runs or the server is gone. **Never automatic, never bulk, no accelerator, not in the details panel, no context menu** (standing rule: no automatic duplicate-source deletion).
+
+**The row's own sentence.** These rows say "This book needs your decision." today, which gives the button no referent. For these rows only (the chip stays "Needs you"; own chip is offer 2):
+
+| Where | String |
+|---|---|
+| Row hint | This recording is already in {Audiobooks Sorted}. The audio files here are exact copies of the files it was arranged from. |
+| Row hint, done | Removed. The copy is gone from the app. |
+
+### 3.2 The button
+
+```
+[ ] Inferno  ·  Dan Brown  ·  12 audio files
+    Needs you                                         [ Approve ] [ View metadata ]
+    This recording is already in Audiobooks Sorted.   [ Source folders ]
+    The audio files here are exact copies of the
+    files it was arranged from.
+                                                      [ Remove this copy ]
+```
+
+| Part | String or rule |
+|---|---|
+| Face | Remove this copy |
+| Tooltip | Delete this copy's files from disk. The app shows the audiobook in {Audiobooks Sorted} first, and you confirm. |
+| Pending face / tooltip | Checking... / Checking the audiobook in {Audiobooks Sorted}... |
+| Accessible name | Remove this copy: {title clue} (visible face first, WCAG 2.5.3) |
+| Style | the Delete book style, `quiet row-retry danger`: outlined `--error`, 9.12:1 on `--surface`; solid only in its dialog. It differs from its neighbours by word, position and hue. |
+| Position | The Delete book slot: last in `.row-actions`, behind the zero-height flex break, on a line of its own, `margin-top:8px` (at least 16 px clear above), last Tab stop. It is never on the primary's line, so **Approve** (inert on these rows today) and Source folders are never its neighbours. Ignore `event.repeat`. At least 96 x 32; the face wraps, never truncates. |
+
+### 3.3 The confirmation
+
+The Delete book dialog in a second mode: same element, same 560 px, same focus and Esc rules (1 to 5 of "Enter must not confirm" apply unchanged; focus returns to Remove this copy, else the Status filter). It adds one block between the reason line and the files line. Stacked, not in columns: the paths are long and columns would not fit at 200% zoom.
+
+```
++-------------------------------------------------------------------+
+| Remove this copy?                                                 |
+| Inferno — Dan Brown                                               |
+| This recording is already in Audiobooks Sorted. The audio files   |
+| here are exact copies of the files it was arranged from.          |
+|                                                                   |
+| Stays in Audiobooks Sorted                                        |
+| Z:\Audiobooks Sorted\Dan Brown\Inferno.m4b                        |
+| 612 MB. Verified 14:32: the file is there and unchanged since     |
+| the app arranged it.                                              |
+|                                                                   |
+| These 12 files (640 MB) will be deleted from your disk. The app   |
+| can't undo this.                                                  |
+| +---------------------------------------------------------------+ |
+| | Z:\Unsorted\Inferno\01 - ... .mp3                             | |
+| | ...                                          (scrolls, 40vh)  | |
+| +---------------------------------------------------------------+ |
+| The app forgets this copy. If the same files turn up again,       |
+| they're found as a new book. Nothing in Audiobooks Sorted is      |
+| touched.                                                          |
+|                                                                   |
+| [ Cancel ]                    [ Remove this copy and 12 files ]   |
++-------------------------------------------------------------------+
+```
+
+| Part | String |
+|---|---|
+| Title, confirm and deleting | Remove this copy? |
+| Book line | {title} — {author} (as Delete book) |
+| Reason line | the row hint, verbatim |
+| Sorted block | a `role="group"` named by its heading. Heading (`.delete-group` style): Stays in {Audiobooks Sorted}. Then the file's full absolute path (`.path`). Then: {size}. Verified {time}: the file is there and unchanged since the app arranged it. ({time} is the clock time of this check, `HH:MM`, like "Checked 14:32".) |
+| Files line, list, groups, stay line | as in 2.2. The last-copy line never shows here: a copy that is also in Sorted is not the last copy. |
+| Forget line | The app forgets this copy. If the same files turn up again, they're found as a new book. Nothing in {Audiobooks Sorted} is touched. |
+| Cancel | Cancel / Close without deleting anything. |
+| Confirm | Remove this copy and {n} files / Remove this copy and 1 file |
+| Confirm tooltip | Delete this copy's {n} files. The audiobook in {Audiobooks Sorted} stays. The app can't undo this. / Delete this copy's file. The audiobook in {Audiobooks Sorted} stays. The app can't undo this. |
+| Deleting | Confirm face "Deleting..."; status "Deleting {n} files..." / "Deleting 1 file..." (as Delete book) |
+
+"Verified" is shown only for a check made in this same preview, never from a stored flag. If either check fails, the dialog opens in its refusal state instead, so the Sorted block never appears next to a failed proof.
+
+### 3.4 Success, refusal and partial failure
+
+Same table of states as Delete book. Titles that differ:
+
+| State | Title |
+|---|---|
+| Confirm, Deleting | Remove this copy? |
+| Refused | Can't remove this copy |
+| Partial | Not everything was deleted (unchanged) |
+| Outcome unknown | Removal may not have finished |
+
+| Outcome | String |
+|---|---|
+| Strip, success | Removed 1 copy and {n} files ({size}). / Removed 1 copy and 1 file ({size}). With folders: Removed 1 copy, {n} files ({size}) and {m} folders. Then "{s} folders stayed." as in 2.3. |
+| Partial, dialog body | Deleted {k} of {n} files. {f} could not be deleted: then the path and cause per file (causes as Delete book). Status line: The copy stays listed. The row offers to delete what is left. |
+| Partial, strip | Deleted {k} of {n} files. The copy stays listed with the {f} that could not be deleted. |
+| Partial, row hint | Deleted {k} of {n} files. {f} still on disk. / Deleted {k} of {n} files. 1 is still on disk. (as Delete book) |
+| Connection lost | Connection interrupted, so the removal may have gone through. Check the list before trying again. |
+| Untyped server error | Removal did not finish. Check the list before trying again. |
+
+The partial status line names no button because the next poll reads the half-removed copy as Missing files, whose button is Delete book. Either button lists only what is left and never touches Sorted.
+
+Refusals (each only for a typed refusal before the first file; every line ends "Nothing was deleted."):
+
+| Refusal | Line |
+|---|---|
+| The audiobook is gone from its place | The audiobook is not where the app put it in {Audiobooks Sorted}. Nothing was deleted. |
+| The audiobook fails its check | The audiobook in {Audiobooks Sorted} has changed since the app arranged it. Nothing was deleted. |
+| A file of the copy no longer matches | These files no longer match the ones the audiobook was arranged from. Nothing was deleted. |
+| Drive not reachable (source or Sorted) | Can't reach {root}. Nothing was deleted. (as Delete book) |
+| Shared file, being processed, book changed | as Delete book, verbatim |
+| Folder differs from the list | The folder doesn't match the list, so nothing was deleted. Press Remove this copy to see the current list. |
+| Any other typed refusal | Remove was not accepted. Nothing was deleted. |
+
+## 4. What the UI needs from the API (names assumed; Ender confirms)
+
+- **Preview** (both actions): each file gains `kind: 'audio'|'other'|'working'`; new `folders:[path]` (the folders that would be removed), `stay:{items:k}`, `last_copy: null|'all'|'some'`. The offer's `present` counts every file the press would delete.
+- **Confirm:** sends every file path shown plus `folders`. The server rebuilds the plan and deletes only if both lists are equal, else `files_changed`. Result adds `folders:{removed:m, stayed:s}`; `deleted` and `bytes` count every file.
+- **Remove this copy:** offer `ask.copy {kind:'verified_duplicate'}` on the row's hold payload; a preview and a remove route, or `mode:'copy'` on the delete routes. The preview returns `sorted:{path, size, verified_at}` or a typed refusal: `sorted_missing`, `sorted_changed`, `not_identical`.
+- **Guarantee:** the preview re-checks both sides now (the Sorted file exists, has its recorded size and checksum; each file of the copy matches a source of that audiobook, in order). The press checks the Sorted file again before the first file goes. A refusal code is sent only when nothing was touched.
+
+## 5. Changes Ender must make
+
+1. `index.html`: `delete-dialog-last` (hidden `p`) above `delete-dialog-files`; a hidden Sorted group between the reason and files lines. `style.css`: `.delete-group` and `.delete-last` only; no new tokens.
+2. `app.js`: `showDeleteState` builds the groups, the last-copy line, the stay line and the folders group; one mode table (delete, copy) holds the title, forget, confirm, tooltip and refusal strings; `buildDeleteButton` takes the mode; strip variants with folders; `ASK_LABELS.copy`, `ASK_TIPS.copy`, `ASK_PENDING.copy`, `ASK_DONE.removed`, `ASK_REFUSED.copy`.
+3. Backend (rows 2 to 4 of 2.1): list other files only when the folder holds no other book; the cascade rule for folders; enumerate working files by path and size, and delete them as part of this press even when their originals are gone, for this action only. Working files used to be cleared silently before the originals; they are now listed and counted.
+4. Remove this copy: the proof checks of section 4 and the refusals of 3.4. Refuse when a listed file is, or links to, the Sorted file. The same boundary checks as Delete book (nothing under the Sorted folder), no recovery copy, records last in one transaction.
+5. The failed working-files label of 2.3.
+6. Tests: one fixture per row of 2.1 (including a shared folder and a folder directly inside a source folder); last copy with all and some originals gone; every string above; a cover held open; a folder that stays; each refusal of 3.4; Cancel focus and Enter in copy mode; the button is last and has its tooltip.
+
+## 6. Checks for Futaba (committed build, seeded fixture on a scratch library, nothing on Z:)
+
+1. **Delete book, 24:** a book alone in its folder with a cover and a text file, one folder shared with another book, one directly inside the source folder. With audio only the dialog is as before. The list equals the fixture's files and nothing else; the count and size include the extras and exclude folders. After the press the extras and the folder are gone, the parent directly inside the source folder stays, and Sorted is identical before and after (listing with sizes and times). In the shared folder the cover stays and the stay line gives the right k.
+2. **Last copy, 26:** a book with working files and no originals: the last-copy line (all), the files listed under "The app's working files", all gone after the press, the records gone, a reacquired copy found as a new book. Repeat with some originals gone (the "some" line) and with originals present (no last-copy line).
+3. **Partial and folder:** hold a cover open: the dialog lists exactly it with "In use by another program.", the audio is gone, the book stays. Put a new file in a listed folder after the dialog opened: refused as "files_changed". Make a listed folder unremovable after the files are gone: the strip says "1 folder stayed." and the book is forgotten.
+4. **Remove this copy, rows:** the button is on the verified-identical row only. Absent on Possible duplicate, identical with an unfinished or failed audiobook, Distinct recording, Missing files, Need to reacquire. Control: absent on the unfixed build.
+5. **Position and style:** last Tab stop, own line, at least 16 px below the line above, never beside Approve, at 1440, 1024, 700 and 200% zoom. No two rects intersect, no horizontal scroll, focus ring not clipped. In greyscale it still reads "Remove".
+6. **Dialog:** Cancel has focus on open; Enter in the body or the list does nothing; Enter on Cancel cancels; Esc cancels; a held Enter opens it once. The Sorted block shows the fixture's path, size and a time within a minute of the press. The list equals the copy's files. Sorted is identical before and after; no recovery copy appears.
+7. **Refusals, verbatim, nothing deleted:** delete the Sorted file after the offer shows; change one byte of it; change one byte of a copy file; make the Sorted drive unreachable. Controls: restore each and the press succeeds. In none of them does the Sorted block show "Verified".
+8. **Outcome and reacquire:** stop the backend during the confirm: the connection line, never "Nothing was deleted". Copy the same files back: found as a new book and flagged as a duplicate again.
+9. **Not in bulk or automatic:** no Remove this copy in Select this page, the bulk bar or any automatic pass; Ctrl+Enter on the row does nothing.
+10. **Strings:** every string above verbatim in the packaged window; every control has its tooltip; a search of the page for `WinError`, `Errno` and `PermissionError` finds nothing outside Technical details.
+
+## 7. Questions and offers
+
+**Question for Sergei (one word)**
+1. Should Remove this copy also delete the copy's cover and text files and empty folders, by the same rule as ruling 24? The spec assumes yes, so the copy disappears as completely as a deleted book. (yes / audio only)
+
+**Offers (not specced)**
+1. Approve is inert on verified-duplicate rows and its tooltip says "That name is taken." (Futaba m-3). Hide it there, or give it its own tooltip.
+2. A chip of its own for verified duplicates ("Already arranged") instead of "Needs you". It changes the counts, so it needs your word.
+3. Bulk "Remove copies" once the count is large. Each copy would still be proven and listed.
+4. A specific refusal for working files the app cannot prove are its own. Today that case reads the generic "Delete was not accepted. Nothing was deleted."
+5. Treat the NAS's own index or thumbnail folders as empty when deciding whether a folder is left empty, if the share makes them. Until then such a folder stays and the stay line says so.
+
+Design basis: Fitts (the destructive button stays the farthest target, alone on its line), Hick (one extra button on one row kind, no menu), Jakob (a native dialog that lists what goes and what stays), NN/g error prevention (proof shown before the confirm, Cancel the default, Enter never confirms, a refusal before the confirm) and visibility of status (the outcome is stated, never the intent; "Verified" only for a check made now); WCAG 2.2 AA 1.4.3, 1.4.11, 2.1.1, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
