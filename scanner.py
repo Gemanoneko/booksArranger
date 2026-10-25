@@ -96,6 +96,23 @@ def inside(path, root):
     except ValueError:
         return False
 
+def gone(root, path):
+    """The folder that proves path was removed: the nearest folder, at or below the source root, that lists now without
+    the next name toward path. None when it cannot be shown: the name is still listed, a folder cannot be read, or the
+    source root itself cannot be listed (a dropped share is never "gone", so nothing is marked missing because of it)."""
+    # Queue paths are the scanner's own absolute paths: the folder returned is spelled as its queue task is.
+    top=os.path.normcase(os.path.abspath(root));current=str(path)
+    while True:
+        parent=os.path.dirname(current)
+        if parent==current or not inside(parent,root):return None
+        try:
+            with os.scandir(parent) as entries:names={os.path.normcase(entry.name) for entry in entries}
+        except FileNotFoundError:
+            if os.path.normcase(os.path.abspath(parent))==top:return None
+            current=parent;continue
+        except OSError:return None
+        return None if os.path.normcase(os.path.basename(current)) in names else parent
+
 class Inventory:
     def __init__(self, database, roots=None, reader=read_metadata, *, audiobook_sources=None, output_root=None):
         # Before directory/schema creation or resetting saved running tasks.
@@ -386,6 +403,21 @@ class Inventory:
                     scan_write(self,root,generation,path,enqueue,finish=False)
         scan_write(self,root,generation,path,lambda db:self._outcome(db,root,generation,path,True),task_directory=True)
 
+    def _vanished(self, root, generation, path, save, error):
+        """A file listed by this scan that is gone before its read (Senua's 0.22.0 final review, N13: deleted by Delete
+        book, or by Sergei outside the app). Skipped quietly: no error row, no catalog row, no failed scan; a catalogued
+        file is not seen, so the completed scan marks it missing. Only on positive evidence (gone): otherwise the read
+        error stands as before. The proving folder is listed again once in this scan, so a renamed file's new name is
+        still catalogued by it, not one scan later."""
+        folder=gone(root,path)
+        if folder is None:raise error
+        relisted=self.__dict__.setdefault('_relisted',set());key=(root,generation,os.path.normcase(folder))
+        again=key not in relisted;relisted.add(key)
+        def persist(db):
+            self._outcome(db,root,generation,path,False,details='Gone before it was read')
+            if again:db.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=? AND directory=1 AND state='done'",(root,generation,folder))
+        save(persist)
+
     def _file(self, connection, label, root, generation, path):
         from catalog_contention import CatalogHold,file_token,scan_write
         if self.stop_event.is_set():raise ScanStopped()
@@ -405,8 +437,8 @@ class Inventory:
             excluded('Exact owned output/recovery/temporary asset excluded from discovery');return
         retired=_retired_source(connection,root,path)
         try:before=fresh_stat(path)
-        except FileNotFoundError:
-            if not retired:raise
+        except FileNotFoundError as error:
+            if not retired:return self._vanished(root,generation,path,save,error)
             def persist_retired(db):
                 db.execute("UPDATE files SET missing=0,error='' WHERE root=? AND path=?",(root,path))
                 db.execute('UPDATE jobs SET checked=checked+1 WHERE root=? AND generation=?',(root,generation))
@@ -416,7 +448,9 @@ class Inventory:
         unchanged=old and old['size']==before.st_size and old['modified']==before.st_mtime_ns and not old['error'] and not retired
         import reacquire_sources
         if unchanged and not reacquire_sources.marked_path(connection,root,path):
-            _same_source(before,fresh_stat(path))
+            try:again=fresh_stat(path)
+            except FileNotFoundError as error:return self._vanished(root,generation,path,save,error)
+            _same_source(before,again)
             def persist_reused(db):
                 db.execute('UPDATE files SET seen=?,missing=0 WHERE root=? AND path=?',(generation,root,path))
                 db.execute('UPDATE jobs SET checked=checked+1,reused=reused+1 WHERE root=? AND generation=?',(root,generation))
@@ -442,7 +476,9 @@ class Inventory:
         except Exception as issue:
             error=str(issue)
             metadata={'notes':['Metadata read failed; source file untouched'],'title':'','author':''}
-        after=fresh_stat(path);_same_source(before,after)
+        try:after=fresh_stat(path)
+        except FileNotFoundError as gone_error:return self._vanished(root,generation,path,save,gone_error)
+        _same_source(before,after)
         encoded=json.dumps(metadata,ensure_ascii=False)
         def persist_read(db):
             db.execute("""INSERT OR REPLACE INTO files(root,path,size,modified,seen,kind,arrival,metadata,error,missing,review)

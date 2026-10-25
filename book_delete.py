@@ -26,6 +26,7 @@ from scanner import connect, inside
 
 CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused')
 CAUSES = ('in_use', 'denied', 'unreachable', 'other')
+BUSY = 'This book is being processed. Nothing was deleted.'  # Judy's "Book is being processed" line
 _UNREACHABLE = ('[WinError 53]', '[WinError 51]', '[WinError 59]', '[WinError 64]', '[WinError 67]', '[WinError 121]',
                 '[WinError 1222]', '[WinError 1231]', '[WinError 3]')
 
@@ -91,9 +92,21 @@ def _newest_failed_job(service, identity):
     return jobs[0] if jobs and jobs[0]['state'] == 'needs attention' else None
 
 
+def scanning(service):
+    """A library scan is running (the scanner's worker thread is alive)."""
+    worker = getattr(service.inventory, 'worker', None)
+    return bool(worker is not None and worker.is_alive())
+
+
 def plan(service, identity, revision):
     """Read-only: what Delete book would remove now. {'files': [{'path', 'size', 'root'}], 'bytes', 'members', 'jobs',
     'kind', 'row'}. Raises DeleteRefused with every refusal check (Judy's preview runs them before the confirm)."""
+    if scanning(service):
+        # Senua's 0.22.0 final review, N13 (probe P1): a Delete while the scan held the book's queued files let the scan
+        # find them gone, and with no catalog row it wrote each back as a new one-file book with a raw "[Errno 2]" error;
+        # the scan then ended "completed with errors", which stops an automatic run. Keep, Approve, Scan again and Convert
+        # already wait for the scan; Delete now does too, before it reads or touches anything.
+        raise DeleteRefused('busy', BUSY)
     try:
         row = service.reviews._row('Audiobooks', identity, revision)
     except ValueError:
@@ -108,7 +121,7 @@ def plan(service, identity, revision):
     with connect(inventory.database) as db:
         jobs = _jobs(db, identity)
         if any(j['state'] in ('pending', 'running') for j in jobs):
-            raise DeleteRefused('busy', 'This book is being processed. Nothing was deleted.')
+            raise DeleteRefused('busy', BUSY)
         cleaned = set()
         if jobs and _table(db, 'source_cleanup'):
             cleaned = {r[0] for r in db.execute('SELECT job_id FROM source_cleanup WHERE job_id IN (%s)' % ','.join('?' * len(jobs)), [j['job_id'] for j in jobs])}
@@ -123,7 +136,7 @@ def plan(service, identity, revision):
         if _table(db, 'automatic_candidates'):
             researching = db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone()
             if researching:
-                raise DeleteRefused('busy', 'This book is being processed. Nothing was deleted.')
+                raise DeleteRefused('busy', BUSY)
         # A finished, queued or researched book was refused above with its own line; any other book without the
         # server's offer (one the app can still fix, a duplicate, Files unclear) is refused here.
         kind = offer(service, row)

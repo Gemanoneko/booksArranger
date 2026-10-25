@@ -798,6 +798,15 @@ class Handler(BaseHTTPRequestHandler):
                 if path in merge_routes:
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
+                    if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active():
+                        # Senua's 0.22.0 final review, N13: Delete waits for a library scan like Keep, Approve and Convert.
+                        # Typed (Judy's Delete spec, section 9): the preview opens the dialog in its refusal state, and the
+                        # confirm's 409 carries the code, so the page says "Nothing was deleted", never "may not have finished".
+                        from book_delete import BUSY,DeleteRefused
+                        refusal=DeleteRefused('busy',BUSY)
+                        if path.endswith('/delete-preview'):self.response(200,{'files':[],'bytes':0,'refusal':refusal.payload()})
+                        else:self.response(409,{'error':str(refusal),**refusal.payload()})
+                        return
                     if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING
                         self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING.replace('Retry','Convert') if path=='/api/audiobook/confirm-convert' else RETRY_SCANNING);return

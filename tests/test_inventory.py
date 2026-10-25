@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 import zipfile
@@ -145,6 +146,66 @@ class InventoryTests(unittest.TestCase):
         moved.rename(audio)
         self.run_scan(inventory,resume=True)
         self.assertEqual(inventory.status('Audiobooks')['state'], 'completed')
+
+    def paused_scan(self, inventory, folder):
+        """Start a scan and hold it right after it listed folder and queued its files (Senua's probe P1, N13). Returns the
+        event that lets it continue."""
+        listed=threading.Event();release=threading.Event();real=inventory._directory
+        def pause(connection,label,root,generation,path):
+            real(connection,label,root,generation,path)
+            if os.path.normcase(path)==os.path.normcase(str(folder)):listed.set();release.wait(20)
+        patcher=unittest.mock.patch.object(inventory,'_directory',pause);patcher.start();self.addCleanup(patcher.stop)
+        self.addCleanup(release.set)
+        inventory.launch('Audiobooks')
+        self.assertTrue(listed.wait(10),'positive control: the scan listed the folder and queued its files')
+        return release
+
+    def outcomes(self, inventory):
+        with connect(self.database) as db:
+            job=db.execute('SELECT * FROM jobs WHERE root=?',(self.roots['Audiobooks'],)).fetchone()
+            errors=db.execute("SELECT path,error FROM scan_outcomes WHERE root=? AND generation=? AND outcome='error'",(self.roots['Audiobooks'],job['generation'])).fetchall()
+            files={Path(r['path']).name:dict(r) for r in db.execute('SELECT * FROM files WHERE root=?',(self.roots['Audiobooks'],))}
+        return dict(job),[dict(r) for r in errors],files
+
+    def test_a_file_gone_mid_scan_is_skipped_quietly_and_a_complete_scan_marks_it_missing(self):
+        # Senua's 0.22.0 final review, N13: a file the scan listed and that was gone before its read (deleted by Delete
+        # book, or by Sergei outside the app) became a raw "[Errno 2]" read error, and a fresh catalog row when it had
+        # none; the scan ended "completed with errors", which stops an automatic run. Now it is skipped quietly.
+        kept=self.file('audio/Author/Book/01.mp3');lost=self.file('audio/Author/Book/02.mp3');renamed=self.file('audio/Author/Book/03.mp3')
+        inventory=Inventory(self.database,self.roots,self.reader);self.run_scan(inventory)
+        new=self.file('audio/Author/Book/04.mp3')  # listed by the next scan, never catalogued
+        release=self.paused_scan(inventory,kept.parent)
+        lost.unlink();new.unlink();renamed.rename(renamed.with_name('03 renamed.mp3'))
+        release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        job,errors,files=self.outcomes(inventory)
+        self.assertEqual((job['state'],job['errors'],errors),('completed',0,[]),inventory.last_error)
+        self.assertEqual(sorted(files),['01.mp3','02.mp3','03 renamed.mp3','03.mp3'],'no row for the file that was never catalogued')
+        self.assertEqual({name:(row['missing'],row['error']) for name,row in files.items()},
+                         {'01.mp3':(0,''),'02.mp3':(1,''),'03.mp3':(1,''),'03 renamed.mp3':(0,'')},
+                         'the gone files are missing, not read errors; the renamed file is catalogued by the same scan')
+        self.assertEqual(inventory.status('Audiobooks')['state'],'completed','automatic discovery continues past this scan')
+
+    def test_a_source_that_becomes_unreachable_mid_scan_is_still_a_read_error(self):
+        # Negative control for the above: "gone" needs a folder that lists without the name. A source root that cannot be
+        # listed (a dropped share) proves nothing, so the reads fail as before and no file is marked missing.
+        first=self.file('audio/Author/Book/01.mp3');self.file('audio/Author/Book/02.mp3')
+        inventory=Inventory(self.database,self.roots,self.reader);self.run_scan(inventory)
+        audio=Path(self.roots['Audiobooks']);moved=self.base/'unreachable-fixture'
+        release=self.paused_scan(inventory,first.parent)
+        for attempt in range(50):
+            try:audio.rename(moved);break
+            except PermissionError:
+                if attempt==49:raise
+                time.sleep(.1)
+        try:
+            release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        finally:
+            moved.rename(audio)
+        job,errors,files=self.outcomes(inventory)
+        self.assertEqual(job['state'],'completed with errors')
+        self.assertEqual(sorted(Path(e['path']).name for e in errors),['01.mp3','02.mp3'])
+        self.assertTrue(all('[WinError' in e['error'] or 'Errno' in e['error'] for e in errors),errors)
+        self.assertEqual([name for name,row in files.items() if row['missing']],[],'nothing marked missing')
 
     def test_crash_queue_recovery_and_database_source_guard(self):
         self.file('audio/01.mp3')

@@ -157,6 +157,14 @@ class BrowserTests(unittest.TestCase):
         code,refused=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[]})
         self.assertEqual((code,refused['code']),(409,'changed'))
         self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':'Z:/x'})[0],400,'paths must be a list')
+        # Senua's 0.22.0 final review, N13: while a library scan runs both routes refuse like Keep and Convert, typed (busy),
+        # so the dialog says "Nothing was deleted"; the service is not asked at all.
+        with patch.object(self.server,'scan_active',return_value=True),patch.object(self.server.merge,'delete_preview',return_value={'files':[],'bytes':0,'kind':'files_missing','refusal':None}) as asked_preview,patch.object(self.server.merge,'delete_book',return_value={'deleted':0,'bytes':0,'failed':[],'forgotten':True}) as asked_delete:
+            code,preview=self.json_call('/api/candidate/delete-preview',{'library':'Audiobooks','id':identity,'revision':1})
+            self.assertEqual((code,preview['files'],preview['refusal']),(200,[],{'code':'busy','message':'This book is being processed. Nothing was deleted.'}))
+            code,refused=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[]})
+            self.assertEqual((code,refused['code'],refused['message']),(409,'busy','This book is being processed. Nothing was deleted.'))
+            asked_preview.assert_not_called();asked_delete.assert_not_called()
         # A refused POST reads its body before the 403 (Handler.refuse), so the client gets the 403, not a reset. Without it a
         # 200 KB body was reset (ConnectionAbortedError, WinError 10053) in 2 of 3 runs alone, and two gate runs failed so.
         for _ in range(20):

@@ -3,7 +3,7 @@ is removed from disk and from every record, so a reacquired copy is a new book. 
 file, a path outside the source roots, Sorted untouched, a partial failure, and a crash between the file and record
 steps; plus every typed refusal, records last, no recovery copy, and reacquire as a new book. Real private files in a
 temporary library with its own Sorted folder; no network, no library access."""
-import json, os, shutil, sqlite3, unittest
+import json, os, shutil, sqlite3, threading, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -126,6 +126,58 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             self.service.delete_book(row['id'], row['revision'], [str(self.parts[0]), str(self.sibling)])
         self.assertEqual(refused.exception.code, 'files_changed')
         self.assertEqual(listing(self.parts[0].parent), before)
+
+    def paused_scan(self, folder):
+        """A library scan held right after it listed the book's folder and queued its files: the moment of Senua's probe
+        P1 (0.22.0 final review, N13). Returns the event that lets it continue."""
+        listed, release, real = threading.Event(), threading.Event(), self.inv._directory
+        def pause(connection, label, root, generation, path):
+            real(connection, label, root, generation, path)
+            if os.path.normcase(path) == os.path.normcase(str(folder)):
+                listed.set(); release.wait(30)
+        patcher = mock.patch.object(self.inv, '_directory', pause); patcher.start(); self.addCleanup(patcher.stop)
+        self.addCleanup(release.set)
+        self.inv.launch('Audiobooks')
+        self.assertTrue(listed.wait(15), 'positive control: the scan listed the book folder and queued its files')
+        return release
+
+    def test_delete_waits_while_a_library_scan_runs(self):
+        # N13: Keep, Approve, Scan again and Convert wait for a library scan; Delete and its preview did not.
+        row = self.book()
+        before = listing(self.parts[0].parent)
+        release = self.paused_scan(self.parts[0].parent)
+        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal'], {'code': 'busy', 'message': 'This book is being processed. Nothing was deleted.'})
+        with self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
+        self.assertEqual(refused.exception.code, 'busy')
+        self.assertEqual(listing(self.parts[0].parent), before, 'nothing deleted')
+        release.set(); self.inv.worker.join(15)
+        self.assertEqual(self.inv.status('Audiobooks')['state'], 'completed')
+        # Control: the same press after the scan goes through.
+        row = self.service.reviews.page(status='output_attention', group='files_missing')['rows'][0]
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertIsNone(preview['refusal'])
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (2, [], True))
+
+    def test_files_deleted_while_a_scan_held_them_do_not_come_back_as_new_books(self):
+        # Senua's probe P1 (N13), as she ran it: the scan listed the folder and queued the files, Delete removed them and
+        # forgot the book, then the scan went on. Its queued reads found no file and no catalog row, wrote each back as a
+        # one-file book ("Новая плоть 1", "Новая плоть 2") with "[Errno 2]", and ended "completed with errors", which stops
+        # an automatic run. The same deletion can always happen outside the app, so the scan must take it quietly.
+        row = self.book()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        release = self.paused_scan(self.parts[0].parent)
+        with mock.patch.object(book_delete, 'scanning', return_value=False):  # Delete as it ran before the refusal
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
+        self.assertEqual((result['deleted'], result['forgotten']), (2, True), 'positive control: P1 deleted and forgot the book mid-scan')
+        release.set(); self.inv.worker.join(15)
+        status = self.inv.status('Audiobooks')
+        self.assertEqual((status['state'], status['errors'], status['unresolved_errors']), ('completed', 0, 0))
+        self.assertEqual(self.records(row['id'], self.parts), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
+        titles = [r['title_clue'] for r in self.service.reviews.page()['rows']]
+        self.assertEqual([t for t in titles if t.startswith('Новая плоть')], [], titles)
+        self.assertEqual(sorted(p.name for p in self.parts[0].parent.iterdir()), ['cover.jpg', 'info.txt', 'Другая.mp3'])
 
     def test_a_partial_failure_keeps_every_record_and_the_next_press_finishes(self):
         row = self.book()
