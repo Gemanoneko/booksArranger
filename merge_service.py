@@ -229,6 +229,8 @@ class MergeService:
         self.automatic.on_change=self.invalidate_status  # a pending start that fires, changes kind or ends shows on the next poll
         from series_backfill import SeriesBackfill
         self.series_backfill=SeriesBackfill(self,research=self.automatic.research)  # v0.16.12; started with the retention sweep
+        from gap_fill import GapFill
+        self.gap_fill=GapFill(self)  # 0.22.1: optional fields after approval (research: the automatic pass's); started with series backfill
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
         known=self._known_identities()
@@ -982,8 +984,9 @@ class MergeService:
                 self._retention_wake.wait(60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
-        backfill=self.__dict__.get('series_backfill')
-        if backfill is not None:backfill.start()
+        for name in ('series_backfill','gap_fill'):
+            background=self.__dict__.get(name)
+            if background is not None:background.start()
 
     def _purge_recovery_now(self,job_id):
         """Right after a book's source cleanup: its recovery copies go at once (the purge verifies the output in
@@ -3478,8 +3481,9 @@ class MergeService:
             pending=self.__dict__.get('_retry_all_stop')
             if pending:pending.set()
             for press in list(self.__dict__.get('_approve_stops',())):press.set()
-        backfill=self.__dict__.get('series_backfill')
-        if backfill is not None:backfill.close()
+        for name in ('series_backfill','gap_fill'):
+            background=self.__dict__.get(name)
+            if background is not None:background.close()
         for name in ('_repair_stop','_retry_all_stop'):
             event=self.__dict__.get(name)
             if event:event.set()

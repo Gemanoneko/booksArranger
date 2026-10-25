@@ -140,51 +140,56 @@ class GapSearchTests(unittest.TestCase):
     def lookup(self,files):
         self.row=catalogue(self.client.database,self.base,candidate(self.base,files))
         return PublicResearch(self.client,leads=[]).lookup(self.row,str(self.base),self.stop)
+    def fill(self,result):
+        """The background pass's request for this book's recorded gaps (gap_fill.GapFill), as it runs after approval."""
+        search=result['metadata_facts']['gap_search']
+        return PublicResearch(self.client,leads=[]).fill_gaps(search['ask'],search['background'],self.stop,{'remaining':12,'lane':'gap'})
     def test_agreeing_local_sources_approve_without_identity_research(self):
-        self.catalog.closed={'api.fantlab.ru','www.wikidata.org'}
-        # Empty primary-page discovery is an optional series gap, never identity evidence.
-        self.client.wikipedia=Mock(return_value={'sources':[],'leads':[]})
-        self.client.discover=Mock(return_value=[])
+        # 0.22.1 (Sergei's backlog item 8): every source is open, yet research asks none; the book is approved on its local
+        # identity at once and its missing optional fields are left to the background pass (before: 5-7 s per site, and a
+        # gap_wait that deferred the book up to 3 times).
         result=self.lookup(SERGEI)
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['metadata_facts']['identity_basis'],'local_agreement')
         self.assertEqual(result['review']['title'],'Око Бога');self.assertEqual(result['review']['canonical_author'],'Rollins James')
         self.assertEqual(result['review']['original_language'],'Unknown');self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
         self.assertEqual(result['metadata_facts']['title_basis'],'local_agreement');self.assertTrue(result['work']['id'].startswith('local:'))
-        hosts={urllib.parse.urlsplit(u).hostname for u in self.catalog.calls}
-        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org','www.goodreads.com'},self.catalog.calls)
-        self.assertIsNone(result['wait']);self.assertIn(result['gap_wait']['source'],('api.fantlab.ru','www.wikidata.org'))
+        self.assertEqual(self.catalog.calls,[],'research asked a source')
+        self.assertIsNone(result['wait']);self.assertIsNone(result['gap_wait'],'an optional field never defers the book')
+        search=result['metadata_facts']['gap_search']
+        self.assertIn('original_title',search['background']);self.assertEqual(search['ask']['title'],'Око Бога');self.assertIs(search['ask']['partial'],False)
         self.assertEqual(result['sources'][0]['kind'],'local_agreement');self.assertTrue(result['sources'][0]['verified_identity'])
         local=[e for e in result['evidence'] if e['source_url']=='']
         self.assertEqual({e['field'] for e in local},{'title','authors'});self.assertIn('Rollins James',local[0]['basis'])
-        self.client.wikipedia.assert_called_once();self.client.discover.assert_called_once()
-        query=self.client.wikipedia.call_args.args[0]
-        self.assertIn(query,('"Око Бога" Джеймс Роллинс','"Око Бога" Rollins James'))
-        self.assertEqual(self.client.discover.call_args.args[0],query+' publisher')
-        self.assertFalse(result['work'].get('verified_series'));self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
+        self.assertFalse(result['work'].get('verified_series'))
         validate_policy(self.row,result['review'],result['metadata_facts'])
     def test_catalog_fills_only_missing_original_title_and_language(self):
         self.catalog.fantlab=[{'work_id':42,'name':'Sandstorm','rusname':'Око Бога','all_autor_name':'James Rollins','all_autor_rusname':'Джеймс Роллинс'}]
         self.catalog.extended['/work/42/extended']={'work_id':42,'work_name':'Око Бога','work_name_orig':'The Eye of God','lang_code':'en','work_type_name':'Роман',
             'authors':[{'type':'autor','name':'Джеймс Роллинс','name_orig':'James Rollins'}]}
-        # Empty primary-page discovery is an optional series gap, never identity evidence.
-        self.client.wikipedia=Mock(return_value={'sources':[],'leads':[]})
-        self.client.discover=Mock(return_value=[])
+        first=self.lookup(SERGEI)
+        self.assertEqual((first['review']['title'],self.catalog.calls),('Око Бога',[]),'approved at once on the local title')
+        # The background pass asks the catalog later, in its own lane of the site's hourly bound.
+        found,fetched=self.fill(first)
+        self.assertEqual((found['catalog']['original_title'],found['catalog']['language'],found['unfilled']),('The Eye of God','en',[]))
+        self.assertTrue(fetched['sources'],'with the fetched receipts')
+        hosts={urllib.parse.urlsplit(u).hostname for u in self.catalog.calls}
+        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org'},self.catalog.calls)
+        with connect(self.client.database) as db:self.assertEqual({r[0] for r in db.execute('SELECT lane FROM public_research_lanes')},{'gap'})
+        # A later research of the same work reads the cached answers: the catalog fills only the missing fields.
+        asked=len(self.catalog.calls)
         result=self.lookup(SERGEI)
+        self.assertEqual(len(self.catalog.calls),asked,'no new request')
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['review']['title'],'The Eye of God');self.assertEqual(result['review']['canonical_author'],'Rollins James')
         self.assertEqual(result['work']['id'],'fantlab:42');self.assertEqual(result['metadata_facts']['original_language'],{'value':'en','status':'verified'})
         cited={e['field']:e['source_url'] for e in result['evidence'] if e['source_url']}
         self.assertEqual(cited,{'title':'https://fantlab.ru/work42','authors':'https://fantlab.ru/work42','original_language':'https://fantlab.ru/work42'})
-        self.client.wikipedia.assert_called_once();self.client.discover.assert_called_once()
-        query=self.client.wikipedia.call_args.args[0]
-        self.assertIn(query,('"Око Бога" Джеймс Роллинс','"Око Бога" Rollins James'))
-        self.assertEqual(self.client.discover.call_args.args[0],query+' publisher')
         self.assertFalse(result['work'].get('verified_series'));self.assertEqual(result['metadata_facts']['series_state'],'omitted_unknown')
-        hosts={urllib.parse.urlsplit(u).hostname for u in self.catalog.calls}
-        self.assertLessEqual(hosts,{'api.fantlab.ru','www.wikidata.org','www.goodreads.com'},self.catalog.calls)
     def test_catalog_with_a_different_author_is_never_adopted(self):
         self.catalog.fantlab=[{'work_id':43,'name':'Око Бога','rusname':'Око Бога','all_autor_name':'Other Writer','all_autor_rusname':'Другой Автор'}]
+        found,_=self.fill(self.lookup(SERGEI))
+        self.assertNotIn('catalog',found);self.assertEqual(len([u for u in self.catalog.calls if '/extended' in u]),0)
         result=self.lookup(SERGEI)
-        self.assertEqual(result['reasons'],[]);self.assertEqual(result['review']['canonical_author'],'Rollins James');self.assertEqual(len([u for u in self.catalog.calls if '/extended' in u]),0)
+        self.assertEqual(result['reasons'],[]);self.assertEqual(result['review']['canonical_author'],'Rollins James');self.assertEqual(result['review']['title'],'Око Бога')
     def test_a_folder_naming_another_book_of_the_same_author_gives_way_to_the_tag_title(self):
         # Sergei 2026-10-24 (ruling 6): title + author is enough; the tag title wins over a differently
         # worded name and nothing is searched on the Internet for identity (before: a red title and research).
@@ -195,13 +200,21 @@ class GapSearchTests(unittest.TestCase):
         files=[('Роллинс - Око Бога/01.mp3',{'album':'Око Бога','artist':'Роллинс','track':'1'})]
         self.catalog.closed={'api.fantlab.ru','www.wikidata.org'}
         self.catalog.openlibrary=[{'key':'/works/OL7W','title':'Око Бога','author_name':['Джеймс Роллинс']}]
+        first=self.lookup(files)
+        # Sergei 2026-10-24: public sources only fill optional fields; a one-word author is an author ("Баошу").
+        self.assertEqual((first['reasons'],first['review']['canonical_author'],self.catalog.calls),([],'Роллинс',[]))
+        self.assertIn('author_full',first['metadata_facts']['gap_search']['background']);self.assertIs(first['metadata_facts']['gap_search']['ask']['partial'],True)
+        found,_=self.fill(first)
+        self.assertEqual(found['author_full']['source_url'],'https://openlibrary.org/works/OL7W')
+        self.assertEqual(found['unfilled'],['original_title']);self.assertEqual(found['wait']['source'],'api.fantlab.ru','the closed catalog may still answer the original title')
         result=self.lookup(files)
         self.assertEqual(result['reasons'],[],result);self.assertEqual(result['review']['canonical_author'],'Роллинс Джеймс')
         self.assertEqual(next(e for e in result['evidence'] if e['field']=='authors')['source_url'],'https://openlibrary.org/works/OL7W')
         self.catalog.openlibrary=[];self.catalog.closed|={'openlibrary.org','www.googleapis.com','itunes.apple.com'}
         with connect(self.client.database) as db:db.execute('DELETE FROM public_research_cache')
+        found,_=self.fill(first)
+        self.assertEqual(found['unfilled'],['original_title','author_full']);self.assertIsNotNone(found['wait'],'closed sources: the background pass tries again when they reopen')
         result=self.lookup(files)
-        # Sergei 2026-10-24: public sources only fill optional fields; a one-word author is an author ("Баошу").
         self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertIsNone(result['wait'])
         self.assertEqual(result['review']['canonical_author'],'Роллинс')
     def test_revalidation_refuses_changed_local_sources(self):
@@ -251,17 +264,14 @@ class GapDeferralTests(unittest.TestCase):
         return state
     def history(self):
         with connect(self.db) as db:return json.loads(db.execute('SELECT result FROM automatic_candidates').fetchone()[0])['research_history']
-    def test_busy_converter_defers_optional_gap_then_admits_when_free(self):
-        auto,merge,inv=self.fake_merge();state=self.converter(auto,{1})
-        self.run_until_admitted(auto,merge)
-        merge.approve_automatic.assert_called_once();self.assertEqual(state['lookups'],2)
-        deferred=[h for h in self.history() if h['state']=='Waiting for source']
-        self.assertEqual(len(deferred),1);self.assertTrue(deferred[0]['reasons'][0].startswith('Optional metadata sources cooling down'))
-    def test_deferral_is_bounded(self):
+    def test_a_busy_converter_never_defers_a_book_for_an_optional_field(self):
+        # 0.22.1 (backlog item 8): a book used to wait for its optional fields while the converter had work, up to 3 queue
+        # drains ('Optional metadata sources cooling down'). It is approved at its first research now, even with a busy
+        # converter and a result that still carries a gap_wait (a record from an older version).
         auto,merge,inv=self.fake_merge();state=self.converter(auto,set(range(1,100)))
         self.run_until_admitted(auto,merge)
-        merge.approve_automatic.assert_called_once();self.assertEqual(state['lookups'],4)
-        self.assertEqual(sum(h['state']=='Waiting for source' for h in self.history()),3)
+        merge.approve_automatic.assert_called_once();self.assertEqual(state['lookups'],1)
+        self.assertFalse(any(h['state']=='Waiting for source' for h in self.history()),self.history())
     def test_idle_converter_admits_immediately(self):
         auto,merge,inv=self.fake_merge();state=self.converter(auto,set())
         self.run_until_admitted(auto,merge);merge.approve_automatic.assert_called_once();self.assertEqual(state['lookups'],1)

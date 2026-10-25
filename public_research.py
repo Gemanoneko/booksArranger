@@ -42,6 +42,14 @@ APP_HOST_WINDOW=3600
 HOST_POLICY={'openlibrary.org':(1800,1.1),'itunes.apple.com':(900,3.5),'www.googleapis.com':(40,1.1),'html.duckduckgo.com':(APP_HOST_REQUESTS,3),'www.goodreads.com':(120,5.0)}
 WIKIMEDIA_HOSTS={'www.wikidata.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org'}
 def host_policy(host):return HOST_POLICY.get(host,(APP_HOST_REQUESTS,1.1))
+# 0.22.1 (backlog item 8, rulings 5 and 6): research never waits for optional fields any more; the background passes that
+# fill them (series backfill, gap fill) each reserve at most BACKGROUND_SHARE of a site's hourly bound under their own
+# lane, so neither can take the whole bound from research or from the other. Research may use the whole bound.
+LANES=('research','series','gap')
+BACKGROUND_SHARE=0.4
+LANE_LIMIT_REASON='Background share of the hourly site bound reached'
+# The optional fields gap_fill.GapFill fills after approval (series: series backfill).
+BACKGROUND_GAPS=('original_title','author_full')
 # Identify the app with a public contact, as Open Library and Wikimedia ask; no e-mail is sent.
 USER_AGENT='BooksArranger/automatic-public-research (+https://github.com/Gemanoneko/booksArranger)'
 CACHE_ENTRIES=5000
@@ -264,6 +272,10 @@ class PublicClient:
             db.execute('CREATE TABLE IF NOT EXISTS public_research_requests(host TEXT,at REAL)')
             db.execute('CREATE INDEX IF NOT EXISTS public_research_requests_host_at ON public_research_requests(host,at)')
             db.execute('CREATE TABLE IF NOT EXISTS public_research_limits(host TEXT PRIMARY KEY,next_at REAL,reason TEXT)')
+            # 0.22.1: the background passes' own share of each site's hourly bound (LANES); a separate table, so an older
+            # version reading public_research_requests is unaffected.
+            db.execute('CREATE TABLE IF NOT EXISTS public_research_lanes(host TEXT NOT NULL,at REAL NOT NULL,lane TEXT NOT NULL)')
+            db.execute('CREATE INDEX IF NOT EXISTS public_research_lanes_lane_host_at ON public_research_lanes(lane,host,at)')
             # Small side index (url, fetched, size): expiry and eviction never read the raw
             # responses, so the shared catalog's write lock is held only for a few row edits.
             db.execute('CREATE TABLE IF NOT EXISTS public_research_cache_index(url TEXT PRIMARY KEY,fetched REAL NOT NULL,size INTEGER NOT NULL)')
@@ -274,6 +286,7 @@ class PublicClient:
             db.execute('DELETE FROM public_research_cache_index WHERE url NOT IN (SELECT url FROM public_research_cache)')
             self._expire(db,self.clock())
             db.execute('DELETE FROM public_research_requests WHERE at<?',(self.clock()-7*86400,))
+            db.execute('DELETE FROM public_research_lanes WHERE at<?',(self.clock()-APP_HOST_WINDOW,))
     @staticmethod
     def _expire(db,now):
         # Both deletes are index range scans (fetched is indexed in both tables).
@@ -327,8 +340,22 @@ class PublicClient:
             value.update(retry_at=retry,kind='source_pause' if limit['reason'] in PAUSE_REASONS else 'source_unavailable',scope='host',reason=limit['reason'])
         else:value.update(retry_at=retry,kind='app_limit',scope='host',reason=APP_LIMIT_REASON)
         return value
+    def _lane_ready(self,db,host,lane,now):
+        """When a background lane (series backfill, gap fill) may next reserve a request at this site: each uses at most
+        BACKGROUND_SHARE of the site's hourly bound (of the 100/hour Wikimedia family for its hosts). Research is never
+        limited by a lane."""
+        if lane=='research':return now
+        family=host in WIKIMEDIA_HOSTS
+        hosts=sorted(WIKIMEDIA_HOSTS) if family else [host]
+        share=max(1,int((100 if family else host_policy(host)[0])*BACKGROUND_SHARE))
+        marks=','.join('?'*len(hosts))
+        rows=[r[0] for r in db.execute('SELECT at FROM public_research_lanes WHERE lane=? AND host IN ('+marks+') AND at>? ORDER BY at',(lane,*hosts,now-APP_HOST_WINDOW))]
+        return rows[len(rows)-share]+APP_HOST_WINDOW if len(rows)>=share else now
     def read(self,url,stop=None,budget=None):
+        """budget: {'remaining': n, 'lane': one of LANES (default 'research')}; remaining 0 reads the cache only."""
         url=allowed_url(url);host=urllib.parse.urlsplit(url).hostname
+        lane=budget.get('lane','research') if isinstance(budget,dict) else 'research'
+        if lane not in LANES:raise ValueError('Unknown public research lane')
         if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
         with self.lock:
             now=self.clock()
@@ -356,51 +383,58 @@ class PublicClient:
                     if family_ready-now>7:raise ResearchWait(host,APP_LIMIT_REASON,family_ready,'app_limit','provider')
                     delay=max(delay,family_ready-now)
                 if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
+                lane_ready=self._lane_ready(db,host,lane,now)
+                if lane_ready>now:raise ResearchWait(host,LANE_LIMIT_REASON,lane_ready,'app_limit','lane')
                 db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
                 db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+host_policy(host)[1],''))
                 db.execute('DELETE FROM public_research_requests WHERE at<?',(now-7*86400,))
+                if lane!='research':
+                    db.execute('INSERT INTO public_research_lanes VALUES(?,?,?)',(host,now+delay,lane))
+                    db.execute('DELETE FROM public_research_lanes WHERE at<?',(now-APP_HOST_WINDOW,))
                 if budget is not None:budget['remaining']-=1
-            if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
-            try:
-                raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
-                if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
-                if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
-            except InterruptedError:raise
-            except Exception as error:
-                now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
-                # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
-                # page: a human check. Respect it like a pause instead of retrying in 5 min.
-                challenge=isinstance(error,ChallengeDetected) or (http_error and error.code==202 and host=='html.duckduckgo.com')
-                retry=now+(CHALLENGE_PAUSE if challenge else 3600 if paused else 300)
-                if http_error and error.headers:
-                    after=error.headers.get('Retry-After','')
-                    if not isinstance(after,str):after=''
-                    try:
-                        if re.fullmatch(r'\d{1,12}',after.strip()):requested=now+int(after)
-                        else:
-                            date=parsedate_to_datetime(after)
-                            requested=date.timestamp() if date.tzinfo else date.replace(tzinfo=dt.timezone.utc).timestamp()
-                        retry=max(retry,requested);paused=paused or requested>now
-                    except (ValueError,TypeError,OverflowError):pass
-                reason=CHALLENGE_REASON if challenge else SOURCE_PAUSE_REASON if paused else 'Public source unavailable; no bypass attempted'
-                with connect(self.database) as db:
-                    db.execute('BEGIN IMMEDIATE')
-                    existing=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
-                    if existing and existing['next_at']>=retry:
-                        retry=existing['next_at']
-                        if existing['reason']:reason=existing['reason']
-                    db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
-                raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
-            def cache_fetched(db):
-                encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
-                db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,encoded,hashlib.sha256(raw).hexdigest(),fetched))
-                db.execute('INSERT OR REPLACE INTO public_research_cache_index VALUES(?,?,?)',(url,fetched,len(encoded)))
-                # Keep the newest responses within both an entry and a byte bound, so
-                # revisits reuse evidence instead of refetching it (was 100 entries).
-                self._evict(db)
-            transaction(self.database,cache_fetched,stop)
-            if budget is not None:budget.setdefault('answered',set()).add(host)
-            return raw
+        # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
+        # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
+        if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')
+        try:
+            raw=self.fetch(url,10,MAX_BYTES,stop=stop) if self.fetch is transport else self.fetch(url,10,MAX_BYTES)
+            if not isinstance(raw,bytes) or len(raw)>MAX_BYTES:raise ValueError()
+            if any(marker in raw[:MAX_BYTES].lower() for marker in CHALLENGE_MARKERS):raise ChallengeDetected()
+        except InterruptedError:raise
+        except Exception as error:
+            now=self.clock();http_error=isinstance(error,urllib.error.HTTPError);paused=http_error and error.code in (403,429)
+            # DuckDuckGo answers automated HTML queries with HTTP 202 and its anomaly
+            # page: a human check. Respect it like a pause instead of retrying in 5 min.
+            challenge=isinstance(error,ChallengeDetected) or (http_error and error.code==202 and host=='html.duckduckgo.com')
+            retry=now+(CHALLENGE_PAUSE if challenge else 3600 if paused else 300)
+            if http_error and error.headers:
+                after=error.headers.get('Retry-After','')
+                if not isinstance(after,str):after=''
+                try:
+                    if re.fullmatch(r'\d{1,12}',after.strip()):requested=now+int(after)
+                    else:
+                        date=parsedate_to_datetime(after)
+                        requested=date.timestamp() if date.tzinfo else date.replace(tzinfo=dt.timezone.utc).timestamp()
+                    retry=max(retry,requested);paused=paused or requested>now
+                except (ValueError,TypeError,OverflowError):pass
+            reason=CHALLENGE_REASON if challenge else SOURCE_PAUSE_REASON if paused else 'Public source unavailable; no bypass attempted'
+            with connect(self.database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                existing=db.execute('SELECT next_at,reason FROM public_research_limits WHERE host=?',(host,)).fetchone()
+                if existing and existing['next_at']>=retry:
+                    retry=existing['next_at']
+                    if existing['reason']:reason=existing['reason']
+                db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,retry,reason))
+            raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
+        def cache_fetched(db):
+            encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
+            db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,encoded,hashlib.sha256(raw).hexdigest(),fetched))
+            db.execute('INSERT OR REPLACE INTO public_research_cache_index VALUES(?,?,?)',(url,fetched,len(encoded)))
+            # Keep the newest responses within both an entry and a byte bound, so
+            # revisits reuse evidence instead of refetching it (was 100 entries).
+            self._evict(db)
+        transaction(self.database,cache_fetched,stop)
+        if budget is not None:budget.setdefault('answered',set()).add(host)
+        return raw
     def json(self,url,stop,budget):return strict_json(self.read(url,stop,budget))
     def receipt(self,url):
         with connect(self.database) as db:record=db.execute('SELECT sha256,fetched FROM public_research_cache WHERE url=?',(allowed_url(url),)).fetchone()
@@ -954,11 +988,17 @@ class PublicResearch:
         return result
 
     def _local_lookup(self,row,local,stop,budget,progress,result,index=None):
-        """Identity from agreeing local sources; the Internet fills only missing fields."""
+        """Identity from agreeing local sources; the Internet fills only missing fields.
+
+        0.22.1 (Sergei's backlog item 8; rulings 5 and 6): the book is approved on its local identity at once. Its missing
+        fields come from answers already in the research cache only: no request is made and nothing waits or defers the
+        book. The gaps nothing answered are recorded (metadata_facts gap_search 'background') and filled later by the
+        background pass (gap_fill.GapFill; series positions by series backfill). It used to wait 5-7 s per site, plus
+        downloads, and to defer the book up to 3 times while sources cooled down."""
         import local_identity
         from standing_metadata import build_policy
         fields=local['fields'];title=fields['title']['value'];author=fields['author']['value']
-        waits=[];filled=self._gap_fill(local,title,author,stop,budget,waits,progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
+        waits=[];filled=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
         titles=local_identity.title_forms(local)
@@ -1031,7 +1071,12 @@ class PublicResearch:
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
         if spelling:facts['author_spelling']=spelling
-        facts['gap_search']={'gaps':list(local['gaps']),'unfilled':list(filled.get('unfilled',[])),'closed_sources':list(filled.get('closed',[]))}
+        # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series
+        # positions are series backfill's (it looks every finished book without a series up and renames it in Sorted).
+        background=[gap for gap in filled.get('unfilled',[]) if gap in BACKGROUND_GAPS]
+        facts['gap_search']={'gaps':list(local['gaps']),'unfilled':list(filled.get('unfilled',[])),'closed_sources':[],'from_cache':True,
+                             'background':background}
+        if background:facts['gap_search']['ask']={'title':title,'author':author,'partial':bool(fields['author'].get('partial'))}
         reasons.extend(policy_reasons);reasons.extend(source_gate(row,work))
         result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':facts['local_agreement']})
         agreed=local_identity.summary(local)
@@ -1060,10 +1105,21 @@ class PublicResearch:
             facts['series_source']=series_source(series)
         result.update(review=review,metadata_facts=facts)
         result['reasons']=list(dict.fromkeys(reasons))
-        # Only a missing required field (full author name) waits for a source; optional gaps never do.
-        result['wait']=_wait(waits,budget.get('answered')) if 'Author full name not established' in result['reasons'] and filled.get('closed') else None
-        result['gap_wait']=_wait(waits,budget.get('answered')) if not result['reasons'] and filled.get('closed') else None
+        # Nothing waits for a source (0.22.1): the missing fields were read from the cache, the rest is filled later.
+        result['wait']=None
+        result['gap_wait']=None
         return result
+
+    def fill_gaps(self,ask,gaps,stop,budget,progress=lambda *_:None):
+        """The background gap fill's request (gap_fill.GapFill, 0.22.1): ask the sources about these missing fields of a
+        book identified locally as ask['title'] by ask['author'] ('partial': a surname only). budget carries the lane.
+        Returns (found, result): found as _gap_fill (catalog, author_full, series, unfilled, closed) plus 'wait', when
+        a closed source could still answer an unfilled field; result['sources'] holds the fetched receipts."""
+        result={'sources':[],'evidence':[]};waits=[]
+        local={'gaps':list(gaps),'fields':{'author':{'partial':bool(ask.get('partial'))}}}
+        found=self._gap_fill(local,ask['title'],ask['author'],stop,budget,waits,progress,result)
+        found['wait']=_wait(waits,budget.get('answered')) if found.get('closed') else None
+        return found,result
 
     def _gap_fill(self,local,title,author,stop,budget,waits,progress,result):
         """Ask only the sources that can answer a field missing locally; never block."""

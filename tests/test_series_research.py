@@ -180,7 +180,15 @@ class LookupTests(Base):
         self.sources.goodreads_search=search_page(('42','%s (Отряд Сигма, #8)'%title,[author]))
         self.sources.goodreads_books['42']=book_page('42',title,[author],'Отряд Сигма','8')
         row=catalogue(self.client.database,self.base,candidate(self.base,SERGEI))
+        # 0.22.1 (backlog item 8): research asks no source; the book is approved without its series at once and series
+        # backfill looks the series up later (in its own lane of the site's hourly bound).
+        first=self.research.lookup(row,str(self.base),self.stop)
+        self.assertEqual((first['reasons'],first['review']['series'],self.sources.calls),([],'',[]))
+        self.assertTrue(self.research._series_goodreads(title,'Джеймс Роллинс',self.stop,{'remaining':6,'lane':'series'},{'sources':[]}))
+        asked=len(self.sources.calls)
+        # Research reads the cached answer: the series, its number and its source, with no new request.
         result=self.research.lookup(row,str(self.base),self.stop)
+        self.assertEqual(len(self.sources.calls),asked)
         self.assertEqual(result['reasons'],[],result)
         self.assertEqual((result['review']['series'],result['review']['number']),('Отряд Сигма','8'))
         facts=result['metadata_facts'];self.assertEqual(facts['series_state'],'verified')

@@ -336,7 +336,7 @@ class SeriesBackfill:
         from public_work_identity import EvidenceConflict
         review = manifest['metadata']
         result = {'sources': []}
-        budget = {'remaining': 6}
+        budget = {'remaining': 6, 'lane': 'series'}  # 0.22.1: its own share of each site's hourly bound (public_research.LANES)
         waits = []
         for provider, args in (('_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
                                ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result)),

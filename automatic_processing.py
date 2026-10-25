@@ -23,10 +23,9 @@ ERROR_LIMIT = 8192
 RESEARCH_FAILURE = 'Metadata research failed'
 MISSING_FAILURE_DETAILS = 'Failure details were not recorded.'
 RETRY_HELP = 'Start automatic processing to retry this book and continue saved work.'
-# A locally identified book whose optional gap sources are cooling down waits only while
-# the converter already has work, and at most this many queue drains; then it proceeds
-# without the optional fields (Sergei decision 2026-10-12: gaps never block a book).
-GAP_DEFER_LIMIT = 3
+# Until 0.22.1 a locally identified book whose optional gap sources were cooling down waited while the converter had work,
+# up to 3 queue drains (GAP_DEFER_LIMIT). Records saved with this reason are researched again when visited; nothing defers
+# a book for an optional field any more (backlog item 8: the background pass gap_fill.GapFill fills it after approval).
 GAP_DEFER_REASON = 'Optional metadata sources cooling down; converter busy, book admitted when it is free'
 # Start over / "Let the app handle it" (RefusedRetry follow-ups 3 and 4): a blocker that clears by itself leaves one
 # pending start for the app, checked every PENDING_POLL seconds (Judy: within 15 s of the blocker clearing).
@@ -667,13 +666,9 @@ class AutomaticProcessing:
                           if questions.get('questions'):
                               result['reasons']=[reason for reason in result.get('reasons',[]) if reason!='Saved manual metadata disagrees with researched identity']
                               result['metadata_holds']=[hold for hold in result.get('metadata_holds',[]) if hold.get('reason')!='Saved manual metadata disagrees with researched identity']
-                  deferrals=(previous or {}).get('gap_deferrals',0)
-                  if not result.get('reasons') and result.get('gap_wait') and deferrals<GAP_DEFER_LIMIT and not self._idle_jobs():
-                      # The converter has work, so waiting for an optional field costs no throughput.
-                      # Eligible again on the next pass, which starts only once the queue drains.
-                      self._record(row,'Waiting for source',dict(result,reasons=[GAP_DEFER_REASON],wait=None,gap_deferrals=deferrals+1),self.clock())
-                      deferred.append(identity)
-                  elif result.get('reasons') and result.get('wait'):
+                  # 0.22.1 (backlog item 8): an optional field never defers a book any more (it used to wait up to 3 queue
+                  # drains while its sources cooled down); the background pass fills it after the approval (gap_fill).
+                  if result.get('reasons') and result.get('wait'):
                       wait=result['wait']
                       self._record(row,'Waiting for source',result,wait.get('retry_at'))
                       deferred.append(identity)
