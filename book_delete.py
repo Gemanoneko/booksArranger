@@ -9,12 +9,16 @@ Guarantees (each refused before the first file is touched, with a typed code; Se
     configured Sorted (output) folder; covers, text files, other books' files and folders are never touched;
   - no file that any other book, job or reacquire record also holds ('shared');
   - no book with a finished or published audiobook, a replacement lineage or a recorded source cleanup ('sorted');
-  - no book being converted, cleaned up or researched right now ('busy'); a changed revision ('changed'); a file list
-    that differs from the one confirmed ('files_changed'); an unreachable source root ('offline').
-Files go first, one at a time, through the exact-handle disposal source cleanup uses (native_io), with NO recovery
-copy (ruling 23: fully removed). A file that fails does not stop the others. The records go last, in one catalog
-transaction, and only when every listed file is confirmed gone (a file already absent counts as gone). On any failure
-no record is deleted, so the book stays listed and nothing is half-forgotten; a crash between the steps ends the same."""
+  - no book being converted, cleaned up or researched right now, and nothing while a library scan runs ('busy'); a
+    changed revision ('changed'); a file list that differs from the one confirmed ('files_changed'); an unreachable
+    source root ('offline'); a file reached through a junction or with another name, or leftover working files the app
+    cannot prove are its own ('refused').
+The book's leftover working files on the app's own drive go first, through the app's verified disposal, while its
+originals are still on disk (that disposal removes a copy only after proving the original it copies). Then its files,
+one at a time, through the exact-handle disposal source cleanup uses (native_io), with NO recovery copy (ruling 23:
+fully removed). A file that fails does not stop the others. The records go last, in one catalog transaction, and only
+when every listed file is confirmed gone (a file already absent counts as gone). On any failure no record is deleted,
+so the book stays listed and nothing is half-forgotten; a crash between the steps ends the same."""
 import json
 import os
 import stat
@@ -225,6 +229,18 @@ def plan(service, identity, revision):
                 raise DeleteRefused('refused', REFUSED)
             guarded.add(_key(p.parent))
         files.append({'path': str(p), 'size': facts.st_size, 'root': root})
+    # Senua's 0.22.0 final review, N15: Delete clears every leftover working file of the book's jobs (see delete()). The
+    # app's verified disposal refuses files it cannot prove are its own (blocked), so such a book is refused here, before
+    # the dialog says its files will be deleted (her N14 rule), not after its files are gone.
+    for job in jobs:
+        if job['state'] != 'needs attention' or job['output']:
+            continue
+        try:
+            state = service._working_state(job, False, fresh=True)
+        except Exception:
+            raise DeleteRefused('refused', REFUSED)
+        if state and state.get('state') != 'cleanable':
+            raise DeleteRefused('refused', REFUSED)
     return {'files': files, 'bytes': sum(f['size'] for f in files), 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
 
 
@@ -278,46 +294,45 @@ def delete(service, identity, revision, paths):
         if sorted(_key(f['path']) for f in found['files']) != sorted(_key(p) for p in paths) or len(set(map(_key, paths))) != len(paths):
             raise DeleteRefused('files_changed', "The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list.")
         deleted, removed_bytes, failed = 0, 0, []
-        for item in found['files']:
-            outcome = remove(item['path'], item['root'], item['size'])
-            if outcome is None:
-                deleted += 1
-                removed_bytes += item['size']
-            else:
-                failed.append({'path': item['path'], 'cause': outcome[0], 'detail': outcome[1]})
+        # Leftover working files of its stopped jobs go first (the app's own drive), while the originals are still on
+        # disk: the app's verified disposal removes a working copy only after it has proven the original it copies, so
+        # once the originals were gone it kept every copy, and the book could never be forgotten (Senua's N15). A clear
+        # that fails keeps every record and touches none of the book's files.
+        working = _clear_working(service, found['jobs'])
+        if working:
+            failed.append(working)
+        else:
+            for item in found['files']:
+                outcome = remove(item['path'], item['root'], item['size'])
+                if outcome is None:
+                    deleted += 1
+                    removed_bytes += item['size']
+                else:
+                    failed.append({'path': item['path'], 'cause': outcome[0], 'detail': outcome[1]})
         forgotten = False
         if not failed:
-            # Every listed file is gone, or was already. Leftover working files of its failed jobs go first (the app's
-            # own drive); a working folder that cannot be cleared keeps every record, like a source file that fails.
-            working = _clear_working(service, found['jobs'])
-            if working:
-                failed.append(working)
+            # Every listed file is gone, or was already, and so are the working files.
+            still = [m for m in found['members'] if os.path.lexists(m)]
+            if still:
+                failed.extend({'path': p, 'cause': 'other', 'detail': 'Still on disk'} for p in still)
             else:
-                still = [m for m in found['members'] if os.path.lexists(m)]
-                if still:
-                    failed.extend({'path': p, 'cause': 'other', 'detail': 'Still on disk'} for p in still)
-                else:
-                    forget(service, identity, found['members'], found['jobs'])
-                    forgotten = True
+                forget(service, identity, found['members'], found['jobs'])
+                forgotten = True
     service.after_delete(identity)
     return {'deleted': deleted, 'bytes': removed_bytes, 'failed': failed, 'forgotten': forgotten}
 
 
 def _clear_working(service, jobs):
-    clear = getattr(service, '_clear_working', None)
+    """Clear the leftover working files of the book's stopped jobs through the app's verified disposal: None when none is
+    left, else the failure entry. Senua's 0.22.0 final review, N15: every leftover counts (audio_only False), not only
+    the .m4b/.wav that stop an M4B Retry, which left the others on the app's drive with their records deleted; and a
+    working state that cannot be read is a failure (records kept), not "nothing left"."""
     for job in jobs:
         if job['state'] != 'needs attention' or job['output']:
             continue
         try:
-            state = service._working_state(job, service._working_kind(job), fresh=True) if hasattr(service, '_working_state') else None
-        except Exception:
-            state = None
-        if not state:
-            continue
-        try:
-            if clear is None:
-                raise BoundaryError('Working files cannot be cleared')
-            clear(job)
+            if service._working_state(job, False, fresh=True):
+                service._clear_working(job, audio_only=False)
         except Exception as error:
             return {'path': 'Working files of an earlier attempt (job %s)' % job['job_id'], 'cause': _cause(error), 'detail': str(error)[:500]}
     return None

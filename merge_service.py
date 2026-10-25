@@ -2868,10 +2868,11 @@ class MergeService:
         try:return bool(m4b_repair.eligible(row))
         except Exception:return False
 
-    def _clear_working(self,row):
+    def _clear_working(self,row,audio_only=None):
+        """audio_only: None reads the job's own rule (_working_kind); Delete book passes False, every leftover."""
         from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_NOT_SAFE,WORKING_FILE_PROBLEM
         from native_io import BoundaryError,FileInUse
-        job_id=row['job_id'];audio_only=self._working_kind(row)
+        job_id=row['job_id'];audio_only=self._working_kind(row) if audio_only is None else audio_only
         before=self._working_state(row,audio_only,fresh=True)
         if before is None:return {'cleared':True,'bytes':0,'already':True}
         if before['state']!='cleanable':raise RetryRefused(WORKING_NOT_SAFE,'not_safe')

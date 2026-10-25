@@ -3,11 +3,12 @@ is removed from disk and from every record, so a reacquired copy is a new book. 
 file, a path outside the source roots, Sorted untouched, a partial failure, and a crash between the file and record
 steps; plus every typed refusal, records last, no recovery copy, and reacquire as a new book. Real private files in a
 temporary library with its own Sorted folder; no network, no library access."""
-import _winapi, json, os, shutil, sqlite3, threading, unittest
+import _winapi, hashlib, json, os, shutil, sqlite3, threading, unittest, uuid
 from pathlib import Path
 from unittest import mock
 
 import book_delete
+import merge_service
 import test_approve_as_is
 from test_approve_as_is import tone
 from scanner import connect
@@ -325,6 +326,78 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertFalse(source.exists())
         with connect(self.inv.database) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM audio_jobs WHERE job_id='job-iron'").fetchone()[0], 0, 'its job and journal go')
+
+    def with_leftovers(self):
+        """The "Source audio needs replacement" MP3, whose failed attempt left a working copy of the original on the app's
+        drive: a real UUID job and attempt, made through the app's own working lifecycle (begin, copy_owned, closed), so
+        its verified disposal can prove the copy and remove it. Returns (source, row, job_id, attempt folder)."""
+        from audio_pipeline import copy_owned, generated_artifacts
+        from source_cleanup import packed
+        from working_lifecycle import digest
+        source = tone(self.audio / 'Unsorted' / 'Железный ад' / 'Железный ад.mp3', self.cover, album='Железный ад', artist='Иван Петров')
+        row = self.start()[0]
+        info, job_id, attempt = source.stat(), str(uuid.uuid4()), str(uuid.uuid4())
+        manifest = {'job_id': job_id, 'candidate_id': row['id'], 'candidate_revision': row['revision'], 'root': str(self.audio), 'metadata': {'title': 'Железный ад'},
+                    'sources': [{'path': str(source), 'size': info.st_size, 'modified': str(info.st_mtime_ns), 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        with connect(self.inv.database) as db:
+            db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       (job_id, json.dumps(manifest), digest(manifest), 'running', 'checking sources', attempt, '{}', None, '', 't', 't'))
+        life = self.service.working
+        life.begin(dict(manifest, attempt_id=attempt))
+        folder = self.service.stage_root / job_id / attempt; folder.mkdir(parents=True)
+        (folder.parent / 'ownership.json').write_text(packed({'job_id': job_id, 'manifest': manifest}), encoding='utf8')
+        with generated_artifacts(folder, life):
+            copy_owned(source, folder / 'source00000.mp3', manifest['sources'][0]['sha256'], threading.Event())
+        failure = {'exception_class': 'ValidationError', 'stage': 'checking sources', 'tag_repair_checked': True}
+        with connect(self.inv.database) as db:
+            db.execute("UPDATE audio_jobs SET state='needs attention',journal=?,reason='Full audio decode failed: Header missing' WHERE job_id=?", (json.dumps({'failure': failure}), job_id))
+        self.service.invalidate_status()
+        row = [r for r in self.service.reviews.page(status='output_attention')['rows'] if r['id'] == row['id']][0]
+        self.assertEqual(row['creation']['job']['attention'].get('delete'), {'kind': 'audio_damaged', 'present': 1}, 'positive control: offered')
+        self.assertEqual(self.service._working_state(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job_id,))[0], False, fresh=True)['state'], 'cleanable', 'positive control: leftovers')
+        return source, row, job_id, folder
+
+    def working_left(self, job_id):
+        """Working files of the job still on the app's drive (the ownership record aside), and its working records."""
+        stage = self.service.stage_root / job_id
+        files = sorted(p.name for p in stage.rglob('*') if p.is_file() and p.name != 'ownership.json') if stage.exists() else []
+        with connect(self.inv.database) as db:
+            records = sum(db.execute('SELECT count(*) FROM %s WHERE job_id=?' % t, (job_id,)).fetchone()[0] for t in ('working_attempts', 'working_files'))
+        return files, records
+
+    def test_delete_clears_the_working_copies_of_its_originals_before_it_removes_them(self):
+        # Senua's 0.22.0 final review, N15. Delete removed the book's files, then asked the app's verified disposal to clear
+        # the working copies, which keeps a copy whose original it cannot prove: with the original gone it kept them all,
+        # so Delete failed on "Working files of an earlier attempt" at every press and never forgot the book.
+        source, row, job_id, folder = self.with_leftovers()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual([f['path'] for f in preview['files']], [str(source)])
+        result = self.service.delete_book(row['id'], row['revision'], [str(source)])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (1, [], True))
+        self.assertFalse(source.exists())
+        self.assertEqual(self.working_left(job_id), ([], 0), 'no working file and no working record of the book left')
+
+    def test_delete_clears_every_leftover_not_only_the_audio_an_m4b_retry_counts(self):
+        # N15: for an M4B job the working state counts only .m4b and .wav leftovers (Retry's rule), so any other leftover
+        # read as "nothing left": its records were deleted with the book and the file stayed on the app's drive.
+        with mock.patch.object(merge_service.MergeService, '_working_kind', return_value=True):  # this job is an M4B job
+            source, row, job_id, folder = self.with_leftovers()
+            self.assertIsNone(self.service._working_state(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job_id,))[0], True, fresh=True), 'positive control: Retry sees nothing left')
+            result = self.service.delete_book(row['id'], row['revision'], [str(source)])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (1, [], True))
+        self.assertEqual(self.working_left(job_id), ([], 0), 'the copy of the original went too')
+
+    def test_working_files_the_app_cannot_prove_refuse_before_anything_is_deleted(self):
+        # N15 with the N14 rule: a file in the attempt folder the app did not record makes its disposal refuse, so the
+        # preview refuses before the dialog lists the book's files (it used to delete them, then stop on the working files).
+        source, row, job_id, folder = self.with_leftovers()
+        (folder / 'stray.wav').write_bytes(b'not the app')
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((preview['files'], (preview['refusal'] or {}).get('code')), ([], 'refused'))
+        with self.assertRaises(book_delete.DeleteRefused):
+            self.service.delete_book(row['id'], row['revision'], [str(source)])
+        self.assertTrue(source.exists(), 'nothing deleted')
+        self.assertEqual(self.working_left(job_id)[0], ['source00000.mp3', 'stray.wav'])
 
     def test_a_damaged_mp3_the_app_can_still_retry_has_no_offer(self):
         source, row = self.damaged_mp3(repaired=False)
