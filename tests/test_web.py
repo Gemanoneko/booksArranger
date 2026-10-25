@@ -157,6 +157,14 @@ class BrowserTests(unittest.TestCase):
         code,refused=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[]})
         self.assertEqual((code,refused['code']),(409,'changed'))
         self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':'Z:/x'})[0],400,'paths must be a list')
+        # Remove this copy (ruling 25) is mode 'copy' on the same routes; folders (ruling 24) are listed paths too.
+        code,preview=self.json_call('/api/candidate/delete-preview',{'library':'Audiobooks','id':identity,'revision':1,'mode':'copy'})
+        self.assertEqual((code,preview['refusal']['code'],preview['sorted']),(200,'changed',None))
+        code,refused=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[],'folders':[],'mode':'copy'})
+        self.assertEqual((code,refused['code']),(409,'changed'))
+        self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':identity,'revision':1,'mode':'everything'})[0],400,'a known mode only')
+        self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[],'folders':'Z:/x'})[0],400,'folders must be a list')
+        self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':identity,'revision':1,'folders':[]})[0],400,'the preview takes no folders')
         # Senua's 0.22.0 final review, N13: while a library scan runs both routes refuse like Keep and Convert, typed (busy),
         # so the dialog says "Nothing was deleted"; the service is not asked at all.
         with patch.object(self.server,'scan_active',return_value=True),patch.object(self.server.merge,'delete_preview',return_value={'files':[],'bytes':0,'kind':'files_missing','refusal':None}) as asked_preview,patch.object(self.server.merge,'delete_book',return_value={'deleted':0,'bytes':0,'failed':[],'forgotten':True}) as asked_delete:

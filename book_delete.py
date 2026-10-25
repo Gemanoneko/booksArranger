@@ -1,39 +1,67 @@
-"""Delete book (Sergei's ruling 23, 2026-10-25; Judy's "Delete book - spec" in Docs/BooksArranger_AttentionTodo_UX_2026-10-24.md).
+"""Delete book and Remove this copy (Sergei's rulings 23-26, 2026-10-25; Judy's "Delete book - spec" and "Delete book
+update and Remove this copy - spec" in Docs/BooksArranger_AttentionTodo_UX_2026-10-24.md).
 
-A book with missing parts or audio the app cannot repair is deleted on Sergei's confirmation: its own audio files are
-removed from disk and every record the app holds about it is deleted, so a reacquired copy is found as a new book.
-Ruling 23 is his explicit exception to ruling 2 (a source goes only after its result is in Sorted), for these books only.
+Delete book (mode 'delete'): a book with missing parts or audio the app cannot repair is deleted on Sergei's confirmation,
+so a reacquired copy is found as a new book. It removes:
+  1. the book's own catalogued audio files;
+  2. the other files of its folder (cover, text, anything not audio) only when the folder holds no other book (ruling 24);
+  3. the app's own working files for its stopped jobs, the copies of its originals included even when the originals are
+     already gone and they are the last copy of its audio (ruling 26: this explicit action only);
+  4. each folder this press leaves empty, up to but never a folder directly inside a source folder (ruling 24);
+and then every record the app holds about it. Ruling 23 is his explicit exception to ruling 2 for these books only.
+
+Remove this copy (mode 'copy', ruling 25): a book whose files the app has proven are an exact copy of an audiobook it
+already arranged in Sorted. The proof is checked again in the preview and once more right before the first file goes:
+the audiobook is where the app put it with its recorded size and checksum, and every file of the copy matches, in order,
+a source the audiobook was arranged from. Items 1, 2 and 4 as above (Judy's default under ruling 24; the copy has no
+job, so no working files), then every record of the copy. The audiobook is held open (no write or delete sharing) while
+the copy's files go.
 
 Guarantees (each refused before the first file is touched, with a typed code; Senua red-teams them):
-  - only the book's own catalogued audio files, each inside a configured Audiobooks SOURCE root and never inside the
-    configured Sorted (output) folder; covers, text files, other books' files and folders are never touched;
-  - no file that any other book, job or reacquire record also holds ('shared');
-  - no book with a finished or published audiobook, a replacement lineage or a recorded source cleanup ('sorted');
-  - no book being converted, cleaned up or researched right now, and nothing while a library scan runs ('busy'); a
-    changed revision ('changed'); a file list that differs from the one confirmed ('files_changed'); an unreachable
-    source root ('offline'); a file reached through a junction or with another name, or leftover working files the app
-    cannot prove are its own ('refused').
-The book's leftover working files on the app's own drive go first, through the app's verified disposal, while its
-originals are still on disk (that disposal removes a copy only after proving the original it copies). Then its files,
-one at a time, through the exact-handle disposal source cleanup uses (native_io), with NO recovery copy (ruling 23:
-fully removed). A file that fails does not stop the others. The records go last, in one catalog transaction, and only
-when every listed file is confirmed gone (a file already absent counts as gone). On any failure no record is deleted,
-so the book stays listed and nothing is half-forgotten; a crash between the steps ends the same."""
+  - only this book's or copy's own files: catalogued audio, plus non-audio files of a folder no other book uses and no
+    other book holds; every path inside a configured Audiobooks source root and never inside the configured Sorted
+    folder; no junction, symlink or other reparse point from the drive root down, no file with a second name;
+  - no file that any other book, job or reacquire record also holds ('shared'; history of a gone book does not count);
+  - Delete: no book with a finished or published audiobook, a replacement lineage or a recorded source cleanup
+    ('sorted'); leftover working files only when the app can prove each is its own ('refused' otherwise);
+  - Remove this copy: the audiobook missing ('sorted_missing') or changed ('sorted_changed'), a copy file that no longer
+    matches ('not_identical'), a listed file that is the audiobook's own file ('refused');
+  - nothing while a library scan runs, a job or research runs on it ('busy'); a changed revision ('changed'); a list
+    that differs from the one confirmed, files or folders ('files_changed'); an unreachable root ('offline').
+Files go one at a time through the exact-handle disposal source cleanup uses (native_io), with NO recovery copy; working
+files through the working lifecycle's exact-handle discard. A file that fails does not stop the others. Records go last,
+in one catalog transaction, only when every listed file is confirmed gone; on any failure no record is deleted, so the
+book stays listed and nothing is half-forgotten. A folder is housekeeping: one that cannot be removed is reported and
+never keeps the book listed. A folder is removed only through the exact-handle empty-folder disposition, which refuses
+on a filesystem where a late directory stream could be lost (Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md);
+the preview lists only folders that disposition can remove, so the dialog never promises one it cannot."""
+import contextlib
+import datetime
 import json
 import os
+import re
 import stat
+import threading
 from pathlib import Path
 
 from metadata import AUDIO
-from native_io import BoundaryError, DirectoryBoundary, FileInUse, VerifiedFile, ordinary
+from native_io import BoundaryError, DirectoryBoundary, FileInUse, VerifiedDirectory, VerifiedFile, ordinary
 from scanner import connect, inside
 
-CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused')
+CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused', 'sorted_missing', 'sorted_changed', 'not_identical')
 CAUSES = ('in_use', 'denied', 'unreachable', 'other')
+MODES = ('delete', 'copy')
 BUSY = 'This book is being processed. Nothing was deleted.'  # Judy's "Book is being processed" line
 REFUSED = 'Delete was not accepted. Nothing was deleted.'  # Judy's "Any other typed refusal" line
+CHANGED = 'This book changed, so nothing was deleted. Review its details and try again.'
+WORKING = "The app's working files"  # the failed working files' "path" (Judy's update spec 2.3)
+IDENTICAL = 'Identical verified recording already arranged'  # merge_service._recording_review's reasons
+POSSIBLE = 'Possible duplicate recording'
+_TEXT = {'delete': {'refused': REFUSED, 'files_changed': "The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list."},
+         'copy': {'refused': 'Remove was not accepted. Nothing was deleted.', 'files_changed': "The folder doesn't match the list, so nothing was deleted. Press Remove this copy to see the current list."}}
 _UNREACHABLE = ('[WinError 53]', '[WinError 51]', '[WinError 59]', '[WinError 64]', '[WinError 67]', '[WinError 121]',
                 '[WinError 1222]', '[WinError 1231]', '[WinError 3]')
+_SNAPSHOT = re.compile(r'source(\d{5})\.[^.\\/]+')
 
 
 class DeleteRefused(ValueError):
@@ -67,6 +95,10 @@ def _title(evidence):
     return str(value.get('title_clue') or '') if isinstance(value, dict) else ''
 
 
+def _sorted_name(output):
+    return Path(output).name if output else 'Audiobooks Sorted'
+
+
 def offer(service, row):
     """The typed offer for this row, or None: {'kind': 'files_missing' | 'audio_damaged', 'present': n}. The server alone
     decides (Judy, section 2): a Missing files row, a Need to reacquire row, or a single MP3 whose full audio check
@@ -82,6 +114,68 @@ def offer(service, row):
     attention = (service.attention_summary(job_ids=[job['job_id']], retry=False) or {}).get(job['job_id']) or {}
     if attention.get('group') == 'reacquire' or (attention.get('remedy') or {}).get('kind') == 'replace_source':
         return {'kind': 'audio_damaged', 'present': present}
+    return None
+
+
+def duplicate(entry):
+    """'verified' or 'possible' for a duplicate-recording row (needs_you entry), else None: the server's own reasons."""
+    reasons = [str(r) for r in (entry or {}).get('reasons') or []]
+    if any(r.startswith(IDENTICAL) for r in reasons):
+        return 'verified'
+    if any(r.startswith(POSSIBLE) for r in reasons):
+        return 'possible'
+    return None
+
+
+def _sorted_record(service, output):
+    """(effective record, its final path) of an arranged audiobook, through the publication bindings (a relocated
+    output resolves to where it is now); (None, None) when it cannot be resolved."""
+    bindings = getattr(service, 'publication_bindings', None)
+    try:
+        lease = bindings.protect(output) if bindings else contextlib.nullcontext((output, None))
+        with lease as (effective, _envelope):
+            return dict(effective), str(effective['final_path'])
+    except Exception:
+        return None, None
+
+
+def copy_source(service, row, exists=True):
+    """The audiobook this book is a verified copy of, from the app's own records, else None (Judy's update spec 3.1): the
+    row is a "Needs you" book whose recording review is identical verified (every file matches, in order, a source of
+    one audiobook) with no missing file, and that audiobook's job is completed, passed its output check and its file is
+    in Sorted. {'job', 'output', 'record', 'final'}. A cheap check (one stat); plan() proves it in full. exists=False (the
+    press): the file's presence is left to the proof, so a missing audiobook is refused as such ('sorted_missing')."""
+    entry = service.needs_you().get(row['id']) or {}
+    if entry.get('group') != 'other' or duplicate(entry) != 'verified':
+        return None
+    members = row.get('members') or []
+    if not members or any(m.get('missing') for m in members):
+        return None
+    try:
+        review = service.reviews._context(row).get('duplicate_review') or {}
+    except Exception:
+        return None
+    if review.get('state') != 'verified_identical' or review.get('blocking'):
+        return None
+    related = sorted({r for r in review.get('related_ids') or [] if isinstance(r, str)})[:50]
+    if not related:
+        return None
+    with connect(service.inventory.database) as db:  # only the related jobs: a page read, never every job
+        rows = [dict(r) for r in db.execute("SELECT job_id,state,manifest,output FROM audio_jobs WHERE state='completed' AND job_id IN (%s) ORDER BY job_id" % ','.join('?' * len(related)), related)]
+    for job in rows:
+        try:
+            job['manifest'], job['output'] = json.loads(job['manifest']), json.loads(job['output'] or '{}')
+        except (TypeError, ValueError):
+            continue
+        output = job['output'] if isinstance(job['output'], dict) else {}
+        sources = (job['manifest'] if isinstance(job['manifest'], dict) else {}).get('sources') or []
+        if (output.get('validation') or {}).get('passed') is not True or len(sources) != len(members):
+            continue
+        if any(not isinstance(s, dict) or s.get('size') != m.get('size') for s, m in zip(sources, members)):
+            continue
+        record, final = _sorted_record(service, output)
+        if record and (not exists or os.path.isfile(final)):
+            return {'job': job, 'output': output, 'record': record, 'final': final}
     return None
 
 
@@ -114,61 +208,16 @@ def _history(job, manifest, current):
     return manifest.get('candidate_id') not in current
 
 
-def plan(service, identity, revision):
-    """Read-only: what Delete book would remove now. {'files': [{'path', 'size', 'root'}], 'bytes', 'members', 'jobs',
-    'kind', 'row'}. Raises DeleteRefused with every refusal check (Judy's preview runs them before the confirm)."""
-    if scanning(service):
-        # Senua's 0.22.0 final review, N13 (probe P1): a Delete while the scan held the book's queued files let the scan
-        # find them gone, and with no catalog row it wrote each back as a new one-file book with a raw "[Errno 2]" error;
-        # the scan then ended "completed with errors", which stops an automatic run. Keep, Approve, Scan again and Convert
-        # already wait for the scan; Delete now does too, before it reads or touches anything.
-        raise DeleteRefused('busy', BUSY)
-    try:
-        row = service.reviews._row('Audiobooks', identity, revision)
-    except ValueError:
-        raise DeleteRefused('changed', 'This book changed, so nothing was deleted. Review its details and try again.')
-    inventory = service.inventory
-    roots = [str(ordinary(r)) for r in inventory.source_roots('Audiobooks')]
-    output = getattr(inventory, 'output_root', None)
-    output = str(ordinary(output)) if output else None
-    members = [m['path'] for m in row.get('members') or []]
-    if not members:
-        raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
-    with connect(inventory.database) as db:
-        jobs = _jobs(db, identity)
-        if any(j['state'] in ('pending', 'running') for j in jobs):
-            raise DeleteRefused('busy', BUSY)
-        cleaned = set()
-        if jobs and _table(db, 'source_cleanup'):
-            cleaned = {r[0] for r in db.execute('SELECT job_id FROM source_cleanup WHERE job_id IN (%s)' % ','.join('?' * len(jobs)), [j['job_id'] for j in jobs])}
-        for job in jobs:
-            try:
-                manifest = json.loads(job['manifest'])
-            except (TypeError, ValueError):
-                manifest = {}
-            lineage = isinstance(manifest, dict) and any(k in manifest for k in ('replacement_id', 'replacement_parent_job_id'))
-            if job['state'] == 'completed' or job['output'] or job['job_id'] in cleaned or lineage:
-                raise DeleteRefused('sorted', 'A finished audiobook of this book is in %s. Nothing was deleted.' % (Path(output).name if output else 'Audiobooks Sorted'))
-        if _table(db, 'automatic_candidates'):
-            researching = db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone()
-            if researching:
-                raise DeleteRefused('busy', BUSY)
-        # A finished, queued or researched book was refused above with its own line; any other book without the
-        # server's offer (one the app can still fix, a duplicate, Files unclear) is refused here.
-        kind = offer(service, row)
-        if kind is None:
-            raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
-        # Shared: another current book, another book's job, or another book's reacquire record holds the file. History of
-        # a book that is gone does not count (Senua's 0.22.0 final review, N16): an archived marker (its originals are
-        # confirmed gone) or a stopped job of that book names the paths it had, and a copy reacquired at those paths is a
-        # new book, which Delete refused as "shared" with a book that is not listed. See _history.
-        keys = {_key(p): p for p in members}
-        shared = {}
-        current = {r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')} if _table(db, 'book_groups') else set()
+class _Holders:
+    """Every path another book holds now, {key: title}, and the folders holding one: another current group's members,
+    another book's job (its sources and cover; history of a gone book aside, N16), another book's reacquire record (an
+    archived one of a gone book aside, N16). Titles of groups are read only for the paths asked about. folders: the
+    folders where another book holds audio (a cover another book's job used stays by itself, ruling 24)."""
+    def __init__(self, db, identity, current):
+        self.db, self.groups, self.titles, covers = db, {}, {}, set()
         if _table(db, 'catalog_group_members'):
-            for r in db.execute('SELECT c.path,g.id,g.evidence FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE g.superseded=0 AND g.id!=?', (identity,)):
-                if _key(r['path']) in keys:
-                    shared.setdefault(keys[_key(r['path'])], _title(r['evidence']) or 'another book')
+            for r in db.execute('SELECT c.path,c.group_id FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE g.superseded=0 AND g.id!=?', (identity,)):
+                self.groups.setdefault(_key(r['path']), r['group_id'])
         if _table(db, 'audio_jobs'):
             for r in db.execute("SELECT state,output,manifest FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IS NOT ?", (identity,)):
                 try:
@@ -177,9 +226,14 @@ def plan(service, identity, revision):
                     continue
                 if not isinstance(manifest, dict) or _history(r, manifest, current):
                     continue
-                for source in manifest.get('sources') or []:
-                    if isinstance(source, dict) and _key(source.get('path', '')) in keys:
-                        shared.setdefault(keys[_key(source['path'])], str((manifest.get('metadata') or {}).get('title') or 'another book'))
+                title = str((manifest.get('metadata') or {}).get('title') or 'another book')
+                for path in (s.get('path', '') for s in manifest.get('sources') or [] if isinstance(s, dict)):
+                    if path:
+                        self.titles.setdefault(_key(path), title)
+                cover = manifest['cover'].get('path', '') if isinstance(manifest.get('cover'), dict) else ''
+                if cover and _key(cover) not in self.titles:
+                    self.titles[_key(cover)] = title
+                    covers.add(_key(cover))
         if _table(db, 'reacquire_markers'):
             for r in db.execute('SELECT candidate_id,state,snapshot FROM reacquire_markers WHERE candidate_id!=?', (identity,)):
                 if r['state'] == 'archived' and r['candidate_id'] not in current:
@@ -188,27 +242,282 @@ def plan(service, identity, revision):
                     snapshot = json.loads(r['snapshot'])
                 except (TypeError, ValueError):
                     continue
+                title = _title((snapshot.get('group') or {}).get('evidence')) or 'another book'
                 for member in snapshot.get('members') or []:
-                    if isinstance(member, dict) and _key(member.get('path', '')) in keys:
-                        shared.setdefault(keys[_key(member['path'])], _title((snapshot.get('group') or {}).get('evidence')) or 'another book')
-    if shared:
-        files = [{'path': p, 'other': other} for p, other in sorted(shared.items())]
-        if len(files) == 1:
-            raise DeleteRefused('shared', '"%s" also belongs to "%s". Nothing was deleted.' % (files[0]['path'], files[0]['other']), files)
-        raise DeleteRefused('shared', '%d of this book\'s files also belong to other books. Nothing was deleted.' % len(files), files)
-    files, used, guarded = [], set(), set()
+                    if isinstance(member, dict) and member.get('path'):
+                        self.titles.setdefault(_key(member['path']), title)
+        self.folders = {os.path.dirname(k) for k in (*self.groups, *self.titles) if k not in covers}
+
+    def __contains__(self, key):
+        return key in self.groups or key in self.titles
+
+    def title(self, key):
+        if key in self.groups:
+            row = self.db.execute('SELECT evidence FROM book_groups WHERE id=?', (self.groups[key],)).fetchone()
+            return (_title(row['evidence']) if row else '') or 'another book'
+        return self.titles[key]
+
+
+def _guard(root, folder, guarded, text):
+    """Every folder from the drive root down to folder, held by the DirectoryBoundary remove() uses: no junction, symlink
+    or other reparse point (Senua's N14). Once per folder."""
+    if _key(folder) in guarded:
+        return
+    try:
+        with DirectoryBoundary(ordinary(root), ordinary(folder)):
+            pass
+    except (BoundaryError, OSError):
+        raise DeleteRefused('refused', text)
+    guarded.add(_key(folder))
+
+
+def _others(members, roots, output, holders, guarded, text):
+    """Ruling 24: the other files of the book's own folders (cover, text, anything not audio), only when the folder holds
+    no other book: no audio file on disk that is not this book's, and nothing another book holds in it (a group member,
+    a job's source or cover, a reacquire record). One that another book holds stays, and so does anything the app
+    cannot place: a subfolder, a link, a file with a second name. ([other files], stay count, [(folder, root)])."""
+    member_keys = {_key(m) for m in members}
+    others, stay, folders = [], 0, []
+    for folder in sorted({_key(Path(m).parent): str(Path(m).parent) for m in members}.values()):
+        try:
+            f = ordinary(folder)
+        except BoundaryError:
+            raise DeleteRefused('refused', text)
+        root = next((r for r in roots if inside(str(f), r) and _key(f) != _key(r)), None)
+        if root is None or output and inside(str(f), output) or not os.path.isdir(f):
+            continue  # a source folder itself is no book's folder; a folder already gone has nothing left
+        _guard(root, f, guarded, text)
+        folders.append((str(f), root))
+        try:
+            with os.scandir(f) as listing:
+                entries = list(listing)
+        except OSError:
+            raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
+        foreign = _key(f) in holders.folders or any(_key(e.path) not in member_keys and Path(e.name).suffix.lower() in AUDIO for e in entries)
+        for entry in entries:
+            key = _key(entry.path)
+            if key in member_keys:
+                continue
+            if foreign or key in holders or entry.is_symlink() or os.path.isjunction(entry.path) or not entry.is_file(follow_symlinks=False):
+                stay += 1
+                continue
+            try:
+                p = ordinary(entry.path)
+                facts = os.lstat(p)
+            except FileNotFoundError:
+                continue
+            except (BoundaryError, OSError):
+                stay += 1
+                continue
+            if not stat.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
+                stay += 1
+                continue
+            others.append({'path': str(p), 'size': facts.st_size, 'root': root, 'kind': 'other'})
+    return others, stay, folders
+
+
+def _working(service, jobs, text):
+    """Ruling 26: every working file of the book's stopped jobs on the app's own drive, through the working lifecycle's
+    discard in dry run (the checks the delete makes, nothing removed). A file the app cannot prove is its own refuses
+    the press now (Senua's N14 rule). [{'path', 'size', 'kind', 'job_id', 'attempt_id', 'original'}]."""
+    working = getattr(service, 'working', None)
+    found = []
+    for job in jobs:
+        if job['state'] != 'needs attention' or job['output']:
+            continue
+        try:
+            listing, _marker = service._working_listing(job['job_id'])  # a link, junction or unknown item: ValueError
+            attempts = {name for name, _files in listing}
+            with connect(service.inventory.database) as db:
+                if _table(db, 'working_attempts'):
+                    attempts |= {r[0] for r in db.execute('SELECT attempt_id FROM working_attempts WHERE job_id=?', (job['job_id'],))}
+            if not attempts:
+                continue
+            if working is None or not hasattr(working, 'discard'):
+                raise BoundaryError('Working files cannot be removed here')
+            sources = (json.loads(job['manifest']) or {}).get('sources') or []
+            for attempt in sorted(attempts):
+                for path, size in working.discard(job['job_id'], attempt, dry_run=True):
+                    match = _SNAPSHOT.fullmatch(Path(path).name)
+                    original = sources[int(match.group(1))].get('path') if match and int(match.group(1)) < len(sources) else None
+                    found.append({'path': path, 'size': size, 'kind': 'working', 'job_id': job['job_id'], 'attempt_id': attempt, 'original': original})
+        except DeleteRefused:
+            raise
+        except Exception:
+            raise DeleteRefused('refused', text)
+    return found
+
+
+def _folders(book_folders, files, output):
+    """Ruling 24: the folders this press leaves empty: a book folder all of whose entries are listed files, then each
+    parent all of whose entries are listed files or such folders, up to but never a folder directly inside a source
+    folder, never a source folder, never one in Sorted. A folder already empty is not touched. Only folders the
+    exact-handle empty-folder disposition can remove are listed (see _removable). Deepest first: [(folder, root)]."""
+    listed = {_key(f['path']) for f in files if f['kind'] != 'working'}
+    planned, out = set(), []
+    for folder, root in sorted(book_folders, key=lambda item: -len(Path(item[0]).parts)):
+        current = folder
+        while _key(current) not in planned:
+            try:
+                deep = len(Path(current).relative_to(Path(root)).parts) >= 2
+            except ValueError:
+                deep = False
+            if not deep or output and inside(current, output):
+                break
+            try:
+                with os.scandir(current) as listing:
+                    names = [_key(e.path) for e in listing]
+            except OSError:
+                break
+            if not names or any(n not in listed and n not in planned for n in names) or not _removable(current, root):
+                break
+            planned.add(_key(current))
+            out.append((current, root))
+            current = str(Path(current).parent)
+    return out
+
+
+def _removable(folder, root):
+    """The exact-handle empty-folder disposition can remove this folder: an ordinary directory (no reparse point) whose
+    ancestors are ordinary, on a filesystem where it is supported (require_empty_disposition). It refuses where a late
+    directory stream could be lost, which today includes NTFS and network shares: then the folder stays, unlisted."""
+    try:
+        with DirectoryBoundary(ordinary(root), ordinary(folder).parent), VerifiedDirectory(ordinary(folder)) as target:
+            target.require_empty_disposition()
+        return True
+    except (BoundaryError, OSError):
+        return False
+
+
+def _remove_folder(folder, root):
+    """Remove one listed folder if it is empty now, through the exact handle; True when it is gone."""
+    try:
+        with DirectoryBoundary(ordinary(root), ordinary(folder).parent), VerifiedDirectory(ordinary(folder), delete=True) as target:
+            target.dispose_empty()
+    except (BoundaryError, OSError):
+        return False
+    return not os.path.lexists(folder)
+
+
+def _copy_proof(service, row, source, files, output, text):
+    """Remove this copy: the proof, now (Judy's update spec, section 4). Every file of the copy, in order, has the size and
+    SHA-256 of the matching source the audiobook was arranged from; then, last, the audiobook is where the app put it
+    with its recorded size and checksum (the full output check). No listed file is the audiobook's own file."""
+    from audio_pipeline import digest
+    sources = (source['job'].get('manifest') or {}).get('sources') or []
+    members = row.get('members') or []
+    mismatch = DeleteRefused('not_identical', 'These files no longer match the ones the audiobook was arranged from. Nothing was deleted.')
+    if len(sources) != len(members):
+        raise mismatch
+    stop = threading.Event()
+    for member, item in zip(members, sources):
+        try:
+            if member.get('missing') or os.path.getsize(member['path']) != item.get('size') or digest(member['path'], stop) != item.get('sha256'):
+                raise mismatch
+        except FileNotFoundError:
+            raise mismatch
+        except OSError:
+            raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % Path(member['path']).anchor, root=Path(member['path']).anchor)
+    name = _sorted_name(output)
+    if output and not os.path.isdir(output):
+        raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % output, root=output)
+    record, final = _sorted_record(service, source['output'])
+    missing = DeleteRefused('sorted_missing', 'The audiobook is not where the app put it in %s. Nothing was deleted.' % name)
+    if not record or not os.path.lexists(final):
+        raise missing
+    if not service._output_valid(source['output']):
+        if not os.path.lexists(final):
+            raise missing
+        raise DeleteRefused('sorted_changed', 'The audiobook in %s has changed since the app arranged it. Nothing was deleted.' % name)
+    try:
+        held = os.stat(final)
+        if any((st.st_dev, st.st_ino) == (held.st_dev, held.st_ino) for st in (os.stat(f['path']) for f in files)):
+            raise DeleteRefused('refused', text)
+    except OSError:
+        raise missing
+    return {'path': final, 'size': record.get('size'), 'verified_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'record': record}
+
+
+def plan(service, identity, revision, mode='delete'):
+    """Read-only: what the press would remove now. {'files': [{'path', 'size', 'root', 'kind'}], 'bytes', 'folders':
+    [(folder, root)], 'stay', 'last_copy', 'sorted', 'members', 'jobs', 'kind', 'row'}. Raises DeleteRefused with every
+    refusal check (the preview runs them before the confirm)."""
+    if mode not in MODES:
+        raise DeleteRefused('refused', REFUSED)
+    text = _TEXT[mode]['refused']
+    if scanning(service):
+        # Senua's 0.22.0 final review, N13 (probe P1): a Delete while the scan held the book's queued files let the scan
+        # find them gone, and with no catalog row it wrote each back as a new one-file book with a raw "[Errno 2]" error;
+        # the scan then ended "completed with errors", which stops an automatic run. Keep, Approve, Scan again and Convert
+        # already wait for the scan; Delete and Remove this copy now do too, before they read or touch anything.
+        raise DeleteRefused('busy', BUSY)
+    try:
+        row = service.reviews._row('Audiobooks', identity, revision)
+    except ValueError:
+        raise DeleteRefused('changed', CHANGED)
+    inventory = service.inventory
+    roots = [str(ordinary(r)) for r in inventory.source_roots('Audiobooks')]
+    output = getattr(inventory, 'output_root', None)
+    output = str(ordinary(output)) if output else None
+    members = [m['path'] for m in row.get('members') or []]
+    if not members:
+        raise DeleteRefused('refused', text)
+    source = None
+    with connect(inventory.database) as db:
+        jobs = _jobs(db, identity)
+        if any(j['state'] in ('pending', 'running') for j in jobs):
+            raise DeleteRefused('busy', BUSY)
+        if mode == 'delete':
+            cleaned = set()
+            if jobs and _table(db, 'source_cleanup'):
+                cleaned = {r[0] for r in db.execute('SELECT job_id FROM source_cleanup WHERE job_id IN (%s)' % ','.join('?' * len(jobs)), [j['job_id'] for j in jobs])}
+            for job in jobs:
+                try:
+                    manifest = json.loads(job['manifest'])
+                except (TypeError, ValueError):
+                    manifest = {}
+                lineage = isinstance(manifest, dict) and any(k in manifest for k in ('replacement_id', 'replacement_parent_job_id'))
+                if job['state'] == 'completed' or job['output'] or job['job_id'] in cleaned or lineage:
+                    raise DeleteRefused('sorted', 'A finished audiobook of this book is in %s. Nothing was deleted.' % _sorted_name(output))
+        elif jobs:
+            raise DeleteRefused('refused', text)  # a copy has no job of its own: a book with one is no "Needs you" duplicate
+        if _table(db, 'automatic_candidates'):
+            researching = db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone()
+            if researching:
+                raise DeleteRefused('busy', BUSY)
+        # The server's own offer: Delete's (a finished, queued or researched book was refused above with its own line; any
+        # other book without it, one the app can still fix, a duplicate, Files unclear, is refused here), or the copy's.
+        if mode == 'delete':
+            kind = offer(service, row)
+        else:
+            source = copy_source(service, row, exists=False)  # the press says why the audiobook fails, see _copy_proof
+            kind = 'verified_duplicate' if source else None
+        if kind is None:
+            raise DeleteRefused('refused', text)
+        # Shared: another current book, another book's job, or another book's reacquire record holds the file. History of
+        # a book that is gone does not count (Senua's 0.22.0 final review, N16): an archived marker (its originals are
+        # confirmed gone) or a stopped job of that book names the paths it had, and a copy reacquired at those paths is a
+        # new book, which Delete refused as "shared" with a book that is not listed. See _history.
+        current = {r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')} if _table(db, 'book_groups') else set()
+        holders = _Holders(db, identity, current)
+        shared = {p: holders.title(_key(p)) for p in members if _key(p) in holders}
+        if shared:
+            listed = [{'path': p, 'other': other} for p, other in sorted(shared.items())]
+            if len(listed) == 1:
+                raise DeleteRefused('shared', '"%s" also belongs to "%s". Nothing was deleted.' % (listed[0]['path'], listed[0]['other']), listed)
+            raise DeleteRefused('shared', '%d of this book\'s files also belong to other books. Nothing was deleted.' % len(listed), listed)
+    files, guarded = [], set()
     for path in members:
         try:
             p = ordinary(path)
         except BoundaryError:
-            raise DeleteRefused('refused', REFUSED)
+            raise DeleteRefused('refused', text)
         root = next((r for r in roots if inside(str(p), r) and _key(p) != _key(r)), None)
         if root is None or output and inside(str(p), output) or p.suffix.lower() not in AUDIO:
             # Never outside a configured source root, never in Sorted, never anything but this book's audio.
-            raise DeleteRefused('refused', REFUSED)
+            raise DeleteRefused('refused', text)
         if not os.path.isdir(root):
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
-        used.add(root)
         try:
             facts = os.lstat(p)
         except FileNotFoundError:
@@ -220,37 +529,33 @@ def plan(service, identity, revision):
         # preview now makes removal's own checks first: a single-link ordinary file, and every folder from the drive
         # root down held by the same DirectoryBoundary remove() uses (no junction, symlink or other reparse point).
         if not stat.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
-            raise DeleteRefused('refused', REFUSED)
-        if _key(p.parent) not in guarded:
-            try:
-                with DirectoryBoundary(ordinary(root), p.parent):
-                    pass
-            except (BoundaryError, OSError):
-                raise DeleteRefused('refused', REFUSED)
-            guarded.add(_key(p.parent))
-        files.append({'path': str(p), 'size': facts.st_size, 'root': root})
-    # Senua's 0.22.0 final review, N15: Delete clears every leftover working file of the book's jobs (see delete()). The
-    # app's verified disposal refuses files it cannot prove are its own (blocked), so such a book is refused here, before
-    # the dialog says its files will be deleted (her N14 rule), not after its files are gone.
-    for job in jobs:
-        if job['state'] != 'needs attention' or job['output']:
-            continue
-        try:
-            state = service._working_state(job, False, fresh=True)
-        except Exception:
-            raise DeleteRefused('refused', REFUSED)
-        if state and state.get('state') != 'cleanable':
-            raise DeleteRefused('refused', REFUSED)
-    return {'files': files, 'bytes': sum(f['size'] for f in files), 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
+            raise DeleteRefused('refused', text)
+        _guard(root, p.parent, guarded, text)
+        files.append({'path': str(p), 'size': facts.st_size, 'root': root, 'kind': 'audio'})
+    others, stay, book_folders = _others(members, roots, output, holders, guarded, text)
+    files += others
+    working = _working(service, jobs, text) if mode == 'delete' else []
+    # Ruling 26: a working copy of an original already gone is the last copy of that audio; the dialog says so.
+    gone = [w for w in working if w['original'] and not os.path.lexists(w['original'])]
+    last_copy = None if not gone else 'some' if any(f['kind'] == 'audio' for f in files) else 'all'
+    folders = _folders(book_folders, files, output)
+    proof = _copy_proof(service, row, source, files, output, text) if mode == 'copy' else None  # the audiobook last
+    files += working
+    return {'files': files, 'bytes': sum(f['size'] for f in files), 'folders': folders, 'stay': stay, 'last_copy': last_copy,
+            'sorted': proof, 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
 
 
-def preview(service, identity, revision):
-    """POST /api/candidate/delete-preview: {'files': [{'path', 'size'}], 'bytes', 'kind', 'refusal': None | {...}}."""
+def preview(service, identity, revision, mode='delete'):
+    """POST /api/candidate/delete-preview: {'files': [{'path', 'size', 'kind'}], 'bytes', 'folders': [path], 'stay':
+    {'items'}, 'last_copy', 'kind', 'sorted': None | {'path', 'size', 'verified_at'}, 'refusal': None | {...}}."""
     try:
-        found = plan(service, identity, revision)
+        found = plan(service, identity, revision, mode)
     except DeleteRefused as refusal:
-        return {'files': [], 'bytes': 0, 'refusal': refusal.payload()}
-    return {'files': [{'path': f['path'], 'size': f['size']} for f in found['files']], 'bytes': found['bytes'], 'kind': found['kind'], 'refusal': None}
+        return {'files': [], 'bytes': 0, 'folders': [], 'stay': {'items': 0}, 'last_copy': None, 'sorted': None, 'refusal': refusal.payload()}
+    shown = found['sorted']
+    return {'files': [{'path': f['path'], 'size': f['size'], 'kind': f['kind']} for f in found['files']], 'bytes': found['bytes'],
+            'folders': [folder for folder, _root in found['folders']], 'stay': {'items': found['stay']}, 'last_copy': found['last_copy'],
+            'kind': found['kind'], 'sorted': {k: shown[k] for k in ('path', 'size', 'verified_at')} if shown else None, 'refusal': None}
 
 
 def _cause(error):
@@ -284,58 +589,109 @@ def remove(path, root, size):
     return None
 
 
-def delete(service, identity, revision, paths):
-    """POST /api/candidate/delete: {'deleted', 'bytes', 'failed': [{'path', 'cause', 'detail'}], 'forgotten'}. Raises
-    DeleteRefused before touching any file. forgotten is True only after the records transaction committed."""
-    if not isinstance(paths, list) or len(paths) > 10000 or any(not isinstance(p, str) or not 1 <= len(p) <= 1000 for p in paths):
-        raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
+@contextlib.contextmanager
+def _hold(found, output):
+    """Remove this copy: the audiobook in Sorted held open, without write or delete sharing, while the copy's files go,
+    and checked once more (its recorded size and native identity) right before the first one. A refusal here touches
+    nothing."""
+    proof = found.get('sorted')
+    with contextlib.ExitStack() as stack:
+        if proof:
+            record, name = proof['record'], _sorted_name(output)
+            final = ordinary(record['final_path'])
+            try:
+                stack.enter_context(DirectoryBoundary(ordinary(record['root']), final.parent))
+                facts = stack.enter_context(VerifiedFile(final)).facts()
+            except (BoundaryError, OSError):
+                if not os.path.lexists(final):
+                    raise DeleteRefused('sorted_missing', 'The audiobook is not where the app put it in %s. Nothing was deleted.' % name)
+                raise DeleteRefused('sorted_changed', 'The audiobook in %s has changed since the app arranged it. Nothing was deleted.' % name)
+            if facts['size'] != record.get('size') or record.get('identity') is not None and facts['identity'] != record['identity']:
+                raise DeleteRefused('sorted_changed', 'The audiobook in %s has changed since the app arranged it. Nothing was deleted.' % name)
+        yield
+
+
+def _bounded(values):
+    return isinstance(values, list) and len(values) <= 10000 and all(isinstance(p, str) and 1 <= len(p) <= 1000 for p in values)
+
+
+def delete(service, identity, revision, paths, folders=None, mode='delete'):
+    """POST /api/candidate/delete: {'deleted', 'bytes', 'failed': [{'path', 'cause', 'detail'}], 'forgotten', 'folders':
+    {'removed', 'stayed'}}. paths and folders are exactly those the dialog showed. Raises DeleteRefused before touching
+    any file. forgotten is True only after the records transaction committed."""
+    folders = [] if folders is None else folders
+    if mode not in MODES or not _bounded(paths) or not _bounded(folders):
+        raise DeleteRefused('refused', REFUSED)
     with service.operation_lock, service.inventory.group_lock:
-        found = plan(service, identity, revision)
-        if sorted(_key(f['path']) for f in found['files']) != sorted(_key(p) for p in paths) or len(set(map(_key, paths))) != len(paths):
-            raise DeleteRefused('files_changed', "The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list.")
+        found = plan(service, identity, revision, mode)
+        same = sorted(_key(f['path']) for f in found['files']) == sorted(_key(p) for p in paths) and len(set(map(_key, paths))) == len(paths)
+        if not same or sorted(_key(f) for f, _root in found['folders']) != sorted(_key(f) for f in folders):
+            raise DeleteRefused('files_changed', _TEXT[mode]['files_changed'])
+        output = getattr(service.inventory, 'output_root', None)
         deleted, removed_bytes, failed = 0, 0, []
-        # Leftover working files of its stopped jobs go first (the app's own drive), while the originals are still on
-        # disk: the app's verified disposal removes a working copy only after it has proven the original it copies, so
-        # once the originals were gone it kept every copy, and the book could never be forgotten (Senua's N15). A clear
-        # that fails keeps every record and touches none of the book's files.
-        working = _clear_working(service, found['jobs'])
-        if working:
-            failed.append(working)
-        else:
+        with _hold(found, output):
             for item in found['files']:
+                if item['kind'] == 'working':
+                    continue
                 outcome = remove(item['path'], item['root'], item['size'])
                 if outcome is None:
                     deleted += 1
                     removed_bytes += item['size']
                 else:
                     failed.append({'path': item['path'], 'cause': outcome[0], 'detail': outcome[1]})
-        forgotten = False
+            # The app's working files (ruling 26), attempt by attempt, after the book's own files: the discard proves each
+            # file is the app's own and needs no original, so it removes the last copy too, for this action only.
+            attempts = sorted({(w['job_id'], w['attempt_id']) for w in found['files'] if w['kind'] == 'working'})
+            for job_id, attempt_id in attempts:
+                try:
+                    for _path, size in service.working.discard(job_id, attempt_id):
+                        deleted += 1
+                        removed_bytes += size
+                except Exception as error:
+                    failed.append({'path': WORKING, 'cause': _cause(error), 'detail': str(error)[:500]})
+                    break
+        forgotten, removed, stayed = False, 0, 0
         if not failed:
-            # Every listed file is gone, or was already, and so are the working files.
-            still = [m for m in found['members'] if os.path.lexists(m)]
+            # Every listed file is gone, or was already.
+            still = [p for p in [*found['members'], *(f['path'] for f in found['files'])] if os.path.lexists(p)]
             if still:
-                failed.extend({'path': p, 'cause': 'other', 'detail': 'Still on disk'} for p in still)
+                failed.extend({'path': p, 'cause': 'other', 'detail': 'Still on disk'} for p in dict.fromkeys(still))
             else:
-                forget(service, identity, found['members'], found['jobs'])
+                # Folders are housekeeping: one that cannot be removed stays and never keeps the book listed.
+                for folder, root in found['folders']:
+                    if _remove_folder(folder, root):
+                        removed += 1
+                    else:
+                        stayed += 1
+                forget(service, identity, found['members'], found['jobs'], [f['path'] for f in found['files'] if f['kind'] == 'other'])
                 forgotten = True
     service.after_delete(identity)
-    return {'deleted': deleted, 'bytes': removed_bytes, 'failed': failed, 'forgotten': forgotten}
+    return {'deleted': deleted, 'bytes': removed_bytes, 'failed': failed, 'forgotten': forgotten, 'folders': {'removed': removed, 'stayed': stayed}}
 
 
-def _clear_working(service, jobs):
-    """Clear the leftover working files of the book's stopped jobs through the app's verified disposal: None when none is
-    left, else the failure entry. Senua's 0.22.0 final review, N15: every leftover counts (audio_only False), not only
-    the .m4b/.wav that stop an M4B Retry, which left the others on the app's drive with their records deleted; and a
-    working state that cannot be read is a failure (records kept), not "nothing left"."""
-    for job in jobs:
-        if job['state'] != 'needs attention' or job['output']:
-            continue
-        try:
-            if service._working_state(job, False, fresh=True):
-                service._clear_working(job, audio_only=False)
-        except Exception as error:
-            return {'path': 'Working files of an earlier attempt (job %s)' % job['job_id'], 'cause': _cause(error), 'detail': str(error)[:500]}
-    return None
+def present(service, row):
+    """The offer's count (Judy's update spec, section 4): every file the press would delete, read without touching the
+    source drive (a page read): the book's present audio, the other files the catalog holds in its folders when no other
+    audio file is catalogued there, and its stopped jobs' working files on the app's own drive. plan() decides."""
+    members = row.get('members') or []
+    count = sum(1 for m in members if not m.get('missing'))
+    keys = {_key(m['path']) for m in members}
+    folders = {_key(Path(m['path']).parent): str(Path(m['path']).parent) for m in members}  # the catalog's own spelling: LIKE folds ASCII only
+    try:
+        with connect(service.inventory.database) as db:
+            for folder, spelled in folders.items():
+                pattern = spelled.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '\\\\%'
+                rows = [r for r in db.execute("SELECT path,missing FROM files WHERE path LIKE ? ESCAPE '\\'", (pattern,)) if os.path.dirname(_key(r['path'])) == folder]
+                foreign = any(_key(r['path']) not in keys and Path(r['path']).suffix.lower() in AUDIO and not r['missing'] for r in rows)
+                if not foreign:
+                    count += sum(1 for r in rows if _key(r['path']) not in keys and not r['missing'])
+            jobs = _jobs(db, row['id'])
+        for job in jobs:
+            if job['state'] == 'needs attention' and not job['output'] and hasattr(service, '_working_listing'):
+                count += sum(len(names) for _attempt, names in service._working_listing(job['job_id'])[0])
+    except Exception:
+        pass  # a hint only: the press itself reads the disk and refuses what it cannot prove
+    return count
 
 
 # The records of one book, by candidate id, by its jobs and by its file paths. Author rules, settings, other books and
@@ -351,9 +707,10 @@ _BY_JOB = (('audio_jobs', 'job_id'), ('audio_destination_holds', 'job_id'), ('au
 _BY_PATH = ('files', 'part_volumes', 'part_chapters', 'source_retirements', 'scan_outcomes')
 
 
-def forget(service, identity, members, jobs):
+def forget(service, identity, members, jobs, others=()):
     """One transaction: every record of this book. Its group goes, so its files never regroup as it; its file rows go,
-    so a copy reacquired at the same paths is a new book with a new identity (Judy, section 5.6)."""
+    so a copy reacquired at the same paths is a new book with a new identity (Judy, section 5.6); the catalog rows of
+    the other files Delete removed (ruling 24) go with them."""
     job_ids = [j['job_id'] for j in jobs]
     with connect(service.inventory.database) as db:
         db.execute('BEGIN IMMEDIATE')
@@ -369,5 +726,5 @@ def forget(service, identity, members, jobs):
                     db.execute('DELETE FROM %s WHERE %s IN (%s)' % (table, column, marks), job_ids)
         for table in _BY_PATH:
             if table in have and 'path' in columns(table):
-                for path in members:
+                for path in [*members, *others]:
                     db.execute('DELETE FROM %s WHERE path=?' % table, (path,))

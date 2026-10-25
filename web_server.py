@@ -678,14 +678,18 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/candidate/delete-preview','/api/candidate/delete'):
             # Delete book (ruling 23; Judy's spec section 9). A typed refusal (409, code) is sent only when no file was
             # touched; the confirm sends exactly the paths the dialog showed.
+            # mode 'copy' is Remove this copy (ruling 25; Judy's update spec, section 4), on the same two routes.
             import book_delete
-            self.shape(data,{'library','id','revision'}|({'paths'} if path.endswith('/delete') else set()))
+            self.shape(data,{'library','id','revision'}|({'paths'} if path.endswith('/delete') else set()),{'mode'}|({'folders'} if path.endswith('/delete') else set()))
             library,id,revision=self.candidate_identity(data)
+            mode=data.get('mode','delete')
+            if mode not in book_delete.MODES:raise ValueError('Delete takes a known mode')
             if path.endswith('/delete-preview'):
-                self.response(200,self.server.merge.delete_preview(id,revision));return
-            paths=data['paths']
-            if not isinstance(paths,list) or len(paths)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in paths):raise ValueError('Delete takes the listed file paths')
-            try:result=self.server.merge.delete_book(id,revision,paths)
+                self.response(200,self.server.merge.delete_preview(id,revision,mode));return
+            paths,folders=data['paths'],data.get('folders',[])
+            for values in (paths,folders):
+                if not isinstance(values,list) or len(values)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in values):raise ValueError('Delete takes the listed file and folder paths')
+            try:result=self.server.merge.delete_book(id,revision,paths,folders,mode)
             except book_delete.DeleteRefused as refusal:
                 self.response(409,{'error':str(refusal),**refusal.payload()});return
             self.response(200,result);return
@@ -816,7 +820,7 @@ class Handler(BaseHTTPRequestHandler):
                         # confirm's 409 carries the code, so the page says "Nothing was deleted", never "may not have finished".
                         from book_delete import BUSY,DeleteRefused
                         refusal=DeleteRefused('busy',BUSY)
-                        if path.endswith('/delete-preview'):self.response(200,{'files':[],'bytes':0,'refusal':refusal.payload()})
+                        if path.endswith('/delete-preview'):self.response(200,{'files':[],'bytes':0,'folders':[],'stay':{'items':0},'last_copy':None,'sorted':None,'refusal':refusal.payload()})
                         else:self.response(409,{'error':str(refusal),**refusal.payload()})
                         return
                     if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():

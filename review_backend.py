@@ -462,15 +462,21 @@ class CandidateReviewService:
                     # The shown page only: the question, its proposals and the destination (Judy's section 11).
                     try:row['ask']=self.jobs.ask_payload(row,needs[row['id']])
                     except (ValueError,OSError,sqlite3.Error) as error:row['ask']={'kind':needs[row['id']]['group'],'reasons':needs[row['id']]['reasons'],'fields':{},'candidates':[],'destination':{'path':'','taken':False,'reason':str(error)[:200]}}
+            import book_delete
             for row in rows:
                 # Delete book (ruling 23; Judy's spec, sections 2 and 9): the server's typed offer, never guessed by the page.
-                # Missing files rows (ask.delete) and the two broken-audio Stopped rows (attention.delete); present picks
-                # the tooltip. Delete itself re-checks every refusal (book_delete.plan).
-                present=sum(1 for m in row.get('members') or [] if not m.get('missing'))
+                # Missing files rows (ask.delete) and the two broken-audio Stopped rows (attention.delete); present, every
+                # file the press would delete (rulings 24 and 26: other files, working files too), picks the tooltip.
+                # Remove this copy (ruling 25, Judy's update spec 3.1): ask.copy, only where the app holds the proof.
+                # Each press re-checks every refusal and the proof itself (book_delete.plan).
                 ask=row.get('ask');job=(row.get('creation') or {}).get('job') or {};attention=job.get('attention') if isinstance(job,dict) else None
-                if isinstance(ask,dict) and ask.get('kind')=='files_missing':ask['delete']={'kind':'files_missing','present':present}
+                if isinstance(ask,dict) and ask.get('kind')=='files_missing':ask['delete']={'kind':'files_missing','present':book_delete.present(self.jobs,row)}
                 elif isinstance(attention,dict) and job.get('state')=='Output needs attention' and (attention.get('group')=='reacquire' or (attention.get('remedy') or {}).get('kind')=='replace_source'):
-                    attention['delete']={'kind':'audio_damaged','present':present}
+                    attention['delete']={'kind':'audio_damaged','present':book_delete.present(self.jobs,row)}
+                elif isinstance(ask,dict) and ask.get('duplicate')=='verified':
+                    try:source=book_delete.copy_source(self.jobs,row)
+                    except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):source=None
+                    if source:ask['copy']={'kind':'verified_duplicate','present':book_delete.present(self.jobs,row)}
             if self.jobs and hasattr(self.jobs,'restart_view'):self.jobs.restart_view(rows)  # Started over marker, release
         finally:
             del self.page_local.contexts;del self.page_local.jobs;del self.page_local.ready_ids

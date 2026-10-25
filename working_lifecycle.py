@@ -438,6 +438,96 @@ class WorkingLifecycle:
             self._set_attempt(current, state='attention' if uncertain or unknown or diagnostic_held else 'sources_retained' if remaining else 'retired',
                               reason='Uncaptured producer file preserved; explicit review required' if uncertain else 'Unknown attempt member preserved; explicit review required' if unknown else 'Compact diagnostic capture limit reached; exact scratch evidence retained' if diagnostic_held else 'Frozen originals/artwork unavailable; source snapshots retained' if remaining else '')
 
+    def discard(self, job_id, attempt_id, dry_run=False):
+        """Delete book (Sergei's rulings 23 and 26, 2026-10-25): remove every recorded working file of one closed,
+        unpublished attempt of a stopped job, the copies of its originals included even when the originals are gone (the
+        last copy of the book's audio: this explicit action only, never retire() or a background pass).
+
+        The proofs are retire()'s except the originals: the private staging ownership record names this job and its
+        frozen manifest; every file sits directly in its own attempt folder under its recorded name; no folder from the
+        staging root down is a link or junction; no other job, attempt or publication/recovery record references it;
+        each file is the exact native identity and size the producer closed. Anything the app cannot prove (an unknown
+        or unrecorded member, an uncaptured producer file, a published or isolated attempt, an open producer) raises
+        BoundaryError before any file is removed. Durable intent per file (removal_intended, disposition_set, removed),
+        so a crash between files is finished by the next press. A recorded file already gone counts as gone.
+        dry_run: every check, nothing removed, no state written. Returns [(path, size)] of the files it removes (or would)."""
+        with self._locks_guard:
+            lock = self._locks.setdefault(job_id, threading.RLock())
+        with lock:
+            self.guard()
+            attempt = self._attempt(job_id, attempt_id)
+            stage = self.stage_root / job_id / attempt_id
+            entries = self._files(job_id, attempt_id)
+            on_disk = []
+            if os.path.lexists(stage):
+                with NativeBoundary(self.stage_root.anchor, stage), os.scandir(stage) as names:
+                    on_disk = [(entry.name, entry.is_file(follow_symlinks=False)) for entry in names]
+            if not on_disk and all(entry['state'] in TERMINAL for entry in entries):
+                return []  # nothing of this attempt is left (an earlier attempt already retired, for one)
+            if attempt['state'] in ('isolated_retained', 'published', 'published_held'):
+                raise BoundaryError('Published or isolated working files are not this action\'s to remove')
+            if attempt['producer'] != 'closed':
+                raise BoundaryError('A producer of this attempt did not close; its files are kept')
+            self._unpublished(attempt)
+            manifest = json.loads(attempt['manifest'])
+            known = {entry['name'] for entry in entries}
+            if any(name not in known or not regular for name, regular in on_disk):
+                raise BoundaryError('Unknown attempt member preserved')
+            if not entries:
+                return []
+            self._references(attempt, [entry['path'] for entry in entries])
+            with contextlib.ExitStack() as stack:
+                boundary = stack.enter_context(NativeBoundary(self.stage_root.anchor, stage)) if os.path.lexists(stage) else None
+                if boundary is not None:
+                    marker = stack.enter_context(NativeFile(stage.parent / 'ownership.json'))
+                    if marker.facts()['size'] > 16 * 1024 * 1024 or json.loads(b''.join(marker.chunks())) != {'job_id': job_id, 'manifest': manifest}:
+                        raise BoundaryError('Private staging ownership changed')
+                prepared, absent = [], []
+                for entry in entries:
+                    path = ordinary(entry['path'])
+                    if path.parent != stage or path.name != entry['name']:
+                        raise BoundaryError('Working retirement path changed')
+                    present = os.path.lexists(path)
+                    if entry['state'] == 'creation_intended' or entry['state'] in TERMINAL:
+                        if present:
+                            raise BoundaryError('A working file the app did not capture, or a replaced name, is kept')
+                        continue
+                    if not present:
+                        absent.append(entry)
+                        continue
+                    handle = stack.enter_context(NativeFile(path, delete=not dry_run))
+                    facts = handle.facts()
+                    single_stream(path)
+                    if facts['links'] != 1 or facts != json.loads(entry['facts']) or facts['size'] != entry['size']:
+                        raise BoundaryError('Closed working-file native identity or size changed')
+                    prepared.append((entry, path, handle))
+                if dry_run:
+                    return [(str(path), entry['size']) for entry, path, _ in prepared]
+                for entry in absent:  # already gone: recorded as gone, through intent
+                    if entry['state'] == 'closed':
+                        entry = self._file_state(entry, 'removal_intended')
+                    if entry['state'] == 'removal_intended':
+                        self._file_state(entry, 'absent_after_intent')
+                    elif entry['state'] == 'disposition_set':
+                        self._file_state(entry, 'removed')
+                removed = []
+                for entry, path, handle in prepared:
+                    self.guard()
+                    boundary.revalidate()
+                    if entry['state'] == 'closed':
+                        entry = self._file_state(entry, 'removal_intended')
+                    if entry['state'] in ('removal_intended', 'disposition_set'):
+                        handle.dispose()
+                        if entry['state'] == 'removal_intended':
+                            entry = self._file_state(entry, 'disposition_set')
+                    handle.__exit__(None, None, None)
+                    if os.path.lexists(path):
+                        raise BoundaryError('Disposed working name still exists or was replaced')
+                    self._file_state(entry, 'removed')
+                    removed.append((str(path), entry['size']))
+                self._set_attempt(self._attempt(job_id, attempt_id), state='retired', reason='Removed by Delete book')
+                return removed
+
     def terminal(self, job_id, attempt_id):
         attempts = self._rows('SELECT * FROM working_attempts WHERE job_id=? AND attempt_id=?', (job_id, attempt_id))
         if not attempts:

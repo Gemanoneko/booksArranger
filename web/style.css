@@ -120,6 +120,10 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 #delete-dialog-list{max-height:40vh;overflow:auto;border:1px solid var(--border);border-radius:5px;padding:8px;color:var(--text)}
 #delete-dialog-list p{margin:0}
 #delete-dialog-list .delete-cause{color:var(--muted);margin:0 0 6px}
+/* Judy's update spec 2.2: group subheads in the list and the Sorted block heading; the last-copy line. No new tokens. */
+#delete-dialog .delete-group{font-size:13px;font-weight:600;color:var(--muted);margin:8px 0 2px}
+#delete-dialog-list .delete-group:first-child{margin-top:0}
+#delete-dialog .delete-last{color:var(--warning)}
 button.danger.solid{background:var(--error);color:var(--on-accent);border-color:var(--error)}
 button.danger.solid:enabled:hover{background:var(--error-hover);border-color:var(--error-hover)}
 button.danger.solid:enabled:active{background:var(--error-pressed);border-color:var(--error-pressed)}

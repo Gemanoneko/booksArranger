@@ -7,6 +7,7 @@ import _winapi, hashlib, json, os, shutil, sqlite3, threading, unittest, uuid
 from pathlib import Path
 from unittest import mock
 
+import audio_jobs
 import book_delete
 import merge_service
 import test_approve_as_is
@@ -327,18 +328,24 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         with connect(self.inv.database) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM audio_jobs WHERE job_id='job-iron'").fetchone()[0], 0, 'its job and journal go')
 
-    def with_leftovers(self):
-        """The "Source audio needs replacement" MP3, whose failed attempt left a working copy of the original on the app's
-        drive: a real UUID job and attempt, made through the app's own working lifecycle (begin, copy_owned, closed), so
-        its verified disposal can prove the copy and remove it. Returns (source, row, job_id, attempt folder)."""
+    def with_leftovers(self, name='Железный ад', parts=1):
+        """The "Source audio needs replacement" MP3 (parts=1), whose failed attempt left a working copy of each original on
+        the app's drive: a real UUID job and attempt, made through the app's own working lifecycle (begin, copy_owned,
+        closed), so its disposal can prove the copies. Returns (source, or the list of parts when parts > 1, row, job_id,
+        attempt folder). A second call in one test adds another book."""
         from audio_pipeline import copy_owned, generated_artifacts
         from source_cleanup import packed
         from working_lifecycle import digest
-        source = tone(self.audio / 'Unsorted' / 'Железный ад' / 'Железный ад.mp3', self.cover, album='Железный ад', artist='Иван Петров')
-        row = self.start()[0]
-        info, job_id, attempt = source.stat(), str(uuid.uuid4()), str(uuid.uuid4())
-        manifest = {'job_id': job_id, 'candidate_id': row['id'], 'candidate_revision': row['revision'], 'root': str(self.audio), 'metadata': {'title': 'Железный ад'},
-                    'sources': [{'path': str(source), 'size': info.st_size, 'modified': str(info.st_mtime_ns), 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()}]}
+        place = self.audio / 'Unsorted' / name
+        sources = [tone(place / (name + '.mp3' if parts == 1 else '%s %d.mp3' % (name, n)), self.cover, album=name, artist='Иван Петров', track='%d/%d' % (n, parts)) for n in range(1, parts + 1)]
+        if getattr(self, 'service', None) is None:
+            self.start()
+        else:
+            self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        row = next(r for r in self.service.reviews.page()['rows'] if r['title_clue'] == name)
+        job_id, attempt = str(uuid.uuid4()), str(uuid.uuid4())
+        manifest = {'job_id': job_id, 'candidate_id': row['id'], 'candidate_revision': row['revision'], 'root': str(self.audio), 'metadata': {'title': name},
+                    'sources': [{'path': str(s), 'size': s.stat().st_size, 'modified': str(s.stat().st_mtime_ns), 'sha256': hashlib.sha256(s.read_bytes()).hexdigest()} for s in sources]}
         with connect(self.inv.database) as db:
             db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                        (job_id, json.dumps(manifest), digest(manifest), 'running', 'checking sources', attempt, '{}', None, '', 't', 't'))
@@ -347,15 +354,17 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         folder = self.service.stage_root / job_id / attempt; folder.mkdir(parents=True)
         (folder.parent / 'ownership.json').write_text(packed({'job_id': job_id, 'manifest': manifest}), encoding='utf8')
         with generated_artifacts(folder, life):
-            copy_owned(source, folder / 'source00000.mp3', manifest['sources'][0]['sha256'], threading.Event())
+            for index, s in enumerate(sources):
+                copy_owned(s, folder / ('source%05d.mp3' % index), manifest['sources'][index]['sha256'], threading.Event())
         failure = {'exception_class': 'ValidationError', 'stage': 'checking sources', 'tag_repair_checked': True}
         with connect(self.inv.database) as db:
             db.execute("UPDATE audio_jobs SET state='needs attention',journal=?,reason='Full audio decode failed: Header missing' WHERE job_id=?", (json.dumps({'failure': failure}), job_id))
         self.service.invalidate_status()
         row = [r for r in self.service.reviews.page(status='output_attention')['rows'] if r['id'] == row['id']][0]
-        self.assertEqual(row['creation']['job']['attention'].get('delete'), {'kind': 'audio_damaged', 'present': 1}, 'positive control: offered')
+        if parts == 1:
+            self.assertEqual(row['creation']['job']['attention'].get('delete'), {'kind': 'audio_damaged', 'present': 2}, 'positive control: offered; present counts the working copy')
         self.assertEqual(self.service._working_state(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job_id,))[0], False, fresh=True)['state'], 'cleanable', 'positive control: leftovers')
-        return source, row, job_id, folder
+        return (sources[0] if parts == 1 else sources), row, job_id, folder
 
     def working_left(self, job_id):
         """Working files of the job still on the app's drive (the ownership record aside), and its working records."""
@@ -365,26 +374,31 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             records = sum(db.execute('SELECT count(*) FROM %s WHERE job_id=?' % t, (job_id,)).fetchone()[0] for t in ('working_attempts', 'working_files'))
         return files, records
 
-    def test_delete_clears_the_working_copies_of_its_originals_before_it_removes_them(self):
-        # Senua's 0.22.0 final review, N15. Delete removed the book's files, then asked the app's verified disposal to clear
-        # the working copies, which keeps a copy whose original it cannot prove: with the original gone it kept them all,
-        # so Delete failed on "Working files of an earlier attempt" at every press and never forgot the book.
+    def shown(self, preview):
+        return [(Path(f['path']).name, f['kind']) for f in preview['files']]
+
+    def test_delete_lists_the_books_working_files_and_removes_them_with_the_book(self):
+        # Rulings 26 and N15: the app's working files for the book are listed (kind "working"), counted and removed by the
+        # same press. N15: they used to be cleared after the originals by the verified disposal, which keeps a copy whose
+        # original it cannot prove, so Delete failed on them at every press and never forgot the book.
         source, row, job_id, folder = self.with_leftovers()
         preview = self.service.delete_preview(row['id'], row['revision'])
-        self.assertEqual([f['path'] for f in preview['files']], [str(source)])
-        result = self.service.delete_book(row['id'], row['revision'], [str(source)])
-        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (1, [], True))
+        self.assertEqual(self.shown(preview), [('Железный ад.mp3', 'audio'), ('source00000.mp3', 'working')])
+        self.assertEqual((preview['bytes'], preview['last_copy']), (2 * source.stat().st_size, None), 'counted; originals here: no last-copy line')
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (2, [], True))
         self.assertFalse(source.exists())
         self.assertEqual(self.working_left(job_id), ([], 0), 'no working file and no working record of the book left')
 
-    def test_delete_clears_every_leftover_not_only_the_audio_an_m4b_retry_counts(self):
+    def test_delete_removes_every_leftover_not_only_the_audio_an_m4b_retry_counts(self):
         # N15: for an M4B job the working state counts only .m4b and .wav leftovers (Retry's rule), so any other leftover
         # read as "nothing left": its records were deleted with the book and the file stayed on the app's drive.
         with mock.patch.object(merge_service.MergeService, '_working_kind', return_value=True):  # this job is an M4B job
             source, row, job_id, folder = self.with_leftovers()
             self.assertIsNone(self.service._working_state(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job_id,))[0], True, fresh=True), 'positive control: Retry sees nothing left')
-            result = self.service.delete_book(row['id'], row['revision'], [str(source)])
-        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (1, [], True))
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (2, [], True))
         self.assertEqual(self.working_left(job_id), ([], 0), 'the copy of the original went too')
 
     def test_working_files_the_app_cannot_prove_refuse_before_anything_is_deleted(self):
@@ -398,6 +412,259 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             self.service.delete_book(row['id'], row['revision'], [str(source)])
         self.assertTrue(source.exists(), 'nothing deleted')
         self.assertEqual(self.working_left(job_id)[0], ['source00000.mp3', 'stray.wav'])
+
+    def test_the_last_copy_of_a_book_whose_original_is_gone_is_deleted_too(self):
+        # Ruling 26: the original is already gone, so the app's working copy is the last copy of the book's audio. The app's
+        # own disposal keeps such a copy ("never remove the last copy"); Delete book removes it, on this press only, and
+        # says so ("all"). Before: refused (the working files read "blocked"), so the book could never be deleted.
+        source, row, job_id, folder = self.with_leftovers()
+        source.unlink()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertIsNone(preview['refusal'])
+        self.assertEqual((self.shown(preview), preview['last_copy']), ([('source00000.mp3', 'working')], 'all'))
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (1, [], True))
+        self.assertEqual(self.working_left(job_id), ([], 0))
+        self.assertEqual(self.records(row['id'], [source]), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
+        # The routine disposal still keeps such a copy: ruling 26 is this action's only.
+        source2, row2, job2, folder2 = self.with_leftovers('Железный ад 2')
+        source2.unlink()
+        with self.assertRaises(audio_jobs.RetryRefused):
+            self.service._clear_working(self.service.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?', (job2,))[0])
+        self.assertEqual(self.working_left(job2)[0], ['source00000.mp3'], 'control: Clear working files keeps the last copy')
+
+    def test_the_last_copy_line_says_some_when_only_some_originals_are_gone(self):
+        # Ruling 26, "some": one of two originals is gone; its working copy holds the last copy of that audio.
+        source, row, job_id, folder = self.with_leftovers(parts=2)
+        source[1].unlink()
+        with mock.patch.object(book_delete, 'offer', return_value={'kind': 'audio_damaged', 'present': 1}):  # a two-file damaged book
+            preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview), preview['last_copy']), ([('Железный ад 1.mp3', 'audio'), ('source00000.mp3', 'working'), ('source00001.mp3', 'working')], 'some'))
+
+    # ---------------------------------------------------------------- ruling 24: other files and folders left empty
+    def alone(self, folder=('Сборники', 'Новая плоть (2016)')):
+        """A three-part book alone in its folder, one part gone (a Missing files row), with a cover and a text file; by
+        default in Сборники, which is directly inside the source folder (Judy's update spec 2.1 example)."""
+        place = self.audio.joinpath(*folder)
+        self.parts = [tone(place / ('Новая плоть %d.mp3' % n), self.cover, album='Новая плоть', artist='Иван Петров', track='%d/3' % n) for n in (1, 2, 3)]
+        (place / 'cover.jpg').write_bytes(b'cover'); (place / 'info.txt').write_text('info', encoding='utf-8')
+        (self.sorted / 'Петров Иван').mkdir(); (self.sorted / 'Петров Иван' / 'Другая книга - Петров Иван.m4b').write_bytes(b'finished')
+        self.start()
+        self.parts[2].unlink()
+        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        rows = self.service.reviews.page(status='output_attention', group='files_missing')['rows']
+        self.assertEqual(len(rows), 1, 'positive control: a Missing files row')
+        return rows[0], place
+
+    def supported(self):
+        """A filesystem where the exact-handle empty-folder disposition is supported. NTFS (this fixture) and network
+        shares report named streams or no local volume, so it refuses there by design (the safety floor of
+        Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md); the rest of the disposition runs for real."""
+        import native_io
+        return mock.patch.object(native_io.VerifiedDirectory, 'require_empty_disposition', return_value={})
+
+    def test_delete_takes_the_cover_text_files_and_the_folder_it_leaves_empty(self):
+        # Ruling 24: the other files of a folder that holds no other book go too, and so does the folder left empty, but
+        # never a folder directly inside a source folder (Сборники stays). Before: only the audio, and the folder stayed.
+        row, place = self.alone()
+        self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 4}, 'present counts every file the press deletes')
+        sorted_before = listing(self.sorted)
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            self.assertEqual(self.shown(preview), [('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio'), ('cover.jpg', 'other'), ('info.txt', 'other')])
+            self.assertEqual((preview['folders'], preview['stay'], preview['bytes']), ([str(place)], {'items': 0}, sum(p.stat().st_size for p in place.iterdir())))
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten'], result['folders']), (4, [], True, {'removed': 1, 'stayed': 0}))
+        self.assertFalse(place.exists(), 'the book folder left empty is removed')
+        self.assertTrue(place.parent.is_dir(), 'a folder directly inside the source folder stays')
+        self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
+        with connect(self.inv.database) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM files WHERE path LIKE ?', (str(place) + '%',)).fetchone()[0], 0, 'their catalog rows go too')
+
+    def test_a_folder_the_disposition_refuses_is_never_promised_and_stays(self):
+        # The safety floor kept: on NTFS or a network share (Z:) the exact-handle disposition refuses, so the preview lists
+        # no folder (the dialog never says one is removed) and the emptied folder stays. The files still go.
+        row, place = self.alone()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((preview['folders'], len(preview['files'])), ([], 4))
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['forgotten'], result['folders']), (True, {'removed': 0, 'stayed': 0}))
+        self.assertEqual(list(place.iterdir()), [], 'emptied, not removed')
+
+    def test_a_listed_folder_that_cannot_be_removed_stays_and_never_keeps_the_book(self):
+        # Ruling 24 / Judy 2.1: a folder is housekeeping. Another program holds it (no delete sharing): it stays, reported,
+        # and the book is forgotten all the same.
+        row, place = self.alone()
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            held = _winapi.CreateFile(str(place), 0x80000000, 0x1 | 0x2, 0, 3, 0x02000000, 0)  # read, share read+write, no delete
+            try:
+                result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+            finally:
+                _winapi.CloseHandle(held)
+        self.assertEqual((result['failed'], result['forgotten'], result['folders']), ([], True, {'removed': 0, 'stayed': 1}))
+        self.assertTrue(place.is_dir())
+
+    def test_a_folder_with_two_books_keeps_its_cover_and_text_files(self):
+        # Ruling 24: "Shared or ambiguous files stay, and the dialog says so": the folder holds another book's audio.
+        row = self.book()
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
+
+    def test_a_cover_another_book_uses_stays_and_the_text_file_goes(self):
+        # Ruling 24: a cover another book's job was made with is that book's too; it stays (and so does the folder), the
+        # text file that is this book's alone goes.
+        row, place = self.alone()
+        with connect(self.inv.database) as db:
+            db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                       ('other-job', json.dumps({'candidate_id': 'other-book', 'metadata': {'title': 'Чужая книга'}, 'sources': [{'path': str(self.audio / 'Elsewhere' / 'x.mp3')}],
+                                                 'cover': {'path': str(place / 'cover.jpg')}}), 'h', 'pending', 'queued', None, '{}', None, '', 't', 't'))
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            self.assertEqual((self.shown(preview)[2:], preview['folders'], preview['stay']), ([('info.txt', 'other')], [], {'items': 1}))
+            self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['cover.jpg'])
+
+    def test_a_cover_held_open_keeps_the_book_listed(self):
+        # Futaba's check 3: the cover in use by another program is reported like any file; the book stays, records kept.
+        row, place = self.alone()
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            with open(place / 'cover.jpg', 'rb'):
+                result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual(([(Path(f['path']).name, f['cause']) for f in result['failed']], result['forgotten'], result['folders']), ([('cover.jpg', 'in_use')], False, {'removed': 0, 'stayed': 0}))
+        self.assertFalse(self.parts[0].exists())
+        self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted while a file is on disk')
+
+    def test_a_file_added_after_the_dialog_opened_refuses_the_press(self):
+        # Futaba's check 3: the list now differs from the one shown (a new file, or the folder no longer left empty).
+        row, place = self.alone()
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+            (place / 'notes.txt').write_text('new', encoding='utf-8')
+            with self.assertRaises(book_delete.DeleteRefused) as refused:
+                self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual(refused.exception.code, 'files_changed')
+        self.assertTrue(self.parts[0].exists(), 'nothing deleted')
+
+    # ---------------------------------------------------------------- ruling 25: Remove this copy
+    def arranged_with_copy(self, possible=False):
+        """An audiobook the app arranged in Sorted (a real conversion and output check), and an exact copy of the two files
+        it was arranged from put back in another folder with a cover: the "Needs you / Identical verified recording
+        already arranged" row (Futaba's m-3). The recording review's verdict is recorded as _recording_review writes it
+        (the reason and the context's duplicate_review), not researched. possible: "Possible duplicate recording"."""
+        from public_research import RESEARCH_VERSION
+        names = ['01.mp3', '02.mp3']
+        sources = [tone(self.audio / 'Unsorted' / 'Утро снайпера' / name, self.cover, album='Утро снайпера', artist='Иван Петров', title='Глава %d' % n, track='%d/2' % n) for n, name in enumerate(names, 1)]
+        kept = self.base / 'kept-copy'; kept.mkdir()
+        for s in sources:
+            shutil.copy2(s, kept / s.name)
+        row = self.start()[0]
+        approved = self.service.approve_book(row['id'], row['revision']); self.wait()
+        job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
+        self.assertEqual(job['state'], 'completed', 'positive control: arranged')
+        self.assertFalse(any(s.exists() for s in sources), 'positive control: the app removed the originals')
+        place = self.audio / 'Unsorted' / 'Утро снайпера (копия)'; place.mkdir()
+        for name in names:
+            shutil.copy2(kept / name, place / name)
+        (place / 'cover.jpg').write_bytes(b'cover')
+        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        copy = next(r for r in self.service.reviews.page()['rows'] if r['members'] and Path(r['members'][0]['path']).parent == place)
+        self.assertNotEqual(copy['id'], job['manifest']['candidate_id'], 'positive control: a new book, not the arranged one')
+        reason = 'Possible duplicate recording — original sources preserved' if possible else 'Identical verified recording already arranged — duplicate sources preserved'
+        verdict = {'state': 'possible' if possible else 'verified_identical', 'blocking': possible, 'related_ids': [job['job_id']], 'related': []}
+        with connect(self.inv.database) as db:
+            db.execute("INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,'Held',?,NULL,'t','')", (copy['id'], copy['revision'], copy['fingerprint'], json.dumps({'reasons': [reason], 'research_version': RESEARCH_VERSION})))
+            found = db.execute('SELECT data FROM candidate_context WHERE id=?', (copy['id'],)).fetchone()
+            data = dict(json.loads(found[0]) if found else {}, duplicate_review=verdict)
+            db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)', (copy['id'], copy['revision'], json.dumps(data)))
+        self.service.invalidate_status(); self.service.__dict__.pop('_needs_cache', None)
+        copy = next(r for r in self.service.reviews.page(status='output_attention')['rows'] if r['id'] == copy['id'])
+        final = Path(job['output']['final_path'])
+        self.assertTrue(final.is_file() and final.is_relative_to(self.sorted), 'positive control: the audiobook is in Sorted')
+        return copy, place, final
+
+    def test_remove_this_copy_is_offered_only_with_the_proof_and_removes_only_the_copy(self):
+        # Ruling 25: the offer only where the app holds the proof; the preview proves it now and shows the audiobook; the
+        # press removes the copy's files (its cover too, ruling 24) and its records, never the audiobook in Sorted.
+        copy, place, final = self.arranged_with_copy()
+        self.assertEqual((copy['ask'].get('duplicate'), copy['ask'].get('copy')), ('verified', {'kind': 'verified_duplicate', 'present': 3}))
+        self.assertNotIn('delete', copy['ask'], 'never both buttons')
+        sorted_before = listing(self.sorted)
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        self.assertIsNone(preview['refusal'])
+        self.assertEqual(self.shown(preview), [('01.mp3', 'audio'), ('02.mp3', 'audio'), ('cover.jpg', 'other')])
+        self.assertEqual((preview['sorted']['path'], preview['sorted']['size'], preview['last_copy']), (str(final), final.stat().st_size, None))
+        self.assertTrue(preview['sorted']['verified_at'].endswith('+00:00'), 'the time of this check, in UTC')
+        # The audiobook is held, with no write or delete sharing, while the copy's files go.
+        real, opened = book_delete.remove, []
+        def watched(path, root, size):
+            try:
+                with open(final, 'r+b'):
+                    opened.append('writable')
+            except PermissionError:
+                opened.append('held')
+            return real(path, root, size)
+        with mock.patch.object(book_delete, 'remove', watched):
+            result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (3, [], True))
+        self.assertEqual(set(opened), {'held'}, 'the audiobook could not be opened for writing during the removal')
+        self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
+        self.assertEqual(list(place.iterdir()), [])
+        self.assertEqual(self.records(copy['id'], [Path(m['path']) for m in copy['members']]), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
+
+    def test_remove_this_copy_refuses_without_the_proof_and_touches_nothing(self):
+        # Ruling 25, Judy's update spec 3.4: the audiobook gone from its place, the audiobook changed, a copy file changed,
+        # a junction; each refused before the first file, nothing deleted. Control: restored, the press goes through.
+        copy, place, final = self.arranged_with_copy()
+        before, sorted_before = listing(place), listing(self.sorted)
+        paths = [str(p) for p in sorted(place.iterdir())]
+        def refusal():
+            code = (self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal'] or {}).get('code')
+            with self.assertRaises(book_delete.DeleteRefused) as refused:
+                self.service.delete_book(copy['id'], copy['revision'], paths, [], 'copy')
+            self.assertEqual(listing(place), before, 'nothing deleted')
+            return code, refused.exception.code
+        away = final.with_name('away.m4b'); final.rename(away)
+        self.assertEqual(refusal(), ('sorted_missing', 'sorted_missing'))
+        away.rename(final)
+        original = final.read_bytes(); stamp = final.stat().st_mtime_ns
+        final.write_bytes(original[:-1] + bytes([original[-1] ^ 1])); os.utime(final, ns=(stamp, stamp))
+        self.assertEqual(refusal(), ('sorted_changed', 'sorted_changed'))
+        final.write_bytes(original); os.utime(final, ns=(stamp, stamp))
+        self.assertEqual(listing(self.sorted), sorted_before)
+        member = place / '02.mp3'; data = member.read_bytes()
+        member.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+        before = listing(place)
+        self.assertEqual(refusal(), ('not_identical', 'not_identical'))
+        member.write_bytes(data); before = listing(place)
+        moved = self.base / 'moved-copy'; place.rename(moved)
+        _winapi.CreateJunction(str(moved), str(place)); self.addCleanup(lambda: os.path.isjunction(place) and os.rmdir(place))
+        self.assertEqual(refusal(), ('refused', 'refused'))
+        os.rmdir(place); moved.rename(place)
+        self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched by every refusal')
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual((result['failed'], result['forgotten']), ([], True), 'control: with the proof whole, the press goes through')
+
+    def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):
+        copy, place, final = self.arranged_with_copy(possible=True)
+        self.assertEqual((copy['ask'].get('duplicate'), copy['ask'].get('copy')), ('possible', None))
+        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'refused')
+        # Each guard alone: the stored verdict says identical, but the row's own reason is still "Possible duplicate".
+        with connect(self.inv.database) as db:
+            data = json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?', (copy['id'],)).fetchone()[0])
+            data['duplicate_review'].update(state='verified_identical', blocking=False)
+            db.execute('UPDATE candidate_context SET data=? WHERE id=?', (json.dumps(data), copy['id']))
+        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'refused')
+        self.assertEqual(len(list(place.iterdir())), 3)
+
+    def test_a_book_folder_directly_inside_the_source_folder_stays(self):
+        row, place = self.alone(folder=('Новая плоть',))
+        with self.supported():
+            preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((len(preview['files']), preview['folders']), (4, []), 'its files go, the folder stays')
 
     def test_a_damaged_mp3_the_app_can_still_retry_has_no_offer(self):
         source, row = self.damaged_mp3(repaired=False)

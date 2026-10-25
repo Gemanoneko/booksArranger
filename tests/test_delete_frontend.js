@@ -60,7 +60,9 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   assert.equal(get('delete-dialog-book').textContent,'Новая плоть — Иван Петров');assert.equal(get('delete-dialog-reason').textContent,'1 of 3 files is missing.');
   assert.match(get('delete-dialog-files').textContent,/^These 2 files \(1[.,]4 GB\) will be deleted from your disk\. The app can't undo this\.$/);
   assert.deepEqual(get('delete-dialog-list').children.map(p=>p.textContent),FILES.map(f=>f.path));
-  assert.equal(get('delete-dialog-folder').hidden,false);
+  assert.equal(get('delete-dialog-folder').hidden,true,'audio only and nothing stays: no stay line (update spec 2.2)');
+  assert.equal(get('delete-dialog-last').hidden,true);assert.equal(get('delete-dialog-sorted').hidden,true);
+  assert.ok(get('delete-dialog-list').children.every(p=>p.className!=='delete-group'),'audio only: no subheads, as before');
   assert.equal(get('delete-dialog-forget').textContent,"The app forgets this book. If you get it again, it's found as a new book. Nothing in Audiobooks Sorted is touched.");
   assert.equal(get('delete-confirm').textContent,'Delete book and 2 files');assert.equal(get('delete-confirm').title,"Delete this book and its 2 files. The app can't undo this.");
   let prevented=false;get('delete-dialog').handlers.keydown({key:'Enter',target:get('delete-dialog-list'),preventDefault(){prevented=true;}});
@@ -72,7 +74,7 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   await get('delete-confirm').handlers.click({repeat:true});assert.equal(posted('/api/candidate/delete').length,0,'a held Enter confirms nothing');
   deleteAnswer=()=>ok({deleted:2,bytes:1400*1024*1024,failed:[],forgotten:true});
   await get('delete-confirm').handlers.click({});await tick();
-  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,paths:FILES.map(f=>f.path)});
+  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,paths:FILES.map(f=>f.path),folders:[]});
   assert.equal(run('deleteDialog'),null,'closed on success');
   assert.match(get('retry-all-status').textContent,/^Deleted 1 book and 2 files \(1[.,]4 GB\)\.$/);
   assert.equal(run('deleteNotes.get("cand-m").text'),'Deleted. The book is gone from the app.');await tick();
@@ -104,7 +106,89 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   assert.equal(get('delete-dialog-title').textContent,'Delete may not have finished');
   assert.equal(get('delete-dialog-files').textContent,'Connection interrupted, so the delete may have gone through. Check the list before trying again.');
   assert.doesNotMatch(get('delete-dialog-files').textContent,/Nothing was deleted/);
-  console.log('PASS Delete book: offer-only button, last with its tooltip, dialog with Cancel focused, Enter confirms nothing, exact paths, success, partial, refusals, lost connection');
+  await get('delete-close').handlers.click({});
+  run('recoveryDisconnected=false;controls()');  // the connection is back (the lost one above set it, as a failed poll does)
+  // 7. Rulings 24 and 26 (Judy's update spec 2.2, 2.3): labelled groups in order, the folders, the stay line, the
+  // last-copy line; the confirm sends the folders shown; the strip names the folders removed and those that stayed.
+  const WORK='C:\\Books\\data\\audio-staging\\job\\attempt\\source00000.m4b';
+  previewAnswer=()=>ok({files:[{path:FOLDER+'\\02.m4b',size:10,kind:'audio'},{path:FOLDER+'\\cover.jpg',size:5,kind:'other'},{path:WORK,size:10,kind:'working'},{path:FOLDER+'\\01.m4b',size:10,kind:'audio'}],
+    bytes:35,folders:[FOLDER],stay:{items:2},last_copy:'some',refusal:null,kind:'files_missing'});
+  paint([missing('g',{kind:'files_missing',present:4}),missing('h',{kind:'files_missing',present:4})]);
+  await deleteButton(trOf('cand-g')).handlers.click({stopPropagation(){}});await tick();
+  assert.deepEqual(get('delete-dialog-list').children.map(p=>p.textContent),['Audio files (2)',FOLDER+'\\01.m4b',FOLDER+'\\02.m4b',"Other files in this book's folder (1)",FOLDER+'\\cover.jpg',
+    "The app's working files (1)",WORK,'Folders left empty are removed (1)',FOLDER]);
+  assert.deepEqual(get('delete-dialog-list').children.filter(p=>p.className==='delete-group').length,4,'four subheads');
+  assert.equal(get('delete-dialog-list').getAttribute('aria-label'),'Files and folders to delete');
+  assert.equal(get('delete-dialog-last').hidden,false);assert.equal(get('delete-dialog-last').textContent,"Some originals are already gone. The app's working files hold the last copy of that audio.");
+  assert.equal(get('delete-dialog-folder').hidden,false);assert.equal(get('delete-dialog-folder').textContent,"2 other items stay where they are. They belong to other books, or the app can't tell whose they are.");
+  assert.match(get('delete-dialog-files').textContent,/^These 4 files \(.+\) will be deleted from your disk\. The app can't undo this\.$/,'every file counts, folders do not');
+  assert.equal(get('delete-confirm').textContent,'Delete book and 4 files');
+  deleteAnswer=()=>ok({deleted:4,bytes:35,failed:[],forgotten:true,folders:{removed:1,stayed:0}});
+  await get('delete-confirm').handlers.click({});await tick();
+  assert.deepEqual(posted('/api/candidate/delete').at(-1).folders,[FOLDER]);
+  assert.match(get('retry-all-status').textContent,/^Deleted 1 book, 4 files \(.+\) and 1 folder\.$/);
+  paint([missing('h',{kind:'files_missing',present:4})]);await deleteButton(trOf('cand-h')).handlers.click({stopPropagation(){}});await tick();
+  deleteAnswer=()=>ok({deleted:4,bytes:35,failed:[],forgotten:true,folders:{removed:0,stayed:1}});
+  await get('delete-confirm').handlers.click({});await tick();
+  assert.match(get('retry-all-status').textContent,/^Deleted 1 book and 4 files \(.+\)\. 1 folder stayed\.$/,'a folder that stayed never keeps the book');
+  // The last copy, all originals gone: the line says so; a stay of one item is singular.
+  previewAnswer=()=>ok({files:[{path:WORK,size:10,kind:'working'}],bytes:10,folders:[],stay:{items:1},last_copy:'all',refusal:null,kind:'audio_damaged'});
+  paint([reacquire]);await deleteButton(trOf('cand-r')).handlers.click({stopPropagation(){}});await tick();
+  assert.equal(get('delete-dialog-last').textContent,"The originals are already gone. The app's working files are the last copy of this book's audio.");
+  assert.equal(get('delete-dialog-folder').textContent,"1 other item stays where it is. It belongs to another book, or the app can't tell whose it is.");
+  assert.deepEqual(get('delete-dialog-list').children.map(p=>p.textContent),["The app's working files (1)",WORK]);assert.equal(get('delete-dialog-list').getAttribute('aria-label'),'Files to delete');
+  await get('delete-cancel').handlers.click({});
+  // 8. Remove this copy (ruling 25, Judy's update spec section 3). Futaba's m-3: no Approve on either duplicate row.
+  const duplicate=(name,copy,kind='verified')=>askRow(name,{kind:'other',also:null,why:'',reasons:['Identical verified recording already arranged — duplicate sources preserved'],reason:'',
+    fields:{title:{proposal:'Inferno',basis:'tag'},author:{proposal:'Dan Brown',basis:'tag'}},candidates:[],destination:{path:'Brown Dan\\Inferno.m4b',absolute:'',taken:true,reason:''},
+    duplicate:kind,...(copy?{copy}:{})},{members:[{path:FOLDER+'\\01.mp3'},{path:FOLDER+'\\02.mp3'}],review:{title:'Inferno',canonical_author:'Dan Brown'}});
+  paint([duplicate('v',{kind:'verified_duplicate',present:3}),duplicate('w',{kind:'verified_duplicate',present:3}),duplicate('q',null,'possible')]);
+  tr=trOf('cand-v');const removeButton=tr=>buttonsOf(tr).find(b=>b.textContent==='Remove this copy' || b.textContent==='Checking...');
+  assert.equal(buttonsOf(tr).find(b=>b.textContent==='Approve'),undefined,'no inert Approve on a duplicate row');
+  assert.equal(buttonsOf(trOf('cand-q')).find(b=>b.textContent==='Approve'),undefined,'nor on a possible duplicate');
+  assert.equal(removeButton(trOf('cand-q')),undefined,'a possible duplicate has no proof: no Remove this copy');assert.equal(deleteButton(tr),undefined,'never both buttons');
+  const remove=buttonsOf(tr).at(-1);assert.equal(remove,removeButton(tr),'last in the row');assert.ok(remove.className.includes('danger'));assert.equal(buttonsOf(tr).at(-2).className,'row-break');
+  assert.equal(remove.title,"Delete this copy's files from disk. The app shows the audiobook in Audiobooks Sorted first, and you confirm.");
+  assert.equal(remove.getAttribute('aria-label'),'Remove this copy: Title v');
+  assert.equal(hint(tr),'This recording is already in Audiobooks Sorted. The audio files here are exact copies of the files it was arranged from.');
+  const COPY=[{path:FOLDER+'\\01.mp3',size:10,kind:'audio'},{path:FOLDER+'\\02.mp3',size:10,kind:'audio'}];
+  previewAnswer=()=>ok({files:COPY,bytes:20,folders:[],stay:{items:0},last_copy:null,sorted:{path:ROOT+'\\Brown Dan\\Inferno.m4b',size:612*1024*1024,verified_at:'2026-10-25T14:32:00+00:00'},refusal:null,kind:'verified_duplicate'});
+  await remove.handlers.click({stopPropagation(){}});await tick();
+  assert.deepEqual(posted('/api/candidate/delete-preview').at(-1),{library:'Audiobooks',id:'cand-v',revision:2,mode:'copy'});
+  assert.equal(get('delete-dialog-title').textContent,'Remove this copy?');assert.equal(document.activeElement,get('delete-cancel'),'Cancel has focus');
+  assert.equal(get('delete-dialog-book').textContent,'Inferno — Dan Brown');assert.equal(get('delete-dialog-reason').textContent,hint(tr));
+  assert.equal(get('delete-dialog-sorted').hidden,false);assert.equal(get('delete-dialog-sorted-title').textContent,'Stays in Audiobooks Sorted');
+  assert.equal(get('delete-dialog-sorted-path').textContent,ROOT+'\\Brown Dan\\Inferno.m4b');
+  assert.match(get('delete-dialog-sorted-facts').textContent,/^.+\. Verified \d\d:\d\d: the file is there and unchanged since the app arranged it\.$/);
+  assert.equal(get('delete-dialog-last').hidden,true,'a copy that is also in Sorted is not the last copy');
+  assert.equal(get('delete-dialog-forget').textContent,"The app forgets this copy. If the same files turn up again, they're found as a new book. Nothing in Audiobooks Sorted is touched.");
+  assert.equal(get('delete-confirm').textContent,'Remove this copy and 2 files');
+  assert.equal(get('delete-confirm').title,"Delete this copy's 2 files. The audiobook in Audiobooks Sorted stays. The app can't undo this.");
+  prevented=false;get('delete-dialog').handlers.keydown({key:'Enter',target:get('delete-dialog-list'),preventDefault(){prevented=true;}});assert.ok(prevented,'Enter confirms nothing in copy mode either');
+  deleteAnswer=()=>ok({deleted:2,bytes:20,failed:[],forgotten:true,folders:{removed:0,stayed:0}});
+  await get('delete-confirm').handlers.click({});await tick();
+  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-v',revision:2,paths:COPY.map(f=>f.path),folders:[],mode:'copy'});
+  assert.match(get('retry-all-status').textContent,/^Removed 1 copy and 2 files \(.+\)\.$/);assert.equal(run('deleteNotes.get("cand-v").text'),'Removed. The copy is gone from the app.');
+  // Refusals in copy mode: the audiobook gone, changed, a copy file no longer matching; never next to the Sorted block.
+  previewAnswer=()=>ok({files:[],bytes:0,folders:[],stay:{items:0},last_copy:null,sorted:null,refusal:{code:'sorted_missing',message:'x'}});
+  paint([duplicate('w',{kind:'verified_duplicate',present:3})]);await removeButton(trOf('cand-w')).handlers.click({stopPropagation(){}});await tick();
+  assert.equal(get('delete-dialog-title').textContent,"Can't remove this copy");assert.equal(get('delete-dialog-sorted').hidden,true);
+  assert.equal(get('delete-dialog-files').textContent,'The audiobook is not where the app put it in Audiobooks Sorted. Nothing was deleted.');await get('delete-close').handlers.click({});
+  previewAnswer=()=>ok({files:COPY,bytes:20,folders:[],stay:{items:0},last_copy:null,sorted:null,refusal:null});
+  await removeButton(trOf('cand-w')).handlers.click({stopPropagation(){}});await tick();
+  assert.equal(get('delete-dialog-files').textContent,'Remove was not accepted. Nothing was deleted.','no proof shown, nothing to confirm');assert.equal(get('delete-confirm').hidden,true);await get('delete-close').handlers.click({});
+  previewAnswer=()=>ok({files:COPY,bytes:20,folders:[],stay:{items:0},last_copy:null,sorted:{path:'x',size:1,verified_at:'2026-10-25T14:32:00+00:00'},refusal:null});
+  for(const [code,line] of [['sorted_changed','The audiobook in Audiobooks Sorted has changed since the app arranged it. Nothing was deleted.'],['not_identical','These files no longer match the ones the audiobook was arranged from. Nothing was deleted.'],
+    ['files_changed',"The folder doesn't match the list, so nothing was deleted. Press Remove this copy to see the current list."]]){
+    deleteAnswer=()=>({ok:false,status:409,json:async()=>({error:'x',code})});
+    await removeButton(trOf('cand-w')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();
+    assert.equal(get('delete-dialog-files').textContent,line,code);await get('delete-close').handlers.click({});
+  }
+  deleteAnswer=()=>{throw new TypeError('Failed to fetch');};
+  await removeButton(trOf('cand-w')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();
+  assert.equal(get('delete-dialog-title').textContent,'Removal may not have finished');
+  assert.equal(get('delete-dialog-files').textContent,'Connection interrupted, so the removal may have gone through. Check the list before trying again.');
+  console.log('PASS Delete book: offer-only button, last with its tooltip, dialog with Cancel focused, Enter confirms nothing, exact paths, success, partial, refusals, lost connection; groups, folders, stay and last-copy lines; Remove this copy with its proof, refusals and no Approve on duplicate rows');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_delete_frontend.js'),module);m.filename=path.join(__dirname,'test_delete_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

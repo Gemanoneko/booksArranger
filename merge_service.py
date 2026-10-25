@@ -2094,6 +2094,10 @@ class MergeService:
             except (ValueError,OSError) as error:
                 payload['destination']={'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
         if entry['group'] in ('part_of_book','files_unclear','order_unclear','other'):self._hold_payload(row,entry,payload)
+        # A duplicate-recording row (Futaba's 0.22.0 QA, m-3): typed, so the page hides its Approve (inert there, with a
+        # wrong "name taken" tooltip) without reading copy. 'verified' or 'possible'; Remove this copy is ask.copy.
+        import book_delete
+        payload['duplicate']=book_delete.duplicate(entry)
         return payload
 
     def _hold_payload(self,row,entry,payload):
@@ -2226,19 +2230,20 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'kept':kept}
 
-    def delete_preview(self,id,revision):
-        """Delete book, step 1 (ruling 23; Judy's spec section 5): the files it would remove, from the disk now, and any
-        refusal, so a refusal shows before Sergei confirms. Read-only. See book_delete."""
+    def delete_preview(self,id,revision,mode='delete'):
+        """Delete book or Remove this copy, step 1 (rulings 23-26; Judy's specs): the files and folders it would remove,
+        from the disk now, and any refusal, so a refusal shows before Sergei confirms. mode 'copy' also proves the copy
+        against the audiobook in Sorted now. Read-only. See book_delete."""
         import book_delete
-        return book_delete.preview(self,id,revision)
+        return book_delete.preview(self,id,revision,mode)
 
-    def delete_book(self,id,revision,paths):
-        """Delete book, step 2: removes exactly the listed files (the paths the dialog showed), then every record of the
-        book, records last. Raises book_delete.DeleteRefused (typed, nothing touched); otherwise
-        {'deleted','bytes','failed','forgotten'}. See book_delete."""
+    def delete_book(self,id,revision,paths,folders=None,mode='delete'):
+        """Step 2: removes exactly the listed files and folders (those the dialog showed), then every record of the book,
+        records last. Raises book_delete.DeleteRefused (typed, nothing touched); otherwise {'deleted','bytes','failed',
+        'forgotten','folders'}. See book_delete."""
         import book_delete
-        if self.draining or self.__dict__.get('_closing'):raise book_delete.DeleteRefused('busy','This book is being processed. Nothing was deleted.')
-        return book_delete.delete(self,id,revision,paths)
+        if self.draining or self.__dict__.get('_closing'):raise book_delete.DeleteRefused('busy',book_delete.BUSY)
+        return book_delete.delete(self,id,revision,paths,folders,mode)
 
     def after_delete(self,identity):
         """Delete book touched the disk or the catalog: every cached list, count and status is read again."""
@@ -2868,11 +2873,10 @@ class MergeService:
         try:return bool(m4b_repair.eligible(row))
         except Exception:return False
 
-    def _clear_working(self,row,audio_only=None):
-        """audio_only: None reads the job's own rule (_working_kind); Delete book passes False, every leftover."""
+    def _clear_working(self,row):
         from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_NOT_SAFE,WORKING_FILE_PROBLEM
         from native_io import BoundaryError,FileInUse
-        job_id=row['job_id'];audio_only=self._working_kind(row) if audio_only is None else audio_only
+        job_id=row['job_id'];audio_only=self._working_kind(row)
         before=self._working_state(row,audio_only,fresh=True)
         if before is None:return {'cleared':True,'bytes':0,'already':True}
         if before['state']!='cleanable':raise RetryRefused(WORKING_NOT_SAFE,'not_safe')
