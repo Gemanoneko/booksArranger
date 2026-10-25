@@ -1,21 +1,158 @@
 'use strict';
-(()=>{const api=window.booksDesktop;if(!api)return;
+(()=>{
+ // ── App updates: strings and states (ruling 27; Judy's 0.22.1 UX spec, section 2). Pure, so the node tests read
+ // them without a window; the shell sends typed causes only, never raw error text. ──
+ const BOUND='3 minutes';
+ const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
+ function name(item){return {conversion:item.title?'the conversion of '+item.title:'the conversion',scan:'the library scan',research:'research',lookups:'research',automatic:'automatic processing',approval:'an approval',cleanup:'a cleanup',press:'an action'}[item.kind]||'the running work';}
+ function what(waiting){
+  const names=[...new Set((waiting||[]).filter(item=>item.kind!=='critical').map(name))];
+  if(!names.length)return 'the running work';
+  const head=names.slice(0,2).join(' and ');return names.length>2?head+' and '+(names.length-2)+' more':head;
+ }
+ function checkLine(u){
+  const c=u.check||{},n=c.version||u.available;
+  switch(c.phase){
+   case 'dev':return 'Updates work only in the installed app.';
+   case 'checking':return 'Checking for updates…';
+   case 'retrying':return `Checking for updates… no answer yet, trying again (try ${c.attempt} of 3).`;
+   case 'current':return `Books Arranger ${u.version} is up to date (checked ${c.at}).`;
+   case 'available':return `Version ${n} is available (checked ${c.at}).`;
+   case 'failed':return {no_answer:`Couldn't check for updates: GitHub didn't answer after 3 tries (tried ${c.at}). Check your internet connection, then try again. Nothing changed.`,
+    no_internet:`Couldn't check for updates: no internet connection (tried ${c.at}). Connect, then try again. Nothing changed.`,
+    github_error:`Couldn't check for updates: GitHub returned an error, ${c.code} (tried ${c.at}). Try again later. Nothing changed.`}[c.cause]||`Couldn't check for updates (tried ${c.at}). Try again later. Nothing changed.`;
+   default:return `Books Arranger ${u.version}. Not checked yet.`;
+  }
+ }
+ function downloadLine(u){
+  const d=u.download||{},n=u.available;
+  if(d.phase==='downloading')return `Downloading version ${n}… ${Math.round(d.progress||0)}%`;
+  if(d.phase==='failed')return {dropped:`Couldn't download version ${n}: the connection dropped (tried ${d.at}). Press Download update to try again.`,
+   checksum:`Couldn't use the download: it failed its checksum check, so it was discarded (tried ${d.at}). Press Download update to try again.`,
+   disk_full:`Couldn't download version ${n}: not enough disk space (tried ${d.at}). Free some space, then press Download update.`}[d.cause]||`Couldn't download version ${n} (tried ${d.at}). Press Download update to try again.`;
+  return u.ready?`Version ${n} is downloaded and verified. Ready to install.`:'';
+ }
+ function installLine(u){
+  const i=u.install||{};
+  if(i.phase==='cancelled')return {text:'Update cancelled. Books Arranger is running as before.',failed:false};
+  if(i.phase!=='failed')return {text:'',failed:false};
+  const line={bound:`Update cancelled: ${what(i.waiting)} did not stop within ${BOUND} (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
+   installer_blocked:`The installer couldn't start (tried ${i.at}). Windows or your antivirus may have blocked it. Books Arranger is running again on ${u.version}. Run the installer yourself:`,
+   checksum:`Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried ${i.at}). Check for updates, then download it again.`,
+   verify_timeout:`Update cancelled: the downloaded installer couldn't be verified in time (tried ${i.at}). Press Restart to update to try again.`,
+   engine_restart:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
+   engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`}[i.cause]
+   ||`Update cancelled (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again.`;
+  return {text:line,failed:true,path:i.cause==='installer_blocked'?u.installerPath||'':''};
+ }
+ // The .desktop-status line while an update runs (2.5); the counter is separate, outside the live region.
+ function phaseLine(u){
+  const i=u.install||{},critical=(i.critical||[])[0],work=(i.waiting||[]).filter(item=>item.kind!=='critical');
+  const finishing={text:`Finishing ${critical} first, so nothing is left half-done. This takes a few seconds.`,counter:''};
+  switch(i.phase){
+   case 'starting':return {text:'Starting the update…',counter:''};
+   case 'pausing':if(critical)return finishing;if(!work.length)return {text:'Starting the update…',counter:''};
+    return {text:`Stopping safely for the update. Waiting for ${what(work)} to reach a safe point…`,counter:`(${Math.floor(i.elapsed||0)} s of ${i.safe} s)`};
+   case 'forcing':if(critical)return finishing;
+    return {text:`${cap(what(work))} didn't reach a safe point in ${i.safe} s. Stopping it now; ${work.length&&work.every(item=>item.kind==='conversion')?'it restarts after the update':'start it again after the update'}.`,counter:''};
+   case 'updating':return {text:'Stopping the engine now. Saved work is kept.',counter:''};
+   case 'installing':return {text:`Installing ${u.available}… No installer window opens. Books Arranger reopens by itself and shows its loading progress.`,counter:''};
+  }
+  return null;
+ }
+ // What the confirm names (2.4): known only from a fresh engine answer; unknown work confirms too.
+ function workLines(desktop){
+  const busy=desktop&&desktop.busy;if(!busy)return {known:false,lines:[]};
+  const lines=[];
+  if(busy.converting)lines.push(`Converting ${busy.current_title||'the current book'}. It stops and starts again from the beginning.`);
+  if(busy.scanning)lines.push('Scanning the library. It stops. Continue it with Resume scanning.');
+  if(['Running','Stopping'].includes(busy.automatic))lines.push('Automatic processing stops. Press Start automatic processing to continue.');
+  const queued=Array.isArray(desktop.queued_actions)?desktop.queued_actions.length:Number(desktop.queued_actions)||0;
+  if(queued)lines.push(queued===1?'1 queued action is dropped. Press it again afterwards.':`${queued} queued actions are dropped. Press them again afterwards.`);
+  return {known:true,lines};
+ }
+ function buttons(u,desktop){
+  const b=u.busy||{},n=u.available,work=workLines(desktop),running=!work.known||work.lines.length>0;
+  return {
+   check:{face:b.check?'Checking…':'Check for updates',busy:!!(b.check||b.install),hidden:false,
+    title:b.check?'Checking for updates…':b.install?'Updating Books Arranger…':'Ask GitHub whether a newer version is available. Nothing is downloaded.'},
+   download:{face:b.download?`Downloading… ${Math.round((u.download||{}).progress||0)}%`:'Download update',busy:!!(b.download||b.install),hidden:!(b.download||n&&!u.ready&&u.packaged),
+    title:b.download?`Downloading version ${n}…`:`Download version ${n} and verify it. Books Arranger isn't changed until you press Restart to update.`},
+   restart:{face:b.install?'Updating…':'Restart to update',busy:!!(b.install||b.download),hidden:!u.ready,
+    title:b.install?'Updating Books Arranger…':running?`Install version ${n} now. Running work stops safely and restarts afterwards. Your source files are not touched. You confirm first.`:`Install version ${n} now. Books Arranger closes, updates and reopens by itself. No installer window opens.`},
+   cancel:{face:'Cancel update',busy:false,hidden:!u.canCancel,title:'Stop the update. Books Arranger keeps running as before.'},
+   installer:{face:'Show installer file',busy:false,hidden:!u.showInstaller,title:'Open the folder that holds the downloaded installer.'},
+  };
+ }
+ globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons});
+
+ const api=window.booksDesktop;if(!api)return;
  const header=document.querySelector('header');const toolbar=document.querySelector('#shutdown')?.parentElement;
  const hint=document.createElement('p');hint.className='field-help';hint.textContent='Closing this window keeps Books Arranger running in the tray. Choose Quit Books Arranger to close the app.';header.after(hint);
- const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title='Finish the current book and cleanup, keep queued books, then close the app';quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();api.quit().catch(showError);},true);}
- const panel=document.createElement('section');panel.className='panel desktop-status';panel.hidden=true;panel.setAttribute('aria-label','Desktop status');const phase=document.createElement('p');phase.setAttribute('role','status');phase.setAttribute('aria-live','polite');panel.append(phase);hint.after(panel);
- const update=document.createElement('section');update.className='panel desktop-update';update.setAttribute('aria-label','App updates');const text=document.createElement('p');text.setAttribute('aria-live','polite');const actions=document.createElement('div');actions.className='toolbar';update.append(text,actions);panel.after(update);
- function button(label,fn){const b=document.createElement('button');b.type='button';b.textContent=label;b.title=label;b.addEventListener('click',()=>fn().catch(showError));actions.append(b);return b;}
- const check=button('Check for updates',()=>api.checkUpdates());const download=button('Download update',()=>api.downloadUpdate());const restart=button('Restart to update',()=>api.installUpdate());
- function showError(error){text.textContent=String(error.message||error);}
+ const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title='Finish the current book and cleanup, keep queued books, then close the app';quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();api.quit().catch(error=>console.warn(error));},true);}
+ const panel=document.createElement('section');panel.className='panel desktop-status';panel.hidden=true;panel.setAttribute('aria-label','Desktop status');
+ const phaseRow=document.createElement('p');const phase=document.createElement('span');phase.setAttribute('role','status');phase.setAttribute('aria-live','polite');
+ const counter=document.createElement('span');counter.className='update-counter';phaseRow.append(phase,counter);panel.append(phaseRow);hint.after(panel);
+ // Three message lines, one per operation (2.1): each its own polite live region, written only when it changes.
+ const update=document.createElement('section');update.className='panel desktop-update';update.setAttribute('aria-label','App updates');
+ const heading=document.createElement('h2');heading.textContent='App updates';update.append(heading);
+ function messageLine(label){const p=document.createElement('p');p.className='update-line';const tag=document.createElement('span');tag.className='field-help';tag.textContent=label;
+  const body=document.createElement('span');body.className='update-text';body.setAttribute('aria-live','polite');p.append(tag,body);update.append(p);return {p,body};}
+ const lines={check:messageLine('Check'),download:messageLine('Download'),install:messageLine('Install')};
+ const installerPath=document.createElement('p');installerPath.className='path';installerPath.hidden=true;update.append(installerPath);
+ const actions=document.createElement('div');actions.className='toolbar';update.append(actions);panel.after(update);
+ // Busy buttons use aria-disabled and keep focus (2.1); a press on one does nothing.
+ function button(fn,quiet){const b=document.createElement('button');b.type='button';if(quiet)b.className='quiet';b.addEventListener('click',()=>{if(b.getAttribute('aria-disabled')==='true')return;fn();});actions.append(b);return b;}
+ const quietly=promise=>Promise.resolve(promise).catch(error=>console.warn(error));
+ const check=button(()=>quietly(api.checkUpdates()).then(poll));const download=button(()=>quietly(api.downloadUpdate()).then(poll));
+ const restart=button(()=>requestRestart());const cancel=button(()=>quietly(api.cancelUpdate()).then(poll));const installer=button(()=>quietly(api.showInstaller()),true);
+ const controls={check,download,restart,cancel,installer};
+ // Confirm (2.4): the approve-dialog pattern. Cancel is focused; no form, so Enter in the body confirms nothing.
+ const dialog=document.createElement('dialog');dialog.id='update-dialog';dialog.setAttribute('aria-labelledby','update-dialog-title');dialog.setAttribute('aria-describedby','update-dialog-lead');
+ const title=document.createElement('h2');title.id='update-dialog-title';const lead=document.createElement('p');lead.id='update-dialog-lead';const work=document.createElement('div');work.id='update-dialog-work';
+ const closing=document.createElement('p');closing.textContent='Your source files are not touched.';
+ const dialogActions=document.createElement('div');dialogActions.className='toolbar';
+ const dismiss=document.createElement('button');dismiss.type='button';dismiss.className='quiet';dismiss.autofocus=true;dismiss.textContent='Cancel';dismiss.title='Close without updating. Nothing stops.';
+ const confirm=document.createElement('button');confirm.type='button';confirm.textContent='Update now';
+ dialogActions.append(dismiss,confirm);dialog.append(title,lead,work,closing,dialogActions);document.body.append(dialog);
+ function closeDialog(){if(dialog.open)dialog.close();restart.focus({preventScroll:true});}
+ dismiss.addEventListener('click',closeDialog);
+ dialog.addEventListener('cancel',event=>{event.preventDefault();closeDialog();});
+ dialog.addEventListener('keydown',event=>{if(event.repeat)event.preventDefault();});
+ confirm.addEventListener('click',()=>{if(!dialog.open)return;dialog.close();restart.focus({preventScroll:true});startUpdate();});
+ let last=null;
+ function startUpdate(){quietly(api.installUpdate()).then(poll);setTimeout(poll,100);}
+ async function requestRestart(){
+  try{last=await api.status();}catch(error){console.warn(error);}
+  const u=last&&last.update;if(!u||!u.ready||u.busy.install||u.busy.download)return;
+  const found=workLines(last.desktop);
+  if(found.known&&!found.lines.length)return startUpdate();
+  title.textContent=`Update to ${u.available} now?`;lead.textContent=`Books Arranger stops its work safely, installs ${u.available} and reopens by itself.`;
+  confirm.title=`Stop work safely, install ${u.available} and reopen Books Arranger.`;
+  work.replaceChildren(...found.lines.map(line=>{const p=document.createElement('p');p.textContent=line;return p;}));
+  if(!dialog.open)dialog.showModal();dismiss.focus();
+ }
+ api.onRestartRequest?.(()=>requestRestart());
+ function write(node,value){if(node.textContent!==value)node.textContent=value;}
  const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job','retry-all','retry-all-go'];
  function render(value){
-  const desktop=value.desktop||{};const quitting=value.quit!=='none'||['finishing','parking','updating','blocked'].includes(desktop.phase);
-  panel.hidden=!quitting;phase.textContent=desktop.error||({finishing:'Finishing the current book and cleanup…',parking:'Parking pending work…',updating:'Parking the idle engine for update…',blocked:'Quit blocked; ownership remains held.'}[desktop.phase]||'Waiting for the engine checkpoint…');
+  last=value;
+  const desktop=value.desktop||{};const u=value.update;const updating=!!(u&&u.busy.install)||['updating','installing'].includes(value.quit);
+  const quitting=value.quit!=='none'||updating||['finishing','parking','pausing','forcing','updating','blocked'].includes(desktop.phase);
+  panel.hidden=!quitting;
+  const step=u&&updating?phaseLine(u):null;
+  if(step){write(phase,step.text);write(counter,step.counter?' '+step.counter:'');}
+  else{write(phase,desktop.error||({finishing:'Finishing the current book and cleanup…',parking:'Parking pending work…',blocked:'Quit blocked; ownership remains held.'}[desktop.phase]||'Waiting for the engine checkpoint…'));write(counter,'');}
   if(quitting){for(const id of mutating){const node=document.getElementById(id);if(node)node.disabled=true;}document.querySelector('#review-form button[type=submit]')?.setAttribute('disabled','');}
-  const u=value.update||{phase:'idle'};check.disabled=quitting||['checking','downloading','installing'].includes(u.phase);download.hidden=u.phase!=='available';restart.hidden=!u.ready||quitting;restart.disabled=!desktop.idle;restart.title=desktop.idle?'Restart to update':'Wait until scanning, research, publication, cleanup and recovery are idle';
-  text.textContent=u.error||({idle:'Check for app updates.',checking:'Checking for updates…',current:'Books Arranger is up to date.',available:'Version '+u.version+' is available.',downloading:'Downloading update… '+Math.round(u.progress)+'%',ready:desktop.idle?'Version '+u.version+' is ready to install.':'Version '+u.version+' is ready. It can install when all work is idle.',installing:'Starting the verified installer…',error:'Update failed. Check for updates to retry.'}[u.phase]||'');
+  update.hidden=!u;if(!u)return;
+  write(lines.check.body,checkLine(u));
+  const downloaded=downloadLine(u);write(lines.download.body,downloaded);lines.download.p.hidden=!downloaded;lines.download.p.classList.toggle('failed',(u.download||{}).phase==='failed');
+  const installed=installLine(u);write(lines.install.body,installed.text);lines.install.p.hidden=!installed.text;lines.install.p.classList.toggle('failed',installed.failed);
+  lines.check.p.classList.toggle('failed',(u.check||{}).phase==='failed');
+  write(installerPath,installed.path||'');installerPath.hidden=!installed.path;
+  const state=buttons(u,desktop);
+  for(const [key,node] of Object.entries(controls)){const s=state[key];write(node,s.face);if(node.title!==s.title)node.title=s.title;node.setAttribute('aria-disabled',s.busy?'true':'false');node.hidden=s.hidden;}
  }
- let polling=false;async function poll(){if(polling)return;polling=true;try{render(await api.status());}catch(e){showError(e);}finally{polling=false;}}
+ let polling=false;async function poll(){if(polling)return;polling=true;try{render(await api.status());}catch(e){console.warn(e);}finally{polling=false;}}
  api.onStatus(()=>poll());setInterval(poll,1000);poll();
 })();
