@@ -1,34 +1,215 @@
-# Books Arranger 0.22.0 - QA on candidate 01581a6 (Futaba)
+# Books Arranger 0.22.0 - QA on candidate 7490b39 (Futaba)
 
-Pass run 2026-10-25. Tester: Futaba. Behavior only; construction is Senua's. The coordinator told me during the pass that this build is superseded (Senua's N13, rulings 24-26 and 24a, and "Remove this copy" are in the next candidate), so I stopped when asked. This report records everything I verified on 01581a6, what I found, and the exact checks still pending. It does not clear any later build.
+Delta pass run 2026-10-25, after the first pass on 01581a6 (kept below, unchanged except for its old receipt, build-identity header and verdict lines). Tester: Futaba. Behavior only; construction is Senua's. This report certifies the build named here and no other.
 
-Version under test: **0.22.0**. Installer: `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0220c/dist/builds/66e2795b-3b6c-462a-bff8-3843b109d7fc/Books-Arranger-Setup-0.22.0.exe`, SHA-256 `e70b90b5019ee6c650e5dc14a34a9cb4dfea5d1ac7909f11a4af3b05c20db63a` (173,916,078 bytes).
+Version under test: **0.22.0**. Installer: `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0220f/dist/builds/8bbb0346-cc54-436c-b9e7-ae8feb32c941/Books-Arranger-Setup-0.22.0.exe`, SHA-256 `74a1622dc7ed1ca69b6fff6893b40eda8d96edf29db6eb63b96d7cb76ccf024e` (173,952,430 bytes).
 
-Release artifact manifest (`cand-0220c/dist/release-artifacts.json`) SHA-256: `b1d3e9753ffb5875556f9175afdaafc39d88789c6aa0e0cb44fc616f89037835`.
+Release artifact manifest (`cand-0220f/dist/release-artifacts.json`) SHA-256: `c8b910ced753088904208ea0fbee8db26dbbfc003155a1f2acb1ed88fb5b34fc`.
 
-Release source commit: 01581a672adc5cd0d1fc45a641bce112a2a3d825
+Release source commit: 7490b39524ec702ece35c3d5ca657d366c229786
+Release artifact manifest SHA256: c8b910ced753088904208ea0fbee8db26dbbfc003155a1f2acb1ed88fb5b34fc
 
-Blockers: 0. Majors: 1 (M-4). Minors: 6 (m-9 to m-13 new; m-3 carried). Data loss found: none. Pattern alerts: 2 (section 8).
+Ender's receipt (from the handoff):
 
-The verdict is on the last line of this file: NO-GO. Why NO-GO, in plain words: on this build I found no Blocker and no data loss, and every interim finding I could re-test is closed (B-1, M-1, M-2, M-3, m-1, m-2, m-4 to m-8). I would have cleared 01581a6 with M-4 stated as a known Major, as v0.21.2 was cleared with its one Major. But the release script matches a report by version number, and the next candidate carries the same number: a GO here could clear a build I have not tested, which is the stale-GO failure the rule exists to stop. Five checks are also unfinished (section 9). So: NO-GO to release 0.22.0 on the strength of this report; a fresh pass on the final candidate decides.
+`Entry-check receipt v2: books-arranger v0.22.0 @ 7490b39524ec702ece35c3d5ca657d366c229786 (dirty: N) [source:e808874d7edf6684860142eacdefa0e925b1e97f76cdc525cb2e75cf782bb91a; harness:c799ba33e41f00f039e378acd578c12f84768977633827600064fb4aa2e6d756; runtime:7aa29336e78db6ca9f9fb408ca334f72c0425bb18432792614fcd14587db4f49; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a`
 
-## 1. Build identity and the entry receipt
+Futaba's receipt (printed by my own run of `run-entry.sh futaba`):
+
+`Entry-check receipt v2: books-arranger v0.22.0 @ 7490b39524ec702ece35c3d5ca657d366c229786 (dirty: N) [source:e808874d7edf6684860142eacdefa0e925b1e97f76cdc525cb2e75cf782bb91a; harness:c799ba33e41f00f039e378acd578c12f84768977633827600064fb4aa2e6d756; runtime:7aa29336e78db6ca9f9fb408ca334f72c0425bb18432792614fcd14587db4f49; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a`
+
+The two lines are **byte-identical** (`diff` of the two logs' receipt lines: no difference). Limit: the receipt covers the pure-node gate (`check`); the other four checks are undeclared (n/a). It is not a behavior test.
+
+Blockers: 0. Majors: 0. Minors: 3 open (m-10 reopened in part; m-14 and m-15 new). Closed on this build: M-4, m-9, m-11, m-12, m-13, m-3. Data loss found: none. Pattern alerts: 2 new, and the 2 of pass 1 closed (section D9).
+
+The verdict is on the last line of this file: **GO**, for 7490b39 and the installer and manifest named above, and for no other build; a rebuild that carries the same version number needs a fresh pass. In plain words: on this build I found no Blocker, no Major and no data loss. Every item of the delta that I could reach was verified on the real packaged backend (and close-and-quit on the real packaged shell). Delete book waits for a scan, skips what vanished outside the app quietly while a dropped root is still an error, takes the book's own cover and text files only when it is alone in its folder, removes the folders it leaves empty (also on a network-style path) without ever touching a folder directly in the source folder or anything in Sorted, and lists and counts all of it correctly. Remove this copy shows on verified duplicates only, proves the copy and the audiobook in Sorted at the press and again at the Confirm, refuses in every state I could make (Sorted file missing or changed, a copy file changed, a drive away) with its exact line and a control that then succeeds, and leaves Sorted byte for byte unchanged. M-4, m-9, m-11, m-12, m-13 and the m-3 lines are closed, with the stored state or the real output compared. Three Minors stay open and are named (m-10 on Stopped rows, m-14, m-15); each is recoverable and none touches data. Not done: the Stopped-set rows (Can retry, Can repair, Original changed, a superseded book), real clicks inside the Electron window and the count on a copy of the live catalog (D10). The release script still needs Senua's RELEASE CLEAR beside this GO.
+
+## D1. Build identity and the entry check
+
+- Installer SHA-256 and manifest SHA-256 recomputed from the files: both equal to the handoff. Manifest `version` 0.22.0, `source_head` 7490b39524ec..., build 8bbb0346-cc54-436c-b9e7-ae8feb32c941. `cand-0220f` HEAD is 7490b39524ec702ece35c3d5ca657d366c229786 and its tree is clean.
+- The installer was **not run** (Sergei has Books Arranger installed; running it would overwrite his install entries). I extracted it with the repo's pinned `7za.exe` 21.07 (SHA-256 `b0cfdeaf429f5cc53f85123dd8f5a5feb92c19d31aa34df257edf9a26be05f95`, as pinned) into an isolated folder: **279 of 279 files hash to the manifest** (0 missing, 0 mismatched, 0 extra), and the candidate's `win-unpacked` tree also hashes 279 of 279. 81 of 81 tracked text files under `resources/backend` equal the committed blobs of 7490b39 once CRLF is ignored (the other 76 files are `.pyc` and `VERSION`). Backend `VERSION` is 0.22.0.
+- Step 1, the entry check, run first with nothing else of ours running (port 5212 free; the only other processes on the machine were not mine): `run-entry.sh` SHA-256 `9cb1626c1723801eecb630a7a9fb7d7b47ca809e98b1307842a4ab19ccbb9c2d` (as required); Bash timeout 600000; exit 0 after 404.6 s; log `qa-run-0220f/logs/futaba-entry.log`. Counts from the log: **1,642 Python cases**, **65 node cases**, **21 page scripts** (counted from the run's own list), **8 syntax files**. All as expected.
+
+## D2. Method and isolation
+
+- Everything ran from the extracted payload with a private environment (own TEMP, APPDATA, LOCALAPPDATA, USERPROFILE), generated fixtures (real MP3 and M4B files made with the packaged FFmpeg), the packaged Python and the packaged backend, started through the 25-line launcher of pass 1 (`desktop_backend.main`, unchanged; the two public-source transports answer HTTP 503, so no fixture book reached the Internet). The page was loaded in the studio's leased headless Edge and driven with trusted pointer clicks and key events. Sergei is asleep, so I also ran the **real packaged shell** (launch, real window, close button, real tray right-click and real click on Quit, first-run window).
+- **Real Windows conditions instead of mocks:** a helper process holding a file open; a process with its working directory inside a folder; drives that disappear mid-press (`subst` drives Q: for the source folder and P: for Sorted, removed again in every script; Y: is Sergei's and was never touched); a network-style source path (`\\localhost\c$\...`, the admin share of this machine); a conversion killed mid-run.
+- **Seeded conditions (marked where used, the way the repo's own tests do):** a "Researching" state on one book and a completed job row on another (only around the two refusals that need them, then removed or restored); the failure record of a stopped job whose working copies were made by the app's own working lifecycle (`seed_working.py`, packaged Python, catalog stopped). Nothing was seeded for any pass or fail below that is not marked.
+- Never installed or run on Sergei's profile. A fingerprint of his install, profile and updater folder (file count, bytes, newest modification time) taken at the start, in the middle and before cleanup is **identical** to the one at the end of pass 1. `Z:\`, `Y:\`, the live `data/` and the real catalog were never opened. No Books Arranger process of Sergei's was running at any time I looked.
+- This is headless pixels plus a few viewed screenshots (Delete dialog groups, the last-copy line in its warning colour, the list with the new button). By the studio rule a headless GO is evidence about logic, not pixels; Jane still looks at the running tool before it reaches Sergei.
+
+## D3. Delta 01581a6..7490b39: result by item
+
+| Item | Result on 7490b39 |
+|---|---|
+| (a) Delete book: waits for a scan | **Pass** (D4.1) |
+| (a) Delete book: gone files and folders skipped quietly; a dropped root still an error | **Pass** (D4.2) |
+| (a) Delete book: cover and text files only when the folder is the book's alone | **Pass** (D4.3) |
+| (a) Delete book: working copy and the "last copy" line | **Pass for "all"** with the app's own closed working copies and a seeded failure record; the "some" line is **not reachable from the page** (D4.4) |
+| (a) Delete book: emptied folders (also on a network-style path); never a folder directly in the source folder, never Sorted | **Pass** (D4.5) |
+| (a) Delete book: grouped lists and the "{k} other items stay" line | **Pass** (D4.3, D4.5) |
+| (b) Remove this copy: only on verified duplicates, "Verified", no inert Approve | **Pass** (D5.1) |
+| (b) Remove this copy: refusals (Sorted missing, changed, copy differs, drive away) with controls | **Pass** (D5.3) |
+| (b) Remove this copy: success touches only the copy; Sorted byte for byte | **Pass** (D5.2) |
+| (c) M-4: Approve on a 77-file book | **Closed** (D6.1) |
+| (d) m-9: a refused Approve keeps the book listed and unchanged | **Closed** (D6.2) |
+| (e) m-10 focus after Delete | **Missing files rows: closed. Stopped rows: still open, intermittent** (m-10, section D8) |
+| (e) m-11 Scan again line after a partial Delete | **Closed** (D6.3) |
+| (e) m-12 chapter names | **Closed** (77 distinct names; observation in D6.4) |
+| (e) m-13 "Not found" in the details panel | **Closed** (D6.5) |
+| (e) m-3 "Goes to" on stopped rows; duplicate rows without an inert Approve | **Closed** (D6.6) |
+| (f) Regression smoke: scan, approve, convert, verify; close and quit; chip; bulk Approve as is | **Pass** (D7) |
+| (g) Section 9 items | 32-hour join **done, pass**; "Can't reach {root}", finished-audiobook and busy-at-same-revision refusals **done, pass**; real clicks inside the Electron window, the live-catalog count and most of the Stopped set **not done** (D10) |
+
+## D4. Delete book
+
+Suites: the 01581a6 suite re-run unchanged on a fresh lab (d1 51 of 51; d3 41 of 41; d4 21 of 21; d5 13 of 13; d6 6 of 6; d2 27 of 29, the two fails being the old "folder line" assertion, which is replaced by the stay line, and the old stale-element assertion of pass 1); plus the new suite for rulings 24, 24a and 26, run six times on fresh labs (four local, two on `\\localhost\c$\...`): 140 to 148 passes each, with only the two items named in m-10 and m-14 failing (D8).
+
+**D4.1 Waits for a scan (Senua's N13).** A library scan of 600 files running; preview, then delete with the exact list, through the API and through the page.
+- Preview: typed refusal `busy`, line "This book is being processed. Nothing was deleted.", no file listed. Delete with the exact list: HTTP 409, same code and line. Nothing deleted, no record touched. The scan then ended "completed", 0 errors.
+- Page: press Delete book while the scan runs: refusal state, title "Can't delete this book", line "This book is being processed. Nothing was deleted.", no Confirm, no list, Close has focus; Close returns focus to the row's Delete book button.
+- Control: right after the scan the same preview lists the book's files again.
+- Seeded, same revision (a book whose research is "Researching", row inserted while the engine ran and restored right after): refused as `busy` at the unchanged revision, same line on the page. This was the one Delete refusal pass 1 could not reach.
+
+**D4.2 Gone files and folders; a dropped root.**
+- A scan of 600 files; while it ran (63 of 604 checked) I removed 12 whole folders and 10 files of the folder being read, outside the app, in 134 ms. The scan ended **"completed"**, 0 errors, 0 unresolved, no scan issue; no catalog row of a removed folder carries an error; the last generation holds 265 "success" outcomes (the gone ones read "Gone before it was read") and no "error"; 330 catalogued files of the removed folders are now marked missing; nothing from a removed folder came back as a present file; the to-do page shows no raw OS text (`Errno`, `WinError`).
+- **Control, a dropped root:** 300 files on a `subst` drive, the drive removed while the scan ran (9 of 25 folders checked): the scan ended **"completed with errors"** (24 errors, 13 unresolved, "[WinError 3]" on the folders it could not list), **0 files marked missing**, all 300 catalog rows kept. The same run on the 01581a6 scanner gives 25 errors, 14 unresolved and the same result, so the quiet skip did not hide a dropped root.
+- Note, not part of this delta: after the drive returned, the first "Start scan" ended "failed" (7 unresolved, "Catalog review, retirement or source evidence changed during read; task remains pending"; my fixture had also changed one file per folder before the scan). The 01581a6 scanner does the same (8 unresolved). "Resume scanning" finished the saved progress cleanly in a separate attempt (checked 300, 0 errors).
+
+**D4.3 Cover and text files; shared folders.** Fixture folders, each with a Missing files book:
+- A (Judy's example): `Сборники\Новая плоть (2016)` with 2 audio files, `cover.jpg`, `info.txt`. Dialog subheads "Audio files (2)", "Other files in this book's folder (2)", "Folders left empty are removed (1)" (13 px, weight 600); "These 4 files (9.3 KB) will be deleted from your disk. The app can't undo this."; list name "Files and folders to delete"; Confirm "Delete book and 4 files"; no stay line; Cancel has focus. After: the four files and `Новая плоть (2016)` are gone, `Сборники` (directly in the source folder) stays; strip "Deleted 1 book, 4 files (9.3 KB) and 1 folder."
+- B (a folder shared with another book and a cover): audio only, so no subheads (exactly as before); the stay line "2 other items stay where they are. They belong to other books, or the app can't tell whose they are."; the other book's file and the cover keep their size and time; the folder stays; strip "Deleted 1 book and 2 files (9.3 KB)."
+- E (a book folder directly inside the source folder, with a cover): subheads for audio and other files, no folder group; the cover goes, the folder stays; strip "Deleted 1 book and 3 files (9.3 KB)."
+- F (a subfolder inside the book's folder): the stay line in its singular form, "1 other item stays where it is. It belongs to another book, or the app can't tell whose it is."; the subfolder and its file stay, so does the folder.
+- G (damaged single MP3 with a cover): audio and cover listed and deleted. The row's offer counts every file the press would delete ("present": 4 for A, 2 for G, 0 for a book whose files are all gone, which opens the "No files are left on disk. Only the app's record of this book is deleted." variant with "Delete book (no files)"; its strip reads "Deleted 1 book. No files were left on disk.", and the empty folder directly in the source folder stays).
+- Every case: one request answered 200; every listed file gone from disk; the files that must stay unchanged; zero records of the book (21 tables, queried directly); Audiobooks Sorted byte for byte unchanged (names, sizes, times, SHA-256), including a decoy folder inside Sorted named like a source folder; no recovery copy; no overlapping boxes in the dialog; the dialog inside the window.
+- **Spec check 3:** a cover held open by a helper (Windows refuses a plain delete of it, control): the dialog "Not everything was deleted" lists exactly the cover with "In use by another program.", Close has focus; the audio file is gone, the cover and its folder stay, no record is deleted, strip "Deleted 1 of 2 files. The book stays listed with the 1 that could not be deleted."; after the release the second press lists only the cover ("This file (5 B)..."), deletes it and the two emptied folders, strip "Deleted 1 book, 1 file (5 B) and 2 folders."
+- A file added to a listed folder after the dialog opened: Confirm is refused inside the dialog, "The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list."; nothing deleted; the next press lists the new file.
+
+**D4.4 Working files and the last-copy line (ruling 26).**
+- A real interrupted conversion (engine killed mid-run) leaves a pending job with an *unclosed* working attempt; after "Resume audiobook jobs" it is a stopped book ("Working cleanup requires attention: A prior producer is not durably closed...") that gets no Delete offer even with its originals gone. With only its failure record rewritten to the "Source audio needs replacement" shape (seeded) the offer appears, but the preview is refused with the generic "Delete was not accepted. Nothing was deleted." (the app cannot prove the unclosed attempt's files are its own; Judy's offer 4 of her update spec). A failed attempt cleans its working copies by itself. So no real flow leaves a *closed* working copy of a book that offers Delete.
+- To test the line, the working copies were made by the app's own working lifecycle (`seed_working.py`, the way `tests/test_book_delete.py::with_leftovers` does) and only the stopped job's failure record was written (**seeded**). Single damaged MP3 whose original is gone: the last-copy line reads "The originals are already gone. The app's working files are the last copy of this book's audio." in the warning colour (rgb 255,213,138), directly above the Files line; one group "The app's working files (1)"; "This file (48 KB)..."; Confirm "Delete book and 1 file"; after the press the working copy is gone from the app's drive, the job and its working records are gone, strip "Deleted 1 book and 1 file (48 KB).", Sorted unchanged. Control with the original present: no last-copy line, the working copy listed under "The app's working files (1)" beside the audio.
+- **Not reachable:** the "Some originals are already gone..." line. A two-file stopped book with one original gone gets no Delete offer (its preview is the generic refusal); only the unit test reaches it, with a mocked offer.
+
+**D4.5 Emptied folders (rulings 24 and 24a).**
+- Cascade: `Автор Первый\Книга Глубокая\Диск 1` with a cover: both emptied folders are listed and removed, `Автор Первый` (directly in the source folder) stays; strip "Deleted 1 book, 2 files (4.7 KB) and 2 folders."
+- Blocked cascade: the same shape with an already-empty sibling folder `Пустая`: only `Диск 1` is listed and removed; `Книга` and `Пустая` stay, untouched.
+- **Network-style path:** the same fixtures with the source folder on `\\localhost\c$\...`: every listed path is spelled as the share, and cases A to G pass identically (including the folder removals). Ruling 24a (a plain rmdir where the native empty-folder check refuses) works on it, and on local NTFS.
+- A listed folder that cannot be removed (a process has it as its working directory; an ordinary rmdir of it fails, control): the strip reads "Deleted 1 book and 1 file (4.6 KB). 2 folders stayed." (the folder and its parent), the book is forgotten, the file is gone, the folders stay, nothing recursive was tried. (Judy's example shows "1 folder stayed."; here two were listed.)
+- Refusals with the exact lines, nothing deleted, Close has focus, no Confirm: **"Can't reach Q:\Books. Nothing was deleted."** (source drive dropped, `subst`), **"A finished audiobook of this book is in sorted. Nothing was deleted."** (**seeded**: a completed job row for the book, inserted while the engine ran and removed right after), **"This book is being processed..."** at the same revision (**seeded**, D4.1). Control: with the drive back, Delete book opens its normal dialog.
+- Never touched: a folder directly in the source folder (`Сборники`, `Автор Первый`, `Одиночная книга` stayed in every run), anything in Sorted (byte for byte).
+- Focus after the press, Missing files rows: next row's first working control after a mouse click, Tab+Enter and Tab+Space (m-10 closed there); see m-10 for the Stopped rows.
+
+## D5. Remove this copy
+
+Lab: seven books converted into Sorted (7 outputs), then byte-identical copies of their sources put back under another folder (`Копии\<title>`), one with a cover, plus a different recording of one title. Two automatic passes ran with the copies present: **no copy was deleted by either pass** (automatic processing never removes a duplicate).
+
+**D5.1 Where it shows.**
+- On exactly the 6 verified-identical rows (6 of 6; 7 of 7 in the dialog lab); not on the "Possible duplicate recording" row (control, it reads "This book needs your decision."). Neither kind of duplicate row shows an Approve any more, and no duplicate row carries Delete book.
+- Row hint on the verified rows: "This recording is already in sorted. The audio files here are exact copies of the files it was arranged from." (the folder is called `sorted` in my lab).
+- The button: face "Remove this copy", tooltip "Delete this copy's files from disk. The app shows the audiobook in sorted first, and you confirm.", accessible name "Remove this copy: {title}", 123 x 37.5 px, outlined in the danger colour (text 9.12:1), the **last** button of the row, on its own line, 23.5 to 24.5 px clear above; at 1440, 1024, 700 and 200% zoom: 0 overlapping boxes, inside the window, no horizontal scroll, at least 16 px clear above. Not in the bulk area with the page selected; Ctrl+Enter on the row opens nothing and sends nothing; a held Enter opens the dialog once (one preview request).
+
+**D5.2 The dialog and the success.**
+- Title "Remove this copy?"; "{title} — {author}"; the row hint verbatim; the **Sorted block**: a `role="group"` named by its heading "Stays in sorted", the file's full path, "62 KB. Verified 17:58: the file is there and unchanged since the app arranged it." (the time was within a minute of the press); "These 5 files (50 KB) will be deleted from your disk..."; subheads "Audio files (4)", "Other files in this book's folder (1)", "Folders left empty are removed (1)"; the forget line "The app forgets this copy. If the same files turn up again, they're found as a new book. Nothing in sorted is touched."; Confirm "Remove this copy and 5 files" with its tooltip; Cancel has focus; Enter in the file list or the body does nothing; Enter on Cancel and Esc cancel and focus returns to the row's button.
+- Success: strip "Removed 1 copy, 5 files (50 KB) and 1 folder."; the copy's files, cover and folder are gone; `Копии` and the six other copies untouched; **Audiobooks Sorted byte for byte unchanged** (7 files; names, sizes, times, SHA-256); no recovery copy; the audiobook in Sorted still opens (duration and chapters); only the copy's own records changed (`files`, `scan_outcomes`, `candidate_context`, `book_groups`, `catalog_group_members`, `automatic_candidates`: no job, output or cleanup table). The same files copied back are found as a **new book** (new identity) and flagged as a verified duplicate again, with the offer.
+- Stopped backend between the dialog and the Confirm: title "Removal may not have finished", "Connection interrupted, so the removal may have gone through. Check the list before trying again.", never "Nothing was deleted"; after a restart every file of the copy was still there, the row and its offer too.
+
+**D5.3 Refusals, each with its control (restore it and the press succeeds).** In none of them does the word "Verified" appear, and each refusal state has no Confirm, no list, no Sorted block, with Close focused (Close returns focus to the row's button):
+- Sorted file renamed away: "The audiobook is not where the app put it in sorted. Nothing was deleted." (also when the dialog was already open, Confirm refused inside the dialog; the Sorted block and "Verified" disappear). Renamed back: the press succeeds. (A deleted-and-copied-back file would have a new file identity; I used a rename so the control is fair.)
+- One byte of the Sorted file flipped: "The audiobook in sorted has changed since the app arranged it. Nothing was deleted." Flipped back: succeeds.
+- One byte of a copy file flipped: "These files no longer match the ones the audiobook was arranged from. Nothing was deleted." Flipped back: succeeds.
+- Sorted drive away (a `subst` drive): "Can't reach P:\Sorted. Nothing was deleted." at the press, and again inside an already open dialog; with the drive back the press succeeds. Source drive away: "Can't reach Q:\Books. Nothing was deleted." Windows refuses to rename the Sorted folder while the engine holds it (EBUSY), which is why I used drives.
+- See m-15 for what the first of the Sorted-drive cases does to the offers afterwards.
+
+## D6. The fixes of pass 1
+
+**D6.1 M-4 (Approve on a 77-file book): closed.** The 77 «Пастушья корона»-style files (one title tag, file names "Пастушья корона NN. Глава ..."), one candidate with 77 members, held as Order unclear ("No file has a track number. The order comes from the file names."). Press **Approve this order**: the request was answered **HTTP 200 after 24.6 s** (the server took 24.0 s, the old 15 s limit is passed). The button read **"Approving..."** and was inert the whole time (pending tooltip "Approving this book...", row hint "Approving this book..."). A mouse click at 1.5 s, Enter at about 4.5 s and Space at about 6.5 s on that button sent **no second request**: exactly one `candidate/approve` request, no 409. The row never said "Connection interrupted" (page text checked); after the answer the row left the list and the book converted to **one** output with 77 chapters (23.1 s). The machine was busy with other runs at the time, so 24.6 s is not a best case.
+
+**D6.2 m-9 (a refused Approve): closed.** A no-author book shows "Goes to sorted\Без автора\X.m4b"; a file is put at that path after the row was shown. Single Approve (as written, and with a typed author): HTTP 409, the row says "Approve was not accepted. Nothing was changed." and stays listed, its Approve inert ("Already there"); after 5 s, after a page reload and after an app restart it is still listed, still "Held — Title or author missing", and the sweep line does not count it as waiting. **Stored state compared:** every record of the book (all tables with its id) is exactly as before the press, no "Approved by you" note, no job. Control: with the path free the same book and revision approves (HTTP 200). Bulk "Approve as is" with the same collision: "Approved 2 of 3. 1 stays listed with its reason."; the refused book stays in the chip, "Held — Title or author missing" in All, Held and Output needs attention, counts consistent; the planted file was not overwritten, the two other books converted for real.
+
+**D6.3 m-11.** Partial Delete (one file held open), then Scan again on the row: "Checked 17:20. Not found." appears (the old 20 s of silence is gone). Closed.
+
+**D6.4 m-12 (chapter names).** The converted 77-file book has **77 distinct chapter names** and no chapter named just "Пастушья корона": the 24 files that carry a label in their name carry exactly that label ("Пролог. Корона Холмов", "Словарь Нак-мак-фиглов", "Глава 1. Там где ветер", ... "Эпилог. Шёпот холмов", "Послесловие", "Бонус"); the other 53 are named from their file number, "Track 02", "Track 03", ... (observation O-1). Chapter starts strictly increase.
+
+**D6.5 m-13.** The included-source list of a Missing files book marks the missing file **"Not found"**, in playback order (file 3 of 3, last); the present files are not marked (checked on two books). The missing entry still shows "Included", Move up and Move down and the stale "0.50 s" (observation O-2).
+
+**D6.6 m-3.** Stopped rows show their "Goes to" line (the damaged-MP3 row: "Goes to sorted\Ян Стальной\Железный ад - Ян Стальной.m4b"; the duplicate-recording row too). The inert Approve is gone from both kinds of duplicate row. The "Possible duplicate recording" row now offers only View metadata and Source folders: no way forward from the row (O-4).
+
+## D7. Regression smoke
+
+- Scan, approve, convert, verify, many times over: seven books converted by automatic processing into Sorted in the copy lab (the ones I probed open with a duration and their chapters), two real conversions by bulk Approve as is (output decodes clean, source removed after the verified output, "Approved by you" in the record), the 77-chapter book, the 32-hour join.
+- Chips: 58 of 58 (all group keys answer 200 with their rows, each visible chip clicked, counts agree, zero-count chips hidden).
+- Bulk "Approve as is": 39 of 39 once the one assertion that encoded the old m-9 behaviour is read the new way (the refused book now stays in its chip: 2 rows, "Старый дом" and the typed row, instead of 1). Dialog 560 px wide, 0 overlaps and nothing clipped at the four sizes; a double press runs once; "Approved 2 of 3. 1 stays listed with its reason."
+- Same author? (M-1, M-3 and the other items of the c3 suite): see **D7.1**.
+- **Close and quit, the real packaged shell** (`Books Arranger.exe` from the payload, private profile, Sergei asleep): launch: 6 processes (shell, GPU, utility, renderer, host, engine), window "Books Arranger" 1280 x 860, engine reports 0.22.0; the close button (a real `WM_CLOSE`) hides the window and keeps all 6 processes and the port (the recorded tray exception); a real right-click on the tray icon opens "Open Books Arranger | Quit Books Arranger | Check for updates"; Escape dismissed it without quitting; a real click on **"Quit Books Arranger" ended all processes 3.3 s later**, the port was free, exit code 0, nothing of mine left. The first-run "Choose data folder" window closed with `WM_CLOSE` ended all 4 processes in 0.3 s.
+
+**D7.1 Same author? (M-1) and the rest of the c3 suite.**
+- Variant C (a run in progress at the press, a 90-minute book converting): the strip says "Remembered. 2 books continue."; both rows leave the chip in 0.7 s; the sweep line says "Still checking 1 book. More may appear here."; both books reach Sorted under "Alder Corvell" with no further press; nothing is left "still checking" (5 of 5).
+- Variants A (the automatic pass was already complete) and B (stopped at the press) behave as in pass 1: same strip, both rows leave the chip at once, and the sweep line says "1 book is waiting to be checked. Start automatic processing to check it." Once Start is accepted (checked on both labs with a separate Start-after script) the partner continues, files under "Alder Corvell" in about 12 s and nothing is left "still checking". The "both filed" assertions of my two scripts do not press Start, so they fail there by design; the M-1 pair of the c3 suite failed the same way in all three runs (20 of 22 each time). The other 20 pass: M-2 (Scan again reads "Checked ... Not found." on three books; with part 2 back the row leaves and the part is catalogued), M-3 (Approve this order enabled 2.5 s after Save), m-1 (Convert what's there 152.0 x 37.5 px), m-2 (no raw OS text in five places), m-4, m-7, m-8. O-5 is the Start-refused-while-converting detail.
+
+## D8. Findings
+
+### Open
+
+**m-10 (reopened in part) - Minor - focus is still lost to the page after a successful Delete on a Stopped row, about one press in three.**
+Repro: the Other chip (Stopped rows: "Source audio needs replacement"), several rows; press Delete book on one, confirm with the mouse, read the focused element 2.5 s later. **Seen:** the page body in 5 of 15 presses of the two repeat runs (2 of 7, 3 of 8), and in 2 of the 6 Stopped-row presses inside the suite runs; in the others focus is on the next row's first control ("View metadata: ..."). A passive focus log of a lost case: focus moved to the next row's control 1 ms after the answer, and that button was replaced by a re-render about 210 ms later with nothing handing focus on again. On Missing files rows it held every time (0 of 7 in the repeat run, and in every Delete of the six suite runs, by mouse click, Tab+Enter and Tab+Space). Spec: next row's first working control, else the row now at this index, else the Status filter. The 0.22.0 fix hands focus on once after the forced re-read; a later re-render takes it away. Judy's call whether Stopped rows deserve the same guarantee; for the keyboard user it is a lost place in the list.
+
+**m-14 (new) - Minor - deleting the last row of a chip leaves no confirmation.**
+Repro: Missing files chip with one row left; Delete book on it; confirm. **Seen:** the strip "Deleted 1 book, 4 files (9.3 KB) and 1 folder." is there at 0.1 s and gone at 0.3 s: the chip reaches zero, the page falls back to All and the strip (which "stays until the chip or filter changes") goes with it. Nothing on the page says what happened; focus goes to the Status filter. Same in all six suite runs (the last Missing files book of each). Only the outcome line of an irreversible press is lost; the files and the records are handled correctly. Judy's call (for example, keep the strip across that one fallback).
+
+**m-15 (new) - Minor - after a refused "Remove this copy" while the Sorted drive was away, the button disappears from every duplicate row until the next scan or restart.**
+Repro: two verified-duplicate rows with the button; open the dialog on one; the Sorted drive drops; press Confirm. **Seen:** the dialog is refused correctly ("Can't reach P:\Sorted. Nothing was deleted.") but afterwards **both** rows lost the button (the API sends no `ask.copy` for either; they still read as verified duplicates). With the drive back it did not return after 15 s, 60 s or a page reload; a library scan restored it, and so did an app restart. A refusal at the press (drive already gone) does not do this. Nothing is lost or deleted; the button just waits for a rescan. Likely a cached view recomputed while the drive was away and kept (read from behaviour, not from the code). Sergei's Sorted folder is on Z:, so a network hiccup plus one Confirm would show it.
+
+### Observations (no finding without a realistic repro, or not part of this delta)
+
+- **O-1** The 53 unlabelled chapters of the 77-file book are named "Track 02", "Track 03", ... (English, from the file number) in a Russian-language book. They are distinct, which is what the fix asked for; the name is the app's generated one.
+- **O-2** A missing file in the included-source list keeps "Included", Move up, Move down and its old duration; only the "Not found" mark is new. Harmless; a missing row that can be moved is odd.
+- **O-3** A conversion that loses the Sorted drive while it runs (a `subst` drive dropped during encoding) stops as "Stopped - see details" in the Other chip with "An inspected destination ancestor is unavailable" and **no Retry**; after the drive returns the row still offers only View metadata and Source folders, and the queue says "Needs attention". Not in this delta's code (I did not compare with 01581a6); it is the case Sergei's Z: can produce, so Jane may want it on the list.
+- **O-4** The "Possible duplicate recording" row (and any two-file stopped book) has no action beyond View metadata and Source folders: no way forward from the row. Judy's offer 3.
+- **O-5** "Start automatic processing" is refused with "Audiobook conversion is running. Pause audiobook jobs before starting automatic processing." while the approved partner of a "Same author?" pair is still converting; waiting for that conversion to end is enough (Start then continues the partner, which files under the existing author in about 12 s, and the output carries the author). The message reads as if he must pause. Unchanged since pass 1.
+- **O-6** The first-scan-after-a-dropped-root behaviour of D4.2 ("failed", then Resume scanning) is identical on 01581a6.
+- The Delete dialog wraps long paths in the middle of a word ("Сбор / ники") because the paths are set in a monospace face; readable.
+
+## D9. Pattern alerts (dispositions proposed; Jane confirms)
+
+1. **A message reports intent, not outcome** (pass 1: M-4, m-9). **Closed:** both verified fixed, with the stored state compared for m-9. Disposition: fix (done).
+2. **A press writes state before its last gate** (pass 1: m-9). **Closed:** a refused press leaves every stored record as it was. Disposition: fix (done).
+3. **New: a press's outcome is lost to the next re-render** (m-10 on Stopped rows: focus; m-14: the strip). Both are "the page re-renders after the press and what the press had just set is gone". Proposed: **fix** by setting focus and the strip in a step after the last re-render of that press, and **add** a test that forces a re-render 100 to 300 ms after the answer (the timing that loses focus here).
+4. **New: a view recomputed during an outage outlives the outage** (m-15; also O-6 and O-3 are the same neighbourhood: a transient drive loss leaves a state that needs a manual step). Proposed: **defer** (Minor, recoverable by a scan) with a note for Jane; **fix** m-15 if Sergei's Z: hiccups are common.
+
+## D10. Section 9 of pass 1: what is closed
+
+| Pass-1 item | Now |
+|---|---|
+| 1. The whole matrix on the final candidate, Senua's N13 | Done for everything the delta touches (D3 to D7). The unaffected parts of the pass-1 matrix were not repeated, except the regression smoke (D7) |
+| 2. The real 32-hour join | **Done, pass.** Two 16-hour M4B parts (179 MB each, 22.05 kHz mono AAC, chapters "Глава 1".."Глава 16" and "Глава 17".."Глава 32"), names "Часть 1/2": joined **automatically without a question** (ruling 19/19a), re-encoded once; the join took about 26 minutes in all (about 8 preparing and checking the audio, 13 encoding, 5 verifying; other runs were using the machine); output **one M4B of 115,200.046 s (32.000 h) with 32 chapters "Глава 1".."Глава 32" in order, part 2 starting at 57,600.023 s**; 120 s at the start, 200 s across the seam (57,500 s on) and 120 s at the end decode clean; both originals were removed only after the verified join (0 left). (The bare-numbered pair being asked "Together these 2 files run 32 hours, which is long for one book." was verified in pass 1.) |
+| 3. Stopped rows: Can retry, Can repair, Original changed, "Retry all/selected never include a superseded book"; M4B variants; the six kept-separate books | **Not done.** The one real "Can retry" shape I could make (a conversion that loses the Sorted drive) produced a row with no Retry (O-3), and I found no way to reach Can repair, Original changed or a superseded book without seeding more than I was willing to |
+| 4. Delete: "Can't reach {root}", the finished-audiobook refusal, busy where the revision does not change first | **Done, pass** (D4.5, D4.1; the last two seeded) |
+| 5. Real clicks inside the Electron window; "Needs you" count on a copy of the live catalog; Retry all/selected with a superseded book | **Not done.** The shell started with `--roots-json` passes no output folder, so its window cannot show the to-do list (as in pass 1); the live catalog is off limits |
+
+## D11. Evidence and cleanup
+
+- Evidence: this report, my entry log `qa-run-0220f/logs/futaba-entry.log` and the child copy my entry run made, `qa-run-0220f/entry-run-F22dur/` (134 MB, mine; Ender's is `entry-run-Af4EJU`). `cand-0220f` and `qa-run-0220f` are kept for Sully as asked and were not written to by me beyond that log and child copy.
+- Removed with `node scripts/studio-sweep.mjs --apply --path`: my work folder (`%LOCALAPPDATA%\Temp\bq22f`: the extracted payload, every lab, catalog, output folder, private profile and environment, logs, screenshots and evidence files). The sweep reported: removed 1 item, 1.32 GB; free space on the Temp drive 120.31 GB to 121.65 GB; I confirmed the path is gone. Then, as the coordinator asked (this supersedes the note in pass 1 section 10 that the scripts stay in the session scratch folder), my harness scripts in the session scratch `shared/` folder, the same way: the sweep reported removed 1 item, 830.23 KB (189 files: the engine launcher, fixture builders, DevTools driver, per-check scripts and this report's assembly inputs); the folder is gone and the session scratch folder is empty. The only remaining traces are the harness's own tool-result dumps outside it, which are not mine to clear.
+- Also removed: the one Windows tray-icon record my real tray test created for my payload path (`HKCU\Control Panel\NotifyIconSettings`, checked to be mine by its path; a second listing shows 0). My `subst` drives Q: and P: were removed by every script that made them (the final `subst` list is empty and neither drive exists; Y: is Sergei's and was never touched). Headless-browser leases: each closed by its own run (`headless-browser.mjs sweep` lists no lease). No test engine of mine is left on any 52xx port and no process of mine is running (checked just before the sweep: no 52xx listener, no payload process).
+- Sergei's install, profile and updater folder: the fingerprint (file count, bytes, newest modification time) taken at the start, in the middle and again after the last test is **identical**, and equal to the one at the end of pass 1. `Z:\`, `Y:\`, the live `data/` and the real catalog were never opened.
+
+**Slips of mine, none a product result:** (1) my first run of the real-shell script counted every payload process on the machine, including my own background engines, so it reported 0 processes and a "process left" count that were mine; I restricted it to the shell's own process tree and re-ran: 12 of 12. (2) A `rm -rf` I tried was blocked by the delete guard and not run; I removed things only through scripts limited to my own folder and the sweep. (3) A background lab build I started on a port another of my runs was using talked to that run's engine for one request (a rejected scan start) before failing; no data of either lab was touched. (4) Several of my assertions were wrong at first (the author shown in the copy dialog is the credited name, not the folder name; "1 folder stayed" when two folders were listed; the old m-9 expectation in the bulk suite; a stricter "no Move buttons" check than the spec asks for); each was corrected and the tables above report only the corrected results. (5) The M-1 checks of the c3 suite and its same-author variant B failed under load because my script pressed Start while the approved partner was still converting (409, O-5); with Start accepted the partner continues (D7.1).
+
+Pass ends here. No fix was made or attempted by me.
+
+# Pass 1 on candidate 01581a6 (superseded; kept as the record of what was verified there)
+
+Everything below is the first pass on 01581a6, unchanged except that its entry receipts, its build-identity header lines and its verdict line were removed, so that this file carries exactly one build identity, one receipt pair and one verdict (the final line). Its "Blockers: 0. Majors: 1 (M-4). Minors: 6" summary was the state of 01581a6; M-4, m-9, m-11, m-12, m-13 and the m-3 Goes to line are closed on 7490b39 (D3), m-10 is reopened in part.
+
+## Pass 1, section 1. Build identity and the entry receipt
 
 - Installer SHA-256 recomputed from the file: equal to the handoff. Manifest SHA-256 recomputed: equal to the handoff. Manifest `version` 0.22.0, `source_head` 01581a67..., build 66e2795b-3b6c-462a-bff8-3843b109d7fc. `cand-0220c` HEAD is 01581a672adc5cd0d1fc45a641bce112a2a3d825 and its tree was clean.
 - The installer was **not run** (Sergei has Books Arranger installed per user; running the installer would overwrite his install entries). I extracted it with the repo's pinned `7za.exe` 21.07 (SHA-256 `b0cfdeaf429f5cc53f85123dd8f5a5feb92c19d31aa34df257edf9a26be05f95`, as pinned) into an isolated folder: **279 of 279 files hash to the manifest** (0 missing, 0 mismatched, 0 extra), and the `win-unpacked` tree hashes 279 of 279. 81 of 81 tracked text files under `resources/backend` equal the committed blobs of 01581a6 once CRLF is ignored (the other 76 files are `.pyc` and `VERSION`). Backend `VERSION` is 0.22.0.
 - Step 1, the entry check, run first with nothing of ours running: `run-entry.sh` SHA-256 `fc0d4d0901d20932cfea1ce9dd15394e51162d160ccb62964faae276acfedfd5` (as required); port 5212 free before and after; Bash timeout 600000; exit 0; log `qa-run-0220c/logs/futaba-entry.log`. Counts from the gate's own pass line: **1,610 Python cases** (337 + 274 + 255 + 210 + 239 + 295 over six workers), **65 node cases** (65 pass, 0 fail, 0 skipped), **21 page scripts**, **8 syntax files**. All as expected.
 
-Ender's receipt (from the handoff):
+Pass 1's two receipt lines (01581a6, source digest b26810d4...) were byte-identical; they are in the git history of this file and are not repeated here, so that this file carries one receipt pair, the one at the top.
 
-`Entry-check receipt v2: books-arranger v0.22.0 @ 01581a672adc5cd0d1fc45a641bce112a2a3d825 (dirty: N) [source:b26810d433ea812e38c3cb7f05e5fd500e862b2de1d039ef0a41913864014036; harness:2de9ab359a4d3a04de5da6202650d8439d894ea44ecda807adfb82e342fd1681; runtime:7aa29336e78db6ca9f9fb408ca334f72c0425bb18432792614fcd14587db4f49; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a`
-
-Futaba's receipt (printed by my run):
-
-`Entry-check receipt v2: books-arranger v0.22.0 @ 01581a672adc5cd0d1fc45a641bce112a2a3d825 (dirty: N) [source:b26810d433ea812e38c3cb7f05e5fd500e862b2de1d039ef0a41913864014036; harness:2de9ab359a4d3a04de5da6202650d8439d894ea44ecda807adfb82e342fd1681; runtime:7aa29336e78db6ca9f9fb408ca334f72c0425bb18432792614fcd14587db4f49; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a`
-
-The two lines are **byte-identical** (`cmp`; SHA-256 of the line `f48e2f6fe056325c280e63b0357b161f3e2d89773ab251d23aeb2ef25c6bb891`). Limit: the receipt covers the pure-node gate (`check`); the other four checks are undeclared (n/a). It is not a behavior test.
-
-## 2. Method and isolation
+## Pass 1, section 2. Method and isolation
 
 Everything ran from the extracted payload, with a private environment (own TEMP, APPDATA, LOCALAPPDATA, USERPROFILE) and fixtures I generated with the packaged FFmpeg (real MP3 and M4B files, a few hundred in all; the largest are two 16-hour M4B parts of 179 MB each).
 
@@ -39,7 +220,7 @@ Everything ran from the extracted payload, with a private environment (own TEMP,
 - Never installed or run on Sergei's profile. A fingerprint of his install, his profile and his updater folder (file count, bytes, newest modification time) taken at the start and again before cleanup is **identical**. `Z:\`, `Y:\`, the live `data/` and the real catalog were never opened. My ports: 5212, 5214, 5216 and 5218 (5210 never used); one engine at a time per data folder.
 - Two conditions the product cannot produce by itself were **seeded into my own catalog**, the way the repo's tests do: a "Need to reacquire" marker (no code path in 0.22.0 writes one: `mp3_tag_repair.assessment` always refuses) and a second current book that lists one file of another book (to reach the shared-file refusal). Both are marked below.
 
-## 3. Item (a): the ten pending checks of the interim report
+## Pass 1, section 3. Item (a): the ten pending checks of the interim report
 
 | # | Check | Result on 01581a6 |
 |---|---|---|
@@ -68,7 +249,7 @@ The 100-book run (packaged desktop backend, 100 generated 2-file books with digi
 
 The changelog says the median wait on a 200-book test with 50 to 99 books converted fell to 3.4 s. My 100-book medians in the same range (3.1 and 3.7 s) are consistent with that, so I neither reproduce nor refute the claim. My interim run on b946ee7 read lower (median 1.29 s, p95 4.64 s) on a different fixture; the status call is unchanged (520 vs 542 ms), so I cannot call it a regression. The list still waits seconds while books convert and the wait grows with the converted count.
 
-## 4. Item (b): regressions of my findings
+## Pass 1, section 4. Item (b): regressions of my findings
 
 | Finding | Result |
 |---|---|
@@ -86,7 +267,7 @@ The changelog says the median wait on a 200-book test with 50 to 99 books conver
 | m-7 / m-8 | **Closed** (above). |
 | m-3 duplicate-recording rows | **Still open**, unchanged (Minor, carried). |
 
-## 5. Item (c): Delete book
+## Pass 1, section 5. Item (c): Delete book
 
 Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 part set, all missing), two damaged MP3s (one given a **seeded** reacquire marker), a Name taken row, an Order unclear row, a Files unclear row, a duplicate-recording "Needs you" row, and one book that shares a file with another book (**seeded**). Final clean run, in this order: d1 (visibility) 51 of 51; d2 (dialog) 28 of 29; d5 (refusals) 13 of 13; d4 (partial failure) 20 of 21; d3 (success flows) 40 of 41; d6 (outside source folder) 6 of 6. The three fails are m-10, m-11 and one assertion of mine that read the wrong element (the dialog was right; see below).
 
@@ -100,7 +281,7 @@ Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 p
 - **No accelerator: pass.** Ctrl+Enter on a Missing files row (row focused, and a button focused) opens nothing and sends nothing.
 - The one fail in d2 is my assertion reading the stale hidden "reason" element in the refusal state: what the user sees is "Can't delete this book" plus the exact sentence above.
 
-## 6. Items (d), (e), (f)
+## Pass 1, section 6. Items (d), (e), (f)
 
 **(d) Пастушья-style regression: pass on grouping, with M-4 on the approval.** 77 chapter-named MP3s (the real file-name pattern "Пастушья корона NN. Глава ...", one title tag, no album) are **ONE candidate with 77 members**, not 77 lone files. Four albums whose title tags are chapter names ("Глава 1. Дом, милый дом - 1", "Часть 1. Бродяжья зона. Глава 01" and so on; 5, 7, 5 and 5 files) are one candidate each, are **not held, and converted** to one output each. Positive control: the two-works "Ведьмак" set is still held ("Source membership uncertain"). The 77-file book has no track tags, so it is held as Order unclear ("No file has a track number. The order comes from the file names.", list shows the first five and "+ 72 more, listed in the details panel."); Approve this order then produces one M4B with 77 chapters, 23.1 s, sources removed after the verified output. Findings from this step: M-4 and m-12.
 
@@ -108,7 +289,7 @@ Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 p
 
 **(f) A real tray Quit: pass.** Launch (packaged shell, private profile): engine listening, **6 processes** (shell, GPU, utility, renderer, host, engine), window "Books Arranger" 1280 x 860 with the v0.22.0 page and "Closing this window keeps Books Arranger running in the tray.". The close button (a real `WM_CLOSE`, what the title-bar X sends) hid the window and kept all 6 processes and the port: the recorded tray exception. A real right-click on the tray icon (found inside the "Show Hidden Icons" flyout by UI Automation, real mouse events) opened the menu "Open Books Arranger | Quit Books Arranger | Check for updates"; Escape dismissed it without quitting. A real click on **"Quit Books Arranger" ended all 6 processes 0.6 s after the click**, port 5214 free, no process of mine left anywhere (CIM query). The first-run "Choose data folder" window of the shell, closed with `WM_CLOSE`, ended all 4 processes in 0.3 s. Killing the shell's parent (my own stopped test) also left no orphan engine.
 
-## 7. Findings
+## Pass 1, section 7. Findings
 
 ### M-4 - Major - Approve on a book with many files outlives the page's 15 s limit and reports "Connection interrupted"
 **Repro:** a book of 77 MP3 files (file names "Пастушья корона 00. ...", "Пастушья корона 01. ...", one title tag, no track numbers; 0.24 MB in total). It is held as Order unclear. Press **Approve this order** on its row. **Seen:** after exactly 15 s the page aborts its request and the row reads "Connection interrupted. Check the status above before trying again." The server answers the same request **24.5 s** after the press (HTTP 200, job queued; measured with no client limit); conversion then takes 195 s. The Approve button is enabled again after the message; pressing it again is answered after 6.7 s with HTTP 409 and the row leaves. In the end there is exactly one output, 77 chapters, nothing lost or duplicated.
@@ -133,12 +314,12 @@ Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 p
 - Bulk Approve as is lists the same destination twice for two same-title no-author books; the second is refused (409) and stays Held.
 - A selected set under a book-words or season marker is asked, an explicit "Часть N" set is joined at any length (ruling 19/19a, as the code reads).
 
-## 8. Pattern alerts (dispositions proposed; Jane confirms)
+## Pass 1, section 8. Pattern alerts (dispositions proposed; Jane confirms)
 
 1. **A message reports intent, not outcome, again** (M-4: "Connection interrupted" while the server accepted the approval; m-9: "Nothing was changed" when the book was taken off the list). The two interim instances (M-1, M-2) are fixed. Proposed: **fix** both, and **add** a test per press that checks the message against the stored state afterwards; for Approve, either let the server answer before it does the long per-file work or give the page a limit above the worst case.
 2. **A press writes state before its last gate** (m-9: the approval note is stored before the destination check refuses; the same shape as M-1). Proposed: **fix** by writing the approval after the last gate, or undoing it on refusal; **add** a test that a refused press leaves the stored state as it was.
 
-## 9. Checks still pending (for the next candidate)
+## Pass 1, section 9. Checks still pending (for the next candidate)
 
 1. The whole matrix of this report on the final candidate (rulings 24-26, 24a and "Remove this copy" are new behavior: Delete now also takes covers, text files, working copies and empty folders, so my "covers and text files stay" and "folder stays" checks must be redone to the new rule), including Senua's N13 (Delete during a scan).
 2. The real 32-hour join output (duration, 32 chapters, the seam decoded, originals removed).
@@ -146,7 +327,7 @@ Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 p
 4. Delete: the "Can't reach {root}" refusal and the finished-audiobook refusal; the busy refusal where the revision does not change first.
 5. Real clicks inside the Electron window; the count of "Needs you" rows on a copy of the live catalog (read-only, no research); "Retry all/selected" with a superseded book.
 
-## 10. Evidence and cleanup
+## Pass 1, section 10. Evidence and cleanup
 
 - Evidence: this report, my entry log `qa-run-0220c/logs/futaba-entry.log` and the child copy my entry run made, `qa-run-0220c/entry-run-FlCKjB/` (120 MB, mine; Ender's is `entry-run-p9RG33`). `cand-0220c` and `qa-run-0220c` are kept as asked and were not written to by me beyond that log and child copy.
 - Removed with `node scripts/studio-sweep.mjs --apply --path`: my work folder (`%LOCALAPPDATA%\Temp\bq22`: the extracted payload, every fixture library and catalog, output folders, private profiles and environments, logs, screenshots and evidence files) and one stray file I made in the Temp root. The sweep reported: removed 2 items, 1.97 GB (the work folder and the 142 KB stray file); free space on the Temp drive 123.02 GB to 124.99 GB. I confirmed both paths are gone afterwards.
@@ -157,4 +338,6 @@ Fixture: a lab with eight Missing files rows (some present, a part set, an MP3 p
 
 Pass ends here. No fix was made or attempted by me.
 
-**Verdict:** NO-GO
+End of file. The one verdict line, for build 7490b39 only (installer SHA-256 74a1622dc7ed1ca69b6fff6893b40eda8d96edf29db6eb63b96d7cb76ccf024e):
+
+**Verdict:** GO
