@@ -157,7 +157,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   // The desktop layer disables Retry during Quit (state 6); a running window leaves it alone (positive control).
   async function desktop(status,id='retry-job'){
     const dnodes=new Map(),dget=id=>{if(!dnodes.has(id))dnodes.set(id,new Element(id));return dnodes.get(id);};
-    const ddoc={getElementById:dget,querySelector:selector=>({'header':dget('header'),'#shutdown':dget('shutdown'),'#version':dget('version')})[selector] || null,createElement:tag=>new Element(tag)};
+    const ddoc={body:dget('body'),getElementById:dget,querySelector:selector=>({'header':dget('header'),'#shutdown':dget('shutdown'),'#version':dget('version')})[selector] || null,createElement:tag=>new Element(tag)};
     const api={status:async()=>status,quit:async()=>({}),checkUpdates:async()=>({}),downloadUpdate:async()=>({}),installUpdate:async()=>({}),onStatus(){}};
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/desktop-ui.js'),'utf8'),vm.createContext({window:{booksDesktop:api},document:ddoc,setInterval:()=>0,console}));
     await new Promise(resolve=>setImmediate(resolve));return dget(id);

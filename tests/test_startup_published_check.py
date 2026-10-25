@@ -325,7 +325,7 @@ class CurrentAudiobookViewTests(unittest.TestCase):
         view.publication = lambda jobs, candidate: {'id': 'p', 'kind': 'conversion', 'record': record, 'cover': None}
 
         @contextlib.contextmanager
-        def protected(publication):
+        def protected(publication, display=False):  # 0.22.1: describe() asks for the display lookup
             yield None, 'key-1'
         view.protected = protected
         return view
