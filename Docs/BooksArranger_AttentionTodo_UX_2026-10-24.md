@@ -1039,3 +1039,251 @@ On a row that offers Keep, the line's label reads **As one book** instead of "Go
 
 1. **Join again:** an undo on kept-separate books before they are filed (remove the file facts, regroup). Cheap now, impossible after filing.
 2. **The same answer for Files unclear** (mixed recordings, title tags name more than one book): these are not whole `.m4b` sets, so they need a split plan, not this store. Offer 3 of the 0.22.0 review.
+
+---
+
+# Delete book — spec (2026-10-25, Judy)
+
+Basis: ruling 23 (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`, Sergei, 2026-10-25) and Futaba's interim QA on b946ee7. Read-only look at local branch `ender/0220c` at 55d664b (`origin/ender/0220c` is not a fetched ref here, and I did not fetch): `web/app.js` (the `ASK_*` tables, `buildAskActions`, `askMode`, `askPress`, `askLeave`, the row builder L225-290, `rowAction` L796, `attentionText` L1587, `sizeText`), `web/style.css` (tokens, `.quiet`, `.row-actions`, the dialogs), `web/index.html` (the four existing dialogs), `audio_jobs.attention_summary` L719 and `source_remedy` L54, `reacquire_sources.py`, and `Docs/BooksArranger_DeletePaths_Audit_2026-10-24.md`. Nothing launched, no rects measured: geometry is target geometry for Futaba. Contrast ratios are calculated from the tokens. Names in the mockups are examples, not live rows. Spec only: no code, not committed.
+
+**Supersedes:** for the two broken-audio rows only, the Reacquire UX line "no Delete files button" and the advice "Keep this original" (`BooksArranger_Reacquire_UX_2026-10-20.md`). Ruling 23 is Sergei's explicit exception to ruling 2. Remove from list, Scan again and Convert what's there stay as specced.
+
+## 1. In brief
+
+1. **Delete book** is a row action on three kinds of row only: Missing files, Need to reacquire, Source audio needs replacement (section 2).
+2. Danger style: outlined red on the row, solid red in the dialog. It is the last button of the row, on its own line, apart from every other button.
+3. It always asks first, in a native dialog that lists every file by path, with the count and the total size. It says the app can't undo it and that nothing in Audiobooks Sorted is touched. Cancel has focus; Enter never confirms.
+4. It deletes the listed files and nothing else. Only when every listed file is gone does it delete the app's records of the book. Records go last, so nothing is half-forgotten.
+5. Success: the row leaves and one strip line confirms. Partial failure or refusal: the dialog names exactly which files and why, and the book stays listed.
+6. No bulk, no accelerator, not in the details panel, no context menu.
+7. Duplicate-recording rows and Files unclear rows do not get it (section 2).
+
+## 2. Which rows show it
+
+**Rule: the server decides.** It sends a typed `delete` offer only when the app itself holds a verdict that the book is incomplete, or broken beyond its own repair. The UI never infers it from copy. No offer means no button (hidden, not disabled: an action with nothing to act on is noise).
+
+| Row | Shows | Why |
+|---|---|---|
+| Missing files, some files present (includes part sets, "Part 2 of 3") | **yes** | Sergei: "parts are missing". The files that are present are deleted. |
+| Missing files, none present ("All files missing") | **yes**, beside Remove from list | Nothing is on disk, so it only forgets the book. Remove from list is the reversible one (the book returns if its files do); Delete book is not. |
+| Need to reacquire (analysed unsafe damage) | **yes** | The app analysed the audio and cannot repair it safely. |
+| Source audio needs replacement (a single MP3 failed its full audio check, and the app's own repair or Retry already ran) | **yes** | This is the Iron-style decode failure after repair failed. |
+| Can retry, Can repair, and the MP3 "Retry checks it again" row | no | The app can still fix it. Repair comes first. |
+| Stopped — see details, Other, Needs you | no | No verdict. A multi-file audio failure has none today. When the app can say "not repairable" it sends the same offer and the button appears (offer 4). |
+| Original changed, Audiobook problem | no | A finished audiobook may exist; recovery copies are kept. |
+| M4B not supported, Name taken, every "Needs your answer" chip | no | Not broken. |
+| Files unclear ("The tags say 12 tracks, but 9 files are here.") | no | Evidence, not a verdict: the tags may be wrong (offer 3). |
+| Duplicate-recording rows ("Identical verified recording already arranged", "Possible duplicate recording") | **no** | See below. |
+
+**Duplicates: no.** (1) Neither is broken or incomplete, and Sergei already has the book, so "reacquire" has no meaning. (2) "Possible duplicate recording" may be a different reading, the only copy of it. (3) Removing a verified duplicate is a different act with a different guarantee: it falls under ruling 2 (a source goes only after its result is verified in Sorted), so it needs its own action that shows the Sorted copy as proof. That is offer 1 and question 2, not specced here. Futaba's m-3 dead end stays open until then.
+
+Also hidden once the row has flipped to Queued (Convert what's there). Inert (`aria-disabled`) with the existing "Another operation is in progress." or "Local server unavailable." while a press runs or the server is gone. On Need to reacquire with some originals already gone, the list holds only those still there; with the source drive offline the preview refuses (section 4).
+
+## 3. The button
+
+```
+[ ] Новая плоть  ·  Сборник  ·  8 audio files
+    Missing files                                          [ Scan again ] [ Convert what's there ]
+    1 of 9 files is missing.                               [ View metadata ] [ Source folders ]
+    In  Z:\Audiobooks\Сборники\Новая плоть (2016)\
+        03 - Павлов Михаил - Засор.m4b                     [ Delete book ]
+    Goes to  Audiobooks Sorted\Сборники\Новая плоть - Разные авторы.m4b
+
+[ ] Червь 19  ·  Джон МакКрэй  ·  1 audio file
+    Need to reacquire                                      [ View metadata ] [ Open folder ]
+    The audio is damaged and cannot be repaired safely.
+    Delete the book, then get a new copy.                  [ Delete book ]
+```
+
+| Part | String or rule |
+|---|---|
+| Face | Delete book |
+| Tooltip, files on disk | Delete this book's files from disk and remove the book from the app. You confirm first. |
+| Tooltip, none on disk | Remove this book from the app for good. No files are left to delete. You confirm first. |
+| Pending face / hint | Checking... / Checking this book's files... |
+| Accessible name | Delete book: {title clue} (visible face first, WCAG 2.5.3) |
+| Style | `quiet row-retry danger`: `--surface` fill, `--error` text and 1px `--error` border (9.12:1 on `--surface`, 6.78 on `--row-hover`), hover fill `--row-hover`. Never an accent fill. It differs from its neighbours by word, position and hue, so greyscale and colour-blind users still read "Delete". |
+| Disabled / pending | `aria-disabled` with the existing `--disabled` look; focus kept. |
+
+**Position (Fitts: the farthest, hardest target; Hick: out of the answer group).**
+- Last in `.row-actions`, after View metadata and Source folders / Open folder, on a line of its own: a zero-height flex break (`flex-basis:100%;height:0`) and `margin-top:8px` on the button, so at least 16 px of clear space above it. It is never on the primary's line, so Scan again, Convert what's there, Remove from list and Approve are never its neighbours.
+- Tab order: row, Select, fields, primary, second action, View metadata, Source folders / Open folder, **Delete book**. Native `button`; Enter and Space press once; `keydown` stops at the button like its neighbours. **Ignore `event.repeat`** on it, so a held Enter cannot open the dialog twice.
+- At least 96 x 32; the face never truncates. Nothing is absolutely positioned.
+- The two Stopped rows have no primary button today (`rowAction` returns null for Need to reacquire, and Source audio needs replacement carries no Retry), so this button is built beside View metadata, not through `rowAction`.
+
+## 4. The confirmation
+
+A native modal `dialog` in the approve-dialog pattern: 560 px max, background inert, `aria-labelledby` the title, `aria-describedby` the body. It is the only overlay, and every state below is inside it, so nothing else is ever covered.
+
+```
++-------------------------------------------------------------------+
+| Delete this book?                                                 |
+| Новая плоть — Сборник                                             |
+| 1 of 9 files is missing.                                          |
+|                                                                   |
+| These 8 files (1.4 GB) will be deleted from your disk. The app    |
+| can't undo this.                                                  |
+| +---------------------------------------------------------------+ |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)\01 - ... .m4b       | |
+| | Z:\Audiobooks\Сборники\Новая плоть (2016)\02 - ... .m4b       | |
+| | ...                                          (scrolls, 40vh)  | |
+| +---------------------------------------------------------------+ |
+| Other files in the folder stay.                                   |
+|                                                                   |
+| The app forgets this book. If you get it again, it's found as a   |
+| new book. Nothing in Audiobooks Sorted is touched.                |
+|                                                                   |
+| [ Cancel ]                      [ Delete book and 8 files ]       |
++-------------------------------------------------------------------+
+```
+
+| Part | String |
+|---|---|
+| Title | Delete this book? |
+| Book line | {title} — {author} (just {title} when the author is unknown) |
+| Reason line | the row's own sentence, verbatim: "1 of 9 files is missing." / "All 2 files are missing." / "The audio is damaged and cannot be repaired safely." / "The app cannot repair this damage without risking missing audio." / "The MP3 failed its full audio check and can't be repaired by the app." |
+| Files line | These {n} files ({size}) will be deleted from your disk. The app can't undo this. / This file ({size}) will be deleted from your disk. The app can't undo this. |
+| No files | No files are left on disk. Only the app's record of this book is deleted. |
+| List | `.path` lines, the full absolute path of each file, `tabindex="0"`, `role="group"`, name "Files to delete", 40vh scroll. Shown when n is above 0. |
+| Folder line | Other files in the folder stay. (shown when n is above 0) |
+| Forget line | The app forgets this book. If you get it again, it's found as a new book. Nothing in {Audiobooks Sorted} is touched. ({Audiobooks Sorted} is `outputName()`.) |
+| Cancel | Cancel / Close without deleting anything. |
+| Confirm | Delete book and {n} files / Delete book and 1 file / Delete book (no files) |
+| Confirm tooltip | Delete this book and its {n} files. The app can't undo this. / Delete this book and its file. The app can't undo this. / Remove this book from the app. No files are touched. |
+
+**Danger in the dialog.** The confirm button is the only filled one: `--error` fill, `--on-accent` text (10.42:1), border `--error`; hover `--error-hover` #FFC7C7 (12.02), pressed `--error-pressed` #F09A9A (8.26). Two new tokens, no new hue. The focus ring has a 2 px offset, so it is read against the dialog's `--surface` (11.18), not the red fill.
+
+**Enter must not confirm.**
+1. Cancel has `autofocus` and is the only default. Confirm never has `autofocus`.
+2. No `form method="dialog"`, no default or submit button: Enter in the body or the list does nothing.
+3. Confirm is reached only by Tab or a click. The Enter that pressed Delete book cannot reach it, because focus is on Cancel when the dialog opens.
+4. Ignore `event.repeat` on both buttons. On press Confirm goes `aria-disabled` at once, so a double press runs once.
+5. Esc and Cancel close it and return focus to the row's Delete book button (`preventScroll`). If the row is gone, focus goes to the Status filter.
+
+**States, all in this dialog.** The press on the row reads "Checking..." while the server builds the list; the dialog opens when the answer arrives. A refusal found then opens the dialog in its refusal state, so Sergei never confirms something that will be refused.
+
+| State | Title | Body | Buttons |
+|---|---|---|---|
+| Confirm | Delete this book? | as above | Cancel (focus), Confirm |
+| Deleting | unchanged | Confirm face "Deleting..." (`aria-disabled`); a polite status line: "Deleting {n} files..." / "Deleting 1 file..." / "Removing this book..." | Cancel `aria-disabled`, tooltip "Deleting can't be stopped."; Esc ignored |
+| Refused | Can't delete this book | the refusal line (below), plus its file list when it has one | Close (focus) |
+| Partial | Not everything was deleted | "Deleted {k} of {n} files. {f} could not be deleted:" then one block per file: the path, and under it the cause in `--muted`; then "The book stays listed. Press Delete book to try these again." | Close (focus) |
+| Outcome unknown | Delete may not have finished | the unknown-outcome line | Close (focus) |
+
+Close: face "Close", tooltip "Close this message."
+
+| Cause line (under each failed path) | When |
+|---|---|
+| In use by another program. | locked by another process |
+| Access denied. | permission |
+| Can't reach the drive. | share offline or dropped |
+| Couldn't delete it. | anything else (raw text only in Technical details) |
+
+| Refusal | Line |
+|---|---|
+| A file also belongs to another book (one) | "{file}" also belongs to "{other}". Nothing was deleted. |
+| Several | {n} of this book's files also belong to other books. Nothing was deleted. (List: each path, with Also in "{other}" under it.) |
+| A finished audiobook exists | A finished audiobook of this book is in {Audiobooks Sorted}. Nothing was deleted. |
+| Source drive not reachable | Can't reach {root}. Nothing was deleted. |
+| Book is being processed | This book is being processed. Nothing was deleted. |
+| Book changed (revision) | This book changed, so nothing was deleted. Review its details and try again. |
+| Folder differs from the list | The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list. |
+| Any other typed refusal | Delete was not accepted. Nothing was deleted. |
+| Connection lost | Connection interrupted, so the delete may have gone through. Check the list before trying again. |
+| Untyped server error | Delete did not finish. Check the list before trying again. |
+
+**"Nothing was deleted" is said only for a typed refusal that the server issues before it touches the first file.** Every other failure is outcome unknown and says so (the pattern alert in Futaba's QA: a message must report outcome, not intent). The NAS may keep deleted files in its own recycle folder; the app can neither see nor empty it, so no string says "permanently".
+
+## 5. What the press does
+
+1. **Preview.** The first press asks the server for the delete list. It is built from the disk now: each of the book's catalogued audio files that exists, under a configured source folder and not under the output folder, with its size. The same call runs every refusal check, so a refusal shows before he confirms.
+2. **Confirm.** The press sends the revision and the paths the dialog showed, nothing else. The server deletes only if the list it builds now equals the list shown; otherwise it refuses ("Folder differs from the list").
+3. **Delete.** One file at a time, through the same verified-handle and boundary checks as source cleanup. **No recovery copy is made:** ruling 23 says fully removed, and a copy under `data/source-recovery` would keep the broken audio on disk. A file that fails does not stop the others: one locked file must not keep the other seven.
+4. **Records last.** Only when every listed file is confirmed gone (a file already absent counts as gone) does the app delete everything it holds about the book, in one catalog transaction: its candidate group and context, reviews, saved track order and manual drafts, research records and evidence, jobs with their journals and set-aside marks, the reacquire marker, its kept-separate file facts, the file inventory rows and read errors of its files, its working files on the app's own drive, and the in-memory caches. It keeps every other book, the author rules and aliases Sergei taught, the settings, and finished audiobooks in Sorted with their records.
+5. **If a file fails, no record is deleted.** The book stays listed. The deleted files are gone, so the next poll reads the row as Missing files ({k} of {n}) and the next Delete book lists only what remains. A crash between 3 and 4 ends the same way. Nothing is forgotten while its files are on disk.
+6. **Reacquire.** A new copy, at the same path or elsewhere, is a new book: new identity, fresh research. Nothing of the old book is carried: no approval, review, hold, hash, marker, draft, "Kept separate" fact or read error. The archived-marker hold ("Damaged-source entry archived; use the newly discovered replacement") must not outlive the book.
+7. **Never touched:** anything under Audiobooks Sorted, another book's files in the same folder, covers, text and other files, the folder itself (the existing empty-folder cleanup handles a folder left empty, by its own rules), a source root.
+
+## 6. After the press
+
+| Outcome | Row | Strip line (polite live region) |
+|---|---|---|
+| Success | Hint "Deleted. The book is gone from the app." Buttons hidden. The row leaves at the answer or the next poll. Its selection, draft, "Checked" time and details panel go with it. | Deleted 1 book and {n} files ({size}). / Deleted 1 book and 1 file ({size}). / Deleted 1 book. No files were left on disk. |
+| Partial | Stays. Hint turns `--warning`: "Deleted {k} of {n} files. {f} still on disk." (f = 1: "... 1 is still on disk.") The dialog showed exactly which. | Deleted {k} of {n} files. The book stays listed with the {f} that could not be deleted. |
+| Refused | Stays. Hint turns `--warning` with the refusal line. Nothing recorded. | none |
+| Outcome unknown | Stays. Hint turns `--warning` with the line. | none |
+
+- **Gone from every list and count within one poll:** its chip, All, the shortcut, the Jobs line, All candidates, Held, the Files view, and the Read errors count if it had any. A fresh page load and an app restart agree. Count and list always agree (one predicate).
+- **Focus after success** as after Approve: the next row's first working control, else the Status filter, `preventScroll`. After partial, refusal or outcome unknown: the row's Delete book button.
+- The hints use the mechanism that carries the existing refusals (`askResults`) and, on the Stopped rows, the one that carries Retry's refusal. Strip text stays until the chip or filter changes, no timer.
+- **Scan again** keeps its honest lines ("Checked 14:32. Not found.", "Files found. The book is checked again.") and is not touched by this action. Futaba's open M-2 (a false "Files found" on a missing part) is a separate defect: this action neither relies on it nor hides it.
+
+## 7. Knock-on copy
+
+Three strings now contradict the button.
+
+| Where | Was | Now |
+|---|---|---|
+| Need to reacquire, row hint, second sentence (both variants) | Put an intact replacement in an unsorted source, then scan it. | Delete the book, then get a new copy. |
+| Need to reacquire, details and cell tooltip | You can remove these damaged originals yourself. After a completed scan confirms they are gone, their active source entry is cleared. | Delete book removes these files and the book. If you remove the originals yourself, the book is cleared after a completed scan confirms they are gone. |
+| Source audio needs replacement, row hint | The MP3 failed its full audio check. Keep this original, replace the source with a sound copy, then rescan this source. The affected file is listed in the details. | The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy. |
+
+The first sentences of the two Need to reacquire hints stay. The "Some original files remain" and "Source unavailable" additions stay. Remove from list, Scan again and Convert what's there keep their tooltips.
+
+## 8. Copy sheet additions (verbatim once built)
+
+Strings of sections 3, 4 and 7 are verbatim there. Those with no other home:
+
+| Where | String |
+|---|---|
+| Row hint, done | Deleted. The book is gone from the app. |
+| Strip, success | Deleted 1 book and {n} files ({size}). / Deleted 1 book and 1 file ({size}). / Deleted 1 book. No files were left on disk. |
+| Strip, partial | Deleted {k} of {n} files. The book stays listed with the {f} that could not be deleted. |
+| Row hint, partial | Deleted {k} of {n} files. {f} still on disk. / Deleted {k} of {n} files. 1 is still on disk. |
+| Accessible name | Delete book: {title clue} |
+| Code tables | `ASK_LABELS.delete`, `ASK_TIPS.delete` (two variants), `ASK_PENDING.delete`, `ASK_DONE.deleted` (status null), `ASK_REFUSED.delete` |
+
+## 9. What the UI needs from the API (names assumed; Ender confirms)
+
+- **Offer:** `ask.delete` on Missing files rows, `attention.delete` on the two Stopped rows: `{kind:'files_missing'|'audio_damaged', present:n}`. No offer, no button. `present` picks the tooltip variant without a call.
+- `POST /api/candidate/delete-preview` `{library,id,revision}` returns `{files:[{path,size}], bytes, refusal:null|{code, files?:[{path,other}], root?}}`.
+- `POST /api/candidate/delete` `{library,id,revision,paths}` returns `{deleted, bytes, failed:[{path,cause}], forgotten}` with `cause` in `in_use|denied|unreachable|other`. Typed refusals are HTTP 409 with `code` in `changed|files_changed|shared|sorted|offline|busy|refused`.
+- **Guarantee:** a refusal code is sent only when no file was touched; anything else reads as outcome unknown. `forgotten:true` only after the records transaction committed.
+
+## 10. Changes Ender must make
+
+1. `app.js`: add `delete` to the `ASK_*` tables. Build the button last in `.row-actions`, after the folder buttons and behind a flex break, for ask rows with `ask.delete` and for the two Stopped rows with `attention.delete` (outside `rowAction`). Ignore `event.repeat`.
+2. `index.html` and `style.css`: `delete-dialog` (approve-dialog pattern, `autofocus` on Cancel, no form) with its five states; `button.danger`, `button.danger.solid`; tokens `--error-hover` and `--error-pressed`.
+3. Backend: the two routes and the guards of section 5 (the same verified-handle checks as source cleanup; refuse any path under the output folder); **no recovery copy**; records last, in one transaction; idempotent (a path already gone counts as gone); typed results. This overrides the retain-history stance of the Reacquire contract for this action only. If a dependency (a published output, replacement lineage) makes full removal unsafe, refuse up front with the "finished audiobook" line, never half done.
+4. A new copy at the same path is found as a new book (5.6), including the archived-marker hold.
+5. The three knock-on strings of section 7.
+6. Tests: one fixture per row kind and per negative of section 2; the press; every refusal; a partial failure (a file held open); records last (stop between 3 and 4); no recovery copy; reacquire as a new book; a front-end test that the button is last and has its tooltip.
+
+## 11. Checks for Futaba (committed build, seeded fixture on a scratch library, nothing on Z:)
+
+1. **Fixture:** Missing files (some present, a part set, all missing), Need to reacquire, Source audio needs replacement, plus the negatives: Can repair, Can retry, the MP3 "Retry checks it again" row, Stopped — see details, Original changed, Name taken, Order unclear, a duplicate "Needs you" row. Delete book is on exactly the first five. Control: absent on the unfixed build.
+2. **Position and style:** the button is the last Tab stop of its row, on its own line, at least 16 px below the line above and never on the primary's line, at 1440, 1024, 700 and 200% zoom. No two rects intersect, no horizontal scroll, focus ring not clipped. Contrast measured in the build: text 9.12, solid face 10.42. In greyscale it still reads "Delete".
+3. **Dialog:** Cancel has focus on open. The list equals the fixture's present files for that book and no other file, with the right count and size. Enter in the body or the list does nothing; Enter on Cancel cancels; Esc cancels; Confirm works only by Tab or click, then Enter or Space; a held Enter opens it once; a double press runs once. Control: a build with Confirm focused on open deletes on Enter.
+4. **Delete:** the listed files are gone from the fixture disk. A sibling book's file and a cover in the same folder are untouched. Audiobooks Sorted is identical before and after (listing with sizes and times). No recovery copy appears under `data/source-recovery`.
+5. **Records:** the row is gone; chip, All, shortcut and Jobs line agree; All candidates, Held and the Files view have nothing for it; the Read errors count drops if it had one. After an app restart all of that holds. Control: query the catalog for the book's id and paths: zero rows.
+6. **Reacquire:** copy the same files back under the same names and scan. It is a new book with fresh research and none of the old approval, hold, review, draft or marker.
+7. **Partial:** hold one file open. The dialog lists exactly that file with "In use by another program.", the others are gone, the book stays listed as Missing files, no record was deleted. Release the file and press again: the list holds only that file, and the delete completes.
+8. **Refused, each verbatim, nothing deleted** (Sorted and sources listed before and after, records unchanged): a shared file; a finished audiobook in Sorted; a source folder not reachable; a changed revision; a file added after the dialog opened. Controls: the same press without the shared file deletes; without the added file it succeeds.
+9. **Outcome unknown:** stop the backend during the confirm. The dialog reads the connection line and never "Nothing was deleted". After a restart the list shows the true state.
+10. **Not in bulk, no accelerator:** no Delete in Select this page or the bulk bar; Ctrl+Enter on a Missing files row deletes nothing.
+11. **Strings and tooltips:** every string above verbatim in the packaged window; every control has its tooltip; a search of the page for `WinError`, `Errno` and `PermissionError` finds nothing outside Technical details.
+12. **Scan again** on a Missing files row still reads "Checked {time}. Not found." when nothing is found, before and after a partial delete.
+
+## 12. Questions and offers
+
+**Questions for Sergei (one word each)**
+1. Cover and text files in a deleted book's folder: leave them, or delete them too when the folder held only this book? The default is leave, so nothing you didn't expect is removed. (leave / delete)
+2. Verified duplicate copies ("Identical verified recording already arranged"): add a separate "Remove this copy" action that deletes the duplicate only after showing the copy in Audiobooks Sorted? (yes / no)
+
+**Offers (not specced)**
+1. **Remove this copy** for verified duplicates, as in question 2. It is the way out of Futaba's m-3 dead end.
+2. Bulk delete for Missing files once the count is large. Today it is a handful, and each book wants its own look.
+3. The same button on Files unclear rows that say "The tags say N tracks, but M files are here", once the app can tell a wrong tag from a missing file.
+4. A "not repairable" verdict for multi-file audio failures (Stopped — see details), so those rows get the button too.
+
+Design basis: Fitts (the destructive button is the farthest target and never beside a primary), Hick (one button, three row kinds, no menu), Jakob (native dialog, the file list a user expects from "Delete"), NN/g error prevention (the confirm lists exactly what goes, Cancel is the default, Enter never confirms, a refusal shows before the confirm), visibility of status (outcome stated, never intent) and plain-language recovery (every failure names the file and the cause); WCAG 2.2 AA 1.4.3, 1.4.11, 2.1.1, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
