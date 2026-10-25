@@ -143,3 +143,5 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 /* Queued Retry, Repair and Delete book (0.22.1, Judy section 1): Cancel beside the queued face, the blocked line, a partial delete's lines. */
 .row-actions .row-cancel,#retry-cancel{min-width:96px;min-height:32px;white-space:normal}#retry-cancel[aria-disabled=true],.row-cancel[aria-disabled=true]{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
 #delete-dialog .delete-blocked{color:var(--warning)}.attention-hint .hint-line{display:block}#queue-line{flex-basis:100%;margin:0}
+/* Busy engine (0.22.1, Judy section 4): the notice can carry a second line ("Busy with: ..."). */
+#connection-notice{white-space:pre-line}

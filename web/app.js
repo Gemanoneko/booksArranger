@@ -97,10 +97,70 @@ let inventoryIntro=$('inventory-intro');
 if(!inventoryIntro){inventoryIntro=document.createElement('p');inventoryIntro.id='inventory-intro';$('search-form').insertAdjacentElement('beforebegin',inventoryIntro);}
 inventoryIntro.textContent='Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.';
 
-function clearConnectionNotice(){recoveryDisconnected=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();renderAutomatic();renderJobs();controls();}
+// ── Busy engine (Judy's 0.22.1 spec, section 4) ──
+// In the desktop window a missing answer means "busy", never "interrupted": the shell closes the app itself, with its own
+// message, when the engine process exits. So a slow answer sets no page-wide offline flag; a notice speaks after 3 s of
+// silence, presses keep their pending face with the ladder below, and nothing reads "Connection interrupted" or "Local
+// server unavailable". Browser mode (launch-web), where the server really can disappear, keeps the old words.
+const BUSY_NOTICE='The app is busy with background work and answers slowly. This page refreshes by itself.';
+const NOT_CONFIRMED={press:"This hasn't been confirmed yet. The app is busy with background work, so it may still go through. Check this row in a moment.",
+  bulk:"The retry requests haven't been confirmed yet. They may still go through. Check the list in a moment.",
+  discard:"The review may not have been discarded. The app hasn't confirmed it. Check the book before trying again.",
+  delete:"The delete may not have finished. The app hasn't confirmed it. Check the list before trying again.",
+  copy:"The removal may not have finished. The app hasn't confirmed it. Check the list before trying again."};
+// A press that got no answer at all (4.3): the desktop's "not confirmed" line, else the browser's old one.
+function lostLine(kind='press'){return desktopMode()?NOT_CONFIRMED[kind]:'Connection interrupted. Check the status above before trying again.';}
+function desktopMode(){return !!shellApi;}
+// Requests still waiting for an answer (any route), and when each status read was answered, per library.
+const inflight=new Map(),receivedAt=new Map();let inflightSeq=0,busyShown=false;
+function oldestWait(now=Date.now()){let oldest=null;for(const started of inflight.values())if(oldest===null || started<oldest)oldest=started;return oldest===null?0:Math.max(0,now-oldest);}
+// The press ladder (4.3): the normal pending note, then one sentence more as time passes.
+let ladderClock=null;  // the tick's own time while it renders (a fake clock in tests)
+function ladderNote(note,since,now=ladderClock ?? Date.now()){
+  if(!note || !Number.isFinite(since))return note;const age=now-since;
+  if(age<3000)return note;
+  if(age<60000)return `${note} The app is busy with background work, so this takes longer.`;
+  return `${note} Still waiting (${Math.floor(age/60000)} min). The app is busy with background work.`;
+}
+function wallClock(ms){const d=new Date(ms);return [d.getHours(),d.getMinutes(),d.getSeconds()].map(v=>String(v).padStart(2,'0')).join(':');}
+// The passes the last update named (4.2): at most three, in the order shown.
+function busyPasses(){
+  const parts=[],named=(row,words)=>{const n=Number(row?.total);return Number.isInteger(n) && n>0?words.replace('{n}',n.toLocaleString()):words.replace('{n} ','');};
+  for(const row of Array.isArray(state?.activities)?state.activities:[]){
+    if(row?.kind==='identity')parts.push(named(row,'re-checking {n} finished books'));
+    else if(row?.kind==='series')parts.push(named(row,'updating series on {n} books'));
+    else if(row?.kind==='scan' && row.step==='researching')parts.push(named(row,'researching {n} books'));
+  }
+  return parts.slice(0,3);
+}
+// The top of the page while an answer is missing (4.2), desktop only and only after loading (the load strip owns it then).
+function renderBusy(now=Date.now()){
+  const age=desktopMode() && !ended && !loadingActive?oldestWait(now):0;
+  if(age<3000){if(busyShown)clearBusy();return;}
+  const passes=busyPasses();
+  const text=age<120000?BUSY_NOTICE+(passes.length?'\nBusy with: '+passes.join(', ')+'.':''):`No answer for ${Math.floor(age/60000)} min: the app is busy with background work. Your files are not touched. If it goes on, quit from the tray and open Books Arranger again.`;
+  if(connectionNotice.textContent!==text)connectionNotice.textContent=text;connectionNotice.hidden=false;
+  const library=$('library').value,at=receivedAt.get(library),status=`Last update ${at?wallClock(at):'not received yet'} · ${receivedStatus.get(library) || 'No status received yet.'}`;
+  if($('status').textContent!==status)$('status').textContent=status;
+  if(!busyShown){busyShown=true;renderJobs();}
+}
+function clearBusy(){
+  busyShown=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';
+  const text=receivedStatus.get($('library').value);if(text && $('status').textContent!==text)$('status').textContent=text;
+  if(state?.audiobook_jobs)renderJobs();
+}
+// Once a second: the notice, and the ladder of any press waiting 3 s or more.
+function pressTick(now=Date.now()){
+  renderBusy(now);
+  const since=[retryPending?.at,askPending?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
+  if(since.some(at=>now-at>=3000)){ladderClock=now;try{controls();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
+}
+function clearConnectionNotice(){recoveryDisconnected=false;busyShown=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();renderAutomatic();renderJobs();controls();}
 function refreshFailed(error){
   if(ended)return;
   if(loadingActive)return;  // the load strip owns silence while it is up: no notice, no "Last received" (Judy 7.7)
+  // Desktop (4.1): no offline flag. An answer with an error is still shown; silence is the busy notice's (renderBusy).
+  if(desktopMode()){if(error?.httpStatus){const prior=$('message').textContent;if(!prior.includes(error.message))message(prior ? prior+'\n'+error.message : error.message);}return;}
   if(error.httpStatus){
     const prior=$('message').textContent;
     if(!prior.includes(error.message))message(prior ? prior+'\n'+error.message : error.message);
@@ -120,8 +180,9 @@ async function request(route, data, timeoutMs=0) {
   const controller=timeoutMs && typeof AbortController==='function'?new AbortController():null;
   if(controller)options.signal=controller.signal;
   const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+  const ticket=++inflightSeq;inflight.set(ticket,Date.now());
   let response;
-  try{response = await fetch(route, options);}finally{if(timer)clearTimeout(timer);}
+  try{response = await fetch(route, options);}finally{if(timer)clearTimeout(timer);inflight.delete(ticket);if(busyShown)renderBusy();}
   const result = await response.json();
   if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;error.body=result;throw error;}
   return result;
@@ -564,7 +625,7 @@ async function refresh(force=false) {
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
   const scanLabel=!state.active_library && status.state==='failed'?'Last scan':'Discovery';
   const statusText=`${scanLabel}: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
-  receivedStatus.set(library,statusText);$('status').textContent=statusText;
+  receivedStatus.set(library,statusText);receivedAt.set(library,Date.now());$('status').textContent=statusText;
   $('error-shortcut').hidden=!(status.unresolved_errors ?? status.errors);$('error-shortcut').textContent=`Read errors · ${status.unresolved_errors ?? status.errors}`;
   $('scan-issues').hidden=!status.scan_issues?.length;$('scan-issues-text').textContent=(status.scan_issues || []).map(issue=>`${issue.path}\n${issue.error}\n${issue.time}`).join('\n\n');
   $('current').textContent=status.current || 'Choose a file to inspect existing metadata and its sorting preview.';
@@ -694,7 +755,7 @@ function renderJobs(){
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
-  text('jobs-status',(recoveryDisconnected || ended?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
+  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
   renderActivities(Array.isArray(state.activities)?state.activities:[],jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
@@ -1112,7 +1173,7 @@ function updateRetry(){
   let aria=(label==='Convert…'?'Convert':label)+': '+((copy.kind==='prepare'?row.title_clue || row.review?.title:row.review?.title || row.title_clue) || 'Book');
   if(queueMode){const face=retryQueueFace(row,mode);label=face.label;title=face.title;aria=face.aria;}
   const result=mode!=='pending' && !queueMode && !clearing && retryResult,queued=queueMode?queueHint(row) || copy.note:null,later=!queueMode && !result?queueNoteFor(row):null;
-  const text=clearing?'Clearing working files…':queued || (result?retryResult.text:later?later.text:mode==='ready' || mode==='blocked'?'':title);
+  const text=clearing?ladderNote('Clearing working files…',retryPending?.at):queued || (result?retryResult.text:later?later.text:mode==='ready' || mode==='blocked'?'':mode==='pending'?ladderNote(title,retryPending?.at):title);
   if(button.textContent!==label)button.textContent=label;
   if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',aria);
@@ -1131,7 +1192,6 @@ function retryQueueFace(row,mode){
   return {label:copy.pending,title:copy.note,aria:`${copy.pending}: ${title}`};
 }
 function retryBlockedTip(copy){const kind=pageBlocker();return `Queue this ${String(copy?.label || 'Retry').toLowerCase()}. ${queueS(kind)}; it starts when ${queueP(kind)} finishes.`;}
-function desktopMode(){return !!shellApi;}
 function keptByChoice(row){const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function queuedByRetry(row){const job={...row.creation.job,state:'Queued',stage:'queued',reason:''};delete job.retry;delete job.repair;delete job.attention;return {...row,status:'Queued',creation:{...row.creation,status:'Queued',job}};}
 async function retryFromRow(row,button=null){
@@ -1179,13 +1239,13 @@ function updateRowRetries(){
     const copy=queueMode?retryQueueCopy(row):retryPending?.key===key && retryPending.kind!=='clear'?{...rowActions[retryPending.kind],note:retryPending.note || rowActions[retryPending.kind].note}:action || rowActions.retry;
     let hint=shown?shown.hint:'',warn=!!shown?.warn,clause=shown?.clause || '',lines=null;
     if(mode==='unavailable' && action?.kind!=='queued' && typeof retry?.reason==='string' && retry.reason){hint=retry.reason;clause='';}
-    if(mode==='pending'){hint=retryPending?.checking?'Checking…':copy.note;clause='';warn=false;}
-    if(clearPending(row)){hint='Clearing working files…';clause='';warn=false;}
+    if(mode==='pending'){hint=retryPending?.checking?'Checking…':ladderNote(copy.note,retryPending?.at);clause='';warn=false;}
+    if(clearPending(row)){hint=ladderNote('Clearing working files…',retryPending?.at);clause='';warn=false;}
     if(!shown && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
     if(retryResult && retryResult.key===key && !retryResult.panelOnly && mode!=='pending' && !queueMode && !clearPending(row)){hint=retryResult.text;warn=retryResult.warn!==false;clause='';}
     else if(!queueMode){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued action's outcome (1.6)
     const deleted=deleteNotes.get(row.id);if(deleted){hint=deleted.text;warn=deleted.warn;clause='';lines=deleted.lines;}  // Delete book's outcome (ruling 23)
-    const queued=queueHint(row);if(queued!==null || mode==='sending'){hint=queued ?? copy.note;warn=false;clause='';lines=null;}  // the queued line replaces the hint (1.3)
+    const queued=queueHint(row);if(queued!==null || mode==='sending'){hint=queued ?? ladderNote(copy.note,queuePresses.get(row.id)?.at);warn=false;clause='';lines=null;}  // the queued line replaces the hint (1.3)
     setHint(entry.hint,hint,clause,warn,lines);
     statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==cellTip(row))entry.cell.title=cellTip(row);
     if(deleted?.done){if(entry.button)entry.button.hidden=true;if(entry.clear)entry.clear.hidden=true;continue;}  // deleted: its buttons go
@@ -1216,7 +1276,9 @@ function updateClearButton(button,row){
   if(pending)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=false;
 }
-const PRESS_TIMEOUT=15000;
+// The 15 s abort is gone (Judy 0.22.1, 4.3): a slow answer is a busy app, not a lost one. A press waits for its answer, its
+// pending face and the ladder say so, and only ten minutes without one end it with the "not confirmed" line.
+const PRESS_TIMEOUT=600000;
 // Futaba's 0.22.0 QA, M-4: Approve checks every file before it answers (probes, hashes, cover, track review): 24.5 s for
 // a 77-file book, longer for real files. At PRESS_TIMEOUT the page said "Connection interrupted" while the server went on
 // and queued the book, and the re-enabled button invited a second press (409). Approve waits for its answer; its pending
@@ -1255,7 +1317,7 @@ async function retryJob(origin=null){
     if(action.confirm){openDiscardDialog(action.kind,[row],()=>restartPress(row,action,origin),origin?.button || $('retry-job'));return false;}
     return restartPress(row,action,origin);
   }
-  retryPending={key,kind:action.kind,note:action.note};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
+  retryPending={key,kind:action.kind,note:action.note,at:Date.now()};retryResult=null;busy=true;remember(key,'checking',action.kind);controls();
   let succeeded=false;
   let answer=null,refreshed=null;
   try{answer=await request(action.endpoint,{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id,...(queueable?{queue:true,title:queueTitle(row)}:{})},PRESS_TIMEOUT);succeeded=true;}
@@ -1268,7 +1330,7 @@ async function retryJob(origin=null){
       const landed=await pressLanded(row,job.job_id);
       if(landed){succeeded=true;answer=landed;}
       else if(landed===false){pressed.delete(key);retryResult={key,text:action.label+' did not go through. Try again.',warn:true};}
-      else retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};  // stays "Checking…": the press may have landed
+      else retryResult={key,text:lostLine(),warn:true};  // stays "Checking…": the press may have landed
     }
   }
   if(succeeded && answer?.queued===true){
@@ -1323,7 +1385,7 @@ async function queuePress(row,action,origin){
   if(answer?.queued===true)queueAccepted(row,action.kind,answer);
   else if(answer)retryLanded(row,action,answer,origin);
   else if(failure?.httpStatus){if(failure.httpStatus===409)retryEpoch++;const fresh=freshRow(failure.body?.row,row);if(fresh)placeRow(row,fresh,origin);retryResult={key:retryKey(fresh || row),text:failure.message || action.refused,warn:true};}
-  else retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};
+  else retryResult={key,text:lostLine(),warn:true};
   controls();
   const handed=document.activeElement;
   if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
@@ -1381,7 +1443,7 @@ function placeRow(row,fresh,origin){
 async function restartPress(row,action,origin){
   const key=retryKey(row);if(retryPending || busy || ended || recoveryDisconnected)return false;
   const body=action.kind==='release'?{library:'Audiobooks',id:row.id,revision:row.revision}:{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id,...(action.kind==='combined'?{discard_review:true}:{})};
-  retryPending={key,kind:action.kind};retryResult=null;restartResult=null;busy=true;controls();
+  retryPending={key,kind:action.kind,at:Date.now()};retryResult=null;restartResult=null;busy=true;controls();
   let answer=null,failure=null;
   try{answer=await request(action.endpoint,body,PRESS_TIMEOUT);}catch(error){failure=error;}
   const focused=document.activeElement===$('retry-job') || document.activeElement===origin?.button;
@@ -1397,7 +1459,7 @@ async function restartPress(row,action,origin){
     const fresh=freshRow(failure.body?.row,row);if(fresh)placeRow(row,fresh,origin);
     retryResult={key:retryKey(fresh || row),text:refusedText(action.kind,failure),warn:true};
     if(!retryKey(fresh || row) || retryKey(fresh || row)!==key)restartResult={id:row.id,text:retryResult.text,warn:true};
-  }else{retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};refreshFailed(failure);}
+  }else{retryResult={key,text:lostLine(action.kind==='release' || action.kind==='combined'?'discard':'press'),warn:true};refreshFailed(failure);}
   controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();
@@ -1411,7 +1473,7 @@ async function clearWorking(origin=null){
   if(!key || !job || workingOf(row)?.state!=='cleanable' || clearPending(row))return false;
   if(ended || recoveryDisconnected){retryResult={key,text:'Local server unavailable.',warn:true};controls();return false;}
   if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun){retryResult={key,text:'Another operation is in progress. Try again in a moment.',warn:true};controls();return false;}
-  retryPending={key,kind:'clear'};retryResult=null;busy=true;controls();
+  retryPending={key,kind:'clear',at:Date.now()};retryResult=null;busy=true;controls();
   let answer=null,failure=null;
   try{answer=await request('/api/audiobook/clear-working',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);}catch(error){failure=error;}
   if(failure && !failure.httpStatus){
@@ -1432,7 +1494,7 @@ async function clearWorking(origin=null){
   }else if(failure?.httpStatus){
     const fresh=freshRow(failure.body?.row,row);if(fresh)placeRow(row,fresh,origin);
     retryResult={key:retryKey(fresh || row),text:refusedText('clear',failure),warn:true};if(failure.httpStatus===409)retryEpoch++;
-  }else retryResult={key,text:'Connection interrupted. Check the status above before trying again.',warn:true};
+  }else retryResult={key,text:lostLine(),warn:true};
   controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();
@@ -1466,7 +1528,7 @@ async function convertPress(row,origin=null){
   retryPending={key,kind:'convert',note:rowActions.convert.note};retryResult=null;busy=true;controls();updateProducerRecoverySurface(row);
   try{answer=await request('/api/audiobook/confirm-convert',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id,statements:[...ORIGIN_STATEMENTS]},PRESS_TIMEOUT);}
   catch(error){
-    retryResult={key,producer:true,snapshot,transport:!error.httpStatus,warn:true,status:error.httpStatus?'Conversion not started':'Conversion status unknown',text:!error.httpStatus?'Could not confirm the request. Reconnect to check its saved state.':error.body?.cause==='book_changed'?error.message:'Nothing was changed. '+(error.message || '')};
+    retryResult={key,producer:true,snapshot,transport:!error.httpStatus,warn:true,status:error.httpStatus?'Conversion not started':'Conversion status unknown',text:!error.httpStatus?(desktopMode()?NOT_CONFIRMED.press:'Could not confirm the request. Reconnect to check its saved state.'):error.body?.cause==='book_changed'?error.message:'Nothing was changed. '+(error.message || '')};
     if(!error.httpStatus)refreshFailed(error);
   }
   retryPending=null;busy=false;let fresh=row;const saved=answer?.producer_recovery;
@@ -1551,7 +1613,7 @@ async function startReleaseSelected(items){
     warn=failed>0 || pass?.action==='blocked' || pass?.visit==='next_run';
     text=`Discarded ${released.toLocaleString()} of ${items.length.toLocaleString()} saved reviews.${bulkPassSentence(pass)}${pass?.action==='blocked' || pass?.visit==='next_run'?'':' Find them under Status: Started over.'}`+(failed?` ${failed.toLocaleString()} were not changed. Check their status.`:'');
     retryEpoch++;
-  }catch(error){text=error.httpStatus?"The reviews weren't discarded. Check the status above.":'Connection interrupted. Check the status above before trying again.';warn=true;if(!error.httpStatus)refreshFailed(error);}
+  }catch(error){text=error.httpStatus?"The reviews weren't discarded. Check the status above.":lostLine('discard');warn=true;if(!error.httpStatus)refreshFailed(error);}
   finally{releaseRun=false;busy=false;}
   const status=$('release-selected-status');status.textContent=text;status.classList?.toggle?.('retry-refused',warn);renderAutomatic();controls();
   if(!recoveryDisconnected && !ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
@@ -1601,7 +1663,7 @@ async function startRetryAll(){
   if(!retryAllConfirm || bulkRunning() || busy || ended || recoveryDisconnected)return;
   retryAllConfirm=null;busy=true;stripNote='';retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};$('retry-selected-status').textContent='';controls();
   try{acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks'}));}
-  catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted. Check the status above.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
+  catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted. Check the status above.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
   finally{busy=false;}
   controls();$('retry-all-status').focus?.({preventScroll:true});
 }
@@ -1708,7 +1770,7 @@ async function startRetrySelected(){
   try{
     const items=confirm.items.map(({row,action})=>({id:row.id,revision:row.revision,job_id:row.creation.job.job_id,kind:action.kind}));
     acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks',items},PRESS_TIMEOUT));
-  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted.'):'Connection interrupted. Check the status above before trying again.';if(!error.httpStatus)refreshFailed(error);}
+  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
   finally{retrySelectedRun=false;busy=false;}
   controls();$('retry-all-status').focus?.({preventScroll:true});
 }
@@ -2435,7 +2497,7 @@ function updateAskRow(entry){
   const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPending?.id===row.id?askPending.kind:null;
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
   if(done){status=ASK_DONE[done]?.[0] || status;hint=ASK_DONE[done]?.[1] || hint;}
-  else if(pending)hint=ASK_PENDING[pending][1];
+  else if(pending)hint=ladderNote(ASK_PENDING[pending][1],askPending?.at);
   else if(result){hint=result.text;warn=true;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
@@ -2471,7 +2533,7 @@ function askPreview(entry,delay){
 }
 function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKind==='convert'?'convert':null):entry.primaryKind;if(kind)return askPress(entry,kind);}
 function askErrorText(error,kind){
-  if(!error.httpStatus)return 'Connection interrupted. Check the status above before trying again.';
+  if(!error.httpStatus)return lostLine();
   if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';
   if(error.body?.code==='moved')return 'The destination changed. Check the Goes to line and try again.';  // N7
   // A safety gate is named (0.22.0 review B5.4).
@@ -2688,14 +2750,14 @@ function deleteText(mode){
     tip:n=>n===0?'Remove this book from the app. No files are touched.':n===1?"Delete this book and its file. The app can't undo this.":`Delete this book and its ${n.toLocaleString()} files. The app can't undo this.`,
     partial:'The book stays listed. Press Delete book to try these again.',
     partialStrip:(k,n,f)=>`Deleted ${k.toLocaleString()} of ${n.toLocaleString()} files. The book stays listed with the ${f.toLocaleString()} that could not be deleted.`,
-    lost:DELETE_LOST,unknown:DELETE_UNKNOWN,refusal:DELETE_REFUSAL,done:'deleted'};
+    lost:desktopMode()?NOT_CONFIRMED.delete:DELETE_LOST,unknown:DELETE_UNKNOWN,refusal:DELETE_REFUSAL,done:'deleted'};
   return {titles:{confirm:'Remove this copy?',deleting:'Remove this copy?',refused:"Can't remove this copy",partial:'Not everything was deleted',unknown:'Removal may not have finished'},
     forget:sortedText("The app forgets this copy. If the same files turn up again, they're found as a new book. Nothing in {sorted} is touched."),
     confirm:n=>n===1?'Remove this copy and 1 file':`Remove this copy and ${n.toLocaleString()} files`,
     tip:n=>sortedText(n===1?"Delete this copy's file. The audiobook in {sorted} stays. The app can't undo this.":`Delete this copy's ${n.toLocaleString()} files. The audiobook in {sorted} stays. The app can't undo this.`),
     partial:'The copy stays listed. The row offers to delete what is left.',
     partialStrip:(k,n,f)=>`Deleted ${k.toLocaleString()} of ${n.toLocaleString()} files. The copy stays listed with the ${f.toLocaleString()} that could not be deleted.`,
-    lost:'Connection interrupted, so the removal may have gone through. Check the list before trying again.',unknown:'Removal did not finish. Check the list before trying again.',
+    lost:desktopMode()?NOT_CONFIRMED.copy:'Connection interrupted, so the removal may have gone through. Check the list before trying again.',unknown:'Removal did not finish. Check the list before trying again.',
     refusal:{...DELETE_REFUSAL,files_changed:"The folder doesn't match the list, so nothing was deleted. Press Remove this copy to see the current list.",refused:ASK_REFUSED.copy,
       sorted_missing:sortedText('The audiobook is not where the app put it in {sorted}. Nothing was deleted.'),sorted_changed:sortedText('The audiobook in {sorted} has changed since the app arranged it. Nothing was deleted.'),
       not_identical:'These files no longer match the ones the audiobook was arranged from. Nothing was deleted.'},done:'copy_removed'};
@@ -2766,7 +2828,7 @@ async function deletePress(id){
   // Delete book asks with queue: true, so a blocker comes back as 'blocked' with the list, not as a busy refusal (Judy 1.5).
   // Remove this copy proves the copy and the audiobook now (both hashed in full): it waits as long as Approve (N19).
   try{preview=await request('/api/candidate/delete-preview',{library:'Audiobooks',id,revision:row.revision,...(mode==='copy'?{mode:'copy'}:{queue:true})},mode==='copy'?APPROVE_TIMEOUT:PRESS_TIMEOUT);}
-  catch(error){deleteNotes.set(id,{text:error.httpStatus?ASK_REFUSED[mode]:'Connection interrupted. Check the status above before trying again.',warn:true});if(!error.httpStatus)refreshFailed(error);}
+  catch(error){deleteNotes.set(id,{text:error.httpStatus?ASK_REFUSED[mode]:lostLine(),warn:true});if(!error.httpStatus)refreshFailed(error);}
   finally{deletePending=null;}
   if(preview)openDeleteDialog(row,preview,mode);
   controls();
@@ -2817,7 +2879,8 @@ function showDeleteState(kind,data={}){
     deleteListing(d);
     setText('delete-confirm',kind==='deleting'?'Deleting...':kind==='queuing'?'Queuing…':blocked?(n===0?'Queue delete':`Queue delete of ${deleteCount(n)}`):t.confirm(n));
     confirm.title=blocked?(n===0?'Queue removing this book from the app. No files are touched.':`Queue this delete. It runs when ${queueP(blocked)} finishes, after the app checks the book and files again. The app can't undo it.`):t.tip(n);
-    setText('delete-dialog-status',kind==='deleting'?(n===0?'Removing this book...':n===1?'Deleting 1 file...':`Deleting ${n.toLocaleString()} files...`):kind==='queuing'?'Queuing this delete…':'');
+    if((kind==='deleting' || kind==='queuing') && !Number.isFinite(d.at))d.at=Date.now();
+    deleteStatusLine();
     if(kind==='deleting'){confirm.setAttribute('aria-disabled','true');cancel.setAttribute('aria-disabled','true');cancel.title="Deleting can't be stopped.";}
     else if(kind==='queuing'){confirm.setAttribute('aria-disabled','true');cancel.setAttribute('aria-disabled','true');cancel.title="Queuing can't be stopped.";}
     else{confirm.removeAttribute('aria-disabled');cancel.removeAttribute('aria-disabled');cancel.title='Close without deleting anything.';}
@@ -2834,6 +2897,12 @@ function showDeleteState(kind,data={}){
     deleteLines(failed,failed.flatMap(item=>[node('p',String(item.path || '')),node('p',DELETE_CAUSE[item.cause] || DELETE_CAUSE.other,'delete-cause')]));
     setText('delete-dialog-status',t.partial);
   }else{setText('delete-dialog-files',data.line || t.unknown);deleteLines([],[]);}
+}
+// The Deleting and Queuing status lines, with the ladder of 4.3 (4.4).
+function deleteStatusLine(now=Date.now()){
+  const d=deleteDialog;if(!d)return;const n=d.n;
+  const base=d.state==='deleting'?(n===0?'Removing this book...':n===1?'Deleting 1 file...':`Deleting ${n.toLocaleString()} files...`):d.state==='queuing'?'Queuing this delete…':'';
+  setText('delete-dialog-status',base?ladderNote(base,d.at,now):'');
 }
 function openDeleteDialog(row,preview,mode='delete'){
   const files=Array.isArray(preview?.files)?preview.files.filter(file=>typeof file?.path==='string'):[];
@@ -2925,7 +2994,7 @@ async function askPress(entry,kind){
   const values=kind==='approve' || kind==='convert'?askValues(row):null,ask=askOf(row);
   // Futaba's 0.22.0 QA, m-11: a Delete book note (a partial delete) took the hint over, so a later Scan again showed no
   // result line. A new press on the row replaces it, as it does an earlier refusal.
-  askPending={id,kind};askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
+  askPending={id,kind,at:Date.now()};askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
   try{
     if(values){
       // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
@@ -3038,4 +3107,5 @@ if(LS){
   if(typeof setInterval==='function')setInterval(loadTick,1000);
   renderLoad();loadPlaceholders();
 }
+if(typeof setInterval==='function')setInterval(pressTick,1000);  // the busy notice and the press ladder (Judy 0.22.1, section 4)
 if(!preEngine)poll();  // the first frame from disk has no engine to ask; the shell swaps in the engine's page
