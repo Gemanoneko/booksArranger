@@ -11,19 +11,27 @@
 - One to-do list in "Output needs attention". It holds only books that need Sergei, sorted by reason, folder and title, with a typed reason and its actions on each row, including Keep as separate books for a set that looks like parts of one book.
 - The parts of one book in one folder are joined into one book. M4B parts are joined by re-encoding once, with their chapters kept; chapters also decide sets whose files are only numbered.
 - Two common Order unclear causes are named on the row.
+- A new "Delete book" action for books with missing parts or broken audio. After a confirmation it removes that book's own files and records; nothing in Audiobooks Sorted is touched.
 
 ### Changed
 
 - Title and author from one local source are enough to identify a book.
 - A held book is researched again only when it changes.
 - The book list is faster: on a 200-book test with 50-99 books converted, the median wait fell from 13.3 s to 3.4 s. It no longer waits behind automatic approvals.
-- The Python gate runs on five workers.
+- The test gate now runs on six workers, with the page and syntax checks running alongside them.
 
 ### Fixed
 
 - Senua's review findings: the 0.21.3 findings F1-F4, F6 and F8, the early 0.22.0 review findings (G1-G6, m1-m5, m7-m9), and series backfill now names books relative to the folder they were published in.
 - "Keep as separate books" now really splits a set even when its details were saved. More doubtful part sets are asked about instead of joined: Эпизод/Том numbering, sets that name several works, generic titles like «Неизвестно», and credits naming three or more people.
 - A status computed without a catalog no longer fails on the to-do list.
+- The to-do list filter chips work.
+- Chapter-named files and title tags no longer split a single book.
+- After a "Same author?" answer, both books continue.
+- "Scan again" reports honestly.
+- "Approve this order" works right after the track review is saved.
+- No typed note is needed to save a track review.
+- Missing or unreadable files are described in plain words.
 - The to-do row never proposes a suspected reader as the author.
 - Tests: a borrowed fixture no longer leaks its research patch, and the local-identity switch is restored after each test.
 
