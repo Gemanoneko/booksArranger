@@ -13,7 +13,8 @@ function attentionRow(name,group,extra={},job={}){
 const DANGLING={kind:'dangling_chapter_reference',removed:[3],description:'The chapter list pointed to missing track 3. That pointer was removed; audio and chapters are unchanged.'};
 function damaged(name,damage=[DANGLING]){return attentionRow(name,'repair',{},{attention:{group:'repair',cause:null,originals_untouched:true,damage},retry:undefined,repair:{allowed:true,reason:''}});}
 function statusCell(tr){return tr.children[4];}
-function actionButtons(tr){return tr.children[5].children[0].children;}
+// 0.22.1: a hidden Cancel retry / Cancel delete sits beside a queueable face (Judy 1.3); the slots below count the others.
+function actionButtons(tr){return tr.children[5].children[0].children.filter(b=>!String(b.className || '').includes('row-cancel'));}
 const posted=route=>calls.filter(call=>call.route===route);
 let repairOverride=null,retryAllOverride=null,stateOverride503=false;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{
@@ -56,7 +57,8 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'mdat_tail_overrun',padding:8}]})+')'),'The file claims a few bytes past its end. Repair adds them; no audio is missing.');
   assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100}]})+')'),'The last 0.02 s of audio is missing. Repair fills it with silence.');
   assert.equal(run('patchCopy('+JSON.stringify({kind:'truncated_final_frames'})+')'),'Filled the missing end of the audio with silence.','no amount from the API, no number');
-  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,true);assert.equal(actionButtons(trs[0])[0].title,'Another operation is in progress.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
+  // 0.22.1 (Judy 1.1): Retry is no longer disabled while another press runs; it stays enabled and a press is queued.
+  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
 
   // Row Retry: one request, pending hint, then the book is queued; focus lands back in the list.
   let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});inventoryRows=[space,unsupported,other,repair];const sent=calls.length;
@@ -122,7 +124,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   const repairRow=()=>[...get('inventory').children].find(tr=>tr.dataset.path==='cand-r');
   repairOverride=async()=>({ok:false,status:409,json:async()=>({error:'This book cannot be repaired.'})});
   actionButtons(repairRow())[0].handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,20));
-  assert.equal(posted('/api/audiobook/repair').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/repair')[0].options.body),{library:'Audiobooks',id:'cand-r',revision:4,job_id:'job-r'});
+  assert.equal(posted('/api/audiobook/repair').length,1);assert.deepEqual(JSON.parse(posted('/api/audiobook/repair')[0].options.body),{library:'Audiobooks',id:'cand-r',revision:4,job_id:'job-r',queue:true,title:'Title r'});
   assert.equal(statusCell(repairRow()).children[0].textContent,'This book cannot be repaired.');assert.ok(statusCell(repairRow()).children[0].classes.has('retry-refused'));
   let repairAnswer;repairOverride=()=>new Promise(resolve=>{repairAnswer=resolve;});
   actionButtons(repairRow())[0].handlers.click({stopPropagation(){}});await tick();

@@ -16,7 +16,8 @@ function keptRow(name,group,cause=null,reason=CHANGED){
 }
 function keptByChoiceRow(name){const row=keptRow(name,'changed');const job={...row.creation.job,kept:true};delete job.attention;delete job.keep;return {...row,creation:{...row.creation,job}};}
 function statusCell(tr){return tr.children[4];}
-function actionButtons(tr){return tr.children[5].children[0].children;}
+// 0.22.1: a hidden Cancel retry / Cancel delete sits beside a queueable face (Judy 1.3); the slots below count the others.
+function actionButtons(tr){return tr.children[5].children[0].children.filter(b=>!String(b.className || '').includes('row-cancel'));}
 const posted=route=>calls.filter(call=>call.route===route);
 let keepOverride=null;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{

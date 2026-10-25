@@ -42,8 +42,9 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";attentionGroup="all";viewControls()');
   paint([missing('m',{kind:'files_missing',present:2}),missing('n',null),reacquire,canRetry,missing('z',{kind:'files_missing',present:0})]);
   // 1. Only rows with the server's offer, last in the row behind a line break, with its tooltip and name.
-  let tr=trOf('cand-m');const buttons=buttonsOf(tr),del=buttons.at(-1);
-  assert.equal(del.textContent,'Delete book');assert.ok(del.className.includes('danger'));assert.equal(buttons.at(-2).className,'row-break');
+  let tr=trOf('cand-m');const buttons=buttonsOf(tr),del=buttons.at(-2);
+  assert.equal(del.textContent,'Delete book');assert.ok(del.className.includes('danger'));assert.equal(buttons.at(-3).className,'row-break');
+  assert.equal(buttons.at(-1).textContent,'Cancel delete');assert.equal(buttons.at(-1).hidden,true,'0.22.1: its Cancel waits, hidden, right after it (Judy 1.3)');
   assert.ok(buttons.indexOf(buttons.find(b=>b.textContent==='View metadata'))<buttons.indexOf(del),'after View metadata and the folder buttons');
   assert.equal(del.title,"Delete this book's files from disk and remove the book from the app. You confirm first.");
   assert.equal(del.getAttribute('aria-label'),'Delete book: Title m');
@@ -55,7 +56,7 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   // 2. The press reads the list; the dialog opens with Cancel focused; Enter in the body or list confirms nothing; Cancel closes.
   previewAnswer=()=>ok({files:FILES,bytes:1400*1024*1024,refusal:null,kind:'files_missing'});
   await del.handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(posted('/api/candidate/delete-preview').at(-1),{library:'Audiobooks',id:'cand-m',revision:2});
+  assert.deepEqual(posted('/api/candidate/delete-preview').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,queue:true});  // 0.22.1: a blocker comes back as 'blocked' (Judy 1.5)
   assert.equal(get('delete-dialog-title').textContent,'Delete this book?');assert.equal(document.activeElement,get('delete-cancel'),'Cancel has focus');
   assert.equal(get('delete-dialog-book').textContent,'Новая плоть — Иван Петров');assert.equal(get('delete-dialog-reason').textContent,'1 of 3 files is missing.');
   assert.match(get('delete-dialog-files').textContent,/^These 2 files \(1[.,]4 GB\) will be deleted from your disk\. The app can't undo this\.$/);
@@ -74,7 +75,7 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   await get('delete-confirm').handlers.click({repeat:true});assert.equal(posted('/api/candidate/delete').length,0,'a held Enter confirms nothing');
   deleteAnswer=()=>ok({deleted:2,bytes:1400*1024*1024,failed:[],forgotten:true});
   await get('delete-confirm').handlers.click({});await tick();
-  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,paths:FILES.map(f=>f.path),folders:[]});
+  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,paths:FILES.map(f=>f.path),folders:[],queue:true,title:'Title m'});
   assert.equal(run('deleteDialog'),null,'closed on success');
   assert.match(get('retry-all-status').textContent,/^Deleted 1 book and 2 files \(1[.,]4 GB\)\.$/);
   assert.equal(run('deleteNotes.get("cand-m").text'),'Deleted. The book is gone from the app.');await tick();

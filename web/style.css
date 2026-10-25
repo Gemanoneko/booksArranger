@@ -140,3 +140,6 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 #list-skeleton span{display:block;height:16px;margin:10px 0;background:var(--raised);border-radius:4px}
 .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
 /* inert while loading (3.6): the existing disabled look, still focusable */[data-not-yet][aria-disabled=true],[data-not-yet][aria-disabled=true]:hover,[data-not-yet][aria-disabled=true]:active{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+/* Queued Retry, Repair and Delete book (0.22.1, Judy section 1): Cancel beside the queued face, the blocked line, a partial delete's lines. */
+.row-actions .row-cancel,#retry-cancel{min-width:96px;min-height:32px;white-space:normal}#retry-cancel[aria-disabled=true],.row-cancel[aria-disabled=true]{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
+#delete-dialog .delete-blocked{color:var(--warning)}.attention-hint .hint-line{display:block}#queue-line{flex-basis:100%;margin:0}

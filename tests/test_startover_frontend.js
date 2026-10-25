@@ -31,7 +31,8 @@ function heldRow(name,extra={}){return noJob(name,{automatic:{state:'Held',reaso
 function marked(name,restart,extra={}){return noJob(name,{restart:{kind:'start_over',at:'2026-10-19T09:00:00+00:00',...restart},...extra});}
 function statusCell(tr){return tr.children[4];}
 function titleCell(tr){return tr.children[1];}
-function actionButtons(tr){return tr.children[5].children[0].children;}
+// 0.22.1: a hidden Cancel retry / Cancel delete sits beside a queueable face (Judy 1.3); the slots below count the others.
+function actionButtons(tr){return tr.children[5].children[0].children.filter(b=>!String(b.className || '').includes('row-cancel'));}
 function rowOf(name){return [...get('inventory').children].find(tr=>tr.dataset.path==='cand-'+name);}
 function paint(list){context.fixture=list;run('heldRow=null;rows=fixture.map(row=>({...row}));renderRows(true);controls()');}
 function setAuto(value){context.auto=value;run('state={...state,automatic_processing:{...state.automatic_processing,...auto}};controls()');}
@@ -297,7 +298,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // Clear: the press, success with the size and the natural hint, focus to the same row's Retry.
   paint([cleanable]);tr=rowOf('cw');let clearAnswer;replies['/api/audiobook/clear-working']=()=>new Promise(resolve=>{clearAnswer=resolve;});
   const cleared=m4bRow('cw',{attention:{group:'retry',cause:null,originals_untouched:true,precheck:'passed'}});inventoryRows=[cleared];actionButtons(tr)[1].focus();
-  const clearing=run('clearFromRow(rows[0],rowButtons("cand-cw").children[1])');await new Promise(resolve=>setImmediate(resolve));
+  const clearing=run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');await new Promise(resolve=>setImmediate(resolve));
   assert.equal(actionButtons(tr)[1].textContent,'Clearing…');assert.equal(actionButtons(tr)[1].getAttribute('aria-disabled'),'true');
   assert.equal(statusCell(tr).children[0].textContent,'Clearing working files…');
   assert.deepEqual(posts.at(-1),{route:'/api/audiobook/clear-working',body:{library:'Audiobooks',id:'cand-cw',revision:4,job_id:'job-cw'}});
@@ -307,7 +308,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.ok(![...actionButtons(tr)].some(button=>button.textContent==='Clear working files' && !button.hidden),'the button leaves');
   assert.equal(document.activeElement?.textContent,'Retry','focus: the same row\'s Retry');
   for(const [answer,words] of [[{cleared:true,bytes:0,already:true},'Working files were already cleared.'],[{cleared:true,bytes:null},'Working files cleared.']]){
-    paint([cleanable]);replies['/api/audiobook/clear-working']=()=>accepted({...answer,row:cleared});await run('clearFromRow(rows[0],rowButtons("cand-cw").children[1])');
+    paint([cleanable]);replies['/api/audiobook/clear-working']=()=>accepted({...answer,row:cleared});await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
     assert.equal(statusCell(rowOf('cw')).children[0].textContent,words+' Safe to retry now.');
   }
   // Failures: the typed cause's words, warning colour; the button stays while the files are still cleanable.
@@ -315,14 +316,14 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
       ['not_safe',"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete."],['file_problem',"Some working files weren't cleared. A file couldn't be removed; try again in a moment."],
       ['what',"Working files weren't cleared. Select the row to read why."]]){
     paint([cleanable]);inventoryRows=[cleanable];replies['/api/audiobook/clear-working']=()=>refused({error:'server words',cause});
-    await run('clearFromRow(rows[0],rowButtons("cand-cw").children[1])');
+    await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
     assert.equal(statusCell(rowOf('cw')).children[0].textContent,words,cause);assert.ok(statusCell(rowOf('cw')).children[0].classes.has('retry-refused'));
     assert.equal(actionButtons(rowOf('cw'))[1].hidden,false,'still cleanable: the button stays');
   }
   // Another request in flight: the button is not disabled; the press is answered in the note.
   paint([cleanable]);run('retryPending={key:"other",kind:"retry"};controls()');assert.equal(actionButtons(rowOf('cw'))[1].disabled,false);
-  assert.equal(actionButtons(rowOf('cw'))[0].disabled,true,'positive control: Retry is busy');
-  const sent=posts.length;await run('clearFromRow(rows[0],rowButtons("cand-cw").children[1])');
+  assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. Another operation is in progress/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
+  const sent=posts.length;await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
   assert.equal(posts.length,sent);assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Another operation is in progress. Try again in a moment.');run('retryPending=null;retryResult=null;controls()');
   // Blocked: its own status, no Retry, no Clear; the reason and the folder in Technical detail only.
   const blockedRow=m4bRow('bw',{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,working:{state:'blocked',stops:true,bytes:null,reason:'A file the app did not record is in the working folder: x.wav'},working_folder:FOLDER}});

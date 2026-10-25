@@ -25,7 +25,8 @@ function refusal(cause,extra={}){
   return {accepted:false,queued_next:false,kind:'retry',state:'refused',reason:'Failed M4B retained: fixture',cause,fix,app_version:'0.18.0',key:'k',at:'2026-10-19T08:00:00+00:00',stale:false,...extra};
 }
 function statusCell(tr){return tr.children[4];}
-function actionButtons(tr){return tr.children[5].children[0].children;}
+// 0.22.1: a hidden Cancel retry / Cancel delete sits beside a queueable face (Judy 1.3); the slots below count the others.
+function actionButtons(tr){return tr.children[5].children[0].children.filter(b=>!String(b.className || '').includes('row-cancel'));}
 function rowOf(name){return [...get('inventory').children].find(tr=>tr.dataset.path==='cand-'+name);}
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');}
 function counts(values){context.counts=values;run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:counts}};renderAttentionGroups()');}

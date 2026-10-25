@@ -70,7 +70,8 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   const before=note.textContent;show(blocked({},{retry:{allowed:false,reason:NOT_YET}}));assert.equal(note.textContent,before);
   show(row);assert.equal(button.disabled,false);assert.equal(note.hidden,true);
   // States 4 and 5, busy and offline, in the specified resolution order.
-  run('busy=true;controls()');assert.equal(button.disabled,true);assert.equal(button.title,'Another operation is in progress.');assert.equal(note.textContent,'Another operation is in progress.');
+  // 0.22.1 (Judy 1.1): another press running no longer disables Retry; it stays enabled and a press is queued.
+  run('busy=true;controls()');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(note.hidden,true);
   run('recoveryDisconnected=true;controls()');assert.equal(button.title,'Local server unavailable.','offline wins over busy');assert.equal(note.textContent,'Local server unavailable.');
   run('busy=false;recoveryDisconnected=false;ended=true;controls()');assert.equal(button.disabled,true);assert.equal(button.title,'Local server unavailable.');
   run('ended=false;controls()');assert.equal(button.disabled,false);assert.equal(note.hidden,true);
@@ -82,7 +83,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.equal(button.title,'Checking this book…');assert.equal(note.textContent,'Checking this book…');assert.equal(button.getAttribute('aria-label'),'Checking…: Вечный зов');
   button.handlers.click();await run('retryJob()');
   const posts=calls.slice(sent).filter(call=>call.route==='/api/audiobook/retry');assert.equal(posts.length,1,'double activation sends one request');
-  assert.deepEqual(JSON.parse(posts[0].options.body),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a'});assert.equal(posts[0].options.headers['X-Books-Token'],'fixture-token');
+  assert.deepEqual(JSON.parse(posts[0].options.body),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a',queue:true,title:'Название книги'});assert.equal(posts[0].options.headers['X-Books-Token'],'fixture-token');  // 0.22.1: queue: true (Judy 1.1)
   assert.equal(document.activeElement,button);
   inventoryRows=[queued(row)];answer({ok:true,status:202,json:async()=>({job_id:'job-a',requeued:true})});await retrying;
   // v0.16.12: accepted means a disabled "Queued", never an enabled Retry again, whatever an older list says.
@@ -109,7 +110,8 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   // Click, then switch book: the other book shows Busy, never Retrying, and no stale note arrives later.
   let late;retryOverride=()=>new Promise(resolve=>{late=resolve;});show(row);inventoryRows=[row];document.activeElement=button;const switching=run('retryJob()');
   const other=blocked({id:'cand-b',path:'cand-b',title_clue:'Другая книга',review:{title:'Другая книга'}},{job_id:'job-b'});show(other);
-  assert.equal(button.textContent,'Retry');assert.equal(button.disabled,true);assert.equal(button.title,'Another operation is in progress.');assert.equal(button.getAttribute('aria-label'),'Retry: Другая книга');
+  // 0.22.1 (Judy 1.1): the other book's Retry stays enabled while the first press runs; a press there would be queued.
+  assert.equal(button.textContent,'Retry');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(button.getAttribute('aria-label'),'Retry: Другая книга');
   inventoryRows=[other];late({ok:false,status:409,json:async()=>({error:refused})});await switching;
   assert.notEqual(note.textContent,refused,'no stale note from the other book');assert.equal(button.disabled,false);assert.notEqual(document.activeElement,get('details-heading'));
   retryOverride=null;
@@ -149,7 +151,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   // Static page contract: placement, primary style, the note, and the pending style.
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
   // Follow-up 2, section 2.5: Clear working files sits beside Retry in the same toolbar, hidden unless the files are cleanable.
-  assert.match(html,/<ul id="automatic-reasons"><\/ul><div id="retry-block" hidden><div class="toolbar"><button id="retry-job" type="button" aria-describedby="retry-note" disabled>Retry<\/button><button id="clear-working" type="button" class="quiet" aria-describedby="retry-note" hidden>Clear working files<\/button><\/div><p id="retry-note" class="field-help" role="status" aria-live="polite" hidden><\/p><\/div><p id="automatic-result-help"/);
+  assert.match(html,/<ul id="automatic-reasons"><\/ul><div id="retry-block" hidden><div class="toolbar"><button id="retry-job" type="button" aria-describedby="retry-note" disabled>Retry<\/button><button id="retry-cancel" type="button" class="quiet" aria-describedby="retry-note" hidden>Cancel retry<\/button><button id="clear-working" type="button" class="quiet" aria-describedby="retry-note" hidden>Clear working files<\/button><\/div><p id="retry-note" class="field-help" role="status" aria-live="polite" hidden><\/p><\/div><p id="automatic-result-help"/);
   assert.doesNotMatch(html,/id="retry-job"[^>]*class=/,'Retry is a primary button');
   assert.match(css,/#retry-job\{min-height:32px;min-width:96px\}/);assert.match(css,/#retry-job\[aria-disabled=true\],#retry-job\[aria-disabled=true\]:hover,#retry-job\[aria-disabled=true\]:active\{background:var\(--disabled\);color:var\(--disabled-text\);border-color:var\(--border\);cursor:default\}/);
   assert.match(css,/#retry-note\.retry-refused\{color:var\(--warning\)\}/);
@@ -176,7 +178,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   assert.match(run('technicalText(selectedRow)'),/Current proposed destination: Z:\/Audiobooks Sorted\/Author\/Cycle\/Book.m4b/);
   assert.equal(button.title,'Check the current sources, review and destination; queue a new job only if all checks pass.');
   const destinationStale=JSON.parse(JSON.stringify(destinationRow));destinationStale.creation.job.attention.destination_review={state:'stale',can_retry:false,reason:'Policy changed'};show(destinationStale);assert.equal(block.hidden,true);assert.equal(run('candidateStatus(selectedRow)'),'Destination unavailable — review this book');
-  show(destinationRow);let releaseDestination;retryOverride=data=>new Promise(resolve=>{assert.equal(data.job_id,'job-a');assert.deepEqual(Object.keys(data).sort(),['id','job_id','library','revision']);releaseDestination=resolve;});
+  show(destinationRow);let releaseDestination;retryOverride=data=>new Promise(resolve=>{assert.equal(data.job_id,'job-a');assert.deepEqual(Object.keys(data).sort(),['id','job_id','library','queue','revision','title']);releaseDestination=resolve;});
   inventoryRows=[destinationRow];inventoryOverride=null;const destinationPress=run('retryJob()');assert.equal(button.textContent,'Checking…');assert.equal(button.getAttribute('aria-disabled'),'true');
   releaseDestination({ok:true,status:202,json:async()=>({job_id:'job-a',queued_next:true,kind:'retry',position:1})});await destinationPress;
   assert.equal(run('candidateStatus(selectedRow)'),'Queued — queue paused');assert.match(run('technicalText(selectedRow)'),/Saved job retained/);
