@@ -19,6 +19,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 TOKEN_VARIABLE = 'BOOKS_ARRANGER_DESKTOP_TOKEN'
 
 
+class UpdateStarted(RuntimeError):
+    """Cancel arrived after the engine began ending for the update: too late to cancel."""
+
+
 class DesktopControl:
     """Quit drain: the book in progress finishes, nothing new starts, then the process exits."""
 
@@ -102,6 +106,13 @@ class DesktopControl:
     def status(self):
         with self.lock:
             value = {'phase': self.phase, 'error': self.error, 'requested_at': self.requested_at}
+            if self.update is not None:
+                value.update(self._update_answer())
+            if self.phase in self.UPDATE_PHASES:
+                # Stopping for an update: answer at once from what the update tracks; no state computation.
+                value['busy'] = None
+                value['idle'] = False
+                return value
         # One shared state computation per poll feeds both busy and idle (was two full computations).
         from merge_service import StatusUnavailable
         unavailable = False
@@ -179,19 +190,222 @@ class DesktopControl:
         self._bound_exit()
         return True
 
+    # ------------------------------------------------------------------ Restart to update (ruling 27, 0.22.1)
+    # Sergei 2026-10-25: "There should be steps to make update fail-less." 0.21.1's Restart to update computed a fresh,
+    # unbounded state inside the request (the full-idle fence) while the shell gave it 5 s; the shell gave up, the engine
+    # finished the fence anyway and shut down, and the app closed without installing. Nothing ever undid the fence.
+    # Now the request answers at once; the work stops at its next safe point (bounded), the engine exits only when
+    # nothing is left running and no file change is half done (critical_sections), and Cancel, or the bound, undoes
+    # every step: the app runs on as before.
+    UPDATE_SAFE = 90.0    # T_safe: seconds for the running work to reach its next safe point
+    UPDATE_FORCE = 60.0   # T_force: then presses in flight are stopped too; a file change still finishes by itself
+    UPDATE_POLL = 0.25
+    UPDATE_PHASES = ('pausing', 'forcing', 'updating')
+
     def prepare_update(self):
-        """Atomic full-idle fence; normal Quit does not install updates."""
-        from app_launcher import verify_idle
-        with self.server.control_condition:
-            if self.server.closing or self.server.merge_admissions:
-                raise RuntimeError('Wait until all Books Arranger work is idle before restarting to update')
-            verify_idle(self.server.state('Audiobooks'))
-            self.server.closing=True
+        """POST /api/desktop/update: starts stopping for the update and answers at once (no state computation here).
+        A repeated request answers the update in progress. Raises RuntimeError while a Quit is under way."""
         with self.lock:
-            self.phase='updating';self.error=''
-        self.thread=threading.Thread(target=self._shutdown,name='books-desktop-update',daemon=True)
+            if self.phase in self.UPDATE_PHASES or self.phase == 'exiting' and self.update is not None:
+                return self._update_answer()
+            if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
+                raise RuntimeError('Books Arranger is closing; the update can start once it has closed')
+            self.update = {'requested_at': time.time(), 'started': time.monotonic(), 'before': self._update_before(),
+                           'cancel': threading.Event(), 'waiting': [], 'critical': [], 'forced': False, 'outcome': None}
+            self.phase = 'pausing'
+            self.error = ''
+        with self.server.control_condition:
+            # New controls are refused from here on; reads and polling keep working.
+            self.server.closing = True
+        self.thread = threading.Thread(target=self._update_park, name='books-desktop-update', daemon=True)
         self.thread.start()
-        return {'phase':'updating'}
+        return self._update_answer()
+
+    update = None
+
+    def _update_before(self):
+        """What runs now, read cheaply (no state computation): Cancel and the bound start it again."""
+        merge = self.server.merge
+        automatic = self._automatic()
+        jobs_thread = getattr(getattr(merge, 'jobs', None), '_thread', None)
+        cleanup = getattr(merge, 'cleanup', None)
+        title = ''
+        try:
+            from scanner import connect
+            with connect(self.server.merge.inventory.database) as db:
+                row = db.execute("SELECT manifest FROM audio_jobs WHERE state='running' LIMIT 1").fetchone()
+            title = (json.loads(row[0]).get('metadata') or {}).get('title', '') if row else ''
+        except Exception:
+            title = ''
+        return {'automatic': bool(automatic is not None and getattr(automatic, 'thread', None) and automatic.thread.is_alive()),
+                'converting': bool(jobs_thread and jobs_thread.is_alive()), 'title': str(title)[:200],
+                'cleanup': bool(cleanup is not None and (getattr(cleanup, 'current', None) or getattr(cleanup, 'thread', None) and cleanup.thread.is_alive())),
+                'scanning': bool(self.server.scan_active()), 'library': getattr(self.server, 'active_library', None)}
+
+    def _update_answer(self):
+        """The update part of desktop status (also the POST answers)."""
+        update = self.update or {}
+        elapsed = max(0.0, time.monotonic() - update['started']) if update.get('started') else 0.0
+        return {'phase': self.phase, 'update': {'phase': self.phase if self.phase in self.UPDATE_PHASES + ('exiting', 'blocked') else 'running',
+                'waiting': [dict(item) for item in update.get('waiting') or []], 'critical': list(update.get('critical') or []),
+                'elapsed': round(elapsed, 1), 'safe_seconds': self.UPDATE_SAFE, 'force_seconds': self.UPDATE_FORCE,
+                'outcome': dict(update['outcome']) if update.get('outcome') else None}}
+
+    def _update_waiting(self):
+        """[{kind, title}] of what the update still waits for: the conversion of a book, its cleanup, the library scan,
+        research or automatic processing, an approval or another press, series or optional-field lookups, and any open
+        file change (critical_sections)."""
+        import critical_sections
+        merge = self.server.merge
+        waiting = []
+        jobs_thread = getattr(getattr(merge, 'jobs', None), '_thread', None)
+        if jobs_thread and jobs_thread.is_alive():
+            waiting.append({'kind': 'conversion', 'title': (self.update or {}).get('before', {}).get('title', '')})
+        cleanup = getattr(merge, 'cleanup', None)
+        if cleanup is not None and (getattr(cleanup, 'current', None) or getattr(cleanup, 'thread', None) and cleanup.thread.is_alive()) \
+                or getattr(merge, '_post_current', None):
+            waiting.append({'kind': 'cleanup', 'title': ''})
+        if self.server.scan_active():
+            waiting.append({'kind': 'scan', 'title': ''})
+        automatic = self._automatic()
+        if automatic is not None and getattr(automatic, 'thread', None) and automatic.thread.is_alive():
+            waiting.append({'kind': 'research' if (getattr(automatic, 'current', None) or {}).get('stage', '').startswith('Research') else 'automatic', 'title': ''})
+        if getattr(self.server, 'merge_admissions', 0):
+            waiting.append({'kind': 'approval' if getattr(merge, '__dict__', {}).get('_approve_stops') else 'press', 'title': ''})
+        for name in ('series_backfill', 'gap_fill'):
+            worker = getattr(getattr(merge, '__dict__', {}).get(name), 'thread', None)
+            if worker is not None and worker.is_alive():
+                waiting.append({'kind': 'lookups', 'title': ''})
+                break
+        for name in critical_sections.open_sections():
+            waiting.append({'kind': 'critical', 'title': name})
+        return waiting
+
+    def _update_park(self):
+        """Stop the work at its safe points, wait (bounded), then end the engine; Cancel or the bound undo it all."""
+        import critical_sections
+        update = self.update
+        merge = self.server.merge
+        try:
+            automatic = self._automatic()
+            if automatic is not None:
+                automatic.stop()  # saves the research checkpoint; pauses the queue when a run is active
+            self.server.inventory.stop()  # the scan stops at its checkpoint (Resume scanning continues it)
+            merge.pause()  # the book in progress stops at its next checkpoint and starts again later
+            for name in ('series_backfill', 'gap_fill'):
+                background = getattr(merge, '__dict__', {}).get(name)
+                if background is not None:
+                    background.stop.set(); background.wake.set()
+            safe = update['started'] + self.UPDATE_SAFE
+            last = safe + self.UPDATE_FORCE
+            while True:
+                if update['cancel'].is_set():
+                    return self._resume_after_update('cancelled')
+                waiting = self._update_waiting()
+                with self.lock:
+                    update['waiting'] = waiting
+                    update['critical'] = critical_sections.open_sections()
+                if not waiting:
+                    break
+                now = time.monotonic()
+                if now >= last:
+                    return self._resume_after_update('bound')
+                if now >= safe and not update['forced']:
+                    with self.lock:
+                        self.phase = 'forcing'
+                        update['forced'] = True
+                    self._force_update_stops()
+                time.sleep(self.UPDATE_POLL)
+            # Nothing runs and no file change is open: closing refuses new presses and every worker has stopped, so
+            # none can open one now. Cancel still wins until this point.
+            with self.lock:
+                cancelled = update['cancel'].is_set()
+                if not cancelled:
+                    self.phase = 'updating'
+            if cancelled:
+                return self._resume_after_update('cancelled')
+            if not self._shutdown():
+                # A close that failed before the engine ended undoes the update too (proposal 5B6): the app runs on.
+                return self._resume_after_update('blocked', self.error)
+        except Exception as error:
+            with self.lock:
+                self.phase = 'blocked'
+                self.error = str(error)[:512] or type(error).__name__
+                update['outcome'] = {'result': 'error', 'reason': self.error}
+
+    def _force_update_stops(self):
+        """After T_safe: presses still running (an approval checking files) are stopped too. A file change that has
+        started is never stopped; the update waits for it."""
+        merge = self.server.merge
+        for press in list(getattr(merge, '__dict__', {}).get('_approve_stops', ())):
+            press.set()
+        pending = getattr(merge, '__dict__', {}).get('_retry_all_stop')
+        if pending:
+            pending.set()
+        automatic = self._automatic()
+        if automatic is not None:
+            try:
+                automatic.stop(force=True)
+            except Exception:
+                pass
+
+    def _resume_after_update(self, result, reason=''):
+        """Cancel, the bound or a failed close: undo the update's stops and start again what was running. The app runs
+        on as before."""
+        update = self.update
+        before = update.get('before') or {}
+        with self.server.control_condition:
+            self.server.closing = False
+            self.server.control_condition.notify_all()
+        problems = []
+        merge = self.server.merge
+        automatic = self._automatic()
+        try:
+            if before.get('automatic') and automatic is not None:
+                automatic.start()  # continues the saved run, which starts the queue again
+            elif before.get('converting') or before.get('cleanup'):
+                resume = merge.resume
+                try:
+                    resume(recheck=False)
+                except TypeError:
+                    resume()
+        except Exception as error:
+            problems.append(str(error)[:300] or type(error).__name__)
+        try:
+            if before.get('scanning') and not before.get('automatic') and before.get('library'):
+                self.server.inventory.launch(before['library'], resume=True)
+                self.server.active_library = before['library']
+        except Exception as error:
+            problems.append(str(error)[:300] or type(error).__name__)
+        for name in ('series_backfill', 'gap_fill'):
+            background = getattr(merge, '__dict__', {}).get(name)
+            if background is not None:
+                try:
+                    background.start()
+                except Exception as error:
+                    problems.append(str(error)[:300])
+        with self.lock:
+            self.phase = 'running'
+            self.error = ''
+            update['outcome'] = {'result': result, 'waiting': [dict(item) for item in update.get('waiting') or []], 'at': time.time(),
+                                 'reason': reason, 'resume_problems': problems}
+        return update['outcome']
+
+    def cancel_update(self):
+        """POST /api/desktop/update-cancel: the update stops; everything it stopped starts again. Raises UpdateStarted
+        once the engine is ending (too late to cancel)."""
+        with self.lock:
+            if self.phase in ('pausing', 'forcing') and self.update is not None:
+                self.update['cancel'].set()
+                thread = self.thread
+            elif self.phase in ('updating', 'exiting', 'stopping'):
+                raise UpdateStarted('The update has started; Books Arranger is closing to install it')
+            else:
+                return self._update_answer()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(30)
+        with self.lock:
+            return self._update_answer()
 
     def stop_now(self):
         """Immediate safe stop (Windows sign-out or shell loss): the book in progress restarts later."""
@@ -227,7 +441,7 @@ def handler_class(base, token):
 
         def do_POST(self):
             path = urlsplit(self.path).path
-            if path not in ('/api/desktop/quit', '/api/desktop/stop-now', '/api/desktop/update'):
+            if path not in ('/api/desktop/quit', '/api/desktop/stop-now', '/api/desktop/update', '/api/desktop/update-cancel'):
                 return super().do_POST()
             if not self.desktop_trusted():
                 return
@@ -238,6 +452,11 @@ def handler_class(base, token):
             except (ValueError, TypeError, UnicodeError, json.JSONDecodeError) as error:
                 return self.fail(400, str(error))
             control = self.server.desktop
+            if path.endswith('/update-cancel'):
+                try:
+                    return self.response(200, control.cancel_update())
+                except UpdateStarted as error:
+                    return self.response(409, {'error': str(error), 'code': 'started'})
             try:
                 result=control.prepare_update() if path.endswith('/update') else control.quit() if path.endswith('/quit') else control.stop_now()
             except RuntimeError as error:return self.fail(409,str(error))
@@ -259,7 +478,7 @@ def watch_shell(control):
             pass
     except OSError:
         pass
-    if control.phase in ('running', 'finishing', 'parking'):
+    if control.phase in ('running', 'finishing', 'parking', 'pausing', 'forcing'):
         control.stop_now()
 
 

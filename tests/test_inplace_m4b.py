@@ -176,6 +176,18 @@ class EligiblePathTests(Fixture):
         self.assertEqual(picture.read_bytes(), PNG)
         self.assertEqual([c['title'] for c in source_chapters(final, self.root, self.stop, 1.5)], ['First', 'Second'])
 
+    def test_an_update_waits_for_the_two_writes_and_their_journal_step(self):
+        # 0.22.1 ruling 27: Restart to update never ends the engine inside the edit's writes; it reports "a tag edit".
+        import critical_sections
+        seen = {}
+        def fault(name, handle=None):seen[name] = critical_sections.open_sections()
+        source = self.media(); manifest = self.manifest(source)
+        with patch('inplace_m4b._fault', side_effect=fault):edited, validation = self.run_in_place(manifest)
+        published(self.fake(), manifest, edited, validation, lambda *a: None)
+        for point in ('before_append', 'appended', 'before_type_patch', 'type_patched'):
+            self.assertEqual(seen[point], [critical_sections.TAG_EDIT], point)
+        self.assertEqual(seen['checked'], [], 'the read-back check is not a file change')
+
     def test_download_marker_removed_and_journaled(self):
         source = self.media(); marker = b'[ZoneTransfer]\r\nZoneId=3\r\n'
         with open(str(source) + ':Zone.Identifier', 'wb') as stream:stream.write(marker)

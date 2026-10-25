@@ -78,6 +78,19 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertIsNone(self.service.automatic.candidate(new[0]), 'no research record carried')
         self.assertFalse(new[0].get('review'))
 
+    def test_an_update_waits_for_the_file_loop_and_the_records_it_began(self):
+        # 0.22.1 ruling 27: Restart to update never ends the engine while a delete's files or records are half done.
+        import critical_sections
+        row = self.book(); preview = self.service.delete_preview(row['id'], row['revision']); seen = []
+        real_remove, real_forget = book_delete.remove, book_delete.forget
+        def remove(*args):seen.append(('file', critical_sections.open_sections())); return real_remove(*args)
+        def forget(*args):seen.append(('records', critical_sections.open_sections())); return real_forget(*args)
+        with mock.patch('book_delete.remove', side_effect=remove), mock.patch('book_delete.forget', side_effect=forget):
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
+        self.assertEqual((result['deleted'], result['forgotten']), (2, True))
+        self.assertEqual(seen, [('file', ['a delete'])] * 2 + [('records', ['a delete'])])
+        self.assertEqual(critical_sections.open_sections(), [])
+
     def test_a_shared_file_refuses_and_nothing_is_touched(self):
         self._share(self.book())
 

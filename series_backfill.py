@@ -20,6 +20,7 @@ Any doubt leaves the published file as it is and records why. File changes wait 
 """
 import copy
 from contextlib import contextmanager
+import critical_sections
 from datetime import datetime
 import hashlib
 import sqlite3
@@ -491,7 +492,8 @@ class SeriesBackfill:
             self._set(job_id, 'pending', '', record)
             return
         try:
-            with self._boundary(record) as boundary:
+            # Ruling 27: the rename, the catalog record and the former file's removal finish once begun.
+            with critical_sections.critical(critical_sections.RENAME), self._boundary(record) as boundary:
                 self._resume_protected(job_id, record, state, temp, new, old, boundary)
         except (BoundaryError, OSError, Held, KeyError) as error:
             self._set(job_id, 'held', 'Series recovery could not verify the files; remaining copies kept: ' + str(error), record)

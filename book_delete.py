@@ -38,6 +38,7 @@ NTFS and network drives such as Z:, where the app's exact-handle empty-folder di
 stream could be lost: Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md). Every other path, source folder
 cleanup and Clear working files included, keeps that refusal: nothing here changes native_io."""
 import contextlib
+import critical_sections
 import datetime
 import json
 import os
@@ -646,7 +647,7 @@ def delete(service, identity, revision, paths, folders=None, mode='delete'):
             raise DeleteRefused('files_changed', _TEXT[mode]['files_changed'])
         output = getattr(service.inventory, 'output_root', None)
         deleted, removed_bytes, failed = 0, 0, []
-        with _hold(found, output):
+        with critical_sections.critical(critical_sections.DELETE), _hold(found, output):
             for item in found['files']:
                 if item['kind'] == 'working':
                     continue
@@ -674,14 +675,15 @@ def delete(service, identity, revision, paths, folders=None, mode='delete'):
             if still:
                 failed.extend({'path': p, 'cause': 'other', 'detail': 'Still on disk'} for p in dict.fromkeys(still))
             else:
-                # Folders are housekeeping: one that cannot be removed stays and never keeps the book listed.
-                for folder, root in found['folders']:
-                    if _remove_folder(folder, root):
-                        removed += 1
-                    else:
-                        stayed += 1
-                forget(service, identity, found['members'], found['jobs'], [f['path'] for f in found['files'] if f['kind'] == 'other'])
-                forgotten = True
+                with critical_sections.critical(critical_sections.DELETE):  # ruling 27: folders and records, once begun
+                    # Folders are housekeeping: one that cannot be removed stays and never keeps the book listed.
+                    for folder, root in found['folders']:
+                        if _remove_folder(folder, root):
+                            removed += 1
+                        else:
+                            stayed += 1
+                    forget(service, identity, found['members'], found['jobs'], [f['path'] for f in found['files'] if f['kind'] == 'other'])
+                    forgotten = True
     service.after_delete(identity)
     return {'deleted': deleted, 'bytes': removed_bytes, 'failed': failed, 'forgotten': forgotten, 'folders': {'removed': removed, 'stayed': stayed}}
 
