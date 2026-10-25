@@ -380,7 +380,12 @@ class Inventory:
             owned={os.path.normcase(r['path']) for r in connection.execute("SELECT path FROM owned_artifacts WHERE kind IN ('temporary','recovery','output')")}
         if 'planned_destination' in {row[1] for row in connection.execute('PRAGMA table_info(output_relocations)')}:
             owned.update(os.path.normcase(row[0]) for row in connection.execute("SELECT planned_destination FROM output_relocations WHERE planned_destination<>''"))
-        with os.scandir(path) as entries:
+        try:listing=os.scandir(path)
+        except FileNotFoundError as error:
+            # A folder the scan queued that is gone before its listing (Sergei deletes torrent folders outside the app):
+            # the same quiet skip as a gone file, on the same evidence (see _vanished).
+            return self._vanished(root,generation,path,lambda operation:scan_write(self,root,generation,path,operation,task_directory=True),error,directory=True)
+        with listing as entries:
             for entry in entries:
                 if self.stop_event.is_set():raise ScanStopped()
                 if entry.is_symlink() or (hasattr(os.path,'isjunction') and os.path.isjunction(entry.path)):continue
@@ -403,18 +408,19 @@ class Inventory:
                     scan_write(self,root,generation,path,enqueue,finish=False)
         scan_write(self,root,generation,path,lambda db:self._outcome(db,root,generation,path,True),task_directory=True)
 
-    def _vanished(self, root, generation, path, save, error):
-        """A file listed by this scan that is gone before its read (Senua's 0.22.0 final review, N13: deleted by Delete
-        book, or by Sergei outside the app). Skipped quietly: no error row, no catalog row, no failed scan; a catalogued
-        file is not seen, so the completed scan marks it missing. Only on positive evidence (gone): otherwise the read
-        error stands as before. The proving folder is listed again once in this scan, so a renamed file's new name is
-        still catalogued by it, not one scan later."""
+    def _vanished(self, root, generation, path, save, error, directory=False):
+        """A file or folder listed by this scan that is gone before its read or listing (Senua's 0.22.0 final review, N13:
+        deleted by Delete book, or by Sergei outside the app, a whole torrent folder included). Skipped quietly: no error
+        row, no catalog row, no failed scan; a catalogued file is not seen, so the completed scan marks it missing. Only
+        on positive evidence (gone): otherwise the read error stands as before, and a source root is never gone. The
+        proving folder is listed again once in this scan, so a renamed file's or folder's new name is still catalogued by
+        it, not one scan later."""
         folder=gone(root,path)
         if folder is None:raise error
         relisted=self.__dict__.setdefault('_relisted',set());key=(root,generation,os.path.normcase(folder))
         again=key not in relisted;relisted.add(key)
         def persist(db):
-            self._outcome(db,root,generation,path,False,details='Gone before it was read')
+            self._outcome(db,root,generation,path,directory,details='Gone before it was read')
             if again:db.execute("UPDATE queue SET state='pending' WHERE root=? AND generation=? AND path=? AND directory=1 AND state='done'",(root,generation,folder))
         save(persist)
 

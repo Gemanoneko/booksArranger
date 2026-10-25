@@ -185,6 +185,45 @@ class InventoryTests(unittest.TestCase):
                          'the gone files are missing, not read errors; the renamed file is catalogued by the same scan')
         self.assertEqual(inventory.status('Audiobooks')['state'],'completed','automatic discovery continues past this scan')
 
+    def test_a_folder_gone_mid_scan_is_skipped_quietly_and_its_files_are_marked_missing(self):
+        # The same for a whole folder (Sergei deletes torrent folders outside the app): queued by the scan, gone before
+        # its listing. It used to be a folder read error ("completed with errors", a scan issue), stopping automatic runs.
+        gone_book=[self.file('audio/Author/Torrent Book/01.mp3'),self.file('audio/Author/Torrent Book/02.mp3')]
+        moved=self.file('audio/Author/Other/01.mp3')
+        inventory=Inventory(self.database,self.roots,self.reader);self.run_scan(inventory)
+        release=self.paused_scan(inventory,moved.parent.parent)  # "Author" listed, its two folders queued
+        import shutil;shutil.rmtree(gone_book[0].parent)
+        moved.parent.rename(moved.parent.with_name('Other renamed'))
+        release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        job,errors,files=self.outcomes(inventory)
+        self.assertEqual((job['state'],job['errors'],errors),('completed',0,[]),inventory.last_error)
+        self.assertEqual(inventory.status('Audiobooks')['scan_issues'],[])
+        with connect(self.database) as db:
+            rows={str(Path(r['path']).relative_to(self.base/'audio')):r['missing'] for r in db.execute('SELECT path,missing FROM files')}
+        self.assertEqual(rows,{str(Path('Author/Torrent Book/01.mp3')):1,str(Path('Author/Torrent Book/02.mp3')):1,
+                               str(Path('Author/Other/01.mp3')):1,str(Path('Author/Other renamed/01.mp3')):0},
+                         'the gone folder\'s files are missing; the renamed folder is catalogued by the same scan')
+
+    def test_a_folder_queued_under_a_root_that_becomes_unreachable_is_still_an_error(self):
+        # Negative control: with the source root itself gone (a dropped share) nothing proves the folder was removed.
+        book=self.file('audio/Author/Book/01.mp3')
+        inventory=Inventory(self.database,self.roots,self.reader);self.run_scan(inventory)
+        audio=Path(self.roots['Audiobooks']);moved=self.base/'unreachable-folder-fixture'
+        release=self.paused_scan(inventory,audio)  # the root listed, "Author" queued
+        for attempt in range(50):
+            try:audio.rename(moved);break
+            except PermissionError:
+                if attempt==49:raise
+                time.sleep(.1)
+        try:
+            release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        finally:
+            moved.rename(audio)
+        job,errors,files=self.outcomes(inventory)
+        self.assertEqual(job['state'],'completed with errors')
+        self.assertEqual([Path(e['path']).name for e in errors],['Author'])
+        self.assertEqual([name for name,row in files.items() if row['missing']],[],'nothing marked missing')
+
     def test_a_source_that_becomes_unreachable_mid_scan_is_still_a_read_error(self):
         # Negative control for the above: "gone" needs a folder that lists without the name. A source root that cannot be
         # listed (a dropped share) proves nothing, so the reads fail as before and no file is marked missing.
