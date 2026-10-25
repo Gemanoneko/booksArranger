@@ -127,6 +127,13 @@ class LoadingServerTests(unittest.TestCase):
         self.assertIn('count', state['status'])
         status, page = self.call('GET', '/api/inventory?library=Audiobooks&view=candidates&status=converted')
         self.assertEqual((status, page.get('code')), (503, 'loading'))
+        # The strip's shared states script is served beside app.js (the page loads it relative, as from disk).
+        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=5)
+        connection.request('GET', '/load-state.js', headers={'Host': f'127.0.0.1:{self.server.server_port}'})
+        response = connection.getresponse()
+        self.assertEqual((response.status, response.getheader('Content-Type')), (200, 'text/javascript; charset=utf-8'))
+        self.assertIn(b'booksLoadState', response.read())
+        connection.close()
 
     def test_the_session_step_counts_each_finished_book_then_parts_arrive_and_loading_ends(self):
         self.serve(books=3)
@@ -142,6 +149,8 @@ class LoadingServerTests(unittest.TestCase):
         self.assertEqual(state['audiobook_jobs']['state'], 'Paused')
         # Background work starts once loading ends, never before the first status.
         self.assertEqual(self.server.merge.started, ['retention', 'published'])
+        # The shell reads the completed load's time from the desktop status, to show it as "last load took" next start.
+        self.assertEqual(DesktopControl(self.server).status()['loading']['took_ms'], state['loading']['took_ms'])
         status, _ = self.call('GET', '/api/inventory?library=Audiobooks&view=candidates&status=converted')
         self.assertEqual(status, 200)
 

@@ -569,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('The application page takes no query parameters')
                 page = (BASE / 'web' / 'index.html').read_text(encoding='utf-8').replace('{{REQUEST_TOKEN}}',self.server.token)
                 self.response(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            elif path in {'/app.js','/desktop-ui.js','/style.css'}:
+            elif path in {'/app.js','/desktop-ui.js','/load-state.js','/style.css'}:
                 content_type = 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8'
                 self.response(200,(BASE / 'web' / path[1:]).read_bytes(),content_type)
             elif path in {'/api/cover','/api/inventory'} and not self.loaded('books'):

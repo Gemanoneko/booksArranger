@@ -111,7 +111,8 @@ render({folder_cleanup_notes:['Native protected stream namespace unsupported']})
 // Page contract: the toolbar sits above the rows; the bar styles exist for every state.
 const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
 assert.ok(html.indexOf('id="pause-jobs"')<html.indexOf('id="jobs-rows"'),'Pause/Resume are above the rows');assert.doesNotMatch(html,/id="jobs-progress"|id="book-progress"/);
-assert.match(html,/<ul id="jobs-rows" aria-label="Running activities"><\/ul><p id="jobs-idle" class="field-help">Nothing running<\/p>/);
+// Hidden until the engine reports its jobs: "Nothing running" is never a placeholder (Judy 0.22.1, 3.5).
+assert.match(html,/<ul id="jobs-rows" aria-label="Running activities"><\/ul><p id="jobs-idle" class="field-help" hidden>Nothing running<\/p>/);
 for(const rule of [/#jobs-activity\{min-height:136px\}/,/\.activity-row progress:indeterminate\{[^}]*animation:activity-slide 1\.4s linear infinite\}/,/\.activity-row\.paused progress:indeterminate\{animation:none/,/\.activity-row\.attention progress::-webkit-progress-value\{background:var\(--warning\)\}/,/@media\(prefers-reduced-motion:reduce\)\{\.activity-row progress:indeterminate\{animation:none;background:repeating-linear-gradient/,/@keyframes activity-slide/])assert.match(css,rule);
 
 // One writer for #version: the engine version, never 'local prototype' (the desktop layer no longer writes it).

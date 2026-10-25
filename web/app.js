@@ -64,13 +64,16 @@ function viewControls(){
   if(!filterOptions[view].some(([value])=>value===filters[view]))filters[view]=view==='candidates'?'converted':'all';
   $('view').value=view;
   $('filter').replaceChildren();
-  for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(FILTER_TITLES[value])option.title=FILTER_TITLES[value];$('filter').append(option);}
+  // Before the library part arrives the Status filter has one option, "Loading…" ("Not loaded" when Stopped), 3.5.
+  if(LS && loadingActive && !(state && partReady('library'))){const option=document.createElement('option');option.textContent=loadStopped()?'Not loaded':'Loading…';$('filter').append(option);}
+  else for(const [value,label] of filterOptions[view]){const option=document.createElement('option');option.value=value;option.textContent=label;if(FILTER_TITLES[value])option.title=FILTER_TITLES[value];$('filter').append(option);}
   $('filter').value=filters[view];
   $('filter').title=FILTER_TITLES[filters[view]] || 'Filter the saved results in this library.';
   for(const id of ['automatic-controls','automatic-help','automatic-policy','automatic-status-block'])$(id).hidden=!audio;
   $('search-label').textContent=view==='files'?'Path contains':'Candidate contains';
   inventoryIntro.textContent=view==='files'?'Each row is a source file, including chapter tracks and companion files. Switch to Book candidates to review audiobook groups.':'Automatic processing researches book candidates and converts confident matches. Held books stay out of the queue; manual review is optional.';
-  $('batch-controls').hidden=!audio || view!=='candidates';
+  $('batch-controls').hidden=!audio || view!=='candidates' || !booksOnScreen();  // no "Select this page" before the books
+  gateLoading();  // the titles above are the controls' own; while loading the gate's sentence stays (3.6)
 }
 const FILTER_TITLES={held:'Show books that automatic processing could not safely approve.',recording_review:'Show recordings marked for comparison, including verified distinct recordings.',
   restarted:'Show books you started over that automatic processing has not queued yet.'};
@@ -90,6 +93,7 @@ inventoryIntro.textContent='Each row is a source file, including chapter tracks 
 function clearConnectionNotice(){recoveryDisconnected=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();renderAutomatic();renderJobs();controls();}
 function refreshFailed(error){
   if(ended)return;
+  if(loadingActive)return;  // the load strip owns silence while it is up: no notice, no "Last received" (Judy 7.7)
   if(error.httpStatus){
     const prior=$('message').textContent;
     if(!prior.includes(error.message))message(prior ? prior+'\n'+error.message : error.message);
@@ -116,8 +120,180 @@ async function request(route, data, timeoutMs=0) {
   return result;
 }
 function message(value='') { $('message').textContent=value; }
-// The only writer of #version: the engine's own version, as reported by its state.
-function renderVersion(){const value=typeof state?.version==='string' && state.version?'v'+state.version:'';if($('version').textContent!==value)$('version').textContent=value;$('version').hidden=!value;}
+// The only writer of #version: the engine's own version, as reported by its state. Hidden while loading (Judy 3.5).
+function renderVersion(){const value=typeof state?.version==='string' && state.version && !loadingActive?'v'+state.version:'';if($('version').textContent!==value)$('version').textContent=value;$('version').hidden=!value;}
+
+// ── Startup (ruling 28; Judy's 0.22.1 UX spec, section 3) ──
+// The window shows this page from the first frame: from disk until the engine answers (preEngine), then served by the
+// engine. One strip says Working, Waiting, Stuck or Stopped from silence (load-state.js); each panel keeps its
+// placeholder until its part arrives; looking works once the books are on screen, changing waits until loading ends.
+const LS=globalThis.booksLoadState || null,shellApi=globalThis.window?.booksDesktop || null;
+const preEngine=globalThis.location?.protocol==='file:';
+const NOT_YET='Not yet: Books Arranger is still loading. This works when loading finishes.';
+const NOT_YET_BOOKS='Not yet: your books are still loading. This works as soon as they appear.';
+const NOT_YET_LIBRARY='Not yet: Books Arranger is still loading. You can switch library when loading finishes.';
+const NOT_SAFE='Not safe right now: the engine is changing the catalog. Wait for it to finish.';
+let loadingActive=!!LS,loadTracker=LS?LS.createTracker(Date.now()):null,loadAnswer=null,shellStartup=null,loadVerdict='working',loadStep='',loadReadyMs=null;
+const notYetSentences=new Set([NOT_YET,NOT_YET_BOOKS,NOT_YET_LIBRARY,NOT_SAFE]);
+// A part of the engine's answer that has arrived (an engine without a loading object has them all).
+function partReady(name,answer=state){return !LS || (!!answer && LS.part(answer,name));}
+function booksOnScreen(){return !loadingActive || partReady('books');}
+function loadStopped(){return !!shellStartup && shellStartup.phase==='stopped';}
+function announceLoad(text){const node=$('load-announce');if(!node)return;node.textContent='';node.textContent=text;}
+// The shell's record (desktop): launch time, exit, port, last load. A new launch (Restart engine) restarts the clocks.
+function applyStartup(value){
+  if(!LS || !value || typeof value!=='object')return;
+  const fresh=!shellStartup || value.startedAt!==shellStartup.startedAt;
+  const wasStopped=loadStopped();shellStartup=value;
+  if(fresh && value.phase==='launching')loadTracker.restart(value.startedAt);
+  else if(fresh)loadTracker.launchedAt=value.startedAt;
+  if(!wasStopped && loadStopped() && loadingActive)announceLoad('Books Arranger stopped loading. Try again is available.');
+  renderLoad();loadPlaceholders();
+}
+// Every engine answer: the loading object, or none (loaded). A "still updating" 503 is an answer too (heard).
+function observeLoad(answer){
+  if(!LS || !loadingActive)return;
+  loadTracker.observe(answer,Date.now());
+  loadAnswer=answer?.loading && typeof answer.loading==='object'?answer.loading:null;
+  renderLoad();  // refresh() settles, once the first list is on screen too
+}
+function loadHeard(){if(LS && loadingActive){loadTracker.heard(Date.now());renderLoad();}}
+function loadTick(){if(LS && loadingActive){loadTracker.tick(Date.now());renderLoad();}}
+function loadTechnical(verdict){
+  const lines=[],step=LS.stepOf(loadTracker.answered?loadAnswer:null),now=Date.now();
+  lines.push(`Step: ${step.id} (${step.n} of ${step.of})`);
+  if(loadAnswer && Number.isFinite(loadAnswer.done))lines.push(`Counts: ${loadAnswer.done}${Number.isFinite(loadAnswer.total)?' of '+loadAnswer.total:''} ${loadAnswer.unit || 'items'}`);
+  lines.push(`Engine answered: ${loadTracker.answered?Math.floor((now-loadTracker.answerAt)/1000)+' s ago':'never'}`);
+  lines.push(`Progress: ${Math.floor((now-loadTracker.progressAt)/1000)} s ago`);
+  lines.push(`Loading started: ${new Date(loadTracker.launchedAt).toISOString()}`);
+  lines.push(`State: ${verdict.state}${loadAnswer?.restart_safe===false?' (the engine is changing the catalog)':''}`);
+  if(loadAnswer?.error)lines.push('Engine: '+loadAnswer.error);
+  if(shellStartup?.exited){lines.push(`Engine exit code: ${shellStartup.exited.code ?? 'unknown'}`);if(shellStartup.exited.lastLines)lines.push('Last engine output:\n'+shellStartup.exited.lastLines);}
+  return lines.join('\n');
+}
+function renderLoad(){
+  if(!LS || !loadingActive || !$('load-strip'))return;
+  const now=Date.now(),stopped=loadStopped(),verdict=LS.evaluate(loadTracker,now,{stopped});
+  const loading=loadTracker.answered?loadAnswer:null,step=LS.stepOf(loading),line=LS.stateLine(verdict,loading,{portPid:shellStartup?.portPid});
+  setText('load-word',line.word);setText('load-text',line.text);
+  $('load-strip').classList?.toggle('alert',['stuck','stopped'].includes(verdict.state));
+  const fraction=LS.fraction(loading),segments=[...(document.querySelectorAll?.('#load-bar .load-segment') || [])];
+  segments.forEach((segment,index)=>{
+    const current=index===step.n-1;
+    segment.classList?.toggle('done',index<step.n-1);
+    // A moving stripe means real movement: only a step that cannot count, only in Working (Judy 3.9).
+    segment.classList?.toggle('moving',current && fraction===null && verdict.state==='working' && loadTracker.answered);
+    segment.classList?.toggle('alert',current && ['stuck','stopped'].includes(verdict.state));
+    const fill=segment.firstElementChild || segment.firstChild;
+    if(fill?.style)fill.style.width=current?(fraction===null?(['stuck','stopped'].includes(verdict.state)?'100%':''):Math.round(fraction*100)+'%'):'';
+  });
+  const bar=$('load-bar');bar.setAttribute('aria-valuemax',String(step.of));bar.setAttribute('aria-valuenow',String(Math.round((step.n-1+(fraction ?? 0))*100)/100));bar.setAttribute('aria-valuetext',LS.valueText(loading));
+  const detail=stopped?[]:LS.detailParts(loadTracker,now,loading,shellStartup?.lastLoadMs),detailText=detail.join(' · ');
+  if($('load-detail').dataset?.text!==detailText){$('load-detail').replaceChildren(...detail.flatMap((part,i)=>i?[' · ',node('span',part)]:[node('span',part)]));if($('load-detail').dataset)$('load-detail').dataset.text=detailText;}
+  $('load-detail').hidden=stopped;
+  const stuck=verdict.state==='stuck',actions=stuck || stopped;
+  $('load-actions').hidden=!actions;$('load-details').hidden=!actions;
+  // Restart engine and Try again are the shell's (desktop); browser mode keeps Copy details only (Judy 3.4).
+  $('load-restart').hidden=!(stuck && !stopped && shellApi);$('load-retry').hidden=!(stopped && shellApi);
+  const unsafe=loading?.restart_safe===false;
+  $('load-restart').setAttribute('aria-disabled',unsafe?'true':'false');$('load-restart').title=unsafe?NOT_SAFE:'Stop the engine and start it again. Loading starts over. Your files are not touched.';
+  if(actions)setText('load-technical',loadTechnical(verdict));
+  // Announcements: events only (a step starts, Stuck, moving again, Stopped); Waiting is not announced.
+  const stepKey=`${step.n}/${step.of}/${step.id}`;
+  if(stepKey!==loadStep && !stopped){if(loadStep)announceLoad(`Step ${step.n} of ${step.of}: ${step.words}.`);loadStep=stepKey;}
+  if(verdict.state!==loadVerdict){
+    if(stuck)announceLoad(`Loading is stuck. ${verdict.signal==='answer'?`The engine hasn't answered for ${LS.duration(verdict.quiet)}.`:`No progress for ${LS.duration(verdict.quiet)}.`}${shellApi?' Restart engine is available.':''}`);
+    else if(loadVerdict==='stuck' && verdict.state==='working')announceLoad('Loading is moving again.');
+    loadVerdict=verdict.state;
+  }
+}
+// Placeholders (Judy 3.5): "loading…" while loading, "not loaded" when Stopped. Never a number for a missing part.
+function loadPlaceholders(){
+  if(!LS || !loadingActive)return;
+  const word=loadStopped()?'not loaded.':'loading…',library=state && partReady('library'),books=partReady('books');
+  if(!library){setText('root',`Source folders: ${word}`);viewControls();}
+  if(!(state && partReady('status')))setText('status',`Library status: ${word}`);
+  if(!(state && partReady('jobs'))){
+    setText('automatic-status',`Automatic processing: ${word}`);setText('research-status',`Research: ${word}`);
+    setText('automatic-start-reason',loadStopped()?'':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
+    setText('jobs-status',loadStopped()?'Jobs: not loaded.':'Jobs: loading…');setText('book-candidate-counts',loadStopped()?'Book candidates: not loaded.':'Book candidates: loading…');
+    $('jobs-idle').hidden=true;
+  }
+  const attention=view==='candidates' && filters.candidates==='output_attention' && !(state && partReady('attention'));
+  $('attention-loading').hidden=!attention;if(attention)setText('attention-loading',`Output needs attention: ${word}`);
+  if(!books){
+    const text=loadStopped()?'Your books are not loaded.':'Loading your books…';
+    setText('empty',text);$('empty').hidden=false;setText('page',text);$('list-skeleton').hidden=loadStopped();
+  }else $('list-skeleton').hidden=true;
+}
+// Settling (3.7): one render pass, then the strip is one quiet line for the session.
+function settleLoad(tookMs){
+  if(!LS || !loadingActive)return;
+  loadingActive=false;loadReadyMs=Number.isFinite(tookMs)?tookMs:null;
+  const strip=$('load-strip'),focused=strip?.contains?.(globalThis.document?.activeElement);
+  ungateAll();
+  if(notYetSentences.has($('message').textContent))message();
+  $('attention-loading').hidden=true;$('list-skeleton').hidden=true;
+  globalThis.document?.body?.removeAttribute?.('aria-busy');
+  if(strip){
+    if(loadReadyMs===null)strip.hidden=true;  // an engine that loads before it answers: no strip at all
+    else{strip.classList?.remove('alert');strip.classList?.add('ready');setText('load-word','Ready');setText('load-text',LS.readyLine(loadReadyMs).replace(/^Ready · /,''));}
+    for(const id of ['load-bar','load-detail','load-actions','load-details'])$(id).hidden=true;
+  }
+  if(loadReadyMs!==null)announceLoad('Books Arranger is ready.');
+  if(focused)$('filter').focus?.({preventScroll:true});  // the standing fallback (1.7)
+  viewControls();renderVersion();controls();
+}
+// Inert while loading (3.6): aria-disabled (still focusable), the sentence as tooltip; never the disabled attribute.
+const LOOKING_CONTROLS=['view','search','filter','clear-filters','previous','next'];
+const CHANGING_CONTROLS=['start','stop','resume','start-automatic','stop-automatic','cancel-automatic-start','pause-jobs','resume-jobs','select-page','queue-books','retry-selected','approve-selected','release-selected','retry-all','retry-all-go','retry-job'];
+function gate(element,sentence){
+  if(!element?.setAttribute)return;
+  if(sentence){
+    if(!element.hasAttribute?.('data-not-yet') && element.dataset){element.dataset.titleBefore=element.title || '';element.dataset.ariaBefore=element.getAttribute('aria-disabled') ?? '';}
+    element.setAttribute('data-not-yet','');element.setAttribute('aria-disabled','true');element.disabled=false;
+    if(element.title!==sentence)element.title=sentence;
+    if(element.tagName==='INPUT' && element.type!=='checkbox' || element.tagName==='TEXTAREA')element.readOnly=true;
+  }else if(element.hasAttribute?.('data-not-yet')){
+    element.removeAttribute('data-not-yet');element.title=element.dataset?.titleBefore || '';
+    if(element.dataset?.ariaBefore)element.setAttribute('aria-disabled',element.dataset.ariaBefore);else element.removeAttribute('aria-disabled');
+    if(element.tagName==='INPUT' || element.tagName==='TEXTAREA')element.readOnly=false;
+  }
+}
+// The read-only row and details controls work once the books are on screen; everything else in them changes something.
+function lookingOnly(element){return /^(View metadata|Open folder|Source folders)\b/.test(element.getAttribute?.('aria-label') || element.textContent || '');}
+function gateLoading(){
+  if(!LS || !loadingActive)return;
+  const books=booksOnScreen();
+  gate($('library'),NOT_YET_LIBRARY);
+  for(const id of LOOKING_CONTROLS)gate($(id),books?'':NOT_YET_BOOKS);
+  for(const id of CHANGING_CONTROLS)gate($(id),NOT_YET);
+  for(const element of globalThis.document?.querySelectorAll?.('#inventory button,#inventory input,#details button,#details input,#details select,#details textarea') || [])
+    gate(element,lookingOnly(element)?(books?'':NOT_YET_BOOKS):NOT_YET);
+}
+function ungateAll(){for(const element of globalThis.document?.querySelectorAll?.('[data-not-yet]') || [])gate(element,'');}
+// A press on an inert control is answered in the message line; focus does not move (3.6).
+function refuseInert(event){
+  const element=event.target?.closest?.('[data-not-yet]');
+  if(!element || !loadingActive)return;
+  if(event.type==='keydown' && ['Tab','Shift','Escape'].includes(event.key))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  if(event.type!=='mousedown' || element.tagName==='SELECT')message(element.title);
+}
+async function restartFromStrip(button){
+  if(button.getAttribute('aria-disabled')==='true'){message(button.title);return;}
+  announceLoad('Restarting the engine.');
+  try{await shellApi?.restartEngine?.();}catch(error){message(error.message);}
+}
+if(LS && $('load-strip')){
+  $('load-restart').addEventListener('click',()=>restartFromStrip($('load-restart')));
+  $('load-retry').addEventListener('click',()=>restartFromStrip($('load-retry')));
+  $('load-copy').addEventListener('click',async()=>{
+    try{const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw Error('no clipboard');await clipboard.writeText($('load-technical').textContent || '');setText('load-copy-status','Copied.');}
+    catch{setText('load-copy-status',"Couldn't copy. Select the text and press Ctrl+C.");}
+  });
+  for(const type of ['click','mousedown','keydown'])globalThis.document?.addEventListener?.(type,refuseInert,true);
+}
 function controls() {
   updateRecovery();updateRetry();updateRowRetries();renderAttentionGroups();updateAskRows();updateDeleteButtons();renderApproveSelected();renderAttentionShortcut();
   const active = state?.active_library;
@@ -145,6 +321,7 @@ function controls() {
   if($('release-selected'))renderReleaseSelected();
   if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
   if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
 }
 async function action(route, data) {
   if (busy || ended) return;
@@ -360,14 +537,19 @@ async function refresh(force=false) {
   const library=$('library').value,context=listContext(),requestView=view,requestFilter=filters[view],requestOffset=offset,requestSearch=search,epoch=retryEpoch;
   // A list change (filter, group, page, search, view, library) shows its loading text and asks for its list at
   // once, beside the status read: neither waits for /api/state (v0.16.7 QA: up to 11 s behind a slow status).
-  const early=force?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
+  const early=force && booksOnScreen()?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
   early?.catch(()=>{});
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
+  observeLoad(current);  // any answer counts, whatever happens to it below (Judy 3.4)
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
+  const libraryWasMissing=!state || !partReady('library');
   state=current;
-  renderJobs();renderAutomatic();renewManualDraft();
+  // Each part paints only once it has arrived; until then its placeholder stays (Judy 3.5).
+  if(partReady('jobs')){renderJobs();renderAutomatic();renewManualDraft();}
   renderVersion();
-  const sourceRoots=Array.isArray(state.source_roots)&&state.source_roots.length?state.source_roots:[state.root];$('root').textContent=state.library==='Audiobooks'?sourceRoots.map((root,i)=>`Source ${i+1}: ${root}`).concat(state.audiobook_output_root?[`Output: ${state.audiobook_output_root}`]:[]).join('\n'):`Source: ${state.root}`;
+  if(libraryWasMissing && partReady('library'))viewControls();
+  if(partReady('library')){const sourceRoots=Array.isArray(state.source_roots)&&state.source_roots.length?state.source_roots:[state.root];$('root').textContent=state.library==='Audiobooks'?sourceRoots.map((root,i)=>`Source ${i+1}: ${root}`).concat(state.audiobook_output_root?[`Output: ${state.audiobook_output_root}`]:[]).join('\n'):`Source: ${state.root}`;}
+  if(!partReady('status') || !state.status){loadPlaceholders();controls();return true;}
   const status=state.status;
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
   const scanLabel=!state.active_library && status.state==='failed'?'Last scan':'Discovery';
@@ -379,7 +561,8 @@ async function refresh(force=false) {
   if (form.elements.namedItem('genre').options.length===1) {
     for (const genre of state.genres) { const option=document.createElement('option');option.value=genre;option.textContent=genre;form.elements.namedItem('genre').append(option); }
   }
-  controls();
+  loadPlaceholders();controls();
+  if(!booksOnScreen())return true;  // no list read before the books part: its placeholder stays (Judy 3.5)
   const key=JSON.stringify([library,view,filters[view],offset,search,status.count,status.checked,status.state,status.unresolved_errors]);
   if (early) {
     if(!await early)return false;
@@ -391,6 +574,8 @@ async function refresh(force=false) {
     if(!await loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,false))return false;
     lastKey=key;
   }
+  // Settling (3.7): every part has arrived and the first list is on screen; one render pass makes it all live.
+  if(LS && loadingActive && LS.loaded(current) && paintedContext===context)settleLoad(current.loading?.took_ms);
   acknowledgeRestart(current);
   return true;
 }
@@ -404,6 +589,7 @@ async function poll() {
       if(sequence===refreshSequence && library===$('library').value){
         // v0.16.8: a busy engine answered 503 "still updating" under load and the page declared the server
         // unavailable, disabling Retry. A reply means the server is there: retry on the next poll.
+        if(error.httpStatus)loadHeard();  // any reply is the engine answering (Judy 3.4)
         if(error.httpStatus!==503)refreshFailed(error);
       }
     }
@@ -2551,4 +2737,11 @@ $('copy-technical').addEventListener('click',async()=>{
 });
 
 controls();
-viewControls();poll();
+viewControls();
+if(LS){
+  // The strip from the first frame: Step 1 and its clocks from the shell's launch time, ticking once a second.
+  shellApi?.startup?.().then(applyStartup).catch(()=>{});shellApi?.onStartup?.(applyStartup);
+  if(typeof setInterval==='function')setInterval(loadTick,1000);
+  renderLoad();loadPlaceholders();
+}
+if(!preEngine)poll();  // the first frame from disk has no engine to ask; the shell swaps in the engine's page

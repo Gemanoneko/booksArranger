@@ -12,5 +12,9 @@ contextBridge.exposeInMainWorld('booksDesktop',Object.freeze({
  showInstaller:()=>ipcRenderer.invoke('books:update-show-installer'),
  onRestartRequest:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:update-restart',()=>fn());},
  status:()=>ipcRenderer.invoke('books:status'),
- onStatus:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:status',(_event,value)=>fn(value));}
+ onStatus:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:status',(_event,value)=>fn(value));},
+ // Startup (ruling 28): what only the shell knows for the load strip, and its Restart engine / Try again.
+ startup:()=>ipcRenderer.invoke('books:startup'),
+ onStartup:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:startup',(_event,value)=>fn(value));},
+ restartEngine:()=>ipcRenderer.invoke('books:restart-engine')
 }));

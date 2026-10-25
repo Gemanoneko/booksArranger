@@ -145,6 +145,9 @@ class DesktopControl:
             verify_idle(snapshot)
             value['idle']=not self.server.closing and not self.server.merge_admissions
         except Exception:value['idle']=False
+        loading = getattr(self.server, 'loading', None)
+        if loading is not None:
+            value['loading'] = loading.view()  # loaded: took_ms, which the shell keeps as "last load took"
         return value
 
     def quit(self):
