@@ -37,7 +37,7 @@ let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=n
 let askPending=null,askBulk=false,approveConfirm=null;
 const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map(),askChecked=new Map();
 // Delete book (ruling 23): its row buttons, its row hints, the press reading the list, and the open dialog.
-const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null;
+const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null;
 // Queued Retry, Repair and Delete book (0.22.1, Judy's spec section 1): the engine's queue as last read, and the page's own
 // notes. queuePresses: a Retry press on its way while the page is busy (book id). queueNotes: an outcome's row line until
 // the next press, a filter change or a status change. queueLate: queued ids whose Cancel came too late.
@@ -477,6 +477,7 @@ function renderRows(force=false) {
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && !tr.contains?.(focused)){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
+  const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
   const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
@@ -538,6 +539,8 @@ function renderRows(force=false) {
   const selected=rows.find(row=>row.path===selectedPath);
   if (selected) select(selected,false);
   else if(!selectedRow){$('details').hidden=true;}
+  if(focusPlan && Date.now()>focusPlan.until)focusPlan=null;
+  if(focusPlan && (listFocus || !document.activeElement || document.activeElement===document.body))leaveTo(focusPlan.next);
   $('empty').hidden=rows.length>0;
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
@@ -1688,7 +1691,9 @@ function renderAttentionGroups(){
     // The selected group emptied: back to All, and focus moves there if it was in the strip or lost. Checking empties
     // into Can retry instead: the books Sergei waited for are there (RefusedRetry follow-up, section 2).
     const lost=!active || active===globalThis.document?.body || strip.contains?.(active),next=attentionGroup==='checking'?'retry':'all';
-    attentionGroup=next;resetStrip();
+    // 0.22.1 (Futaba m-14): the chip emptied because its last row was settled; the strip line saying what happened (a
+    // delete's outcome) stays across this one fall-back. A chip or filter Sergei changes still clears it.
+    attentionGroup=next;retryAllConfirm=null;
     setTimeout(()=>{updateList();if(lost)$('group-'+next).focus?.({preventScroll:true});},0);
   }
   for(const key of attentionKeys){
@@ -2964,6 +2969,9 @@ async function deleteConfirm(event){
     // unless focus has moved meanwhile.
     const index=rows.findIndex(item=>item.id===d.id),next=rows.slice(index+1).find(item=>item.id!==d.id && !askDone.has(item.id))?.id;
     askLeave({row:d.row});controls();const handed=document.activeElement;
+    // 0.22.1 (m-10 on Stopped rows, about one press in three): a later re-render, after this hand-off, replaced the focused
+    // button again. For a few seconds every rebuild of the list that drops focus hands it on once more (renderRows).
+    focusPlan={next,until:Date.now()+5000};
     refresh(true).catch(()=>{}).then(()=>{if(document.activeElement===handed || !document.activeElement || document.activeElement===document.body)leaveTo(next);});return;
   }
   if(failed.length){

@@ -120,6 +120,24 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   await deleteButton(trOf('cand-f1')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();await tick();
   assert.equal(trOf('cand-f1'),undefined);assert.ok(trOf('cand-f2').contains(document.activeElement),'focus is on the next row');
   inventoryOverride=null;
+  // 0.22.1, Futaba's m-10 on Stopped rows (one press in three): a later rebuild of the list replaced the focused control of
+  // the next row and nothing handed focus on again. Now each rebuild in the next few seconds hands it on.
+  const stopped=name=>attentionRow(name,'other',{delete:{kind:'audio_damaged',present:1}});
+  paint([stopped('s1'),stopped('s2')]);inventoryOverride=()=>({ok:true,json:async()=>({rows:[stopped('s2')],total:1})});
+  await deleteButton(trOf('cand-s1')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();await tick();
+  assert.equal(trOf('cand-s1'),undefined);assert.ok(trOf('cand-s2').contains(document.activeElement),'focus on the next Stopped row');
+  run('renderRows(true)');  // the later re-render Futaba's focus log caught (about 210 ms after the hand-off)
+  assert.ok(trOf('cand-s2').contains(document.activeElement),'still on the next row after a later rebuild');
+  run('focusPlan=null');inventoryOverride=null;
+  // 0.22.1, Futaba's m-14: deleting the last row of a chip falls back to All; the strip saying what happened stays.
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{files_missing:1}}};attentionGroup="files_missing"');
+  paint([missing('l',{kind:'files_missing',present:2})]);inventoryOverride=()=>({ok:true,json:async()=>({rows:[],total:0})});
+  await deleteButton(trOf('cand-l')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();await tick();
+  const said=get('retry-all-status').textContent;assert.match(said,/^Deleted 1 book and 2 files/);
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:{files_missing:0}}};renderAttentionGroups()');
+  assert.equal(run('attentionGroup'),'all','the emptied chip falls back to All');assert.equal(get('retry-all-status').textContent,said,'the strip line stays');
+  run('resetStrip();renderAttentionGroups()');assert.equal(get('retry-all-status').textContent,'','control: a chip or filter change still clears it');
+  inventoryOverride=null;run('attentionGroup="all"');
   // Futaba's m-3: every Stopped row shows its Goes to line (Judy's to-do spec 1.6 and section 4), from its job.
   const going=blocked({id:'cand-d',path:'cand-d',title_clue:'Title d',review:{title:'Title d'}},{job_id:'job-d',reason:'x',destination:{path:'Иван Петров\\Железный ад.m4b',absolute:ROOT+'\\Иван Петров\\Железный ад.m4b'},attention:{group:'retry',cause:null,originals_untouched:true}});
   paint([going,canRetry]);
