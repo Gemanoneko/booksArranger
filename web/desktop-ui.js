@@ -130,7 +130,7 @@
   try{last=await api.status();}catch(error){console.warn(error);}
   // A press while loading is answered in the message line; focus stays (Judy 3.6).
   if(loadingWaits(last)){const line=document.getElementById('message');if(line)line.textContent=NOT_YET_UPDATE;return;}
-  const u=last&&last.update;if(!u||!u.ready||u.busy.install||u.busy.download)return;
+  const u=last&&last.update;if(!u||!u.ready||(u.busy||{}).install||(u.busy||{}).download)return;
   const found=workLines(last.desktop);
   if(found.known&&!found.lines.length)return startUpdate();
   title.textContent=`Update to ${u.available} now?`;lead.textContent=`Books Arranger stops its work safely, installs ${u.available} and reopens by itself.`;
@@ -144,7 +144,7 @@
  function render(value){
   last=value;
   if(quit){const title=value.loaded===false?QUIT_LOADING:QUIT_NORMAL;if(quit.title!==title)quit.title=title;}
-  const desktop=value.desktop||{};const u=value.update;const updating=!!(u&&u.busy.install)||['updating','installing'].includes(value.quit);
+  const desktop=value.desktop||{};const u=value.update;const updating=!!(u&&(u.busy||{}).install)||['updating','installing'].includes(value.quit);
   const quitting=value.quit!=='none'||updating||['finishing','parking','pausing','forcing','updating','blocked'].includes(desktop.phase);
   panel.hidden=!quitting;
   const step=u&&updating?phaseLine(u):null;
