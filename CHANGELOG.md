@@ -11,7 +11,8 @@
 - One to-do list in "Output needs attention". It holds only books that need Sergei, sorted by reason, folder and title, with a typed reason and its actions on each row, including Keep as separate books for a set that looks like parts of one book.
 - The parts of one book in one folder are joined into one book. M4B parts are joined by re-encoding once, with their chapters kept; chapters also decide sets whose files are only numbered.
 - Two common Order unclear causes are named on the row.
-- A new "Delete book" action for books with missing parts or broken audio. After a confirmation it removes that book's own files and records; nothing in Audiobooks Sorted is touched.
+- A new "Delete book" action for books with missing parts or broken audio. After a confirmation it removes that book's own files and records; nothing in Audiobooks Sorted is touched. It waits while a library scan runs. It also removes the book's own cover and text files, the app's working copy, and folders left empty (including on network drives; never one directly in a source folder or in Sorted).
+- A new "Remove this copy" action for verified duplicates. It checks the copy in Audiobooks Sorted byte for byte before deleting.
 
 ### Changed
 
@@ -19,6 +20,7 @@
 - A held book is researched again only when it changes.
 - The book list is faster: on a 200-book test with 50-99 books converted, the median wait fell from 13.3 s to 3.4 s. It no longer waits behind automatic approvals.
 - The test gate now runs on six workers, with the page and syntax checks running alongside them.
+- Scanning: files and folders deleted outside the app are skipped quietly during a scan.
 
 ### Fixed
 
@@ -28,6 +30,9 @@
 - The to-do list filter chips work.
 - Chapter-named files and title tags no longer split a single book.
 - After a "Same author?" answer, both books continue.
+- Approve on books with many files no longer reports a false "Connection interrupted".
+- Joined chapter files get proper chapter names.
+- Small fixes: a refused Approve keeps the book listed; "Not found" is shown for missing files; focus returns sensibly after Delete; the "Goes to" line is shown on stopped rows.
 - "Scan again" reports honestly.
 - "Approve this order" works right after the track review is saved.
 - No typed note is needed to save a track review.
