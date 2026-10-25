@@ -128,6 +128,25 @@ class BrowserTests(unittest.TestCase):
         self.inventory.worker.join(5)
         self.assertFalse(self.inventory.worker.is_alive())
 
+    def test_every_attention_chip_is_served_through_the_http_route(self):
+        # Futaba's 0.22.0 QA blocker: the route checked `group` against its own older set, so every "Needs your answer"
+        # chip (and Reacquire) answered 400 "Unknown attention group" and bulk Approve as is could not be reached; the tests
+        # called review_backend directly. Every chip the page sends (web/app.js attentionKeys) goes through the real route.
+        import re
+        script=(Path(__file__).resolve().parents[1]/'web'/'app.js').read_text('utf8')
+        needs=re.search(r"const NEEDS_KEYS=\[([^\]]*)\]",script)[1]
+        chips=re.findall(r"'([a-z_]+)'",re.search(r"const attentionKeys=\[([^\]]*)\]",script)[1].replace('...NEEDS_KEYS',needs))
+        self.assertGreaterEqual(len(chips),17,chips)
+        for group in chips:
+            code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group='+group)
+            self.assertEqual(code,200,(group,page));self.assertEqual(page['rows'],[],group)
+        code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group=no_such_chip')
+        self.assertEqual((code,page['error']),(400,'Unknown attention group'),'positive control: an unknown chip is still refused')
+        # One list: the server's chips are exactly the page's, and the counts in the status carry every one of them.
+        from review_backend import ATTENTION_GROUPS
+        self.assertEqual(sorted(chips),sorted(ATTENTION_GROUPS))
+        self.assertEqual(set(self.server.merge.state()['attention_counts']),ATTENTION_GROUPS-{'all'})
+
     def test_filtered_inventory_and_candidate_review_revision_contract(self):
         root=self.roots['Audiobooks']
         with connect(self.database) as connection:

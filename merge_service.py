@@ -21,7 +21,7 @@ from review_backend import CandidateReviewService
 from scanner import connect
 from metadata import propose
 from source_cleanup import CleanupJobs, packed
-from review_backend import member_key
+from review_backend import member_key, NEEDS_GROUPS, JOB_GROUPS
 from conversion_progress import approved_scope,completed_book,phase_progress
 from replacement_jobs import Replacements,digest as record_digest,now as replacement_now
 from replacement_retirement import ReplacementRetirement
@@ -143,9 +143,9 @@ _WORKING_LOCK=threading.Lock()  # the working-folder classification cache and th
 def attention_counts(summary):
     """(counts per attention group, Can retry books whose leftover working files Retry clears first) for the strip and
     the Retry all dialog (RefusedRetry follow-up 2, section 2.4: k is the server's, read when the dialog opens)."""
-    counts={'retry':0,'repair':0,'reacquire':0,'checking':0,'changed':0,'audiobook':0,'other':0,'unsupported':0};cleanable=0
+    counts=dict.fromkeys(JOB_GROUPS,0);cleanable=0  # the one list of chips (review_backend)
     for item in summary.values():
-        counts[item['group']]+=1
+        counts[item['group']]=counts.get(item['group'],0)+1
         if item['group']=='retry' and isinstance(item.get('working'),dict) and item['working'].get('state')=='cleanable':cleanable+=1
     return counts,cleanable
 
@@ -1946,7 +1946,7 @@ class MergeService:
     # ------------------------------------------------------------ the one to-do list (Judy 2026-10-24, rulings 10, 6a, 6b)
     # Judy 2026-10-24 (0.22.0 review, B3): the three hold chips join "Needs your answer"; Other keeps stopped jobs and a
     # catch-all for a hold the app cannot classify.
-    NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear')
+    NEEDS_GROUPS=NEEDS_GROUPS  # the one list of chips (review_backend)
     ASK_GROUPS=('title_author','author_unclear','same_author')
     NO_COVERAGE={'listed':0,'still_checking':0,'removed':0,'with_job':0}
 

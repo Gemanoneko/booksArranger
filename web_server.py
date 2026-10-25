@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from catalog_owner import BASE, catalog_lock
 from merge_service import QUIET_MAX_AGE, StatusUnavailable
+from review_backend import ATTENTION_GROUPS
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
 
@@ -351,7 +352,8 @@ class Handler(BaseHTTPRequestHandler):
                     if view=='candidates':
                         if library!='Audiobooks': raise ValueError('Book candidates apply only to Audiobooks')
                         group=query.get('group') or None
-                        if group is not None and group not in {'all','retry','repair','checking','changed','audiobook','other','unsupported'}:raise ValueError('Unknown attention group')
+                        # The one list of chips (review_backend.ATTENTION_GROUPS); its own older set refused every new chip.
+                        if group is not None and group not in ATTENTION_GROUPS:raise ValueError('Unknown attention group')
                         pager=getattr(self.server.merge,'cached_page',None)  # a quiet app reuses the identical page
                         if callable(pager):result=pager(100,int(offset),search,selected_status,group)
                         else:result=self.server.merge.reviews.page(100,int(offset),search,selected_status,group) if group else self.server.merge.reviews.page(100,int(offset),search,selected_status)

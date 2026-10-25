@@ -65,6 +65,16 @@ def image_kind(data):
     raise ValueError('Cover must be a bounded usable JPEG or PNG')
 
 
+# The Output needs attention groups (the chips), the one list every route and count reads. Futaba's 0.22.0 QA blocker:
+# web_server checked `group` against its own older set, so every new chip (and Reacquire) answered 400 "Unknown attention
+# group" while page() accepted it. NEEDS_GROUPS are the books only Sergei can move on (MergeService.needs_you), in their
+# list order (Judy 2026-10-24, B3); JOB_GROUPS the stopped jobs (AudioJobs.attention_summary), with their order.
+NEEDS_GROUPS=('files_missing','title_author','author_unclear','same_author','name_taken','part_of_book','files_unclear','order_unclear')
+JOB_ORDER={'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
+JOB_GROUPS=tuple(JOB_ORDER)
+ATTENTION_GROUPS=frozenset(('all',)+NEEDS_GROUPS+JOB_GROUPS)
+
+
 class CandidateReviewService:
     def __init__(self,inventory,cache_dir,client=None,jobs=None):
         self.inventory=inventory; self.cache=ordinary(cache_dir)
@@ -299,8 +309,7 @@ class CandidateReviewService:
     # Judy 2026-10-24, section 1: the "Needs your answer" set first (missing files first: deleted files can be recovered
     # only while the recycle bin keeps them), then the Stopped set in its existing order.
     # 0.22.0 review (Judy 2026-10-24, B3): the three hold chips follow Name taken in the same set.
-    ATTENTION_ORDER={'files_missing':-8,'title_author':-7,'author_unclear':-6,'same_author':-5,'name_taken':-4,'part_of_book':-3,'files_unclear':-2,'order_unclear':-1,
-                     'retry':0,'repair':1,'reacquire':1.5,'checking':2,'changed':3,'audiobook':4,'other':5,'unsupported':6}
+    ATTENTION_ORDER={**{group:n-len(NEEDS_GROUPS) for n,group in enumerate(NEEDS_GROUPS)},**JOB_ORDER}  # files_missing -8 ... order_unclear -1
 
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
@@ -314,14 +323,13 @@ class CandidateReviewService:
         Speed (v0.16.7): job, ready, held and attention filters are decided per candidate id first, so
         only matching groups are rendered; per-book extras (cleanup, Retry data, current audiobook)
         are computed for the shown page only, from one jobs list; the converted set comes from the
-        last status computation when fresh. group (Output needs attention only): retry, repair, checking, other
-        or unsupported; that list is ordered retry, repair, checking, other, unsupported, then by scope.
+        last status computation when fresh. group (Output needs attention only): one of ATTENTION_GROUPS; that
+        list is ordered by ATTENTION_ORDER, then by scope.
         A job made by Repair carries 'repaired' (audio_jobs.repair_record) in every state.
         """
         if not isinstance(limit,int) or not 1<=limit<=1000 or not isinstance(offset,int) or offset<0:raise ValueError('Invalid page bounds')
         if status not in ('all','errors','changed','review','approved','ready','jobs','created','converted','output_attention','held','recording_review','restarted'):raise ValueError('Unknown candidate status')
-        if group not in (None,'all','retry','repair','reacquire','checking','changed','audiobook','other','unsupported')+tuple(k for k in self.ATTENTION_ORDER if self.ATTENTION_ORDER[k]<0) \
-                or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
+        if group is not None and group not in ATTENTION_GROUPS or group not in (None,'all') and status!='output_attention':raise ValueError('Unknown attention group')
         direct=status in ('all','errors','changed')
         with connect(self.inventory.database) as db:
             self.page_local.contexts={r['id']:{'revision':r['revision'],'data':json.loads(r['data'])} for r in db.execute('SELECT * FROM candidate_context')}
