@@ -296,8 +296,8 @@ class Handler(BaseHTTPRequestHandler):
         read and dropped first: a socket closed with unread data is reset, and on Windows the client then sees WinError
         10053 instead of the 403 (two flaky gate runs, 2026-10-25). Nothing of the body is used."""
         try:
-            lengths = self.headers.get_all('Content-Length',[]) or []
-            if self.command == 'POST' and len(lengths) == 1 and lengths[0].isascii() and lengths[0].isdigit() and len(lengths[0]) <= 6 and 0 < int(lengths[0]) <= MAX_BODY \
+            lengths = (self.headers.get_all('Content-Length',[]) or []) if getattr(self, 'command', None) == 'POST' else []
+            if len(lengths) == 1 and lengths[0].isascii() and lengths[0].isdigit() and len(lengths[0]) <= 6 and 0 < int(lengths[0]) <= MAX_BODY \
                     and not self.headers.get('Transfer-Encoding'):
                 self.connection.settimeout(2)
                 remaining = int(lengths[0])
@@ -306,8 +306,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not chunk:
                         break
                     remaining -= len(chunk)
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass  # a request double or a closed socket: answer as before
         self.fail(403, message)
 
     def query(self):
