@@ -277,19 +277,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def trusted(self, token=False):
         if self.headers.get('Host') not in {f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'}:
-            self.fail(403,'Invalid local host')
+            self.refuse('Invalid local host')
             return False
         origin = self.headers.get('Origin')
         if origin and origin not in self.server.origins:
-            self.fail(403,'Cross-origin access is blocked')
+            self.refuse('Cross-origin access is blocked')
             return False
         if self.headers.get('Sec-Fetch-Site') not in {None,'none','same-origin'}:
-            self.fail(403,'Cross-site access is blocked')
+            self.refuse('Cross-site access is blocked')
             return False
         if token and not secrets.compare_digest(self.headers.get('X-Books-Token','').encode('utf-8'),self.server.token.encode('ascii')):
-            self.fail(403,'Missing or invalid local request token')
+            self.refuse('Missing or invalid local request token')
             return False
         return True
+
+    def refuse(self, message):
+        """403 before the request body was read. The declared body (one Content-Length, at most MAX_BODY, 2 s at most) is
+        read and dropped first: a socket closed with unread data is reset, and on Windows the client then sees WinError
+        10053 instead of the 403 (two flaky gate runs, 2026-10-25). Nothing of the body is used."""
+        try:
+            lengths = self.headers.get_all('Content-Length',[]) or []
+            if self.command == 'POST' and len(lengths) == 1 and lengths[0].isascii() and lengths[0].isdigit() and len(lengths[0]) <= 6 and 0 < int(lengths[0]) <= MAX_BODY \
+                    and not self.headers.get('Transfer-Encoding'):
+                self.connection.settimeout(2)
+                remaining = int(lengths[0])
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+        except (OSError, ValueError):
+            pass
+        self.fail(403, message)
 
     def query(self):
         parsed = urlsplit(self.path)
