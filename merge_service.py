@@ -2326,8 +2326,28 @@ class MergeService:
             return value
         title,author=bounded(title,'title'),bounded(author,'author')
         row=self.reviews._row('Audiobooks',id,revision)
+        # 0.22.1 (item 1, the list read during research): every listed to-do row computes this for its "Goes to" line and
+        # Author field, about 0.3 s each (folder siblings, the catalog index, the rules); a page of 100 held rows took
+        # 11-30 s while research ran. The answer is reused while the book, the rules and the catalog facts it reads are
+        # unchanged; the caller still checks the destination on disk live.
+        key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,self._approval_stamp())
+        cache=self.__dict__.setdefault('_approval_results',{})
+        kept=cache.get(key)
+        if kept is not None:return row,copy.deepcopy(kept)
         result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**({'chosen':chosen} if chosen is not None else {}))
+        if len(cache)>=4096:cache.clear()
+        cache[key]=copy.deepcopy(result)
         return row,result
+
+    def _approval_stamp(self):
+        """What research.approved() reads beyond the book: the catalog revision (folder siblings), the finished and queued
+        books (library spellings and confirmed spellings) and Sergei's author rules."""
+        with connect(self.inventory.database) as db:
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules')")}
+            return (tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
+                    tuple(db.execute('SELECT count(*),max(updated) FROM audio_jobs').fetchone()) if 'audio_jobs' in have else (),
+                    tuple(db.execute("SELECT count(*) FROM automatic_candidates WHERE state='Queued'").fetchone()) if 'automatic_candidates' in have else (),
+                    tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rules').fetchone()) if 'author_rules' in have else ())
 
     def _approval_destination(self,row,result):
         """(path relative to the output folder, absolute path, reason when there is none) Approve files this result as."""

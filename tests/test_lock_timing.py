@@ -187,6 +187,29 @@ class ApprovalStartTests(ApproveFixture):
         self.assertEqual(len(seen), 2, 'every finished book was still re-checked')
 
 
+class ApprovalPreviewTests(ApproveFixture):
+    def test_the_goes_to_line_is_reused_until_the_book_or_the_rules_change_and_taken_stays_live(self):
+        # The to-do list computes this for every held row it shows (0.3 s each on the live catalog: 11-30 s a page during
+        # research). Reused while the book, the rules and the catalog facts it reads are unchanged.
+        import author_rules
+        tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера', title='Глава 1', track='1/1')
+        row = self.start()[0]
+        calls = []
+        real = self.service.automatic.research.approved
+        with patch.object(self.service.automatic.research, 'approved', lambda *a, **k: calls.append(1) or real(*a, **k)):
+            first = self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(self.service.approval_preview(row['id'], row['revision']), first)
+            self.assertEqual(len(calls), 1, 'reused')
+            Path(first['absolute']).parent.mkdir(parents=True); Path(first['absolute']).write_bytes(b'x')
+            self.assertTrue(self.service.approval_preview(row['id'], row['revision'])['taken'], 'the name on disk is checked live')
+            self.assertEqual(len(calls), 1)
+            self.service.approval_preview(row['id'], row['revision'], title='Утро снайпера 2')
+            self.assertEqual(len(calls), 2, 'typed values are their own answer')
+            with connect(self.inv.database) as db: author_rules.setup(db); author_rules.append(db, 'keep', 'Кто-то Новый', source='test')
+            self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(len(calls), 3, 'a new rule computes it again')
+
+
 class ListReadLimitTests(ApproveFixture):
     # The limit leaves the gate (seven workers at once) room: one page took 0.2-2.0 s alone on a live-sized catalog (1,572
     # books, 508 finished; see live_sized), and 21 s on 0.22.0 code during a status computation; the live list took 54-100 s.
