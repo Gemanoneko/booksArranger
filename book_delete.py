@@ -32,9 +32,11 @@ Files go one at a time through the exact-handle disposal source cleanup uses (na
 files through the working lifecycle's exact-handle discard. A file that fails does not stop the others. Records go last,
 in one catalog transaction, only when every listed file is confirmed gone; on any failure no record is deleted, so the
 book stays listed and nothing is half-forgotten. A folder is housekeeping: one that cannot be removed is reported and
-never keeps the book listed. A folder is removed only through the exact-handle empty-folder disposition, which refuses
-on a filesystem where a late directory stream could be lost (Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md);
-the preview lists only folders that disposition can remove, so the dialog never promises one it cannot."""
+never keeps the book listed. Ruling 24a (Sergei 2026-10-25, "Allow"): for these two explicit actions only, a folder left
+empty is removed with a plain, non-recursive directory removal (rmdir: it fails unless the folder is empty), also on
+NTFS and network drives such as Z:, where the app's exact-handle empty-folder disposition refuses (a late directory
+stream could be lost: Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md). Every other path, source folder
+cleanup and Clear working files included, keeps that refusal: nothing here changes native_io."""
 import contextlib
 import datetime
 import json
@@ -45,7 +47,7 @@ import threading
 from pathlib import Path
 
 from metadata import AUDIO
-from native_io import BoundaryError, DirectoryBoundary, FileInUse, VerifiedDirectory, VerifiedFile, ordinary
+from native_io import BoundaryError, DirectoryBoundary, FileInUse, VerifiedFile, ordinary
 from scanner import connect, inside
 
 CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused', 'sorted_missing', 'sorted_changed', 'not_identical')
@@ -351,8 +353,9 @@ def _working(service, jobs, text):
 def _folders(book_folders, files, output):
     """Ruling 24: the folders this press leaves empty: a book folder all of whose entries are listed files, then each
     parent all of whose entries are listed files or such folders, up to but never a folder directly inside a source
-    folder, never a source folder, never one in Sorted. A folder already empty is not touched. Only folders the
-    exact-handle empty-folder disposition can remove are listed (see _removable). Deepest first: [(folder, root)]."""
+    folder, never a source folder, never one in Sorted. A folder already empty is not touched. Only an ordinary folder
+    (no junction, symlink or reparse point, from the drive root down) is listed (see _removable). Deepest first:
+    [(folder, root)]."""
     listed = {_key(f['path']) for f in files if f['kind'] != 'working'}
     planned, out = set(), []
     for folder, root in sorted(book_folders, key=lambda item: -len(Path(item[0]).parts)):
@@ -378,22 +381,36 @@ def _folders(book_folders, files, output):
 
 
 def _removable(folder, root):
-    """The exact-handle empty-folder disposition can remove this folder: an ordinary directory (no reparse point) whose
-    ancestors are ordinary, on a filesystem where it is supported (require_empty_disposition). It refuses where a late
-    directory stream could be lost, which today includes NTFS and network shares: then the folder stays, unlisted."""
+    """An ordinary folder: it and every folder from the drive root down to it held by DirectoryBoundary (no junction,
+    symlink or other reparse point). Ruling 24a: no filesystem capability is required."""
     try:
-        with DirectoryBoundary(ordinary(root), ordinary(folder).parent), VerifiedDirectory(ordinary(folder)) as target:
-            target.require_empty_disposition()
-        return True
+        with DirectoryBoundary(ordinary(root), ordinary(folder)):
+            return True
     except (BoundaryError, OSError):
         return False
 
 
+def _empty(folder):
+    """The folder's listing shows nothing: no file, subfolder or link (ruling 24a's first condition)."""
+    with os.scandir(folder) as listing:
+        return next(listing, None) is None
+
+
 def _remove_folder(folder, root):
-    """Remove one listed folder if it is empty now, through the exact handle; True when it is gone."""
+    """Ruling 24a: remove one listed folder if it is empty now; True when it is gone. Its ancestors are held (no junction
+    or symlink, none renamed meanwhile), the folder itself must be an ordinary directory, never directly inside a source
+    folder (_folders) and never in Sorted (_folders), and its listing must show nothing. Then a plain rmdir, which
+    fails if anything arrived in it meanwhile: never anything recursive. Any failure keeps the folder ("1 folder
+    stayed."); the book is forgotten all the same."""
     try:
-        with DirectoryBoundary(ordinary(root), ordinary(folder).parent), VerifiedDirectory(ordinary(folder), delete=True) as target:
-            target.dispose_empty()
+        target = ordinary(folder)
+        with DirectoryBoundary(ordinary(root), target.parent):
+            facts = os.lstat(target)
+            if not stat.S_ISDIR(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or os.path.isjunction(target) or os.path.islink(target):
+                return False
+            if not _empty(target):
+                return False
+            os.rmdir(target)
     except (BoundaryError, OSError):
         return False
     return not os.path.lexists(folder)

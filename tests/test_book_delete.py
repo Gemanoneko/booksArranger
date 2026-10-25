@@ -321,10 +321,10 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         attention = row['creation']['job']['attention']
         self.assertEqual(((attention.get('remedy') or {}).get('kind'), attention.get('delete')), ('replace_source', {'kind': 'audio_damaged', 'present': 1}))
         preview = self.service.delete_preview(row['id'], row['revision'])
-        self.assertEqual([f['path'] for f in preview['files']], [str(source)])
-        result = self.service.delete_book(row['id'], row['revision'], [str(source)])
-        self.assertEqual((result['deleted'], result['forgotten']), (1, True))
-        self.assertFalse(source.exists())
+        self.assertEqual(([f['path'] for f in preview['files']], preview['folders']), ([str(source)], [str(source.parent)]))
+        result = self.service.delete_book(row['id'], row['revision'], [str(source)], preview['folders'])
+        self.assertEqual((result['deleted'], result['forgotten'], result['folders']), (1, True, {'removed': 1, 'stayed': 0}))
+        self.assertFalse(source.exists() or source.parent.exists(), 'the file, then its folder left empty (rulings 24, 24a)')
         with connect(self.inv.database) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM audio_jobs WHERE job_id='job-iron'").fetchone()[0], 0, 'its job and journal go')
 
@@ -456,24 +456,16 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(len(rows), 1, 'positive control: a Missing files row')
         return rows[0], place
 
-    def supported(self):
-        """A filesystem where the exact-handle empty-folder disposition is supported. NTFS (this fixture) and network
-        shares report named streams or no local volume, so it refuses there by design (the safety floor of
-        Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md); the rest of the disposition runs for real."""
-        import native_io
-        return mock.patch.object(native_io.VerifiedDirectory, 'require_empty_disposition', return_value={})
-
     def test_delete_takes_the_cover_text_files_and_the_folder_it_leaves_empty(self):
         # Ruling 24: the other files of a folder that holds no other book go too, and so does the folder left empty, but
         # never a folder directly inside a source folder (Сборники stays). Before: only the audio, and the folder stayed.
         row, place = self.alone()
         self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 4}, 'present counts every file the press deletes')
         sorted_before = listing(self.sorted)
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
-            self.assertEqual(self.shown(preview), [('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio'), ('cover.jpg', 'other'), ('info.txt', 'other')])
-            self.assertEqual((preview['folders'], preview['stay'], preview['bytes']), ([str(place)], {'items': 0}, sum(p.stat().st_size for p in place.iterdir())))
-            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual(self.shown(preview), [('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio'), ('cover.jpg', 'other'), ('info.txt', 'other')])
+        self.assertEqual((preview['folders'], preview['stay'], preview['bytes']), ([str(place)], {'items': 0}, sum(p.stat().st_size for p in place.iterdir())))
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
         self.assertEqual((result['deleted'], result['failed'], result['forgotten'], result['folders']), (4, [], True, {'removed': 1, 'stayed': 0}))
         self.assertFalse(place.exists(), 'the book folder left empty is removed')
         self.assertTrue(place.parent.is_dir(), 'a folder directly inside the source folder stays')
@@ -481,35 +473,104 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         with connect(self.inv.database) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM files WHERE path LIKE ?', (str(place) + '%',)).fetchone()[0], 0, 'their catalog rows go too')
 
-    def test_a_folder_the_disposition_refuses_is_never_promised_and_stays(self):
-        # The safety floor kept: on NTFS or a network share (Z:) the exact-handle disposition refuses, so the preview lists
-        # no folder (the dialog never says one is removed) and the emptied folder stays. The files still go.
+    def test_ruling_24a_removes_the_emptied_folders_on_ntfs_where_the_native_disposition_still_refuses(self):
+        # Ruling 24a (Sergei 2026-10-25, "Allow"): on NTFS and network drives (Z:) the app's exact-handle empty-folder
+        # disposition refuses (a late directory stream could be lost), so before this no folder was ever listed or removed.
+        # Delete book now removes the folders it leaves empty with a plain rmdir, cascading up to, never including, a
+        # folder directly inside the source folder. Control: the native disposition still refuses on this same drive, so
+        # source folder cleanup and every other path keep the old refusal.
+        import native_io
+        row, place = self.alone(folder=('Сборники', 'Петров Иван', 'Новая плоть'))
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual(preview['folders'], [str(place), str(place.parent)], 'the book folder, then its parent left empty; deepest first')
+        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['failed'], result['forgotten'], result['folders']), ([], True, {'removed': 2, 'stayed': 0}))
+        self.assertFalse(place.parent.exists(), 'both removed')
+        self.assertTrue((self.audio / 'Сборники').is_dir(), 'never a folder directly inside the source folder')
+        control = self.audio / 'Сборники' / 'empty'; control.mkdir()
+        with self.assertRaises(native_io.DirectoryDispositionUnsupported):
+            with native_io.DirectoryBoundary(self.audio, control.parent), native_io.VerifiedDirectory(control, delete=True) as target:
+                target.dispose_empty()
+        self.assertTrue(control.is_dir(), 'control: the old refusal still holds for every other path')
+
+    def test_a_file_that_appears_before_the_folder_goes_keeps_the_folder_and_the_book_is_forgotten(self):
+        # Ruling 24a: a file that arrives after the preview, while the press runs, makes the folder not empty: it stays
+        # ("1 folder stayed."), the new file is untouched, and the book removal completes.
         row, place = self.alone()
         preview = self.service.delete_preview(row['id'], row['revision'])
-        self.assertEqual((preview['folders'], len(preview['files'])), ([], 4))
-        result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
-        self.assertEqual((result['forgotten'], result['folders']), (True, {'removed': 0, 'stayed': 0}))
-        self.assertEqual(list(place.iterdir()), [], 'emptied, not removed')
+        real = book_delete.remove
+        def arriving(path, root, size):
+            outcome = real(path, root, size)
+            if not any(p.suffix == '.mp3' for p in place.iterdir()):
+                (place / 'late.txt').write_text('arrived', encoding='utf-8')
+            return outcome
+        with mock.patch.object(book_delete, 'remove', arriving):
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['failed'], result['forgotten'], result['folders']), ([], True, {'removed': 0, 'stayed': 1}))
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['late.txt'])
+        self.assertEqual(self.records(row['id'], [])['book_groups'], 0, 'the book is forgotten all the same')
+
+    def test_the_folder_removal_is_a_plain_rmdir_never_recursive(self):
+        # Ruling 24a: even if a file arrives between the emptiness check and the removal, the removal itself refuses a
+        # folder that is not empty (rmdir semantics): the file and the folder stay.
+        row, place = self.alone()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        real = book_delete.remove
+        def arriving(path, root, size):
+            outcome = real(path, root, size)
+            if not any(p.suffix == '.mp3' for p in place.iterdir()):
+                (place / 'late.txt').write_text('arrived', encoding='utf-8')
+            return outcome
+        with mock.patch.object(book_delete, 'remove', arriving), mock.patch.object(book_delete, '_empty', return_value=True):  # the check raced
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['forgotten'], result['folders']), (True, {'removed': 0, 'stayed': 1}))
+        self.assertEqual((place / 'late.txt').read_text(encoding='utf-8'), 'arrived')
+
+    def test_a_folder_swapped_for_a_junction_during_the_press_is_not_removed(self):
+        # Ruling 24a: only an ordinary folder is removed. Emptied, then replaced by a junction (to an empty folder) before
+        # its removal: the junction is not removed; it stays, and so does its target.
+        row, place = self.alone()
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        real, target, moved = book_delete.remove, self.base / 'junction-target', self.base / 'emptied-book'
+        target.mkdir()
+        def swapping(path, root, size):
+            outcome = real(path, root, size)
+            if not any(place.iterdir()):
+                place.rename(moved); _winapi.CreateJunction(str(target), str(place))
+            return outcome
+        self.addCleanup(lambda: os.path.isjunction(place) and os.rmdir(place))
+        with mock.patch.object(book_delete, 'remove', swapping):
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertEqual((result['forgotten'], result['folders']), (True, {'removed': 0, 'stayed': 1}))
+        self.assertTrue(os.path.isjunction(place) and target.is_dir(), 'the junction and its target stay')
+
+    def test_a_folder_holding_a_link_or_a_subfolder_is_not_left_empty(self):
+        # Ruling 24a: the folder's listing must show no file, subfolder or link; a junction inside it stays, so does it.
+        row, place = self.alone()
+        target = self.base / 'elsewhere'; target.mkdir()
+        _winapi.CreateJunction(str(target), str(place / 'link')); self.addCleanup(lambda: os.path.isjunction(place / 'link') and os.rmdir(place / 'link'))
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((preview['folders'], preview['stay']), ([], {'items': 1}))
+        self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        self.assertTrue(os.path.isjunction(place / 'link') and target.is_dir(), 'the link and its target untouched')
 
     def test_a_listed_folder_that_cannot_be_removed_stays_and_never_keeps_the_book(self):
         # Ruling 24 / Judy 2.1: a folder is housekeeping. Another program holds it (no delete sharing): it stays, reported,
         # and the book is forgotten all the same.
         row, place = self.alone()
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
-            held = _winapi.CreateFile(str(place), 0x80000000, 0x1 | 0x2, 0, 3, 0x02000000, 0)  # read, share read+write, no delete
-            try:
-                result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
-            finally:
-                _winapi.CloseHandle(held)
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        held = _winapi.CreateFile(str(place), 0x80000000, 0x1 | 0x2, 0, 3, 0x02000000, 0)  # read, share read+write, no delete
+        try:
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        finally:
+            _winapi.CloseHandle(held)
         self.assertEqual((result['failed'], result['forgotten'], result['folders']), ([], True, {'removed': 0, 'stayed': 1}))
         self.assertTrue(place.is_dir())
 
     def test_a_folder_with_two_books_keeps_its_cover_and_text_files(self):
         # Ruling 24: "Shared or ambiguous files stay, and the dialog says so": the folder holds another book's audio.
         row = self.book()
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
         self.assertEqual((self.shown(preview), preview['folders'], preview['stay']), ([('Новая плоть 1.mp3', 'audio'), ('Новая плоть 2.mp3', 'audio')], [], {'items': 3}))
 
     def test_a_cover_another_book_uses_stays_and_the_text_file_goes(self):
@@ -520,19 +581,17 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                        ('other-job', json.dumps({'candidate_id': 'other-book', 'metadata': {'title': 'Чужая книга'}, 'sources': [{'path': str(self.audio / 'Elsewhere' / 'x.mp3')}],
                                                  'cover': {'path': str(place / 'cover.jpg')}}), 'h', 'pending', 'queued', None, '{}', None, '', 't', 't'))
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
-            self.assertEqual((self.shown(preview)[2:], preview['folders'], preview['stay']), ([('info.txt', 'other')], [], {'items': 1}))
-            self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((self.shown(preview)[2:], preview['folders'], preview['stay']), ([('info.txt', 'other')], [], {'items': 1}))
+        self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
         self.assertEqual(sorted(p.name for p in place.iterdir()), ['cover.jpg'])
 
     def test_a_cover_held_open_keeps_the_book_listed(self):
         # Futaba's check 3: the cover in use by another program is reported like any file; the book stays, records kept.
         row, place = self.alone()
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
-            with open(place / 'cover.jpg', 'rb'):
-                result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        with open(place / 'cover.jpg', 'rb'):
+            result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
         self.assertEqual(([(Path(f['path']).name, f['cause']) for f in result['failed']], result['forgotten'], result['folders']), ([('cover.jpg', 'in_use')], False, {'removed': 0, 'stayed': 0}))
         self.assertFalse(self.parts[0].exists())
         self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted while a file is on disk')
@@ -540,11 +599,10 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
     def test_a_file_added_after_the_dialog_opened_refuses_the_press(self):
         # Futaba's check 3: the list now differs from the one shown (a new file, or the folder no longer left empty).
         row, place = self.alone()
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
-            (place / 'notes.txt').write_text('new', encoding='utf-8')
-            with self.assertRaises(book_delete.DeleteRefused) as refused:
-                self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        (place / 'notes.txt').write_text('new', encoding='utf-8')
+        with self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']], preview['folders'])
         self.assertEqual(refused.exception.code, 'files_changed')
         self.assertTrue(self.parts[0].exists(), 'nothing deleted')
 
@@ -611,7 +669,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (3, [], True))
         self.assertEqual(set(opened), {'held'}, 'the audiobook could not be opened for writing during the removal')
         self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
-        self.assertEqual(list(place.iterdir()), [])
+        self.assertFalse(place.exists(), 'the copy folder left empty is removed too (ruling 24a)')
         self.assertEqual(self.records(copy['id'], [Path(m['path']) for m in copy['members']]), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
 
     def test_remove_this_copy_refuses_without_the_proof_and_touches_nothing(self):
@@ -662,8 +720,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
 
     def test_a_book_folder_directly_inside_the_source_folder_stays(self):
         row, place = self.alone(folder=('Новая плоть',))
-        with self.supported():
-            preview = self.service.delete_preview(row['id'], row['revision'])
+        preview = self.service.delete_preview(row['id'], row['revision'])
         self.assertEqual((len(preview['files']), preview['folders']), (4, []), 'its files go, the folder stays')
 
     def test_a_damaged_mp3_the_app_can_still_retry_has_no_offer(self):
