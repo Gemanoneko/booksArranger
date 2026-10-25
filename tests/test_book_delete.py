@@ -723,6 +723,20 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         preview = self.service.delete_preview(row['id'], row['revision'])
         self.assertEqual((len(preview['files']), preview['folders']), (4, []), 'its files go, the folder stays')
 
+    def test_a_stopped_row_carries_its_jobs_destination_for_its_goes_to_line(self):
+        # Futaba's m-3 (rest): the damaged-MP3 Stopped row had no "Goes to" line; Judy's to-do spec (1.6, section 4) puts one
+        # on every row, Stopped rows included. The row's job now carries its own destination, relative to Sorted.
+        source, row = self.damaged_mp3()
+        self.assertIsNone(row['creation']['job'].get('destination'), 'positive control: a manifest naming no destination')
+        target = self.sorted / 'Петров Иван' / 'Железный ад - Петров Иван.m4b'
+        with connect(self.inv.database) as db:
+            manifest = json.loads(db.execute("SELECT manifest FROM audio_jobs WHERE job_id='job-iron'").fetchone()[0])
+            manifest.update(destination=str(target), output_root=str(self.sorted))
+            db.execute("UPDATE audio_jobs SET manifest=? WHERE job_id='job-iron'", (json.dumps(manifest),))
+        self.service.invalidate_status()
+        row = next(r for r in self.service.reviews.page(status='output_attention')['rows'] if r['id'] == row['id'])
+        self.assertEqual(row['creation']['job']['destination'], {'path': str(Path('Петров Иван') / 'Железный ад - Петров Иван.m4b'), 'absolute': str(target)})
+
     def test_a_damaged_mp3_the_app_can_still_retry_has_no_offer(self):
         source, row = self.damaged_mp3(repaired=False)
         self.assertNotIn('delete', row['creation']['job']['attention'], '"Retry checks it again": Repair comes first')

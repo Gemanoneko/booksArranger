@@ -90,6 +90,9 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   await get('delete-close').handlers.click({});
   assert.equal(hint(trOf('cand-p')),'Deleted 1 of 2 files. 1 is still on disk.');
   assert.equal(get('retry-all-status').textContent,'Deleted 1 of 2 files. The book stays listed with the 1 that could not be deleted.');
+  // Futaba's 0.22.0 QA, m-11: after a partial delete, Scan again on the row shows its result line (spec check 12).
+  await buttonsOf(trOf('cand-p')).find(b=>b.textContent==='Scan again').handlers.click({stopPropagation(){}});await tick();
+  assert.match(hint(trOf('cand-p')),/Checked \d\d:\d\d\. Not found\.$/);
   // 5. A refusal found by the preview opens the dialog in its refusal state: nothing to confirm.
   previewAnswer=()=>ok({files:[],bytes:0,refusal:{code:'shared',files:[{path:FOLDER+'\\01.m4b',other:'Другая книга'}]}});
   await deleteButton(trOf('cand-p')).handlers.click({stopPropagation(){}});await tick();
@@ -108,6 +111,21 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   assert.doesNotMatch(get('delete-dialog-files').textContent,/Nothing was deleted/);
   await get('delete-close').handlers.click({});
   run('recoveryDisconnected=false;controls()');  // the connection is back (the lost one above set it, as a failed poll does)
+  // Futaba's 0.22.0 QA, m-10: after a successful Delete with other rows left, focus goes to the next row's first working
+  // control (the list is read again; here it holds the next row only), not to the page.
+  previewAnswer=()=>ok({files:FILES,bytes:10,refusal:null});deleteAnswer=()=>ok({deleted:2,bytes:10,failed:[],forgotten:true,folders:{removed:0,stayed:0}});
+  paint([missing('f1',{kind:'files_missing',present:2}),missing('f2',{kind:'files_missing',present:2})]);
+  inventoryOverride=()=>({ok:true,json:async()=>({rows:[missing('f2',{kind:'files_missing',present:2})],total:1})});
+  await deleteButton(trOf('cand-f1')).handlers.click({stopPropagation(){}});await tick();await get('delete-confirm').handlers.click({});await tick();await tick();
+  assert.equal(trOf('cand-f1'),undefined);assert.ok(trOf('cand-f2').contains(document.activeElement),'focus is on the next row');
+  inventoryOverride=null;
+  // Futaba's m-3: every Stopped row shows its Goes to line (Judy's to-do spec 1.6 and section 4), from its job.
+  const going=blocked({id:'cand-d',path:'cand-d',title_clue:'Title d',review:{title:'Title d'}},{job_id:'job-d',reason:'x',destination:{path:'Иван Петров\\Железный ад.m4b',absolute:ROOT+'\\Иван Петров\\Железный ад.m4b'},attention:{group:'retry',cause:null,originals_untouched:true}});
+  paint([going,canRetry]);
+  const line=tr=>{const found=[];const walk=e=>{for(const c of e.children || []){if(c.className==='goes-to')found.push(c);walk(c);}};walk(statusCell(tr));return found;};
+  assert.deepEqual(line(trOf('cand-d')).map(l=>l.children.map(c=>c.textContent)),[['Goes to','Audiobooks Sorted\\Иван Петров\\Железный ад.m4b']]);
+  assert.equal(line(trOf('cand-d'))[0].title,ROOT+'\\Иван Петров\\Железный ад.m4b');
+  assert.deepEqual(line(trOf('cand-c')),[],'no destination from the server: no line');
   // 7. Rulings 24 and 26 (Judy's update spec 2.2, 2.3): labelled groups in order, the folders, the stay line, the
   // last-copy line; the confirm sends the folders shown; the strip names the folders removed and those that stayed.
   const WORK='C:\\Books\\data\\audio-staging\\job\\attempt\\source00000.m4b';

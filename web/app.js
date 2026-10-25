@@ -256,7 +256,7 @@ function renderRows(force=false) {
         if(askOf(row))buildAskCell(row,td);  // a book only Sergei can move on: its sentence, fields, Goes to (Judy 2026-10-24)
         else{
         const shown=rowState(row);
-        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
+        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);stoppedGoesTo(row,td);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
@@ -699,7 +699,7 @@ function cleanupFacts(row){const creation=row.creation || {},policy=creation.cle
 function chapterSummary(row){if(row.creation?.job)return row.creation.chapters_description || 'Chapter markers: see saved job plan';return $('add-chapters').checked && row.creation?.chapters_available?`Chapter markers: ${trackDraft.included.length} — one per included source track`:'Chapter markers: none';}
 function updateChapterSummary(){if(!trackDraft || selectedRow?.kind!=='candidate')return;$('output-summary').textContent=$('output-summary').textContent.replace(/^Chapter markers:.*$/m,chapterSummary(selectedRow));}
 function plannedChapter(member,key){if(!$('add-chapters').checked)return 'Chapter markers disabled';if(!trackDraft.included.includes(key))return 'Excluded from output — no chapter marker';if(member.chapter_name_source==='source' && member.chapter_name)return 'Source chapter name: '+member.chapter_name;const position=trackDraft.order.filter(id=>trackDraft.included.includes(id)).indexOf(key)+1;const number=Number.isInteger(member.chapter_number) && member.chapter_number>=0?member.chapter_number:position;return 'Generated chapter label: Track '+String(number).padStart(Math.max(2,String(trackDraft.included.length).length),'0');}
-function renderMembers(row,force=false){if(!force && $('candidate-members').contains?.(document.activeElement))return;const focused=document.activeElement?.dataset?.memberFocus;const memberKey=JSON.stringify([row.id,row.members,row.metadata_facts,trackDraft.order,trackDraft.included,$('add-chapters').checked]);if(memberKey===memberRenderKey)return;memberRenderKey=memberKey;$('candidate-members').replaceChildren();const map=new Map(row.members.map(member=>[member.member_key || member.path,member])),order=trackDraft.order;const header=$('candidate-members').parentElement.querySelector('thead tr');header.replaceChildren();for(const label of ['Include','Proposed order','Track title / filename','Source disc / track number','Duration','Order evidence'])header.append(node('th',label));for(let index=0;index<order.length;index++){const key=order[index],member=map.get(key);if(!member)continue;const tr=node('tr'),inc=node('input');inc.type='checkbox';inc.dataset.memberFocus=key+':include';inc.checked=trackDraft.included.includes(key);inc.title='Include this source file in the output audiobook. Excluded files stay untouched.';inc.setAttribute('aria-label','Include '+member.path);inc.setAttribute('aria-describedby','track-save-help');inc.disabled=ended;inc.addEventListener('change',()=>{if(busy || ended){inc.checked=trackDraft.included.includes(key);return;}trackDraft.included=inc.checked?[...trackDraft.included,key]:trackDraft.included.filter(item=>item!==key);tracksChanged();renderMembers(row,true);});const label=node('label','','check');label.append(inc,node('span',inc.checked?'Included':'Excluded from output'));const include=node('td');include.append(label);tr.append(include);const movement=node('td');movement.append(node('p',String(index+1)));const buttons=node('div','','member-actions');for(const [delta,text] of [[-1,'Move up'],[1,'Move down']]){const button=node('button',text,'quiet');button.type='button';button.dataset.memberFocus=key+':'+delta;button.title=`${text}: ${member.path}`;button.setAttribute('aria-label',`${text}: ${member.path}`);button.setAttribute('aria-describedby','order-help');button.disabled=ended || index+delta<0 || index+delta>=order.length;button.addEventListener('click',()=>{if(busy || ended)return;[order[index],order[index+delta]]=[order[index+delta],order[index]];tracksChanged();renderMembers(row,true);});buttons.append(button);}movement.append(buttons);tr.append(movement);for(const value of [`${member.track_title || ''}\n${member.path}\n${plannedChapter(member,key)}${memberComponents(member,row).length?'\n'+memberComponents(member,row).join('\n'):''}`, `${member.source_disc || 'Unknown'} / ${member.source_track || 'Unknown'}`,typeof member.duration==='number'?`${member.duration.toFixed(2)} s`:'Unknown',member.order_evidence || 'Unknown'])tr.append(node('td',value));$('candidate-members').append(tr);}if(focused){const target=[...$('candidate-members').querySelectorAll('[data-member-focus]')].find(element=>element.dataset.memberFocus===focused && !element.disabled);target?.focus({preventScroll:true});}const included=row.members.filter(member=>trackDraft.included.includes(member.member_key || member.path)),known=included.every(member=>typeof member.duration==='number');$('member-count').textContent=`Included audio files — ${included.length} · ${known?included.reduce((sum,member)=>sum+member.duration,0).toFixed(2)+' s':'Total duration incomplete'}`;}
+function renderMembers(row,force=false){if(!force && $('candidate-members').contains?.(document.activeElement))return;const focused=document.activeElement?.dataset?.memberFocus;const memberKey=JSON.stringify([row.id,row.members,row.metadata_facts,trackDraft.order,trackDraft.included,$('add-chapters').checked]);if(memberKey===memberRenderKey)return;memberRenderKey=memberKey;$('candidate-members').replaceChildren();const map=new Map(row.members.map(member=>[member.member_key || member.path,member])),order=trackDraft.order;const header=$('candidate-members').parentElement.querySelector('thead tr');header.replaceChildren();for(const label of ['Include','Proposed order','Track title / filename','Source disc / track number','Duration','Order evidence'])header.append(node('th',label));for(let index=0;index<order.length;index++){const key=order[index],member=map.get(key);if(!member)continue;const tr=node('tr'),inc=node('input');inc.type='checkbox';inc.dataset.memberFocus=key+':include';inc.checked=trackDraft.included.includes(key);inc.title='Include this source file in the output audiobook. Excluded files stay untouched.';inc.setAttribute('aria-label','Include '+member.path);inc.setAttribute('aria-describedby','track-save-help');inc.disabled=ended;inc.addEventListener('change',()=>{if(busy || ended){inc.checked=trackDraft.included.includes(key);return;}trackDraft.included=inc.checked?[...trackDraft.included,key]:trackDraft.included.filter(item=>item!==key);tracksChanged();renderMembers(row,true);});const label=node('label','','check');label.append(inc,node('span',inc.checked?'Included':'Excluded from output'));const include=node('td');include.append(label);tr.append(include);const movement=node('td');movement.append(node('p',String(index+1)));const buttons=node('div','','member-actions');for(const [delta,text] of [[-1,'Move up'],[1,'Move down']]){const button=node('button',text,'quiet');button.type='button';button.dataset.memberFocus=key+':'+delta;button.title=`${text}: ${member.path}`;button.setAttribute('aria-label',`${text}: ${member.path}`);button.setAttribute('aria-describedby','order-help');button.disabled=ended || index+delta<0 || index+delta>=order.length;button.addEventListener('click',()=>{if(busy || ended)return;[order[index],order[index+delta]]=[order[index+delta],order[index]];tracksChanged();renderMembers(row,true);});buttons.append(button);}movement.append(buttons);tr.append(movement);for(const value of [`${member.track_title || ''}\n${member.path}${member.missing?'\nNot found':''}\n${plannedChapter(member,key)}${memberComponents(member,row).length?'\n'+memberComponents(member,row).join('\n'):''}`, `${member.source_disc || 'Unknown'} / ${member.source_track || 'Unknown'}`,typeof member.duration==='number'?`${member.duration.toFixed(2)} s`:'Unknown',member.order_evidence || 'Unknown'])tr.append(node('td',value));$('candidate-members').append(tr);}if(focused){const target=[...$('candidate-members').querySelectorAll('[data-member-focus]')].find(element=>element.dataset.memberFocus===focused && !element.disabled);target?.focus({preventScroll:true});}const included=row.members.filter(member=>trackDraft.included.includes(member.member_key || member.path)),known=included.every(member=>typeof member.duration==='number');$('member-count').textContent=`Included audio files — ${included.length} · ${known?included.reduce((sum,member)=>sum+member.duration,0).toFixed(2)+' s':'Total duration incomplete'}`;}
 function tracksChanged(){trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();$('source-coverage').checked=false;$('playback-order').checked=false;controls();$('output-reasons').textContent='Save the changed source selection and playback order. Review confirmations were reset.';}
 async function renderCovers(row){const coverKey=JSON.stringify([row.id,row.cover_choices,coverId]);if(coverKey===coverRenderKey || $('selected-cover').contains?.(document.activeElement) || $('cover-choices').contains?.(document.activeElement))return;coverRenderKey=coverKey;const seq=++coverSequence;for(const url of coverObjects)URL.revokeObjectURL(url);coverObjects.length=0;$('selected-cover').replaceChildren();$('cover-choices').replaceChildren();for(const cover of row.cover_choices || []){const panel=node('section','','cover-choice');panel.append(node('p',`${cover.source_label || 'Artwork'} · ${cover.evidence_kind || 'Local artwork — edition unverified'}`));if(cover.source_url)panel.append(sourceLink(cover.source_url,`Cover source: ${cover.source_label || 'Artwork'}`));const image=node('img');image.alt=`Cover: ${row.review?.title || row.title_clue}`;image.hidden=true;panel.append(image);const imageState=node('p','Loading cover…');panel.append(imageState);const use=node('button','Use this cover','quiet');use.type='button';use.title='Select this image as the single cover in the output audiobook.';use.setAttribute('aria-describedby','cover-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;coverId=cover.id;dirty=true;noteOnlyDirty=false;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Cover selection is an unsaved draft.';renderCovers(row);controls();});panel.append(use);(cover.id===coverId?$('selected-cover'):$('cover-choices')).append(panel);if(!cover.thumbnail_url){imageState.textContent='Cover image unavailable';continue;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Invalid local thumbnail route');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover image unavailable');const blob=await response.blob();if(seq!==coverSequence)return;const object=URL.createObjectURL(blob);coverObjects.push(object);image.src=object;image.hidden=false;imageState.textContent='';}catch(error){if(seq===coverSequence)imageState.textContent=error.message || 'Cover image unavailable';}}if(!coverId)$('selected-cover').append(node('p',row.metadata_facts?.cover?.kind==='absent'?'No artwork available; the saved policy permits processing without artwork.':'Artwork not selected. Artwork alone does not establish recording identity.'));}
 $('select-page').addEventListener('change',()=>{for(const row of rows.filter(item=>item.kind==='candidate')){if($('select-page').checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);}renderRows();});
@@ -987,6 +987,12 @@ function updateClearButton(button,row){
   button.disabled=false;
 }
 const PRESS_TIMEOUT=15000;
+// Futaba's 0.22.0 QA, M-4: Approve checks every file before it answers (probes, hashes, cover, track review): 24.5 s for
+// a 77-file book, longer for real files. At PRESS_TIMEOUT the page said "Connection interrupted" while the server went on
+// and queued the book, and the re-enabled button invited a second press (409). Approve waits for its answer; its pending
+// face and aria-disabled button stay until then, so it cannot be pressed twice. A server gone away still ends the request
+// at once (a closed connection), and a request still unanswered after ten minutes ends like a lost connection.
+const APPROVE_TIMEOUT=600000;
 // After a press with no reply: re-read the book from the server. Returns its queued state (it landed),
 // false (the server answered and the book is not queued) or null (still no answer).
 async function pressLanded(row,jobId){
@@ -2130,6 +2136,11 @@ function updateAskButton(entry,button,kind){
   if(mode==='pending' || mode==='inert')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=!['ready','pending','inert'].includes(mode);
 }
+// Every Stopped row shows where its book goes (Judy's to-do spec 1.6 and section 4; Futaba's m-3): its job's own destination.
+function stoppedGoesTo(row,td){
+  const job=row.creation?.job,dest=job?.destination;if(job?.state!=='Output needs attention' || typeof dest?.path!=='string' || !dest.path)return;
+  const line=node('p','','goes-to');line.append(node('span','Goes to','goes-label'),node('span',outputName()+'\\'+dest.path,'path'));line.title=dest.absolute || dest.path;td.append(line);
+}
 function renderGoesTo(entry){
   const dest=askDestination(entry.row),line=entry.dest,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
   line.hidden=!path;if(!path)return;
@@ -2188,6 +2199,12 @@ function askClock(date){return String(date.getHours()).padStart(2,'0')+':'+Strin
 // The strip line (a polite live region): stays until the chip or filter changes; Retry receipts do not overwrite it.
 function askNote(text){stripNote=text;retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};renderAttentionGroups();}
 // After a press settled a book, focus goes to the next row's first working control, else the Status filter.
+// After a forced re-read (Delete book): the first working control of row id if it is still listed, else the Status filter.
+function leaveTo(id){
+  const next=id?rows.find(row=>row.id===id):null,other=next?askRows.get(next.id):null;
+  const target=!next?null:other?(other.controls.find(c=>!c.disabled && !c.hidden) || other.primary):[...(rowButtons(next.path)?.children || [])].find(b=>b.type==='button' && !b.hidden && !b.disabled);
+  (target || $('filter')).focus?.({preventScroll:true});
+}
 function askLeave(entry){
   const index=rows.findIndex(item=>item.id===entry.row.id);
   for(const next of rows.slice(index+1)){
@@ -2393,7 +2410,12 @@ async function deleteConfirm(event){
     deleteNotes.set(d.id,{text:ASK_DONE[t.done][1],warn:false,done:true});if(askRows.has(d.id))askDone.set(d.id,t.done);
     closeDeleteDialog(false);
     askNote(deleteStrip(d.mode,k,Number(result.bytes) || 0,result.folders));
-    askLeave({row:d.row});controls();refresh(true).catch(()=>{});return;
+    // Futaba's 0.22.0 QA, m-10: the forced re-read (the row leaves at the answer) replaces every row, the control askLeave
+    // had just focused too, so focus fell to the page. After it, the next row is found again (else the Status filter),
+    // unless focus has moved meanwhile.
+    const index=rows.findIndex(item=>item.id===d.id),next=rows.slice(index+1).find(item=>item.id!==d.id && !askDone.has(item.id))?.id;
+    askLeave({row:d.row});controls();const handed=document.activeElement;
+    refresh(true).catch(()=>{}).then(()=>{if(document.activeElement===handed || !document.activeElement || document.activeElement===document.body)leaveTo(next);});return;
   }
   if(failed.length){
     const f=failed.length;showDeleteState('partial',{deleted:k,failed});
@@ -2421,12 +2443,14 @@ async function askPress(entry,kind){
   if(kind==='order' || kind==='choose')return openTrackReview(entry);
   if(askPending || askBulk)return;
   const values=kind==='approve' || kind==='convert'?askValues(row):null,ask=askOf(row);
-  askPending={id,kind};askResults.delete(id);controls();
+  // Futaba's 0.22.0 QA, m-11: a Delete book note (a partial delete) took the hint over, so a later Scan again showed no
+  // result line. A new press on the row replaces it, as it does an earlier refusal.
+  askPending={id,kind};askResults.delete(id);deleteNotes.delete(id);controls();
   try{
     if(values){
       // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
       const shown=askDestination(row)?.path;
-      await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{})},PRESS_TIMEOUT);
+      await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{})},APPROVE_TIMEOUT);
       askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);
       const settled=Math.max(1,Number(ask.same_author?.count) || 1);
       askNote(values.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
@@ -2498,7 +2522,7 @@ async function runApproveSelected(){
     if(ended || recoveryDisconnected)break;
     askPending={id:row.id,kind:'approve'};updateAskRows();
     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
-    try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{})},PRESS_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
+    try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{})},APPROVE_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
     catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
     finally{askPending=null;}
   }

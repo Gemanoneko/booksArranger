@@ -1186,7 +1186,9 @@ class MergeService:
         if not jobs: return None
         job = jobs[-1]
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
-        value={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+        from review_backend import job_destination
+        value={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),
+               'destination':job_destination(job['manifest'])}
         if isinstance(job['manifest'].get('retry_intent'),dict):value['retry_parent_job_id']=job['manifest']['retry_intent'].get('parent_job_id')
         if job['state']=='needs attention':
             attention=self.attention_summary([job['job_id']]).get(job['job_id'])
@@ -2361,6 +2363,12 @@ class MergeService:
         safety=[r for r in result.get('reasons',[]) if r in self.APPROVAL_SAFETY_REASONS and not (include and r=='Source files unavailable or unreadable')]
         if safety:raise ValueError('; '.join(dict.fromkeys(safety)))
         if not result.get('work') or not result.get('review'):raise ValueError('Approve was not accepted. Nothing was changed.')
+        # Futaba's 0.22.0 QA, m-9: a name taken since the row was shown refused only in build_manifest, after the approval
+        # (the review, "Approved by you", the track order) was written, so the row said "Nothing was changed" while the book
+        # left the to-do list until the next Start. The destination is checked before anything is written; the late check
+        # in build_manifest stays (and the publication itself never overwrites).
+        _relative,destination,_reason=self._approval_destination(row,result)
+        if destination and os.path.lexists(destination):raise ValueError('An audiobook already exists at this path; nothing was overwritten')
         approval=result['approval']
         files=[m['path'] for m in sorted(row['members'],key=lambda m:m.get('order') or 0) if include is None or m['path'] in include]
         ctx=self.reviews._context(row)

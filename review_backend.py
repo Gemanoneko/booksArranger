@@ -23,6 +23,15 @@ from scanner import connect, fresh_stat, inside
 from encoding_policy import PROFILE, freeze_policy, AUTOMATIC_PROFILE, freeze_automatic_policy
 TEXT_FIELDS=('title','author','canonical_author','original_language','series','number','genre','topic','narrator','universe')
 MAX_COVER=8*1024*1024
+
+
+def job_destination(manifest):
+    """A job's own destination, for its Stopped row's "Goes to" line (Judy's to-do spec 1.6 and section 4: every row,
+    Stopped rows included; Futaba's m-3): {'path' relative to the output folder, 'absolute'}, or None when the manifest
+    names none inside its output folder (an older manifest)."""
+    destination,root=manifest.get('destination'),manifest.get('output_root')
+    if not isinstance(destination,str) or not destination or not isinstance(root,str) or not root or not inside(destination,root):return None
+    return {'path':os.path.relpath(destination,root),'absolute':destination}
 def utc(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def member_key(path): return str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(path))))
 def digest(path):
@@ -339,7 +348,7 @@ class CandidateReviewService:
             for job in job_rows:
                 state={'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
                 self.page_local.jobs[job['manifest']['candidate_id']]={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],
-                    'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False})}
+                    'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),'destination':job_destination(job['manifest'])}
                 if isinstance(job['manifest'].get('retry_intent'),dict):self.page_local.jobs[job['manifest']['candidate_id']]['retry_parent_job_id']=job['manifest']['retry_intent'].get('parent_job_id')
                 if job['manifest'].get('m4b_repair'):
                     from audio_jobs import repair_record;repaired=repair_record(job)

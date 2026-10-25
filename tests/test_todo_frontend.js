@@ -34,7 +34,7 @@ backend={...backend,audiobook_output_root:ROOT,audiobook_jobs:{...backend.audiob
 let approveAnswer=null,previewAnswer=null,scanAnswer=null;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{
   const data=options?.body?JSON.parse(options.body):undefined;
-  if(route==='/api/candidate/approve'){calls.push({route,options});if(approveAnswer)return approveAnswer(data);return {ok:true,status:200,json:async()=>({approved:true,job_id:'job-'+data.id,row:{id:data.id}})};}
+  if(route==='/api/candidate/approve'){calls.push({route,options});if(approveAnswer)return approveAnswer(data,options);return {ok:true,status:200,json:async()=>({approved:true,job_id:'job-'+data.id,row:{id:data.id}})};}
   if(route==='/api/candidate/approve-preview'){calls.push({route,options});if(previewAnswer)return previewAnswer(data);return {ok:true,status:200,json:async()=>({preview:{path:(data.author || 'Без автора')+'\\'+(data.title || 'x')+'.m4b',absolute:'',taken:false,title:data.title,author:data.author}})};}
   if(route==='/api/candidate/scan-again'){calls.push({route,options});return scanAnswer?scanAnswer(data):{ok:true,status:200,json:async()=>({found:false})};}
   if(route==='/api/candidate/dismiss'){calls.push({route,options});return {ok:true,status:200,json:async()=>({removed:true})};}
@@ -257,6 +257,26 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     assert.equal(get('technical-details').hidden,false);assert.equal(get('technical-details').open,false);
     assert.match(get('automatic-technical').textContent,/\[WinError 2\] The system cannot find the file specified/,'the raw text, in Technical details only');
   }
+  // Futaba's 0.22.0 QA, M-4: the server answers Approve on a 77-file book after 24.5 s; the page gave up at 15 s with
+  // "Connection interrupted" and a second press got a 409. Long timers run here at 1/1000 speed and the request aborts for
+  // real: the old 15 s limit is 15 ms, the server answers at 25 ms.
+  context.AbortController=AbortController;context.clearTimeout=id=>clearTimeout(id);context.setTimeout=(fn,ms)=>ms>=10000?setTimeout(fn,ms/1000):0;
+  approveAnswer=(data,options)=>new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>resolve({ok:true,status:200,json:async()=>({approved:true,job_id:'job-'+data.id,row:{id:data.id}})}),25);
+    options?.signal?.addEventListener?.('abort',()=>{clearTimeout(timer);reject(Object.assign(new Error('This operation was aborted'),{name:'AbortError'}));});});
+  paint([askRow('slow',{...noAuthor.ask})]);
+  const heavy=buttonsOf(trOf('cand-slow'))[0],heavySent=posted('/api/candidate/approve').length;
+  heavy.handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(heavy.textContent,'Approving...');assert.equal(heavy.getAttribute('aria-disabled'),'true','pending until the answer: no second press');
+  heavy.handlers.click({stopPropagation(){}});
+  await new Promise(resolve=>setTimeout(resolve,120));
+  assert.equal(posted('/api/candidate/approve').length-heavySent,1,'one request');
+  assert.equal(run('askDone.get("cand-slow")'),'approve','the answer came and was taken');
+  assert.equal(run('askResults.get("cand-slow")'),undefined,'no "Connection interrupted"');
+  context.setTimeout=()=>0;context.clearTimeout=()=>{};delete context.AbortController;approveAnswer=null;
+  // Futaba's 0.22.0 QA, m-13: the included-source table marks a missing file "Not found" (Judy's to-do spec, section 7).
+  run("trackDraft={id:'cand-m13',revision:2,order:['k1','k2','k3'],included:['k1','k2','k3']};renderMembers({id:'cand-m13',members:[{member_key:'k1',path:'B/01.mp3',duration:1},{member_key:'k2',path:'B/02.mp3',duration:1},{member_key:'k3',path:'B/03.mp3',duration:0.5,missing:true}]},true)");
+  assert.deepEqual(get('candidate-members').children.map(tr=>tr.children[2].textContent.split('\n').includes('Not found')),[false,false,true]);
   context.setTimeout=()=>0;
   console.log('PASS to-do list: chips and counts, shortcut, row fields and Goes to, Approve as is / typed / Ctrl+Enter, author choices (ruling 14), Name taken, missing files, Same author?, bulk Approve as is, Technical details');
 })().catch(error=>{console.error(error);process.exitCode=1;});

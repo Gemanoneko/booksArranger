@@ -363,6 +363,22 @@ class PartsStayTogether(unittest.TestCase):
         names=['Пастушья корона %s%s'%(n,self.PASTUSHYA.get(n,'')) for n in ['0','00']+['%02d'%n for n in range(1,76)]]+list(extra)
         return [('%s/%s.mp3'%(folder,name),{'title':'Пастушья корона ','artist':'Терри Пратчетт'}) for name in names]
 
+    def test_futaba_m12_the_joined_pratchett_chapters_are_named_from_their_file_names(self):
+        # Futaba's 0.22.0 QA, m-12: the 77-file join had 77 chapters all named "Пастушья корона", the one title tag on every
+        # file. That tag is the book's shared prefix of every file name; each chapter is named from its file name after it,
+        # or, where the name carries only a number, by that number.
+        from chapter_plan import names
+        members=[{'path':path,'source_track':'','metadata':{'track_title':tags['title'],'tags':tags},'duration':1} for path,tags in self.pastushya()]
+        got=names(members)
+        self.assertEqual(len(set(got)),77,'one chapter per file')
+        self.assertEqual(got[:6],['Пролог. Корона Холмов','Словарь Нак-мак-фиглов','Глава 1. Там где ветер','Track 02','Track 03','Track 04'])
+        self.assertIn('Глава 13. Шалости и не только',got);self.assertNotIn('Пастушья корона',[n.strip() for n in got])
+        # Controls (test_chapter_preservation): a description repeated on files whose names do not carry it stays, and a
+        # book title equal to the album is no chapter name.
+        plain=lambda n,title:{'path':'%d.mp3'%n,'source_track':str(n),'metadata':{'track_title':title,'tags':{'album':'Book'}}}
+        self.assertEqual(names([plain(1,'Начало'),plain(2,'Начало')]),['Начало','Начало'])
+        self.assertEqual(names([plain(1,'Book'),plain(2,'Book')]),['Track 01','Track 02'])
+
     def test_review_n10_the_real_pratchett_chapter_names_are_one_book(self):
         # Senua's 0.22.0 release review, N10: N4's file-name works check read each chapter name ("Пастушья корона 01. Глава 1.
         # Там где ветер", "Пастушья корона 00. Словарь Нак-мак-фиглов") as a work, so the one live same-title set became 77

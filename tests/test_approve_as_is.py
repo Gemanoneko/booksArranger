@@ -86,6 +86,31 @@ class ApproveAsIsTests(ApproveFixture):
         self.service.approve_book(fresh['id'],fresh['revision']);self.wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
 
+    def stored(self,identity):
+        """What the catalog holds about one book: its group, context, research record and entered values."""
+        with connect(self.inv.database) as db:
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            one=lambda sql:[tuple(r) for r in db.execute(sql,(identity,))]
+            return {'group':one('SELECT revision,review,approved,fingerprint FROM book_groups WHERE id=?'),
+                    'context':one('SELECT revision,data FROM candidate_context WHERE id=?') if 'candidate_context' in have else [],
+                    'research':one('SELECT revision,state,result FROM automatic_candidates WHERE id=?') if 'automatic_candidates' in have else [],
+                    'entered':one('SELECT * FROM manual_metadata_sources WHERE candidate_id=?') if 'manual_metadata_sources' in have else []}
+
+    def test_m9_a_refused_approve_leaves_the_stored_book_as_it_was(self):
+        # Futaba's 0.22.0 QA, m-9: a file put at the "Goes to" path after the row was shown. Approve was refused ("Nothing was
+        # changed") but the approval had already been written: the book left the to-do list until the next Start.
+        for n,name in ((1,'Пролог'),(2,'Финал')):tone(self.audio/'Unsorted'/'Брат мой'/(name+'.mp3'),self.cover,album='Брат мой',artist='Иван Петров')
+        row=self.start()[0];self.research(row)
+        preview=self.service.approval_preview(row['id'],row['revision'])
+        before=self.stored(row['id'])
+        taken=Path(preview['absolute']);taken.parent.mkdir(parents=True);taken.write_bytes(b'PREEXISTING')
+        with self.assertRaisesRegex(ValueError,'already exists'):self.service.approve_book(row['id'],row['revision'],path=preview['path'])
+        self.assertEqual(self.stored(row['id']),before,'refused: nothing was changed, as the row says')
+        self.assertEqual((taken.read_bytes(),self.service.jobs.status()['jobs']),(b'PREEXISTING',[]))
+        # Control: the same row, at the same revision, approves once the name is free.
+        taken.unlink();self.service.approve_book(row['id'],row['revision'],path=preview['path']);self.wait()
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
+
     def test_convert_whats_there_leaves_out_the_missing_file(self):
         sources=[tone(self.audio/'Unsorted'/'Новая плоть'/('%02d.mp3'%n),self.cover,album='Новая плоть',title='Рассказ %d'%n,artist='Иван Петров',track='%d/3'%n) for n in (1,2,3)]
         self.start();sources[2].unlink()
