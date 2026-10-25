@@ -65,6 +65,13 @@ _TEXT = {'delete': {'refused': REFUSED, 'files_changed': "The folder doesn't mat
 _UNREACHABLE = ('[WinError 53]', '[WinError 51]', '[WinError 59]', '[WinError 64]', '[WinError 67]', '[WinError 121]',
                 '[WinError 1222]', '[WinError 1231]', '[WinError 3]')
 _SNAPSHOT = re.compile(r'source(\d{5})\.[^.\\/]+')
+# Senua's 0.22.0 review, N18: "the folder holds no other book" counts audio in any format the app might not read, not
+# only the formats it converts (metadata.AUDIO): a recording beside the book in .ape or .wv is another book's, not a
+# file of this one.
+SOUND = AUDIO | {'.ape', '.wv', '.mka', '.mp4', '.m4p', '.m4r', '.mp2', '.mpc', '.tta', '.tak', '.ofr', '.shn', '.ac3', '.dts',
+                 '.aif', '.aiff', '.aifc', '.alac', '.amr', '.awb', '.caf', '.oga', '.spx', '.ra', '.rm', '.ram', '.dsf', '.dff',
+                 '.webm', '.mkv', '.3gp', '.3ga'}
+_WALK = 2000  # entries read below one book folder before it counts as holding something else
 
 
 class DeleteRefused(ValueError):
@@ -274,11 +281,34 @@ def _guard(root, folder, guarded, text):
     guarded.add(_key(folder))
 
 
+def _below(entries, member_keys):
+    """True when a subfolder of the folder listed as entries holds audio (SOUND) that is not this book's, or cannot be
+    read through: every ordinary subfolder, down, never through a link or junction. Bounded: past _WALK entries the
+    folder counts as holding something else (its files stay)."""
+    pending, seen = [e.path for e in entries if e.is_dir(follow_symlinks=False) and not os.path.isjunction(e.path)], 0
+    while pending:
+        try:
+            with os.scandir(pending.pop()) as listing:
+                for entry in listing:
+                    seen += 1
+                    if seen > _WALK:
+                        return True
+                    if entry.is_dir(follow_symlinks=False):
+                        if not os.path.isjunction(entry.path):
+                            pending.append(entry.path)
+                    elif Path(entry.name).suffix.lower() in SOUND and _key(entry.path) not in member_keys:
+                        return True
+        except OSError:
+            return True
+    return False
+
+
 def _others(members, roots, output, holders, guarded, text):
     """Ruling 24: the other files of the book's own folders (cover, text, anything not audio), only when the folder holds
-    no other book: no audio file on disk that is not this book's, and nothing another book holds in it (a group member,
-    a job's source or cover, a reacquire record). One that another book holds stays, and so does anything the app
-    cannot place: a subfolder, a link, a file with a second name. ([other files], stay count, [(folder, root)])."""
+    no other book: no audio file on disk that is not this book's, in the folder or any subfolder, in any format (SOUND),
+    and nothing another book holds in it or below it (a group member, a job's source or cover, a reacquire record;
+    Senua's N18). One that another book holds stays, and so does anything the app cannot place: a subfolder, a link, a
+    file with a second name. ([other files], stay count, [(folder, root)])."""
     member_keys = {_key(m) for m in members}
     others, stay, folders = [], 0, []
     for folder in sorted({_key(Path(m).parent): str(Path(m).parent) for m in members}.values()):
@@ -296,7 +326,9 @@ def _others(members, roots, output, holders, guarded, text):
                 entries = list(listing)
         except OSError:
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
-        foreign = _key(f) in holders.folders or any(_key(e.path) not in member_keys and Path(e.name).suffix.lower() in AUDIO for e in entries)
+        inner = _key(f) + os.sep
+        foreign = (_key(f) in holders.folders or any(h.startswith(inner) for h in holders.folders)
+                   or any(_key(e.path) not in member_keys and Path(e.name).suffix.lower() in SOUND for e in entries) or _below(entries, member_keys))
         for entry in entries:
             key = _key(entry.path)
             if key in member_keys:
@@ -700,8 +732,9 @@ def present(service, row):
         with connect(service.inventory.database) as db:
             for folder, spelled in folders.items():
                 pattern = spelled.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '\\\\%'
-                rows = [r for r in db.execute("SELECT path,missing FROM files WHERE path LIKE ? ESCAPE '\\'", (pattern,)) if os.path.dirname(_key(r['path'])) == folder]
-                foreign = any(_key(r['path']) not in keys and Path(r['path']).suffix.lower() in AUDIO and not r['missing'] for r in rows)
+                under = list(db.execute("SELECT path,missing FROM files WHERE path LIKE ? ESCAPE '\\'", (pattern,)))  # the folder and below (N18)
+                rows = [r for r in under if os.path.dirname(_key(r['path'])) == folder]
+                foreign = any(_key(r['path']) not in keys and Path(r['path']).suffix.lower() in SOUND and not r['missing'] for r in under)
                 if not foreign:
                     count += sum(1 for r in rows if _key(r['path']) not in keys and not r['missing'])
             jobs = _jobs(db, row['id'])
