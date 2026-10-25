@@ -1,39 +1,155 @@
 'use strict';
 // Provider injected for deterministic tests; production uses electron-updater's
 // GitHub provider, checksum download and explicit installer invocation.
-class UpdateController {
-  constructor({provider, packaged, notify, acquireArtifact, parkEngine, install}) {
-    Object.assign(this,{provider,packaged,notify,acquireArtifact,parkEngine,install});
-    this.value={phase:'idle',version:'',error:'',progress:0};this.ready=null;this.operation=false;
-    provider.autoDownload=false;provider.autoInstallOnAppQuit=false;provider.autoRunAppAfterInstall=true;
-    provider.on('update-available',info=>{if(this.ready){this.emit();return;}this.value={phase:'available',version:info.version,error:'',progress:0};this.emit();});
-    provider.on('update-not-available',()=>{if(!this.ready)this.value={phase:'current',version:'',error:'',progress:0};this.emit();});
-    provider.on('download-progress',progress=>{this.value={...this.value,phase:'downloading',progress:Math.max(0,Math.min(100,Number(progress.percent)||0))};this.emit();});
-    provider.on('update-downloaded',info=>{const helper=provider.downloadedUpdateHelper;
-      if(!helper||!helper.file||!helper.downloadedFileInfo||!helper.downloadedFileInfo.sha512||helper.downloadedFileInfo.isAdminRightsRequired){this.fail(new Error('Downloaded update lacks checksum identity'));return;}
-      this.ready=Object.freeze({path:helper.file,sha512:helper.downloadedFileInfo.sha512,version:info.version});
-      this.value={phase:'ready',version:info.version,error:'',progress:100};this.emit();});
-    provider.on('error',error=>this.fail(error));
-  }
-  emit(){this.notify({...this.value,ready:!!this.ready});}
-  fail(error){this.value={...this.value,phase:this.ready?'ready':'error',error:String(error.message||error).slice(0,512)};this.emit();}
-  async check(){if(!this.packaged)throw new Error('Update checks are available in the installed app');if(this.operation)return;
-    this.operation=true;this.value={...this.value,phase:this.ready?'ready':'checking',error:''};this.emit();
-    try{await this.provider.checkForUpdates();}catch(error){this.fail(error);throw error;}finally{this.operation=false;}}
-  async download(){if(!this.packaged||this.operation||this.value.phase!=='available')throw new Error('Check for an available update first');
-    this.operation=true;this.value={...this.value,phase:'downloading',error:''};this.emit();
-    try{await this.provider.downloadUpdate();}catch(error){this.fail(error);throw error;}finally{this.operation=false;}}
-  async restart(){if(!this.packaged||!this.ready||this.operation)throw new Error('A verified downloaded update is required');
-    this.operation=true;let lease;
-    try{
-      // Keep the exact checksum-verified installer write/delete denied throughout
-      // the engine idle fence, native exit and installer process creation.
-      lease=await this.acquireArtifact(this.ready);
-      if(!lease.isAlive())throw new Error('Installer native lease ended; update cancelled');
-      await this.parkEngine();
-      if(!lease.isAlive())throw new Error('Installer native lease ended; update cancelled');
-      this.value={...this.value,phase:'installing',error:''};this.emit();
-      await this.install(this.ready);
-    }catch(error){this.fail(error);throw error;}finally{if(lease)await lease.close();this.operation=false;}}
+// 0.22.1 (ruling 27; Judy's 0.22.1 UX spec, section 2): Check, Download and Install each keep their own record
+// (phase, HH:MM, typed cause), so a failed install can never show up as a check result. A check is bounded (30 s an
+// attempt, 3 attempts, 5 s and 15 s apart). Restart to update has no idle gate: the engine stops its work in bounded
+// steps and can be cancelled. Once the engine has ended, any failure to start the installer starts the old engine
+// again. Raw error text goes to the log, never to the page.
+const CHECK_ATTEMPTS = 3;
+const CHECK_ATTEMPT_MS = 30000;
+const CHECK_BACKOFF_MS = [5000, 15000];
+const NO_INTERNET = /ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NAME_RESOLUTION_FAILED|ERR_ADDRESS_UNREACHABLE|ERR_NETWORK_ACCESS_DENIED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|ENETDOWN/;
+const NO_ANSWER = /ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_CHANGED|ETIMEDOUT|ECONNRESET|socket hang up|timed out/i;
+
+function hhmm(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function text(error) { return String((error && (error.stack || error.message)) || error); }
+function httpCode(error) {
+ const code = Number(error && (error.statusCode || error.status)) || Number((/HttpError: (\d{3})|\b(?:status(?:Code)?|code)\D{0,3}(\d{3})\b/i.exec(text(error)) || []).slice(1).find(Boolean));
+ return code >= 400 && code <= 599 ? code : 0;
 }
-module.exports={UpdateController};
+function checkCause(error) {
+ if (error && error.timedOut) return { cause: 'no_answer' };
+ const message = text(error);
+ if (NO_INTERNET.test(message)) return { cause: 'no_internet' };
+ const code = httpCode(error);
+ if (code) return { cause: 'github_error', code };
+ if (NO_ANSWER.test(message)) return { cause: 'no_answer' };
+ return { cause: 'other' };
+}
+function downloadCause(error) {
+ const message = text(error);
+ if ((error && error.code === 'ERR_CHECKSUM_MISMATCH') || /checksum/i.test(message)) return 'checksum';
+ if (/ENOSPC|not enough space|disk (is )?full/i.test(message)) return 'disk_full';
+ if (NO_INTERNET.test(message) || NO_ANSWER.test(message)) return 'dropped';
+ return 'other';
+}
+const INSTALL_BUSY = ['starting', 'pausing', 'forcing', 'updating', 'installing'];
+
+class UpdateController {
+  constructor({provider, packaged, version = '', notify, acquireArtifact, parkEngine, install, restartEngine = async () => {}, exists = () => true,
+    log = () => {}, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))}) {
+    Object.assign(this,{provider,packaged,version,notify,acquireArtifact,parkEngine,install,restartEngine,exists,log,now,sleep});
+    this.available='';this.ready=null;this.seen=null;this.downloadFailed='';this.cancelRequested=false;this.installerShown=false;
+    this.busy={check:false,download:false,install:false};
+    this.check_={phase:packaged?'idle':'dev',at:'',cause:'',code:0,attempt:0};
+    this.download_={phase:'idle',at:'',cause:'',progress:0};
+    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0};
+    provider.autoDownload=false;provider.autoInstallOnAppQuit=false;provider.autoRunAppAfterInstall=true;
+    provider.on('update-available',info=>{this.seen={available:String(info.version||'')};});
+    provider.on('update-not-available',()=>{this.seen={current:true};});
+    provider.on('download-progress',progress=>{if(!this.busy.download)return;this.download_={...this.download_,phase:'downloading',progress:Math.max(0,Math.min(100,Number(progress.percent)||0))};this.emit();});
+    provider.on('update-downloaded',info=>{const helper=provider.downloadedUpdateHelper;
+      if(!helper||!helper.file||!helper.downloadedFileInfo||!helper.downloadedFileInfo.sha512||helper.downloadedFileInfo.isAdminRightsRequired){
+        this.ready=null;this.downloadFailed=helper&&helper.downloadedFileInfo&&helper.downloadedFileInfo.isAdminRightsRequired?'other':'checksum';this.log('Downloaded update lacks checksum identity');return;}
+      this.ready=Object.freeze({path:helper.file,sha512:helper.downloadedFileInfo.sha512,version:info.version});this.downloadFailed='';});
+    // Check and download handle their own failures; a late error from an abandoned attempt only reaches the log.
+    provider.on('error',error=>this.log('updater: '+text(error)));
+  }
+  get value(){
+    const installing=this.busy.install;
+    return {version:this.version,available:this.available||(this.ready&&this.ready.version)||'',ready:!!this.ready,packaged:!!this.packaged,
+      busy:{...this.busy},check:{...this.check_},download:{...this.download_},
+      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical]},
+      canCancel:installing&&!this.cancelRequested&&['starting','pausing','forcing'].includes(this.install_.phase),
+      showInstaller:this.installerShown&&!!this.ready&&this.exists(this.ready.path),installerPath:this.ready?this.ready.path:''};
+  }
+  emit(){this.notify(this.value);}
+  stamp(){return hhmm(this.now());}
+  async check(){
+    if(!this.packaged){this.check_={...this.check_,phase:'dev'};this.emit();return this.value;}
+    if(this.busy.check)return this.value;
+    this.busy.check=true;this.installerShown=false;
+    try{
+      for(let attempt=1;attempt<=CHECK_ATTEMPTS;attempt++){
+        if(attempt===1){this.check_={phase:'checking',at:'',cause:'',code:0,attempt};this.emit();}
+        this.seen=null;
+        try{
+          await this.bounded(this.provider.checkForUpdates(),CHECK_ATTEMPT_MS);
+        }catch(error){
+          this.log('Update check attempt '+attempt+' failed: '+text(error));
+          const {cause,code=0}=checkCause(error);
+          if(error&&error.timedOut)this.provider.checkForUpdatesPromise=null; // the next try sends a new request, not the stuck one
+          if(cause!=='no_answer'||attempt===CHECK_ATTEMPTS){this.check_={phase:'failed',at:this.stamp(),cause,code,attempt};return this.value;}
+          this.check_={phase:'retrying',at:'',cause:'',code:0,attempt:attempt+1};this.emit();
+          await this.sleep(CHECK_BACKOFF_MS[attempt-1]);
+          continue;
+        }
+        const found=this.seen&&this.seen.available;
+        if(found)this.available=found;
+        this.check_={phase:found?'available':'current',at:this.stamp(),cause:'',code:0,attempt,version:found||''};
+        return this.value;
+      }
+    }finally{this.busy.check=false;this.emit();}
+    return this.value;
+  }
+  bounded(promise,ms){
+    return Promise.race([Promise.resolve(promise),this.sleep(ms).then(()=>{throw Object.assign(new Error('No answer in '+ms/1000+' s'),{timedOut:true});})]);
+  }
+  async download(){
+    if(!this.packaged||!this.available||this.ready&&this.ready.version===this.available)throw new Error('Check for an available update first');
+    if(this.busy.download||this.busy.install)return this.value;
+    this.busy.download=true;this.downloadFailed='';this.download_={phase:'downloading',at:'',cause:'',progress:0};this.emit();
+    try{
+      await this.provider.downloadUpdate();
+      if(!this.ready)throw Object.assign(new Error('Downloaded update lacks checksum identity'),{downloadCause:this.downloadFailed||'checksum'});
+      this.download_={phase:'ready',at:this.stamp(),cause:'',progress:100};
+    }catch(error){
+      this.log('Update download failed: '+text(error));
+      this.ready=null;this.download_={phase:'failed',at:this.stamp(),cause:error.downloadCause||downloadCause(error),progress:0};
+    }finally{this.busy.download=false;this.emit();}
+    return this.value;
+  }
+  progress(update){
+    const phase=update.phase==='exiting'?'updating':update.phase;
+    if(!INSTALL_BUSY.includes(phase)||this.install_.phase==='installing')return;
+    this.install_={...this.install_,phase,waiting:Array.isArray(update.waiting)?update.waiting:[],critical:Array.isArray(update.critical)?update.critical:[],
+      elapsed:Number(update.elapsed)||0,safe:Number(update.safe_seconds)||this.install_.safe};
+    this.emit();
+  }
+  cancel(){
+    if(!this.value.canCancel)return false;
+    this.cancelRequested=true;this.emit();return true;
+  }
+  async restart(){
+    if(!this.packaged||!this.ready)throw new Error('A verified downloaded update is required');
+    if(this.busy.install||this.busy.download)return this.value;
+    this.busy.install=true;this.cancelRequested=false;this.installerShown=false;
+    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0};this.emit();
+    const ready=this.ready;let lease=null,engineEnded=false;
+    try{
+      // Keep the exact checksum-verified installer write/delete denied from before the engine stops until the
+      // installer process exists.
+      try{lease=await this.acquireArtifact(ready);}
+      catch(error){throw Object.assign(error,{updateCause:/timed out/i.test(error.message)?'verify_timeout':'checksum'});}
+      if(!lease.isAlive())throw Object.assign(new Error('Installer native lease ended; update cancelled'),{updateCause:'checksum'});
+      try{await this.parkEngine({progress:update=>this.progress(update),cancelRequested:()=>this.cancelRequested});}
+      catch(error){engineEnded=error.updateCause==='engine_exit';throw error;}
+      engineEnded=true;
+      if(!lease.isAlive())throw Object.assign(new Error('Installer native lease ended; update cancelled'),{updateCause:'checksum'});
+      this.install_={...this.install_,phase:'installing'};this.emit();
+      await this.install(ready); // resolves once the installer process exists; the app then exits
+      return this.value;
+    }catch(error){
+      this.log('Update did not install: '+text(error));
+      let cause=error.updateCause||(engineEnded?'installer_blocked':'other');
+      if(engineEnded){try{await this.restartEngine();}catch(restartError){this.log('Engine restart failed: '+text(restartError));cause='engine_restart';}}
+      if(cause==='checksum'){this.ready=null;this.download_={phase:'idle',at:'',cause:'',progress:0};}
+      this.installerShown=['bound','installer_blocked'].includes(cause);
+      this.install_={...this.install_,phase:cause==='cancelled'?'cancelled':'failed',at:this.stamp(),cause,
+        waiting:Array.isArray(error.waiting)&&error.waiting.length?error.waiting:this.install_.waiting};
+      return this.value;
+    }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();}
+  }
+}
+module.exports={UpdateController,checkCause,downloadCause,CHECK_ATTEMPTS,CHECK_ATTEMPT_MS,CHECK_BACKOFF_MS};

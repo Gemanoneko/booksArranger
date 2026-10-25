@@ -59,12 +59,12 @@ const state = {
   owner: null,
   hostOutput: '',
   engineVersion: '',
-  updateIdle: false,
+  updateLog: '',
   baseUrl: '',
   token: crypto.randomBytes(32).toString('hex'),
   win: null,
   tray: null,
-  quit: 'none', // none | requested | exiting
+  quit: 'none', // none | requested | updating | installing | exiting
   ready: false,
   output: '',
 };
@@ -211,7 +211,8 @@ function startBackend(config) {
   child.on('exit', (code) => {
     state.backendExited = true;
     if (!state.ready) return; // startup reports it: waitForBackend sees the exit
-    if (state.quit === 'updating') return;
+    // Restart to update: the update flow reads the exit (code 0 installs; anything else starts the old engine again).
+    if (state.quit === 'updating' || state.quit === 'installing') return;
     if (state.quit !== 'none') return finishExit(code === 0 ? 0 : 1);
     if (code === 0) return finishExit(0); // the backend's own Stop server control
     reportError('Books Arranger stopped', `The Books Arranger engine stopped unexpectedly (exit ${code}).\n\n${lastLines(state.output)}`);
@@ -234,7 +235,8 @@ function request(method, route, { desktop = false, timeout = 5000 } = {}) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          if (res.statusCode >= 400) reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
+          // The status marks an answer (a refusal), as against no answer at all: the update tells them apart.
+          if (res.statusCode >= 400) reject(Object.assign(new Error(parsed.error || `HTTP ${res.statusCode}`), { status: res.statusCode, code: parsed.code }));
           else resolve(parsed);
         } catch (error) {
           reject(error);
@@ -336,16 +338,19 @@ function showWindow() {
 }
 
 function trayMenu() {
-  const quitting = state.quit !== 'none';
+  const updating = state.quit === 'updating' || state.quit === 'installing' || !!updateController?.busy.install;
+  const quitting = state.quit !== 'none' && !updating;
+  // Judy 0.22.1 2.7: tray Check and Restart show the window and run into the panel; failures appear only there.
   return Menu.buildFromTemplate([
     { label: 'Open Books Arranger', click: showWindow },
     { type: 'separator' },
     quitting
       ? { label: 'Quitting after the current book…', enabled: false }
-      : { label: 'Quit Books Arranger', click: () => requestQuit({ confirmed: false }) },
+      : { label: 'Quit Books Arranger', enabled: !updating, click: () => requestQuit({ confirmed: false }) },
     { type:'separator' },
-    { label:'Check for updates',enabled:!!updateController&&!quitting,click:()=>updateController.check().catch(error=>reportError('Update check failed',error.message)) },
-    ...(updateController&&updateController.ready&&!quitting&&state.updateIdle?[{label:'Restart to update',click:()=>updateController.restart().catch(error=>reportError('Update could not install',error.message))}]:[]),
+    { label:'Check for updates',enabled:!!updateController&&!quitting&&!updating,click:()=>{showWindow();updateController.check().catch(error=>logUpdate('Tray check: '+error.message));} },
+    ...(updating?[{label:'Updating…',enabled:false}]
+      :updateController&&updateController.ready&&!quitting?[{label:'Restart to update',click:()=>{showWindow();if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:update-restart');}}]:[]),
   ]);
 }
 
@@ -474,9 +479,15 @@ function runReadOnlyPython(config,script,args){return new Promise((resolve,rejec
   child.on('exit',code=>{clearTimeout(timer);try{const result=JSON.parse(output);if(code||!result.ok)reject(new Error(result.error||error||'Data folder check failed'));else resolve(result);}catch(e){reject(new Error(error||e.message));}});
 });}
 function broadcastStatus(){
-  const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};
+  const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};
   if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:status',value);
-  refreshTray('Books Arranger'+(state.quit==='none'?'':' — '+state.quit));
+  const updating=state.quit==='updating'||state.quit==='installing'||!!updateController?.busy.install;
+  refreshTray('Books Arranger'+(updating?' — updating':state.quit==='none'?'':' — '+state.quit));
+}
+// The updater's raw error text goes to the shell's own log, never to the page (Judy 0.22.1 2.2).
+function logUpdate(line){
+  state.updateLog=(state.updateLog+new Date().toISOString()+' '+String(line)+'\n').slice(-16384);
+  if(flag(argv,'quiet-errors'))process.stderr.write('[update] '+line+'\n');
 }
 function acquireUpdateArtifact(config,artifact){return new Promise((resolve,reject)=>{
   const child=spawn(config.python,['-I','-B',path.join(config.backendDir,'desktop_update_lease.py'),artifact.path,artifact.sha512],{cwd:config.backendDir,windowsHide:true,detached:true,stdio:['pipe','pipe','pipe']});
@@ -494,21 +505,46 @@ function configureUpdater(config){
   const {autoUpdater}=require('electron-updater');
   const {UpdateController}=require('./update-controller');
   if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
-  updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,notify:broadcastStatus,
+  updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,version:app.getVersion(),notify:broadcastStatus,log:logUpdate,
+    exists:file=>fs.existsSync(file),
     acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
-    parkEngine:()=>require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus}),
-    install:async()=>{state.quit='exiting';autoUpdater.quitAndInstall(false,true);await sleep(250);if(!autoUpdater.quitAndInstallCalled){state.quit='none';throw new Error('Installer did not start; reopen Books Arranger and try again');}}
+    parkEngine:options=>require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus,...options}),
+    install:()=>installUpdate(autoUpdater),
+    restartEngine:()=>restartEngineAfterUpdate(config),
   });
-  setInterval(async()=>{
-    if(state.backendExited||state.quit!=='none'){state.updateIdle=false;return;}
-    try{const status=await desktopStatus.get();state.updateIdle=status.idle===true;}catch{state.updateIdle=false;}
-    refreshTray('Books Arranger');
-  },1000);
   broadcastStatus();
+}
+// Silent install (Sergei 2026-10-25, Q2: no installer window), reopening by itself. electron-updater quits the app
+// as soon as it has asked for the installer, before a failed start is known; the quit is held while 'installing' and
+// the app exits only once the installer process exists. Otherwise the old engine starts again (0.21.1 left the
+// shell with no engine at all when the installer did not start).
+async function installUpdate(autoUpdater){
+  const original=autoUpdater.spawnLog;let spawned=null;
+  autoUpdater.spawnLog=function(...args){spawned=original.apply(this,args);return spawned;};
+  state.quit='installing';broadcastStatus();
+  try{
+    autoUpdater.quitAndInstall(true,true);
+    if(!autoUpdater.quitAndInstallCalled||!spawned)throw new Error('The updater did not start the installer');
+    await Promise.race([spawned,sleep(10000).then(()=>{throw new Error('The installer process did not start within 10 s');})]);
+  }catch(error){
+    autoUpdater.quitAndInstallCalled=false;state.quit='updating';
+    throw Object.assign(error,{updateCause:'installer_blocked'});
+  }finally{autoUpdater.spawnLog=original;}
+  finishExit(0);
+}
+async function restartEngineAfterUpdate(config){
+  try{
+    const child=startBackend(config);
+    await waitForBackend(child);
+    if(state.win&&!state.win.isDestroyed())state.win.reload(); // the new engine serves the page with its own token
+  }finally{state.quit='none';broadcastStatus();}
 }
 ipcMain.handle('books:update-check',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.check();});
 ipcMain.handle('books:update-download',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.download();});
 ipcMain.handle('books:update-install',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.restart();});
+ipcMain.handle('books:update-cancel',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.cancel();});
+ipcMain.handle('books:update-show-installer',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');
+  const {showInstaller,installerPath}=updateController.value;if(!showInstaller)return false;shell.showItemInFolder(installerPath);return true;});
 async function startConfigured(config){
   currentConfig=config;
   const child=startBackend(config);
@@ -545,7 +581,7 @@ ipcMain.handle('books:select',async(event,choice)=>{
   return {opened:true};
 });
 ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(source==='setup'){if(state.backend)throw new Error('Catalog is still opening');finishExit(0);return;}return requestQuit({confirmed:false});});
-ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?{...updateController.value,ready:!!updateController.ready}:null};});
+ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};});
 
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -558,6 +594,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     if (state.quit === 'exiting') return;
     event.preventDefault();
+    if (state.quit === 'installing' || state.quit === 'updating') return; // the update flow decides when the app exits
     requestQuit({ confirmed: false });
   });
   app.whenReady().then(async () => {
