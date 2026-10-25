@@ -162,7 +162,7 @@ def operation(method):
 class MergeService:
     draining=False # Set by a desktop Quit: the current book finishes, nothing new starts.
 
-    def __init__(self, inventory, cache_dir):
+    def __init__(self, inventory, cache_dir, progress=None):
         from publication_locations import require_no_pending_moves
         require_no_pending_moves(inventory.database)
         self.inventory = inventory
@@ -233,17 +233,33 @@ class MergeService:
         self.gap_fill=GapFill(self)  # 0.22.1: optional fields after approval (research: the automatic pass's); started with series backfill
         self.jobs.on_space_hold=lambda:self.automatic.stop(force=True)
         self.jobs.on_working_hold=lambda:self.automatic.stop(force=True)
+        # Startup (0.22.1, ruling 28): every finished book's location is looked up once, in one catalog snapshot. Each used
+        # to be resolved twice through current() (a lookup and its fresh re-check: 42 s for 508 books on the live catalog),
+        # recorded through its own connection (3 s) and checked for enrollment through the full cleanup status (recovery
+        # sets and source folders, 10 s). Display lookups need no lease: nothing here reads or removes a file. They also
+        # seed progress_books' cache (_lookups), so the first status does not resolve them again. progress(done, total)
+        # reports each book to the startup loader, which may stop the construction there (web_server.LoadAborted).
         known=self._known_identities()
-        for job in self.jobs.status()['jobs']:
-            if job['state']=='completed':self._register(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size'])
-            if job['state']=='completed':
+        completed=[job for job in self.jobs.status()['jobs'] if job['state']=='completed']
+        with connect(inventory.database) as db:
+            db.executemany('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',[(job['output']['final_path'],job['job_id'],'output',job['output']['sha256'],job['output']['size']) for job in completed])
+            enrolled={row[0] for row in db.execute('SELECT job_id FROM source_cleanup')}
+        looked={}
+        with connect(inventory.database) as db:
+            db.execute('BEGIN');token=self.publication_bindings.lookup_token(db)
+            for index,job in enumerate(completed):
+                if progress is not None:progress(index,len(completed))
                 # Ready/converted counts compare the live file with its last full verification, from the first status.
                 try:
-                    effective,_=self.publication_bindings.current(job['output'])
+                    effective,envelope=self.publication_bindings.remembered(db,job['output'],token)  # the first page reuses it too
+                    looked[job['job_id']]=((token,packed(job['output'])),(effective,envelope))
                     identity=known.get(self._identity_key(effective['final_path'],effective['sha256']))
                     if identity:self._validated_outputs[job['job_id']]=tuple(identity)
                 except (ValueError,OSError,KeyError):pass  # Current-view reports the binding failure; catalog remains readable.
-            if job['state']=='completed' and job['manifest'].get('cleanup_policy',{}).get('enabled') and not self.cleanup.status(job['job_id']):
+        self._lookups=looked
+        if progress is not None:progress(len(completed),len(completed))
+        for job in completed:
+            if job['manifest'].get('cleanup_policy',{}).get('enabled') and job['job_id'] not in enrolled:
                 # A crash after durable audio success but before enrollment does
                 # not turn its explicit frozen policy into a historical sweep.
                 self._enroll_completed_without_start(job)
@@ -492,6 +508,24 @@ class MergeService:
                 if completed_book(row,ctx,job,source_by.get(job['job_id']),storage_by.get(job['job_id']),folder_by.get(job['job_id']),current,member_key,{PROFILE,AUTOMATIC_PROFILE},binding,location_envelope=location_envelope,retry_binding=retry_binding):converted.add(identity)
             return {'approved':len(approved),'converted':len(converted),'converted_ids':converted,'candidate_total':len(candidate_ids),'not_approved_total':len(candidate_ids-set(approved))}
         finally:self._progress_lock.release()
+
+    def warm_status(self,progress=None):
+        """Startup (0.22.1, ruling 28): the first status, computed by the loader with a counter. Its largest part, the
+        cleanup status of every enrolled book (9 s on the live catalog), is read one book at a time, in the order the full
+        read gives, each reported to progress(done, total), and kept as the status computation keeps it (_catalog_cached),
+        so state() reuses it. Returns state()."""
+        self._catalog_version(create=True)
+        before=self._catalog_version()
+        rows=self.cleanup._rows('SELECT * FROM source_cleanup ORDER BY created',())
+        cleanups=[]
+        for index,row in enumerate(rows):
+            if progress is not None:progress(index,len(rows))
+            item=self.cleanup.status(row['job_id'])
+            if item is not None:cleanups.append(item)
+        if progress is not None:progress(len(rows),len(rows))
+        # Nothing else writes while loading; a commit in between all the same means a fresh full read.
+        self._catalog_cached('cleanups',lambda:cleanups if self._catalog_version()==before else self.cleanup.status())
+        return self.state()
 
     def status_snapshot(self,max_age=STATUS_MAX_AGE):
         """Polling routes only: concurrent readers share one state() computation, reused briefly. Controls keep fresh state().

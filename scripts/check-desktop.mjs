@@ -72,6 +72,7 @@ patterns.push('test_lock_timing.py');  // 0.22.1: presses never wait behind back
 patterns.push('test_gap_fill.py');  // 0.22.1: approval on local identity at once, optional fields in the background, per-site lanes
 patterns.push('test_folder_structure.py');  // 0.22.1: items 9 and 10, Sergei's folder structure, clean file-name order, number-titled books
 patterns.push('test_desktop_update.py');  // 0.22.1: the fail-less updater's engine fence, the busy-engine matrix (ruling 27)
+patterns.push('test_startup_loading.py');  // 0.22.1: the engine answers at once and loads in the background (ruling 28)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

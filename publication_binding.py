@@ -105,16 +105,31 @@ class PublicationBindings:
         if 'series_backfill' in have:token.append(tuple(db.execute("SELECT count(*),group_concat(job_id) FROM (SELECT job_id FROM series_backfill WHERE state='done' ORDER BY job_id)").fetchone()))
         return (tuple(sorted(have)),*token)
 
+    @staticmethod
+    def _kind(db,original,exists=True):
+        kinds=[r[0] for r in db.execute("SELECT DISTINCT publication_kind FROM output_relocations WHERE job_id=? AND publication_kind IN ('base','replacement')",(original['job_id'],))] if exists else []
+        if len(kinds)>1:raise ValueError('Publication binding is ambiguous')
+        return kinds[0] if kinds else 'base'
+
+    def remembered(self,db,original,token):
+        """lookup(db, original) that also fills display()'s cache with the same answer, under the token the caller read in
+        the same snapshot (startup, 0.22.1: construction looks each finished book up once; the first book page then
+        reuses it instead of resolving 100 relocations again, 5 s on the live catalog)."""
+        exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone()
+        kind=self._kind(db,original,exists)
+        value=self.lookup(db,original,kind)
+        with self.lock:
+            cache=self.__dict__.setdefault('_display',{})
+            if len(cache)<4096:cache[(token,kind,None,locations._digest(original))]=copy.deepcopy(value)
+        return value
+
     def lookup(self,db,original,kind=None,repair_journal_sha256=None):
         """Display-only location lookup in the caller's coherent SQL snapshot.
 
         This does not grant deletion authority or current native verification.
         """
         exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone()
-        if kind is None:
-            kinds=[r[0] for r in db.execute("SELECT DISTINCT publication_kind FROM output_relocations WHERE job_id=? AND publication_kind IN ('base','replacement')",(original['job_id'],))] if exists else []
-            if len(kinds)>1:raise ValueError('Publication binding is ambiguous')
-            kind=kinds[0] if kinds else 'base'
+        if kind is None:kind=self._kind(db,original,exists)
         bound=exists and db.execute('SELECT 1 FROM output_relocations WHERE job_id=? AND publication_kind=?',(original['job_id'],kind)).fetchone()
         if not bound:return copy.deepcopy(original),None
         durable=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(original['job_id'],)).fetchone()
