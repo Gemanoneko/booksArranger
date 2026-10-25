@@ -170,6 +170,31 @@ class BrowserTests(unittest.TestCase):
         for _ in range(20):
             self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':['x'*4000]*50},authorized=False)[0],403,'the token is required')
 
+    def test_a_refused_post_stops_draining_its_body_after_two_seconds_in_all(self):
+        # Senua's 0.22.0 final review, N17: the drain before a 403 timed out per read, so a sender trickling its body held
+        # the handler for as long as it kept sending. The 2 s are now a total: the 403 arrives while bytes still trickle.
+        import socket
+        port=self.server.server_port
+        sender=socket.create_connection(('127.0.0.1',port),timeout=6);self.addCleanup(sender.close)
+        sender.sendall(('POST /api/candidate/delete HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nContent-Type: application/json\r\nContent-Length: 200000\r\n\r\n'%port).encode('ascii'))
+        stop=threading.Event();self.addCleanup(stop.set)
+        def trickle():
+            while not stop.is_set():
+                try:sender.send(b' ')
+                except OSError:return
+                stop.wait(.2)
+        threading.Thread(target=trickle,daemon=True).start()
+        started=time.monotonic();reply=b''
+        try:
+            while b'\r\n' not in reply:
+                chunk=sender.recv(1024)
+                if not chunk:break
+                reply+=chunk
+        except socket.timeout:pass
+        elapsed=time.monotonic()-started;stop.set()
+        self.assertIn(b' 403 ',reply.split(b'\r\n')[0],reply[:80])
+        self.assertLess(elapsed,4,'the 403 came at the drain\'s total deadline, not when the sender stopped')
+
     def test_filtered_inventory_and_candidate_review_revision_contract(self):
         root=self.roots['Audiobooks']
         with connect(self.database) as connection:

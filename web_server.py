@@ -292,22 +292,34 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def refuse(self, message):
-        """403 before the request body was read. The declared body (one Content-Length, at most MAX_BODY, 2 s at most) is
-        read and dropped first: a socket closed with unread data is reset, and on Windows the client then sees WinError
-        10053 instead of the 403 (two flaky gate runs, 2026-10-25). Nothing of the body is used."""
+        """403 before the request body was read. The declared body (one Content-Length, at most MAX_BODY) is read and
+        dropped first, for 2 s in all: a socket closed with unread data is reset, and on Windows the client then sees
+        WinError 10053 instead of the 403 (two flaky gate runs, 2026-10-25). Nothing of the body is used.
+
+        The 2 s are a total (Senua's 0.22.0 final review, N17): each read is one socket receive (read1) whose timeout is
+        the time left, so a sender that trickles bytes cannot hold this handler longer. A timeout ends the drain and the
+        403 is sent anyway."""
         try:
             lengths = (self.headers.get_all('Content-Length',[]) or []) if getattr(self, 'command', None) == 'POST' else []
             if len(lengths) == 1 and lengths[0].isascii() and lengths[0].isdigit() and len(lengths[0]) <= 6 and 0 < int(lengths[0]) <= MAX_BODY \
                     and not self.headers.get('Transfer-Encoding'):
-                self.connection.settimeout(2)
+                deadline = time.monotonic() + 2
+                read = getattr(self.rfile, 'read1', None) or self.rfile.read
                 remaining = int(lengths[0])
-                while remaining > 0:
-                    chunk = self.rfile.read(min(remaining, 65536))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
+                try:
+                    while remaining > 0:
+                        left = deadline - time.monotonic()
+                        if left <= 0:
+                            break
+                        self.connection.settimeout(left)
+                        chunk = read(min(remaining, 65536))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                finally:
+                    self.connection.settimeout(2)  # the 403 itself is written with the same 2 s as before
         except (OSError, ValueError, AttributeError, TypeError):
-            pass  # a request double or a closed socket: answer as before
+            pass  # a request double, a closed socket or the deadline: answer as before
         self.fail(403, message)
 
     def query(self):
