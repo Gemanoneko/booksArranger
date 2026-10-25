@@ -1,4 +1,10 @@
-# Books Arranger 0.22.1 backlog
+# Books Arranger 0.22.1 / 0.22.2 backlog
+
+**UPDATE (Sergei, 2026-10-25 night): 0.22.2 is folded back into 0.22.1.** Everything below ships in 0.22.1.
+
+**Earlier release split (superseded):**
+- **0.22.1** is ONLY the lock/speed fixes and approving on local identity at once (items 7 and 8 and their diagnosis below). Release it first.
+- **0.22.2** is everything else: the updater, startup (ruling 28), queued Retry and Delete, busy-page copy, Delete on all-missing rows, and the Minors.
 
 These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; work starts when Sergei says so. Rulings are in `Team/Docs/BooksArranger_Rulings_2026-10-24.md`.
 
@@ -34,6 +40,17 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 - on the page, a timed-out press while health answers reads "busy", not offline (Judy spec §4);
 - add timing tests.
 
+9. **"Order unclear" on a perfect book, with a WRONG proposed order** (Sergei, 2026-10-25). The book is `Z:\Audiobooks\James Rollins\Sigma Force\2. Map of Bones\`: 240 files named `Роллинс Джеймс - Кости волхвов - 001..240 - Kosti_001..240.m4a`, in perfect sequence.
+   - The row says "Some track tags aren't plain numbers". Its proposed playback order starts 07, 09, 18, 21, 27, which are the files with a different modified date (3/7/2020) and odd track tags. Approving that order would build a scrambled book.
+   - **Fix:** when the file names form one clean continuous 1..N sequence, they decide the order, whatever a few odd tags say. Never propose an order that contradicts a clean file-name sequence.
+   - **Identity:** use the folder structure `Author\Series\N. Title`, so this book is James Rollins, Sigma Force #2, "Map of Bones" (English original, ruling 16). Today's "Goes to" says `Rollins James\Кости волхвов - Rollins James.m4b`.
+
+10. **"1986" goes to Без автора** (Sergei, 2026-10-25; in 0.22.1 with item 9). The file is `Z:\Audiobooks\JESPER ERSGARD\JESPER ERSGARD - 1986.m4b`; its tag credits the reader «Илья Сланевский». Sergei's author rule already maps Сланевский to Ersgard Jesper.
+   - The row says "Part of a bigger book: This file is named as one chapter.", the Author field is empty, and the destination is `Без автора\1986.m4b`.
+   - **Fix (a):** the author comes from the file name and folder ("JESPER ERSGARD - …" in folder "JESPER ERSGARD"), and the seeded author rules apply (reader → real author). Без автора is only the last resort, when no local source names an author.
+   - **Fix (b):** a single file whose title is a number ("1986", "1408") is a whole book, not a chapter, unless real sibling parts exist.
+   - **Fix (c):** the Author field shows the author the app resolved, not an empty field.
+
 ## Carried from QA and review (Minor)
 
 - **Futaba m-10:** focus after Delete on Stopped rows (about 1 in 3).
@@ -46,6 +63,14 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 - **Futaba observations:**
   - a conversion that loses the Sorted drive mid-run stops with no Retry;
   - the first scan after a dropped root ends "failed".
+
+## Universe routing miss (Sergei, 2026-10-25)
+
+- `Z:\Audiobooks Sorted\де Клемешье Алекс\Сын Дога - де Клемешье Алекс.m4b`, converted 10-20, belongs to Lukyanenko's **Дозоры** universe. It was filed under its author alone, not routed into the Дозоры universe the way the 2026-10-20 Universe/Cycle routing decisions intend (Brief: "confirmed Universe/Cycle routing", 11 existing Дозоры/Warhammer routing decisions).
+- To do:
+  - find out why this book missed the routing;
+  - fix detection for new books;
+  - move this one (and any other misses) in the later rename pass (ruling 21).
 
 ## Later, by ruling 21
 
