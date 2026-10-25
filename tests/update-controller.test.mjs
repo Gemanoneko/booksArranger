@@ -1,11 +1,108 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';import {createRequire} from 'node:module';const {UpdateController}=createRequire(import.meta.url)('../desktop/update-controller.js');
-function fixture(overrides={}){const provider=new EventEmitter();provider.checkForUpdates=async()=>{};provider.downloadUpdate=async()=>{};provider.downloadedUpdateHelper={file:'C:/owned/update.exe',downloadedFileInfo:{sha512:'checksum',isAdminRightsRequired:false}};const seen=[];const lease={isAlive:()=>true,close:async()=>seen.push('close')};const controller=new UpdateController({provider,packaged:true,notify:v=>seen.push(v.phase),acquireArtifact:async()=>{seen.push('lease');return lease;},parkEngine:async()=>seen.push('park'),install:async()=>seen.push('install'),...overrides});return {provider,controller,seen,lease};}
-function ready(f){f.provider.emit('update-downloaded',{version:'0.17.0'});}
-test('explicit ready restart holds installer through park and installation',async()=>{const f=fixture();ready(f);await f.controller.restart();assert.deepEqual(f.seen.slice(-5),['lease','park','installing','install','close']);assert.equal(f.provider.autoInstallOnAppQuit,false);assert.equal(f.provider.autoDownload,false);});
-test('busy atomic fence refuses installation and releases exact lease',async()=>{const f=fixture({parkEngine:async()=>{throw new Error('busy');}});ready(f);await assert.rejects(f.controller.restart(),/busy/);assert(!f.seen.includes('install'));assert(f.seen.includes('close'));assert.equal(f.controller.value.phase,'ready');});
-test('tampered artifact never parks engine',async()=>{const f=fixture({acquireArtifact:async()=>{throw new Error('checksum changed');}});ready(f);await assert.rejects(f.controller.restart(),/checksum/);assert(!f.seen.includes('park'));assert(!f.seen.includes('install'));});
-test('lease loss after parked engine never invokes installer',async()=>{let alive=true;const f=fixture({parkEngine:async()=>{alive=false;}});f.lease.isAlive=()=>alive;ready(f);await assert.rejects(f.controller.restart(),/lease ended/);assert(!f.seen.includes('install'));});
-test('check failure preserves downloaded ready artifact',async()=>{const f=fixture();ready(f);f.provider.checkForUpdates=async()=>{throw new Error('offline');};await assert.rejects(f.controller.check(),/offline/);assert.equal(f.controller.value.phase,'ready');assert.equal(f.controller.ready.version,'0.17.0');});
-test('dev check refuses real provider and never claims current',async()=>{let calls=0;const f=fixture({packaged:false});f.provider.checkForUpdates=async()=>calls++;await assert.rejects(f.controller.check(),/installed app/);assert.equal(calls,0);assert.equal(f.controller.value.phase,'idle');});
-test('missing checksum and admin installer cannot become ready',()=>{for(const bad of [{sha512:null},{sha512:'x',isAdminRightsRequired:true}]){const f=fixture();f.provider.downloadedUpdateHelper.downloadedFileInfo=bad;ready(f);assert.equal(f.controller.ready,null);assert.equal(f.controller.value.phase,'error');}});
-test('unexpected engine exit refuses installer with artifact preserved',async()=>{const f=fixture({parkEngine:async()=>{throw new Error('owned engine exited unsafely');}});ready(f);await assert.rejects(f.controller.restart(),/unsafely/);assert(!f.seen.includes('install'));assert.equal(f.controller.ready.version,'0.17.0');});
+import test from 'node:test';import assert from 'node:assert/strict';import {EventEmitter} from 'node:events';import {createRequire} from 'node:module';import fs from 'node:fs';import vm from 'node:vm';const {UpdateController}=createRequire(import.meta.url)('../desktop/update-controller.js');
+// 0.22.1 (ruling 27; Judy's 0.22.1 UX spec, section 2). A fake provider and a fake clock: each sleep advances it; a
+// 30 s attempt bound only fires when GitHub is black-holed (otherwise the provider answers first). No real requests.
+const START=new Date(2026,9,25,21,4,0).getTime();
+function fixture(){const provider=new EventEmitter();const f={provider,seen:[],states:[],log:[],clock:START,blackHole:false};
+ provider.checkForUpdates=async()=>{provider.emit('update-available',{version:'0.22.2'});return {};};
+ provider.downloadUpdate=async()=>{provider.emit('download-progress',{percent:42.4});provider.emit('update-downloaded',{version:'0.22.2'});};
+ provider.downloadedUpdateHelper={file:'C:/owned/update.exe',downloadedFileInfo:{sha512:'checksum',isAdminRightsRequired:false}};
+ f.lease={isAlive:()=>true,close:async()=>f.seen.push('close')};
+ f.sleep=async ms=>{f.clock+=ms;if(ms===30000&&!f.blackHole)await new Promise(()=>{});};
+ f.controller=new UpdateController({provider,packaged:true,version:'0.22.1',notify:v=>f.states.push(v),now:()=>f.clock,sleep:f.sleep,log:line=>f.log.push(line),
+  acquireArtifact:async()=>{f.seen.push('lease');return f.lease;},parkEngine:async()=>{f.seen.push('park');},
+  install:async()=>{f.seen.push('install while '+f.controller.value.install.phase);},restartEngine:async()=>{f.seen.push('old engine started');}});
+ return f;}
+async function ready(f){await f.controller.check();await f.controller.download();assert.equal(f.controller.value.ready,true,'positive control: downloaded and verified');}
+const typed=(cause,extra={})=>Object.assign(new Error('fixture '+cause),{updateCause:cause},extra);
+// The page's pure helpers, run in their own realm; answers come back as plain values.
+function page(){const context={window:{},console};vm.createContext(context);vm.runInContext(fs.readFileSync(new URL('../web/desktop-ui.js',import.meta.url),'utf8'),context);
+ return Object.fromEntries(Object.entries(context.booksUpdateText).map(([key,fn])=>[key,(...args)=>JSON.parse(JSON.stringify(fn(...args)))]));}
+
+test('restart holds the installer from before the engine stops until the installer starts',async()=>{const f=fixture();await ready(f);await f.controller.restart();
+ assert.deepEqual(f.seen,['lease','park','install while installing','close']);assert.equal(f.provider.autoInstallOnAppQuit,false);assert.equal(f.provider.autoDownload,false);});
+test('GitHub black-holed: 3 tries of 30 s, 5 s and 15 s apart, then its own plain line',{timeout:3000},async()=>{const f=fixture();f.blackHole=true;let calls=0;
+ f.provider.checkForUpdates=()=>{calls++;f.provider.checkForUpdatesPromise='stuck';return new Promise(()=>{});};
+ await f.controller.check();const check=f.controller.value.check;
+ assert.equal(calls,3);assert.equal(f.clock-START,3*30000+5000+15000);assert.equal(f.provider.checkForUpdatesPromise,null,'each try sends a new request, not the stuck one');
+ assert.deepEqual([check.phase,check.cause,check.at],['failed','no_answer','21:05']);
+ assert.deepEqual(f.states.filter(v=>v.check.phase==='retrying').map(v=>v.check.attempt),[2,3]);
+ assert(f.log.length===3&&!JSON.stringify(f.controller.value).includes('No answer in'),'raw text stays in the log');});
+test('no internet and a GitHub error fail at once, each with its cause',async()=>{for(const [error,cause,code] of [[new Error('net::ERR_INTERNET_DISCONNECTED'),'no_internet',0],[Object.assign(new Error('HttpError: 503 Service Unavailable'),{statusCode:503}),'github_error',503]]){
+ const f=fixture();let calls=0;f.provider.checkForUpdates=async()=>{calls++;throw error;};await f.controller.check();
+ assert.equal(calls,1);assert.deepEqual([f.controller.value.check.cause,f.controller.value.check.code],[cause,code]);assert(!JSON.stringify(f.controller.value).includes('ERR_INTERNET'),'raw text stays in the log');assert(f.log.length);}});
+test('a check answers up to date or available, with the time',async()=>{const f=fixture();await f.controller.check();assert.deepEqual([f.controller.value.check.phase,f.controller.value.check.at,f.controller.value.available],['available','21:04','0.22.2']);
+ const g=fixture();g.provider.checkForUpdates=async()=>{g.provider.emit('update-not-available',{});};await g.controller.check();assert.equal(g.controller.value.check.phase,'current');});
+test('a failed install never shows up as a check result',async()=>{const f=fixture();await ready(f);const before=f.controller.value.check;f.controller.parkEngine=async()=>{throw typed('bound',{waiting:[{kind:'scan'}]});};
+ await f.controller.restart();assert.deepEqual(f.controller.value.check,before);assert.deepEqual([f.controller.value.install.phase,f.controller.value.install.cause],['failed','bound']);
+ await f.controller.check();assert.equal(f.controller.value.install.cause,'bound','a new check clears only the check line');assert.equal(f.controller.value.showInstaller,false,'Show installer file goes with a new check');});
+test('download: progress, ready, and every typed failure',async()=>{const f=fixture();await f.controller.check();const progress=[];f.controller.notify=v=>progress.push(v.download.phase+':'+Math.round(v.download.progress));
+ await f.controller.download();assert.deepEqual(progress,['downloading:0','downloading:42','ready:100']);
+ for(const [message,cause] of [['sha512 checksum mismatch, expected x','checksum'],['ENOSPC: no space left on device','disk_full'],['net::ERR_CONNECTION_RESET','dropped'],['something else','other']]){
+  const g=fixture();await g.controller.check();g.provider.downloadUpdate=async()=>{throw new Error(message);};await g.controller.download();assert.deepEqual([g.controller.value.download.phase,g.controller.value.download.cause,g.controller.value.ready],['failed',cause,false]);}});
+test('missing checksum and admin installer cannot become ready',async()=>{for(const [bad,cause] of [[{sha512:null},'checksum'],[{sha512:'x',isAdminRightsRequired:true},'other']]){const f=fixture();f.provider.downloadedUpdateHelper.downloadedFileInfo=bad;await f.controller.check();await f.controller.download();
+ assert.equal(f.controller.ready,null);assert.deepEqual([f.controller.value.download.phase,f.controller.value.download.cause],['failed',cause]);}});
+test('the installer would not start: the old engine starts again, and the line and Show installer file name the file',async()=>{const f=fixture();await ready(f);f.controller.install=async()=>{throw typed('installer_blocked');};
+ await f.controller.restart();assert.deepEqual(f.seen,['lease','park','old engine started','close']);const value=f.controller.value;
+ assert.deepEqual([value.install.cause,value.showInstaller,value.installerPath,value.ready],['installer_blocked',true,'C:/owned/update.exe',true]);});
+test('Cancel update while it waits: no installer, no engine restart, the lease is released',async()=>{const f=fixture();await ready(f);
+ f.controller.parkEngine=async({progress,cancelRequested})=>{progress({phase:'pausing',waiting:[{kind:'conversion',title:'Fixture'}],elapsed:12,safe_seconds:90});assert.equal(f.controller.value.canCancel,true);assert.equal(f.controller.cancel(),true);assert.equal(cancelRequested(),true);throw typed('cancelled');};
+ await f.controller.restart();assert.deepEqual(f.seen,['lease','close']);assert.deepEqual([f.controller.value.install.phase,f.controller.value.canCancel,f.controller.value.busy.install],['cancelled',false,false]);});
+test('a tampered artifact never stops the engine and asks for a new download',async()=>{const f=fixture();await ready(f);f.controller.acquireArtifact=async()=>{throw new Error('checksum changed');};
+ await f.controller.restart();assert(!f.seen.includes('park'));assert.deepEqual([f.controller.value.install.cause,f.controller.value.ready],['checksum',false]);});
+test('verification that runs out of time keeps the download for another try',async()=>{const f=fixture();await ready(f);f.controller.acquireArtifact=async()=>{throw new Error('Installer integrity check timed out');};
+ await f.controller.restart();assert.deepEqual([f.controller.value.install.cause,f.controller.value.ready],['verify_timeout',true]);});
+test('lease loss after the engine stopped: no installer, and the old engine starts again',async()=>{let alive=true;const f=fixture();await ready(f);f.lease.isAlive=()=>alive;f.controller.parkEngine=async()=>{alive=false;};
+ await f.controller.restart();assert(!f.seen.some(s=>s.startsWith('install')));assert(f.seen.includes('old engine started'));assert.equal(f.controller.value.install.cause,'checksum');});
+test('an engine that exits unsafely is started again; one that cannot be started says so',async()=>{const f=fixture();await ready(f);f.controller.parkEngine=async()=>{throw typed('engine_exit');};
+ f.controller.restartEngine=async()=>{throw new Error('port taken');};await f.controller.restart();assert.equal(f.controller.value.install.cause,'engine_restart');});
+test('dev build says updates work only in the installed app and never asks GitHub',async()=>{const f=fixture();let calls=0;f.controller.packaged=false;f.provider.checkForUpdates=async()=>calls++;
+ await f.controller.check();assert.equal(calls,0);assert.equal(f.controller.value.check.phase,'dev');});
+
+test('page: the controller records read as their lines (black-holed GitHub, dev build)',{timeout:3000},async()=>{const f=fixture();f.blackHole=true;f.provider.checkForUpdates=()=>new Promise(()=>{});await f.controller.check();
+ assert.equal(page().checkLine(f.controller.value),"Couldn't check for updates: GitHub didn't answer after 3 tries (tried 21:05). Check your internet connection, then try again. Nothing changed.");
+ const g=fixture();g.controller.packaged=false;await g.controller.check();assert.equal(page().checkLine(g.controller.value),'Updates work only in the installed app.');});
+test('page: every Check, Download and Install line reads as Judy wrote it',()=>{const t=page();const base={version:'0.22.1',available:'0.22.2',ready:false,check:{},download:{},install:{}};
+ const check=c=>t.checkLine({...base,check:c}),download=d=>t.downloadLine({...base,download:d}),install=(i,extra={})=>t.installLine({...base,...extra,install:{at:'21:07',...i}}).text;
+ assert.equal(check({phase:'idle'}),'Books Arranger 0.22.1. Not checked yet.');assert.equal(check({phase:'checking'}),'Checking for updates…');
+ assert.equal(check({phase:'retrying',attempt:2}),'Checking for updates… no answer yet, trying again (try 2 of 3).');
+ assert.equal(check({phase:'current',at:'21:04'}),'Books Arranger 0.22.1 is up to date (checked 21:04).');assert.equal(check({phase:'available',at:'21:04',version:'0.22.2'}),'Version 0.22.2 is available (checked 21:04).');
+ assert.equal(check({phase:'failed',cause:'no_internet',at:'21:04'}),"Couldn't check for updates: no internet connection (tried 21:04). Connect, then try again. Nothing changed.");
+ assert.equal(check({phase:'failed',cause:'github_error',code:503,at:'21:04'}),"Couldn't check for updates: GitHub returned an error, 503 (tried 21:04). Try again later. Nothing changed.");
+ assert.equal(check({phase:'failed',cause:'other',at:'21:04'}),"Couldn't check for updates (tried 21:04). Try again later. Nothing changed.");
+ assert.equal(download({phase:'downloading',progress:42.4}),'Downloading version 0.22.2… 42%');assert.equal(t.downloadLine({...base,ready:true}),'Version 0.22.2 is downloaded and verified. Ready to install.');
+ assert.equal(download({phase:'failed',cause:'dropped',at:'21:05'}),"Couldn't download version 0.22.2: the connection dropped (tried 21:05). Press Download update to try again.");
+ assert.equal(download({phase:'failed',cause:'checksum',at:'21:05'}),"Couldn't use the download: it failed its checksum check, so it was discarded (tried 21:05). Press Download update to try again.");
+ assert.equal(download({phase:'failed',cause:'disk_full',at:'21:05'}),"Couldn't download version 0.22.2: not enough disk space (tried 21:05). Free some space, then press Download update.");
+ assert.equal(download({phase:'failed',cause:'other',at:'21:05'}),"Couldn't download version 0.22.2 (tried 21:05). Press Download update to try again.");
+ assert.equal(install({phase:'cancelled'}),'Update cancelled. Books Arranger is running as before.');
+ assert.equal(install({phase:'failed',cause:'bound',waiting:[{kind:'conversion',title:'Лабиринты Ехо 3'}]}),'Update cancelled: the conversion of Лабиринты Ехо 3 did not stop within 3 minutes (tried 21:07). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.');
+ const blocked=t.installLine({...base,installerPath:'C:/owned/update.exe',install:{phase:'failed',cause:'installer_blocked',at:'21:07'}});
+ assert.deepEqual([blocked.text,blocked.path],["The installer couldn't start (tried 21:07). Windows or your antivirus may have blocked it. Books Arranger is running again on 0.22.1. Run the installer yourself:",'C:/owned/update.exe']);
+ assert.equal(install({phase:'failed',cause:'checksum'}),"Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried 21:07). Check for updates, then download it again.");
+ assert.equal(install({phase:'failed',cause:'verify_timeout'}),"Update cancelled: the downloaded installer couldn't be verified in time (tried 21:07). Press Restart to update to try again.");
+ assert.equal(install({phase:'failed',cause:'engine_restart'}),"Books Arranger couldn't restart its engine (tried 21:07). Choose Quit Books Arranger in the tray, then open it again.");
+ for(const file of ['../web/desktop-ui.js','../desktop/update-controller.js','../desktop/engine-update.js'])assert(!fs.readFileSync(new URL(file,import.meta.url),'utf8').includes('Request timed out'),'"Request timed out" appears nowhere: '+file);});
+test('page: phase lines, with the seconds counter apart from the live text',()=>{const t=page();const u=i=>t.phaseLine({available:'0.22.2',install:{safe:90,elapsed:0,waiting:[],critical:[],...i}});
+ assert.deepEqual(u({phase:'starting'}),{text:'Starting the update…',counter:''});
+ assert.deepEqual(u({phase:'pausing',elapsed:12.6,waiting:[{kind:'conversion',title:'Fixture'},{kind:'scan'},{kind:'research'},{kind:'approval'}]}),{text:'Stopping safely for the update. Waiting for the conversion of Fixture and the library scan and 2 more to reach a safe point…',counter:'(12 s of 90 s)'});
+ assert.deepEqual(u({phase:'pausing',waiting:[{kind:'critical',title:'a tag edit'}],critical:['a tag edit']}),{text:'Finishing a tag edit first, so nothing is left half-done. This takes a few seconds.',counter:''});
+ assert.equal(u({phase:'forcing',waiting:[{kind:'conversion',title:'Fixture'}]}).text,"The conversion of Fixture didn't reach a safe point in 90 s. Stopping it now; it restarts after the update.");
+ assert.equal(u({phase:'forcing',waiting:[{kind:'approval'}]}).text,"An approval didn't reach a safe point in 90 s. Stopping it now; start it again after the update.");
+ assert.equal(u({phase:'updating'}).text,'Stopping the engine now. Saved work is kept.');
+ assert.equal(u({phase:'installing'}).text,'Installing 0.22.2… No installer window opens. Books Arranger reopens by itself and shows its loading progress.');});
+test('page: the confirm names the running work; idle starts at once; unknown work confirms',()=>{const t=page();
+ assert.deepEqual(t.workLines({busy:{converting:true,current_title:'Лабиринты Ехо 3',scanning:true,automatic:'Running'},queued_actions:2}).lines,['Converting Лабиринты Ехо 3. It stops and starts again from the beginning.','Scanning the library. It stops. Continue it with Resume scanning.','Automatic processing stops. Press Start automatic processing to continue.','2 queued actions are dropped. Press them again afterwards.']);
+ assert.deepEqual(t.workLines({busy:{converting:false,scanning:false,automatic:'Idle'},queued_actions:[{id:1}]}).lines,['1 queued action is dropped. Press it again afterwards.']);
+ assert.deepEqual(t.workLines({busy:{converting:false,scanning:false,automatic:'Idle'}}),{known:true,lines:[]},'no queue count in status: no queue line');
+ assert.equal(t.workLines({busy:null}).known,false);});
+test('page: buttons have real tooltips, busy ones use aria-disabled, and show only when they apply',()=>{const t=page();const base={version:'0.22.1',available:'0.22.2',ready:false,packaged:true,busy:{},check:{},download:{},install:{},canCancel:false,showInstaller:false};
+ const idle=t.buttons(base,{busy:{converting:false,scanning:false,automatic:'Idle'}});
+ for(const [key,b] of Object.entries(idle))assert.notEqual(b.title,b.face,key+' tooltip is a sentence, not the face');
+ assert.deepEqual([idle.download.hidden,idle.restart.hidden,idle.cancel.hidden,idle.installer.hidden],[false,true,true,true]);
+ const readyIdle=t.buttons({...base,ready:true},{busy:{converting:false,scanning:false,automatic:'Idle'}}).restart;
+ assert.equal(readyIdle.title,'Install version 0.22.2 now. Books Arranger closes, updates and reopens by itself. No installer window opens.');assert.equal(readyIdle.busy,false,'no idle gate');
+ assert.equal(t.buttons({...base,ready:true},{busy:{converting:true}}).restart.title,'Install version 0.22.2 now. Running work stops safely and restarts afterwards. Your source files are not touched. You confirm first.');
+ const updating=t.buttons({...base,ready:true,busy:{install:true},canCancel:true},{});
+ assert.deepEqual([updating.restart.face,updating.restart.busy,updating.restart.title,updating.cancel.hidden,updating.cancel.title],['Updating…',true,'Updating Books Arranger…',false,'Stop the update. Books Arranger keeps running as before.']);
+ const checking=t.buttons({...base,busy:{check:true}},{}).check;assert.deepEqual([checking.face,checking.busy,checking.title],['Checking…',true,'Checking for updates…']);
+ const downloading=t.buttons({...base,busy:{download:true},download:{progress:7}},{}).download;assert.deepEqual([downloading.face,downloading.title],['Downloading… 7%','Downloading version 0.22.2…']);});

@@ -20,6 +20,7 @@ bytes equal the plan.
 """
 import base64
 import contextlib
+import critical_sections
 import hashlib
 import json
 import os
@@ -410,11 +411,14 @@ def _edit(manifest, stage, stop, progress, session):
     try:
         source_proofs.forget(source)
         progress('Creating audio', {'encoding': encoding, 'source_metadata_preservation': True, 'in_place': True})
-        _fault('before_append')
-        writer.write_at(plan.source_size, plan.appended_movie); _fault('appended'); writer.flush()
-        _fault('before_type_patch')
-        writer.write_at(intent['type_offset'], b'free'); writer.flush(); _fault('type_patched')
-        session.record('written'); progress('Checking output', {})
+        # Ruling 27: the two writes and their journal step finish once begun; an update waits for them.
+        with critical_sections.critical(critical_sections.TAG_EDIT):
+            _fault('before_append')
+            writer.write_at(plan.source_size, plan.appended_movie); _fault('appended'); writer.flush()
+            _fault('before_type_patch')
+            writer.write_at(intent['type_offset'], b'free'); writer.flush(); _fault('type_patched')
+            session.record('written')
+        progress('Checking output', {})
         raw = ap.probe(source, stage, stop); actual, profile = ap.audio_info(raw)
         if profile != ('aac', str(encoding['sample_rate']), encoding['channels']) or abs(actual - duration) > .25:
             raise ap.ValidationError('Preserved output audio profile is incorrect')

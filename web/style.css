@@ -128,3 +128,7 @@ button.danger.solid{background:var(--error);color:var(--on-accent);border-color:
 button.danger.solid:enabled:hover{background:var(--error-hover);border-color:var(--error-hover)}
 button.danger.solid:enabled:active{background:var(--error-pressed);border-color:var(--error-pressed)}
 button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:not-allowed}
+/* 0.22.1 App updates (ruling 27; Judy 2.1, 2.4, 2.5): one message line per operation, busy buttons keep focus, the update dialog. Existing tokens only. */
+.desktop-update .update-line{margin:4px 0}.desktop-update .update-line .field-help{display:inline-block;min-width:72px;margin-right:8px}.desktop-update .update-line.failed .update-text{color:var(--warning)}.desktop-update button{min-width:96px}
+.desktop-update button[aria-disabled=true],.desktop-update button[aria-disabled=true]:hover,.desktop-update button[aria-disabled=true]:active{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}.desktop-status .update-counter{font-variant-numeric:tabular-nums}
+#update-dialog{width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px}#update-dialog::backdrop{background:rgb(0 0 0 / .65)}#update-dialog p{overflow-wrap:anywhere}#update-dialog button{min-height:32px;min-width:96px;white-space:normal}

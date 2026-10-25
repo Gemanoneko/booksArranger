@@ -132,28 +132,14 @@ class ControlTests(unittest.TestCase):
         time.sleep(.3)
         server.finish_shutdown.assert_called_once_with()
 
-    def test_update_busy_admission_refuses_without_closing_or_shutdown(self):
-        server,_=fake_server();server.merge_admissions=1;server.state=Mock()
-        control=DesktopControl(server)
+    # 0.21.1's refuse-unless-idle update fence is gone (ruling 27): the update now waits for the work at its safe points;
+    # its contract is tests/test_desktop_update.py.
+    def test_update_is_refused_while_quit_is_finishing(self):
+        server,jobs_thread=fake_server(converting=True)
+        control=DesktopControl(server);control.quit()
         with self.assertRaises(RuntimeError):control.prepare_update()
-        self.assertFalse(server.closing);server.finish_shutdown.assert_not_called();server.state.assert_not_called()
-
-    def test_update_checks_full_idle_under_admission_lock(self):
-        server,_=fake_server();server.merge_admissions=0;server.state=Mock(return_value={'fixture':'full state'})
-        control=DesktopControl(server)
-        def verified(state):
-            self.assertTrue(server.control_lock.locked());self.assertEqual(state,{'fixture':'full state'});self.assertFalse(server.closing)
-        with patch('app_launcher.verify_idle',side_effect=verified):control.prepare_update()
-        control.thread.join(5)
-        self.assertTrue(server.closing);server.finish_shutdown.assert_called_once_with()
-        self.assertEqual(control.phase,'exiting')
-
-    def test_update_nonidle_keeps_owner_and_serving(self):
-        server,_=fake_server();server.merge_admissions=0;server.state=Mock(return_value={})
-        control=DesktopControl(server)
-        with patch('app_launcher.verify_idle',side_effect=RuntimeError('Recovery work is active')):
-            with self.assertRaisesRegex(RuntimeError,'Recovery'):control.prepare_update()
-        self.assertFalse(server.closing);server.finish_shutdown.assert_not_called();self.assertEqual(control.phase,'running')
+        self.assertEqual(control.phase,'finishing')
+        jobs_thread.is_alive.return_value=False;server.merge.drained.return_value=True;control.thread.join(5)
 
 
 class HandlerTests(unittest.TestCase):

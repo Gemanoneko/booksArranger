@@ -5,6 +5,7 @@ be discarded by the separate hash-bound storage cleanup after durable success.
 Audio success is separate from cleanup state. Constructors never start work.
 """
 import contextlib
+import critical_sections
 import hashlib
 import json
 import os
@@ -464,7 +465,8 @@ class CleanupJobs:
                 # Senua 0.21.3 F2: the pure re-reads run before the removal intent is recorded too, so a refusal leaves no
                 # member in removal_intended (restore() reads that as a collision). They run again just before disposal.
                 self._sorted(final,BoundaryError);self._output_present(output,out,final)
-                with self.review_boundary(),connect(self.database) as db:
+                # Ruling 27: one original's removal (intent, disposal, retirement record) finishes once begun.
+                with critical_sections.critical(critical_sections.CLEANUP),self.review_boundary(),connect(self.database) as db:
                     db.execute('BEGIN IMMEDIATE')
                     if not self.guard(db,intent):raise BoundaryError('Completed source review changed before removal')
                     db.execute("UPDATE cleanup_members SET state='removal_intended' WHERE cleanup_id=? AND path=?",(id,source['path']))

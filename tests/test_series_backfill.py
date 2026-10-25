@@ -151,6 +151,14 @@ class BackfillTests(unittest.TestCase):
         # A second pass changes nothing.
         backfill.run_pass();self.assertTrue(lib.target.exists());self.assertEqual(json.loads(lib.row()['output'])['sha256'],output['sha256'])
 
+    def test_an_update_waits_for_the_rename_and_its_record(self):
+        # 0.22.1 ruling 27: Restart to update never ends the engine between the rename, its record and the former file's removal.
+        import critical_sections
+        lib=self.lib;backfill=lib.backfill();seen=[];real=SeriesBackfill.catalog
+        def catalog(self,job_id,record):seen.append(critical_sections.open_sections());return real(self,job_id,record)
+        with patch.object(SeriesBackfill,'catalog',catalog):backfill.run_pass()
+        self.assertEqual(lib.state(backfill),('done',''));self.assertEqual(seen,[['a file rename']]);self.assertEqual(critical_sections.open_sections(),[])
+
     def test_a_book_outside_the_sorted_folder_is_left_as_it_is(self):
         # Audit m4: no temp file, rename or delete inside a source folder: the output folder unset, the book's folder
         # also a source, and the book outside the output folder.

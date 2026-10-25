@@ -127,6 +127,14 @@ class CleanupTest(unittest.TestCase):
         self.worker.restore(self.id)
         for s in self.sources:
             p=Path(s['path']);self.assertEqual(hashlib.sha256(p.read_bytes()).hexdigest(),s['sha256']);self.assertEqual(p.stat().st_mtime_ns,int(s['modified']))
+    def test_an_update_waits_for_each_removal_it_began(self):
+        # 0.22.1 ruling 27: Restart to update never ends the engine between an original's removal and its record.
+        import critical_sections
+        seen=[];real=self.worker._retire
+        def retire(*args):seen.append(critical_sections.open_sections());return real(*args)
+        with patch.object(self.worker,'_retire',side_effect=retire):self.worker.run(self.id)
+        self.assertEqual(self.worker.status('test')['removed'],2)
+        self.assertEqual(seen,[['a cleanup']]*2);self.assertEqual(critical_sections.open_sections(),[])
     def test_output_change_preserves_all_originals(self):
         Path(self.job['output']['final_path']).write_bytes(b'changed')
         with self.assertRaises(BoundaryError):self.worker.run(self.id)
