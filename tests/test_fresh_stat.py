@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import scanner
+from scan_wait import finish_scan
 
 SCRATCH = Path(__file__).resolve().parents[1] / 'scratch' / 'fresh-stat-fixtures'
 SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -97,8 +98,7 @@ class FreshStatTests(unittest.TestCase):
             return {'title':'Unaccepted replacement'}
         self.inventory.reader=replacing
         self.inventory.launch('Audiobooks')
-        self.inventory.worker.join(5)
-        self.assertFalse(self.inventory.worker.is_alive())
+        finish_scan(self.inventory)
         row=self.row()
         self.assertIsNone(row['review'])
         self.assertIn('identity=',row['error'])

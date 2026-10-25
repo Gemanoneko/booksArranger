@@ -12,6 +12,7 @@ from audio_jobs import AudioJobs,RetryRefused,failure_cause,_failure_details,RET
 from audio_pipeline import StepProgress
 from automatic_processing import AutomaticProcessing
 from scanner import connect
+from scan_wait import finish_scan
 from test_blocked_retry import Queue,AREA
 from web_server import activities
 
@@ -152,7 +153,7 @@ class BookListTests(unittest.TestCase):
         for name in ('Alpha','Beta','Gamma','Delta'):(audio/name).mkdir(parents=True);(audio/name/'01.mp3').write_bytes(name.encode()*10)
         roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
         self.inventory=Inventory(base/'catalog.sqlite3',roots,lambda path,kind,stop:{'title':Path(path).parent.name,'tags':{'album':Path(path).parent.name},'probe':{'format':{'duration':'1.0'}},'method':'fixture'})
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(10)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         self.service=CandidateReviewService(self.inventory,base/'covers');self.ids={r['title_clue']:r['id'] for r in self.service.page()['rows']}
         groups={'Alpha':'unsupported','Beta':'retry','Gamma':'other'}
         self.jobs=[{'job_id':'job-'+name,'state':'needs attention','stage':'checking','reason':'raw '+name,'manifest':{'candidate_id':self.ids[name],'cleanup_policy':{'enabled':False}}} for name in groups]

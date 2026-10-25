@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from scanner import Inventory, connect
+from scan_wait import finish_scan
 from source_config import load_source_config, normalize_sources
 
 SCRATCH=Path('C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared')
@@ -44,8 +45,7 @@ class MultiSourceTests(unittest.TestCase):
     def scan(self,inv,root=None,resume=False):
         if root:inv.launch_source(str(root),resume)
         else:inv.launch('Audiobooks',resume)
-        inv.worker.join(20)
-        self.assertFalse(inv.worker.is_alive(),'Synthetic scan exceeded its deadline')
+        finish_scan(inv)
         self.assertEqual(inv.last_error,'')
 
     def test_legacy_id_revision_and_review_survive_additive_configuration(self):

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 import manual_metadata as m
 from public_research import PublicResearch
+from scan_wait import finish_scan
 
 class ManualResearchTests(unittest.TestCase):
     def setUp(self):
@@ -50,7 +51,7 @@ class LocalPolicyRecheckTests(unittest.TestCase):
         try:
             calls=[]
             def lookup(*args):calls.append(args[0]['id']);return {'reasons':['Book identity uncertain'],'sources':[]}
-            auto,merge,inv=fx.fake_merge(lookup);inv.launch('Audiobooks');inv.worker.join(5)
+            auto,merge,inv=fx.fake_merge(lookup);inv.launch('Audiobooks');finish_scan(inv)
             row=inv.candidates('Audiobooks')['rows'][0]
             with connect(inv.database) as db:
                 m.initialize(db);m.append(db,m.capture(row,{'title':'Human source retained'},'Credits'))

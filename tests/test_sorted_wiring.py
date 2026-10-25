@@ -7,6 +7,7 @@ CleanupJobs rule (Sergei's rulings 2 and 1a). Private audio fixtures only; no ne
 import shutil,subprocess,tempfile,threading,time,unittest,urllib.error
 from pathlib import Path
 from scanner import Inventory
+from scan_wait import finish_scan
 from merge_service import MergeService
 from public_research import PublicClient,PublicResearch
 from test_automatic_media import artwork
@@ -24,7 +25,7 @@ class ProductionSortedWiringTests(unittest.TestCase):
                 '-metadata','album=Око Бога','-metadata','title=Глава '+str(index),'-metadata','artist=Джеймс Роллинс','-metadata','track=%d/2'%index,'-disposition:v','attached_pic',str(source)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots,output_root=str(self.sorted));self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots,output_root=str(self.sorted));self.inv.launch('Audiobooks');finish_scan(self.inv)
         self.service=MergeService(self.inv,self.base/'cache');self.addCleanup(self.service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         self.client=PublicClient(self.inv.database,fetch=offline)

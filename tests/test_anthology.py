@@ -6,6 +6,7 @@ import unittest
 
 from metadata import propose, future_audio_tags
 from scanner import Inventory
+from scan_wait import finish_scan
 
 SCRATCH=Path(__file__).resolve().parents[1]/'scratch'/'anthology-tests'
 SCRATCH.mkdir(parents=True,exist_ok=True)
@@ -86,7 +87,7 @@ class AnthologyTests(unittest.TestCase):
             source=Path(roots['Audiobooks'])/'book.mp3';source.write_bytes(b'fixture')
             reader=lambda *args:{'artist':'SOURCE READER','author':'SOURCE READER','tags':{'comment':'Keep this'}}
             inventory=Inventory(base/'state'/'inventory.sqlite3',roots,reader)
-            inventory.launch('Audiobooks');inventory.worker.join(5)
+            inventory.launch('Audiobooks');finish_scan(inventory)
             inventory.save_review(roots['Audiobooks'],str(source),legacy)
             old=inventory.rows('Audiobooks')[0]
             self.assertEqual(old['tag_preview']['ARTIST'],legacy['author'])

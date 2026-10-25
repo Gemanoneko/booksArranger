@@ -7,6 +7,7 @@ import groups
 import split_books
 from local_identity import (agreement,canonical_author,catalog_index,confirmed_spellings,middle_initial_same,slip_same,
                             KNOWN_AGREEMENT_VERSIONS,AGREEMENT_VERSION)
+from scan_wait import finish_scan
 from source_identity import source_gate
 import test_automatic_processing as automatic_fixtures
 from test_local_identity import catalogue,Catalog
@@ -267,7 +268,7 @@ class SplitAdmissionTests(unittest.TestCase):
         for n in (1,2):
             source=folder/('Чужак %d.m4b'%n);make_part(source,'Чужак %d'%n,n,chapters);self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv);self.service=MergeService(self.inv,self.base/'cache')
         self.addCleanup(self.temp.cleanup);self.addCleanup(self.service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         self.client=PublicClient(self.inv.database,fetch=offline)
@@ -439,7 +440,7 @@ class PartBookAdmissionTests(unittest.TestCase):
             own=chapters[n-1] if isinstance(chapters,tuple) else chapters
             source=folder/(stem+'.m4b');make_part(source,title,n,own,album='Имаджика',artist='Клайв Баркер');self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv);self.service=MergeService(self.inv,self.base/'cache')
         self.addCleanup(self.temp.cleanup);self.addCleanup(self.service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         self.client=PublicClient(self.inv.database,fetch=offline)
@@ -538,7 +539,7 @@ class M4AGroupAdmissionTests(unittest.TestCase):
         for n in (1,2,3):
             source=folder/('%02d.m4a'%n);make_part(source,'Глава %d'%n,n,n==3,total=0);sources.append(source)
         roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
-        inv=Inventory(base/'catalog.sqlite3',roots);inv.launch('Audiobooks');inv.worker.join(10);service=MergeService(inv,base/'cache')
+        inv=Inventory(base/'catalog.sqlite3',roots);inv.launch('Audiobooks');finish_scan(inv);service=MergeService(inv,base/'cache')
         self.addCleanup(temp.cleanup);self.addCleanup(service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         client=PublicClient(inv.database,fetch=offline)

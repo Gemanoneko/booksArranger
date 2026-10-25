@@ -11,6 +11,7 @@ import test_approve_as_is
 import test_quiet_status
 from merge_service import MergeService
 from scanner import Inventory, connect
+from scan_wait import finish_scan
 from test_approve_as_is import tone
 
 
@@ -49,7 +50,7 @@ class CandidatesTests(test_approve_as_is.ApproveFixture):
         tone(self.audio / 'Unsorted' / 'Ясно' / 'Ясно.mp3', self.cover, album='Ясно', artist='Иван Петров')
         roots = {'Audiobooks': str(self.audio), 'Podcasts': str(self.base / 'podcasts'), 'Ebooks': str(self.base / 'ebooks')}
         inventory = Inventory(self.base / 'catalog.sqlite3', roots, output_root=str(self.sorted))
-        inventory.launch('Audiobooks'); inventory.worker.join(10)
+        inventory.launch('Audiobooks'); finish_scan(inventory)
         self.assertEqual(inventory.candidates('Audiobooks')['total'], 1)  # the first page stores the groups
         held, release = threading.Event(), threading.Event()
 

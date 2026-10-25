@@ -8,6 +8,7 @@ from test_collection_identity import PAGE,TITLE,WORKS
 from standing_metadata import build_policy
 from audio_jobs import AudioJobs
 from scanner import connect
+from scan_wait import finish_scan
 from public_research import PublicClient,PublicResearch
 
 class StandingAdmissionTests(unittest.TestCase):
@@ -21,7 +22,7 @@ class StandingAdmissionTests(unittest.TestCase):
     def replace_sources(self):
         for source in self.f.sources:source.unlink()
     def rescan(self):
-        self.f.inv.launch('Audiobooks');self.f.inv.worker.join(10)
+        self.f.inv.launch('Audiobooks');finish_scan(self.f.inv)
         return self.f.service.reviews.page()['rows']
     def test_existing_m4b_arranges_ready_preserving_chapters_and_24h_recovery(self):
         self.replace_sources();base=self.f.base/'base.m4b';source=self.f.audio/'existing.m4b';chapter=self.f.base/'source-chapters.txt'

@@ -5,6 +5,7 @@ Sorted folder and the production output policy. No network, no library access.""
 import json,shutil,subprocess,tempfile,threading,time,unittest,urllib.error
 from pathlib import Path
 from scanner import Inventory,connect
+from scan_wait import finish_scan,finish_thread
 from merge_service import MergeService
 from public_research import PublicClient,PublicResearch
 from test_automatic_media import artwork
@@ -30,7 +31,7 @@ class ApproveFixture(unittest.TestCase):
 
     def start(self):
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots,output_root=str(self.sorted));self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots,output_root=str(self.sorted));self.inv.launch('Audiobooks');finish_scan(self.inv)
         self.service=MergeService(self.inv,self.base/'cache');self.addCleanup(self.service.close)
         def offline(url,*_):raise urllib.error.HTTPError(url,503,'private fixture',{},None)
         self.service.automatic.research=PublicResearch(PublicClient(self.inv.database,fetch=offline),leads=[])
@@ -114,7 +115,7 @@ class ApproveAsIsTests(ApproveFixture):
     def test_convert_whats_there_leaves_out_the_missing_file(self):
         sources=[tone(self.audio/'Unsorted'/'Новая плоть'/('%02d.mp3'%n),self.cover,album='Новая плоть',title='Рассказ %d'%n,artist='Иван Петров',track='%d/3'%n) for n in (1,2,3)]
         self.start();sources[2].unlink()
-        self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         row=self.service.reviews.page()['rows'][0];self.assertTrue(any(m.get('missing') for m in row['members']),'positive control: a member is gone')
         with self.assertRaisesRegex(ValueError,'unavailable'):self.service.approve_book(row['id'],row['revision'])
         self.service.approve_book(row['id'],row['revision'],without_missing=True);self.wait()
@@ -196,7 +197,7 @@ class ReviewFindingsTests(ApproveFixture):
             except BaseException as error:outcome['error']=error
         with mock.patch.object(audio_pipeline,'probe',slow):
             worker=threading.Thread(target=press);worker.start()
-            self.assertTrue(started.wait(30));t0=time.monotonic();self.service.drain();worker.join(30)
+            self.assertTrue(started.wait(30));t0=time.monotonic();self.service.drain();finish_thread(worker,'The interrupted press')
         self.assertLess(time.monotonic()-t0,5,'Quit does not wait behind the press')
         self.assertIsInstance(outcome.get('error'),ValueError,outcome);self.assertIn('closing',str(outcome['error']))
         self.assertEqual(self.service.jobs.status()['jobs'],[])

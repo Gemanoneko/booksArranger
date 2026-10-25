@@ -2,6 +2,7 @@ import base64,contextlib,json,shutil,sqlite3,subprocess,tempfile,time,unittest
 from unittest.mock import patch
 from pathlib import Path
 from scanner import Inventory,connect
+from scan_wait import finish_scan
 from merge_service import MergeService
 from audio_pipeline import digest
 from encoding_policy import PROFILE
@@ -51,7 +52,7 @@ class MergeTests(unittest.TestCase):
         (folder/'cover.png').write_bytes(PNG)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
         def reader(path,kind,stop):return {'title':'Book','track_title':'Chapter '+Path(path).stem,'tags':{'album':'Book','comment':'Original comment'},'probe':{'format':{'duration':'0.3'}},'method':'private fixture'}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots,reader);self.inv.launch('Audiobooks');self.inv.worker.join(5)
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots,reader);self.inv.launch('Audiobooks');finish_scan(self.inv)
         self.service=MergeService(self.inv,self.base/'cache')
         self.review={'title':'Book','author':'Author Name','canonical_author':'Name Author','original_language':'Other','series':'Series','number':'2','genre':'Fantasy','multi_author':False,'anthology':False,'narrator':'Reader','topic':''}
         self.hashes=[digest(p) for p in self.sources]
@@ -128,7 +129,7 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(self.service.candidate_status(row['id'])['state'],'Audiobook created')
         self.service.close();self.service=MergeService(self.inv,self.base/'cache')
         self.assertEqual(self.service.jobs.status()['completed'],1)
-        self.inv.launch('Audiobooks');self.inv.worker.join(5)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         with connect(self.inv.database) as db:
             created=db.execute('SELECT metadata FROM files WHERE path=?',(output['final_path'],)).fetchone()
             owned=db.execute("SELECT job_id,kind,sha256,size FROM owned_artifacts WHERE path=?",(output['final_path'],)).fetchone()

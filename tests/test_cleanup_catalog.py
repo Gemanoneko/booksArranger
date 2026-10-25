@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from scanner import Inventory,connect
+from scan_wait import finish_scan
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'cleanup-catalog-tests'
 AREA.mkdir(parents=True,exist_ok=True)
@@ -32,8 +33,7 @@ class CleanupCatalogTests(unittest.TestCase):
         self.original=self.inventory.save_candidate('Audiobooks',row['id'],row['revision'],self.review,True)
 
     def scan(self,resume=False):
-        self.inventory.launch('Audiobooks',resume);self.inventory.worker.join(5)
-        self.assertFalse(self.inventory.worker.is_alive())
+        self.inventory.launch('Audiobooks',resume);finish_scan(self.inventory)
         self.assertEqual(self.inventory.status('Audiobooks')['state'],'completed',self.inventory.last_error)
 
     def retire(self,paths):
@@ -92,7 +92,7 @@ class CleanupCatalogTests(unittest.TestCase):
         self.retire(self.paths[:1]);self.paths[0].write_bytes(b'new unreadable metadata fixture')
         def bad(*args):raise ValueError('fixture metadata failure')
         self.inventory.reader=bad
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         with connect(self.inventory.database) as db:
             self.assertEqual(db.execute('SELECT state FROM source_retirements').fetchone()[0],'removed')
             self.assertIn('metadata failure',db.execute('SELECT error FROM files WHERE path=?',(str(self.paths[0]),)).fetchone()[0])
@@ -104,7 +104,7 @@ class CleanupCatalogTests(unittest.TestCase):
             if path==str(self.paths[0]):raise ValueError('new arrival metadata error')
             return {'title':'Book','track_title':Path(path).stem,'method':'fixture','tags':{'album':'Book'}}
         self.inventory.reader=bad
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         row=self.row()
         self.assertGreater(row['revision'],self.original['revision'])
         self.assertEqual(row['retired_source_count'],0)

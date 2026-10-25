@@ -6,6 +6,7 @@ from unittest.mock import Mock,patch
 import groups
 import research_switch
 from scanner import Inventory,connect
+from scan_wait import finish_scan,finish_thread
 from source_identity import source_gate,clues,filename_identity
 from public_research import PublicClient,PublicResearch,ResearchWait,allowed_url,parse_page,credited_pair,strict_json,APP_LIMIT_REASON,LEGACY_APP_LIMIT_REASON,SOURCE_PAUSE_REASON
 from automatic_processing import AutomaticProcessing
@@ -328,7 +329,7 @@ class AutoTests(unittest.TestCase):
         restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted);state=restarted.status()
         self.assertEqual(state['state'],'Paused');self.assertTrue(state['restart_paused']);self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(restarted.thread);merge.approve_automatic.assert_not_called()
     def test_legacy_wait_migration_retains_all_evidence_and_does_not_approve(self):
-        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(3);candidate=inv.candidates('Audiobooks')['rows'][0]
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv);candidate=inv.candidates('Audiobooks')['rows'][0]
         client=PublicClient(self.db,fetch=lambda *_:b'fixture',clock=lambda:100000);auto.research.client=client
         result={'sources':[{'sha256':'fixture unique proof'}],'work':WORK,'reasons':['Uncertain'],'wait':{'source':'ast.ru','reason':LEGACY_APP_LIMIT_REASON,'retry_at':180000}}
         auto._record(candidate,'Waiting for source',result,180000);record=auto._refresh_wait(candidate,auto.candidate(candidate))
@@ -336,7 +337,7 @@ class AutoTests(unittest.TestCase):
         with connect(self.db) as db:stored=json.loads(db.execute('SELECT result FROM automatic_candidates').fetchone()[0])
         self.assertEqual(stored['sources'],result['sources']);self.assertEqual(stored['work'],WORK);self.assertEqual(stored['reasons'],result['reasons']);merge.approve_automatic.assert_not_called()
     def test_new_identity_sources_reconsider_old_wait_once_without_erasing_host_pause(self):
-        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(3);candidate=inv.candidates('Audiobooks')['rows'][0]
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv);candidate=inv.candidates('Audiobooks')['rows'][0]
         result={'reasons':['Book identity uncertain'],'wait':{'source':'api.fantlab.ru','kind':'app_limit','reason':APP_LIMIT_REASON,'retry_at':180000}}
         auto._record(candidate,'Waiting for source',result,180000)
         with connect(self.db) as db:
@@ -472,7 +473,7 @@ class AutoTests(unittest.TestCase):
     def quit_racing_start(self,refusal):
         """A saved research run continued by Start while queued work exists, whose queue start is refused."""
         from audio_jobs import StartRefused
-        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5)
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv)
         candidate=inv.candidates('Audiobooks')['rows'][0];run_id=str(uuid.uuid4())
         now=__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()  # newest run: the one Start continues
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Paused','research',json.dumps({'pending':[candidate['id']],'done':[]}),'',now,now))
@@ -497,7 +498,7 @@ class AutoTests(unittest.TestCase):
 
     def test_failure_checkpoint_refusal_blocks_retry_without_claiming_durability(self):
         import sqlite3
-        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5)
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv)
         candidate=inv.candidates('Audiobooks')['rows'][0];run_id=str(uuid.uuid4());now='2026-10-11T00:00:00+00:00'
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(run_id,'Running','research',json.dumps({'pending':[candidate['id']],'done':[]}),'',now,now))
         auto._record(candidate,'Researching')
@@ -550,7 +551,7 @@ class AutoTests(unittest.TestCase):
                 self.assertIsNone(auto.thread);merge.approve_automatic.assert_not_called();auto.close()
         auto,merge,inv=self.fake_merge();status=auto.status(jobs=merge.state());self.assertTrue(status['can_start'],'positive control: '+status['start_block_reason']);auto.close()
     def test_construction_and_inventory_only_never_approve(self):
-        auto,merge,inv=self.fake_merge();self.assertEqual(auto.status()['state'],'Idle');merge.approve_automatic.assert_not_called();inv.launch('Audiobooks');inv.worker.join(5);merge.approve_automatic.assert_not_called();auto.close()
+        auto,merge,inv=self.fake_merge();self.assertEqual(auto.status()['state'],'Idle');merge.approve_automatic.assert_not_called();inv.launch('Audiobooks');finish_scan(inv);merge.approve_automatic.assert_not_called();auto.close()
     def test_uncertain_work_is_revisited_until_user_stop(self):
         # Sergei 2026-10-24, ruling 5 (option B): an uncertain book is held until something about it changes. Before, it
         # was revisited on a backoff timer (up to 24 h) until Stop, and the run never ended.
@@ -578,13 +579,13 @@ class AutoTests(unittest.TestCase):
         auto,merge,inv=self.fake_merge(lookup);auto.start();self.assertTrue(entered.wait(2));self.assertEqual(auto.stop()['state'],'Stopping');release.set();self.assertEqual(self.wait_auto(auto)['state'],'Paused');merge.approve_automatic.assert_not_called()
         second=AutomaticProcessing(merge,auto.research);self.assertEqual(second.status()['state'],'Paused');self.assertIsNone(second.thread);merge.resume.assert_not_called();auto.close();second.close()
     def test_unsaved_manual_draft_lease_blocks_only_candidate(self):
-        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');inv.worker.join(5);candidate=inv.candidates('Audiobooks')['rows'][0]
+        auto,merge,inv=self.fake_merge();inv.launch('Audiobooks');finish_scan(inv);candidate=inv.candidates('Audiobooks')['rows'][0]
         auto.draft(candidate['id'],candidate['revision'],True);self.assertTrue(auto.manual_draft(candidate));auto.start();self.wait_auto(auto)
         self.assertEqual(auto.candidate(inv.candidate('Audiobooks',candidate['id']))['reasons'],['Manual draft retained']);merge.approve_automatic.assert_not_called();auto.close()
 
     def test_repaired_observed_source_is_refreshed_then_researched_at_new_revision(self):
         lookup=Mock(return_value={'reasons':[],'sources':[]})
-        auto,merge,inv=self.fake_merge(lookup);inv.launch('Audiobooks');inv.worker.join(5)
+        auto,merge,inv=self.fake_merge(lookup);inv.launch('Audiobooks');finish_scan(inv)
         original=inv.candidates('Audiobooks')['rows'][0];path=Path(original['members'][0]['path'])
         auto._record(original,'Held',{'reasons':['Source files changed'],'sources':[{'url':'https://ast.ru/book/old','sha256':'a'*64,'kind':'publisher_or_journal'}]},time.time()-1)
         run_id=str(uuid.uuid4())
@@ -609,7 +610,7 @@ class AutoTests(unittest.TestCase):
         self.assertTrue(path.exists())
     def test_source_refresh_hold_does_not_query_or_approve_and_keeps_checkpoint(self):
         lookup=Mock(return_value={'reasons':[]});auto,merge,inv=self.fake_merge(lookup)
-        inv.launch('Audiobooks');inv.worker.join(5);original=inv.candidates('Audiobooks')['rows'][0]
+        inv.launch('Audiobooks');finish_scan(inv);original=inv.candidates('Audiobooks')['rows'][0]
         auto._record(original,'Held',{'reasons':['Source files changed']},time.time()-1)
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[original['id']],'done':[]}), '', '2026-10-11T00:00:00Z','2026-10-11T00:00:00Z'))
         with patch.object(inv,'refresh_candidate_sources',return_value={'state':'held','reason':'Observed source remains unreadable'}) as refresh:
@@ -620,7 +621,7 @@ class AutoTests(unittest.TestCase):
         self.assertTrue(Path(original['members'][0]['path']).exists())
     def test_manual_draft_prevents_stale_source_refresh_before_any_read(self):
         lookup=Mock(return_value={'reasons':[]});auto,merge,inv=self.fake_merge(lookup)
-        inv.launch('Audiobooks');inv.worker.join(5);original=inv.candidates('Audiobooks')['rows'][0]
+        inv.launch('Audiobooks');finish_scan(inv);original=inv.candidates('Audiobooks')['rows'][0]
         auto._record(original,'Held',{'reasons':['Source files changed']},time.time()-1);auto.draft(original['id'],original['revision'],True)
         with connect(self.db) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[original['id']],'done':[]}), '', '2026-10-11T00:00:00Z','2026-10-11T00:00:00Z'))
         with patch.object(inv,'refresh_candidate_sources',wraps=inv.refresh_candidate_sources) as refresh:
@@ -766,7 +767,7 @@ class BetweenBooksStateTests(unittest.TestCase):
         worker=threading.Thread(target=lambda:(handing.set(),release.wait(10)));fx.merge.cleanup.thread=worker;worker.start()
         try:
             self.assertTrue(handing.wait(5));self.assertEqual(fx.merge.state()['state'],'Running')
-        finally:release.set();worker.join(5)
+        finally:release.set();finish_thread(worker,'The stand-in cleanup worker')
         self.assertEqual(fx.merge.state()['state'],'Paused','queued work with no worker alive still reads Paused')
     def test_cleanup_resumed_during_a_status_read_reads_running(self):
         # Kept from v0.16.1: the after-read check still sees a worker that a Resume started mid-read.
@@ -776,7 +777,7 @@ class BetweenBooksStateTests(unittest.TestCase):
             rows=read();fx.merge.cleanup.thread=worker;worker.start();return rows
         fx.merge.cleanup.status=resumed_mid_read
         try:self.assertEqual(fx.merge.state()['state'],'Running')
-        finally:release.set();worker.join(5)
+        finally:release.set();finish_thread(worker,'The resumed stand-in cleanup worker')
         fx.merge.cleanup.status=read;self.assertEqual(fx.merge.state()['state'],'Paused')
     def test_pause_during_cleanup_reads_pausing_until_the_converter_exits(self):
         fx=self.fixture();fx.gap.clear();fx.start();self.assertTrue(fx.removing.wait(5))

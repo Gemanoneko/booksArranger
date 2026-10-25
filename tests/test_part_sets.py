@@ -12,6 +12,7 @@ import part_sets
 import test_approve_as_is
 from test_m4b_join import part
 from test_split_books import row as catalog_row
+from scan_wait import finish_scan
 
 
 def parts(*chapter_lists, titles=None, tracks=None, hours=8.0, credits=None, names=None):
@@ -261,7 +262,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
             self.assertNotIn('One part of a bigger book', result['reasons'], (new['title_clue'], result['reasons']))
             self.assertIsNone(result.get('part_set'))
         # Remembered per file: a library scan with the files unchanged forms no set again.
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1])
 
     def test_keep_splits_a_set_whose_panel_values_were_saved(self):
@@ -363,7 +364,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         row = self.asked()
         self.service.keep_separate(row['id'], row['revision'])
         sources[0].unlink(); part(sources[0], 'Чёрная звезда', 1, [(0, 400, 's01e01'), (400, 1000, 's01e02')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=3, seconds=2)
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1, 1], 'one changed file alone forms no set')
 
     def test_keep_refuses_anything_but_an_asked_set_and_a_stale_row(self):
@@ -412,7 +413,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         part(folder / 'Незнакомцы 2.m4b', 'Незнакомцы 2', 2, [(0, 500, 'Глава 3'), (500, 1000, 'Глава 4')], album='Незнакомцы', artist='Дин Кунц', total=3)
         result = self.service.scan_again(row['id'], row['revision'])
         self.assertEqual((result['found'], result['changed'], result['scan_started']), (False, True, True), 'a new file beside the book: its folder is scanned')
-        self.inv.worker.join(30)
+        finish_scan(self.inv)
         self.assertEqual([len(r['members']) for r in self.rows()], [3], 'the restored part is catalogued and joins its set')
         self.assertEqual(self.service.reviews.page(status='output_attention', group='files_missing')['rows'], [], 'the row leaves')
 

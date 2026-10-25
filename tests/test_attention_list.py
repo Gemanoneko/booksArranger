@@ -5,6 +5,7 @@ import os,shutil,unittest
 from pathlib import Path
 import test_approve_as_is
 from test_approve_as_is import tone
+from scan_wait import finish_scan
 
 
 class AttentionListTests(test_approve_as_is.ApproveFixture):
@@ -59,7 +60,7 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         self.start()
         backup=self.base/'kept';backup.mkdir()
         for source in sources:shutil.copy2(source,backup/source.name);source.unlink()
-        self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         rows,total=self.listed('files_missing');self.assertEqual(list(rows),['Iron Inferno'])
         row=rows['Iron Inferno'];self.assertEqual(row['ask']['missing']['present'],0)
         self.assertEqual(row['ask']['missing']['files'],[str(s) for s in sources],'full paths, even with the folder gone')
@@ -69,13 +70,13 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         self.service.dismiss_attention(row['id'],row['revision'])
         self.assertEqual(self.listed('files_missing')[1],0);self.assertEqual(self.counts()['files_missing'],0)
         for source in sources:shutil.copy2(backup/source.name,source)
-        self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         self.assertEqual(self.listed('files_missing')[1],0,'the files are back: not missing any more')
 
     def test_scan_again_finds_a_restored_file(self):
         sources=[tone(self.audio/'Unsorted'/'Новая плоть'/('%02d.mp3'%n),self.cover,album='Новая плоть',artist='Иван Петров',track='%d/2'%n) for n in (1,2)]
         self.start();data=sources[1].read_bytes();stamp=sources[1].stat();sources[1].unlink()
-        self.inv.launch('Audiobooks');self.inv.worker.join(10)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         row=self.listed('files_missing')[0]['Новая плоть']
         self.assertFalse(self.service.scan_again(row['id'],row['revision'])['found'])
         sources[1].write_bytes(data);os.utime(sources[1],ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
@@ -91,7 +92,7 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         tone(self.audio/'Koontz Dean'/'Watchers'/'01.mp3',self.cover,album='Watchers',artist='Koontz Dean')
         known=self.start()[0];self.service.approve_book(known['id'],known['revision']);self.wait()
         for name in ('Ticktock','Intensity'):tone(self.audio/'Unsorted'/name/'01.mp3',self.cover,album=name,artist='Dean Koonts')
-        self.inv.launch('Audiobooks');self.inv.worker.join(10);self.research_all()
+        self.inv.launch('Audiobooks');finish_scan(self.inv);self.research_all()
         rows,_=self.listed('same_author');self.assertEqual(sorted(rows),['Intensity','Ticktock'],'positive control: both asked')
         # The run that researched them is saved (Stop), both visited: Start continues it.
         with connect(self.inv.database) as db:

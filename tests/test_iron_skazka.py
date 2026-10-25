@@ -8,6 +8,7 @@ from unittest.mock import Mock,patch
 import test_producer_recovery as core
 import test_retry_intent as intent
 from producer_recovery import ProducerRecovery,CLAIM,BOOT_MARGIN_MS,verify_retained,protected_dependency,packed
+from scan_wait import finish_scan
 
 NOW=int(time.time()*1000);T0=NOW-3*86400000  # the old attempt ran three days ago
 def iso(ms):return datetime.fromtimestamp(ms/1000,timezone.utc).isoformat()
@@ -188,7 +189,7 @@ class IronInferno(unittest.TestCase):
         source.write_bytes(source.read_bytes()+tag)
         strict=subprocess.run([ff,'-hide_banner','-v','error','-xerror','-nostdin','-f','mp3','-i',str(source),'-map','0:a:0','-c:a','pcm_s16le','-f','s16le','pipe:1'],capture_output=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         self.assertNotEqual(strict.returncode,0);self.assertEqual(mp3_tag_repair.plan(source.read_bytes()).receipt()['removed_bytes'],128)  # it needs the repair
-        self.inv.launch('Audiobooks');self.inv.worker.join(30)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         row,parent=self.failed()
         with patch.object(self.service,'_resume_later'):self.assertTrue(self.service.retry_blocked_job('Audiobooks',row['id'],row['revision'],parent['job_id'])['queued_next'])
         with contextlib.ExitStack() as held:

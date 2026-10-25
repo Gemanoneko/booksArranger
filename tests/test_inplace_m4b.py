@@ -16,6 +16,7 @@ import zone_identifier
 from audio_pipeline import create_private, digest, fingerprint, run_owned, source_chapters, ValidationError
 from encoding_policy import AUTOMATIC_PROFILE, freeze_automatic_policy
 from native_io import BoundaryError, VerifiedFile
+from scan_wait import finish_scan
 
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'inplace-m4b-tests'
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
@@ -1028,7 +1029,7 @@ class ServiceTests(unittest.TestCase):
         run_owned([shutil.which('ffmpeg'), '-v', 'error', '-nostdin', '-n', '-i', str(plain), '-f', 'ffmetadata', '-i', str(self.base / 'chapters.txt'),
                    '-map', '0:a:0', '-map_chapters', '1', '-c:a', 'copy', '-metadata', 'title=A Book', '-metadata', 'album=A Book', '-metadata', 'artist=John Writer', str(self.source)], self.base, stop, 30)
         roots = {'Audiobooks': str(self.audio), 'Podcasts': str(self.base / 'podcasts'), 'Ebooks': str(self.base / 'ebooks')}
-        self.inv = Inventory(self.base / 'catalog.sqlite3', roots); self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv = Inventory(self.base / 'catalog.sqlite3', roots); self.inv.launch('Audiobooks'); finish_scan(self.inv)
         self.service = MergeService(self.inv, self.base / 'cache')
         def fetch(url, *_):
             if '/search-works?' in url:return json.dumps([{'work_id': 42, 'name': 'A Book', 'rusname': 'Книга', 'all_autor_name': 'John Writer', 'all_autor_rusname': 'Джон Писатель'}]).encode()

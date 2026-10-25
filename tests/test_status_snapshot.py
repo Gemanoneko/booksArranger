@@ -15,6 +15,7 @@ import merge_service
 from desktop_backend import DesktopControl, handler_class
 from merge_service import MergeService, SharedSnapshot, StatusUnavailable
 from replacement_jobs import Replacements
+from scan_wait import finish_thread
 from web_server import BrowserServer, Handler
 
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'status-snapshot-tests'
@@ -202,7 +203,7 @@ class ReplacementSnapshotTests(unittest.TestCase):
                     for _ in range(50): store.get(new_job='missing')
                     other = []
                     worker = threading.Thread(target=lambda: other.append(len(opened)) or store.rows() or other.append(len(opened)))
-                    worker.start(); worker.join(5)
+                    worker.start(); finish_thread(worker, 'The other reader')
                     self.assertEqual(store.rows(), [])
                     with store.snapshot(): self.assertEqual(store.rows(), [])
                 self.assertEqual(other[1] - other[0], 1)  # another thread still reads fresh

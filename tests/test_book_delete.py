@@ -13,6 +13,7 @@ import merge_service
 import test_approve_as_is
 from test_approve_as_is import tone
 from scanner import connect
+from scan_wait import finish_scan
 
 
 def listing(folder):
@@ -35,7 +36,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         for part in self.parts:
             shutil.copy2(part, self.kept / part.name)
         self.parts[2].unlink()
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         rows = self.service.reviews.page(status='output_attention', group='files_missing')['rows']
         self.assertEqual([r['title_clue'] for r in rows], ['Новая плоть'], 'positive control: a Missing files row')
         return rows[0]
@@ -70,7 +71,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         # Reacquire: the same files back under the same names are a new book, with nothing of the old one.
         for part in self.parts:
             shutil.copy2(self.kept / part.name, part)
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         new = [r for r in self.service.reviews.page()['rows'] if r['title_clue'] == 'Новая плоть']
         self.assertEqual([len(r['members']) for r in new], [3])
         self.assertNotEqual(new[0]['id'], row['id'], 'a new identity')
@@ -166,7 +167,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
         self.assertEqual(refused.exception.code, 'busy')
         self.assertEqual(listing(self.parts[0].parent), before, 'nothing deleted')
-        release.set(); self.inv.worker.join(15)
+        release.set(); finish_scan(self.inv)
         self.assertEqual(self.inv.status('Audiobooks')['state'], 'completed')
         # Control: the same press after the scan goes through.
         row = self.service.reviews.page(status='output_attention', group='files_missing')['rows'][0]
@@ -186,7 +187,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         with mock.patch.object(book_delete, 'scanning', return_value=False):  # Delete as it ran before the refusal
             result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
         self.assertEqual((result['deleted'], result['forgotten']), (2, True), 'positive control: P1 deleted and forgot the book mid-scan')
-        release.set(); self.inv.worker.join(15)
+        release.set(); finish_scan(self.inv)
         status = self.inv.status('Audiobooks')
         self.assertEqual((status['state'], status['errors'], status['unresolved_errors']), ('completed', 0, 0))
         self.assertEqual(self.records(row['id'], self.parts), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
@@ -236,7 +237,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual([(f['path'], f['cause']) for f in result['failed']], [(str(self.parts[1]), 'in_use')])
         self.assertFalse(self.parts[0].exists()); self.assertTrue(self.parts[1].exists())
         self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted while a file is on disk')
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         row = self.service.reviews.page(status='output_attention', group='files_missing')['rows'][0]
         self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 1}, 'listed with what remains')
         preview = self.service.delete_preview(row['id'], row['revision'])
@@ -251,7 +252,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
         self.assertFalse(any(p.exists() for p in self.parts), 'the files went first')
         self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'the records are still there: nothing half-forgotten')
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         row = self.service.reviews.page(status='output_attention', group='files_missing')['rows'][0]
         self.assertEqual(row['ask']['delete'], {'kind': 'files_missing', 'present': 0})
         preview = self.service.delete_preview(row['id'], row['revision'])
@@ -341,7 +342,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         if getattr(self, 'service', None) is None:
             self.start()
         else:
-            self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+            self.inv.launch('Audiobooks'); finish_scan(self.inv)
         row = next(r for r in self.service.reviews.page()['rows'] if r['title_clue'] == name)
         job_id, attempt = str(uuid.uuid4()), str(uuid.uuid4())
         manifest = {'job_id': job_id, 'candidate_id': row['id'], 'candidate_revision': row['revision'], 'root': str(self.audio), 'metadata': {'title': name},
@@ -451,7 +452,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         (self.sorted / 'Петров Иван').mkdir(); (self.sorted / 'Петров Иван' / 'Другая книга - Петров Иван.m4b').write_bytes(b'finished')
         self.start()
         self.parts[2].unlink()
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         rows = self.service.reviews.page(status='output_attention', group='files_missing')['rows']
         self.assertEqual(len(rows), 1, 'positive control: a Missing files row')
         return rows[0], place
@@ -627,7 +628,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         for name in names:
             shutil.copy2(kept / name, place / name)
         (place / 'cover.jpg').write_bytes(b'cover')
-        self.inv.launch('Audiobooks'); self.inv.worker.join(10)
+        self.inv.launch('Audiobooks'); finish_scan(self.inv)
         copy = next(r for r in self.service.reviews.page()['rows'] if r['members'] and Path(r['members'][0]['path']).parent == place)
         self.assertNotEqual(copy['id'], job['manifest']['candidate_id'], 'positive control: a new book, not the arranged one')
         reason = 'Possible duplicate recording — original sources preserved' if possible else 'Identical verified recording already arranged — duplicate sources preserved'

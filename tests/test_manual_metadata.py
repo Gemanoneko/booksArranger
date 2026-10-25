@@ -2,6 +2,7 @@ import os
 import sqlite3
 import unittest
 import manual_metadata as m
+from scan_wait import finish_scan
 
 class ManualMetadataTests(unittest.TestCase):
     def setUp(self):
@@ -61,7 +62,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
             base=Path(temp);audio=base/'audio';audio.mkdir();(audio/'book.mp3').write_bytes(b'private synthetic fixture')
             roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
             def reader(path,kind,stop):return {'title':'Book','track_title':'Book','tags':{'album':'Book'},'method':'fixture'}
-            inventory=Inventory(base/'catalog.sqlite3',roots,reader);inventory.launch('Audiobooks');inventory.worker.join(5)
+            inventory=Inventory(base/'catalog.sqlite3',roots,reader);inventory.launch('Audiobooks');finish_scan(inventory)
             service=CandidateReviewService(inventory,base/'cover-cache');row=service.page()['rows'][0]
             review={'title':'Entered book','canonical_author':'Writer','original_language':'Other'}
             saved=service.save('Audiobooks',row['id'],row['revision'],review,False,'Credits checked')
@@ -100,7 +101,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
             (audio/'cover.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='))
             roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
             def reader(path,kind,stop):return {'title':'Book','track_title':'Book','tags':{'album':'Book'},'method':'fixture','probe':{'format':{'duration':'1.0'}}}
-            inv=Inventory(base/'catalog.sqlite3',roots,reader);inv.launch('Audiobooks');inv.worker.join(5)
+            inv=Inventory(base/'catalog.sqlite3',roots,reader);inv.launch('Audiobooks');finish_scan(inv)
             service=CandidateReviewService(inv,base/'cache');row=service.page()['rows'][0]
             row=service.covers('Audiobooks',row['id'],row['revision']);cover=row['cover_choices'][0]['id']
             review={'title':'Book','author':'Writer','canonical_author':'Writer','original_language':'Other'}
@@ -133,7 +134,7 @@ class CandidateEvidenceIntegration(unittest.TestCase):
             (audio/'cover.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='))
             roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
             def reader(path,kind,stop):return {'title':'Unverified source label','track_title':'Track','tags':{'album':'Source collection'},'method':'fixture','probe':{'format':{'duration':'1.0'}}}
-            inv=Inventory(base/'catalog.sqlite3',roots,reader,output_root=str(output));inv.launch('Audiobooks');inv.worker.join(5)
+            inv=Inventory(base/'catalog.sqlite3',roots,reader,output_root=str(output));inv.launch('Audiobooks');finish_scan(inv)
             service=CandidateReviewService(inv,base/'cache');row=service.page()['rows'][0];row=service.covers('Audiobooks',row['id'],row['revision'])
             review={'title':'','canonical_author':'Writer','author':'Writer','original_language':'Other','anthology':True,'universe':'Verified Universe','series':'','number':''}
             row=service.save('Audiobooks',row['id'],row['revision'],review,True,'Reviewed universe collection credits; no separate book title',cover_id=row['cover_choices'][0]['id'])

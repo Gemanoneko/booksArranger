@@ -6,13 +6,14 @@ from unittest.mock import patch
 from test_merge_service import MergeTests
 from audio_pipeline import digest
 from chapter_repair import restore,recover
+from scan_wait import finish_scan
 
 class Repair(MergeTests):
     def test_stream_copy_preserves_full_presentation_and_collision(self):
         # Different beginning/end tones make presentation preservation concrete.
         subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-y','-f','lavfi','-i','sine=frequency=880:duration=0.3','-ar','44100','-ac','1','-c:a','libmp3lame','-b:a','128k',str(self.sources[1])],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         self.hashes=[digest(p) for p in self.sources]
-        self.inv.launch('Audiobooks');self.inv.worker.join(5)
+        self.inv.launch('Audiobooks');finish_scan(self.inv)
         row=self.ready()
         # A chapterless original is intentionally created, then corrected separately.
         row=self.service.reviews.tracks('Audiobooks',row['id'],row['revision'],row['track_order'],row['included'],True,True,False,evidence_note='Verified fixture source files')

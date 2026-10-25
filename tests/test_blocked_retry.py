@@ -12,6 +12,7 @@ import audio_jobs
 from audio_jobs import AudioJobs,RetryRefused,RETRY_FILES_PRESENT,RETRY_BOOK_CHANGED,RETRY_JOB_CHANGED,RETRY_REVIEW_CHANGED,RETRY_CLOSING,RETRY_SCANNING
 from merge_service import MergeService
 from scanner import connect
+from scan_wait import finish_scan
 from working_lifecycle import WorkingLifecycle
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'blocked-retry-tests';AREA.mkdir(parents=True,exist_ok=True)
@@ -301,7 +302,7 @@ class PageTests(unittest.TestCase):
             base=Path(folder);audio=base/'audio';(audio/'Book').mkdir(parents=True);(audio/'Book'/'01.mp3').write_bytes(b'private fixture')
             roots={'Audiobooks':str(audio),'Podcasts':str(base/'podcasts'),'Ebooks':str(base/'ebooks')}
             inventory=Inventory(base/'catalog.sqlite3',roots,lambda path,kind,stop:{'title':'Book','tags':{'album':'Book'},'probe':{'format':{'duration':'1.0'}},'method':'fixture'})
-            inventory.launch('Audiobooks');inventory.worker.join(5)
+            inventory.launch('Audiobooks');finish_scan(inventory)
             service=CandidateReviewService(inventory,base/'covers');identity=service.page()['rows'][0]['id']
             job={'job_id':'job-a','state':'needs attention','stage':'queued','reason':LEGACY,'manifest':{'candidate_id':identity,'cleanup_policy':{'enabled':True}}}
             retry=Mock(side_effect=lambda job_ids=None,retry=True:{'job-a':{'group':'retry','cause':'files','originals_untouched':True,'retry':{'allowed':True,'reason':''}}} if retry and 'job-a' in (job_ids or ['job-a']) else {})

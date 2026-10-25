@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 from scanner import Inventory,connect
+from scan_wait import finish_scan
 from review_backend import CandidateReviewService
 
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'review-tests'
@@ -26,7 +27,7 @@ class ReviewTests(unittest.TestCase):
         (folder/'cover.png').write_bytes(PNG)
         def reader(path,kind,stop):return {'title':'Book','track_title':'Chapter '+Path(path).stem,'tags':{'album':'Book','comment':'Original comment'},'probe':{'format':{'duration':'1.0'}},'method':'fixture'}
         self.inventory=Inventory(self.base/'catalog.sqlite3',self.roots,reader)
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         self.service=CandidateReviewService(self.inventory,self.base/'cover-cache')
         self.review={'title':'Book','author':'Author Name','canonical_author':'Name Author','original_language':'Other','series':'','number':'','genre':'Fantasy','multi_author':False,'anthology':False,'narrator':'Reader','topic':''}
         self.row=self.service.page()['rows'][0]
@@ -55,7 +56,7 @@ class ReviewTests(unittest.TestCase):
         row=self.ready();self.sources[0].write_bytes(b'changed private fixture content')
         with self.assertRaisesRegex(ValueError,'Source changed'):
             self.service.build_manifest('Audiobooks',row['id'],row['revision'])
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         fresh=self.service.page()['rows'][0]
         self.assertFalse(fresh['metadata_approved']);self.assertFalse(fresh['creation']['can_create'])
 
@@ -135,7 +136,7 @@ class ReviewTests(unittest.TestCase):
     def test_single_existing_m4b_never_ready_for_concatenation(self):
         for path in self.sources:path.unlink()
         new=self.sources[0].with_suffix('.m4b');new.write_bytes(b'private existing audiobook')
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         # Historical missing members remain blocking alongside the single-file guard.
         row=self.service.page()['rows'][0]
         self.assertFalse(row['creation']['can_create'])
@@ -152,7 +153,7 @@ class ReviewTests(unittest.TestCase):
         row=self.ready();identity=row['id']
         other=Path(self.roots['Audiobooks'])/'Another';other.mkdir()
         (other/'01.mp3').write_bytes(b'another private recording')
-        self.inventory.launch('Audiobooks');self.inventory.worker.join(5)
+        self.inventory.launch('Audiobooks');finish_scan(self.inventory)
         job={'job_id':'fixture','state':'completed','stage':'published','reason':'','manifest':{'candidate_id':identity,'cleanup_policy':{'enabled':True}}}
         authority=Mock(return_value={'converted_ids':{identity}})
         self.service.jobs=SimpleNamespace(progress_books=authority,

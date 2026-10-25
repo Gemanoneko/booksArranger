@@ -12,6 +12,7 @@ from catalog_owner import catalog_lock
 from migration_planning import prepare,write_plan,read_pinned_json,_completed_census,_completeness_receipt
 import test_merge_service as fixture
 from publication_locations import _digest
+from scan_wait import finish_scan
 
 class MigrationPlanningTests(unittest.TestCase):
     def test_real_series_retag_enrolls_relocates_and_revalidates_original_history(self):
@@ -138,7 +139,7 @@ class MigrationPlanningTests(unittest.TestCase):
             result=original_reader(path,kind,stop)
             if Path(path).parent==other:result=dict(result,title='Second',tags={'album':'Second'})
             return result
-        f.inv.reader=reader;f.inv.launch('Audiobooks');f.inv.worker.join(5)
+        f.inv.reader=reader;f.inv.launch('Audiobooks');finish_scan(f.inv)
         candidates=f.service.reviews.page()['rows'];self.assertEqual(len(candidates),2,candidates)
         for candidate in candidates:
             reviews=f.service.reviews;row=reviews.covers('Audiobooks',candidate['id'],candidate['revision'])

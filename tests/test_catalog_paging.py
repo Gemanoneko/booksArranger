@@ -4,12 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from scanner import Inventory,connect
 from review_backend import CandidateReviewService
+from scan_wait import close_scan,finish_scan
 AREA=Path(__file__).resolve().parents[1]/'scratch'/'paging-tests';AREA.mkdir(parents=True,exist_ok=True)
 PNG=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
 
 class Paging(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.base=Path(self.temp.name);audio=self.base/'audio';audio.mkdir()
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);audio=self.base/'audio';audio.mkdir()
         for n in range(127):
             folder=audio/f'Book{n:03}';folder.mkdir();(folder/'01.mp3').write_bytes(b'private fixture')
         def reader(path,kind,stop):
@@ -17,14 +18,17 @@ class Paging(unittest.TestCase):
             if n<125:raise ValueError('Private unreadable fixture')
             return {'title':'Book','track_title':'Chapter1','tags':{'album':'Book'},'method':'fixture'}
         self.inv=Inventory(self.base/'catalog.sqlite3',{'Audiobooks':str(audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')},reader)
-        self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=CandidateReviewService(self.inv,self.base/'covers')
+        # 0.22.0 entry check (2026-10-25): a 10 s join returned silently under the gate's load, so the test read 119 of 127
+        # books and the folder's removal then met the catalog the running scan still held open. Wait for the scan to end,
+        # and close it before the folder goes (cleanups run last-in, first-out), even when setUp itself fails.
+        self.addCleanup(close_scan,self.inv)
+        self.inv.launch('Audiobooks');finish_scan(self.inv);self.service=CandidateReviewService(self.inv,self.base/'covers')
         self.rows=self.inv.candidates('Audiobooks',1000)['rows']
         cover=str(uuid.uuid4());(self.service.cache/(cover+'.png')).write_bytes(PNG)
         with connect(self.inv.database) as db:
             for row in self.rows[-2:]:
                 ctx={'metadata_approved':True,'cover_id':cover,'cover_choices':[{'id':cover,'sha256':'fixture'}]}
                 db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(row['id'],row['revision'],json.dumps(ctx)))
-    def tearDown(self):self.temp.cleanup()
 
     def test_global_error_and_approval_filters_before_paging_no_source_reads(self):
         with patch('review_backend.fresh_stat',side_effect=AssertionError('List source stat')),patch('review_backend.source_hash',side_effect=AssertionError('List source hash')),patch('review_backend.digest',side_effect=AssertionError('List file hash')),patch.object(self.service,'enrich',wraps=self.service.enrich) as enrich:

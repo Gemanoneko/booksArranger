@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 from catalog_owner import catalog_lock
 from metadata import ScanStopped
 from scanner import Inventory, connect
+from scan_wait import close_scan, finish_scan
 from web_server import BrowserServer, Handler
 
 SCRATCH = Path(__file__).resolve().parents[1] / 'scratch' / 'web-2026-10-09' / 'tests'
@@ -96,10 +97,7 @@ class BrowserTests(unittest.TestCase):
         self.url = f'http://127.0.0.1:{self.server.server_port}'
 
     def tearDown(self):
-        self.inventory.stop()
-        if self.inventory.worker:
-            self.inventory.worker.join(5)
-            self.assertFalse(self.inventory.worker.is_alive())
+        close_scan(self.inventory)
         self.server.shutdown()
         self.thread.join(5)
         self.server.server_close()
@@ -125,8 +123,7 @@ class BrowserTests(unittest.TestCase):
         return status,json.loads(raw)
 
     def wait_scan(self):
-        self.inventory.worker.join(5)
-        self.assertFalse(self.inventory.worker.is_alive())
+        finish_scan(self.inventory)
 
     def test_every_attention_chip_is_served_through_the_http_route(self):
         # Futaba's 0.22.0 QA blocker: the route checked `group` against its own older set, so every "Needs your answer"

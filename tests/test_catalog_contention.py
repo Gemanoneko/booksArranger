@@ -15,6 +15,7 @@ import groups
 import scanner
 import sqlite_retry
 from scanner import Inventory,connect
+from scan_wait import finish_scan
 
 SCRATCH=Path(os.environ.get('BOOKS_QA_FIXTURE_ROOT','C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-2026-10-20/shared'))/'catalog-contention'
 
@@ -152,7 +153,7 @@ class CatalogContentionTests(unittest.TestCase):
         inv=Inventory(self.db,self.roots,self.inv.reader,audiobook_sources=[str(self.root),str(extra)],output_root=str(self.base/'sorted'))
         fault,attempts=self.inject_after_write_once()
         with fault:
-            inv.launch('Audiobooks',resume=True);inv.worker.join(10)
+            inv.launch('Audiobooks',resume=True);finish_scan(inv)
         self.assertFalse(inv.worker.is_alive())
         self.assertEqual(inv.last_error,'')
         self.assertGreaterEqual(len(attempts),2)

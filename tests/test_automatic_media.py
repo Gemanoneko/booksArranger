@@ -5,6 +5,7 @@ from unittest.mock import patch
 from contextlib import contextmanager
 from metadata import propose
 from scanner import Inventory
+from scan_wait import finish_scan
 from merge_service import MergeService
 from public_research import PublicClient,PublicResearch
 from test_automatic_processing import fixture_payload,AREA
@@ -31,7 +32,7 @@ class AutomaticMediaTests(unittest.TestCase):
             subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','sine=frequency=440:duration=0.4','-i',str(self.cover_path),'-map','0:a','-map','1:v','-c:a','libmp3lame','-b:a','128k','-ar','44100','-ac','1','-c:v','png','-id3v2_version','3','-metadata','album=A Book','-metadata','title=Chapter '+str(index),'-metadata','artist=John Writer','-metadata','track='+str(index)+'/2','-disposition:v','attached_pic',str(source)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv);self.service=MergeService(self.inv,self.base/'cache')
         def fetch(url,*_):
             if '/search-works?' in url:return json.dumps([{'work_id':42,'name':'A Book','rusname':'Книга','all_autor_name':'John Writer','all_autor_rusname':'Джон Писатель'}]).encode()
             if '/work/42/extended' in url:return json.dumps(fixture_payload()).encode()

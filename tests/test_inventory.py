@@ -11,6 +11,7 @@ import zipfile
 
 from metadata import ScanStopped, propose, read_metadata, safe_name
 from scanner import Inventory, connect
+from scan_wait import finish_scan
 
 SCRATCH = Path(__file__).resolve().parents[1] / 'scratch' / 'test-fixtures'
 SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -40,8 +41,7 @@ class InventoryTests(unittest.TestCase):
 
     def run_scan(self, inventory, label='Audiobooks', resume=False):
         inventory.launch(label, resume)
-        inventory.worker.join(timeout=10)
-        self.assertFalse(inventory.worker.is_alive(), 'fixture scan exceeded its deadline')
+        finish_scan(inventory)
         self.assertNotEqual(inventory.status(label)['state'], 'failed', inventory.last_error)
 
     def test_book_list_reads_without_the_write_lock_once_groups_are_current(self):
@@ -122,8 +122,7 @@ class InventoryTests(unittest.TestCase):
         inventory.launch('Audiobooks')
         self.assertTrue(entered.wait(5))
         inventory.stop()
-        inventory.worker.join(5)
-        self.assertFalse(inventory.worker.is_alive())
+        finish_scan(inventory)
         self.assertEqual(inventory.status('Audiobooks')['state'], 'stopped')
         self.assertEqual(len(inventory.rows('Audiobooks')), 1)
         resumed = Inventory(self.database,self.roots,self.reader)
@@ -176,7 +175,7 @@ class InventoryTests(unittest.TestCase):
         new=self.file('audio/Author/Book/04.mp3')  # listed by the next scan, never catalogued
         release=self.paused_scan(inventory,kept.parent)
         lost.unlink();new.unlink();renamed.rename(renamed.with_name('03 renamed.mp3'))
-        release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        release.set();finish_scan(inventory)
         job,errors,files=self.outcomes(inventory)
         self.assertEqual((job['state'],job['errors'],errors),('completed',0,[]),inventory.last_error)
         self.assertEqual(sorted(files),['01.mp3','02.mp3','03 renamed.mp3','03.mp3'],'no row for the file that was never catalogued')
@@ -194,7 +193,7 @@ class InventoryTests(unittest.TestCase):
         release=self.paused_scan(inventory,moved.parent.parent)  # "Author" listed, its two folders queued
         import shutil;shutil.rmtree(gone_book[0].parent)
         moved.parent.rename(moved.parent.with_name('Other renamed'))
-        release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+        release.set();finish_scan(inventory)
         job,errors,files=self.outcomes(inventory)
         self.assertEqual((job['state'],job['errors'],errors),('completed',0,[]),inventory.last_error)
         self.assertEqual(inventory.status('Audiobooks')['scan_issues'],[])
@@ -216,7 +215,7 @@ class InventoryTests(unittest.TestCase):
                 if attempt==49:raise
                 time.sleep(.1)
         try:
-            release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+            release.set();finish_scan(inventory)
         finally:
             moved.rename(audio)
         job,errors,files=self.outcomes(inventory)
@@ -237,7 +236,7 @@ class InventoryTests(unittest.TestCase):
                 if attempt==49:raise
                 time.sleep(.1)
         try:
-            release.set();inventory.worker.join(10);self.assertFalse(inventory.worker.is_alive())
+            release.set();finish_scan(inventory)
         finally:
             moved.rename(audio)
         job,errors,files=self.outcomes(inventory)

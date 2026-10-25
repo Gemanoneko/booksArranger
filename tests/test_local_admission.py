@@ -3,6 +3,7 @@ publication, source retirement and 24-hour recovery. Private audio fixtures only
 import json,shutil,subprocess,tempfile,threading,time,unittest,urllib.error
 from pathlib import Path
 from scanner import Inventory
+from scan_wait import finish_scan
 from merge_service import MergeService
 from public_research import PublicClient,PublicResearch
 from test_automatic_media import artwork
@@ -18,7 +19,7 @@ class LocalAdmissionTests(unittest.TestCase):
                 '-metadata','album=Око Бога','-metadata','title=Глава '+str(index),'-metadata','artist=Джеймс Роллинс','-metadata','track=%d/2'%index,'-disposition:v','attached_pic',str(source)],check=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             self.sources.append(source)
         roots={'Audiobooks':str(self.audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')}
-        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');self.inv.worker.join(10);self.service=MergeService(self.inv,self.base/'cache')
+        self.inv=Inventory(self.base/'catalog.sqlite3',roots);self.inv.launch('Audiobooks');finish_scan(self.inv);self.service=MergeService(self.inv,self.base/'cache')
         self.calls=[]
         def offline(url,*_):
             # Every public source is closed: identity must not depend on the Internet.
