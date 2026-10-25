@@ -381,76 +381,99 @@ class MergeService:
             db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',(path,job,kind,hash,size))
 
     def progress_books(self,jobs=None,cleanups=None,storage=None,folders=None):
-        """One coherent catalog observation; no writer/reader transaction crosses filesystem checks."""
-        from catalog_contention import synchronize_groups
+        """One coherent catalog observation (one SQLite snapshot); no writer/reader transaction crosses filesystem checks.
+
+        0.22.1 (backlog items 6-7): it takes Inventory.group_lock only to rebuild stale groups, never for the read, and
+        never while it holds its own lock. It used to hold group_lock for the whole read, about 500 publication lookups
+        (15 s on the live catalog), on every status computation, which each research step and each poll makes: the list,
+        Scan again, Remove from list, Delete and approvals queued behind it. Each approved book is rendered again only when
+        its own row changed, and each job's publication lookup is reused while its receipt and the relocation records are
+        unchanged (PublicationBindings.lookup_token)."""
+        from catalog_contention import groups_current,synchronize_groups
         jobs=jobs if jobs is not None else self.jobs.status()['jobs']
         cleanups=cleanups if cleanups is not None else self.cleanup.status()
         storage=storage if storage is not None else self.storage_cleanup.status()
         folders=folders if folders is not None else self.storage_cleanup.folder_status()
-        # Control paths may already own group_lock before calling state(). Never invert it.
-        with self.inventory.group_lock:
-            self._progress_lock.acquire()
-            try:
-                roots=list(self.inventory.source_roots('Audiobooks')) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']]
-                synchronize_groups(self.inventory,roots)
-                with connect(self.inventory.database) as db:
-                    db.execute('BEGIN')
-                    root_json=json.dumps(roots)
-                    candidate_ids={r[0] for r in db.execute('SELECT id FROM book_groups WHERE root IN (SELECT value FROM json_each(?)) AND superseded=0',(root_json,))}
-                    rows=[dict(r) for r in db.execute("SELECT g.*,c.revision AS context_revision,c.data AS context_data FROM book_groups g JOIN candidate_context c ON c.id=g.id WHERE g.root IN (SELECT value FROM json_each(?)) AND g.superseded=0 AND json_extract(c.data,'$.metadata_approved')=1",(root_json,))]
-                    signature=[(r['id'],r['revision'],r['fingerprint'],r['review'],r['context_revision'],r['context_data'],r['changed']) for r in rows]
-                    if self._approved_cache is None or self._approved_cache[0]!=signature:
-                        retired={}
-                        for root in roots:retired.update(groups.retired_sources(db,root))
-                        approved={}
-                        for r in rows:
-                            if r['context_revision']!=r['revision']:continue
-                            row=groups.render(r,r['root'],True,retired);ctx=json.loads(r['context_data'])
-                            if ctx.get('metadata_facts'):
-                                from standing_metadata import validate_policy
-                                validate_policy(row,row['review'],ctx['metadata_facts'])
-                                row['preview']=propose(row['members'][0]['path'],self.reviews._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=ctx['metadata_facts'])
-                            if (row.get('review') or {}).get('organization_policy')=='books-hierarchy-v2':row['preview']=propose(row['members'][0]['path'],self.reviews._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=ctx.get('metadata_facts'))
-                            if approved_scope(row,ctx,member_key):approved[row['id']]=(row,ctx)
-                        self._approved_cache=(signature,approved)
-                    catalog_approved=dict(self._approved_cache[1])
-                    # Do not use Replacements.get/representative: their cached/new-connection
-                    # rows can belong to another snapshot. Freeze the same exact DB guards here.
-                    replacements=getattr(self,'replacements',None)
-                    relations=[dict(r) for r in db.execute('SELECT * FROM audiobook_replacements ORDER BY created,id')] if replacements else []
-                    representatives=[]
-                    if replacements:
-                        for identity in catalog_approved:
-                            matches=[r for r in relations if r['candidate_id']==identity]
-                            if len(matches)>1:raise ValueError('Ambiguous replacement relation')
-                            relation=matches[0] if matches else None
-                            if relation and relation['state'] in {'published','retiring','completed'}:
-                                job=next((j for j in jobs if j['job_id']==relation['replacement_job_id']),None)
-                            else:
-                                matches=[j for j in jobs if j['manifest']['candidate_id']==identity and not j['manifest'].get('replacement_id')]
-                                job=matches[-1] if matches else None
-                            representatives.append((job,relation))
-                    else:representatives=[(job,None) for job in jobs]
-                    observed=[]
-                    for job,relation in representatives:
-                        if not job or job['manifest']['candidate_id'] not in catalog_approved:continue
-                        record=job.get('output') or {};effective=None;location_envelope=None
-                        try:
-                            bindings=getattr(self,'publication_bindings',None)
-                            effective,location_envelope=bindings.lookup(db,record) if bindings else (record,None)
-                        except (OSError,KeyError,ValueError):pass
-                        binding=relation if relation and relation['state'] in {'published','retiring','completed'} and replacements.structural_guard(relation,db=db) else None
-                        retry_binding=False
-                        if job['manifest'].get('retry_intent'):
-                            import retry_intent
-                            proof=job['manifest']['retry_intent']
-                            retry_binding=retry_intent.guard(db,job['manifest'],proof['approved_manifest'],proof['target_root'])
-                        observed.append((job,relation,binding,effective,location_envelope,retry_binding))
-                # DB committed/closed before group lock release and every filesystem callback.
-            except BaseException:
-                self._progress_lock.release()
-                raise
+        roots=list(self.inventory.source_roots('Audiobooks')) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']]
+        if not groups_current(self.inventory,roots):
+            # Control paths may already own group_lock before calling state(): taken here first, never after _progress_lock.
+            with self.inventory.group_lock:synchronize_groups(self.inventory,roots)
+        self._progress_lock.acquire()
         try:
+            with connect(self.inventory.database) as db:
+                db.execute('BEGIN')
+                root_json=json.dumps(roots)
+                candidate_ids={r[0] for r in db.execute('SELECT id FROM book_groups WHERE root IN (SELECT value FROM json_each(?)) AND superseded=0',(root_json,))}
+                rows=[dict(r) for r in db.execute("SELECT g.*,c.revision AS context_revision,c.data AS context_data FROM book_groups g JOIN candidate_context c ON c.id=g.id WHERE g.root IN (SELECT value FROM json_each(?)) AND g.superseded=0 AND json_extract(c.data,'$.metadata_approved')=1",(root_json,))]
+                signature=[(r['id'],r['revision'],r['fingerprint'],r['review'],r['context_revision'],r['context_data'],r['changed']) for r in rows]
+                if self._approved_cache is None or self._approved_cache[0]!=signature:
+                    # Each row is rendered again only when its own row changed (an approval used to render all ~500).
+                    previous=self.__dict__.get('_approved_rows') or {}
+                    retired=None;approved={};rendered={}
+                    for r,key in zip(rows,signature):
+                        if r['context_revision']!=r['revision']:continue
+                        kept=previous.get(r['id'])
+                        if kept is not None and kept[0]==(key,r['root']):
+                            rendered[r['id']]=kept
+                            if kept[1] is not None:approved[r['id']]=kept[1]
+                            continue
+                        if retired is None:
+                            retired={}
+                            for root in roots:retired.update(groups.retired_sources(db,root))
+                        row=groups.render(r,r['root'],True,retired);ctx=json.loads(r['context_data'])
+                        if ctx.get('metadata_facts'):
+                            from standing_metadata import validate_policy
+                            validate_policy(row,row['review'],ctx['metadata_facts'])
+                            row['preview']=propose(row['members'][0]['path'],self.reviews._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=ctx['metadata_facts'])
+                        if (row.get('review') or {}).get('organization_policy')=='books-hierarchy-v2':row['preview']=propose(row['members'][0]['path'],self.reviews._output_root(row),'audiobook',row['metadata'],row['review'],automatic_facts=ctx.get('metadata_facts'))
+                        value=(row,ctx) if approved_scope(row,ctx,member_key) else None
+                        rendered[r['id']]=((key,r['root']),value)
+                        if value is not None:approved[row['id']]=value
+                    self._approved_rows=rendered
+                    self._approved_cache=(signature,approved)
+                catalog_approved=dict(self._approved_cache[1])
+                # Do not use Replacements.get/representative: their cached/new-connection
+                # rows can belong to another snapshot. Freeze the same exact DB guards here.
+                replacements=getattr(self,'replacements',None)
+                relations=[dict(r) for r in db.execute('SELECT * FROM audiobook_replacements ORDER BY created,id')] if replacements else []
+                representatives=[]
+                if replacements:
+                    for identity in catalog_approved:
+                        matches=[r for r in relations if r['candidate_id']==identity]
+                        if len(matches)>1:raise ValueError('Ambiguous replacement relation')
+                        relation=matches[0] if matches else None
+                        if relation and relation['state'] in {'published','retiring','completed'}:
+                            job=next((j for j in jobs if j['job_id']==relation['replacement_job_id']),None)
+                        else:
+                            matches=[j for j in jobs if j['manifest']['candidate_id']==identity and not j['manifest'].get('replacement_id')]
+                            job=matches[-1] if matches else None
+                        representatives.append((job,relation))
+                else:representatives=[(job,None) for job in jobs]
+                observed=[]
+                bindings=getattr(self,'publication_bindings',None)
+                token=bindings.lookup_token(db) if bindings is not None and hasattr(bindings,'lookup_token') else None
+                looked=self.__dict__.get('_lookups') or {};kept={}
+                for job,relation in representatives:
+                    if not job or job['manifest']['candidate_id'] not in catalog_approved:continue
+                    record=job.get('output') or {};effective=None;location_envelope=None
+                    key=(token,packed(record)) if token is not None else None
+                    saved=looked.get(job['job_id'])
+                    if key is not None and saved is not None and saved[0]==key:
+                        effective,location_envelope=saved[1];kept[job['job_id']]=saved  # read-only below
+                    else:
+                        try:
+                            effective,location_envelope=bindings.lookup(db,record) if bindings else (record,None)
+                            if key is not None:kept[job['job_id']]=(key,(effective,location_envelope))
+                        except (OSError,KeyError,ValueError):pass
+                    binding=relation if relation and relation['state'] in {'published','retiring','completed'} and replacements.structural_guard(relation,db=db) else None
+                    retry_binding=False
+                    if job['manifest'].get('retry_intent'):
+                        import retry_intent
+                        proof=job['manifest']['retry_intent']
+                        retry_binding=retry_intent.guard(db,job['manifest'],proof['approved_manifest'],proof['target_root'])
+                    observed.append((job,relation,binding,effective,location_envelope,retry_binding))
+                self._lookups=kept
+            # DB committed/closed before every filesystem callback.
             approved={identity:(row,ctx) for identity,(row,ctx) in catalog_approved.items()
                       if any((self.reviews.cache/(ctx['cover_id']+suffix)).is_file() for suffix in ('.png','.jpg'))}
             source_by={r['job_id']:r for r in cleanups};storage_by={r['job_id']:r for r in storage};folder_by={r['job_id']:r for r in folders}
@@ -679,6 +702,11 @@ class MergeService:
         cached=getattr(self,'_converted_cache',None)
         age=time.monotonic()-cached[0] if cached else -1
         if cached and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and len(cached)>2 and cached[2] is not None and cached[2]==self._quiet_token()):return set(cached[1])
+        # 0.22.1: while a status computation reads the same set, the list shows the last one instead of queuing a second.
+        computing=self.__dict__.get('_progress_lock')
+        if cached and computing is not None:
+            if not computing.acquire(blocking=False):return set(cached[1])
+            computing.release()
         token=self._quiet_token();started=time.monotonic()
         value=set(self.progress_books()['converted_ids']);self._converted_cache=(started,value,token);return set(value)
 
@@ -726,13 +754,43 @@ class MergeService:
             if not self._start_allowed(generation):raise StartRefused('stale','Start was superseded by Pause or closing.')
             self._automatic_cleanup_generation=generation
 
-    def resume(self,*,start_generation=None,pending_owner=None):
+    def resume(self,*,start_generation=None,pending_owner=None,recheck=True):
+        """Start (or keep running) the audiobook queue. recheck (Start, the automatic run's start): first re-check every
+        finished book (its temporary and folder cleanup, AudioJobs' published-output check), then answer the full status.
+
+        recheck=False (an approval that queued a book, 0.22.1): only starts the queue when it is idle; no re-check of the
+        finished books and no status computation. The approval path used to run both under the operation lock: 4-5 min on
+        the live catalog (506 finished books) whenever the converter was idle, and a full status computation otherwise,
+        with every press waiting."""
         generation=self._capture_start_generation() if start_generation is None else start_generation
-        return self._resume_guarded(generation,pending_owner)
+        if recheck:self._recheck_finished(generation,pending_owner)
+        return self._resume_guarded(generation,pending_owner,recheck)
+
+    def _recheck_finished(self,generation,pending_owner=None):
+        """Start's re-check of every finished book, one book at a time under the operation lock (0.22.1): presses run
+        between two books instead of waiting minutes for the whole pass. Skipped while a worker runs, as before."""
+        allow=lambda:self._start_allowed(generation)
+        with self.operation_lock:
+            if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
+            if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
+                raise StartRefused('busy','A previous start request is still checking. Retry Start after it stops; saved retry requests are retained.')
+            self._no_scan()
+            if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
+            finished=[job['job_id'] for job in self.jobs.status()['jobs'] if job['state']=='completed']
+        # The queue itself clears its stop only at guarded admission; pruning cannot erase Pause.
+        stop=_Flag(lambda:not allow() or self.jobs._drain.is_set())
+        try:
+            for job_id in finished:
+                with self.operation_lock:
+                    if stop.is_set():raise InterruptedError()
+                    self._prune_completed(job_id,stop=stop)
+                time.sleep(.01)  # a press waiting for the lock takes it here (a lock handed straight back is not fair)
+        except InterruptedError:raise StartRefused('stale','Startup was paused; saved retry requests are retained.')
 
     @operation
-    def _resume_guarded(self,generation,pending_owner=None):
+    def _resume_guarded(self,generation,pending_owner=None,recheck=True):
         allow=lambda:self._start_allowed(generation)
+        answer=(lambda:self.state()) if recheck else dict
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
         if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
             raise StartRefused('busy','A previous start request is still checking. Retry Start after it stops; saved retry requests are retained.')
@@ -740,33 +798,26 @@ class MergeService:
         if self.jobs._thread and self.jobs._thread.is_alive():
             if self.jobs._stop.is_set():raise StartRefused('busy','The audiobook worker is still pausing. Retry Start after it stops.')
             self._authorize_automatic_cleanup(generation)
-            return self.state()|{'start_admission':{'state':'running','generation':generation}}
+            return answer()|{'start_admission':{'state':'running','generation':generation}}
         if self.cleanup.thread and self.cleanup.thread.is_alive():
             if self.cleanup.stop.is_set():raise StartRefused('busy','The cleanup worker is still pausing. Retry Start after it stops.')
             self._authorize_automatic_cleanup(generation)
-            return self.state()|{'start_admission':{'state':'checking','generation':generation}}
-        # The queue itself clears its stop only at guarded admission; pruning cannot erase Pause.
-        stop=_Flag(lambda:not allow() or self.jobs._drain.is_set())
-        try:
-            for job in self.jobs.status()['jobs']:
-                if stop.is_set():raise InterruptedError()
-                if job['state']=='completed':self._prune_completed(job['job_id'],stop=stop)
-        except InterruptedError:raise StartRefused('stale','Startup was paused; saved retry requests are retained.')
+            return answer()|{'start_admission':{'state':'checking','generation':generation}}
         if not allow():raise StartRefused('stale','Startup was paused; saved retry requests are retained.')
         pending=self.cleanup._rows("SELECT id,intent FROM source_cleanup WHERE state IN ('waiting','paused')")
         historical=[c['id'] for c in pending if json.loads(c['intent']).get('historical')]
         def handoff():
-            try:return self.jobs.resume(admission_check=allow,admission_token=generation)
+            try:return self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
             except Exception as error:
                 self._record_start_failure(error)
                 return {'start_admission':{'state':getattr(error,'start_state','blocked'),'reason':str(error)}}
         if historical:started=self.cleanup.resume(historical,follow_audio=False,admission_check=allow,admission_token=generation)
         elif pending:started=self.cleanup.resume(admission_check=allow,after_drain=handoff,admission_token=generation)
-        else:started=self.jobs.resume(admission_check=allow,admission_token=generation)
+        else:started=self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
         if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','Startup was superseded by Pause or closing; saved retry requests are retained.')
         self._authorize_automatic_cleanup(generation)
         admission=started.get('start_admission',started) if isinstance(started,dict) else {'state':'requested'}
-        return self.state()|{'start_admission':admission}
+        return answer()|{'start_admission':admission}
 
     def _cleanup_binding(self,db,manifest):
         row=db.execute('SELECT revision,review FROM book_groups WHERE id=?',(manifest['candidate_id'],)).fetchone()
@@ -2620,7 +2671,8 @@ class MergeService:
                                         if facts['links']==1 and facts['size']==pin['size'] and file.sha256()==pin['sha256']:file.dispose()
                                 except (ValueError,OSError):pass
         if stop.is_set():raise InterruptedError()
-        self.resume()
+        # 0.22.1: the queued book starts at once; Start's re-check of every finished book is not on the approval path.
+        self.resume(recheck=False)
         return fresh,job
 
     def _request_m4b_readmission(self,job_id,kind,origin=None):
@@ -2676,10 +2728,10 @@ class MergeService:
             return {'retryable':False,'requeued':False,'accepted':not known}
         if parent and eligible(parent):
             result=self._retry_preserved_m4b(parent,now)
-            if result.get('requeued') and resume:self.resume()
+            if result.get('requeued') and resume:self.resume(recheck=False)  # one requeued book: no re-check of the finished ones
             return result
         result=self.jobs.retry_failed(job_id,now)
-        if result.get('requeued') and resume:self.resume()
+        if result.get('requeued') and resume:self.resume(recheck=False)  # one requeued book: no re-check of the finished ones
         return result
 
     def _m4b_prior_audio(self,job_id):

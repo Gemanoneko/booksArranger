@@ -61,6 +61,16 @@ def scan_write(inventory,root,generation,path,operation,expected=None,*,stopping
     return write(inventory.database,persist,None if stopping else inventory.stop_event)
 
 
+def groups_current(inventory,roots):
+    """True when the stored groups of every root match the catalog revision (a read transaction; no lock, no write). A
+    caller that gets False rebuilds them with synchronize_groups under group_lock."""
+    import groups
+    from scanner import connect
+    with connect(inventory.database) as db:
+        db.execute('BEGIN')
+        return _groups_current(db,roots,groups)
+
+
 def synchronize_groups(inventory,roots):
     # Caller owns group_lock. Drop the reader before acquiring a fresh writer.
     import groups

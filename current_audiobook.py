@@ -121,10 +121,15 @@ class CurrentAudiobooks:
             yield locations
 
     @contextlib.contextmanager
-    def protected(self,publication):
+    def protected(self,publication,display=False):
+        """display (describe(), the book list and the inspector, 0.22.1): the location comes from
+        PublicationBindings.display(), one cached read, instead of a lease; the file itself is still opened and checked.
+        Verification keeps the lease."""
         original=publication.get('original_record',publication['record'])
         kind='replacement' if publication['kind']=='replacement' else ('Chaptersv2' if publication.get('corrected') else 'Chapters') if publication['kind']=='chapter_update' else 'base'
-        lease=self.bindings.protect(original,kind,publication['parent'],repair_journal_sha256=publication.get('journal_sha256')) if self.bindings else contextlib.nullcontext((original,None))
+        if self.bindings and display and hasattr(self.bindings,'display'):
+            lease=contextlib.nullcontext(self.bindings.display(original,kind,repair_journal_sha256=publication.get('journal_sha256')))
+        else:lease=self.bindings.protect(original,kind,publication['parent'],repair_journal_sha256=publication.get('journal_sha256')) if self.bindings else contextlib.nullcontext((original,None))
         with lease as (record,envelope):
             publication['record']=record
             publication['original_record']=original
@@ -196,7 +201,7 @@ class CurrentAudiobooks:
         try:
             publication=self.publication(jobs,candidate)
             if publication is None:return {'state':'none','reason':'No verified audiobook created yet','identity':'none'}
-            with self.protected(publication) as (_,key):
+            with self.protected(publication,display=True) as (_,key):
                 with self._lock:known=key in self._cache;error=self._cache.get(key)
                 if not known and self.verified is not None:
                     try:current=self.verified(publication['record']) is True

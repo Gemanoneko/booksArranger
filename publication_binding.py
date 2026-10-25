@@ -49,6 +49,23 @@ class PublicationBindings:
                 if owner:
                     self.local.db=None;db.rollback();db.close()
 
+    def display(self,original,kind=None,repair_journal_sha256=None):
+        """(effective record, envelope) for showing a book, from one read snapshot, reused while lookup_token() and the
+        receipt are unchanged (0.22.1: the book list resolved each shown book's relocation twice through protect(), about
+        5 s a page on the live catalog). No lease and no deletion authority: verification and every destructive caller
+        keep protect()."""
+        with contextlib.closing(sqlite3.connect(self.database,timeout=10)) as db:
+            db.row_factory=sqlite3.Row;db.execute('BEGIN')
+            key=(self.lookup_token(db),kind,repair_journal_sha256,locations._digest(original))
+            with self.lock:
+                cache=self.__dict__.setdefault('_display',{})
+                if key in cache:return copy.deepcopy(cache[key])
+            value=self.lookup(db,original,kind,repair_journal_sha256=repair_journal_sha256)
+        with self.lock:
+            if len(cache)>=4096:cache.clear()
+            cache[key]=copy.deepcopy(value)
+        return value
+
     def current(self,original,kind=None,job=None,repair_journal_sha256=None):
         with self.protect(original,kind,job,repair_journal_sha256=repair_journal_sha256) as (record,envelope):
             return record,envelope
@@ -69,6 +86,24 @@ class PublicationBindings:
         current=locations.resolve(db,dict(durable),kind,original)
         if kind in {'Chapters','Chaptersv2'} and json.loads(current['relocation']['accepted_routing_json']).get('repair_journal_sha256')!=repair_journal_sha256:return False
         return current['generation']==envelope['generation'] and current['effective_location']==envelope['effective_location']
+
+    @staticmethod
+    def lookup_token(db):
+        """What a display lookup depends on beyond the job's own receipt, read in the caller's snapshot: the relocation
+        rows (a transition writes a new generation), the append-only migration events and the completed series backfills
+        (a retagged book's lineage). Equal tokens and an equal receipt give an equal lookup() answer (0.22.1: the status
+        computation reuses each job's answer instead of resolving about 500 relocations every time, 19 s on the live
+        catalog). Display only, like lookup().
+
+        Cheap by construction (it runs once per shown book): every relocation insert and generation change appends a
+        migration event in the same savepoint (publication_locations; the events table refuses UPDATE and DELETE), so the
+        newest event id stands for both tables; only primary keys and the done rows' ids are read, never the JSON."""
+        have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('output_relocations','migration_events','series_backfill')")}
+        token=[]
+        if 'output_relocations' in have:token.append(db.execute('SELECT max(rowid) FROM output_relocations').fetchone()[0])
+        if 'migration_events' in have:token.append(db.execute('SELECT max(event_id) FROM migration_events').fetchone()[0])
+        if 'series_backfill' in have:token.append(tuple(db.execute("SELECT count(*),group_concat(job_id) FROM (SELECT job_id FROM series_backfill WHERE state='done' ORDER BY job_id)").fetchone()))
+        return (tuple(sorted(have)),*token)
 
     def lookup(self,db,original,kind=None,repair_journal_sha256=None):
         """Display-only location lookup in the caller's coherent SQL snapshot.

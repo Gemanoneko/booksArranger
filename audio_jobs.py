@@ -924,17 +924,19 @@ class AudioJobs:
                 raise RetryRefused(RETRY_JOB_CHANGED)
         return {'job_id': job_id, 'requeued': True}
 
-    def resume(self,admission_check=None,admission_token=None):
+    def resume(self,admission_check=None,admission_token=None,settle=True):
         """Check published outputs, then start under the original queue lock.
 
         A guarded stale start cannot undo a completed Pause. No Merge lock is acquired
         by admission_check, and published-output hashing remains outside the queue lock.
+        settle=False (a book an approval just queued, 0.22.1): starts the worker without the published-output check of
+        every finished book (Start runs it; so does the background published check) and answers no full status.
         """
         def permitted():
             if admission_check is not None and admission_check() is not True:
                 raise StartRefused('stale','This start was superseded by Pause or closing. Retry Start after pending checks stop.')
         def answer(kind):
-            value=self.status()
+            value=self.status() if settle else {}
             if admission_check is not None:value['start_admission']={'state':kind,'generation':admission_token}
             return value
         with self._lock:
@@ -954,7 +956,7 @@ class AudioJobs:
         try:
             changes=[]
             try:
-                rows=self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
+                rows=self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id") if settle else []
                 for index,row in enumerate(rows):
                     permitted()
                     if stop.is_set():

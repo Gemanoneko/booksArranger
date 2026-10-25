@@ -568,7 +568,10 @@ class Inventory:
         try:root=self.source_root_for_candidate(identity)
         except ValueError as issue:return result('held',str(issue),'protected_or_changed')
         try:
-            with self.group_lock,contextlib.ExitStack() as guards:
+            # 0.22.1 (backlog items 6-7): the catalog snapshot and the file reads take no group_lock, so Scan again no longer
+            # queues behind a status computation or an approval. Only a write takes the lock, briefly, and it still writes
+            # nothing unless the catalog is exactly the snapshot read here (compare-and-set below).
+            with contextlib.ExitStack() as guards:
                 check()
                 with connect(self.database) as db:initial=snapshot(db)
                 group,rows,job,context=initial;old_fingerprint=group['fingerprint'];paths=[row['path'] for row in rows]
@@ -599,8 +602,9 @@ class Inventory:
                         updates.append((row,metadata,facts))
                     receipts.append(receipt)
                 check()
-                with connect(self.database) as db:
-                    db.execute('BEGIN IMMEDIATE')
+                # Nothing changed on disk: a read transaction confirms the snapshot, with no write lock and no group_lock.
+                with self.group_lock if updates else contextlib.nullcontext(),connect(self.database) as db:
+                    db.execute('BEGIN IMMEDIATE' if updates else 'BEGIN')
                     if snapshot(db)!=initial:return result('held','Catalog or protected state changed during source refresh','catalog_changed')
                     for row,metadata,facts in updates:
                         db.execute("UPDATE files SET size=?,modified=?,metadata=?,error='',missing=0 WHERE root=? AND path=?",
@@ -716,13 +720,24 @@ class Inventory:
     def candidate(self,label,identity):
         if label!='Audiobooks':raise ValueError('Book candidates are available only for Audiobooks')
         root=self.source_root_for_candidate(identity)
+        # 0.22.1 (backlog items 6-7): when the stored groups are current, one book is a plain read of one SQLite snapshot
+        # (WAL), with no group_lock, no write transaction and no regroup. Scan again, Remove from list, the Delete check
+        # and every other one-book read used to queue behind whatever held the lock (a status computation, an approval).
+        with connect(self.database) as db:
+            db.execute('BEGIN')
+            if groups.current(db,root):return self._candidate_row(db,root,identity)
+            db.execute('ROLLBACK')
         with self.group_lock,connect(self.database) as db:
             db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
-            row=db.execute('SELECT * FROM book_groups WHERE root=? AND id=? AND superseded=0',(root,identity)).fetchone()
-            if row is None:raise ValueError('Candidate no longer current')
-            current=db.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
-            pending=db.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
-            return groups.render(row,root,bool(current and current['state']=='completed' and not pending and not current['errors']),groups.retired_sources(db,root))
+            return self._candidate_row(db,root,identity)
+
+    @staticmethod
+    def _candidate_row(db,root,identity):
+        row=db.execute('SELECT * FROM book_groups WHERE root=? AND id=? AND superseded=0',(root,identity)).fetchone()
+        if row is None:raise ValueError('Candidate no longer current')
+        current=db.execute('SELECT state,errors FROM jobs WHERE root=?',(root,)).fetchone()
+        pending=db.execute("SELECT count(*) FROM queue WHERE root=? AND state IN ('pending','running')",(root,)).fetchone()[0]
+        return groups.render(row,root,bool(current and current['state']=='completed' and not pending and not current['errors']),groups.retired_sources(db,root))
 
     def save_candidate(self,label,identity,revision,review,approve=False):
         if label!='Audiobooks':raise ValueError('Only audiobooks have book candidates')
