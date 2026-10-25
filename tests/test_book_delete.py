@@ -3,7 +3,7 @@ is removed from disk and from every record, so a reacquired copy is a new book. 
 file, a path outside the source roots, Sorted untouched, a partial failure, and a crash between the file and record
 steps; plus every typed refusal, records last, no recovery copy, and reacquire as a new book. Real private files in a
 temporary library with its own Sorted folder; no network, no library access."""
-import json, os, shutil, sqlite3, threading, unittest
+import _winapi, json, os, shutil, sqlite3, threading, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -178,6 +178,39 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         titles = [r['title_clue'] for r in self.service.reviews.page()['rows']]
         self.assertEqual([t for t in titles if t.startswith('Новая плоть')], [], titles)
         self.assertEqual(sorted(p.name for p in self.parts[0].parent.iterdir()), ['cover.jpg', 'info.txt', 'Другая.mp3'])
+
+    def test_the_preview_refuses_a_folder_junction_into_sorted_before_listing_anything(self):
+        # Senua's 0.22.0 final review, N14 (probe P6): the book's folder replaced by a junction into Audiobooks Sorted, which
+        # holds same-named copies. The preview listed both files ("These 2 files will be deleted") because lstat follows a
+        # folder junction; removal then refused each one. The preview now refuses first, with removal's own check.
+        row = self.book()
+        folder = self.parts[0].parent
+        target = self.sorted / 'Петров Иван' / 'Новая плоть'; target.mkdir()
+        for part in self.parts[:2]:
+            shutil.copy2(self.kept / part.name, target / part.name)
+        moved = self.base / 'moved-book'; folder.rename(moved)
+        _winapi.CreateJunction(str(target), str(folder)); self.addCleanup(lambda: os.path.isjunction(folder) and os.rmdir(folder))
+        self.assertTrue(os.path.isjunction(folder) and self.parts[0].is_file(), 'positive control: the book paths reach Sorted')
+        sorted_before = listing(self.sorted)
+        preview = self.service.delete_preview(row['id'], row['revision'])
+        self.assertEqual((preview['files'], preview['refusal']), ([], {'code': 'refused', 'message': 'Delete was not accepted. Nothing was deleted.'}))
+        with self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
+        self.assertEqual(refused.exception.code, 'refused')
+        self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
+        self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted')
+        # Control: the real folder back, the same press lists the two files.
+        os.rmdir(folder); moved.rename(folder)
+        self.assertEqual(len(self.service.delete_preview(row['id'], row['revision'])['files']), 2)
+
+    def test_the_preview_refuses_a_file_with_another_name(self):
+        # N14, the other check removal makes: a file with a second hard link (another name for the same data) is refused
+        # by remove() ("has another name"), so the preview refuses it before the dialog says it will be deleted.
+        row = self.book()
+        other = self.base / 'second-name.mp3'; os.link(self.parts[0], other)
+        self.assertEqual((self.service.delete_preview(row['id'], row['revision'])['refusal'] or {}).get('code'), 'refused')
+        other.unlink()
+        self.assertIsNone(self.service.delete_preview(row['id'], row['revision'])['refusal'], 'control: one name, listed')
 
     def test_a_partial_failure_keeps_every_record_and_the_next_press_finishes(self):
         row = self.book()

@@ -27,6 +27,7 @@ from scanner import connect, inside
 CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused')
 CAUSES = ('in_use', 'denied', 'unreachable', 'other')
 BUSY = 'This book is being processed. Nothing was deleted.'  # Judy's "Book is being processed" line
+REFUSED = 'Delete was not accepted. Nothing was deleted.'  # Judy's "Any other typed refusal" line
 _UNREACHABLE = ('[WinError 53]', '[WinError 51]', '[WinError 59]', '[WinError 64]', '[WinError 67]', '[WinError 121]',
                 '[WinError 1222]', '[WinError 1231]', '[WinError 3]')
 
@@ -172,16 +173,16 @@ def plan(service, identity, revision):
         if len(files) == 1:
             raise DeleteRefused('shared', '"%s" also belongs to "%s". Nothing was deleted.' % (files[0]['path'], files[0]['other']), files)
         raise DeleteRefused('shared', '%d of this book\'s files also belong to other books. Nothing was deleted.' % len(files), files)
-    files, used = [], set()
+    files, used, guarded = [], set(), set()
     for path in members:
         try:
             p = ordinary(path)
         except BoundaryError:
-            raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
+            raise DeleteRefused('refused', REFUSED)
         root = next((r for r in roots if inside(str(p), r) and _key(p) != _key(r)), None)
         if root is None or output and inside(str(p), output) or p.suffix.lower() not in AUDIO:
             # Never outside a configured source root, never in Sorted, never anything but this book's audio.
-            raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
+            raise DeleteRefused('refused', REFUSED)
         if not os.path.isdir(root):
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
         used.add(root)
@@ -191,8 +192,19 @@ def plan(service, identity, revision):
             continue  # already gone: counts as gone
         except OSError:
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
-        if not stat.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400:
-            raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
+        # Senua's 0.22.0 final review, N14 (probe P6): lstat follows a folder junction, so a book folder replaced by a
+        # junction into Sorted listed Sorted's same-named files as "will be deleted"; removal then refused each one. The
+        # preview now makes removal's own checks first: a single-link ordinary file, and every folder from the drive
+        # root down held by the same DirectoryBoundary remove() uses (no junction, symlink or other reparse point).
+        if not stat.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
+            raise DeleteRefused('refused', REFUSED)
+        if _key(p.parent) not in guarded:
+            try:
+                with DirectoryBoundary(ordinary(root), p.parent):
+                    pass
+            except (BoundaryError, OSError):
+                raise DeleteRefused('refused', REFUSED)
+            guarded.add(_key(p.parent))
         files.append({'path': str(p), 'size': facts.st_size, 'root': root})
     return {'files': files, 'bytes': sum(f['size'] for f in files), 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
 
