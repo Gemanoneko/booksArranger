@@ -120,11 +120,109 @@ def activities(jobs, scan, scan_library, automatic, started_at=None, now_ms=None
     return sorted(rows, key=lambda row: ACTIVITY_ORDER[row['kind']])
 
 
+STARTED = time.monotonic()  # the engine's own start: "Loaded in" counts from here
+# Startup (ruling 28; Judy's 0.22.1 UX spec, section 3). The shell owns step 1 (the process is launching); the engine
+# reports the rest. Parts are what the page may show, each whole: absent from /api/state until it arrives.
+LOAD_STEPS = ('engine', 'catalog', 'session', 'books')
+LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
+NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
+# Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
+LOOKING = {'/api/inspect', '/api/open-folder'}
+
+
+class LoadAborted(Exception):
+    """Quit, a stop or an update arrived while loading: the loader ends at its next checkpoint."""
+
+
+def still_loading(server):
+    loading = getattr(server, 'loading', None)
+    return loading is not None and not loading.finished
+
+
+class Loading:
+    """What the startup loader is doing: its step and counter, when either last moved, the named cause it waits for,
+    whether ending it now is safe, and the parts the page may show. Ages, never clock times: a clock change cannot fake
+    progress. took_ms stays for the session, so a reloaded page shows the same "Loaded in"."""
+
+    def __init__(self, started=None):
+        self.lock = threading.Lock()
+        self.started = STARTED if started is None else started
+        self.step, self.done, self.total, self.unit = 'catalog', None, None, None
+        self.moved = time.monotonic()
+        self.waiting_for = None
+        self.writing = 0
+        self.parts = set()
+        self.took_ms = None
+        self.error = ''
+        self.abort = threading.Event()
+
+    def checkpoint(self):
+        if self.abort.is_set():
+            raise LoadAborted('Loading stopped')
+
+    def begin(self, step, total=None, unit=None):
+        self.checkpoint()
+        with self.lock:
+            self.step, self.total, self.unit = step, total, unit
+            self.done = 0 if total is not None else None
+            self.moved = time.monotonic()
+
+    def advance(self, done, total=None):
+        self.checkpoint()
+        with self.lock:
+            if total is not None:
+                self.total = total
+            if done != self.done:
+                self.done = done
+                self.moved = time.monotonic()
+
+    def ready(self, *parts):
+        with self.lock:
+            self.parts.update(parts)
+            self.moved = time.monotonic()
+
+    @contextlib.contextmanager
+    def changing(self):
+        """The loader is writing the catalog: restarting the engine now is not offered (restart_safe false)."""
+        with self.lock:
+            self.writing += 1
+        try:
+            yield
+        finally:
+            with self.lock:
+                self.writing -= 1
+
+    def finish(self):
+        with self.lock:
+            self.parts.update(LOAD_PARTS)
+            self.step, self.done, self.total, self.unit = 'done', None, None, None
+            self.took_ms = round((time.monotonic() - self.started) * 1000)
+            self.moved = time.monotonic()
+
+    @property
+    def finished(self):
+        return self.took_ms is not None
+
+    def view(self):
+        with self.lock:
+            step = self.step
+            return {'step': step, 'n': LOAD_STEPS.index(step) + 1 if step in LOAD_STEPS else len(LOAD_STEPS), 'of': len(LOAD_STEPS),
+                    'done': self.done, 'total': self.total, 'unit': self.unit,
+                    'progress_age_ms': max(0, round((time.monotonic() - self.moved) * 1000)),
+                    'waiting_for': copy.deepcopy(self.waiting_for), 'restart_safe': not self.writing,
+                    'parts': {name: name in self.parts for name in LOAD_PARTS}, 'took_ms': self.took_ms, 'error': self.error}
+
+
 class BrowserServer(ThreadingHTTPServer):
     allow_reuse_address = False
     daemon_threads = True
+    loading = None  # Loading while the deferred catalog loads; kept after it ends (took_ms)
+    loader = None
+    merge_factory = None
 
-    def __init__(self, address, inventory, merge_factory=None):
+    def __init__(self, address, inventory, merge_factory=None, defer=False):
+        """defer=True (the desktop and browser apps): bind and answer at once; start_loading() opens the catalog in the
+        background. Without it the catalog is opened here, as tests and tools expect."""
         if address[0] != '127.0.0.1':
             raise ValueError('Books Arranger only binds to IPv4 loopback')
         self.inventory = inventory
@@ -139,25 +237,120 @@ class BrowserServer(ThreadingHTTPServer):
         self.recovery_operations = 0
         self.merge = None
         self.closing = False
+        self.loading = None
+        self.loader = None
+        self.merge_factory = merge_factory
         super().__init__(address, Handler)
+        if defer:
+            self.loading = Loading()
+            self.loading.ready('library', 'status')  # the inventory is open: folders, filters and file counts
+            return
         try:
-            if merge_factory is None:
-                from merge_service import MergeService
-                merge_factory = MergeService
-            self.merge = merge_factory(inventory, Path(inventory.database).parent / 'merge-cache')
-            # Whatever starts automatic processing (Start, Start over, release, a pending start), its scan is the
-            # Audiobooks library's: the scan line and progress row follow it as after the Start button.
-            automatic=getattr(self.merge,'automatic',None)
-            if automatic is not None and hasattr(automatic,'on_started'):automatic.on_started=lambda:setattr(self,'active_library','Audiobooks')
-            # A start that fires later (the O12 pending start) reads the server's closing flag at that moment, as the
-            # control gate does for a press: nothing starts once Quit or shutdown has begun.
-            if automatic is not None and hasattr(automatic,'server_closing'):automatic.server_closing=lambda:self.closing
-            if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
-            # Published-book hashing reads every finished book from the library share; it must not delay health.
-            if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
+            self.merge = self._open_merge()
+            self._start_background()
         except BaseException:
             super().server_close()
             raise
+
+    def _open_merge(self, progress=None):
+        factory = self.merge_factory
+        if factory is None:
+            from merge_service import MergeService
+            factory = MergeService
+        cache = Path(self.inventory.database).parent / 'merge-cache'
+        merge = factory(self.inventory, cache, progress=progress) if progress is not None else factory(self.inventory, cache)
+        # Whatever starts automatic processing (Start, Start over, release, a pending start), its scan is the
+        # Audiobooks library's: the scan line and progress row follow it as after the Start button.
+        automatic=getattr(merge,'automatic',None)
+        if automatic is not None and hasattr(automatic,'on_started'):automatic.on_started=lambda:setattr(self,'active_library','Audiobooks')
+        # A start that fires later (the O12 pending start) reads the server's closing flag at that moment, as the
+        # control gate does for a press: nothing starts once Quit or shutdown has begun.
+        if automatic is not None and hasattr(automatic,'server_closing'):automatic.server_closing=lambda:self.closing
+        return merge
+
+    def _start_background(self):
+        if hasattr(self.merge,'start_retention'):self.merge.start_retention(self.recovery_admission)
+        # Published-book hashing reads every finished book from the library share; it must not delay health.
+        if hasattr(self.merge,'start_published_check'):self.merge.start_published_check()
+
+    # ------------------------------------------------------------------ startup loader (ruling 28, 0.22.1)
+    # Sergei 2026-10-25: "Show me the screen and load whatever you want after." The engine used to open the whole
+    # catalog before it answered anything: 1 min 40 s on the 706 MB catalog with no window. Now it answers at once and
+    # loads here, reporting its step, its counter and the parts the page may show.
+    def start_loading(self):
+        self.loader = threading.Thread(target=self._load, name='books-loader', daemon=True)
+        self.loader.start()
+        return self.loader
+
+    def _load(self):
+        loading = self.loading
+        try:
+            self._load_catalog(loading)
+            loading.begin('session', 0, 'items')
+            merge = self._open_merge(progress=lambda done, total: loading.advance(done, total))
+            if loading.abort.is_set():
+                merge.close()
+                raise LoadAborted('Loading stopped')
+            self.merge = merge
+            # Step 4: the first status (counted per book) and the first book page, so the page's first reads are warm.
+            loading.begin('books', 0, 'books')
+            warm = getattr(merge, 'warm_status', None)
+            jobs = warm(progress=lambda done, total: loading.advance(done, total)) if callable(warm) else merge.state()
+            automatic = merge.automatic.status(jobs=jobs, scanning=False, server_closing=self.closing) if hasattr(merge, 'automatic') else None
+            self._loaded_jobs = (jobs, automatic)
+            loading.ready('jobs', 'attention')
+            loading.checkpoint()
+            pager = getattr(merge, 'cached_page', None)
+            if callable(pager):
+                pager(100, 0, '', 'converted')
+            loading.ready('books')
+            loading.checkpoint()
+            # Background work (recovery retention, series and optional-field lookups, the published-book check) starts
+            # once loading ends: it changes the catalog and reads the library share, which the first status needs too.
+            self._start_background()
+            loading.finish()
+        except LoadAborted:
+            return
+        except BaseException as error:
+            if loading.abort.is_set():
+                return  # stopped while loading: whatever failed after that is not the load's failure
+            # The engine ends with its message (its exit is the shell's Stopped); loading changes nothing it cannot redo.
+            message = str(error)[:512] or type(error).__name__
+            with loading.lock:
+                loading.error = message
+            try:
+                print('Books Arranger could not load the catalog: ' + message, file=sys.stderr, flush=True)
+            except Exception:
+                pass
+            with self.control_condition:
+                self.closing = True
+            threading.Thread(target=self.finish_shutdown, name='books-load-failed', daemon=True).start()
+
+    def _load_catalog(self, loading):
+        """Step 2: the catalog's own checks, and the stored book groups brought up to date (a grouping change rebuilds them
+        once, after an update: about 12 s on the live catalog). Rebuilding writes the catalog: no restart is offered."""
+        from catalog_contention import groups_current, synchronize_groups
+        roots = list(self.inventory.source_roots('Audiobooks')) if hasattr(self.inventory, 'source_roots') else [self.inventory.roots['Audiobooks']]
+        loading.checkpoint()
+        if not groups_current(self.inventory, roots):
+            with loading.changing(), self.inventory.group_lock:
+                synchronize_groups(self.inventory, roots)
+        loading.checkpoint()
+
+    def stop_loading(self, timeout=60.0):
+        """Quit, a stop or an update while loading: the loader ends at its next checkpoint (a catalog write it began
+        finishes first). Raises TimeoutError, as an inventory worker does, if it has not ended."""
+        if self.loading is None or self.loading.finished:
+            return
+        self.loading.abort.set()
+        loader = self.loader
+        if loader is not None and loader is not threading.current_thread():
+            loader.join(timeout)
+            if loader.is_alive():
+                raise TimeoutError('Loading has not reached its safe checkpoint; ownership retained')
+
+    def still_loading(self):
+        return still_loading(self)
 
     @contextlib.contextmanager
     def recovery_admission(self):
@@ -171,12 +364,15 @@ class BrowserServer(ThreadingHTTPServer):
                 self.merge_admissions-=1;self.recovery_operations-=1;self.control_condition.notify_all()
 
     def server_close(self):
+        if self.loading is not None:
+            self.loading.abort.set()
         if self.merge is not None:
             self.merge.close()
             self.merge = None
         super().server_close()
 
     def finish_shutdown(self):
+        self.stop_loading()  # Quit while loading: nothing else runs yet (Judy 3.2)
         with self.control_condition:
             while self.merge_admissions:
                 self.control_condition.wait(timeout=.5)
@@ -185,7 +381,7 @@ class BrowserServer(ThreadingHTTPServer):
         if worker and worker.is_alive():
             worker.join(timeout=20)
             if worker.is_alive():raise TimeoutError('Inventory worker has not reached its safe checkpoint; ownership retained')
-        self.merge.close()
+        if self.merge is not None:self.merge.close()
         self.shutdown()
 
     def scan_active(self):
@@ -219,6 +415,8 @@ class BrowserServer(ThreadingHTTPServer):
         While the app is quiet (merge_service.status_snapshot), a poll also reuses the library and automatic
         status: together they read about 100 MB of the real catalog per poll.
         """
+        if self.still_loading():
+            return self.loading_state(library)
         active = bool(self.inventory.worker and self.inventory.worker.is_alive())
         quiet=getattr(self.merge,'_quiet_token',None) if cached else None
         token=quiet() if callable(quiet) else None
@@ -232,7 +430,8 @@ class BrowserServer(ThreadingHTTPServer):
             status=self.inventory.status(library)
             automatic=self.merge.automatic.status(jobs=jobs,scanning=active,server_closing=self.closing) if hasattr(self.merge,'automatic') else None
             if token is not None and quiet()==token:self._quiet_parts=((token,key),time.monotonic(),copy.deepcopy((status,automatic)))
-        return self.health() | {'library': library, 'root': self.inventory.roots[library],
+        loaded = {'loading': self.loading.view()} if self.loading is not None else {}
+        return self.health() | loaded | {'library': library, 'root': self.inventory.roots[library],
             'libraries': list(self.inventory.roots), 'genres': list(GENRES),'source_roots':list(self.inventory.source_roots(library)) if hasattr(self.inventory,'source_roots') else [self.inventory.roots[library]],'audiobook_output_root':getattr(self.inventory,'output_root',None),
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
@@ -240,6 +439,23 @@ class BrowserServer(ThreadingHTTPServer):
             'automatic_processing': automatic,
             'activities': activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
                                      self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))}
+
+    def loading_state(self, library):
+        """/api/state while loading: answered at once, with only the parts that have arrived. A part that has not
+        arrived is absent, never 0, [] or '' (Judy 3.5): the page shows its placeholder for it."""
+        view = self.loading.view()
+        value = self.health() | {'loading': view, 'library': library, 'root': self.inventory.roots[library],
+            'libraries': list(self.inventory.roots), 'genres': list(GENRES),
+            'source_roots': list(self.inventory.source_roots(library)) if hasattr(self.inventory, 'source_roots') else [self.inventory.roots[library]],
+            'audiobook_output_root': getattr(self.inventory, 'output_root', None), 'active_library': None, 'stopping': False}
+        if view['parts']['status']:
+            value['status'] = self.inventory.status(library)
+        loaded = self.__dict__.get('_loaded_jobs')
+        if view['parts']['jobs'] and loaded is not None:
+            jobs, automatic = copy.deepcopy(loaded)
+            value.update(audiobook_jobs=jobs, automatic_processing=automatic,
+                         activities=activities(jobs, None, None, automatic, self.__dict__.setdefault('_activity_started', {})))
+        return value
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'
@@ -334,6 +550,11 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError('Choose one configured library')
         return value
 
+    def loaded(self, part):
+        """The part has arrived and the catalog service is open (always, once loading has ended)."""
+        loading=getattr(self.server,'loading',None)
+        return self.server.merge is not None and (loading is None or loading.finished or loading.view()['parts'][part])
+
     def do_GET(self):
         if not self.trusted():
             return
@@ -348,9 +569,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('The application page takes no query parameters')
                 page = (BASE / 'web' / 'index.html').read_text(encoding='utf-8').replace('{{REQUEST_TOKEN}}',self.server.token)
                 self.response(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            elif path in {'/app.js','/desktop-ui.js','/style.css'}:
+            elif path in {'/app.js','/desktop-ui.js','/load-state.js','/style.css'}:
                 content_type = 'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8'
                 self.response(200,(BASE / 'web' / path[1:]).read_bytes(),content_type)
+            elif path in {'/api/cover','/api/inventory'} and not self.loaded('books'):
+                # Still loading: a "still updating" answer, which the page counts as an answer (Judy 3.4).
+                if not self.trusted(token=True): return
+                self.response(503,{'error':'Your books are still loading','code':'loading'})
             elif path == '/api/cover':
                 if not self.trusted(token=True): return
                 if set(query) != {'id'}: raise ValueError('Cover requires only its cached identity')
@@ -791,6 +1016,9 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
+                if still_loading(self.server) and not (path=='/api/shutdown' and not data) and not (path in LOOKING and self.loaded('books')):
+                    # Looking is free, changing waits (Judy 3.6): refused, never queued, with the page's own sentence.
+                    self.response(409,{'error':NOT_YET,'code':'loading'});return
                 if path in {'/api/scan/start','/api/scan/resume','/api/scan/stop'}:
                     if set(data)!={'library'}: raise ValueError('Scan controls require only a library')
                     library=self.library(data['library'])
@@ -971,7 +1199,8 @@ def main(argv=None, *, ready=None, before_start=None, startup_guard=None, create
 def serve_owned(args, roots, port, ready):
     inventory = Inventory(args.database,roots,audiobook_sources=getattr(args,'audiobook_source',None),output_root=getattr(args,'audiobook_output_root',None))
     try:
-        server = BrowserServer(('127.0.0.1',port),inventory)
+        # Answers at once; the catalog loads in the background (ruling 28).
+        server = BrowserServer(('127.0.0.1',port),inventory,defer=True)
     except OSError as error:
         raise RuntimeError(f'Books Arranger cannot bind its assigned port {port}; stop the existing owner first. No fallback port is used.') from error
     instance_file = Path(args.database).parent / 'web-instance.json'
@@ -987,7 +1216,11 @@ def serve_owned(args, roots, port, ready):
             if sys.stdout is not None:
                 print(f'Books Arranger {server.loaded_version} — http://127.0.0.1:{port}/ — PID {os.getpid()}',flush=True)
             if ready is not None:ready(server)
+            server.start_loading()
             server.serve_forever(poll_interval=.2)
+        # A load that failed ends the engine with its message and a failure code: the shell shows Stopped.
+        if isinstance(server.loading, Loading) and server.loading.error:
+            raise RuntimeError(server.loading.error)
     finally:
         inventory.stop()
         if inventory.worker and inventory.worker.is_alive():inventory.worker.join(timeout=20)

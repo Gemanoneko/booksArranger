@@ -5,12 +5,21 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="books-token" content="{{REQUEST_TOKEN}}">
   <title>Books Arranger</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <!-- Relative: the shell shows this same page from disk as the first frame, before the engine serves it (ruling 28). -->
+  <link rel="stylesheet" href="style.css">
+  <script src="load-state.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
-<body>
+<body aria-busy="true">
   <main>
     <header><div><h1>Books Arranger</h1><p>Discover, research and arrange your local books.</p></div><span id="version" class="badge" hidden></span></header>
+    <section id="load-strip" class="panel" aria-label="Loading progress">
+      <p id="load-line"><strong id="load-word">Working</strong> · <span id="load-text">Step 1 of 4: Starting the engine</span></p>
+      <div id="load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="4" aria-valuenow="0" aria-valuetext="Step 1 of 4, Starting the engine"><span class="load-segment"><span class="load-fill"></span></span><span class="load-segment"><span class="load-fill"></span></span><span class="load-segment"><span class="load-fill"></span></span><span class="load-segment"><span class="load-fill"></span></span></div>
+      <p id="load-detail"><span>running 0:00</span> · <span>no answer from the engine yet</span></p>
+      <div id="load-actions" class="toolbar" hidden><button id="load-restart" type="button" title="Stop the engine and start it again. Loading starts over. Your files are not touched." hidden>Restart engine</button><button id="load-retry" type="button" title="Start the engine again." hidden>Try again</button><button id="load-copy" type="button" class="quiet" title="Copy the technical message to the clipboard.">Copy details</button><span id="load-copy-status" role="status"></span></div>
+      <details id="load-details" hidden><summary title="Show the technical message.">Technical details</summary><pre id="load-technical"></pre></details>
+    </section>
     <p class="notice">Discovery preserves source files. Verified audiobooks follow their saved source-cleanup policy.</p>
     <section aria-label="Library scan controls" class="panel">
       <div class="toolbar">
@@ -18,18 +27,18 @@
         <select id="library"><option>Audiobooks</option><option>Podcasts</option><option>Ebooks</option></select>
         <button id="shutdown" class="quiet">Stop server</button>
       </div>
-      <p id="root" class="path"></p>
+      <p id="root" class="path">Source folders: loading…</p>
       <div id="automatic-controls" class="toolbar" hidden>
         <button id="start-automatic" type="button" title="Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held." aria-describedby="automatic-help automatic-start-reason" disabled>Start automatic processing</button>
         <button id="stop-automatic" type="button" class="quiet" title="Stop research and pause audiobook jobs. Save pending work; finished books stay in place." aria-describedby="automatic-help" disabled>Stop automatic processing</button>
         <button id="cancel-automatic-start" type="button" class="quiet" title="Don't start automatic processing by itself. Books you started over keep waiting. Press Start automatic processing when you want it to run." hidden>Cancel automatic start</button>
       </div>
       <div id="automatic-status-block" hidden>
-        <p id="automatic-status" aria-live="polite">Automatic processing: status unavailable</p>
+        <p id="automatic-status" aria-live="polite">Automatic processing: loading…</p>
         <p id="automatic-request" role="status"></p>
         <p id="automatic-detail" class="field-help" role="status" aria-live="polite"></p>
-        <p id="automatic-start-reason" class="field-help" role="status" aria-live="polite" hidden></p>
-        <p id="research-status">Research status unavailable</p>
+        <p id="automatic-start-reason" class="field-help" role="status" aria-live="polite">Automatic processing can start when loading finishes.</p>
+        <p id="research-status">Research: loading…</p>
         <p id="research-current" class="field-help"></p>
       </div>
       <p id="automatic-help" class="field-help" hidden>Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it. Existing audiobook jobs must be paused before starting automatic discovery.</p>
@@ -39,27 +48,29 @@
         <button id="start" class="quiet" title="Check for new or changed files and retry unreadable files. Reuse saved metadata for unchanged readable files.">Start scanning</button><button id="stop" class="quiet" title="Stop discovery after its current read and save pending scan work." aria-describedby="discovery-help" disabled>Stop scanning</button><button id="resume" class="quiet" title="Continue saved pending work without starting a new discovery pass." disabled>Resume scanning</button>
       </div>
       <p id="discovery-help" class="field-help">Scanning checks folders for arrivals. Unchanged readable files reuse saved metadata; new, changed and unreadable files are read.</p>
-      <p id="status" aria-live="polite">Connecting to the local catalog…</p>
+      <p id="status" aria-live="polite">Library status: loading…</p>
       <p id="current" class="path"></p>
       <p id="draft-protection-status" role="status" class="field-help" hidden></p>
       <p id="message" role="status"></p>
       <p id="connection-notice" role="status" aria-live="polite" hidden></p>
       <details id="scan-issues" hidden><summary>Scan issues</summary><pre id="scan-issues-text"></pre></details>
     </section>
-    <section id="audio-jobs" class="panel" hidden aria-label="Audiobook jobs"><h2>Audiobook jobs</h2><p id="jobs-status" aria-live="polite"></p><p id="book-candidate-counts">Book candidate totals unavailable</p><p class="field-help">Candidates are discovered book groups. Scan every source to include its books.</p><div class="toolbar"><button id="pause-jobs" type="button" title="Stop the current audiobook operation and save pending books. Finished outputs stay in place." aria-describedby="jobs-help">Pause audiobook jobs</button><button id="resume-jobs" type="button" title="Continue pending books. An interrupted book restarts; completed outputs are not recreated." aria-describedby="jobs-help">Resume audiobook jobs</button></div><div id="jobs-activity"><ul id="jobs-rows" aria-label="Running activities"></ul><p id="jobs-idle" class="field-help">Nothing running</p><p id="jobs-more" class="field-help" hidden></p></div><p id="approved-help" class="field-help">Approved books passed metadata and source-order checks. Converted books also passed output and cleanup checks.</p><p id="jobs-help" class="field-help">Pausing stops only the owned audiobook operation. An interrupted book restarts; finished outputs stay in place. Scanning is separate.</p></section>
+    <section id="audio-jobs" class="panel" hidden aria-label="Audiobook jobs"><h2>Audiobook jobs</h2><p id="jobs-status" aria-live="polite">Jobs: loading…</p><p id="book-candidate-counts">Book candidates: loading…</p><p class="field-help">Candidates are discovered book groups. Scan every source to include its books.</p><div class="toolbar"><button id="pause-jobs" type="button" title="Stop the current audiobook operation and save pending books. Finished outputs stay in place." aria-describedby="jobs-help">Pause audiobook jobs</button><button id="resume-jobs" type="button" title="Continue pending books. An interrupted book restarts; completed outputs are not recreated." aria-describedby="jobs-help">Resume audiobook jobs</button></div><div id="jobs-activity"><ul id="jobs-rows" aria-label="Running activities"></ul><p id="jobs-idle" class="field-help" hidden>Nothing running</p><p id="jobs-more" class="field-help" hidden></p></div><p id="approved-help" class="field-help">Approved books passed metadata and source-order checks. Converted books also passed output and cleanup checks.</p><p id="jobs-help" class="field-help">Pausing stops only the owned audiobook operation. An interrupted book restarts; finished outputs stay in place. Scanning is separate.</p></section>
     <section class="panel" aria-label="File inventory">
       <p id="inventory-intro">Each row is a source file, including chapter tracks and companion files. Book grouping, online metadata matching and merging are later steps.</p>
       <form id="search-form" class="toolbar">
         <label id="view-label" for="view">View</label><select id="view" title="Show source files or possible audiobook groups."><option value="files">Files</option><option value="candidates">Book candidates</option></select>
         <label id="search-label" for="search">Path contains</label><input id="search" type="search" maxlength="500" placeholder="Author, folder or filename">
-        <label for="filter">Status</label><select id="filter" title="Filter the saved results in this library."></select>
-        <button id="clear-filters" type="button" class="quiet" title="Show all saved results and return to the first page.">Clear filters</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><button id="error-shortcut" type="button" class="quiet" title="Show all files with unresolved read errors in this library." hidden></button><button id="attention-shortcut" type="button" class="quiet" title="Show every book that needs you." hidden></button><span id="page" role="status" aria-live="polite"></span>
+        <label for="filter">Status</label><select id="filter" title="Filter the saved results in this library."><option>Loading…</option></select>
+        <button id="clear-filters" type="button" class="quiet" title="Show all saved results and return to the first page.">Clear filters</button><button id="previous" type="button" class="quiet" disabled>Previous</button><button id="next" type="button" class="quiet" disabled>Next</button><button id="error-shortcut" type="button" class="quiet" title="Show all files with unresolved read errors in this library." hidden></button><button id="attention-shortcut" type="button" class="quiet" title="Show every book that needs you." hidden></button><span id="page" role="status" aria-live="polite">Loading your books…</span>
       </form>
       <p id="restart-summary" class="field-help" hidden></p>
+      <p id="attention-loading" class="field-help" hidden>Output needs attention: loading…</p>
       <div id="attention-groups" class="toolbar" role="group" aria-label="Output needs attention, by reason" hidden><span>Reason:</span><button id="group-all" type="button" class="quiet attention-group" aria-pressed="true" title="Show all books that need attention.">All · 0</button><div id="attention-set-needs" class="attention-set" role="group" aria-label="Questions for you"><span>Needs your answer:</span><button id="group-files_missing" type="button" class="quiet attention-group" aria-pressed="false" title="Show books with files missing from disk." hidden>Missing files · 0</button><button id="group-title_author" type="button" class="quiet attention-group" aria-pressed="false" title="Show books with no title or no author." hidden>Missing title or author · 0</button><button id="group-author_unclear" type="button" class="quiet attention-group" aria-pressed="false" title="Show books where the author could be more than one person." hidden>Author unclear · 0</button><button id="group-same_author" type="button" class="quiet attention-group" aria-pressed="false" title="Show author names that may match an author you already have." hidden>Same author? · 0</button><button id="group-name_taken" type="button" class="quiet attention-group" aria-pressed="false" title="Show books whose name already exists in Audiobooks Sorted." hidden>Name taken · 0</button><button id="group-part_of_book" type="button" class="quiet attention-group" aria-pressed="false" title="Show books that may be parts of a bigger book." hidden>Part of a bigger book · 0</button><button id="group-files_unclear" type="button" class="quiet attention-group" aria-pressed="false" title="Show books where the app isn't sure which files belong." hidden>Files unclear · 0</button><button id="group-order_unclear" type="button" class="quiet attention-group" aria-pressed="false" title="Show books where the app isn't sure of the playback order." hidden>Order unclear · 0</button></div><div id="attention-set-stopped" class="attention-set" role="group" aria-label="Stopped books"><span>Stopped:</span><button id="group-retry" type="button" class="quiet attention-group" aria-pressed="false" title="Show books you can retry now.">Can retry · 0</button><button id="group-repair" type="button" class="quiet attention-group" aria-pressed="false" title="Show books with damage the app can repair.">Can repair · 0</button><button id="group-reacquire" type="button" class="quiet attention-group" aria-pressed="false" title="Show books whose damaged audio needs a replacement source." hidden>Need to reacquire · 0</button><button id="group-checking" type="button" class="quiet attention-group" aria-pressed="false" title="Show saved retry requests waiting for checks and books whose retry checks are running." hidden>Checking · 0</button><button id="group-changed" type="button" class="quiet attention-group" aria-pressed="false" title="Show books whose original changed after the check." hidden>Original changed · 0</button><button id="group-audiobook" type="button" class="quiet attention-group" aria-pressed="false" title="Show books whose audiobook is missing or not verified." hidden>Audiobook problem · 0</button><button id="group-other" type="button" class="quiet attention-group" aria-pressed="false" title="Show books that stopped for another reason.">Other · 0</button><button id="group-unsupported" type="button" class="quiet attention-group" aria-pressed="false" title="Show M4B books the app cannot convert safely.">M4B not supported · 0</button></div><button id="retry-all" type="button" hidden>Retry all (0)</button><span id="retry-all-confirm" hidden><span id="retry-all-question"></span><button id="retry-all-go" type="button">Request 0 retries</button><button id="retry-all-cancel" type="button" class="quiet">Cancel</button></span><p id="attention-sweep" class="field-help" hidden></p><p id="retry-all-line" hidden><span id="retry-all-status" role="status" tabindex="-1"></span><span id="retry-all-count"></span></p></div>
       <div id="batch-controls" class="toolbar" hidden><label class="check"><input id="select-page" type="checkbox" title="Select only the audiobook candidates visible on this page.">Select this page</label><span id="batch-count" aria-live="polite"></span><button id="queue-books" type="button" title="Queue the selected reviewed books. Incomplete or changed candidates stay out of the queue." aria-describedby="batch-help" disabled>Queue selected books</button><button id="retry-selected" type="button" hidden disabled>Retry selected (0)</button><button id="approve-selected" type="button" hidden disabled>Approve as is (0)</button><button id="release-selected" type="button" class="quiet" hidden disabled>Let the app handle selected (0)</button><span id="release-selected-status" role="status" aria-live="polite" tabindex="-1"></span><span id="retry-selected-confirm" hidden><span id="retry-selected-question"></span><button id="retry-selected-go" type="button">Queue 0 books</button><button id="retry-selected-cancel" type="button" class="quiet">Cancel</button></span><span id="retry-selected-status" role="status" tabindex="-1"></span><p id="batch-help" class="field-help">Only ready selected revisions are queued. Candidates needing review remain selected.</p></div>
       <div class="table-scroll" id="inventory-scroll"><table id="inventory-table" role="table"><thead id="inventory-head" role="rowgroup"><tr><th>Type</th><th>Arrival</th><th>Existing title / filename clue</th><th id="author-heading">Existing author / artist clue</th><th>Preview status</th><th>Proposed destination</th></tr></thead><tbody id="inventory" role="rowgroup"></tbody></table></div>
-      <p id="empty">Select a library and start scanning. Saved results remain available after restart.</p>
+      <p id="empty">Loading your books…</p>
+      <div id="list-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
     </section>
     <section id="details" class="panel" hidden aria-label="Selected file details">
       <h2 id="details-heading" tabindex="-1">Selected file</h2><p id="source" class="path"></p><p id="reason"></p><p id="proposed" class="path"></p>
@@ -165,6 +176,8 @@
     </div>
     <div class="toolbar"><button id="delete-cancel" class="quiet" type="button" title="Close without deleting anything." autofocus>Cancel</button><button id="delete-confirm" class="danger solid" type="button">Delete book</button><button id="delete-close" class="quiet" type="button" title="Close this message." hidden>Close</button></div>
   </dialog>
+  <!-- The load strip's announcements (Judy 3.4): events only, never the counts or clocks. Visually hidden. -->
+  <p id="load-announce" class="visually-hidden" role="status" aria-live="polite"></p>
   <script src="desktop-ui.js"></script>
 </body>
 </html>

@@ -103,6 +103,11 @@ class DesktopControl:
                 'automatic': automatic_state,
                 'scanning': self.server.scan_active()}
 
+    def _loading(self):
+        """The catalog is still loading (web_server.Loading): nothing runs but the loader."""
+        loading = getattr(self.server, 'loading', None)
+        return loading is not None and not loading.finished
+
     def status(self):
         with self.lock:
             value = {'phase': self.phase, 'error': self.error, 'requested_at': self.requested_at}
@@ -113,6 +118,10 @@ class DesktopControl:
                 value['busy'] = None
                 value['idle'] = False
                 return value
+        if self._loading():
+            # Startup (ruling 28): the shell's tray and Quit read the load at once; there is no state to compute yet.
+            value.update(loading=self.server.loading.view(), busy=None, idle=False)
+            return value
         # One shared state computation per poll feeds both busy and idle (was two full computations).
         from merge_service import StatusUnavailable
         unavailable = False
@@ -136,9 +145,17 @@ class DesktopControl:
             verify_idle(snapshot)
             value['idle']=not self.server.closing and not self.server.merge_admissions
         except Exception:value['idle']=False
+        loading = getattr(self.server, 'loading', None)
+        if loading is not None:
+            value['loading'] = loading.view()  # loaded: took_ms, which the shell keeps as "last load took"
         return value
 
     def quit(self):
+        with self.lock:
+            if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
+                return {'phase': self.phase}
+        if self._loading():
+            return self.stop_now()  # nothing runs but loading: Quit closes at once (Judy 3.2)
         with self.lock:
             if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
                 return {'phase': self.phase}
@@ -210,10 +227,20 @@ class DesktopControl:
                 return self._update_answer()
             if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
                 raise RuntimeError('Books Arranger is closing; the update can start once it has closed')
-            self.update = {'requested_at': time.time(), 'started': time.monotonic(), 'before': self._update_before(),
+            loading = self._loading()
+            self.update = {'requested_at': time.time(), 'started': time.monotonic(), 'before': {} if loading else self._update_before(),
                            'cancel': threading.Event(), 'waiting': [], 'critical': [], 'forced': False, 'outcome': None}
-            self.phase = 'pausing'
+            # While loading (a Stuck load, Judy 3.6) nothing runs to stop: the loader ends at its checkpoint and the
+            # engine exits for the update at once; too late to cancel from here.
+            self.phase = 'updating' if loading else 'pausing'
             self.error = ''
+        if loading:
+            self.server.inventory.stop()
+            with self.server.control_condition:
+                self.server.closing = True
+            self.thread = threading.Thread(target=self._shutdown, name='books-desktop-update', daemon=True)
+            self.thread.start()
+            return self._update_answer()
         with self.server.control_condition:
             # New controls are refused from here on; reads and polling keep working.
             self.server.closing = True

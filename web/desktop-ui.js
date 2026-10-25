@@ -84,12 +84,16 @@
    installer:{face:'Show installer file',busy:false,hidden:!u.showInstaller,title:'Open the folder that holds the downloaded installer.'},
   };
  }
- globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons});
+ // Startup (ruling 28; Judy 3.6): Restart to update waits for loading, unless loading is stuck or stopped (the shell's verdict).
+ const NOT_YET_UPDATE='Not yet: Books Arranger is still loading. You can update when it finishes, or if loading gets stuck.';
+ const QUIT_LOADING='Stop loading and close Books Arranger. Your files are not touched.',QUIT_NORMAL='Finish the current book and cleanup, keep queued books, then close the app';
+ function loadingWaits(value){return !!value&&value.loaded===false&&!['stuck','stopped'].includes(value.verdict);}
+ globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons,loadingWaits,NOT_YET_UPDATE,QUIT_LOADING});
 
  const api=window.booksDesktop;if(!api)return;
  const header=document.querySelector('header');const toolbar=document.querySelector('#shutdown')?.parentElement;
- const hint=document.createElement('p');hint.className='field-help';hint.textContent='Closing this window keeps Books Arranger running in the tray. Choose Quit Books Arranger to close the app.';header.after(hint);
- const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title='Finish the current book and cleanup, keep queued books, then close the app';quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();api.quit().catch(error=>console.warn(error));},true);}
+ const hint=document.createElement('p');hint.className='field-help';hint.textContent='Closing this window keeps Books Arranger running in the tray. Choose Quit Books Arranger to close the app.';(document.getElementById('load-strip')||header).after(hint);  // the load strip sits directly under the header (Judy 3.3)
+ const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title=QUIT_NORMAL;quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();api.quit().catch(error=>console.warn(error));},true);}
  const panel=document.createElement('section');panel.className='panel desktop-status';panel.hidden=true;panel.setAttribute('aria-label','Desktop status');
  const phaseRow=document.createElement('p');const phase=document.createElement('span');phase.setAttribute('role','status');phase.setAttribute('aria-live','polite');
  const counter=document.createElement('span');counter.className='update-counter';phaseRow.append(phase,counter);panel.append(phaseRow);hint.after(panel);
@@ -124,6 +128,8 @@
  function startUpdate(){quietly(api.installUpdate()).then(poll);setTimeout(poll,100);}
  async function requestRestart(){
   try{last=await api.status();}catch(error){console.warn(error);}
+  // A press while loading is answered in the message line; focus stays (Judy 3.6).
+  if(loadingWaits(last)){const line=document.getElementById('message');if(line)line.textContent=NOT_YET_UPDATE;return;}
   const u=last&&last.update;if(!u||!u.ready||u.busy.install||u.busy.download)return;
   const found=workLines(last.desktop);
   if(found.known&&!found.lines.length)return startUpdate();
@@ -137,6 +143,7 @@
  const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job','retry-all','retry-all-go'];
  function render(value){
   last=value;
+  if(quit){const title=value.loaded===false?QUIT_LOADING:QUIT_NORMAL;if(quit.title!==title)quit.title=title;}
   const desktop=value.desktop||{};const u=value.update;const updating=!!(u&&u.busy.install)||['updating','installing'].includes(value.quit);
   const quitting=value.quit!=='none'||updating||['finishing','parking','pausing','forcing','updating','blocked'].includes(desktop.phase);
   panel.hidden=!quitting;
@@ -151,6 +158,7 @@
   lines.check.p.classList.toggle('failed',(u.check||{}).phase==='failed');
   write(installerPath,installed.path||'');installerPath.hidden=!installed.path;
   const state=buttons(u,desktop);
+  if(loadingWaits(value)&&!state.restart.busy)state.restart={...state.restart,busy:true,title:NOT_YET_UPDATE};
   for(const [key,node] of Object.entries(controls)){const s=state[key];write(node,s.face);if(node.title!==s.title)node.title=s.title;node.setAttribute('aria-disabled',s.busy?'true':'false');node.hidden=s.hidden;}
  }
  let polling=false;async function poll(){if(polling)return;polling=true;try{render(await api.status());}catch(e){console.warn(e);}finally{polling=false;}}

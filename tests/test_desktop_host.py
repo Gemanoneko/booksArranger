@@ -36,7 +36,10 @@ class NativeHostTests(unittest.TestCase):
      try:health=get('/api/health');break
      except OSError:time.sleep(.1)
     self.assertIsNotNone(health);self.assertEqual(health['pid'],proof['pid']);self.assertEqual(health['application'],'Books Arranger')
-    desktop=get('/api/desktop/status');self.assertTrue(desktop['idle']);self.assertEqual(desktop['busy']['queued'],0)
+    # 0.22.1 (ruling 28): health answers while the catalog still loads; idle is reported once loading has ended.
+    deadline=time.monotonic()+25;desktop=get('/api/desktop/status')
+    while (desktop.get('loading') or {}).get('took_ms') is None and time.monotonic()<deadline:time.sleep(.1);desktop=get('/api/desktop/status')
+    self.assertIsInstance(desktop['loading']['took_ms'],int);self.assertTrue(desktop['idle']);self.assertEqual(desktop['busy']['queued'],0)
     record=data/'web-instance.json';self.assertTrue(record.exists())
     req=urllib.request.Request('http://127.0.0.1:5212/api/desktop/quit',data=b'{}',headers={'X-Books-Desktop':token,'Content-Type':'application/json'},method='POST');self.assertEqual(urllib.request.urlopen(req,timeout=2).status,202)
     p.wait(15);self.assertEqual(p.returncode,0);self.assertFalse(record.exists())

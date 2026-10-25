@@ -65,9 +65,16 @@ const state = {
   win: null,
   tray: null,
   quit: 'none', // none | requested | updating | installing | exiting
-  ready: false,
+  ready: false, // the engine answered with our ownership proof
+  loaded: false, // ...and reported its catalog loaded (ruling 28): until then Quit is immediate and the strip is up
+  startup: null, // desktop/startup.js record: what the page's load strip needs from the shell
+  generation: 0, // one per engine launch; a Restart engine leaves the old launch's watchers behind
+  verdict: 'working', // the shell's own Working/Waiting/Stuck/Stopped, for the tray
+  firstFrame: '', // file URL of the page the window shows before the engine answers
   output: '',
 };
+const startupKit = require('./startup');
+let loadState = null; // web/load-state.js, shared with the page
 
 function remember(chunk) {
   state.output = (state.output + chunk.toString('utf8')).slice(-16384);
@@ -208,12 +215,15 @@ function startBackend(config) {
   child.stderr.on('data', remember);
   child.stdin.on('error', () => {});
   child.on('error', (error) => remember(`\n${error.message}\n`));
+  const generation = state.generation;
   child.on('exit', (code) => {
+    if (generation !== state.generation) return; // a launch Restart engine already replaced
     state.backendExited = true;
-    if (!state.ready) return; // startup reports it: waitForBackend sees the exit
     // Restart to update: the update flow reads the exit (code 0 installs; anything else starts the old engine again).
     if (state.quit === 'updating' || state.quit === 'installing') return;
     if (state.quit !== 'none') return finishExit(code === 0 ? 0 : 1);
+    // While loading, an exit is the strip's Stopped (Try again), never an error box (Judy 3.4).
+    if (!state.loaded) return setTimeout(() => engineStopped({ code, lastLines: lastLines(state.output) }), 300); // the last output first
     if (code === 0) return finishExit(0); // the backend's own Stop server control
     reportError('Books Arranger stopped', `The Books Arranger engine stopped unexpectedly (exit ${code}).\n\n${lastLines(state.output)}`);
     finishExit(1);
@@ -267,29 +277,112 @@ function engineRequest(method, route, options = {}) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitForBackend(child) {
-  const deadline = Date.now() + 180000;
-  while (Date.now() < deadline) {
-    if (state.backendExited) {
-      await sleep(300); // let the last output arrive
-      // The engine's own message, without the Python exception name.
-      throw new Error(lastLines(state.output, 1).replace(/^[\w.]*(Error|Exception): /, '') || 'The engine exited during startup.');
-    }
-    try {
-      const health = await request('GET', '/api/health', { timeout: 2000 });
-      // Never attach to some other program (or another copy) that holds the port.
-      if (state.owner && health.application === 'Books Arranger' && health.pid === state.owner.pid &&
-          health.version === app.getVersion() && typeof health.instance === 'string') {
-        state.engineVersion = health.version;
-        return health;
+// ── Startup (ruling 28) ─────────────────────────────────────────────────────
+// The window opens at app ready and the engine fills it in. There is no total time limit: the shell waits for the
+// engine's first answer, then watches; the page's strip says Working, Waiting or Stuck from silence, and Stopped when
+// the process has exited or another copy holds the port. A Restart engine is the way out of a stuck load.
+function pushStartup() {
+  if (state.win && !state.win.isDestroyed()) state.win.webContents.send('books:startup', state.startup.value);
+}
+function engineStopped({ code = null, lastLines: lines = '', portPid = null } = {}) {
+  if (state.loaded || state.quit !== 'none') return;
+  state.startup.stopped({ code, lastLines: lines, portPid });
+  state.verdict = 'stopped';
+  pushStartup(); loadTip(loadState ? loadState.trayTooltip({ state: 'stopped' }, null, false) : 'Books Arranger — stopped');
+  if (pendingLaunch) { pendingLaunch.reject(Object.assign(new Error('The engine stopped while loading'), { lastLines: lines })); pendingLaunch = null; }
+}
+let pendingLaunch = null;
+// Resolves when our engine answers (the page is then served by it); rejects when it stops first.
+function watchEngine(generation) {
+  return new Promise((resolve, reject) => {
+    pendingLaunch = { resolve, reject };
+    (async () => {
+      while (generation === state.generation && state.startup.value.phase === 'launching') {
+        if (state.backendExited) return; // the exit handler reports Stopped
+        try {
+          const health = await request('GET', '/api/health', { timeout: 2000 });
+          if (generation !== state.generation) return;
+          // Never attach to some other program (or another copy) that holds the port.
+          const verdict = startupKit.classifyHealth(health, state.owner, app.getVersion());
+          if (verdict === 'ours') return attachEngine(health);
+          if (verdict === 'other') return engineStopped({ portPid: health.pid, lastLines: `Port ${new URL(state.baseUrl).port} belongs to another Books Arranger (process ${health.pid}).` });
+        } catch { /* not answering yet */ }
+        await sleep(250);
       }
-      if (health.application) throw new Error(`Port ${new URL(state.baseUrl).port} belongs to another Books Arranger (PID ${health.pid}).`);
-    } catch (error) {
-      if (/belongs to another/.test(error.message)) throw error;
-    }
-    await sleep(250);
+    })();
+  });
+}
+function attachEngine(health) {
+  state.engineVersion = health.version;
+  state.ready = true;
+  state.startup.running();
+  if (state.win && !state.win.isDestroyed()) state.win.loadURL(`${state.baseUrl}/`).catch((error) => remember(`\n${error.message}\n`)); // the engine's page takes over the first frame
+  pushStartup(); broadcastStatus();
+  watchLoad(state.generation);
+  if (pendingLaunch) { pendingLaunch.resolve(health); pendingLaunch = null; }
+}
+// The tray follows the load (3.8), refreshed every 5 s; the completed load's time is kept for the next start (3.7).
+async function watchLoad(generation) {
+  const tracker = loadState.createTracker(state.startup.value.startedAt);
+  let lastTray = 0;
+  while (generation === state.generation && !state.loaded && state.quit === 'none' && !state.backendExited) {
+    const at = Date.now();
+    tracker.tick(at);
+    try {
+      const status = await desktopStatus.get({ timeout: 3000 });
+      tracker.observe(status, Date.now());
+      if (!status.loading || loadState.loaded({ loading: status.loading })) return engineLoaded(status.loading && status.loading.took_ms);
+    } catch (error) { if (error.status) tracker.heard(Date.now()); }
+    const before = state.verdict;
+    state.verdict = loadState.evaluate(tracker, Date.now()).state;
+    if (state.verdict !== before || Date.now() - lastTray >= 5000) { lastTray = Date.now(); loadTip(loadState.trayTooltip({ state: state.verdict }, tracker.loading, false)); }
+    await sleep(1000);
   }
-  throw new Error('The engine did not become ready within 3 minutes.');
+}
+function engineLoaded(tookMs) {
+  state.loaded = true; state.verdict = 'working';
+  if (Number.isFinite(tookMs)) { state.startup.loaded(tookMs); startupKit.saveLastLoad(startupKit.loadTimeFile(app.getPath('userData')), tookMs); }
+  pushStartup(); loadTip('Books Arranger');
+  if (pendingSettings) { const save = pendingSettings; pendingSettings = null; save().catch((error) => remember(`\nSettings were not saved: ${error.message}\n`)); }
+}
+let pendingSettings = null; // first run: the chosen folder is remembered once its catalog has loaded
+function launchEngine(config, { fresh = true } = {}) {
+  state.generation += 1;
+  state.ready = false; state.loaded = false; state.verdict = 'working';
+  state.output = '';
+  if (fresh) state.startup.launch(); // a Restart engine started its launch (and its clock) at the press
+  pushStartup(); loadTip(loadState.trayTooltip({ state: 'working' }, null, false));
+  startBackend(config); // first: the watch reads this launch's exit flag, never the last launch's
+  return watchEngine(state.generation);
+}
+// Ends the current engine: its pipe closes (a checkpoint stop, as at a failed start); an engine still there after the
+// bound is ended through its native host (its kill-on-close job). Only while loading: nothing else runs yet.
+async function endLoadingEngine(boundMs = 15000) {
+  const child = state.backend;
+  if (!child || state.backendExited) return;
+  try { child.stdin.end(); } catch { /* host gone */ }
+  const deadline = Date.now() + boundMs;
+  while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) await sleep(200);
+  if (child.exitCode === null && child.signalCode === null) {
+    remember('\nThe engine did not stop within ' + Math.round(boundMs / 1000) + ' s; ending it.\n');
+    try { child.kill(); } catch { /* already gone */ }
+    const end = Date.now() + 5000;
+    while (child.exitCode === null && child.signalCode === null && Date.now() < end) await sleep(200);
+  }
+}
+async function restartEngine(config) {
+  if (state.loaded || state.quit !== 'none' || state.restarting) return false;
+  state.restarting = true;
+  // A new catalog the first launch already created is opened as an existing one.
+  if (config.catalogMode === 'new' && fs.existsSync(path.join(config.dataDir, 'inventory.sqlite3'))) config = currentConfig = { ...config, catalogMode: 'existing' };
+  try {
+    state.generation += 1; // the old launch's exit and watchers no longer speak
+    state.startup.launch(); state.verdict = 'working'; pushStartup();
+    await endLoadingEngine();
+    if (state.win && !state.win.isDestroyed()) await state.win.loadURL(state.firstFrame).catch(() => {}); // the old page's token died with its engine
+    launchEngine(config, { fresh: false }).catch(() => { /* the strip shows Stopped */ });
+    return true;
+  } finally { state.restarting = false; }
 }
 
 // ── Window and tray ─────────────────────────────────────────────────────────
@@ -297,6 +390,8 @@ function iconImage() {
   return nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
 }
 
+// The window exists from app ready (Judy 3.2): its first frame is the app's own page from disk (the same markup and
+// script, showing Step 1 and every placeholder) until the engine answers and serves the page itself.
 function createWindow() {
   const origin = state.baseUrl;
   const win = new BrowserWindow({
@@ -314,6 +409,8 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
   win.webContents.on('render-process-gone', () => { if (!win.isDestroyed()) win.reload(); });
+  // The page asks for the shell's startup record when it loads (the first frame, then the engine's page).
+  win.webContents.on('did-finish-load', () => { if (state.startup) pushStartup(); });
   // Close button: hide to the tray; conversions continue. No renderer round-trip.
   win.on('close', (event) => {
     if (state.quit === 'exiting') return;
@@ -326,8 +423,8 @@ function createWindow() {
     if (flag(argv, 'show-inactive')) win.showInactive();
     else win.show();
   });
-  win.loadURL(`${origin}/`);
   state.win = win;
+  win.loadURL(state.firstFrame).catch((error) => remember(`\n${error.message}\n`));
 }
 
 function showWindow() {
@@ -350,7 +447,7 @@ function trayMenu() {
     { type:'separator' },
     { label:'Check for updates',enabled:!!updateController&&!quitting&&!updating,click:()=>{showWindow();updateController.check().catch(error=>logUpdate('Tray check: '+error.message));} },
     ...(updating?[{label:'Updating…',enabled:false}]
-      :updateController&&updateController.ready&&!quitting?[{label:'Restart to update',click:()=>{showWindow();if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:update-restart');}}]:[]),
+      :updateController&&updateController.ready&&!quitting?[{...startupKit.restartItem({loaded:state.loaded,verdict:state.verdict}),click:()=>{showWindow();if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:update-restart');}}]:[]),
   ]);
 }
 
@@ -366,11 +463,17 @@ function refreshTray(tooltip) {
   state.tray.setContextMenu(trayMenu());
   state.tray.setToolTip(tooltip);
 }
+// The load's tooltip (3.8) is kept, so an update broadcast during loading repeats it instead of "Books Arranger".
+function loadTip(tooltip) {
+  state.trayTip = tooltip === 'Books Arranger' ? '' : tooltip;
+  refreshTray(tooltip);
+}
 
 // ── Quit ────────────────────────────────────────────────────────────────────
 async function requestQuit({ confirmed }) {
   if(state.backendExited)return finishExit(state.backend?.exitCode===0?0:1);
   if (state.quit !== 'none') return;
+  if (!state.loaded) return quitWhileLoading();
   let status;
   try {
     status = await desktopStatus.get();
@@ -433,6 +536,16 @@ async function watchQuit() {
   }
 }
 
+// Quit while loading closes at once, with no confirmation: nothing runs but loading (Judy 3.2). The window and tray go
+// now; the engine stops at its next checkpoint (its pipe closes, as at a failed start), bounded by endLoadingEngine.
+async function quitWhileLoading() {
+  state.quit = 'requested';
+  if (state.win && !state.win.isDestroyed()) state.win.hide();
+  if (state.tray && !state.tray.isDestroyed()) state.tray.destroy();
+  await endLoadingEngine();
+  finishExit(0);
+}
+
 async function stopNowAndExit() {
   if (state.quit === 'exiting') return;
   state.quit = 'requested';
@@ -467,7 +580,7 @@ let updateController=null;
 function trustedSender(event){
   const wc=event.sender;
   if(setupWindow&&!setupWindow.isDestroyed()&&wc===setupWindow.webContents&&wc.getURL()===require('node:url').pathToFileURL(path.join(__dirname,'setup.html')).href)return 'setup';
-  if(state.win&&!state.win.isDestroyed()&&wc===state.win.webContents&&new URL(wc.getURL()).origin===state.baseUrl)return 'app';
+  if(state.win&&!state.win.isDestroyed()&&wc===state.win.webContents&&(new URL(wc.getURL()).origin===state.baseUrl||state.firstFrame&&wc.getURL()===state.firstFrame))return 'app';
   throw new Error('Unknown desktop control sender');
 }
 function runReadOnlyPython(config,script,args){return new Promise((resolve,reject)=>{
@@ -482,7 +595,7 @@ function broadcastStatus(){
   const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};
   if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:status',value);
   const updating=state.quit==='updating'||state.quit==='installing'||!!updateController?.busy.install;
-  refreshTray('Books Arranger'+(updating?' — updating':state.quit==='none'?'':' — '+state.quit));
+  refreshTray(updating?'Books Arranger — updating':state.quit!=='none'?'Books Arranger — '+state.quit:state.trayTip||'Books Arranger');
 }
 // The updater's raw error text goes to the shell's own log, never to the page (Judy 0.22.1 2.2).
 function logUpdate(line){
@@ -508,7 +621,9 @@ function configureUpdater(config){
   updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,version:app.getVersion(),notify:broadcastStatus,log:logUpdate,
     exists:file=>fs.existsSync(file),
     acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
-    parkEngine:options=>require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus,...options}),
+    // Stopped while loading (Judy 3.6): no engine to stop, the update installs at once.
+    parkEngine:options=>!state.loaded&&state.backendExited&&state.quit==='none'?(state.quit='updating',broadcastStatus(),Promise.resolve())
+      :require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus,...options}),
     install:()=>installUpdate(autoUpdater),
     restartEngine:()=>restartEngineAfterUpdate(config),
   });
@@ -532,11 +647,12 @@ async function installUpdate(autoUpdater){
   }finally{autoUpdater.spawnLog=original;}
   finishExit(0);
 }
+// The update did not install: the old version starts again from Step 1 and loads as at launch (no time limit).
 async function restartEngineAfterUpdate(config){
   try{
-    const child=startBackend(config);
-    await waitForBackend(child);
-    if(state.win&&!state.win.isDestroyed())state.win.reload(); // the new engine serves the page with its own token
+    state.quit='none';
+    if(state.win&&!state.win.isDestroyed())await state.win.loadURL(state.firstFrame).catch(()=>{});
+    await launchEngine(config); // resolves when the new engine answers; it serves the page with its own token
   }finally{state.quit='none';broadcastStatus();}
 }
 ipcMain.handle('books:update-check',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.check();});
@@ -545,15 +661,20 @@ ipcMain.handle('books:update-install',async event=>{if(trustedSender(event)!=='a
 ipcMain.handle('books:update-cancel',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');return updateController.cancel();});
 ipcMain.handle('books:update-show-installer',async event=>{if(trustedSender(event)!=='app'||!updateController)throw new Error('Update controls unavailable');
   const {showInstaller,installerPath}=updateController.value;if(!showInstaller)return false;shell.showItemInFolder(installerPath);return true;});
-async function startConfigured(config){
+// The window, the tray and the updater exist from the first frame; the engine is launched beside them and the page
+// shows its load (ruling 28). Returns the launch: it resolves when the engine answers, rejects if it stops first.
+function startConfigured(config){
   currentConfig=config;
-  const child=startBackend(config);
+  loadState=require(path.join(config.backendDir,'web','load-state.js'));
+  state.firstFrame=require('node:url').pathToFileURL(path.join(config.backendDir,'web','index.html')).href;
+  state.baseUrl=`http://127.0.0.1:${config.port}`;
+  state.startup=startupKit.createStartup({lastLoadMs:startupKit.readLastLoad(startupKit.loadTimeFile(app.getPath('userData')))});
   if(!state.tray)createTray();
-  await waitForBackend(child);
-  state.ready=true;
-  if(state.backendExited)throw new Error(lastLines(state.output)||'Engine exited during startup');
   createWindow();
-  configureUpdater(config);
+  if(!updateController)configureUpdater(config);
+  const launch=launchEngine(config,{fresh:false});
+  launch.catch(()=>{}); // a stop shows in the strip (Stopped, Try again), never as an error box
+  return launch;
 }
 async function chooseCatalog(){
   setupWindow=new BrowserWindow({width:1280,height:860,minWidth:950,minHeight:650,title:'Books Arranger — Choose data folder',backgroundColor:'#1B2530',autoHideMenuBar:true,
@@ -571,17 +692,21 @@ ipcMain.handle('books:select',async(event,choice)=>{
   const config={...currentConfig,dataDir:path.resolve(choice.folder),catalogMode:choice.mode,requiresSetup:false};
   const args=['--folder',config.dataDir,'--mode',choice.mode,'--install-root',path.dirname(process.execPath),'--install-root',process.resourcesPath];
   if(config.rootsJson)args.push('--roots-json',config.rootsJson);
-  await runReadOnlyPython(config,'desktop_catalog.py',args);
-  try{await startConfigured(config);}catch(error){if(state.backend&&!state.backendExited)state.backend.stdin.end();throw error;}
-  // Persist only after owner/version verified healthy startup. CREATE_NEW refuses
-  // unexpected existing settings; no fallback or migration of selected data.
+  await runReadOnlyPython(config,'desktop_catalog.py',args); // an unusable folder is refused here, on the form (Judy 3.2)
+  // Persist only after the chosen catalog has loaded. CREATE_NEW refuses unexpected
+  // existing settings; no fallback or migration of selected data.
   const settingsFile=path.join(app.getPath('userData'),'desktop-settings.json');
-  await runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir]);
+  pendingSettings=()=>runReadOnlyPython(config,'desktop_settings.py',[settingsFile,config.dataDir]);
+  // The setup window closes and the main window opens at Step 1; a failure after this is the strip's Stopped.
+  startConfigured(config);
   if(setupWindow){setupWindow.close();setupWindow=null;}
   return {opened:true};
 });
 ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(source==='setup'){if(state.backend)throw new Error('Catalog is still opening');finishExit(0);return;}return requestQuit({confirmed:false});});
-ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};});
+ipcMain.handle('books:startup',event=>{trustedSender(event);return state.startup?state.startup.value:null;});
+// Restart engine (Stuck) and Try again (Stopped): a new launch from Step 1; only while loading.
+ipcMain.handle('books:restart-engine',async event=>{if(trustedSender(event)!=='app'||!currentConfig)throw new Error('Restart engine is unavailable');return restartEngine(currentConfig);});
+ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null,loaded:state.loaded,verdict:state.verdict};});
 
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
@@ -604,8 +729,9 @@ if (!app.requestSingleInstanceLock()) {
       config = configuration();
       currentConfig=config;
       if(config.requiresSetup)await chooseCatalog();
-      else await startConfigured(config);
+      else startConfigured(config); // the engine's own failures show in the window's load strip (Stopped)
     } catch (error) {
+      // Only a configuration the shell cannot run at all (no runtime, a bad option) ends here, before any window.
       // Close the private host pipe only on startup failure. Its retained native
       // job requests checkpoint shutdown; no numeric-PID kill or port assumption.
       if (state.backend && !state.backendExited) state.backend.stdin.end();
