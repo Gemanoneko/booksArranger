@@ -19,6 +19,7 @@ from merge_service import QUIET_MAX_AGE, StatusUnavailable
 from review_backend import ATTENTION_GROUPS
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
+from action_queue import ActionQueue
 
 PORT = 5210
 MAX_BODY = 256 * 1024
@@ -240,6 +241,7 @@ class BrowserServer(ThreadingHTTPServer):
         self.loading = None
         self.loader = None
         self.merge_factory = merge_factory
+        self.actions = ActionQueue(self)  # queued Retry, Repair and Delete book (0.22.1, Judy section 1); memory only
         super().__init__(address, Handler)
         if defer:
             self.loading = Loading()
@@ -373,6 +375,7 @@ class BrowserServer(ThreadingHTTPServer):
 
     def finish_shutdown(self):
         self.stop_loading()  # Quit while loading: nothing else runs yet (Judy 3.2)
+        self.actions.close()  # queued actions are dropped, never run (Q1); one running holds an admission, waited for below
         with self.control_condition:
             while self.merge_admissions:
                 self.control_condition.wait(timeout=.5)
@@ -436,7 +439,7 @@ class BrowserServer(ThreadingHTTPServer):
             'active_library': self.active_library if active else None,
             'stopping': active and self.inventory.stop_event.is_set(),
             'status': status, 'audiobook_jobs': jobs,
-            'automatic_processing': automatic,
+            'automatic_processing': automatic, **self.actions.view(),
             'activities': activities(jobs, self.inventory.status(self.active_library) if active and self.active_library in self.inventory.roots else None,
                                      self.active_library if active else None, automatic, self.__dict__.setdefault('_activity_started', {}))}
 
@@ -456,6 +459,10 @@ class BrowserServer(ThreadingHTTPServer):
             value.update(audiobook_jobs=jobs, automatic_processing=automatic,
                          activities=activities(jobs, None, None, automatic, self.__dict__.setdefault('_activity_started', {})))
         return value
+
+# The presses that queue (0.22.1, Judy 1.1); Start over, Approve, Scan again and the rest keep their refusals.
+QUEUED_ROUTES = frozenset({'/api/audiobook/retry', '/api/audiobook/repair', '/api/candidate/delete', '/api/candidate/delete-preview'})
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'BooksArranger'
@@ -679,6 +686,19 @@ class Handler(BaseHTTPRequestHandler):
         return library,id,revision
 
     @staticmethod
+    def queue_flag(data):
+        value=data.get('queue',False)
+        if type(value) is not bool:raise ValueError('queue must be an explicit boolean')
+        return value
+
+    @staticmethod
+    def queue_title(data):
+        """The title the page shows for the book, kept with a queued action for its outcome line (display only)."""
+        value=data.get('title','')
+        if not isinstance(value,str) or len(value)>500:raise ValueError('Title exceeds its allowed bound')
+        return value
+
+    @staticmethod
     def shape(data,required,optional=()):
         if not set(required)<=set(data) or set(data)-set(required)-set(optional): raise ValueError('Request fields are incomplete or unknown')
 
@@ -769,11 +789,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.active_library='Audiobooks'
             else:value=automatic.stop()
             self.response(202,{'automatic_processing':value});return
+        if path=='/api/queue/cancel':
+            # Cancel a queued action (Judy 1.7): out of the queue, nothing started; 409 'started' when it is too late.
+            self.shape(data,{'id'})
+            answer=self.server.actions.cancel(self.uuid_value(data['id']))
+            if answer is None:self.response(409,{'error':'It has already started.','code':'started'});return
+            self.response(200,answer);return
+        if path=='/api/queue/ack':
+            # The page has shown these outcomes (Judy 1.6): they leave /api/state.
+            self.shape(data,{'ids'})
+            ids=data['ids']
+            if not isinstance(ids,list) or len(ids)>1000:raise ValueError('Acknowledge takes a list of outcome ids')
+            self.response(200,self.server.actions.acknowledge([self.uuid_value(value) for value in ids]));return
         reviews=self.server.merge.reviews
         if path=='/api/audiobook/retry':
-            self.shape(data,{'library','id','revision','job_id'})
+            self.shape(data,{'library','id','revision','job_id'},{'queue','title'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
             job_id=self.uuid_value(data['job_id'])
+            if self.queue_flag(data):
+                answer=self.server.actions.enqueue('retry',id,self.queue_title(data),{'revision':revision,'job_id':job_id})
+                if answer is not None:self.response(202,answer);return  # queued; None: nothing waits, it runs now
             from audio_jobs import RetryRefused
             try:result=self.server.merge.retry_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
@@ -796,9 +831,12 @@ class Handler(BaseHTTPRequestHandler):
             self.response(202,result);return
         if path=='/api/audiobook/repair':
             # Repair button: the same request shape and answers as Retry.
-            self.shape(data,{'library','id','revision','job_id'})
+            self.shape(data,{'library','id','revision','job_id'},{'queue','title'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
             job_id=self.uuid_value(data['job_id'])
+            if self.queue_flag(data):
+                answer=self.server.actions.enqueue('repair',id,self.queue_title(data),{'revision':revision,'job_id':job_id})
+                if answer is not None:self.response(202,answer);return
             from audio_jobs import RetryRefused
             try:result=self.server.merge.repair_blocked_job(library,id,revision,job_id)
             except RetryRefused as error:
@@ -829,7 +867,7 @@ class Handler(BaseHTTPRequestHandler):
                     if item['kind'] not in ('retry','repair'):raise ValueError('Invalid retry action')
                 if len({item['job_id'] for item in items})!=len(items):raise ValueError('Duplicate retry target')
             from audio_jobs import RetryRefused
-            try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all()
+            try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all(skip=self.server.actions.queued_jobs())
             except RetryRefused as error:
                 self.fail(409,str(error));return
             self.response(202,{'retry_all':run});return
@@ -905,15 +943,28 @@ class Handler(BaseHTTPRequestHandler):
             # touched; the confirm sends exactly the paths the dialog showed.
             # mode 'copy' is Remove this copy (ruling 25; Judy's update spec, section 4), on the same two routes.
             import book_delete
-            self.shape(data,{'library','id','revision'}|({'paths'} if path.endswith('/delete') else set()),{'mode'}|({'folders'} if path.endswith('/delete') else set()))
-            library,id,revision=self.candidate_identity(data)
+            # queue: true (0.22.1, Judy 1.5): Delete book only. The preview names what the delete would wait for ('blocked')
+            # instead of refusing it as busy; the confirm queues when anything blocks it, and runs at once otherwise.
+            self.shape(data,{'library','id','revision'}|({'paths'} if path.endswith('/delete') else set()),{'mode','queue'}|({'folders','title'} if path.endswith('/delete') else set()))
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
             mode=data.get('mode','delete')
             if mode not in book_delete.MODES:raise ValueError('Delete takes a known mode')
+            queued=self.queue_flag(data)
+            if queued and mode!='delete':raise ValueError('Only Delete book is queued')
             if path.endswith('/delete-preview'):
-                self.response(200,self.server.merge.delete_preview(id,revision,mode));return
+                if not queued:
+                    self.response(200,self.server.merge.delete_preview(id,revision,mode));return
+                result=self.server.merge.delete_preview(id,revision,mode,wait=True)
+                if result.get('refusal') is None and not result.get('blocked'):
+                    kind=self.server.actions.waiting('delete',id)
+                    if kind:result['blocked']={'kind':kind}
+                self.response(200,result);return
             paths,folders=data['paths'],data.get('folders',[])
             for values in (paths,folders):
                 if not isinstance(values,list) or len(values)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in values):raise ValueError('Delete takes the listed file and folder paths')
+            if queued:
+                answer=self.server.actions.enqueue('delete',id,self.queue_title(data),{'revision':revision,'paths':paths,'folders':folders})
+                if answer is not None:self.response(202,answer);return
             try:result=self.server.merge.delete_book(id,revision,paths,folders,mode)
             except book_delete.DeleteRefused as refusal:
                 self.response(409,{'error':str(refusal),**refusal.payload()});return
@@ -1012,7 +1063,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract'}
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -1048,9 +1099,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.response(200,{'stopping':True})
                     threading.Thread(target=self.server.finish_shutdown,daemon=True).start();return
                 if path in merge_routes:
+                    # Queued Retry, Repair and Delete book (0.22.1, Judy 1.1): a press with queue: true is accepted while a scan
+                    # runs and waits for it (action_queue); without it the scan refusals below stand.
+                    queued=data.get('queue') is True and path in QUEUED_ROUTES and data.get('mode','delete')=='delete'
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
-                    if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active():
+                    if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active() and not queued:
                         # Senua's 0.22.0 final review, N13: Delete waits for a library scan like Keep, Approve and Convert.
                         # Typed (Judy's Delete spec, section 9): the preview opens the dialog in its refusal state, and the
                         # confirm's 409 carries the code, so the page says "Nothing was deleted", never "may not have finished".
@@ -1059,7 +1113,7 @@ class Handler(BaseHTTPRequestHandler):
                         if path.endswith('/delete-preview'):self.response(200,{'files':[],'bytes':0,'folders':[],'stay':{'items':0},'last_copy':None,'sorted':None,'refusal':refusal.payload()})
                         else:self.response(409,{'error':str(refusal),**refusal.payload()})
                         return
-                    if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active():
+                    if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active() and not queued:
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING
                         self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING.replace('Retry','Convert') if path=='/api/audiobook/confirm-convert' else RETRY_SCANNING);return
                     self.server.merge_admissions+=1;admitted=True

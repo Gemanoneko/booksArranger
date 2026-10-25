@@ -145,6 +145,12 @@ class DesktopControl:
             verify_idle(snapshot)
             value['idle']=not self.server.closing and not self.server.merge_admissions
         except Exception:value['idle']=False
+        # Queued Retry, Repair and Delete book (0.22.1): Restart to update drops them, so its confirm names them (Judy 2.4)
+        # and the app is not idle while any waits.
+        actions = getattr(self.server, 'actions', None)
+        value['queued_actions'] = actions.count() if actions is not None else 0
+        if value['queued_actions']:
+            value['idle'] = False
         loading = getattr(self.server, 'loading', None)
         if loading is not None:
             value['loading'] = loading.view()  # loaded: took_ms, which the shell keeps as "last load took"
@@ -165,6 +171,7 @@ class DesktopControl:
         with self.server.control_condition:
             # New controls are refused from here on; reads and polling keep working.
             self.server.closing = True
+        self._drop_queue()
         merge = self.server.merge
         merge.drain()
         self.server.inventory.stop()
@@ -174,6 +181,12 @@ class DesktopControl:
         self.thread = threading.Thread(target=self._park, name='books-desktop-quit', daemon=True)
         self.thread.start()
         return {'phase': 'finishing'}
+
+    def _drop_queue(self):
+        """Quit and Restart to update drop the queued Retry, Repair and Delete book presses (Sergei, Q1; Judy 1.8)."""
+        actions = getattr(self.server, 'actions', None)
+        if actions is not None:
+            actions.drop()
 
     def _parked(self):
         automatic = self._automatic()
@@ -244,6 +257,7 @@ class DesktopControl:
         with self.server.control_condition:
             # New controls are refused from here on; reads and polling keep working.
             self.server.closing = True
+        self._drop_queue()
         self.thread = threading.Thread(target=self._update_park, name='books-desktop-update', daemon=True)
         self.thread.start()
         return self._update_answer()

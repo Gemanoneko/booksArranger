@@ -1895,14 +1895,15 @@ class MergeService:
             return self._record_start_failure(error)
         return {'state':'checking','generation':generation}
 
-    def retry_all(self,items=None):
-        """Reserve one submitter briefly; persist outside the control lock, then recheck its intent."""
+    def retry_all(self,items=None,skip=()):
+        """Reserve one submitter briefly; persist outside the control lock, then recheck its intent. skip: job ids with a
+        queued Retry or Repair press (0.22.1, Judy 1.3): Retry all leaves them out; the queue runs them."""
         from audio_jobs import RETRY_SCANNING,RETRY_CLOSING,RETRY_ALL_RUNNING,RETRY_ALL_NONE
         if self.inventory.worker and self.inventory.worker.is_alive():raise StartRefused('busy',RETRY_SCANNING)
         generation=self._capture_start_generation()
         if items is None:
             summary=self.attention_summary()
-            targets=[{'job_id':job_id,'kind':'retry'} for job_id,item in summary.items() if item.get('retry',{}).get('allowed') is True]
+            targets=[{'job_id':job_id,'kind':'retry'} for job_id,item in summary.items() if item.get('retry',{}).get('allowed') is True and job_id not in skip]
         else:
             if not isinstance(items,list) or not 1<=len(items)<=10000 or len({item.get('job_id') for item in items if isinstance(item,dict)})!=len(items):raise ValueError('Expected unique selected retry targets')
             targets=[]
@@ -2324,12 +2325,13 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'kept':kept}
 
-    def delete_preview(self,id,revision,mode='delete'):
+    def delete_preview(self,id,revision,mode='delete',wait=False):
         """Delete book or Remove this copy, step 1 (rulings 23-26; Judy's specs): the files and folders it would remove,
         from the disk now, and any refusal, so a refusal shows before Sergei confirms. mode 'copy' also proves the copy
-        against the audiobook in Sorted now. Read-only. See book_delete."""
+        against the audiobook in Sorted now. Read-only. wait (a queued Delete book, 0.22.1): a scan or the book's own
+        processing is named in 'blocked' instead of refused. See book_delete."""
         import book_delete
-        return book_delete.preview(self,id,revision,mode)
+        return book_delete.preview(self,id,revision,mode,wait)
 
     def delete_book(self,id,revision,paths,folders=None,mode='delete'):
         """Step 2: removes exactly the listed files and folders (those the dialog showed), then every record of the book,

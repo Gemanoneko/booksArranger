@@ -175,6 +175,40 @@ class BrowserTests(unittest.TestCase):
         for _ in range(20):
             self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':['x'*4000]*50},authorized=False)[0],403,'the token is required')
 
+    def test_retry_repair_and_delete_queue_over_http_while_a_scan_runs(self):
+        # 0.22.1 (backlog 2 and 3; Judy's spec section 1 and 6): with queue: true the three presses are accepted and queued
+        # while a scan runs (202 queued, position, blocker); /api/state carries the queue; Cancel takes one out, and is
+        # too late (409 started) once it is gone. Without queue: true the scan refusals stand (control).
+        import uuid
+        book,job,other=str(uuid.uuid4()),str(uuid.uuid4()),str(uuid.uuid4())
+        merge=self.server.merge
+        with patch.object(self.server,'scan_active',return_value=True),patch.object(merge,'retry_blocked_job') as retried,patch.object(merge,'repair_blocked_job') as repaired,patch.object(merge,'delete_book') as deleted,\
+             patch.object(merge,'delete_preview',return_value={'files':[{'path':'Z:/a.mp3','size':1,'kind':'audio'}],'bytes':1,'folders':[],'stay':{'items':0},'last_copy':None,'sorted':None,'kind':'files_missing','refusal':None,'blocked':{'kind':'scan'}}) as previewed:
+            code,refused=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job})
+            self.assertEqual((code,refused['error']),(409,'Scanning is running. Retry when it stops.'),'control: a press without queue is refused as before')
+            code,first=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':True,'title':'Лабиринты Ехо 3'})
+            self.assertEqual((code,first['queued'],first['position'],first['blocker']),(202,True,1,{'kind':'scan'}))
+            code,preview=self.json_call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True})
+            self.assertEqual((code,preview['refusal'],preview['blocked'],len(preview['files'])),(200,None,{'kind':'scan'},1),'the list and what it waits for, not a busy refusal')
+            self.assertEqual(previewed.call_args.kwargs,{'wait':True})
+            code,second=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':other,'revision':2,'paths':['Z:/a.mp3'],'folders':[],'queue':True,'title':'Новая плоть'})
+            self.assertEqual((code,second['position'],second['blocker']),(202,2,{'kind':'scan'}))
+            retried.assert_not_called();deleted.assert_not_called();repaired.assert_not_called()
+            code,state=self.json_call('/api/state?library=Audiobooks')
+            self.assertEqual([(item['id'],item['action'],item['book_id'],item['position'],item['title']) for item in state['queued_actions']],
+                             [(first['id'],'retry',book,1,'Лабиринты Ехо 3'),(second['id'],'delete',other,2,'Новая плоть')])
+            self.assertEqual((state['queue_running'],state['queue_outcomes']),(None,[]))
+            self.assertEqual(self.json_call('/api/queue/cancel',{'id':second['id']}),(200,{'cancelled':True}))
+            self.assertEqual(self.json_call('/api/queue/cancel',{'id':second['id']}),(409,{'error':'It has already started.','code':'started'}),'gone: too late')
+            self.server.actions.drop()
+        self.assertEqual(self.call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':'yes'})[0],400,'an explicit boolean')
+        self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True,'mode':'copy'})[0],400,'Remove this copy does not queue')
+        # Nothing waits and nothing blocks: the press runs at once and answers as before.
+        with patch.object(merge,'retry_blocked_job',return_value={'job_id':job,'requeued':True}) as retried:
+            code,ran=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':True})
+            self.assertEqual((code,ran),(202,{'job_id':job,'requeued':True}))
+            retried.assert_called_once_with('Audiobooks',book,1,job)
+
     def test_a_refused_post_stops_draining_its_body_after_two_seconds_in_all(self):
         # Senua's 0.22.0 final review, N17: the drain before a 403 timed out per read, so a sender trickling its body held
         # the handler for as long as it kept sending. The 2 s are now a total: the 403 arrives while bytes still trickle.

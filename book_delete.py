@@ -515,14 +515,21 @@ def _copy_proof(service, row, source, files, output, text, stop=None, proven=Non
     return {'path': final, 'size': record.get('size'), 'verified_at': verified, 'record': record, 'stamps': stamps}
 
 
-def plan(service, identity, revision, mode='delete', stop=None, proven=None):
+def plan(service, identity, revision, mode='delete', stop=None, proven=None, wait=False):
     """Read-only: what the press would remove now. {'files': [{'path', 'size', 'root', 'kind'}], 'bytes', 'folders':
-    [(folder, root)], 'stay', 'last_copy', 'sorted', 'members', 'jobs', 'kind', 'row'}. Raises DeleteRefused with every
-    refusal check (the preview runs them before the confirm). stop and proven: see _copy_proof."""
+    [(folder, root)], 'stay', 'last_copy', 'sorted', 'members', 'jobs', 'kind', 'row', 'blocked'}. Raises DeleteRefused
+    with every refusal check (the preview runs them before the confirm). stop and proven: see _copy_proof.
+
+    wait=True (the queued Delete's preview, 0.22.1; Judy 1.5): a scan, or the book's own processing, is not a refusal but
+    what the delete waits for: 'blocked' names it ('scan' or 'book') and the plan is made anyway, read-only. The run
+    itself always plans with wait=False, so a blocker never lets anything be deleted."""
     if mode not in MODES:
         raise DeleteRefused('refused', REFUSED)
     text = _TEXT[mode]['refused']
-    if scanning(service):
+    blocked = None
+    if scanning(service) and wait:
+        blocked = 'scan'
+    elif scanning(service):
         # Senua's 0.22.0 final review, N13 (probe P1): a Delete while the scan held the book's queued files let the scan
         # find them gone, and with no catalog row it wrote each back as a new one-file book with a raw "[Errno 2]" error;
         # the scan then ended "completed with errors", which stops an automatic run. Keep, Approve, Scan again and Convert
@@ -543,7 +550,9 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None):
     with connect(inventory.database) as db:
         jobs = _jobs(db, identity)
         if any(j['state'] in ('pending', 'running') for j in jobs):
-            raise DeleteRefused('busy', BUSY)
+            if not wait:
+                raise DeleteRefused('busy', BUSY)
+            blocked = blocked or 'book'
         if mode == 'delete':
             cleaned = set()
             if jobs and _table(db, 'source_cleanup'):
@@ -560,8 +569,10 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None):
             raise DeleteRefused('refused', text)  # a copy has no job of its own: a book with one is no "Needs you" duplicate
         if _table(db, 'automatic_candidates'):
             researching = db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone()
-            if researching:
+            if researching and not wait:
                 raise DeleteRefused('busy', BUSY)
+            if researching:
+                blocked = blocked or 'book'
         # The server's own offer: Delete's (a finished, queued or researched book was refused above with its own line; any
         # other book without it, one the app can still fix, a duplicate, Files unclear, is refused here), or the copy's.
         if mode == 'delete':
@@ -619,21 +630,33 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None):
     proof = _copy_proof(service, row, source, files, output, text, stop, proven) if mode == 'copy' else None  # the audiobook last
     files += working
     return {'files': files, 'bytes': sum(f['size'] for f in files), 'folders': folders, 'stay': stay, 'last_copy': last_copy,
-            'sorted': proof, 'members': members, 'jobs': jobs, 'kind': kind, 'row': row}
+            'sorted': proof, 'members': members, 'jobs': jobs, 'kind': kind, 'row': row, 'blocked': blocked}
 
 
-def preview(service, identity, revision, mode='delete'):
+def processing(service, identity):
+    """The book is converting, queued for conversion or being researched: what a queued Delete waits for ('book'),
+    the same facts plan() refuses as 'busy'. Read-only."""
+    with connect(service.inventory.database) as db:
+        if any(j['state'] in ('pending', 'running') for j in _jobs(db, identity)):
+            return True
+        return bool(_table(db, 'automatic_candidates') and db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone())
+
+
+def preview(service, identity, revision, mode='delete', wait=False):
     """POST /api/candidate/delete-preview: {'files': [{'path', 'size', 'kind'}], 'bytes', 'folders': [path], 'stay':
-    {'items'}, 'last_copy', 'kind', 'sorted': None | {'path', 'size', 'verified_at'}, 'refusal': None | {...}}."""
+    {'items'}, 'last_copy', 'kind', 'sorted': None | {'path', 'size', 'verified_at'}, 'refusal': None | {...}, 'blocked':
+    None | {'kind'}}. wait: see plan (Delete book only)."""
+    wait = wait and mode == 'delete'
     try:
         with _stoppable(service) as stop:
-            found = plan(service, identity, revision, mode, stop)
+            found = plan(service, identity, revision, mode, stop, wait=wait)
     except DeleteRefused as refusal:
         return {'files': [], 'bytes': 0, 'folders': [], 'stay': {'items': 0}, 'last_copy': None, 'sorted': None, 'refusal': refusal.payload()}
     shown = found['sorted']
     return {'files': [{'path': f['path'], 'size': f['size'], 'kind': f['kind']} for f in found['files']], 'bytes': found['bytes'],
             'folders': [folder for folder, _root in found['folders']], 'stay': {'items': found['stay']}, 'last_copy': found['last_copy'],
-            'kind': found['kind'], 'sorted': {k: shown[k] for k in ('path', 'size', 'verified_at')} if shown else None, 'refusal': None}
+            'kind': found['kind'], 'sorted': {k: shown[k] for k in ('path', 'size', 'verified_at')} if shown else None, 'refusal': None,
+            'blocked': {'kind': found['blocked']} if found.get('blocked') else None}
 
 
 def _cause(error):

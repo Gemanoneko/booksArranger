@@ -97,6 +97,32 @@ class RequestTests(unittest.TestCase):
         self.assertIs(value.thread, thread, 'one update, not two')
         value.cancel_update()
 
+    def test_the_confirm_names_the_queued_actions_and_quit_or_the_update_drops_them(self):
+        # 0.22.1 (Judy 1.8 and 2.4; Sergei, Q1): queued Retry and Delete presses are counted for the update's confirm, the
+        # app is not idle while any waits, and Restart to update or Quit drops them without running one.
+        from action_queue import ActionQueue
+        for leave in ('update', 'quit'):
+            server, _ = engine(scanning=True)
+            server.actions = ActionQueue(server, poll=.02)
+            server.merge.drain, server.merge.drained = Mock(), Mock(return_value=True)
+            self.addCleanup(server.actions.close)
+            self.assertTrue(server.actions.enqueue('retry', 'book-1', 'Book', {'revision': 1, 'job_id': 'job-1'})['queued'])
+            self.assertTrue(server.actions.enqueue('retry', 'book-2', 'Book', {'revision': 1, 'job_id': 'job-2'})['queued'])
+            value = control(server)
+            with patch('app_launcher.verify_idle'):
+                status = value.status()
+            self.assertEqual((status['queued_actions'], status['idle']), (2, False), leave)
+            if leave == 'update':
+                value.prepare_update()
+            else:
+                value.quit()
+            self.assertEqual(server.actions.count(), 0, leave)
+            self.assertEqual(server.actions.view()['queued_actions'], [], leave)
+            if leave == 'update':
+                value.cancel_update()
+            else:
+                finish(value)
+
     def test_status_during_the_update_answers_without_a_state_computation(self):
         server, _ = engine(converting=True, stubborn=True, slow_state=10.0)
         value = control(server)

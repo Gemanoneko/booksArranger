@@ -3,7 +3,7 @@ is removed from disk and from every record, so a reacquired copy is a new book. 
 file, a path outside the source roots, Sorted untouched, a partial failure, and a crash between the file and record
 steps; plus every typed refusal, records last, no recovery copy, and reacquire as a new book. Real private files in a
 temporary library with its own Sorted folder; no network, no library access."""
-import _winapi, hashlib, json, os, shutil, sqlite3, threading, unittest, uuid
+import _winapi, hashlib, json, os, shutil, sqlite3, threading, time, unittest, uuid
 from pathlib import Path
 from unittest import mock
 
@@ -188,6 +188,72 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertIsNone(preview['refusal'])
         result = self.service.delete_book(row['id'], row['revision'], [f['path'] for f in preview['files']])
         self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (2, [], True))
+
+    # ---------------------------------------------------------------- 0.22.1: queued Delete book (Judy's spec, section 1)
+    def action_queue(self):
+        """The engine's queue over the real service, with the server parts it reads (the scan flag, closing, admissions)."""
+        from action_queue import ActionQueue
+        inv, service = self.inv, self.service
+        lock = threading.Lock()
+        server = type('Server', (), {'merge': service, 'closing': False, 'merge_admissions': 0, 'control_lock': lock, 'control_condition': threading.Condition(lock),
+                                     'scan_active': lambda self: bool(inv.worker and inv.worker.is_alive()), 'invalidate_status': lambda self: service.invalidate_status()})()
+        queue = ActionQueue(server, poll=.05)
+        self.addCleanup(queue.close)
+        return queue
+
+    def outcome(self, queue, count=1):
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            found = queue.view()['queue_outcomes']
+            if len(found) >= count:
+                return found[count - 1]
+            time.sleep(.05)
+        self.fail('the queued action did not end')
+
+    def test_a_delete_confirmed_during_a_scan_waits_for_it_then_checks_again_and_deletes(self):
+        # Backlog 3 (Sergei, Засор): a Delete pressed while another operation ran was refused. The preview now lists the
+        # files and names the scan as what it waits for; the confirm queues; the delete runs when the scan ends.
+        row = self.book()
+        sorted_before = listing(self.sorted)
+        release = self.paused_scan(self.parts[0].parent)
+        preview = self.service.delete_preview(row['id'], row['revision'], 'delete', wait=True)
+        self.assertEqual((preview['refusal'], preview['blocked']), (None, {'kind': 'scan'}))
+        self.assertEqual([Path(f['path']).name for f in preview['files']], [p.name for p in self.parts[:2]], 'the real list, not an empty refusal')
+        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'busy', 'control: without wait the scan still refuses')
+        queue = self.action_queue()
+        answer = queue.enqueue('delete', row['id'], 'Новая плоть', {'revision': row['revision'], 'paths': [f['path'] for f in preview['files']], 'folders': preview['folders']})
+        self.assertEqual((answer['queued'], answer['position'], answer['blocker']), (True, 1, {'kind': 'scan'}))
+        time.sleep(.5)
+        self.assertTrue(all(p.exists() for p in self.parts[:2]), 'nothing is deleted while the scan runs')
+        release.set(); finish_scan(self.inv)
+        found = self.outcome(queue)
+        self.assertEqual((found['result'], found['deleted'], found['failed'], found['title']), ('done', 2, [], 'Новая плоть'))
+        self.assertFalse(any(p.exists() for p in self.parts))
+        self.assertEqual(self.records(row['id'], self.parts), {'book_groups': 0, 'candidate_context': 0, 'automatic_candidates': 0, 'files': 0})
+        self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
+        self.assertEqual(sorted(p.name for p in self.parts[0].parent.iterdir()), ['cover.jpg', 'info.txt', 'Другая.mp3'], 'the sibling book stays')
+
+    def test_a_queued_delete_whose_files_changed_meanwhile_deletes_nothing(self):
+        # Judy 1.6: every check runs again at run time; a list that differs from the one confirmed cancels the delete.
+        row, place = self.alone()
+        preview = self.service.delete_preview(row['id'], row['revision'], 'delete', wait=True)
+        self.assertIsNone(preview['blocked'], 'nothing blocks it yet')
+        held, release = threading.Event(), threading.Event()
+        def hold():
+            with self.service.operation_lock:
+                held.set(); release.wait(30)
+        holder = threading.Thread(target=hold); holder.start(); self.addCleanup(holder.join); self.addCleanup(release.set)
+        self.assertTrue(held.wait(5))
+        queue = self.action_queue()
+        self.assertEqual(queue.waiting('delete', row['id']), 'operation', 'the preview would name the operation')
+        answer = queue.enqueue('delete', row['id'], 'Новая плоть', {'revision': row['revision'], 'paths': [f['path'] for f in preview['files']], 'folders': preview['folders']})
+        self.assertEqual(answer['blocker'], {'kind': 'operation'})
+        (place / 'notes.txt').write_text('new', encoding='utf-8')
+        release.set()
+        found = self.outcome(queue)
+        self.assertEqual((found['result'], found['code']), ('refused', 'files_changed'))
+        self.assertTrue(all(p.exists() for p in self.parts[:2]), 'nothing deleted')
+        self.assertEqual(len(self.service.reviews.page(status='output_attention', group='files_missing')['rows']), 1, 'the book stays listed')
 
     def test_files_deleted_while_a_scan_held_them_do_not_come_back_as_new_books(self):
         # Senua's probe P1 (N13), as she ran it: the scan listed the folder and queued the files, Delete removed them and
