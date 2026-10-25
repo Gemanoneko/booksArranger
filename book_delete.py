@@ -99,6 +99,17 @@ def scanning(service):
     return bool(worker is not None and worker.is_alive())
 
 
+def _history(job, manifest, current):
+    """True for another book's job that is only history: its book is gone (no current group has its id) and the job never
+    produced anything (stopped, no output, no replacement lineage). A queued, running or finished job, a job with a
+    replacement lineage, and any job of a book that is still listed keep counting as sharing."""
+    if job['state'] != 'needs attention' or job['output']:
+        return False
+    if any(k in manifest for k in ('replacement_id', 'replacement_parent_job_id')):
+        return False
+    return manifest.get('candidate_id') not in current
+
+
 def plan(service, identity, revision):
     """Read-only: what Delete book would remove now. {'files': [{'path', 'size', 'root'}], 'bytes', 'members', 'jobs',
     'kind', 'row'}. Raises DeleteRefused with every refusal check (Judy's preview runs them before the confirm)."""
@@ -143,24 +154,32 @@ def plan(service, identity, revision):
         kind = offer(service, row)
         if kind is None:
             raise DeleteRefused('refused', 'Delete was not accepted. Nothing was deleted.')
-        # Shared: another current book, any other book's job, or another book's reacquire record holds the file.
+        # Shared: another current book, another book's job, or another book's reacquire record holds the file. History of
+        # a book that is gone does not count (Senua's 0.22.0 final review, N16): an archived marker (its originals are
+        # confirmed gone) or a stopped job of that book names the paths it had, and a copy reacquired at those paths is a
+        # new book, which Delete refused as "shared" with a book that is not listed. See _history.
         keys = {_key(p): p for p in members}
         shared = {}
+        current = {r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')} if _table(db, 'book_groups') else set()
         if _table(db, 'catalog_group_members'):
             for r in db.execute('SELECT c.path,g.id,g.evidence FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE g.superseded=0 AND g.id!=?', (identity,)):
                 if _key(r['path']) in keys:
                     shared.setdefault(keys[_key(r['path'])], _title(r['evidence']) or 'another book')
         if _table(db, 'audio_jobs'):
-            for r in db.execute("SELECT manifest FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IS NOT ?", (identity,)):
+            for r in db.execute("SELECT state,output,manifest FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id') IS NOT ?", (identity,)):
                 try:
                     manifest = json.loads(r['manifest'])
                 except (TypeError, ValueError):
                     continue
-                for source in manifest.get('sources') or [] if isinstance(manifest, dict) else []:
+                if not isinstance(manifest, dict) or _history(r, manifest, current):
+                    continue
+                for source in manifest.get('sources') or []:
                     if isinstance(source, dict) and _key(source.get('path', '')) in keys:
                         shared.setdefault(keys[_key(source['path'])], str((manifest.get('metadata') or {}).get('title') or 'another book'))
         if _table(db, 'reacquire_markers'):
-            for r in db.execute('SELECT candidate_id,snapshot FROM reacquire_markers WHERE candidate_id!=?', (identity,)):
+            for r in db.execute('SELECT candidate_id,state,snapshot FROM reacquire_markers WHERE candidate_id!=?', (identity,)):
+                if r['state'] == 'archived' and r['candidate_id'] not in current:
+                    continue
                 try:
                     snapshot = json.loads(r['snapshot'])
                 except (TypeError, ValueError):

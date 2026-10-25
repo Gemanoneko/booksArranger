@@ -83,7 +83,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             if not db.execute("SELECT 1 FROM sqlite_master WHERE name='reacquire_markers'").fetchone():
                 db.execute("CREATE TABLE reacquire_markers(candidate_id TEXT PRIMARY KEY,job_id TEXT NOT NULL,root TEXT NOT NULL,state TEXT NOT NULL,snapshot TEXT NOT NULL,analysis TEXT NOT NULL,receipt TEXT NOT NULL DEFAULT '')")
             db.execute("INSERT OR REPLACE INTO reacquire_markers VALUES(?,?,?,?,?,?,'')",
-                       ('other-book', 'other-job', str(self.audio), 'archived',
+                       ('other-book', 'other-job', str(self.audio), 'required',
                         json.dumps({'group': {'scope': 'x', 'evidence': json.dumps({'title_clue': 'Другая запись'})}, 'members': [{'path': str(self.parts[0])}]}), '{}'))
         before = listing(self.parts[0].parent)
         preview = self.service.delete_preview(row['id'], row['revision'])
@@ -94,13 +94,26 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(refused.exception.code, 'shared')
         self.assertEqual(listing(self.parts[0].parent), before, 'nothing deleted')
         self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted')
-        # Another book's job holding the file refuses the same way; control: with neither, the delete goes through.
+        # Senua's 0.22.0 final review, N16: the same marker archived (its originals confirmed gone), of a book that is
+        # gone, is history: a copy reacquired at its paths is not "shared" with a book that is not listed.
         with connect(self.inv.database) as db:
-            db.execute('DELETE FROM reacquire_markers WHERE candidate_id=?', ('other-book',))
-            db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       ('other-job', json.dumps({'candidate_id': 'other-book', 'metadata': {'title': 'Чужая книга'}, 'sources': [{'path': str(self.parts[1])}]}), 'h',
-                        'needs attention', 'checking sources', None, '{}', None, 'x', 't', 't'))
-        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['files'], [{'path': str(self.parts[1]), 'other': 'Чужая книга'}])
+            db.execute("UPDATE reacquire_markers SET state='archived' WHERE candidate_id='other-book'")
+        self.assertIsNone(self.service.delete_preview(row['id'], row['revision'])['refusal'], 'an archived marker of a gone book')
+        # Another book's job holding the file: shared while that book is listed, or when the job made something; a stopped
+        # job of a book that is gone is history (N16).
+        sibling = next(r['id'] for r in self.service.reviews.page()['rows'] if [m['path'] for m in r['members']] == [str(self.sibling)])
+        def job(candidate, state='needs attention', output=None):
+            with connect(self.inv.database) as db:
+                db.execute("DELETE FROM audio_jobs WHERE job_id='other-job'")
+                db.execute('INSERT INTO audio_jobs(job_id,manifest,manifest_hash,state,stage,attempt_id,journal,output,reason,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                           ('other-job', json.dumps({'candidate_id': candidate, 'metadata': {'title': 'Чужая книга'}, 'sources': [{'path': str(self.parts[1])}]}), 'h',
+                            state, 'checking sources', None, '{}', output, 'x', 't', 't'))
+            return (self.service.delete_preview(row['id'], row['revision'])['refusal'] or {}).get('files')
+        held = [{'path': str(self.parts[1]), 'other': 'Чужая книга'}]
+        self.assertEqual(job(sibling), held, 'a listed book\'s stopped job')
+        self.assertEqual(job('gone-book', 'pending'), held, 'a queued job of a gone book')
+        self.assertEqual(job('gone-book', 'completed', '{}'), held, 'a finished job of a gone book')
+        self.assertIsNone(job('gone-book'), 'a stopped job of a gone book is history')
         with connect(self.inv.database) as db:
             db.execute("DELETE FROM audio_jobs WHERE job_id='other-job'")
         self.assertIsNone(self.service.delete_preview(row['id'], row['revision'])['refusal'], 'control')
