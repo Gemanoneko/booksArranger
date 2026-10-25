@@ -472,6 +472,7 @@ class CandidateReviewService:
                     try:row['ask']=self.jobs.ask_payload(row,needs[row['id']])
                     except (ValueError,OSError,sqlite3.Error) as error:row['ask']={'kind':needs[row['id']]['group'],'reasons':needs[row['id']]['reasons'],'fields':{},'candidates':[],'destination':{'path':'','taken':False,'reason':str(error)[:200]}}
             import book_delete
+            recheck=False
             for row in rows:
                 # Delete book (ruling 23; Judy's spec, sections 2 and 9): the server's typed offer, never guessed by the page.
                 # Missing files rows (ask.delete) and the two broken-audio Stopped rows (attention.delete); present, every
@@ -483,14 +484,18 @@ class CandidateReviewService:
                 elif isinstance(attention,dict) and job.get('state')=='Output needs attention' and (attention.get('group')=='reacquire' or (attention.get('remedy') or {}).get('kind')=='replace_source'):
                     attention['delete']={'kind':'audio_damaged','present':book_delete.present(self.jobs,row)}
                 elif isinstance(ask,dict) and ask.get('duplicate')=='verified':
-                    try:source=book_delete.copy_source(self.jobs,row)
+                    try:source=book_delete.copy_source(self.jobs,row,exists=False)
                     except (ValueError,OSError,KeyError,TypeError,sqlite3.Error):source=None
-                    if source:ask['copy']={'kind':'verified_duplicate','present':book_delete.present(self.jobs,row)}
+                    if source and os.path.isfile(source['final']):ask['copy']={'kind':'verified_duplicate','present':book_delete.present(self.jobs,row)}
+                    # Futaba's 0.22.0 QA, m-15: with the audiobook out of reach (its drive away) there is no offer, and the
+                    # drive coming back is no catalog commit, so a quiet list kept the page without it for 5 minutes. A
+                    # page like this is read again sooner (MergeService.cached_page).
+                    elif source:recheck=True
             if self.jobs and hasattr(self.jobs,'restart_view'):self.jobs.restart_view(rows)  # Started over marker, release
         finally:
             del self.page_local.contexts;del self.page_local.jobs;del self.page_local.ready_ids
             if hasattr(self.page_local,'audiobooks'):del self.page_local.audiobooks
-        return {'rows':rows,'total':total,'reacquire_archives':result.get('reacquire_archives',[])}|({'restart_counts':restart_counts} if restart_counts is not None else {})
+        return {'rows':rows,'total':total,'reacquire_archives':result.get('reacquire_archives',[])}|({'restart_counts':restart_counts} if restart_counts is not None else {})|({'recheck':True} if recheck else {})
 
     def _actor(self,actor,note):
         if actor not in ('user','assistant'):raise ValueError('Unknown reviewer actor')

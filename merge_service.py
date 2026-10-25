@@ -509,17 +509,20 @@ class MergeService:
         return value
 
     def cached_page(self,limit,offset,search,status,group=None):
-        """The book list for polling: a quiet app reuses the identical page (see status_snapshot)."""
+        """The book list for polling: a quiet app reuses the identical page (see status_snapshot). A page the list marks
+        'recheck' (an offer withheld while its audiobook was out of reach: Futaba's 0.22.0 QA, m-15) is reused for
+        WORKING_MAX_AGE at most: a drive coming back is no catalog commit."""
         key=(limit,offset,search,status,group);token=self._quiet_token(True)
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_pages',{}).get(key)
-            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<self.quiet_max_age():return copy.deepcopy(kept[2])
+            if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
         value=self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status)
+        recheck=isinstance(value,dict) and value.pop('recheck',False) is True
         if token is not None and self._quiet_token()==token:
             with _QUIET_LOCK:
                 pages=self.__dict__.setdefault('_quiet_pages',{})
                 if len(pages)>=16:pages.clear()
-                pages[key]=(token,time.monotonic(),copy.deepcopy(value))
+                pages[key]=(token,time.monotonic(),copy.deepcopy(value),WORKING_MAX_AGE if recheck else QUIET_MAX_AGE)
         return value
 
     def quiet_max_age(self):

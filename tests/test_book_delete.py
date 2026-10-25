@@ -825,6 +825,22 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(refused.exception.code, 'not_identical')
         self.assertEqual(sorted(p.name for p in place.iterdir()), ['01.mp3', '02.mp3', 'cover.jpg'], 'nothing deleted')
 
+    def test_a_copy_offer_withheld_while_the_audiobook_was_away_comes_back_without_a_scan(self):
+        # Futaba's 0.22.0 QA, m-15: Confirm refused while the Sorted drive was away; the list read during the outage had
+        # no offer, and with the drive back the quiet app reused that page (no catalog commit) for up to 5 minutes: the
+        # button came back only after a scan or a restart. Now such a page is read again within WORKING_MAX_AGE.
+        copy, place, final = self.arranged_with_copy()
+        page = lambda: next(r for r in self.service.cached_page(100, 0, '', 'output_attention')['rows'] if r['id'] == copy['id'])
+        self.assertIn('copy', page()['ask'], 'positive control: the offer')
+        away = final.with_name('away.m4b'); final.rename(away)  # the drive goes
+        self.service.invalidate_status()  # the refused Confirm was a control: the next poll reads the list again
+        self.assertNotIn('copy', page()['ask'], 'no offer while the audiobook is out of reach')
+        away.rename(final)  # the drive is back: no catalog commit
+        self.assertNotIn('copy', page()['ask'], 'positive control: the quiet page is reused')
+        real = merge_service.time.monotonic
+        with mock.patch.object(merge_service.time, 'monotonic', side_effect=lambda: real() + merge_service.WORKING_MAX_AGE + 1):
+            self.assertIn('copy', page()['ask'], 'back within 30 s, no scan or restart')
+
     def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):
         copy, place, final = self.arranged_with_copy(possible=True)
         self.assertEqual((copy['ask'].get('duplicate'), copy['ask'].get('copy')), ('possible', None))
