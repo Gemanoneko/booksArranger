@@ -11,9 +11,9 @@ from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
-SAME_TITLE_VERSION = 'same-title-v3'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check)
+SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check); v4: N10 (chapter names are no works)
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
-SAME_ALBUM_VERSION = 'same-album-v3'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too)
+SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (the works check for a plain album group too); v4: N11 (chapter-named title tags are no works)
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
 M4B_PARTS_VERSION = 'm4b-parts-v2'
@@ -289,7 +289,7 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
     only when their folder names an author who is not the shared start (Monogatari: "Нисио Исин - Monogatari Series").
     Returns [{'scope', 'members', 'name', 'basis'}]."""
     from source_identity import filename_identity,norm
-    from local_identity import title_key,looks_like_person,clean_title,garbled,JUNK_TITLES,tag_index,work_name
+    from local_identity import title_key,looks_like_person,clean_title,garbled,JUNK_TITLES,tag_index,work_name,chapter_works
     counts=Counter(scopes[path] for path in scopes)
     folders={}
     for path,item in members.items():
@@ -318,8 +318,10 @@ def _same_title_sets(members,scopes,assigned,chaptered,taken):
             if len(group)<2:continue
             # Senua's 0.22.0 review, N4: a generic title tag no list knows ("Запись с диктофона" on "Кинг - Оно" and
             # "Кинг - Мизери") joins nothing when the file names name two or more works besides the tag's own.
-            tagged=norm(work_name(str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title',''))))
-            if len({norm(work_name(filename_identity(item['filename']).get('title') or '')) for item in group}-{'',tagged})>1:continue
+            # N10: chapter names are no works ("Пастушья корона 01. Глава 1. Там где ветер", "Пастушья корона 02").
+            tag_title=str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title',''))
+            tagged=norm(work_name(tag_title))
+            if len(set(chapter_works([filename_identity(item['filename']).get('title') or '' for item in group],tag_title))-{'',tagged})>1:continue
             scope=folder+'\x1fSame title '+title
             if scope in taken:continue
             name=' '.join(str({k.casefold():v for k,v in group[0]['metadata'].get('tags',{}).items()}.get('title','')).split())
@@ -409,7 +411,7 @@ def _same_album_parts(members,scopes,assigned,chaptered,taken):
     protected or chaptered files, files whose author tags name different people (an anthology, mixed recordings) and
     files in different folders or sources. Returns [{'scope', 'members', 'name', 'basis'}]."""
     from source_identity import norm
-    from local_identity import same_person,compare_names,work_name
+    from local_identity import same_person,compare_names
     found=[];albums={}
     for path,item in members.items():
         if path in assigned or path in chaptered or Path(path).suffix.lower()=='.m4b' or '\x1fAlbum ' not in scopes[path]:continue
@@ -426,20 +428,24 @@ def _same_album_parts(members,scopes,assigned,chaptered,taken):
         if scope in taken:continue
         name=DISC_SUFFIX.sub('',entries[0][1]).strip() or entries[0][1]
         found.append({'scope':scope,'members':[item for item,_,_ in entries],'name':name,'basis':'same album and one author',
-                      'works':_works(sorted(entries,key=lambda e:e[0]['path']),scopes,norm(work_name(name)))})
+                      'works':_works(sorted(entries,key=lambda e:e[0]['path']),scopes,name)})
     return found
 
-def _works(entries,scopes,album):
+def _works(entries,scopes,name):
     """Senua's 0.22.0 review, G3: the works the title tags of one album's files name, part numbers aside. A work is a
     title that two or more files carry ("Последнее желание 1", "Последнее желание 2") or the one title every file of an
-    original group carries; chapter labels and the album's own title are not works. Two or more works: the files may be
-    several books (the Ведьмак disc case), so the joined book is held as Files unclear. Returns [{'name', 'files'}] or []."""
+    original group carries; chapter labels and the album's own title (name, its disc number aside) are not works. Two or
+    more works: the files may be several books (the Ведьмак disc case), so the joined book is held as Files unclear.
+    N11: a chapter label is the whole title's label ("Глава 1. Дом, милый дом - 1", "Часть первая. Фрагмент 2"), and the
+    album's own title and a number is a chapter in a set of chapters (local_identity.chapter_works). Returns
+    [{'name', 'files'}] or []."""
     from source_identity import norm
-    from local_identity import work_name
+    from local_identity import work_name,chapter_works
+    album=norm(work_name(name))
+    titles=[tags.get('title') or '' for _,_,tags in entries]
     named=[];per_scope={}
-    for item,_,tags in entries:
-        title=work_name(tags.get('title') or '');key=norm(title)
-        named.append((key,title));per_scope.setdefault(scopes[item['path']],set()).add(key)
+    for (item,_,_),title,key in zip(entries,titles,chapter_works(titles,name)):
+        named.append((key,work_name(title)));per_scope.setdefault(scopes[item['path']],set()).add(key)
     counts=Counter(key for key,_ in named if key and key!=album)
     works={key for key,n in counts.items() if n>=2}
     works|={next(iter(keys)) for keys in per_scope.values() if len(keys)==1 and next(iter(keys)) not in ('',album)}
@@ -592,14 +598,13 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
     # Senua's 0.22.0 review, N6: G3's works check for a plain album group too (one folder, one album, one artist: "Последнее
     # желание 1/2" and "Меч предназначения 1/2" under the album "Ведьмак"). Held as Files unclear listing the works; never
     # converted on its own. Reviewed, approved or queued groups and the other grouping routes keep their own rules.
-    from source_identity import norm
-    from local_identity import work_name
+    # N11: chapter-named title tags ("Глава 1. Дом, милый дом - 1") are no works (_works).
     for scope,group in output.items():
         if scope in protected or scope in split or scope in sets or scope in joined or scope in part_sets:continue
         if '\x1fAlbum ' not in scope or len(group['members'])<2 or group.get('source_partition_uncertain'):continue
         entries=[(m,'',{k.casefold():str(v) for k,v in m['metadata'].get('tags',{}).items()}) for m in sorted(group['members'],key=lambda m:m['path'])]
         album=' '.join(entries[0][2].get('album','').split())
-        works=_works(entries,{m['path']:scope for m in group['members']},norm(work_name(DISC_SUFFIX.sub('',album).strip() or album)))
+        works=_works(entries,{m['path']:scope for m in group['members']},DISC_SUFFIX.sub('',album).strip() or album)
         if works:
             group['album_works']=works;group['source_partition_uncertain']=True
             group.setdefault('conflicts',[]).append('The title tags name more than one book: '+'; '.join(w['name'] for w in works[:4]))

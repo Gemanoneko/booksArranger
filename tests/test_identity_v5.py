@@ -348,6 +348,71 @@ class PartsStayTogether(unittest.TestCase):
             group=next(iter(groups.build(self.rows(files)).values()))
             self.assertFalse(group.get('source_partition_uncertain'),titles);self.assertFalse(group.get('album_works'),titles)
 
+    # The 77 real file names of «Пастушья корона» (Z:\Audiobooks, one title tag "Пастушья корона ", no album): the part after
+    # "Пастушья корона NN"; the other numbers are bare. "64.Глава" has no space and 73/74 end in a space, as on disk.
+    PASTUSHYA={'0':'. Пролог. Корона Холмов','00':'. Словарь Нак-мак-фиглов','01':'. Глава 1. Там где ветер','05':'. Глава 2. Голос в темноте',
+               '09':'. Глава 3. Мир вверх тармашками','15':'. Глава 4. В добрый путь и добро пожаловать','19':'. Глава 5. Новые времена',
+               '24':'. Глава 6. Везде поспеть','27':'. Глава 7. Стихия','30':'. Глава 8. Баронский герб','33':'. Глава 9. Заклинатель коз',
+               '35':'. Глава 10. Сокровище','41':'. Глава 11. Город','45':'. Глава 12. Эльф среди фиглов','48':'. Глава 13. Шалости и не только',
+               '51':'. Глава 14. Повесть о двух королевах','56':'. Глава 15. Логово бога','60':'. Глава 16. Хохотун Вбоквелл',
+               '64':'.Глава 17. Ведьмы спорят','66':'. Глава 18. Пастушья корона','71':'. Глава 19. Мир','73':'. Эпилог. Шёпот холмов ',
+               '74':'. Послесловие ','75':'. Бонус'}
+
+    def pastushya(self,extra=()):
+        folder='Unsorted/Terry Pratchet/Discworld/Tiffany Aching/Терри Пратчетт - Пастушья корона (Макс Потёмкин)'
+        names=['Пастушья корона %s%s'%(n,self.PASTUSHYA.get(n,'')) for n in ['0','00']+['%02d'%n for n in range(1,76)]]+list(extra)
+        return [('%s/%s.mp3'%(folder,name),{'title':'Пастушья корона ','artist':'Терри Пратчетт'}) for name in names]
+
+    def test_review_n10_the_real_pratchett_chapter_names_are_one_book(self):
+        # Senua's 0.22.0 release review, N10: N4's file-name works check read each chapter name ("Пастушья корона 01. Глава 1.
+        # Там где ветер", "Пастушья корона 00. Словарь Нак-мак-фиглов") as a work, so the one live same-title set became 77
+        # lone files. Chapter labels and the tag's own title with a number name no other work.
+        built=groups.build(self.rows(self.pastushya()))
+        self.assertEqual([len(g['members']) for g in built.values()],[77],[s.split('\\')[-1] for s in built])
+        self.assertEqual(next(iter(built.values()))['numbered_set']['basis'],'same title tag')
+        # Two other works by their file names (no "Пастушья корона NN" start, no chapter label) still refuse the set.
+        built=groups.build(self.rows(self.pastushya(extra=('Шляпа, полная неба','Зимних дел мастер'))))
+        self.assertEqual({len(g['members']) for g in built.values()},{1},'not joined: the file names name two more works')
+        # The tag's own title and a number is a chapter only in a set that shows chapters ("Пастушья корона 02", a "Глава"):
+        # two books of a series under one series tag stay two books.
+        files=[('Unsorted/Ведьмак/Ведьмак %d. %s.mp3'%(n,name),{'title':'Ведьмак','artist':'Анджей Сапковский'}) for n,name in ((1,'Последнее желание'),(2,'Меч предназначения'))]
+        self.assertEqual(len(groups.build(self.rows(files))),2)
+
+    def test_review_n11_chapter_named_title_tags_are_not_several_books(self):
+        # Senua's 0.22.0 release review, N11: N6's album works check held albums whose title tags are chapter names, from the
+        # live catalog: Мистер Вечный Канун, Schismatrix, Война миров, Книга осенних демонов. None is held now.
+        albums={'Мистер Вечный Канун. Уэлихолн':('Глава 1. Дом, милый дом - 1','Глава 1. Дом, милый дом - 2','Глава 2. Когда не все дома',
+                                                 'Глава 3. Человек в зеленом - 1','Глава 3. Человек в зеленом - 2'),
+                'Схизматрица':('Вступление','Пролог','Часть 1. Бродяжья зона. Глава 01','Часть 1. Бродяжья зона. Глава 01',
+                               'Часть 1. Бродяжья зона. Глава 02','Часть 2. Сообщающиеся анархии. Глава 01','Часть 2. Сообщающиеся анархии. Глава 01'),
+                'Профессия: инквизитор 7. Война миров':('Пролог','Часть первая. Фрагмент 1','Часть первая. Фрагмент 2','Часть вторая. Фрагмент 1','Часть вторая. Фрагмент 2'),
+                'Книга осенних демонов':('Пролог','Глава 1. Клуб абсолютной кредитной карточки_01','Глава 1. Клуб абсолютной кредитной карточки_02',
+                                         'Глава 2. Рассказ психотерапевта_01','Глава 2. Рассказ психотерапевта_02')}
+        for album,titles in albums.items():
+            files=[('Unsorted/%s/%02d.mp3'%(album.replace(':',''),n),{'album':album,'artist':'Чтец','track':str(n),'title':title}) for n,title in enumerate(titles,1)]
+            built=groups.build(self.rows(files))
+            self.assertEqual(len(built),1,album);group=next(iter(built.values()))
+            self.assertFalse(group.get('source_partition_uncertain'),album);self.assertFalse(group.get('album_works'),album)
+        # Positive controls: two works with no chapter label are still held, numbered with the album's own title too, or with
+        # book words ("Книга 1. …" is a book, not a chapter).
+        for titles in (('Ведьмак 1. Последнее желание 1','Ведьмак 1. Последнее желание 2','Ведьмак 2. Меч предназначения 1','Ведьмак 2. Меч предназначения 2'),
+                       ('Книга 1. Последнее желание 1','Книга 1. Последнее желание 2','Книга 2. Меч предназначения 1','Книга 2. Меч предназначения 2')):
+            files=[('Unsorted/Ведьмак/%02d.mp3'%n,{'album':'Ведьмак','artist':'Анджей Сапковский','track':str(n),'title':title}) for n,title in enumerate(titles,1)]
+            group=next(iter(groups.build(self.rows(files)).values()))
+            self.assertTrue(group.get('source_partition_uncertain'),titles);self.assertEqual(len(group['album_works']),2,titles)
+
+    def test_review_n10_n11_chapter_labels_name_no_work_book_words_do(self):
+        works=local_identity.chapter_works
+        for title in ('Глава 1. Там где ветер','Глава седьмая. Город','Chapter 3: The Wind','Часть 1. Бродяжья зона. Глава 01','Часть вторая. Фрагмент 2',
+                      'Part II. The Return','Пролог. Корона Холмов','Эпилог. Шёпот холмов','01. Глава 2. Голос в темноте'):
+            self.assertEqual(works([title]),[''],title)
+        for title in ('Книга 2. Меч предназначения','Том 3. Адамант Хенны','Эпизод 4. Кровь','Тени Замбулы. Глава 1','Последнее желание 2','Глазами клоуна'):
+            self.assertNotEqual(works([title]),[''],title)
+        # The own title and a number: a chapter when the set shows chapters, else whatever the rest names.
+        self.assertEqual(works(['Пастушья корона 00. Словарь Нак-мак-фиглов','Пастушья корона 02'],'Пастушья корона '),['',''])
+        self.assertEqual(works(['Пастушья корона 00. Словарь Нак-мак-фиглов','Пастушья корона 01. Глава 1. Там где ветер'],'Пастушья корона'),['',''])
+        self.assertEqual(len(set(works(['Ведьмак 1. Последнее желание','Ведьмак 2. Меч предназначения'],'Ведьмак'))-{''}),2)
+
     def witcher(self,disc_titles=(('Последнее желание','Чтец Один'),('Меч предназначения','Чтец Два'))):
         files=[]
         for disc,(work,reader) in enumerate(disc_titles,1):

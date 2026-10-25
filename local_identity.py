@@ -1585,6 +1585,49 @@ def work_name(value):
     return text(value)
 
 
+# Senua's 0.22.0 release review, N10/N11: a title that opens with a chapter or part label names a piece of the book, whatever
+# follows the label ("Глава 1. Там где ветер", "Часть 1. Бродяжья зона. Глава 01", "Часть первая. Фрагмент 1", "Пролог. Корона
+# Холмов"). Book, volume and episode words ("Книга 2", "Том 3", "Эпизод 4") are no chapter labels: they may name books.
+_ORDINAL_WORD = (r'(?:перв|втор|трет|четв[её]рт|пят|шест|седьм|восьм|девят|десят|одиннадцат|двенадцат|тринадцат|четырнадцат|'
+                 r'пятнадцат|шестнадцат|семнадцат|восемнадцат|девятнадцат|двадцат)(?:ая|ый|ой|ий|ья|ей|ое|ье)|first|second|third|'
+                 r'fourth|fifth|sixth|seventh|eighth|ninth|tenth|one|two|three|four|five|six|seven|eight|nine|ten')
+CHAPTER_LABEL = re.compile(r'^\W*(?:(?:глава|гл\.?|chapter|chap\.|ch\.|часть|ч\.|part|pt\.?|фрагмент|fragment)\s*[#№:.\-–—]?\s*'
+                           r'(?:\d{1,4}|[ivxlc]{1,7}|' + _ORDINAL_WORD + r')(?![^\W\d_])'
+                           r'|(?:пролог|prologue|prolog|эпилог|epilogue|epilog|послесловие|предисловие|afterword|foreword|вступление|'
+                           r'введение|интерлюдия|interlude)(?![^\W\d_]))', re.I)
+
+
+def _own_title_tail(value, own):
+    """What follows the book's own title and a number at the start of a title, else None: "Пастушья корона 01. Глава 1.
+    Там где ветер" -> "глава 1. там где ветер", "Пастушья корона 02" -> '' (own: "Пастушья корона")."""
+    def fold(v):
+        return ' '.join(unicodedata.normalize('NFC', str(v or '')).casefold().replace('ё', 'е').split())
+    value, own = fold(value), fold(clean_title(own))
+    if not own or not value.startswith(own):
+        return None
+    match = re.match(r'[\s_.,:;\-–—]*(?:№\s*)?\d{1,4}(?:[-.]\d{1,3})?(?!\d)(?![^\W\d_])', value[len(own):])
+    return value[len(own) + match.end():].strip(' _.,:;-–—') if match else None
+
+
+def chapter_works(values, own=''):
+    """The work each title of one set names (norm keys, in order; '' for none): work_name(), chapter labels aside. Senua's
+    0.22.0 release review, N10/N11: grouping read every chapter name as a work, so «Пастушья корона» (77 files named
+    "Пастушья корона 01. Глава 1. Там где ветер", "Пастушья корона 02", ...) stopped joining and 21 albums whose title tags
+    are chapter names ("Глава 1. Дом, милый дом - 1", "Часть 1. Бродяжья зона. Глава 01") were held as several books.
+    A title names no work of its own when
+      - it opens with a chapter or part label (CHAPTER_LABEL), whatever follows; or
+      - it is the book's own title (own: the shared title tag, or the album) and a number ("Пастушья корона 00. Словарь
+        Нак-мак-фиглов") and the set is visibly chapters: some title is the own title and a number alone ("Пастушья корона
+        02") or followed by a chapter label. Without that, "Ведьмак 1. Последнее желание" and "Ведьмак 2. Меч
+        предназначения" under one "Ведьмак" tag still name two works."""
+    titles = [clean_title(v) for v in values]
+    bare = [re.sub(r'^\s*\d[\d.\-_ ]*', '', t) for t in titles]
+    tails = [_own_title_tail(b, own) for b in bare]
+    chapters = any(t == '' or CHAPTER_LABEL.match(t) for t in tails if t is not None)
+    return ['' if CHAPTER_LABEL.match(b) or chapters and tail is not None else norm(work_name(title))
+            for title, b, tail in zip(titles, bare, tails)]
+
+
 def _shares_surname(a, b):
     """The same surname (any script), first names aside: "Дж. Р.Р. Толкин" / "Джон Рональд Руэл Толкин"."""
     left = [w for w in words(a) if len(w) >= 4 and norm(w) not in GIVEN_NAMES]
