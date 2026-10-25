@@ -30,6 +30,9 @@ function rowOf(name){return [...get('inventory').children].find(tr=>tr.dataset.p
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');}
 function counts(values){context.counts=values;run('state={...state,audiobook_jobs:{...state.audiobook_jobs,attention_counts:counts}};renderAttentionGroups()');}
 const text=row=>run('attentionText('+JSON.stringify(row)+')');
+// Futaba's 0.22.0 QA, m-6: the cell tooltip carries no raw text (the spec's check 3); the technical message is read from
+// technicalText(), which Technical details shows.
+function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical detail|WinError|Header missing|ffmpeg|audio-staging/.test(title),'m-6: no raw text in the cell tooltip: '+title);return run('technicalText(rows.find(row=>row.path==='+JSON.stringify(tr.dataset.path)+'))');}
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";viewControls()');
 
@@ -39,7 +42,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   assert.equal(statusCell(tr).children[0].textContent,CHECKING);
   assert.equal(statusCell(tr).children[0].classes.has('retry-refused'),false,'--muted: it clears by itself');
   assert.equal(actionButtons(tr)[0].textContent,'Retry');assert.equal(actionButtons(tr)[0].disabled,true);assert.equal(actionButtons(tr)[0].title,CHECKING);
-  assert.equal(statusCell(tr).title,'Technical detail: '+M4B_REASON,'the job reason only');
+  assert.equal(techOf(tr),'Technical detail: '+M4B_REASON,'the job reason only');
   context.fixture=pendingRow('p');run('select(fixture,true);controls()');
   assert.equal(get('automatic-result-status').textContent,'Stopped — checking the M4B');
   assert.equal(get('retry-block').hidden,false);assert.equal(get('retry-job').disabled,true);assert.equal(get('retry-job').title,CHECKING);assert.equal(get('retry-note').textContent,CHECKING);
@@ -50,7 +53,7 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   assert.equal(statusCell(tr).children[0].textContent,CANT_OPEN);
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning: Sergei can fix it');
   assert.equal(actionButtons(tr)[0].textContent,'Retry');assert.equal(actionButtons(tr)[0].disabled,false);assert.equal(actionButtons(tr)[0].title,READY);
-  assert.equal(statusCell(tr).title,'Technical detail: '+UNOPENED+'; earlier failure: '+M4B_REASON);
+  assert.equal(techOf(tr),'Technical detail: '+UNOPENED+'; earlier failure: '+M4B_REASON);
   context.fixture=unopenedRow('u');run('select(fixture,true);controls()');
   assert.equal(get('automatic-technical').textContent,'Technical detail: '+UNOPENED+'; earlier failure: '+M4B_REASON);
 
@@ -108,8 +111,9 @@ const text=row=>run('attentionText('+JSON.stringify(row)+')');
   // 3c: the absolute working folder is in Technical detail only (panel and hover title), for working_files only.
   const waiting=m4bRow('w',{attention:{group:'other',cause:null,originals_untouched:true,working_folder:FOLDER},retry:{allowed:false,reason:NOT_YET},readmission:refusal('working_files')});
   paint([waiting]);tr=rowOf('w');
-  // Judy 2026-10-24, section 4.6: the cell tooltip is the first 200 characters; the whole message is in Technical details.
-  {const full='Technical detail: Failed M4B retained: fixture; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER;assert.equal(statusCell(tr).title,full.length>200?full.slice(0,200)+'…':full);assert.ok(full.length>200,'positive control: this message is long');}
+  // Futaba's 0.22.0 QA, m-6 (the spec's check 3 over its section 4.6): the cell tooltip is the row's plain sentence, never the raw
+  // message; the whole message is in Technical details.
+  {const tip=statusCell(tr).title;assert.ok(tip,'a tooltip');for(const raw of ['Technical detail','audio-staging',M4B_REASON.slice(0,30)])assert.ok(!tip.includes(raw),raw);}
   assert.ok(!statusCell(tr).children[0].textContent.includes('audio-staging'),'never in the hint');
   context.fixture=waiting;run('select(fixture,true);controls()');
   assert.match(get('automatic-technical').textContent,/; working folder: C:\\Users\\fixture\\.*\\job-w$/);

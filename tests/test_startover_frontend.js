@@ -46,6 +46,9 @@ context.fetch=async(route,options)=>{
 const accepted=body=>({ok:true,status:202,json:async()=>body}),refused=body=>({ok:false,status:409,json:async()=>body});
 const RUNNING={state:'Running',can_start:false,can_stop:true,start_block_reason:'Automatic processing is already running.',start_pending:null};
 const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',start_pending:null};
+// Futaba's 0.22.0 QA, m-6: the cell tooltip carries no raw text (the spec's check 3); the technical message is read from
+// technicalText(), which Technical details shows.
+function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical detail|WinError|Header missing|ffmpeg|audio-staging/.test(title),'m-6: no raw text in the cell tooltip: '+title);return run('technicalText(rows.find(row=>row.path==='+JSON.stringify(tr.dataset.path)+'))');}
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";viewControls()');
 
@@ -268,7 +271,7 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(clear.textContent,'Clear working files');assert.equal(clear.disabled,false);assert.equal(clear.getAttribute('aria-label'),'Clear working files: Title cw');
   assert.equal(clear.title,'Delete the working files an earlier attempt left behind. Originals are not touched. Frees about 637 MB.');
   assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','View metadata','Source folders'],'Retry, Clear, then navigation');
-  assert.equal(statusCell(tr).title,tip('Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER));
+  assert.equal(techOf(tr),'Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   // Repair: the same rule with its own verb.
   const repairable=m4bRow('rw',{retry:undefined,repair:{allowed:true,reason:''},attention:{group:'repair',cause:null,originals_untouched:true,damage:[{kind:'dangling_chapter_reference'}],working:{state:'cleanable',bytes:10,reason:'r'}}});
   paint([repairable]);tr=rowOf('rw');
@@ -327,7 +330,7 @@ const IDLE={state:'Idle',can_start:true,can_stop:false,start_block_reason:'',sta
   assert.equal(statusCell(tr).textContent,"Stopped — can't clear working files");
   assert.equal(statusCell(tr).children[0].textContent,"Working files from an earlier attempt are still present, and the app can't clear them safely right now.");
   assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['View metadata','Source folders']);
-  assert.equal(statusCell(tr).title,tip('Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER));
+  assert.equal(techOf(tr),'Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   const unreachable={...blockedRow,creation:{...blockedRow.creation,job:{...blockedRow.creation.job,attention:{...blockedRow.creation.job.attention,working:{state:'blocked',stops:true,cause:'originals_unreachable',reason:'r'}}}}};
   assert.equal(text(unreachable).hint,"Working files from an earlier attempt are still present, and the app can't clear them while the original files can't be reached. Check that the library drive is connected.");
   // An old working-files record with no files: the natural row, nothing about cleanup (Minor 3).

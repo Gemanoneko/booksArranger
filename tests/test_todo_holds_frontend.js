@@ -20,12 +20,13 @@ const files=(n,folder='Z:\\Audiobooks\\Колесо')=>Array.from({length:Math.m
 function hold(name,kind,cause,facts={},extra={}){return askRow(name,{kind,also:null,why:'',reasons:['x'],fields:named,candidates:[],cause,facts,files:files(12),file_count:12,flagged:[],saved_tracks:false,reason:'',destination:dest('Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'),...extra});}
 const COUNTS={files_missing:1,title_author:0,author_unclear:1,same_author:1,name_taken:0,part_of_book:6,files_unclear:7,order_unclear:5,retry:1,repair:0,reacquire:0,checking:0,changed:0,audiobook:0,other:1,unsupported:0};
 backend={...backend,audiobook_output_root:ROOT,audiobook_jobs:{...backend.audiobook_jobs,attention_counts:COUNTS,todo_still_checking:0}};
-let scanAnswer=null,approveAnswer=null,keepAnswer=null;const baseFetch=context.fetch;
+let scanAnswer=null,approveAnswer=null,keepAnswer=null,tracksAnswer=null;const baseFetch=context.fetch;
 context.fetch=async(route,options)=>{
   const data=options?.body?JSON.parse(options.body):undefined;
   if(route==='/api/candidate/scan-again'){calls.push({route,options});return scanAnswer?scanAnswer(data):{ok:true,status:200,json:async()=>({found:true,changed:false})};}
   if(route==='/api/candidate/approve'){calls.push({route,options});return approveAnswer?approveAnswer(data):{ok:true,status:200,json:async()=>({approved:true,job_id:'j',row:{}})};}
   if(route==='/api/candidate/keep-separate'){calls.push({route,options});return keepAnswer?keepAnswer(data):{ok:true,status:200,json:async()=>({kept:4})};}
+  if(route==='/api/candidate/tracks' && tracksAnswer){calls.push({route,options});return tracksAnswer(data);}
   if(route==='/api/candidate/approve-preview'){calls.push({route,options});return {ok:true,status:200,json:async()=>({preview:{path:'x.m4b',taken:false}})};}
   return baseFetch(route,options);
 };
@@ -71,6 +72,19 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   run('trackDirty=true;trackDraft={id:"cand-o1"};controls()');
   assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'Save or discard the edits in the details panel first.');
   run('trackDirty=false;trackDraft=null;controls()');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
+  // Futaba's 0.22.0 QA, M-3: a real Save track review lands and Approve this order works at once, also with a note typed in
+  // the panel. It stayed inert ("Save or discard the edits...") for 33 s and more, until another row was selected.
+  {
+    const o1=JSON.parse(run('JSON.stringify(rows.find(row=>row.id==="cand-o1"))'));inventoryRows=context.fixture.map(row=>({...row}));
+    tracksAnswer=()=>({ok:true,status:200,json:async()=>({saved:true,row:o1})});
+    run('trackDraft={id:"cand-o1",revision:2,order:[],included:[]};trackDirty=true;manualTrackTouched=true;controls()');
+    get('manual-evidence').value='Listened to every join.';get('review-form').handlers.input({target:get('manual-evidence')});
+    assert.equal(buttonsOf(tr)[0].title,'Save or discard the edits in the details panel first.','positive control: inert while the edits are unsaved');
+    await get('save-tracks').handlers.click();await tick();
+    tr=trOf('cand-o1');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null,'Approve works as soon as the save lands');
+    assert.equal(buttonsOf(tr)[0].title,'Approve the order shown: convert if needed, rename, move to Audiobooks Sorted.');
+    tracksAnswer=null;
+  }
   // Approve this order sends the row as shown.
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
   assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'},'with the Goes to line shown (m1)');

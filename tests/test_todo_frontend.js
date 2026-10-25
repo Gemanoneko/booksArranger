@@ -210,9 +210,23 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(document.activeElement,get('group-author_unclear'),'focus returns to the active chip');
   approveAnswer=null;
 
-  // 8. Technical details: collapsed, the whole message, Copy; the cell tooltip is the first 200 characters.
+  // Futaba's 0.22.0 QA, M-2: a missing part. Still absent: "Checked. Not found."; restored beside the book: the server scans
+  // its folder's source and answers changed (never found), so the row says what happened and leaves.
+  const partRow=askRow('p',{kind:'files_missing',also:null,why:'',reasons:['Parts of this book are missing'],fields:{},candidates:[],
+    missing:{folders:['Z:\\Audiobooks\\Unsorted\\Strangers'],files:['Part 2 of 3'],present:2,total:3},destination:dest('Кунц Дин\\Незнакомцы - Кунц Дин.m4b')});
+  paint([partRow]);tr=trOf('cand-p');
+  scanAnswer=()=>({ok:true,status:200,json:async()=>({found:false,changed:false,scan_started:false,scan_later:false})});
+  await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
+  {const hint=statusCell(tr).children[0];assert.match(hint.textContent+hint.children.map(span=>span.textContent).join(''),/Checked \d\d:\d\d\. Not found\.$/);}
+  scanAnswer=()=>({ok:true,status:200,json:async()=>({found:false,changed:true,scan_started:true,scan_later:false})});
+  await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(statusCell(tr).children[0].textContent,'Changes found. The book is checked again.');assert.equal(get('retry-all-status').textContent,'Changes found. The book is checked again.');
+  scanAnswer=null;
+
+  // 8. Technical details: collapsed, the whole message, Copy. The cell tooltip is the row's plain sentence, never the raw reason
+  // (Futaba's 0.22.0 QA, m-6: the spec's check 3 over its section 4.6).
   const long=askRow('l',{...noAuthor.ask,reasons:['x'.repeat(300)]});paint([long]);tr=trOf('cand-l');
-  assert.equal(statusCell(tr).title,('Technical detail: '+'x'.repeat(300)).slice(0,200)+'…');
+  assert.equal(statusCell(tr).title,'No author in the tags, file name or folder name.');assert.ok(!statusCell(tr).title.includes('xxxxxxxxxx'));
   run('select(rows[0],true)');assert.equal(get('technical-details').hidden,false);assert.equal(get('technical-details').open,false);
   assert.equal(get('automatic-technical').textContent,'Technical detail: '+'x'.repeat(300));
   let copied='';context.navigator={clipboard:{writeText:async text=>{copied=text;}}};await get('copy-technical').handlers.click();
@@ -220,6 +234,29 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.deepEqual(get('names-found-list').children.map(li=>li.textContent),['Title: Шестёрка воронов 1 - set name + part number']);
   get('technical-details').open=true;run('select('+JSON.stringify({...both,kind:'candidate'})+',true)');assert.equal(get('technical-details').open,false,'closed again on every selection');
   assert.equal(get('copy-technical-status').textContent,'','Copied. stays only until the selection changes');
+  // Futaba's 0.22.0 QA, m-4: the opened Accepted evidence shows no names or rule numbers; the stored text stays recorded.
+  {
+    const basis='Approved by you on 2026-10-25 (Sergei 2026-10-24, ruling 6b): "Мор" by "Pratchett Terry"';
+    const note='author tag; Sergei\'s rule (ruling 12) for "Терри Пратчетт"; a reader named in Sergei ruling 1 (2026-10-13); Set name + part number (rulings 13 and 15); Sergei: not an author';
+    const stored={...noAuthor,kind:'candidate',review_context:{metadata_actor:'user',metadata_evidence:[{field:'title',reviewer_identity:'Sergei (Approve)',basis,note}],manual_note:'(Sergei 2026-10-24, ruling 6a)'}};
+    run('select('+JSON.stringify(stored)+',true)');
+    for(const id of ['accepted-evidence','automatic-accepted-evidence']){
+      const text=get(id).textContent;assert.ok(text.includes('Approved by you on 2026-10-25'),id+': positive control, the evidence is shown');
+      assert.doesNotMatch(text,/Sergei|ruling/i,id);
+    }
+  }
+  // Futaba's 0.22.0 QA, m-2: raw OS text ("[WinError 2] ...") is never in the All status cell or the panel's reasons: one
+  // plain sentence is, and the raw text is only in the collapsed Technical details.
+  {
+    const raw='Cannot protect exact file: [WinError 2] The system cannot find the file specified.';
+    const gone={...askRow('w',null),automatic:{state:'Needs attention',reasons:[raw]}};
+    paint([gone]);const cell=statusCell(trOf('cand-w'));
+    assert.equal(cell.textContent,"Needs attention — A source file is missing or can't be opened.");
+    run('select(rows[0],true)');
+    assert.deepEqual(get('automatic-reasons').children.map(li=>li.textContent),["A source file is missing or can't be opened."]);
+    assert.equal(get('technical-details').hidden,false);assert.equal(get('technical-details').open,false);
+    assert.match(get('automatic-technical').textContent,/\[WinError 2\] The system cannot find the file specified/,'the raw text, in Technical details only');
+  }
   context.setTimeout=()=>0;
   console.log('PASS to-do list: chips and counts, shortcut, row fields and Goes to, Approve as is / typed / Ctrl+Enter, author choices (ruling 14), Name taken, missing files, Same author?, bulk Approve as is, Technical details');
 })().catch(error=>{console.error(error);process.exitCode=1;});

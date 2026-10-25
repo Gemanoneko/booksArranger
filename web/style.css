@@ -91,7 +91,8 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 .goes-to.taken .goes-label{color:var(--warning)}
 .goes-to .path,.ask-missing .path{color:var(--text);margin:0}
 .ask-missing{margin-top:4px}
-.row-actions .ask-convert{min-width:152px;white-space:normal}
+/* Futaba 0.22.0 QA, m-1: .row-retry[aria-label^="Convert"] (104px) out-ranked this rule on Convert what's there. */
+.row-actions .ask-convert,.row-actions .row-retry.ask-convert[aria-label]{min-width:152px;white-space:normal}
 #technical-details pre{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.6 ui-monospace,Consolas,monospace}
 #technical-details .toolbar button{min-height:32px;min-width:96px}
 #approve-dialog{width:min(560px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow-y:auto;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:16px}

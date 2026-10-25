@@ -24,6 +24,9 @@ context.fetch=async(route,options)=>{
   return baseFetch(route,options);
 };
 const settle=(ms=30)=>new Promise(resolve=>setTimeout(resolve,ms));
+// Futaba's 0.22.0 QA, m-6: the cell tooltip carries no raw text (the spec's check 3); the technical message is read from
+// technicalText(), which Technical details shows.
+function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical detail|WinError|Header missing|ffmpeg|audio-staging/.test(title),'m-6: no raw text in the cell tooltip: '+title);return run('technicalText(rows.find(row=>row.path==='+JSON.stringify(tr.dataset.path)+'))');}
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";viewControls()');
   // Classes and copy (section 1): the API group and cause decide, never the reason text.
@@ -36,8 +39,8 @@ const settle=(ms=30)=>new Promise(resolve=>setTimeout(resolve,ms));
   context.fixture=[changed,missing,unverified];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
   const trs=get('inventory').children;assert.equal(trs.length,3);
   for(const tr of trs)assert.equal(statusCell(tr).children[0].textContent,'Recovery copies are kept until you decide.');
-  assert.equal(statusCell(trs[0]).title,'Technical detail: '+CHANGED,'the kept reason, not the empty job reason');
-  assert.equal(statusCell(trs[1]).title,'Technical detail: The system cannot find the file specified');
+  assert.equal(techOf(trs[0]),'Technical detail: '+CHANGED,'the kept reason, not the empty job reason');
+  assert.equal(techOf(trs[1]),'Technical detail: The system cannot find the file specified');
   const keep=actionButtons(trs[0])[0];
   assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's files and stop flagging it. Nothing is deleted.");
   assert.equal(keep.getAttribute('aria-label'),'Keep files: Title a');assert.ok(keep.className.split(' ').includes('quiet'));assert.equal(keep.disabled,false);

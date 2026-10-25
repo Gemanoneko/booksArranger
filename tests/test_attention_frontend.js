@@ -23,6 +23,9 @@ context.fetch=async(route,options)=>{
   return baseFetch(route,options);
 };
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+// Futaba's 0.22.0 QA, m-6: the cell tooltip carries no raw text (the spec's check 3); the technical message is read from
+// technicalText(), which Technical details shows.
+function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical detail|WinError|Header missing|ffmpeg|audio-staging/.test(title),'m-6: no raw text in the cell tooltip: '+title);return run('technicalText(rows.find(row=>row.path==='+JSON.stringify(tr.dataset.path)+'))');}
 (async()=>{
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";viewControls()');
   // Class copy comes from the API class, never from the reason text; missing class falls back.
@@ -37,7 +40,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   context.fixture=[retry,space,unsupported,other,repair];run('rows=fixture.map(row=>({...row}));renderRows(true);controls()');
   const trs=get('inventory').children;assert.equal(trs.length,5);
   assert.equal(statusCell(trs[0]).textContent,'Stopped — ready to retry');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.');
-  assert.equal(statusCell(trs[0]).title,'Technical detail: raw reason a');
+  assert.equal(techOf(trs[0]),'Technical detail: raw reason a');
   assert.equal(actionButtons(trs[0])[0].textContent,'Retry');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].getAttribute('aria-label'),'Retry: Title a');
   assert.equal(actionButtons(trs[0])[0].className.split(' ').includes('quiet'),true,'row actions are quiet; the accent fill is for Retry all');
   assert.equal(statusCell(trs[1]).children[0].textContent,'Not enough free disk space yet. Free up space, then retry.','an unavailable reason replaces the hint');assert.equal(actionButtons(trs[1])[0].disabled,true);
@@ -45,7 +48,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(statusCell(trs[3]).children[0].textContent,'The conversion stopped. Select the row to read the technical message.');assert.notEqual(actionButtons(trs[3])[0].textContent,'Retry');
   // Damaged: the damage line, Repair and never Retry; the technical note joins the hover detail.
   assert.equal(statusCell(trs[4]).children[0].textContent,'The chapter list points to a missing part. Repair removes that pointer.');
-  assert.equal(statusCell(trs[4]).title,'Technical detail: raw reason r — '+DANGLING.description);
+  assert.equal(techOf(trs[4]),'Technical detail: raw reason r — '+DANGLING.description);
   assert.equal(actionButtons(trs[4])[0].textContent,'Repair');assert.equal(actionButtons(trs[4])[0].getAttribute('aria-label'),'Repair: Title r');
   assert.equal(actionButtons(trs[4])[0].title,'Patch the damage found in this book, then queue its audiobook job.');
   assert.ok(![...actionButtons(trs[4])].some(button=>button.textContent==='Retry'),'a damaged book never shows both');
@@ -98,7 +101,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(statusCell(m4bRow).children[0].textContent,"Retry was refused: the book's review or source files changed. Start over sends it back to automatic processing.");assert.ok(statusCell(m4bRow).children[0].classes.has('retry-refused'));
   assert.ok(![...actionButtons(m4bRow)].some(button=>button.textContent==='Retry'),'no Retry that cannot work');
   assert.equal(actionButtons(m4bRow)[0].textContent,'Start over','Start over in the Retry slot');
-  assert.match(statusCell(m4bRow).title,/^Technical detail: Failed M4B retained: Reviewed candidate changed during source proof; earlier failure: /);
+  assert.match(techOf(m4bRow),/^Technical detail: Failed M4B retained: Reviewed candidate changed during source proof; earlier failure: /);
   // A queued child outside the attention list says the same.
   assert.equal(status(blocked({status:'Queued',creation:{status:'Queued',reasons:[],job:{job_id:'child-m',state:'Queued',stage:'queued',reason:'',readmission:{accepted:true,queued_next:true,position:2,kind:'repair',state:'admitted'}}}})),'Queued — runs after 2 books');
   // v0.16.8: the press got no reply but it landed: the page asks the server and shows Queued, never an error.
