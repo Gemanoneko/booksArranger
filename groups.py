@@ -10,6 +10,7 @@ from metadata import propose, future_audio_tags
 from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
+import track_order
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
 SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check); v4: N10 (chapter names are no works)
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
@@ -17,7 +18,8 @@ SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (th
 # Ruling 19a (Sergei 2026-10-24): explicitly marked .m4b parts with their own chapters are joined, chapters kept; the
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
 M4B_PARTS_VERSION = 'm4b-parts-v2'
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION
+# 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION
 DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
 def setup(connection):
@@ -210,8 +212,24 @@ def _legacy_build(rows,split=None):
         group['members'].append(item)
     for group in batches.values():
         members=group['members']
+        sequence=track_order.filename_sequence([item['filename'] for item in members]) if split is None else None
+        if sequence:
+            # 0.22.1, item 9 (Sergei 2026-10-25): the names number the files 1..N without a gap: that is the order, and the
+            # disc and track tags do not change it ("Map of Bones": 240 files, most tagged "N/-1", 20 re-tagged "N").
+            for item,position in zip(members,sequence):
+                item['track']=position;item['disc']=None;item['order_conflict']=False
+                item['order_evidence']='File-name sequence: %d of %d'%(position,len(members))
+        elif len(members)==1:
+            # A single file has nothing to order: a tag that numbers it differently from its name is no conflict.
+            members[0]['order_conflict']=False
         members.sort(key=lambda item:(item['disc'] if item['disc'] is not None else 0,
             item['track'] is None,item['track'] if item['track'] is not None else 0,natural(item['filename']),item['path']))
+        if not sequence and len(members)>1 and all(item['track'] is not None for item in members)                 and [item['path'] for item in members]==[item['path'] for item in sorted(members,key=lambda item:(natural(item['filename']),item['path']))]:
+            # Item 9: the tags number the files in the order their names sort ("00_00_Пролог" .. "04_45_…" tagged 1..51): the
+            # names number parts and chapters, not a different order, so the two do not conflict.
+            for item in members:
+                if item['order_conflict']:
+                    item['order_conflict']=False;item['order_evidence']=item['order_evidence'].replace(' · Embedded and filename numbers conflict','')
         positions={}
         for index,item in enumerate(members,1):
             item['order']=index
@@ -599,9 +617,14 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
     # желание 1/2" and "Меч предназначения 1/2" under the album "Ведьмак"). Held as Files unclear listing the works; never
     # converted on its own. Reviewed, approved or queued groups and the other grouping routes keep their own rules.
     # N11: chapter-named title tags ("Глава 1. Дом, милый дом - 1") are no works (_works).
+    from local_identity import folder_structure
+    roots={row['path']:row['root'] for row in audio}
     for scope,group in output.items():
         if scope in protected or scope in split or scope in sets or scope in joined or scope in part_sets:continue
         if '\x1fAlbum ' not in scope or len(group['members'])<2 or group.get('source_partition_uncertain'):continue
+        structure=folder_structure(group,roots.get(group['members'][0]['path'],''))
+        if structure and structure['book']=='folder':
+            continue  # 0.22.1, item 9: a book folder of Sergei's structure (Sigma Force\9. Bloodline) holds one book; its chapter titles are no works
         entries=[(m,'',{k.casefold():str(v) for k,v in m['metadata'].get('tags',{}).items()}) for m in sorted(group['members'],key=lambda m:m['path'])]
         album=' '.join(entries[0][2].get('album','').split())
         works=_works(entries,{m['path']:scope for m in group['members']},DISC_SUFFIX.sub('',album).strip() or album)

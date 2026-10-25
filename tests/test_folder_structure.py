@@ -1,0 +1,276 @@
+"""0.22.1, backlog items 9 and 10 (Sergei, 2026-10-25): real rows from his library, read the way he files his books.
+
+Item 9: a clean file-name sequence decides the order (Map of Bones: 240 files, most track tags "N/-1", 20 re-tagged
+"N" were sorted first); the folder structure Author\\Series\\N. Title names the author, the series, the book's number
+and the title (ruling 6: a local source is enough; the folder's Latin title is the original, ruling 16); scrambled tags
+give way to it (Black Order); a single file has nothing to order (Anita Blake 0); a disc tag that repeats the book's
+number in its series is no missing disc (VanderMeer "Книга 1", disc 1/3). Item 10: a single file titled "1986" is a
+whole book; an author named before the title in a tag ("Джастин Кронин. Перерождение 2") is set aside; the row shows
+the author the app resolved; Sergei's reader rules (Сланевский, Смелова, Пухов) never make a reader the author.
+Catalog rows only (groups.build on inventory-shaped rows, as the scanner stores them); no file, no network."""
+import contextlib, json, sqlite3, tempfile, threading, unittest
+from pathlib import Path
+
+import author_rules
+import groups
+import local_identity
+from metadata import propose
+from public_research import PublicResearch, ResearchWait
+from source_identity import source_gate
+
+AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'folder-structure-tests'; AREA.mkdir(parents=True, exist_ok=True)
+ROOT = 'Z:\\Audiobooks'
+SORTED = 'Z:\\Audiobooks Sorted'
+SIGMA = 'James Rollins\\Sigm\u0430 Force'  # the live folder name carries a Cyrillic "а"
+
+
+def file_row(relative, **tags):
+    path = ROOT + '\\' + relative
+    metadata = {'title': tags.get('title', ''), 'artist': tags.get('artist', ''), 'tags': tags,
+                'probe': {'format': {'duration': '60'}, 'streams': [{'codec_type': 'audio', 'codec_name': 'aac', 'sample_rate': '44100', 'channels': 1}]}}
+    return {'root': ROOT, 'path': path, 'kind': 'audiobook', 'size': 1000, 'modified': 1000, 'metadata': json.dumps(metadata, ensure_ascii=False),
+            'error': '', 'missing': 0, 'seen': 1, 'arrival': 0, 'review': ''}
+
+
+def built(rows):
+    """{book folder or file: row} as the catalog groups them."""
+    found = {}
+    for n, (scope, group) in enumerate(groups.build(rows).items()):
+        row = dict(group, id='book-%d' % n, revision=1, fingerprint='fp-%d' % n, source_root=ROOT)
+        key = str(Path(group['members'][0]['path']).parent) if len(group['members']) > 1 else group['members'][0]['path']
+        found[key] = row
+    return found
+
+
+class Offline:
+    """Every public source is closed: identity must not need one."""
+    def __init__(self, database):
+        self.database = database; self.calls = []
+
+    def _closed(self, url, *_, **__):
+        self.calls.append(url); raise ResearchWait('offline', 'private fixture', 0)
+    json = read = _closed
+
+    def discover(self, query, *_):
+        self.calls.append(query); raise ResearchWait('offline', 'private fixture', 0)
+    wikipedia = discover
+
+    def receipt(self, url):
+        return {'url': url}
+
+
+class Base(unittest.TestCase):
+    def catalog(self, rows):
+        temp = tempfile.TemporaryDirectory(dir=AREA); self.addCleanup(temp.cleanup)
+        database = Path(temp.name) / 'catalog.sqlite3'
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            db.execute("CREATE TABLE files(root TEXT,path TEXT,kind TEXT,metadata TEXT,missing INTEGER DEFAULT 0,PRIMARY KEY(root,path))")
+            for row in rows:
+                db.execute("INSERT INTO files VALUES(?,?,'audiobook',?,0)", (ROOT, row['path'], row['metadata']))
+            author_rules.seed(db)  # Sergei's 2026-10-24 answers: Сланевский, Смелова and Пухов are readers
+            db.commit()
+        self.research = PublicResearch(Offline(str(database)), leads=[])
+        self.books = built(rows)
+        return self.books
+
+    def lookup(self, row):
+        return self.research.lookup(dict(row, _manual_metadata_sources=[]), ROOT, threading.Event())
+
+    def goes_to(self, row, result):
+        review = dict(result['review'], organization_policy='books-hierarchy-v2')
+        return propose(row['members'][0]['path'], SORTED, 'audiobook', row['metadata'], review, automatic_facts=result.get('metadata_facts'))['path']
+
+    def approved(self, row):
+        """What Approve and the row show (rulings 6b and 11a)."""
+        return self.research.approved(row, ROOT)['approval']
+
+
+def map_of_bones():
+    # 240 files in perfect sequence; most track tags "N/-1"; the 20 files re-tagged on 2020-03-07 carry a plain "N".
+    odd = {7, 9, 18, 21, 27, 29, 32, 35, 41, 44, 52, 60, 77, 100, 104, 106, 108, 113, 117, 150}
+    return [file_row(SIGMA + '\\2. Map of Bones\\Роллинс Джеймс - Кости волхвов - %02d - Kosti_%03d.m4a' % (n, n),
+                     track=('%d' % n) if n in odd else '%d/-1' % n, album='Кости волхвов', artist='Роллинс Джеймс', title='Kosti_%03d' % n, genre='Speech')
+            for n in range(1, 241)]
+
+
+class OrderTests(Base):
+    def test_a_clean_file_name_sequence_decides_the_order_whatever_a_few_odd_tags_say(self):
+        row = self.catalog(map_of_bones())[ROOT + '\\' + SIGMA + '\\2. Map of Bones']
+        names = [m['filename'] for m in sorted(row['members'], key=lambda m: m['order'])]
+        self.assertEqual(names[:3], ['Роллинс Джеймс - Кости волхвов - 01 - Kosti_001.m4a', 'Роллинс Джеймс - Кости волхвов - 02 - Kosti_002.m4a',
+                                     'Роллинс Джеймс - Кости волхвов - 03 - Kosti_003.m4a'], 'never 07, 09, 18, 21, 27 first')
+        self.assertEqual([int(n.split(' - ')[2]) for n in names], list(range(1, 241)))
+        self.assertFalse(any(m['order_conflict'] for m in row['members']))
+        result = self.lookup(row)
+        self.assertNotIn('Playback order uncertain', result['reasons'])
+
+    def test_no_sequence_when_the_names_do_not_settle_it(self):
+        import track_order
+        self.assertIsNone(track_order.filename_sequence(['CD1 - 01.mp3', 'CD1 - 02.mp3', 'CD2 - 01.mp3', 'CD2 - 02.mp3']))
+        self.assertIsNone(track_order.filename_sequence(['01.mp3', '02.mp3', '04.mp3']), 'a gap')
+        self.assertIsNone(track_order.filename_sequence(['Глава.mp3', 'Пролог.mp3']))
+        self.assertEqual(track_order.filename_sequence(['00_00_Prolog.mp3', '00_01_Blagodarnosti.mp3', '01_02_Nyneshniy den.mp3']), [0, 1, 2])
+        self.assertEqual(track_order.filename_sequence(['Orakul_002.mp3', 'Orakul_001.mp3']), [2, 1])
+
+    def test_tags_that_number_the_files_in_the_order_their_names_sort_are_no_conflict(self):
+        # "9. Bloodline": names number part and chapter (00_00 .. 04_45, the chapter count restarting is no sequence),
+        # the tags number the files 01/51 .. 51/51 in that same order.
+        names = ['00_00_Rollins_D_Liniya_krovi', '00_01_Blagodarnosti', '00_02_Vyskazyvaniya', '01_01_Nyneshniy den', '01_02_Nyneshniy den', '02_03_Ray i ad']
+        rows = [file_row(SIGMA + '\\9. Bloodline\\%s.mp3' % name, track='%02d/%02d' % (n, len(names)), album='Линия крови. Отряд сигма_08', artist='Роллинс Джеймс')
+                for n, name in enumerate(names, 1)]
+        row = self.catalog(rows)[ROOT + '\\' + SIGMA + '\\9. Bloodline']
+        self.assertFalse(any(m['order_conflict'] for m in row['members']))
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], result['reasons'])
+        self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), ('Bloodline', 'Sigma Force', '9'))
+
+    def test_a_single_file_is_never_order_unclear(self):
+        row = self.catalog([file_row('Laurell K. Hamilton\\Anita Blake\\0 Those Who Seek Forgiveness.m4b', track='1', album='Anita Blake 0 - Those Who Seek Forgiveness',
+                                     title='Anita Blake 0 - Those Who Seek Forgiveness', artist='Laurell K. Hamilton', album_artist='Laurell K. Hamilton')])
+        row = next(iter(row.values()))
+        self.assertFalse(row['members'][0]['order_conflict'], 'its name says 0, its tag 1: one file has nothing to order')
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        review = result['review']
+        self.assertEqual((review['title'], review['series'], review['number'], review['canonical_author']),
+                         ('Those Who Seek Forgiveness', 'Anita Blake', '0', 'Hamilton Laurell K.'), 'a prequel is position 0')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Hamilton Laurell K\\Anita Blake\\Anita Blake - 0 - Those Who Seek Forgiveness - Hamilton Laurell K.m4b')
+
+
+class StructureTests(Base):
+    def test_map_of_bones_is_james_rollins_sigma_force_2_with_its_original_title(self):
+        row = self.catalog(map_of_bones())[ROOT + '\\' + SIGMA + '\\2. Map of Bones']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        review = result['review']
+        self.assertEqual((review['title'], review['canonical_author'], review['series'], review['number']), ('Map of Bones', 'Rollins James', 'Sigma Force', '2'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Rollins James\\Sigma Force\\Sigma Force - 2 - Map of Bones - Rollins James.m4b',
+                         'was Rollins James\\Кости волхвов - Rollins James.m4b')
+        self.assertNotIn('original_title', result['metadata_facts']['gap_search']['gaps'], 'the folder names the original title')
+
+    def test_black_order_scrambled_tags_give_way_to_the_folders_and_the_file_names(self):
+        rows = [file_row(SIGMA + '\\3. Black Order\\Чёрный орден - чит. Кирсанов С. - %02d - Роллинс Джеймс.m4a' % n,
+                         track='%d/-1' % n, album='чит. Кирсанов С.', artist='Чёрный орден', title='Роллинс Джеймс') for n in range(1, 97)]
+        row = self.catalog(rows)[ROOT + '\\' + SIGMA + '\\3. Black Order']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        review = result['review']
+        self.assertEqual((review['title'], review['canonical_author'], review['series'], review['number']), ('Black Order', 'Rollins James', 'Sigma Force', '3'))
+        self.assertEqual([m['filename'].split(' - ')[2] for m in sorted(row['members'], key=lambda m: m['order'])][:3], ['01', '02', '03'])
+        shown = self.approved(row)
+        self.assertNotIn('Кирсанов', shown['title'] + shown['author'], 'a reader ("чит.") is never the title or the author')
+
+    def test_the_last_oracle_series_in_the_album_artist_is_not_the_author_and_the_disc_tag_does_not_order(self):
+        rows = [file_row(SIGMA + '\\5. The Last Oracle\\Orakul_%03d.mp3' % n, track='%03d/216' % n, disc='06', album='Последний оракул',
+                         artist='Роллинс Джеймс', album_artist='Отряд "Сигма"', title='Orakul_%03d' % n) for n in range(1, 217)]
+        row = self.catalog(rows)[ROOT + '\\' + SIGMA + '\\5. The Last Oracle']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], 'not "Track numbers skip or don\'t start at 1"')
+        review = result['review']
+        self.assertEqual((review['title'], review['canonical_author'], review['series'], review['number']), ('The Last Oracle', 'Rollins James', 'Sigma Force', '5'))
+
+    def vandermeer(self):
+        folder = 'Jeff VanderMeer\\Annihilation\\'
+        return self.catalog([
+            file_row(folder + '477. Книга 1. Аннигиляция (Сергей Пухов)\\11. Аннигиляция.m4b', track='1/1', disc='1/3', album='Аннигиляция',
+                     artist='Джефф Вандермеер', album_artist='Джефф Вандермеер', title='Аннигиляция'),
+            file_row(folder + '478. Книга 2. Консолидация (Сергей Пухов)\\21. Ворожба.m4b', track='1/3', disc='2/3', album='Консолидация', artist='Джефф Вандермеер', album_artist='Джефф Вандермеер', title='Ворожба'),
+            file_row(folder + '478. Книга 2. Консолидация (Сергей Пухов)\\22. Губка.m4b', track='2/3', disc='2/3', album='Консолидация', artist='Джефф Вандермеер', album_artist='Джефф Вандермеер', title='Губка'),
+            file_row(folder + '478. Книга 2. Консолидация (Сергей Пухов)\\23. Ворота.m4b', track='3/3', disc='2/3', album='Консолидация', artist='Джефф Вандермеер', album_artist='Джефф Вандермеер', title='Ворота'),
+            file_row(folder + '1340. Книга 3. Ассимиляция (Сергей Пухов)\\31. Ассимиляция.m4b', track='1/2', disc='3/3', album='Ассимиляция', artist='Джефф Вандермеер', title='Ассимиляция 1'),
+            file_row(folder + '1340. Книга 3. Ассимиляция (Сергей Пухов)\\32. Ассимиляция.m4b', track='2/2', disc='3/3', album='Ассимиляция', artist='Джефф Вандермеер', title='Ассимиляция 2')])
+
+    def test_vandermeer_book_1_is_annihilation_1_not_three_missing_discs(self):
+        books = self.vandermeer()
+        self.assertEqual(len(books), 3, 'each "Книга N" folder is its own book, never three parts of one')
+        row = books[ROOT + '\\Jeff VanderMeer\\Annihilation\\477. Книга 1. Аннигиляция (Сергей Пухов)\\11. Аннигиляция.m4b']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], 'not "Files unclear: the tags say 3 discs, but 1 is here"')
+        review = result['review']
+        self.assertEqual((review['title'], review['canonical_author'], review['series'], review['number']), ('Аннигиляция', 'VanderMeer Jeff', 'Annihilation', '1'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\VanderMeer Jeff\\Annihilation\\Annihilation - 1 - Аннигиляция - VanderMeer Jeff.m4b')
+        self.assertIn('original_title', result['metadata_facts']['gap_search']['background'], 'the English title comes from a source, later')
+        self.assertNotIn('Пухов', self.approved(row)['author'], 'the reader in brackets is no author (and the uploader number 477 no position)')
+
+    def test_vandermeer_books_2_and_3_are_one_book_each_with_their_parts_in_order(self):
+        books = self.vandermeer()
+        for folder, number, title, parts in (('478. Книга 2. Консолидация (Сергей Пухов)', '2', 'Консолидация', 3), ('1340. Книга 3. Ассимиляция (Сергей Пухов)', '3', 'Ассимиляция', 2)):
+            row = books[ROOT + '\\Jeff VanderMeer\\Annihilation\\' + folder]
+            self.assertEqual(len(row['members']), parts)
+            result = self.lookup(row)
+            self.assertEqual(result['reasons'], [], folder)
+            self.assertEqual(result.get('part_set', {}).get('decision', 'join'), 'join', 'never separate books of a series')
+            self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, 'Annihilation', number))
+
+
+class NumberTitleTests(Base):
+    def jesper(self):
+        return self.catalog([
+            file_row('JESPER ERSGARD\\JESPER ERSGARD - 1986.m4b', album='1986', title='1986', artist='Илья Сланевский', genre='Other'),
+            file_row('JESPER ERSGARD\\JESPER ERSGARD - 1986 Season 2.m4b', album='1986 Сезон 2', title='1986 Сезон 2', artist='Илья Сланевский', album_artist='Илья Сланевский'),
+            file_row('JESPER ERSGARD\\Jesper Ersgard - 1986 Book 3 At the End of Time.m4b', album='1986 Book 3 At the End of Time', title='1986 Book 3 At the End of Time', artist='Jesper Ersgard')])
+
+    def test_a_single_file_titled_1986_is_a_whole_book_by_the_author_its_name_and_folder_give(self):
+        row = self.jesper()[ROOT + '\\JESPER ERSGARD\\JESPER ERSGARD - 1986.m4b']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], 'not "Part of a bigger book: This file is named as one chapter."')
+        self.assertEqual((result['review']['title'], result['review']['canonical_author']), ('1986', 'Ersgard Jesper'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Ersgard Jesper\\1986 - Ersgard Jesper.m4b', 'was Без автора\\1986.m4b')
+        shown = self.approved(row)
+        self.assertNotIn(shown['author'], ('', 'Без автора', 'Илья Сланевский'), 'the row shows the author the app resolved, never the reader')
+
+    def test_a_lone_number_beside_numbered_files_stays_a_chapter(self):
+        rows = [file_row('Кто-то Иванов - Книга\\%02d.m4b' % n, album='%02d' % n, title='%02d' % n, artist='Кто-то Иванов') for n in (4, 5)]
+        books = self.catalog(rows)
+        result = self.lookup(books[ROOT + '\\Кто-то Иванов - Книга\\05.m4b'])
+        self.assertIn(local_identity.PIECE_REASON, result['reasons'], 'positive control: chapter files are pieces')
+
+    def test_a_held_piece_shows_the_author_it_resolved(self):
+        record = {'accepted': False, 'ask': None, 'route': None, 'held': 'one chapter',
+                  'fields': {'title': {'value': '1986', 'basis': 'tag'}, 'author': {'value': 'JESPER ERSGARD', 'basis': 'file_name'}}}
+        self.assertEqual(local_identity.shown(record)['author'], 'JESPER ERSGARD')
+
+
+class CroninTests(Base):
+    def test_perezhdenie_2_is_the_passage_2_twelve_by_justin_cronin(self):
+        folder = 'Justin Cronin\\The Passage Trilogy\\'
+        books = self.catalog([
+            file_row(folder + 'Перерождение 1. Перерождение.m4b', track='1', album='Перерождение', artist='Джастин Кронин', album_artist='Светлана Смелова', title='Джастин Кронин. Перерождение'),
+            file_row(folder + 'Перерождение 2. Двенадцать.m4b', track='2', album='Джастин Кронин. Перерождение 2', artist='Светлана Смелова', title='Двенадцать'),
+            file_row(folder + 'Перерождение 3. Город зеркал.m4b', album='Перерождение 3. Город зеркал', artist='Светлана Смелова', title='Перерождение 3. Город зеркал')])
+        row = books[ROOT + '\\' + folder + 'Перерождение 2. Двенадцать.m4b']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], '"<Series> N. <Title>" is no chapter label')
+        review = result['review']
+        self.assertEqual((review['title'], review['canonical_author'], review['series'], review['number']), ('Двенадцать', 'Cronin Justin', 'The Passage', '2'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Cronin Justin\\The Passage\\The Passage - 2 - Двенадцать - Cronin Justin.m4b',
+                         'was Без автора\\Джастин Кронин. Перерождение 2.m4b')
+        self.assertNotIn('Смелова', self.approved(row)['author'], 'the reader rule')
+        third = self.lookup(books[ROOT + '\\' + folder + 'Перерождение 3. Город зеркал.m4b'])
+        self.assertEqual((third['review']['title'], third['review']['number']), ('Город зеркал', '3'))
+
+    def test_an_author_named_before_the_title_in_a_tag_is_set_aside(self):
+        books = self.catalog([file_row('Unsorted\\Кронин\\Перерождение.m4b', album='Джастин Кронин. Перерождение', title='Джастин Кронин. Перерождение', artist='Светлана Смелова')])
+        result = self.lookup(next(iter(books.values())))
+        self.assertEqual(result['reasons'], [], result)
+        self.assertEqual((result['review']['title'], result['review']['canonical_author']), ('Перерождение', 'Кронин Джастин'))
+
+
+class StructureGuardTests(unittest.TestCase):
+    def row(self, *relative):
+        return {'members': [{'path': ROOT + '\\' + r, 'filename': Path(r).name} for r in relative]}
+
+    def test_only_author_series_book_with_a_number(self):
+        read = lambda *r: local_identity.folder_structure(self.row(*r), ROOT)
+        self.assertIsNone(read('Unsorted\\Книги\\01. Title.mp3'), 'a container is no author')
+        self.assertIsNone(read('Jeff VanderMeer\\Born\\Борн 1.m4b', 'Jeff VanderMeer\\Born\\Борн 2.m4b'), 'a book folder of parts, no series')
+        self.assertIsNone(read('Stephen King\\Оно\\1 часть\\01.mp3'), 'a part folder is a piece of a book')
+        self.assertIsNone(read('Stephen King\\Оно\\01. Глава 1.mp3'), 'a chapter file')
+        found = read('Jeff VanderMeer\\Annihilation\\477. Книга 1. Аннигиляция (Сергей Пухов)\\11. Аннигиляция.m4b')
+        self.assertEqual((found['series'], found['position'], found['title'], found['reader']), ('Annihilation', '1', 'Аннигиляция', 'Сергей Пухов'))
+        found = read(SIGMA + '\\2. Map of Bones\\01.m4a', SIGMA + '\\2. Map of Bones\\02.m4a')
+        self.assertEqual((found['author'], found['series'], found['position'], found['title']), ('James Rollins', 'Sigma Force', '2', 'Map of Bones'))
+
+
+if __name__ == '__main__':
+    unittest.main()

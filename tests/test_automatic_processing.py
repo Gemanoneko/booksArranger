@@ -67,9 +67,14 @@ class AutoTests(unittest.TestCase):
     def test_unrelated_filename_work_without_album_also_splits(self):
         self.assertEqual(len(groups.build([row(self.base/'One Author – First Tale.mp3','First Tale','One Author',album=''),row(self.base/'Two Author – Second Tale.mp3','Second Tale','Two Author',album='')])),2)
     def test_missing_order_gap_and_filename_only_do_not_approve(self):
+        # Names that number nothing (0.22.1, item 9: a clean 01, 02 file-name sequence decides the order, see the control).
+        for tracks in (('1','3'),('1','1'),('','')):
+            group=next(iter(groups.build([row(self.base/'Part A.mp3','A Book',track=tracks[0]),row(self.base/'Part B.mp3','A Book',track=tracks[1])]).values()))
+            self.assertIn('Playback order uncertain',source_gate(group,WORK))
         for tracks in (('1','3'),('1','1'),('','')):
             group=next(iter(groups.build([row(self.base/'01.mp3','A Book',track=tracks[0]),row(self.base/'02.mp3','A Book',track=tracks[1])]).values()))
-            self.assertIn('Playback order uncertain',source_gate(group,WORK))
+            # The legacy public-evidence path (this WORK) still needs embedded track numbers; the order is the names'.
+            self.assertEqual([Path(m['path']).name for m in sorted(group['members'],key=lambda m:m['order'])],['01.mp3','02.mp3'])
         candidate=self.candidate();candidate['members'][0]['metadata']['tags']={}
         self.assertIn('Source membership uncertain',source_gate(candidate,WORK))
     def test_conflicting_source_title_or_format_held(self):

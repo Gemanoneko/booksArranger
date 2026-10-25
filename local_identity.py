@@ -90,6 +90,7 @@ ruth katherine samantha christine emma catherine rachel janet maria heather juli
 джемма йон тодд барбара гордон карлос кэтрин алекс кристина ханну кодзи содзи киноко митио стэнли стенли алджернон бентли крейг айзек
 martha neal fritz grady thimoty colin josh simon tim algernon bentley craig isaac jesper jeff rick shaun stanley gordon mitchel michio kinoko
 andrzej guy nick andy ian nate gerald gemma jon todd barbara carlos catherine alex kristina hannu koji soji graham
+джастин джефф лорел лорелл laurell laurel йеспер
 '''.split())
 NAME_PARTICLES = {'de', 'van', 'von', 'der', 'le', 'la', 'du', 'di', 'da', 'де', 'ван', 'фон', 'дер', 'ле', 'ла', 'дю', 'ди', 'да'}
 INITIALS = re.compile(r'^(?:[^\W\d_]\.){1,3}[^\W\d_]?\.?$')
@@ -961,7 +962,9 @@ def surname_first(name):
     if len(tokens) < 2 or PEOPLE_SEPARATOR.search(name):
         return ' '.join(tokens) or text(name), 'kept as written (one word or several people)'
     first, last = norm(tokens[0]), norm(tokens[-1])
-    if (first in GIVEN_NAMES or INITIALS.match(tokens[0])) and last not in GIVEN_NAMES:
+    # 0.22.1 (Sergei 2026-10-25, "Laurell K. Hamilton"): a middle initial between two words shows the first name comes first.
+    middle = len(tokens) == 3 and INITIALS.match(tokens[1]) and not INITIALS.match(tokens[0]) and not INITIALS.match(tokens[2])
+    if (first in GIVEN_NAMES or INITIALS.match(tokens[0]) or middle) and last not in GIVEN_NAMES:
         # The surname is the last word, with a lowercase particle before it ("де Клемешье").
         cut = len(tokens) - 1
         while cut > 1 and tokens[cut - 1].casefold() in NAME_PARTICLES:
@@ -1239,7 +1242,12 @@ def _piece_conflicts(row, title, part, siblings, components, author='', numbered
     beside others with the same title). Shared by agreement() and identify(); every entry is forced.
     numbered: the title is a ruling-13 "set name + number" name, so its trailing number is expected."""
     conflicts = []
-    if title and not numbered and (PART_TITLE.search(clean_title(title)) or not re.search(r'[^\W\d_]{2}', clean_title(title))):
+    # 0.22.1, item 10 (b): a single file titled only with a number of three or four digits ("1986", "1408") is a whole book,
+    # unless files beside it are numbered too; "01" or "05" stays a chapter or part.
+    lone_number = bool(title and len(row.get('members', [])) == 1 and re.fullmatch(r'\W*[1-9]\d{2,3}\W*', clean_title(title))
+                       and not any(re.fullmatch(r'\W*\d{1,4}\W*', clean_title(_index_stripped(v)) or v) for s in (siblings or [])
+                                   for v in (text(s['tags'].get('title')), filename_identity(s['filename']).get('title') or Path(s['filename']).stem) if v))
+    if title and not numbered and not lone_number and (PART_TITLE.search(clean_title(title)) or not re.search(r'[^\W\d_]{2}', clean_title(title))):
         conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True, 'piece': 'part_title'})
     elif title and not part and len(row.get('members', [])) == 1 and _chapter_only(row, title):
         # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
@@ -1685,6 +1693,126 @@ def _numbered_title(set_title, value):
     return '%s %d' % (clean_title(set_title), int(numbers[-1]))
 
 
+# ------------------------------------------------------------ 0.22.1, item 9: the folder structure is a local source
+# Sergei 2026-10-25 (ruling 6: a local source is enough): "Z:\Audiobooks\James Rollins\Sigma Force\2. Map of Bones\" is
+# James Rollins, Sigma Force #2, "Map of Bones". Author folder, series folder, then the book: a folder or a file named
+# "N. Title", "Книга N. Title", "<Series> N. Title" or "N Title", with an uploader's catalog number before "Книга N"
+# ("477. Книга 1. Аннигиляция (Сергей Пухов)") and a reader in brackets after it.
+STRUCTURE_VERSION = 'folders-v1'
+_UPLOADER = re.compile(r'^\s*\d{2,6}\s*\.\s+(?=(?:книга|кн\.|book|том|т\.|vol\.?|volume)\s*[#№]?\s*\d)', re.I)
+_BOOK_POSITION = re.compile(r'^\s*(?:(?:книга|кн\.|book|том|т\.|vol\.?|volume)\s*[#№]?\s*)?(\d{1,3}(?:[.,]5)?)(?:\s*[.:_)\-–—]\s*|\s+)(\S.*)$', re.I)
+_SERIES_POSITION = re.compile(r'^\s*(\D{2,80}?)[\s_]+(\d{1,3}(?:[.,]5)?)\s*[.:\-–—]\s*(\S.*)$')
+_SERIES_WORDS = re.compile(r'[\s,_-]+(?:trilogy|series|saga|cycle|chronicles?|duology|quartet|tetralogy|трилогия|серия|сага|цикл|дилогия|тетралогия)\s*$', re.I)
+_READER_TAIL = re.compile(r'\s*[(\[]([^()\[\]]{3,80})[)\]]\s*$')
+_LOOKALIKE = str.maketrans('аеорсухкмтіАВЕКМНОРСТХІ', 'aeopcyxkmtiABEKMHOPCTXI')
+
+
+def latin_lookalikes(value):
+    """A word written in Latin letters with a Cyrillic look-alike in it ("Sigmа" with a Cyrillic а) in Latin letters."""
+    def fix(match):
+        word = match[0]
+        latin = sum(1 for c in word if 'a' <= c.casefold() <= 'z')
+        return word.translate(_LOOKALIKE) if latin and latin >= len(word) - latin else word
+    return re.sub(r'[^\W\d_]+', fix, str(value or ''))
+
+
+def _relative_parts(path, root):
+    """The path's names below the source root, else None."""
+    try:
+        parts = Path(path).parts
+        base = Path(root).parts
+    except (TypeError, ValueError):
+        return None
+    if not root or len(parts) <= len(base) or [norm(p) for p in parts[:len(base)]] != [norm(p) for p in base]:
+        return None
+    return list(parts[len(base):])
+
+
+def folder_structure(row, root, index=None):
+    """{'author', 'series', 'position', 'title', 'reader', 'file_series', 'book', 'book_name', 'series_folder'} when the
+    book sits at Author\\Series\\<book> below its source root and <book> names its place in the series; else None.
+    <book> is the folder that holds every file, or the file itself when it sits directly in the series folder."""
+    members = row.get('members') or []
+    if not members:
+        return None
+    paths = [_relative_parts(m['path'], root) for m in members]
+    if any(p is None or len(p) < 3 for p in paths) or len({tuple(norm(x) for x in p[:3]) for p in paths}) != 1:
+        return None
+    first = paths[0]
+    author, series = text(first[0]), text(first[1])
+    if norm(author) in CONTAINER_NAMES or norm(series) in CONTAINER_NAMES or COLLECTION_FOLDER.search(author) or COLLECTION_FOLDER.search(series):
+        return None
+    if not looks_like_person(author, index) or looks_like_person(series, index) or DISC.fullmatch(series.strip()):
+        return None
+    if len(first) == 3:
+        if len(members) != 1:
+            return None
+        book, kind = Path(first[2]).stem, 'file'
+    else:
+        book, kind = first[2], 'folder'
+    name = text(book)
+    reader = ''
+    tail = _READER_TAIL.search(name)
+    if tail:
+        reader, name = text(tail[1]), text(name[:tail.start()])
+    name = _UPLOADER.sub('', name)
+    file_series = ''
+    match = _BOOK_POSITION.match(name)
+    if match:
+        position, title = match[1], match[2]
+    else:
+        match = _SERIES_POSITION.match(name)
+        if not match or kind != 'file' or looks_like_person(match[1], index):
+            return None
+        file_series, position, title = text(match[1]), match[2], match[3]
+    title = text(re.sub(r'\s*[-–—]\s*$', '', title))
+    # "Title - Author" or "Author - Title" written into the book's name: the author is not part of the title.
+    for piece in re.split(r'\s+[-–—]\s+', title):
+        if piece != title and compare_names(piece, author):
+            title = text(re.sub(r'(?:^|\s+[-–—]\s+)' + re.escape(piece) + r'(?:\s+[-–—]\s+|$)', ' - ', title).strip(' -–—'))
+    title = clean_title(title)
+    if not title or not re.search(r'[^\W\d_]{2}', title) or garbled(title) or NARRATOR_MARKER.search(title) or CHAPTER_LABEL.match(title)             or set(words(title)) <= PART_WORDS or PART_FOLDER.search(name) or DISC.search(name):
+        return None  # a disc, part or chapter folder ("1 часть", "CD 2") is a piece of a book, not a book of a series
+    position = position.replace(',', '.')
+    position = str(int(position)) if position.isdigit() else position
+    return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', series)) or series),
+            'position': position, 'title': title, 'reader': reader, 'file_series': file_series, 'book': kind, 'book_name': text(book),
+            'series_folder': series}
+
+
+def _transliterated_title(a, b):
+    """The same words in two scripts ("Kosti volhvov" / "Кости волхвов"): a transliteration, not a translation."""
+    left, right = words(a), words(b)
+    return bool(left) and len(left) == len(right) and all(transliterated(x, y) or norm(x) == norm(y) for x, y in zip(left, right))
+
+
+def _structured_title(title, structure, author_names, index=None):
+    """The book's title once its place in Sergei's folders is known: (title record, the replaced tag title or '').
+    The tag title stays unless it is empty, a reader credit, a person, only the series and the book's number, the
+    series and number before the folder's title ("Anita Blake 0 - Those Who Seek Forgiveness"), or a translation whose
+    original the folder names in Latin letters ("Кости волхвов" in "2. Map of Bones", ruling 16)."""
+    folder = structure['title']
+    record = {'state': 'one', 'value': folder, 'basis': 'folder_name', 'how': 'the folder structure (Author\\Series\\N. Title)',
+              'sources': [{'kind': 'folder structure', 'value': structure['book_name']}]}
+    if title is None:
+        return record, ''
+    value = title['value']
+    key, folder_key = title_key(value), title_key(folder)
+    if key == folder_key:
+        return title, ''
+    series_names = [s for s in (structure['series'], structure['file_series'], structure['series_folder']) if s]
+    numbered = {title_key('%s %s' % (s, structure['position'])) for s in series_names}
+    if NARRATOR_MARKER.search(value) or looks_like_person(value, index) or any(compare_names(value, a) for a in author_names if a) \
+            or key in numbered or key in {title_key(s) for s in series_names}:
+        return record, value
+    if key.endswith(folder_key) and any(key.startswith(title_key(s)) for s in series_names):
+        return record, value
+    if script(folder) == 'latin' and script(value) == 'cyrillic' and not _transliterated_title(value, folder):
+        # The folder names the original title in Latin letters; the tag carries the translation (ruling 16).
+        return dict(record, how=record['how'] + '; the original title, the tag "%s" is the translation (ruling 16)' % value, aliases=[value]), value
+    return title, ''
+
+
 class _Readers:
     """Who reads in this library and this book (guard 1)."""
 
@@ -1757,10 +1885,17 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             # "Ширли Джексон - Призрак дома на холме" in the title tag: the person before the dash is an
             # author credit, the rest is the title.
             parsed = filename_identity(value + '.x')
+            dotted = re.match(r'^\s*([^.\d]{3,60}?)\.\s+(\S.*)$', value)
             if parsed.get('author') and looks_like_person(parsed['author'], index) and re.search(r'[^\W\d_]{2}', parsed.get('title', '')):
                 title['value'] = clean_title(parsed['title'])
                 title['how'] += ' (the author named before the title is set aside)'
                 tag_title_author = parsed['author']
+            elif dotted and looks_like_person(dotted[1], index) and re.search(r'[^\W\d_]{2}', dotted[2]):
+                # 0.22.1, item 10 (Sergei 2026-10-25): "Джастин Кронин. Перерождение 2" in the title tag: the person before
+                # the full stop is an author credit, never part of the title.
+                title['value'] = clean_title(dotted[2])
+                title['how'] += ' (the author named before the title is set aside)'
+                tag_title_author = text(dotted[1])
     if title is None:
         named = dict(row.get('numbered_set') or {})
         if named.get('name') and (garbled(named['name']) or norm(clean_title(named['name'])) in JUNK_TITLES):
@@ -1789,10 +1924,21 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 title = {'state': 'one', 'value': value, 'basis': 'folder_name', 'how': 'the folder name',
                          'sources': [{'kind': 'folder', 'value': component['value']}]}
                 break
+    # 0.22.1, item 9 (Sergei 2026-10-25, ruling 6): the folder structure Author\Series\N. Title is a local source. It names the
+    # series and the book's place in it, the author, and the title when the tags do not (or carry the translation of a
+    # title the folder names in Latin letters, ruling 16).
+    structure = folder_structure(row, root, index) if not (part and part['title']) else None
+    if structure:
+        title, replaced = _structured_title(title, structure, [structure['author'], tag_title_author], index)
+        if replaced:
+            ignored.append({'field': 'title', 'value': replaced, 'why': 'the folder structure names the book (Author / Series / N. Title)'})
     if part and part['blocked']:
         conflicts.append({'field': 'title', 'detail': part['blocked'], 'force': True, 'piece': 'part_set',
                           'position': part['position'], 'parts': part['parts'], 'set': part['set_title']})
     pieces = _piece_conflicts(row, title['value'] if title else '', part, siblings, components, numbered=bool(title and title.get('basis') == 'number_rule'))
+    if structure:
+        # Its own book of a series (Sergei: "Перерождение 2. Двенадцать" is book 2, "Двенадцать"): no chapter or part of another.
+        pieces = [p for p in pieces if p.get('piece') not in ('part_title', 'chapter', 'numbered_part', 'siblings')]
     for piece in pieces:
         if piece['piece'] == 'numbered_part' and title and title['basis'] == 'tag':
             # Ruling 13: "Торадора! Том 5" with the title tag "Торадора!" is part 5, named after its set.
@@ -1964,6 +2110,18 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         person = _person_folder({'value': ancestor}, index)
         if person:
             offer(person, 'folder name', 'folder_name', 'folder')
+    if structure:
+        # Item 9: the author folder. Scrambled tags (Sergei 2026-10-25, "Black Order": the title in the artist tag, the
+        # reader in the album tag): a credit that is no person and not the folder's author gives way to the folder.
+        offer(structure['author'], 'folder name', 'folder_name', 'folder')
+        # The tags are scrambled when a title or album tag, or every file name, names the folder's author.
+        scrambled = any(compare_names(text(_tags(m).get(f)), structure['author']) for m in members[:3] for f in ('title', 'album') if text(_tags(m).get(f)))             or bool(members) and all(any(compare_names(piece, structure['author']) for piece in re.split(r'\s+[-–—]\s+', Path(m['filename']).stem)) for m in members)
+        for c in list(candidates):
+            if c['kind'] in ('tag', 'slot') and not c.get('rule') and (scrambled or not c.get('person') and not looks_like_person(c['name'], index))                     and not compare_names(c['name'], structure['author']) and not _shares_surname(c['name'], structure['author']):
+                candidates.remove(c)
+                if c in slots:
+                    slots.remove(c)
+                ignored.append({'field': c['source'], 'value': c['name'], 'why': 'not a person; the folder structure names the author'})
     if folk:
         # Folk tales (Sergei 2026-10-24): the compiler or reteller the files credit is the author, else Сборники.
         compiler = _compiler_credit(members)
@@ -2026,7 +2184,7 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         ask['why'] = 'garbled'
     fields = {}
     if title:
-        fields['title'] = {k: title[k] for k in ('state', 'value', 'basis', 'how', 'sources')}
+        fields['title'] = {k: title[k] for k in ('state', 'value', 'basis', 'how', 'sources', 'aliases') if k in title}
         if title['state'] == 'one' and title['basis'] == 'tag':
             support = _title_support(title['value'], components, author['name'] if author else '')
             if support:
@@ -2074,7 +2232,17 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                         {'state': 'grey', 'value': value['value'], 'sources': [value], 'how': 'only the embedded tag names it'})
     if part and part['series'] and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
         fields['series'], fields['number'] = part['series'], part['number']
+    from_folders = False
+    if structure and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+        # Item 9: the series folder and the book's number in it ("Sigma Force\2. Map of Bones", "Книга 1", "Перерождение 2.").
+        fields['series'] = {'state': 'green', 'value': structure['series'], 'how': 'the series folder (Author / Series / N. Title)',
+                            'sources': [{'kind': 'folder structure', 'value': structure['series_folder']}]}
+        fields['number'] = {'state': 'green', 'value': structure['position'], 'how': 'the book\'s number in its series folder',
+                            'sources': [{'kind': 'folder structure', 'value': structure['book_name']}]}
+        from_folders = True
     series = {'name': fields['series']['value'], 'number': fields['number']['value']} if fields['series']['state'] == 'green' and fields['number']['state'] == 'green' else {}
+    if series and from_folders:
+        series['folder'] = True
     accepted = bool(title and (author or route) and not ask and not piece)
     gaps = []
     if accepted and not route:
@@ -2152,8 +2320,11 @@ def shown(record):
     proposal = ask.get('fields') or {}
     title = fields['title']['value'] or (proposal.get('title') or {}).get('proposal', '')
     title_basis = fields['title'].get('basis') or (proposal.get('title') or {}).get('basis', '')
-    author = fields['author']['value'] if record.get('accepted') else (proposal.get('author') or {}).get('proposal', '')
-    author_basis = fields['author'].get('basis') if record.get('accepted') else (proposal.get('author') or {}).get('basis', '')
+    # 0.22.1, item 10 (c): a book held as a piece asks nothing, so its row shows the author the app resolved (it showed an
+    # empty Author field and "Goes to Без автора").
+    resolved = record.get('accepted') or not ask
+    author = fields['author']['value'] if resolved else (proposal.get('author') or {}).get('proposal', '')
+    author_basis = fields['author'].get('basis') if resolved else (proposal.get('author') or {}).get('basis', '')
     candidates = list(ask.get('candidates') or [])
     if ask.get('why') == 'reader' or any(c['name'] == author and c.get('reader_count') for c in candidates):
         author, author_basis = '', ''
@@ -2210,6 +2381,10 @@ def title_forms(record):
         value = clean_title(source.get('value'))
         if value and title_key(value) == title_key(forms[0]) and value not in forms:
             forms.append(value)
+    for value in record['fields']['title'].get('aliases') or ():
+        # Item 9: the translation in the tags of a book the folder names in its original ("Кости волхвов" / "Map of Bones").
+        if clean_title(value) and clean_title(value) not in forms:
+            forms.append(clean_title(value))
     return forms
 
 

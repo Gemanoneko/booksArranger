@@ -101,6 +101,15 @@ def source_gate(row,work):
         else:
             proven=dict(zip(sorted(m['path'] for m in members),split['positions']))
             if any(proven[m['path']]!=((m.get('disc') or 1),m.get('track')) for m in members):reasons.append('Playback order uncertain')
+    # 0.22.1, item 9 (Sergei 2026-10-25). A clean file-name sequence (track_order) decides the order: the tags of a few
+    # files never override it. A disc tag that only repeats the book's place in its series ("Книга 1" folder, disc 1/3:
+    # book 1 of 3) is no disc: the series came from the folder structure (local_identity, Author\Series\N. Title).
+    import track_order
+    sequence=track_order.filename_sequence(track_order.member_names(members)) if len(members)>1 else None
+    series_number=str((work.get('verified_series') or {}).get('number') or '') if (work.get('verified_series') or {}).get('folder') else ''
+    def series_disc(tags):
+        match=re.fullmatch(r'0*(\d+)(?:/\d+)?',str(tags.get('disc') or tags.get('discnumber') or '').strip())
+        return bool(series_number and match and series_number.isdigit() and int(match[1])==int(series_number))
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))
@@ -116,12 +125,12 @@ def source_gate(row,work):
             # (or, for a grouped numbered set, the set's shared name).
             own=[v for v in (tags.get('album'),tags.get('title'),named.get('title'),named.get('author') if row.get('numbered_set') else '',Path(m['path']).parent.name) if v]
             if not any(same_title(v) for v in own) and not (len(members)==1 or folder_context):reasons.append('Source membership uncertain')
-            if m.get('order_conflict'):reasons.append('Playback order uncertain')
+            if m.get('order_conflict') and len(members)>1 and not sequence:reasons.append('Playback order uncertain')  # one file: nothing to order
             if len(members)==1 and not work.get('part_book') and not work.get('numbered_part'):
                 denominator=re.fullmatch(r'\d+/(\d+)',str(tags.get('track') or tags.get('tracknumber') or '').strip())
                 if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
                 disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())
-                if disc_total and int(disc_total[1])>1:reasons.append('Source membership uncertain')
+                if disc_total and int(disc_total[1])>1 and not series_disc(tags):reasons.append('Source membership uncertain')
             series=work.get('verified_series') or {}
             for key in ('series','series-part','series_part'):
                 value=text(tags.get(key))
@@ -150,7 +159,7 @@ def source_gate(row,work):
         if standing and not source_title:
             source_title=norm(named['title']) if len(members)==1 else norm(folder_title) if folder_context else ''
         if not source_title or not (title_matches(source_title,aliases,work.get('author_aliases',[])) or local and source_title in {norm(v) for v in (tags.get('album'),tags.get('title'),named.get('title'),Path(m['path']).parent.name) if v and same_title(v)}):reasons.append('Source membership uncertain')
-        if m.get('order_conflict'):reasons.append('Playback order uncertain')
+        if m.get('order_conflict') and len(members)>1 and not sequence:reasons.append('Playback order uncertain')
         # One part of a multi-part set filed as its own book (Sergei 2026-10-13): its set totals are
         # the set's, not this book's. Re-derived at admission (local_identity.revalidate) and
         # admitted only when the part carries its own chapters (merge_service).
@@ -158,7 +167,7 @@ def source_gate(row,work):
             denominator=re.fullmatch(r'\d+/(\d+)',str(tags.get('track') or tags.get('tracknumber') or '').strip())
             if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
             disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())
-            if disc_total and int(disc_total[1])>1:reasons.append('Source membership uncertain')
+            if disc_total and int(disc_total[1])>1 and not series_disc(tags):reasons.append('Source membership uncertain')
         if tags.get('author') and not source_author(tags['author']):reasons.append('Sources disagree on the title or author')
         series=work.get('verified_series') or {}
         for key in ('series','series-part','series_part'):
@@ -182,11 +191,14 @@ def source_gate(row,work):
             match=re.match(r'^(\d{1,4})[ _.-]+',m['filename'])
             filename_positions.append(int(match[1]) if match else None)
         use_filenames=bool(standing and (folder_context or len(albums)==1 and next(iter(albums),'')) and all(p is not None for p in filename_positions))
+        named_order=bool(sequence and standing and (folder_context or len(albums)==1 and next(iter(albums),'')))
         if split:
             # Proven above (embedded track numbers, part numbers in the names or disc folders).
             use_filenames=bool(standing and split['ok'])
             positions=[(m.get('disc') or 1,m.get('track')) for m in members]
-        else:positions=[(m.get('disc') or 1,m.get('track') if m.get('track') is not None else filename_positions[i] if use_filenames else None) for i,m in enumerate(members)]
+        elif named_order:
+            use_filenames=True;positions=[(1,position) for position in sequence]
+        else:positions=[(1 if series_disc(t) else m.get('disc') or 1,m.get('track') if m.get('track') is not None else filename_positions[i] if use_filenames else None) for i,(m,t) in enumerate(zip(members,tags))]
         if any(p[1] is None for p in positions) or len(set(positions))!=len(positions):reasons.append('Playback order uncertain')
         # No natural filename sort can certify a gap-free recording.
         for disc in {p[0] for p in positions}:
@@ -196,13 +208,13 @@ def source_gate(row,work):
         if discs!=list(range(1,len(discs)+1)):reasons.append('Playback order uncertain')
         for t in tags:
             total_discs=re.fullmatch(r'\d+/(\d+)',str(t.get('disc') or t.get('discnumber') or '').strip())
-            if total_discs and int(total_discs[1])!=len(discs):reasons.append('Source membership uncertain')
+            if total_discs and int(total_discs[1])!=len(discs) and not named_order and not series_disc(t):reasons.append('Source membership uncertain')
         # Embedded track numbers must establish order, filename numbering alone remains a clue.
         if not use_filenames and any(not re.fullmatch(r'\d+(?:/\d+)?',str(t.get('track') or t.get('tracknumber') or '').strip()) for t in tags):reasons.append('Playback order uncertain')
         totals=[]
         for t,m in zip(tags,members):
             match=re.fullmatch(r'\d+/(\d+)',str(t.get('track') or t.get('tracknumber') or '').strip())
-            if match:totals.append((int(match[1]),m.get('disc') or 1))
+            if match:totals.append((int(match[1]),m.get('disc') or 1 if not (named_order or series_disc(t)) else 1))
         if totals and any(n!=sum(p[0]==disc for p in positions) for n,disc in totals):
             reasons.append('Source membership uncertain')
     return list(dict.fromkeys(reasons))

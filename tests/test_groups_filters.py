@@ -54,8 +54,9 @@ class GroupFilterTests(unittest.TestCase):
 
     def test_order_only_ambiguity_is_separate_from_metadata_approval(self):
         inventory=Inventory(self.database,self.roots,self.reader)
-        self.catalog('audio/Book/01.mp3',{'album':'Book','track':'2','artist':'Reader Person'})
-        self.catalog('audio/Book/02.mp3',{'album':'Book','track':'2','artist':'Reader Person'})
+        # Names without a numbering (0.22.1, item 9: a clean 01, 02 file-name sequence would decide the order).
+        self.catalog('audio/Book/Part A.mp3',{'album':'Book','track':'2','artist':'Reader Person'})
+        self.catalog('audio/Book/Part B.mp3',{'album':'Book','track':'2','artist':'Reader Person'})
         row=inventory.candidates('Audiobooks')['rows'][0]
         saved=inventory.save_candidate('Audiobooks',row['id'],row['revision'],REVIEW,True)
         self.assertTrue(saved['metadata_approved'])

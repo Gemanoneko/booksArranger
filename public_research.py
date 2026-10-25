@@ -72,7 +72,9 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 # 18: local agreement identity and gap-only search; older results get one fresh pass.
 # standing-21-v1 (0.22.0): identity v5 and research only on change (Sergei 2026-10-24): every held or waiting book is
 # researched once more under the new rules, then only when it changes.
-RESEARCH_VERSION='standing-21-v1'
+# standing-22-v1 (0.22.1, items 9 and 10): the folder structure, a clean file-name order and the number-titled whole book; every
+# held or waiting book is researched once more under them (research is local only since 0.22.1, so this costs no request).
+RESEARCH_VERSION='standing-22-v1'
 
 class ChallengeDetected(ValueError):pass
 
@@ -685,6 +687,14 @@ class PublicResearch:
         import groups,part_sets,split_books
         members=row.get('members') or []
         if len(members)<2 or not (row.get('part_set') or row.get('split_book')) or any(Path(m['path']).suffix.lower()!='.m4b' for m in members):return None
+        # 0.22.1, item 9 (Sergei 2026-10-25, VanderMeer): the parts in one book folder of Sergei's structure
+        # ("Annihilation\478. Книга 2. Консолидация") whose album tags all name that book are that one book, whatever the parts'
+        # own titles say. Its sibling folders are the other books of the series, never parts of this one.
+        import local_identity
+        structure=local_identity.folder_structure(row,root)
+        albums={local_identity.title_key(local_identity.text(local_identity._tags(m).get('album'))) for m in members}
+        if structure and structure['book']=='folder' and albums=={local_identity.title_key(structure['title'])}:
+            return {'decision':'join','basis':'one book folder','version':part_sets.VERSION,'parts':len(members)}
         if row.get('split_book') and split_books.joinable_parts(members):return None
         # A split book of many files is a book's chapter files (Dan Brown's 108-155): joined as before, never probed one by one.
         if row.get('split_book') and len(members)>groups.PART_SET_MAX:return None

@@ -84,10 +84,12 @@ class LocalFilenameGateTests(unittest.TestCase):
 
     def test_nonidentity_admission_barriers_are_preserved(self):
         for change,reason in (({'missing':True},'Source files unavailable or unreadable'),
-                              ({'error':'read failed'},'Source files unavailable or unreadable'),
-                              ({'order_conflict':True},'Playback order uncertain')):
+                              ({'error':'read failed'},'Source files unavailable or unreadable')):
             row,work=fixture(*CASES[3]);row['members'][0].update(change)
             self.assertIn(reason,source_gate(row,work))
+        # 0.22.1, item 9 (Sergei 2026-10-25, "0 Those Who Seek Forgiveness"): one file has nothing to order.
+        row,work=fixture(*CASES[3]);self.assertEqual(len(row['members']),1);row['members'][0]['order_conflict']=True
+        self.assertNotIn('Playback order uncertain',source_gate(row,work))
         row,work=fixture(*CASES[3]);row['source_partition_uncertain']=True
         self.assertIn('Source membership uncertain',source_gate(row,work))
         row,work=fixture(*CASES[3]);row['members'][0]['metadata']['tags']['track']='1/2'

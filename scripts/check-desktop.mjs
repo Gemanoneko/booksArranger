@@ -69,6 +69,8 @@ patterns.push('test_split_books.py','test_collection_identity.py');  // Senua 0.
 patterns.push('test_m4b_join.py','test_part_sets.py');  // 0.22.0: rulings 19a and 19 (M4B parts joined keeping their chapters; bare-numbered sets decided by their chapters)
 patterns.push('test_book_delete.py');  // 0.22.0: ruling 23, Delete book (only its own files, never Sorted, records last)
 patterns.push('test_lock_timing.py');  // 0.22.1: presses never wait behind background work (group_lock, the approval's re-check, list limit)
+patterns.push('test_gap_fill.py');  // 0.22.1: approval on local identity at once, optional fields in the background, per-site lanes
+patterns.push('test_folder_structure.py');  // 0.22.1: items 9 and 10, Sergei's folder structure, clean file-name order, number-titled books
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))
