@@ -147,6 +147,18 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(sorted(chips),sorted(ATTENTION_GROUPS))
         self.assertEqual(set(self.server.merge.state()['attention_counts']),ATTENTION_GROUPS-{'all'})
 
+    def test_delete_book_routes_answer_typed_refusals_over_http(self):
+        # Ruling 23 (Delete book): both routes through the real server, with the token, typed. A book that is not current
+        # is a typed refusal before anything is touched: 200 with the refusal for the preview, 409 with its code for delete.
+        import uuid
+        identity=str(uuid.uuid4())
+        code,preview=self.json_call('/api/candidate/delete-preview',{'library':'Audiobooks','id':identity,'revision':1})
+        self.assertEqual((code,preview['files'],preview['refusal']['code']),(200,[],'changed'))
+        code,refused=self.json_call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[]})
+        self.assertEqual((code,refused['code']),(409,'changed'))
+        self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':'Z:/x'})[0],400,'paths must be a list')
+        self.assertEqual(self.call('/api/candidate/delete',{'library':'Audiobooks','id':identity,'revision':1,'paths':[]},authorized=False)[0],403,'the token is required')
+
     def test_filtered_inventory_and_candidate_review_revision_contract(self):
         root=self.roots['Audiobooks']
         with connect(self.database) as connection:

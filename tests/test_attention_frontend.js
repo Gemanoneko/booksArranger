@@ -229,7 +229,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   context.fixture=researching('Book 1',10);run('state=fixture;renderJobs()');const view=run("activityRows.get('scan')");const samples=view.samples.length;
   context.fixture=researching('Book 2',12);run('state=fixture;renderJobs()');assert.equal(view.samples.length,samples+1,'a new book does not reset the history');
   context.fixture=attentionRow('bad-source','other',{}, {attention:{group:'other',originals_untouched:true,remedy:{kind:'replace_source',cause:'source_decode_failed',path:'Z:/Audio/Железная.mp3'}}});
-  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.match(sourceText.hint,/sound copy.*rescan/);
+  const sourceText=run('attentionText(fixture)');assert.equal(sourceText.status,'Source audio needs replacement');assert.equal(sourceText.hint,"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",'Judy 2026-10-25, Delete book spec section 7');
   assert.match(run('technicalText(fixture)'),/Z:\/Audio\/Железная.mp3/);
   context.fixture=attentionRow('reacquire','reacquire',{}, {attention:{group:'reacquire',reacquire:{state:'required',certainty:'uncertain',reason:'Measured damaged audio',repair_limit:'Cannot preserve speech',originals:[{path:'Z:/shared/one.mp3'}],source_presence:'unavailable'}},retry:{allowed:true}});
   assert.equal(run('attentionText(fixture).status'),'Need to reacquire');

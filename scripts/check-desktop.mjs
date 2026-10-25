@@ -58,6 +58,7 @@ patterns.push('test_todo_holds.py');  // 0.22.0 review: the three hold rows, the
 patterns.push('test_join_parts.py');  // 0.22.0: ruling 19, the parts of one book in one folder are joined
 patterns.push('test_split_books.py','test_collection_identity.py');  // Senua 0.22.0 early review m7: changed in 0.22.0, were outside the gate
 patterns.push('test_m4b_join.py','test_part_sets.py');  // 0.22.0: rulings 19a and 19 (M4B parts joined keeping their chapters; bare-numbered sets decided by their chapters)
+patterns.push('test_book_delete.py');  // 0.22.0: ruling 23, Delete book (only its own files, never Sorted, records last)
 const code=`import sys,unittest,json,pathlib
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))

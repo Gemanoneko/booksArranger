@@ -36,6 +36,8 @@ let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=n
 // chip changes and are dropped on Approve; done/results/checked are the per-row outcomes shown until the row leaves.
 let askPending=null,askBulk=false,approveConfirm=null;
 const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map(),askChecked=new Map();
+// Delete book (ruling 23): its row buttons, its row hints, the press reading the list, and the open dialog.
+const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null;
 
 let routingPreviewTimer=null,routingPreviewSequence=0;
 function queueRoutingPreview(){
@@ -117,7 +119,7 @@ function message(value='') { $('message').textContent=value; }
 // The only writer of #version: the engine's own version, as reported by its state.
 function renderVersion(){const value=typeof state?.version==='string' && state.version?'v'+state.version:'';if($('version').textContent!==value)$('version').textContent=value;$('version').hidden=!value;}
 function controls() {
-  updateRecovery();updateRetry();updateRowRetries();renderAttentionGroups();updateAskRows();renderApproveSelected();renderAttentionShortcut();
+  updateRecovery();updateRetry();updateRowRetries();renderAttentionGroups();updateAskRows();updateDeleteButtons();renderApproveSelected();renderAttentionShortcut();
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
   $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
@@ -230,7 +232,7 @@ function renderRows(force=false) {
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && !tr.contains?.(focused)){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
-  const body=$('inventory'); body.replaceChildren();askRows.clear();
+  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
   // In this filter the list window grows with the viewport: rows with fields are 150-230 px tall (section 9).
@@ -279,6 +281,7 @@ function renderRows(force=false) {
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title=row.kind==='candidate'?"Open this book's source folder in File Explorer.":"Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
+    if(row.kind==='candidate' && deleteOffer(row))buildDeleteButton(row,buttons);  // ruling 23: last, on its own line
     actions.append(buttons);tr.append(actions);
     tr.addEventListener('click',()=>select(row,selectedPath!==row.path));
     tr.addEventListener('keydown',event=>{if(event.key==='Enter' || event.key===' '){event.preventDefault();select(row,selectedPath!==row.path);}});
@@ -415,7 +418,7 @@ function listContext(){return JSON.stringify([$('library').value,view,filters[vi
 // While a different list is on its way, the old rows are not shown as the new filter's result.
 function showListLoading(){
   const label=filterOptions[view].find(item=>item[0]===filters[view])?.[1] || '';
-  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();$('inventory').setAttribute?.('aria-busy','true');
+  $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();$('inventory').setAttribute?.('aria-busy','true');
   const text=`Loading ${label}${filters[view]==='output_attention' && attentionGroup!=='all'?' · '+attentionLabels[attentionGroup]:''}…`;
   $('empty').textContent=text;$('empty').hidden=false;$('page').textContent=text;$('previous').disabled=true;$('next').disabled=true;
 }
@@ -955,8 +958,10 @@ function updateRowRetries(){
     if(clearPending(row)){hint='Clearing working files…';clause='';warn=false;}
     if(!shown && row.creation?.job?.kept===true && mode!=='pending')hint=KEPT_HINT;
     if(retryResult && retryResult.key===key && !retryResult.panelOnly && mode!=='pending' && !clearPending(row)){hint=retryResult.text;warn=retryResult.warn!==false;clause='';}
+    const deleted=deleteNotes.get(row.id);if(deleted){hint=deleted.text;warn=deleted.warn;clause='';}  // Delete book's outcome (ruling 23)
     setHint(entry.hint,hint,clause,warn);
     statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==cellTip(row))entry.cell.title=cellTip(row);
+    if(deleted?.done){if(entry.button)entry.button.hidden=true;if(entry.clear)entry.clear.hidden=true;continue;}  // deleted: its buttons go
     if(entry.clear)updateClearButton(entry.clear,row);
     if(!entry.button)continue;
     const gone=!action && mode!=='pending',hadFocus=gone && document.activeElement===entry.button;
@@ -1597,7 +1602,7 @@ function refusalCurrent(row){const refusal=refusalOf(row);return refusal && refu
 function attentionOf(row){const job=row?.creation?.job,a=job?.attention;return a && typeof a.group==='string' && (job.state==='Output needs attention' || keptGroup(a))?a:null;}
 function attentionText(row){
   const reacquire=attentionOf(row)?.reacquire;
-  if(reacquire?.state==='required')return {status:'Need to reacquire',hint:(reacquire.certainty==='uncertain'?'The app cannot repair this damage without risking missing audio.':'The audio is damaged and cannot be repaired safely.')+' Put an intact replacement in an unsorted source, then scan it.',warn:true};
+  if(reacquire?.state==='required')return {status:'Need to reacquire',hint:(reacquire.certainty==='uncertain'?'The app cannot repair this damage without risking missing audio.':'The audio is damaged and cannot be repaired safely.')+' Delete the book, then get a new copy.',warn:true};
   const producer=producerRecoveryText(row);if(producer)return producer;
   const a=attentionOf(row);if(!a)return null;
   const destination=a.destination_review;
@@ -1607,7 +1612,7 @@ function attentionText(row){
     if(queued?.queued_next===true)return {status:/paused|stopped|idle/i.test(state?.audiobook_jobs?.state || '')?'Queued — queue paused':queuedNextText(queued),hint:'The saved job is kept. The current sources, review and destination are checked before a new job is created.'};
     return {status:'Queued destination needs review',hint:'This saved job uses a different destination. Retry checks the current book before creating a new job.',warn:true};
   }
-  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:'The MP3 failed its full audio check. Keep this original, replace the source with a sound copy, then rescan this source. The affected file is listed in the details.',warn:true};
+  if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);
   if(readmission?.queued_next===true)return {status:queuedNextText(readmission),hint:readmission.kind==='repair'?damageHint(a):readmission.origin==='automatic'?AUTO_QUEUED_HINT:'The book is checked again before it runs.'};
@@ -1735,7 +1740,7 @@ function technicalText(row){
   const unopened=attention?.precheck==='unavailable' && typeof attention.precheck_reason==='string'?attention.precheck_reason:'';
   // Leftover working files: their own reason first (follow-up 2, section 2.3), then the earlier failure and the folder.
   const working=workingOf(row),files=typeof working?.reason==='string'?working.reason:'';
-  if(attention?.reacquire){const r=attention.reacquire;return 'Affected source file: '+r.originals.map(s=>s.path).join('; ')+' — Audio problem: '+r.reason+' — Why replacement is needed: '+r.repair_limit+' — The amount of affected audio is not established. You can remove these damaged originals yourself. After a completed scan confirms they are gone, their active source entry is cleared.'+(r.source_presence==='unavailable'?' Source unavailable — deletion not confirmed. Connect the source drive and scan again.':r.source_presence==='partially_missing'?' Some original files remain. The book stays listed until all its original source files are confirmed gone.':'');}
+  if(attention?.reacquire){const r=attention.reacquire;return 'Affected source file: '+r.originals.map(s=>s.path).join('; ')+' — Audio problem: '+r.reason+' — Why replacement is needed: '+r.repair_limit+' — The amount of affected audio is not established. Delete book removes these files and the book. If you remove the originals yourself, the book is cleared after a completed scan confirms they are gone.'+(r.source_presence==='unavailable'?' Source unavailable — deletion not confirmed. Connect the source drive and scan again.':r.source_presence==='partially_missing'?' Some original files remain. The book stays listed until all its original source files are confirmed gone.':'');}
   const sourceFile=attention?.remedy?.kind==='replace_source' && typeof attention.remedy.path==='string'?attention.remedy.path:'';
   const first=(sourceFile?'Source to replace: '+sourceFile:'') || files || unopened || refused,facts=first && raw?`${first}; earlier failure: ${raw}`:first || raw;
   // Working files from an earlier attempt: the absolute folder, here only, never in the hint (follow-up, point 3c).
@@ -1891,13 +1896,15 @@ const HOLD_APPROVE={order_unclear:['Approve this order','Approve the order shown
   files_unclear:['Approve these files','Approve the files shown as one book: convert if needed, rename, move to Audiobooks Sorted.'],
   part_of_book:['Approve as one book','File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.']};
 const BASIS_LINES={number_rule:'Set name + part number.',file_name:'Title from the file name.',folder_name:'Title from the folder name.'};
-const ASK_LABELS={approve:'Approve',separate:'Keep as separate books',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list',order:'Change order',choose:'Choose files'};
+const ASK_LABELS={approve:'Approve',separate:'Keep as separate books',scan:'Scan again',convert:"Convert what's there",remove:'Remove from list',order:'Change order',choose:'Choose files',delete:'Delete book'};
 const ASK_TIPS={approve:'Approve with the values shown: convert if needed, rename, move to Audiobooks Sorted. Ctrl+Enter in a field does the same.',
   // Keep as separate books (Judy 2026-10-25): the other answer to a set row; it records, approves nothing, touches no file.
   separate:'Make each file shown its own book. Nothing is joined. Each book is checked again.',
   scan:"Look for the missing files in this book's folders. Nothing is changed or deleted.",convert:'Convert the files that are present and leave out the missing ones.',
   remove:'Stop listing this book. No files are touched. A scan lists it again if its files return.',
-  order:'Change the playback order in the details panel. Save it there, then approve.',choose:'Choose which files belong in the details panel. Save it there, then approve.'};
+  order:'Change the playback order in the details panel. Save it there, then approve.',choose:'Choose which files belong in the details panel. Save it there, then approve.',
+  // Delete book (Judy 2026-10-25): two variants, by the offer's present count.
+  delete:{files:"Delete this book's files from disk and remove the book from the app. You confirm first.",none:'Remove this book from the app for good. No files are left to delete. You confirm first.'}};
 const HOLD_SCAN_TIP="Check this book's folders again, for example after you rename or add files. Nothing is changed or deleted.";
 function holdKind(ask){return Object.hasOwn(HOLD_STATUS,ask?.kind || '')?ask.kind:'';}
 // The face and tooltip follow the chip, so the press says what is confirmed (B4 Buttons).
@@ -1906,11 +1913,11 @@ function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind=
 const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
 function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
-const ASK_PENDING={approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
+const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
-  changed:[null,'Changes found. The book is checked again.'],later:[null,'Changes found. The next library scan will pick them up.']};
-const ASK_REFUSED={approve:'Approve was not accepted. Nothing was changed.',separate:'Keep as separate books was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
+  changed:[null,'Changes found. The book is checked again.'],deleted:[null,'Deleted. The book is gone from the app.'],later:[null,'Changes found. The next library scan will pick them up.']};
+const ASK_REFUSED={delete:'Delete was not accepted. Nothing was deleted.',approve:'Approve was not accepted. Nothing was changed.',separate:'Keep as separate books was not accepted. Nothing was changed.',convert:'Convert was not accepted. Nothing was changed.',scan:'Scan did not finish. Nothing was changed.',remove:'Remove from list was not accepted. Nothing was changed.'};
 function askOf(row){const ask=row?.kind==='candidate'?row.ask:null;return ask && typeof ask==='object' && typeof ask.kind==='string'?ask:null;}
 function askKind(ask){return ask.kind==='files_missing'?ask.also || '':ask.kind;}
 function askName(row){return row.title_clue || row.review?.title || 'Book';}
@@ -2132,6 +2139,7 @@ function updateAskRow(entry){
   else if(pending)hint=ASK_PENDING[pending][1];
   else if(result){hint=result.text;warn=true;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
+  const deleted=deleteNotes.get(row.id);if(deleted && !done){hint=deleted.text;warn=deleted.warn;clause='';}  // Delete book's outcome (ruling 23)
   statusInPlace(entry.cell,status);setHint(entry.hint,hint,clause,warn);
   const also=done?'':askAlso(ask),why=done?'':ask.kind==='same_author'?sameWhy(ask):askReason(ask);
   if(entry.also.textContent!==also)entry.also.textContent=also;entry.also.hidden=!also;
@@ -2182,6 +2190,148 @@ function askLeave(entry){
   }
   $('filter').focus?.({preventScroll:true});
 }
+// ---------------------------------------------------------------- Delete book
+// Ruling 23 (Sergei 2026-10-25): a book with missing parts or broken audio the app cannot repair is deleted from disk and
+// from the app, so a reacquired copy is a new book. Judy's "Delete book - spec" (Docs/BooksArranger_AttentionTodo_UX_
+// 2026-10-24.md). The server alone offers it (ask.delete on Missing files rows, attention.delete on Need to reacquire and
+// Source audio needs replacement); the page never guesses. It always asks first; Cancel is the default and Enter in the
+// dialog confirms nothing; "Nothing was deleted" is said only for a typed refusal issued before the first file.
+const DELETE_CAUSE={in_use:'In use by another program.',denied:'Access denied.',unreachable:"Can't reach the drive.",other:"Couldn't delete it."};
+const DELETE_REFUSAL={busy:'This book is being processed. Nothing was deleted.',changed:'This book changed, so nothing was deleted. Review its details and try again.',
+  files_changed:"The folder doesn't match the list, so nothing was deleted. Press Delete book to see the current list.",refused:'Delete was not accepted. Nothing was deleted.'};
+const DELETE_LOST='Connection interrupted, so the delete may have gone through. Check the list before trying again.';
+const DELETE_UNKNOWN='Delete did not finish. Check the list before trying again.';
+function deleteOffer(row){
+  const ask=askOf(row);if(ask)return ask.delete && typeof ask.delete==='object'?ask.delete:null;
+  const a=attentionOf(row);return a?.delete && typeof a.delete==='object' && row.creation?.job?.state==='Output needs attention'?a.delete:null;
+}
+function deleteTip(offer){return Number(offer?.present)>0?ASK_TIPS.delete.files:ASK_TIPS.delete.none;}
+function deleteRefusalText(refusal){
+  const code=refusal?.code,files=Array.isArray(refusal?.files)?refusal.files:[];
+  if(code==='shared')return files.length===1?`"${files[0].path}" also belongs to "${files[0].other}". Nothing was deleted.`:`${files.length.toLocaleString()} of this book's files also belong to other books. Nothing was deleted.`;
+  if(code==='sorted')return `A finished audiobook of this book is in ${outputName()}. Nothing was deleted.`;
+  if(code==='offline')return `Can't reach ${typeof refusal.root==='string' && refusal.root?refusal.root:'the source drive'}. Nothing was deleted.`;
+  return DELETE_REFUSAL[code] || ASK_REFUSED.delete;
+}
+// The row's own sentence, verbatim (Judy, section 4): a Missing files hint, or the first sentence of a Stopped hint.
+function deleteReason(row){const text=askText(row)?.hint || attentionText(row)?.hint || '';return String(text).replace(/ Delete the book, then get a new copy\.$/,'');}
+function buildDeleteButton(row,buttons){
+  // Last in the row, after View metadata and the folder buttons, on a line of its own (Judy, section 3).
+  const gap=node('span','','row-break');gap.setAttribute('aria-hidden','true');
+  const button=node('button',ASK_LABELS.delete,'quiet row-retry danger');button.type='button';
+  button.setAttribute('aria-label',ASK_LABELS.delete+': '+(row.title_clue || row.review?.title || 'Book'));
+  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.getAttribute?.('aria-disabled')==='true' || button.disabled)return;deletePress(row.id);});
+  button.addEventListener('keydown',event=>{event?.stopPropagation?.();if(event?.repeat)event.preventDefault?.();});  // a held Enter opens it once
+  buttons.append(gap,button);deleteButtons.set(row.id,{row,button,gap});updateDeleteButton(row.id);
+}
+function deleteMode(row){
+  if(ended || recoveryDisconnected)return 'offline';
+  if(deleteNotes.get(row.id)?.done || ['approve','convert','deleted'].includes(askDone.get(row.id)))return 'done';
+  if(deletePending?.id===row.id)return 'pending';
+  if(deletePending || deleteDialog || busy || askPending || askBulk || retryPending || bulkRunning() || recoverySubmitting || automaticRequest!==null || releaseRun)return 'busy';
+  return 'ready';
+}
+function updateDeleteButton(id){
+  const entry=deleteButtons.get(id);if(!entry)return;const {row,button,gap}=entry,offer=deleteOffer(row),mode=deleteMode(row);
+  const hidden=mode==='done' || !offer;button.hidden=hidden;gap.hidden=hidden;if(hidden)return;
+  const label=mode==='pending'?ASK_PENDING.delete[0]:ASK_LABELS.delete;
+  const title={offline:'Local server unavailable.',busy:'Another operation is in progress.',pending:ASK_PENDING.delete[1],ready:deleteTip(offer)}[mode];
+  if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
+  if(mode==='ready')button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
+}
+function updateDeleteButtons(){for(const id of deleteButtons.keys())updateDeleteButton(id);}
+async function deletePress(id){
+  const entry=deleteButtons.get(id);if(!entry || deletePending || deleteDialog || deleteMode(entry.row)!=='ready')return;
+  const row=entry.row;deletePending={id};deleteNotes.delete(id);askResults.delete(id);controls();
+  let preview=null;
+  try{preview=await request('/api/candidate/delete-preview',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);}
+  catch(error){deleteNotes.set(id,{text:error.httpStatus?ASK_REFUSED.delete:'Connection interrupted. Check the status above before trying again.',warn:true});if(!error.httpStatus)refreshFailed(error);}
+  finally{deletePending=null;}
+  if(preview)openDeleteDialog(row,preview);
+  controls();
+}
+function deleteCount(n){return n===1?'1 file':n.toLocaleString()+' files';}
+function deleteLines(list,lines){$('delete-dialog-list').replaceChildren(...lines);$('delete-dialog-list').hidden=!lines.length;}
+function showDeleteState(kind,data={}){
+  const d=deleteDialog;if(!d)return;d.state=kind;const n=d.n,row=d.row;
+  const ask=askOf(row),book=row.review?.title || (ask?askProposal(ask,'title'):'') || row.title_clue || '',author=row.review?.canonical_author || (ask?askProposal(ask,'author'):'') || (row.artists || [])[0] || '';
+  const titles={confirm:'Delete this book?',deleting:'Delete this book?',refused:"Can't delete this book",partial:'Not everything was deleted',unknown:'Delete may not have finished'};
+  setText('delete-dialog-title',titles[kind]);
+  const confirm=$('delete-confirm'),cancel=$('delete-cancel'),close=$('delete-close');
+  const asking=kind==='confirm' || kind==='deleting';
+  for(const id of ['delete-dialog-book','delete-dialog-reason','delete-dialog-forget'])$(id).hidden=!asking;
+  $('delete-dialog-folder').hidden=!asking || n===0;
+  confirm.hidden=!asking;cancel.hidden=!asking;close.hidden=asking;
+  if(asking){
+    setText('delete-dialog-book',author?`${book} — ${author}`:book);setText('delete-dialog-reason',deleteReason(row));
+    setText('delete-dialog-files',n===0?"No files are left on disk. Only the app's record of this book is deleted.":n===1?`This file (${sizeText(d.bytes)}) will be deleted from your disk. The app can't undo this.`:`These ${n.toLocaleString()} files (${sizeText(d.bytes)}) will be deleted from your disk. The app can't undo this.`);
+    setText('delete-dialog-forget',`The app forgets this book. If you get it again, it's found as a new book. Nothing in ${outputName()} is touched.`);
+    deleteLines(d.paths,d.paths.map(path=>node('p',path)));
+    setText('delete-confirm',kind==='deleting'?'Deleting...':n===0?'Delete book (no files)':`Delete book and ${deleteCount(n)}`);
+    confirm.title=n===0?'Remove this book from the app. No files are touched.':n===1?"Delete this book and its file. The app can't undo this.":`Delete this book and its ${n.toLocaleString()} files. The app can't undo this.`;
+    setText('delete-dialog-status',kind==='deleting'?(n===0?'Removing this book...':n===1?'Deleting 1 file...':`Deleting ${n.toLocaleString()} files...`):'');
+    if(kind==='deleting'){confirm.setAttribute('aria-disabled','true');cancel.setAttribute('aria-disabled','true');cancel.title="Deleting can't be stopped.";}
+    else{confirm.removeAttribute('aria-disabled');cancel.removeAttribute('aria-disabled');cancel.title='Close without deleting anything.';}
+    return;
+  }
+  setText('delete-dialog-status','');
+  if(kind==='refused'){
+    setText('delete-dialog-files',data.line || ASK_REFUSED.delete);
+    const shared=Array.isArray(data.files) && data.files.length>1?data.files:[];
+    deleteLines(shared,shared.flatMap(file=>[node('p',file.path),node('p',`Also in "${file.other}"`,'delete-cause')]));
+  }else if(kind==='partial'){
+    const failed=data.failed || [],k=Number(data.deleted) || 0;
+    setText('delete-dialog-files',`Deleted ${k.toLocaleString()} of ${n.toLocaleString()} files. ${failed.length.toLocaleString()} could not be deleted:`);
+    deleteLines(failed,failed.flatMap(item=>[node('p',String(item.path || '')),node('p',DELETE_CAUSE[item.cause] || DELETE_CAUSE.other,'delete-cause')]));
+    setText('delete-dialog-status','The book stays listed. Press Delete book to try these again.');
+  }else{setText('delete-dialog-files',data.line || DELETE_UNKNOWN);deleteLines([],[]);}
+}
+function openDeleteDialog(row,preview){
+  const files=Array.isArray(preview?.files)?preview.files.filter(file=>typeof file?.path==='string'):[];
+  deleteDialog={id:row.id,row,paths:files.map(file=>file.path),n:files.length,bytes:Number(preview?.bytes) || 0,state:'confirm'};
+  if(preview?.refusal){const line=deleteRefusalText(preview.refusal);showDeleteState('refused',{line,files:preview.refusal.files});deleteNotes.set(row.id,{text:line,warn:true});}
+  else showDeleteState('confirm');
+  $('delete-dialog').showModal?.();
+  (preview?.refusal?$('delete-close'):$('delete-cancel')).focus?.();  // Cancel has focus: the Enter that opened it confirms nothing
+}
+function closeDeleteDialog(returnFocus=true){
+  if(!deleteDialog)return;const id=deleteDialog.id;deleteDialog=null;$('delete-dialog').close?.();controls();
+  if(!returnFocus)return;
+  const button=deleteButtons.get(id)?.button;
+  if(button && !button.hidden)button.focus?.({preventScroll:true});else $('filter').focus?.({preventScroll:true});
+}
+async function deleteConfirm(event){
+  const d=deleteDialog;
+  if(event?.repeat || !d || d.state!=='confirm' || $('delete-confirm').getAttribute?.('aria-disabled')==='true')return;
+  showDeleteState('deleting');controls();
+  let result=null;
+  try{result=await request('/api/candidate/delete',{library:'Audiobooks',id:d.id,revision:d.row.revision,paths:d.paths},120000);}
+  catch(error){
+    if(error.httpStatus===409 && typeof error.body?.code==='string'){const line=deleteRefusalText(error.body);showDeleteState('refused',{line,files:error.body.files});deleteNotes.set(d.id,{text:line,warn:true});}
+    else{const line=error.httpStatus?DELETE_UNKNOWN:DELETE_LOST;showDeleteState('unknown',{line});deleteNotes.set(d.id,{text:line,warn:true});if(!error.httpStatus)refreshFailed(error);}
+    $('delete-close').focus?.();controls();return;
+  }
+  const failed=Array.isArray(result?.failed)?result.failed:[],k=Number(result?.deleted) || 0;
+  if(result?.forgotten===true && !failed.length){
+    deleteNotes.set(d.id,{text:ASK_DONE.deleted[1],warn:false,done:true});if(askRows.has(d.id))askDone.set(d.id,'deleted');
+    closeDeleteDialog(false);
+    const size=sizeText(Number(result.bytes) || 0);
+    askNote(k===0?'Deleted 1 book. No files were left on disk.':k===1?`Deleted 1 book and 1 file (${size}).`:`Deleted 1 book and ${k.toLocaleString()} files (${size}).`);
+    askLeave({row:d.row});controls();refresh(true).catch(()=>{});return;
+  }
+  if(failed.length){
+    const f=failed.length;showDeleteState('partial',{deleted:k,failed});
+    deleteNotes.set(d.id,{text:`Deleted ${k.toLocaleString()} of ${d.n.toLocaleString()} files. ${f===1?'1 is':f.toLocaleString()} still on disk.`,warn:true});
+    askNote(`Deleted ${k.toLocaleString()} of ${d.n.toLocaleString()} files. The book stays listed with the ${f.toLocaleString()} that could not be deleted.`);
+  }else{showDeleteState('unknown',{line:DELETE_UNKNOWN});deleteNotes.set(d.id,{text:DELETE_UNKNOWN,warn:true});}
+  $('delete-close').focus?.();controls();
+}
+$('delete-confirm').addEventListener('click',deleteConfirm);
+$('delete-cancel').addEventListener('click',event=>{if(event?.repeat || deleteDialog?.state==='deleting')return;closeDeleteDialog();});
+$('delete-close').addEventListener('click',event=>{if(event?.repeat)return;closeDeleteDialog();});
+$('delete-dialog').addEventListener('cancel',event=>{event?.preventDefault?.();if(deleteDialog?.state==='deleting')return;closeDeleteDialog();});
+// No form and no default button: Enter in the body or the file list does nothing; only a focused button acts on it.
+$('delete-dialog').addEventListener('keydown',event=>{if(event?.key==='Enter' && !['delete-cancel','delete-close','delete-confirm'].includes(event.target?.id))event.preventDefault?.();});
 // Change order / Choose files (0.22.0 review B4): select the row, open Manual review and move focus to its included-files
 // heading, where Include, Move up / Move down and Save track review already are. Approve then uses what he saved.
 function openTrackReview(entry){

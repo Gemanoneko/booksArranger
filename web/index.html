@@ -149,6 +149,20 @@
     <p id="approve-dialog-left" hidden></p>
     <div class="toolbar"><button id="approve-cancel" class="quiet" type="button" title="Close without approving anything." autofocus>Cancel</button><button id="approve-confirm" type="button">Approve 0 books</button></div>
   </dialog>
+  <!-- Delete book (ruling 23; Judy 2026-10-25): Cancel is the default; no form, so Enter in the body confirms nothing. -->
+  <dialog id="delete-dialog" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-body">
+    <h2 id="delete-dialog-title">Delete this book?</h2>
+    <div id="delete-dialog-body">
+      <p id="delete-dialog-book"></p>
+      <p id="delete-dialog-reason"></p>
+      <p id="delete-dialog-files"></p>
+      <div id="delete-dialog-list" class="path" tabindex="0" role="group" aria-label="Files to delete"></div>
+      <p id="delete-dialog-folder">Other files in the folder stay.</p>
+      <p id="delete-dialog-forget"></p>
+      <p id="delete-dialog-status" role="status" aria-live="polite"></p>
+    </div>
+    <div class="toolbar"><button id="delete-cancel" class="quiet" type="button" title="Close without deleting anything." autofocus>Cancel</button><button id="delete-confirm" class="danger solid" type="button">Delete book</button><button id="delete-close" class="quiet" type="button" title="Close this message." hidden>Close</button></div>
+  </dialog>
   <script src="desktop-ui.js"></script>
 </body>
 </html>

@@ -644,6 +644,20 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:row=None
                 self.response(409,{'error':str(error),'code':error.code,'row':row});return
             self.response(200,result);return
+        if path in ('/api/candidate/delete-preview','/api/candidate/delete'):
+            # Delete book (ruling 23; Judy's spec section 9). A typed refusal (409, code) is sent only when no file was
+            # touched; the confirm sends exactly the paths the dialog showed.
+            import book_delete
+            self.shape(data,{'library','id','revision'}|({'paths'} if path.endswith('/delete') else set()))
+            library,id,revision=self.candidate_identity(data)
+            if path.endswith('/delete-preview'):
+                self.response(200,self.server.merge.delete_preview(id,revision));return
+            paths=data['paths']
+            if not isinstance(paths,list) or len(paths)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in paths):raise ValueError('Delete takes the listed file paths')
+            try:result=self.server.merge.delete_book(id,revision,paths)
+            except book_delete.DeleteRefused as refusal:
+                self.response(409,{'error':str(refusal),**refusal.payload()});return
+            self.response(200,result);return
         if path=='/api/candidate/keep-separate':
             # "Keep as separate books" (Judy 2026-10-25): records the set's files as separate books; touches no file.
             self.shape(data,{'library','id','revision'})
@@ -729,7 +743,8 @@ class Handler(BaseHTTPRequestHandler):
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
-                         '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate'}
+                         '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
+                         '/api/candidate/delete-preview','/api/candidate/delete'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

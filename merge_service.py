@@ -2226,6 +2226,25 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'kept':kept}
 
+    def delete_preview(self,id,revision):
+        """Delete book, step 1 (ruling 23; Judy's spec section 5): the files it would remove, from the disk now, and any
+        refusal, so a refusal shows before Sergei confirms. Read-only. See book_delete."""
+        import book_delete
+        return book_delete.preview(self,id,revision)
+
+    def delete_book(self,id,revision,paths):
+        """Delete book, step 2: removes exactly the listed files (the paths the dialog showed), then every record of the
+        book, records last. Raises book_delete.DeleteRefused (typed, nothing touched); otherwise
+        {'deleted','bytes','failed','forgotten'}. See book_delete."""
+        import book_delete
+        if self.draining or self.__dict__.get('_closing'):raise book_delete.DeleteRefused('busy','This book is being processed. Nothing was deleted.')
+        return book_delete.delete(self,id,revision,paths)
+
+    def after_delete(self,identity):
+        """Delete book touched the disk or the catalog: every cached list, count and status is read again."""
+        self.__dict__.pop('_needs_cache',None)
+        self.invalidate_status()
+
     def dismiss_attention(self,id,revision):
         """Remove from list (ruling 10): a book with no audio file left stops being listed. No file is touched; a scan
         that finds its files again (a new fingerprint) lists it again."""
