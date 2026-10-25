@@ -82,6 +82,33 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         self.assertTrue(self.service.scan_again(row['id'],row['revision'])['found'])
         self.assertEqual(self.listed('files_missing')[1],0)
 
+    def test_qa_m1_after_a_same_author_answer_the_partner_book_continues_too(self):
+        # Futaba's 0.22.0 QA, M-1: two books by the new spelling "Dean Koonts" were asked "Same author?". Answering one
+        # filed it, and the strip said "2 books continue", but the partner was never researched again: a run visits a book
+        # once, the saved run had already passed it, so it sat held and listed nowhere ("Still checking") for 30+ minutes.
+        import json,time,uuid
+        from scanner import connect
+        tone(self.audio/'Koontz Dean'/'Watchers'/'01.mp3',self.cover,album='Watchers',artist='Koontz Dean')
+        known=self.start()[0];self.service.approve_book(known['id'],known['revision']);self.wait()
+        for name in ('Ticktock','Intensity'):tone(self.audio/'Unsorted'/name/'01.mp3',self.cover,album=name,artist='Dean Koonts')
+        self.inv.launch('Audiobooks');self.inv.worker.join(10);self.research_all()
+        rows,_=self.listed('same_author');self.assertEqual(sorted(rows),['Intensity','Ticktock'],'positive control: both asked')
+        # The run that researched them is saved (Stop), both visited: Start continues it.
+        with connect(self.inv.database) as db:
+            db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[],'done':[r['id'] for r in rows.values()],'deferred':[]}),'','t','t'))
+        one=rows['Ticktock']
+        self.service.approve_book(one['id'],one['revision'],choice='same');self.wait()
+        self.service.automatic.start()
+        limit=time.monotonic()+90
+        while self.service.automatic.status()['state'] not in ('Completed','Needs attention','Idle'):
+            if time.monotonic()>limit:self.fail('automatic processing did not finish: %r'%self.service.automatic.status())
+            time.sleep(.2)
+        self.wait()
+        jobs={job['manifest']['metadata']['title']:job for job in self.service.jobs.status()['jobs']}
+        self.assertEqual(sorted(jobs),['Intensity','Ticktock','Watchers'],'the partner continued: researched again and converted')
+        self.assertEqual(jobs['Intensity']['manifest']['metadata']['canonical_author'],'Koontz Dean','under the answered author')
+        self.assertEqual(self.service.todo_coverage()['still_checking'],0)
+
     def test_a_job_whose_book_was_converted_since_is_stale_and_never_counted(self):
         tone(self.audio/'Unsorted'/'Ясно'/'Ясно.mp3',self.cover,album='Ясно',artist='Иван Петров')
         row=self.start()[0]

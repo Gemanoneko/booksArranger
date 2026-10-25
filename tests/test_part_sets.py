@@ -396,6 +396,26 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         self.assertEqual(len(job['manifest']['sources']), 2)
 
+    def test_qa_m2_scan_again_on_a_missing_part_tells_the_truth_and_catalogs_the_restored_part(self):
+        # Futaba's 0.22.0 QA, M-2: Scan again on a "Part 2 of 3" row said "Files found" with part 2 still absent (its two known
+        # parts were unchanged), and with part 2 restored it never catalogued the new file, so the row came back unchanged.
+        folder = self.folder('Dean Koontz')
+        for n in (1, 3):
+            part(folder / ('Незнакомцы %d.m4b' % n), 'Незнакомцы %d' % n, n, [(0, 500, 'Глава %d' % (2 * n - 1)), (500, 1000, 'Глава %d' % (2 * n))],
+                 album='Незнакомцы', artist='Дин Кунц', total=3)
+        row = self.start()[0]
+        self.service.automatic._record(row, 'Held', dict(self.research(row), until_change=True), None)
+        listed = self.service.reviews.page(status='output_attention', group='files_missing')['rows']
+        self.assertEqual([Path(f).name for f in listed[0]['ask']['missing']['files']], ['Part 2 of 3'], 'positive control: the missing-part row')
+        result = self.service.scan_again(row['id'], row['revision'])
+        self.assertEqual((result['found'], result['changed']), (False, False), 'part 2 is still absent: "Checked. Not found."')
+        part(folder / 'Незнакомцы 2.m4b', 'Незнакомцы 2', 2, [(0, 500, 'Глава 3'), (500, 1000, 'Глава 4')], album='Незнакомцы', artist='Дин Кунц', total=3)
+        result = self.service.scan_again(row['id'], row['revision'])
+        self.assertEqual((result['found'], result['changed'], result['scan_started']), (False, True, True), 'a new file beside the book: its folder is scanned')
+        self.inv.worker.join(30)
+        self.assertEqual([len(r['members']) for r in self.rows()], [3], 'the restored part is catalogued and joins its set')
+        self.assertEqual(self.service.reviews.page(status='output_attention', group='files_missing')['rows'], [], 'the row leaves')
+
 
 if __name__ == '__main__':
     unittest.main()

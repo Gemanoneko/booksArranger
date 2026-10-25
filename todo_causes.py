@@ -127,12 +127,16 @@ def files_cause(members, reasons, title='', split=False, works=None):
     return {'cause': 'unknown'}
 
 
-def piece_cause(hold):
-    """{'cause': chapter | numbered_part | siblings | part_set | unreadable | unknown, 'beside', 'index', 'total', 'set'}"""
+def piece_cause(hold, files=1):
+    """{'cause': chapter | numbered_part | siblings | part_set | unreadable | unknown, 'beside', 'index', 'total', 'set'}
+    files: how many files the book has. Futaba's 0.22.0 QA, m-8: a title that names a part ('part_title') on a book of
+    several files is not "This file is named as one chapter."; it takes the numbered-part sentence."""
     piece = (hold or {}).get('piece') or {}
     kind = piece.get('piece')
-    if kind in ('chapter', 'part_title'):
+    if kind == 'chapter' or kind == 'part_title' and files <= 1:
         return {'cause': 'chapter'}
+    if kind == 'part_title':
+        return {'cause': 'numbered_part'}
     if kind == 'numbered_part':
         return {'cause': 'numbered_part'}
     if kind == 'siblings':

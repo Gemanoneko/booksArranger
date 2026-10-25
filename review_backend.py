@@ -718,7 +718,9 @@ class CandidateReviewService:
             if actor=='user' and not keep_pending:ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if not isinstance(order,list) or len(order)!=len(keys) or set(order)!=set(keys) or not isinstance(included,list) or len(set(included))!=len(included) or not set(included)<=set(keys):raise ValueError('Review the exact known member list and order')
             if any(type(v)is not bool for v in (source_coverage_confirmed,order_confirmed,chapters)):raise ValueError('Track confirmations must be explicit booleans')
-            if (source_coverage_confirmed or order_confirmed) and not evidence_note.strip():raise ValueError('Record the membership and order review basis')
+            # Futaba's 0.22.0 QA, m-7 (ruling 6b removed mandatory notes): Sergei's own track review needs no typed note;
+            # an assistant review still records concrete evidence (_actor).
+            if actor!='user' and (source_coverage_confirmed or order_confirmed) and not evidence_note.strip():raise ValueError('Record the membership and order review basis')
             titles=[m.get('track_title') for m in row['members'] if member_key(m['path']) in included]
             if chapters and not chapters_available([m for m in row['members'] if member_key(m['path']) in included]):raise ValueError('Chapter boundaries unavailable: source durations need checking')
             hashes={}

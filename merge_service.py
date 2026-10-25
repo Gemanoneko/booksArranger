@@ -2113,7 +2113,7 @@ class MergeService:
         def cause(kind):
             if kind=='order_unclear':return todo_causes.order_cause(chosen)
             if kind=='files_unclear':return todo_causes.files_cause(chosen,reasons,title,split=bool(row.get('split_book')),works=(row.get('joined_parts') or {}).get('works') or row.get('album_works'))
-            if kind=='part_of_book':return todo_causes.piece_cause(entry.get('hold'))
+            if kind=='part_of_book':return todo_causes.piece_cause(entry.get('hold'),files=len(chosen))
             return {}
         found=cause(entry['group'])
         payload['cause']=found.get('cause','');payload['facts']={k:v for k,v in found.items() if k not in ('cause','flagged')}
@@ -2134,18 +2134,22 @@ class MergeService:
         import datetime
         try:listed_missing=any(m.get('missing') for m in self.inventory.candidate('Audiobooks',id)['members'])
         except (ValueError,KeyError,TypeError):listed_missing=False
+        entry=self.needs_you().get(id) or {}
+        if entry.get('group')=='files_missing' and (entry.get('hold') or {}).get('kind')=='missing_parts':
+            # Futaba's 0.22.0 QA, M-2: a missing part ("Part 2 of 3") is no known member, so re-reading the known parts said
+            # "found" with the part still absent, and a restored part was never catalogued. Found now means a new audio
+            # file beside the book: its source is scanned so the file is catalogued and the set regroups; none: not found.
+            self.inventory.refresh_candidate_sources('Audiobooks',id,revision,force=False)  # the known parts: changed or gone
+            new=self._new_audio_beside(id)
+            started,later=self._scan_book_source(id) if new else (False,False)
+            if started:self.__dict__.pop('_needs_cache',None)
+            return {'found':False,'changed':bool(new),'scan_started':started,'scan_later':later,
+                    'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':''}
         receipt=self.inventory.refresh_candidate_sources('Audiobooks',id,revision,force=False)
         state=receipt.get('state');found=state in ('refreshed','unchanged')
         gone=not listed_missing and state=='held' and receipt.get('hold_code')=='source_unavailable'
         started=later=False
-        if gone:
-            automatic=getattr(self,'automatic',None)
-            owned=automatic is not None and automatic.status()['state'] in ('Running','Stopping')
-            worker=getattr(self.inventory,'worker',None)
-            if owned or worker is not None and worker.is_alive():later=True
-            else:
-                try:self.inventory.launch_source(self.inventory.source_root_for_candidate(id));started=True
-                except ValueError:later=True
+        if gone:started,later=self._scan_book_source(id)
         if state=='refreshed':
             # The groups take the changed files now, so the book leaves the list at this answer, not one poll later.
             try:self.inventory.candidate('Audiobooks',id)
@@ -2153,6 +2157,36 @@ class MergeService:
         if found or started:self.__dict__.pop('_needs_cache',None)
         return {'found':found,'changed':state=='refreshed' or gone,'scan_started':started,'scan_later':later,
                 'checked_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'reason':'' if found or gone else receipt.get('reason','')}
+
+    def _scan_book_source(self,id):
+        """Start a scan of this book's source so new or renamed files are catalogued: (started, later). Later when automatic
+        processing or another scan owns discovery (it picks them up); never two scans at once."""
+        automatic=getattr(self,'automatic',None)
+        owned=automatic is not None and automatic.status()['state'] in ('Running','Stopping')
+        worker=getattr(self.inventory,'worker',None)
+        if owned or worker is not None and worker.is_alive():return False,True
+        try:self.inventory.launch_source(self.inventory.source_root_for_candidate(id))
+        except ValueError:return False,True
+        return True,False
+
+    def _new_audio_beside(self,id,limit=5000):
+        """Audio files in this book's folders that the catalog does not hold yet (a restored part). Read-only: one
+        directory listing per folder, at most `limit` entries each."""
+        from metadata import AUDIO
+        try:members=self.inventory.candidate('Audiobooks',id)['members']
+        except (ValueError,KeyError,TypeError):return []
+        folders=sorted({str(Path(m['path']).parent) for m in members})
+        found=[]
+        with connect(self.inventory.database) as db:
+            for folder in folders:
+                try:
+                    with os.scandir(folder) as entries:
+                        for count,item in enumerate(entries):
+                            if count>=limit:break
+                            if Path(item.name).suffix.lower() in AUDIO and item.is_file(follow_symlinks=False) \
+                                    and not db.execute('SELECT 1 FROM files WHERE path=?',(item.path,)).fetchone():found.append(item.path)
+                except OSError:continue
+        return found
 
     def keep_separate(self,id,revision):
         """Judy's "Keep as separate books" (2026-10-25): Sergei's answer "these are separate books" to a "Part of a bigger book"
@@ -2247,7 +2281,35 @@ class MergeService:
             author_rules.setup(db)
             if choice=='same':author_rules.append(db,'same_as',question['new'],target=question['existing'],actor='user',source='Sergei (Same author?)',question=title)
             else:author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
+        self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
+
+    def _continue_after_rule(self,skip=None):
+        """Futaba's 0.22.0 QA, M-1: a run visits a book once, so a book whose question a new rule answers (the partner of a
+        "Same author?" answer) stayed held and listed nowhere ("Still checking") until a new run's scan: Start continued
+        the saved run, which had passed it. Every other current book without a job whose research the new rules decide
+        (author_rules.Rules.changed_for: a credit or folder it asked about) is put back on the run's list: researched in
+        this run, or in the saved run when it continues (AutomaticProcessing.requeue). Returns the ids put back."""
+        import author_rules
+        database=self.inventory.database
+        rules=author_rules.load(database)
+        automatic=getattr(self,'automatic',None)
+        if rules is None or automatic is None or not hasattr(automatic,'requeue'):return []
+        with connect(database) as db:
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'automatic_candidates' not in have or 'book_groups' not in have:return []
+            current={r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')}
+            jobs={r[0] for r in db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
+            records=db.execute("SELECT id,result FROM automatic_candidates WHERE state IN ('Held','Waiting for source')").fetchall()
+        back=[]
+        for record in records:
+            if record['id']==skip or record['id'] not in current or record['id'] in jobs:continue
+            try:result=json.loads(record['result'])
+            except (TypeError,ValueError):continue
+            if isinstance(result,dict) and 'rules_generation' in result and rules.changed_for(result):
+                automatic.requeue(record['id']);back.append(record['id'])
+        self.__dict__.pop('_needs_cache',None)
+        return back
 
     def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None):
         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks

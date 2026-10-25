@@ -63,6 +63,12 @@ class CauseTests(unittest.TestCase):
         self.assertEqual(cause({'piece': 'part_set', 'position': 2, 'parts': 5, 'set': 'Торадора!'}), {'cause': 'part_set', 'index': 2, 'total': 5, 'set': 'Торадора!'})
         self.assertEqual(cause({'piece': 'unreadable'})['cause'], 'unreadable')
         self.assertEqual(todo_causes.piece_cause({'kind': 'piece'})['cause'], 'unknown')
+        # Futaba's 0.22.0 QA, m-8: a four-file book whose title ends in a number read "This file is named as one chapter.";
+        # several files take the numbered-part sentence ("The name marks this as one numbered part.").
+        part_title = {'kind': 'piece', 'piece': {'piece': 'part_title'}}
+        self.assertEqual(todo_causes.piece_cause(part_title, files=4)['cause'], 'numbered_part')
+        self.assertEqual(todo_causes.piece_cause(part_title, files=1)['cause'], 'chapter')
+        self.assertEqual(todo_causes.piece_cause({'kind': 'piece', 'piece': {'piece': 'chapter'}}, files=4)['cause'], 'chapter', 'only one file is ever this piece')
 
     def test_several_holds_count_once_in_order(self):
         record = {'reasons': ['Playback order uncertain', 'Source membership uncertain'], 'identity_hold': None}
@@ -110,6 +116,23 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
         job = self.service.jobs.status()['jobs'][0]
         self.assertEqual([Path(s['path']).name for s in job['manifest']['sources']], [m['filename'] for m in reversed(row['members'])],
                          'Approve used the saved order (it used to rebuild the catalog order)')
+
+    def test_qa_m7_save_track_review_needs_no_typed_note(self):
+        # Futaba's 0.22.0 QA, m-7: Save track review with its two confirmations refused "Record the membership and order
+        # review basis" until a note was typed (ruling 6b removed mandatory notes); the typed note then marked the panel
+        # unsaved, which kept "Approve this order" inert (M-3). An assistant review still needs its evidence.
+        self.order_book()
+        self.start(); self.research_all()
+        row = self.listed('order_unclear')['Око мира']
+        keys = list(reversed([m['member_key'] for m in row['members']]))
+        saved = self.service.reviews.tracks('Audiobooks', row['id'], row['revision'], keys, keys, True, True, True, actor='user')
+        self.assertEqual(saved['track_order'], keys)
+        with self.assertRaisesRegex(ValueError, 'Assistant review requires concrete supporting evidence'):
+            self.service.reviews.tracks('Audiobooks', saved['id'], saved['revision'], keys, keys, True, True, True, actor='assistant')
+        row = self.listed('order_unclear')['Око мира']
+        self.service.approve_book(row['id'], row['revision']); self.wait()
+        job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
+        self.assertEqual([Path(s['path']).name for s in job['manifest']['sources']], [m['filename'] for m in reversed(row['members'])], 'the saved order')
 
     def test_files_unclear_names_the_track_total(self):
         for n in (1, 2):
