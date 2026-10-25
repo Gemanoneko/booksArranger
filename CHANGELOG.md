@@ -19,7 +19,7 @@
 - Title and author from one local source are enough to identify a book.
 - A held book is researched again only when it changes.
 - The book list is faster: on a 200-book test with 50-99 books converted, the median wait fell from 13.3 s to 3.4 s. It no longer waits behind automatic approvals.
-- The test gate now runs on six workers, with the page and syntax checks running alongside them.
+- The test gate now runs on seven workers, with the page and syntax checks running alongside them, and its tests wait for each fixture scan to finish instead of a fixed time.
 - Scanning: files and folders deleted outside the app are skipped quietly during a scan.
 
 ### Fixed
