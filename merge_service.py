@@ -36,7 +36,7 @@ CATALOG_MAX_AGE=60.0 # Seconds catalog facts (cleanups, Ready totals) are reused
 QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and the catalog has no new commit;
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
 WORKING_MAX_AGE=30.0 # The same bound while any listed row carries leftover working files: files removed outside the app
-# show within a minute, not five (RefusedRetry follow-up 2, section 2.6).
+# show within a minute, not five (RefusedRetry follow-up 2, section 2.6); or a book stopped by a drive that went away.
 WORKING_RECHECK=20.0 # Seconds a classified working folder is reused while its listing is unchanged (it stats the originals).
 CHECK_REFRESH=10.0 # Seconds between status refreshes while the M4B check pass finishes checks (follow-up 2, section 3).
 _QUIET_LOCK=threading.Lock()
@@ -1293,7 +1293,8 @@ class MergeService:
                 if isinstance(item.get('working'),dict) and item['working'].get('state')=='blocked':
                     item['producer_recovery']=recovery.status(job_id)
                     if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''};item['group']='retry'  # one predicate: an enabled Retry the bulk path accepts
-        if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) for item in summary.values())
+        # A drive that comes back (cause 'unreachable', 0.22.1) is no catalog commit either: its Retry shows within WORKING_MAX_AGE.
+        if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) or item.get('cause')=='unreachable' for item in summary.values())
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary
