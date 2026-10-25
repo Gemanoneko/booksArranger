@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds,workerSecondsReport} from '../scripts/python-check-batches.mjs';
-const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.py','test_gamma.py','test_delta.py'];
+const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.py','test_gamma.py','test_delta.py','test_epsilon.py'];
 const reports=()=>pythonBatches(patterns).map((p,batch)=>({batch,patterns:p,ids:p.map(x=>'case.'+x),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
 test('both short worker layouts retain the original fallback prerequisite',()=>{
- assert.equal(PYTHON_WORKERS,5);  // 0.22.0: three no longer fit the 540 s deadline; four reached 430 of the 432 s projection (2026-10-25)
+ assert.equal(PYTHON_WORKERS,6);  // 0.22.0: three no longer fit; five left 4 s of the 540 s deadline with real concurrent times (2026-10-25)
  for(let i=0;i<PYTHON_WORKERS;i++){const layout=pythonWorkerLayout(i);assert.equal(layout.relative,'scratch/'+i);assert.deepEqual(layout.requiredDirectories,['scratch/tmp','scratch/source-fallback-2026-10-11']);}
  assert.throws(()=>pythonWorkerLayout(PYTHON_WORKERS));assert.throws(()=>pythonWorkerLayout(-1));assert.throws(()=>pythonWorkerLayout(1.5));assert.throws(()=>pythonWorkerLayout('../escape'));
 });
@@ -20,7 +20,7 @@ test('server conflicts remain serial and every declared pattern appears exactly 
 test('measured heavy modules spread longest first; serial modules stay together; declared order is kept',()=>{
  const declared=['test_alpha.py','test_desktop_host.py','test_inplace_m4b.py','test_beta.py','test_automatic_media.py','test_web.py','test_series_backfill.py','test_gamma.py','test_iron_skazka.py'];
  const b=pythonBatches(declared);
- assert.deepEqual(b,[['test_alpha.py','test_desktop_host.py','test_beta.py','test_web.py','test_gamma.py'],['test_inplace_m4b.py'],['test_automatic_media.py'],['test_series_backfill.py'],['test_iron_skazka.py']]);
+ assert.deepEqual(b,[['test_desktop_host.py','test_web.py'],['test_inplace_m4b.py'],['test_automatic_media.py'],['test_iron_skazka.py'],['test_series_backfill.py'],['test_alpha.py','test_beta.py','test_gamma.py']]);
  assert.deepEqual(pythonBatches([...declared]),b,'deterministic');
  for(const batch of b)assert.deepEqual(batch,declared.filter(p=>batch.includes(p)),'each worker keeps the declared order');
  assert.throws(()=>pythonBatches(['test_a.py','test_b.py']),/Invalid/);  // fewer modules than workers
@@ -33,16 +33,28 @@ test('the real inventory projects every worker under the deadline from its measu
  // The projection itself (0.22.0: placement alone never caught three workers running past the deadline): every worker's
  // measured seconds stay under 80 % of the 540 s deadline, leaving room for the copy and for the workers at once. Five
  // workers (2026-10-25) leave the projection well under it, so new suites fit without a recount.
- const loads=projectedSeconds(b);assert.equal(loads.length,PYTHON_WORKERS);assert(Math.max(...loads)<=0.7*540,'projected worker seconds '+loads.join(', '));
+ // 2026-10-25: the weights are now each module's real seconds while five workers ran together (they were each module alone,
+ // and the projection then said about 350 s while worker 0 really took 510 s). So the bound is the real one: every worker's
+ // projected seconds stay at or under 80 % of the deadline (432 s), the room left for the copies and a machine that isn't quiet.
+ const loads=projectedSeconds(b);assert.equal(loads.length,PYTHON_WORKERS);assert(Math.max(...loads)<=0.8*540,'projected worker seconds '+loads.join(', '));
 });
 test('the gate prints every worker\'s real seconds beside its projection (Senua 0.22.0 early review, m5)',async()=>{
- const b=pythonBatches(patterns),report=workerSecondsReport(b,[431.24,402.5,388,12.04,7]);
- assert.deepEqual(report.real,[431.2,402.5,388,12,7]);assert.deepEqual(report.projected,projectedSeconds(b));
+ const b=pythonBatches(patterns),report=workerSecondsReport(b,[431.24,402.5,388,12.04,7,3.96]);
+ assert.deepEqual(report.real,[431.2,402.5,388,12,7,4]);assert.deepEqual(report.projected,projectedSeconds(b));
  assert.equal(report.lines.length,PYTHON_WORKERS);assert.match(report.lines[0],/^Python worker 0: 431\.2 s real, \d+ s projected, 540 s deadline$/);
- assert.throws(()=>workerSecondsReport(b,[1,2,3,4]),/worker/);assert.throws(()=>workerSecondsReport(b,[1,2,3,4,NaN]),/worker/);
+ assert.throws(()=>workerSecondsReport(b,[1,2,3,4,5]),/worker/);assert.throws(()=>workerSecondsReport(b,[1,2,3,4,5,NaN]),/worker/);
  const fs=await import('node:fs');const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
  assert.match(source,/workerSecondsReport\(batches,results\.map\(r=>r\.seconds\)\)/,'the gate reports the measured times');
  assert.match(source,/python_worker_seconds:/,'and records them in its pass line');
+});
+test('the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path',async()=>{
+ const fs=await import('node:fs');const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('const side=sideChecks();'),python=source.indexOf('const results=await Promise.all(workers.map('),joined=source.indexOf('const sideResult=await side;');
+ assert(start>0 && python>start && joined>python,'the chain starts before the workers and is awaited after them');
+ for(const text of ["for(const name of syntaxFiles)await step(process.execPath,['--check',name]);","for(const name of frontendScripts)await step(process.execPath,[path.join('tests',name)]);",
+   "const node=await step(process.execPath,['--test','--test-reporter=tap',...nodeTests]);"])assert(source.includes(text),'in the chain: '+text);
+ assert(!source.includes('spawnSync'),'nothing runs serially before or after the workers');
+ assert(source.includes("if(sideResult.failure)throw Error("),'a failure in the chain still fails the gate');
 });
 test('duplicate and malformed patterns cannot silently change discovery',()=>{assert.throws(()=>pythonBatches([...patterns,patterns[0]]));assert.throws(()=>pythonBatches(['../test_a.py','test_b.py']));});
 test('actual complete occurrence count is summed without deduplicating loader IDs',()=>{const r=reports();r[0].ids[1]=r[0].ids[0];assert.equal(validatePythonReports(patterns,pythonBatches(patterns),r).count,patterns.length);});

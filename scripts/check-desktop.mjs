@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pure-node handoff graph; the outer protocol-2 supervisor owns its descendants.
 // No GUI launch, installer execution, live catalog or source-library access.
-import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawnSync,spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
+import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -18,11 +18,20 @@ if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)thro
 fs.mkdirSync(path.join(root,'scratch','source-fallback-2026-10-11'),{recursive:true});
 const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate","test_series_backfill.AREA":"scratch/s"};
 const deadline=Date.now()+540000;
-function run(exe,args){const r=spawnSync(exe,args,{cwd:root,encoding:'utf8',windowsHide:true,timeout:Math.max(1,deadline-Date.now()),maxBuffer:16*1024*1024,env:{...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')}});process.stdout.write(r.stdout||'');process.stderr.write(r.stderr||'');if(r.error||r.status!==0)throw Error(r.error?.message||'Focused desktop check failed');return r.stdout;}
-for(const name of ['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js'])run(process.execPath,['--check',name]);
-const nodeOutput=run(process.execPath,['--test','--test-reporter=tap','tests/release-contract.test.mjs','tests/release-flow.test.mjs','tests/update-controller.test.mjs','tests/engine-update.test.mjs','tests/launch-options.test.mjs','tests/release-leased-executables.test.mjs','tests/status-flight.test.mjs','tests/quit-watch.test.mjs','tests/python-check-batches.test.mjs','tests/gate-source-guard.test.mjs']);
-const nodeCount=Number(/^# tests (\d+)$/m.exec(nodeOutput)?.[1]);
-if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutput)||!/^# cancelled 0$/m.test(nodeOutput))throw Error('Node cases were not completely executed');
+// 2026-10-25 (the gate left 4 s of its 540 s deadline on a quiet machine): the syntax checks, the node cases and the page
+// scripts run in one chain beside the Python workers; they used to run before and after them, on the deadline's critical
+// path. Same checks, in the same order inside the chain, each bounded by the same deadline, and a failure still fails the
+// gate, but only after every Python worker and the chain have finished.
+const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
+function runAsync(exe,args){return new Promise(resolve=>{const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
+const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js'],nodeTests=['tests/release-contract.test.mjs','tests/release-flow.test.mjs','tests/update-controller.test.mjs','tests/engine-update.test.mjs','tests/launch-options.test.mjs','tests/release-leased-executables.test.mjs','tests/status-flight.test.mjs','tests/quit-watch.test.mjs','tests/python-check-batches.test.mjs','tests/gate-source-guard.test.mjs'];
+const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
+function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
+ const step=async(exe,args)=>{if(failure)return null;const r=await runAsync(exe,args);log.push(r.stdout,r.stderr);if(r.error||r.timedOut||r.status!==0)failure=(r.error||(r.timedOut?'deadline':'exit '+r.status))+': '+args.join(' ');return r;};
+ for(const name of syntaxFiles)await step(process.execPath,['--check',name]);
+ const node=await step(process.execPath,['--test','--test-reporter=tap',...nodeTests]);if(node)nodeOutput=node.stdout;
+ for(const name of frontendScripts)await step(process.execPath,[path.join('tests',name)]);
+ return {log,failure,nodeOutput};})();}
 // Extend the original desktop/media graph with every integrated maintenance and
 // automatic/status boundary. Report discovery rather than a stale literal count.
 const patterns=['test_desktop_quit.py','test_desktop_catalog.py','test_desktop_host.py','test_build_guard.py','test_working_cleanup.py','test_working_precision.py','test_working_lifecycle.py','test_storage_cleanup.py','test_automatic_media_policy.py','test_automatic_media.py','test_standing_admission.py','test_attempt_working_lifecycle.py','test_published_snapshot_lifecycle.py','test_attention_failure_policy.py','test_automatic_record_retry.py','test_web.py','test_sqlite_busy.py','test_automatic_processing.py','test_status_read_contention.py'];
@@ -96,6 +105,7 @@ function inventory(directory,relative=''){
  return files;
 }
 const inputs=inventory(root),batches=pythonBatches(patterns);
+const side=sideChecks();  // beside the Python workers (see sideChecks)
 const workers=batches.map((batch,i)=>{
  const layout=pythonWorkerLayout(i),directory=path.join(root,layout.relative);fs.mkdirSync(directory); // fresh or refuse
  for(const [name,sha] of inputs){const destination=path.join(directory,name),bytes=fs.readFileSync(path.join(root,name));if(createHash('sha256').update(bytes).digest('hex')!==sha)throw Error('Python batch source changed during copy');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes,{flag:'wx'});}
@@ -118,12 +128,15 @@ const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
 })));
 // Never return on one worker's failure while the others are still running.
 for(let i=0;i<results.length;i++){process.stdout.write(results[i].out);process.stderr.write(results[i].err);}
+const sideResult=await side;process.stdout.write(sideResult.log.join(''));
 const workerSeconds=workerSecondsReport(batches,results.map(r=>r.seconds));for(const line of workerSeconds.lines)console.log(line);
 for(const worker of workers)if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))throw Error('Python batch source changed during tests');
 if(overflow||results.some(r=>r.error||r.timedOut||r.status!==0))throw Error('Python batch failed, exceeded output cap or original deadline');
+if(sideResult.failure)throw Error('Focused desktop check failed: '+sideResult.failure);
+const nodeOutput=sideResult.nodeOutput,nodeCount=Number(/^# tests (\d+)$/m.exec(nodeOutput)?.[1]);
+if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutput)||!/^# cancelled 0$/m.test(nodeOutput))throw Error('Node cases were not completely executed');
+if(JSON.stringify(inventory(root))!==JSON.stringify(inputs))throw Error('Gate source changed during the checks');  // the chain ran beside the copies
 const reports=results.map(r=>{const matches=[...r.out.matchAll(/^BOOKS_PYTHON_BATCH_RESULT (.+)$/gm)];if(matches.length!==1)throw Error('Python batch completion missing or duplicated');return JSON.parse(matches[0][1]);});
 const pythonCount=validatePythonReports(patterns,batches,reports).count;
 console.log('Integrated Python cases: '+pythonCount);
-const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
-for(const name of frontendScripts)run(process.execPath,[path.join('tests',name)]);
-console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:8,python_worker_seconds:workerSeconds.real}));
+console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real}));
