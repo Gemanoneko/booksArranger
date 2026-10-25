@@ -233,15 +233,40 @@ class CatalogContentionTests(unittest.TestCase):
             db.execute("UPDATE queue SET state='pending'")
         def changed(path,kind,stop):
             self.calls.append(path)
-            with connect(self.db) as db:db.execute("UPDATE candidate_context SET data=? WHERE id='book'",(json.dumps({'manual':'new'}),))
+            with connect(self.db) as db:db.execute("UPDATE candidate_context SET data=? WHERE id='book'",(json.dumps({'manual':'new','n':len(self.calls)}),))
             return {'title':'Book','author':'Writer'}
         self.inv.reader=changed
-        with patch('reacquire_sources.root_scan_lease',return_value=contextlib.nullcontext(None)):
+        with patch('reacquire_sources.root_scan_lease',return_value=contextlib.nullcontext(None)),patch.object(scanner,'HOLD_WAIT',.01,create=True):
             self.inv._run('Audiobooks',str(self.root),1)
-        self.assertEqual(self.calls,[str(self.path)]);self.assertEqual(self.row('files')['review'],'saved-review')
+        # 0.22.1 (Futaba's O-6): read again with fresh evidence, HOLD_RETRIES times; evidence that keeps changing stops
+        # the scan, resumable ('stopped', the task pending), never 'failed'. Nothing the scan read is saved over it.
+        self.assertEqual(self.calls,[str(self.path)]*(1+scanner.HOLD_RETRIES));self.assertEqual(self.row('files')['review'],'saved-review')
         self.assertEqual(self.row('jobs')['checked'],0);self.assertEqual(self.row('jobs')['errors'],0)
-        self.assertEqual(self.row('queue')['state'],'pending');self.assertEqual(self.row('jobs')['state'],'failed')
-        self.assertEqual(json.loads(self.row('candidate_context')['data']),{'manual':'new'})
+        self.assertEqual(self.row('queue')['state'],'pending');self.assertEqual(self.row('jobs')['state'],'stopped')
+        self.assertEqual(json.loads(self.row('candidate_context')['data']),{'manual':'new','n':1+scanner.HOLD_RETRIES})
+
+    def test_evidence_changed_once_during_a_read_is_read_again_and_the_scan_completes(self):
+        # Futaba's 0.22.0 QA, O-6: the first scan after a dropped root came back ended "failed" (7 unresolved, "Catalog
+        # review, retirement or source evidence changed during read; task remains pending"); Resume then finished it.
+        # One change under one read no longer fails the scan: the task is read again with the fresh evidence.
+        evidence={'members':[{'path':str(self.path)}]}
+        with connect(self.db) as db:
+            groups.setup(db)
+            db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
+            db.execute("INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review,approved,changed,superseded) VALUES('book',?,'scope',1,'fp',?,'review',1,0,0)",(str(self.root),json.dumps(evidence)))
+            db.execute("INSERT INTO candidate_context VALUES('book',1,'{}')")
+            db.execute("UPDATE queue SET state='pending'")
+        def once(path,kind,stop):
+            self.calls.append(path)
+            if len(self.calls)==1:
+                with connect(self.db) as db:db.execute("UPDATE candidate_context SET data=? WHERE id='book'",(json.dumps({'manual':'new'}),))
+            return {'title':'Book','author':'Writer','tags':{'album':'Book','artist':'Writer'}}
+        self.inv.reader=once
+        with patch('reacquire_sources.root_scan_lease',return_value=contextlib.nullcontext(None)),patch.object(scanner,'HOLD_WAIT',.01,create=True):
+            self.inv._run('Audiobooks',str(self.root),1)
+        self.assertEqual(self.calls,[str(self.path)]*2,'read again once')
+        self.assertEqual((self.row('jobs')['state'],self.row('jobs')['errors'],self.row('queue')['state']),('completed',0,'done'))
+        self.assertEqual(json.loads(self.row('candidate_context')['data']),{'manual':'new'},'the change made during the read stays')
 
     def test_old_worker_cannot_replace_new_generation_failure_state(self):
         with connect(self.db) as db:db.execute("UPDATE jobs SET generation=2,current='new worker'")
