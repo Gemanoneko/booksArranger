@@ -309,6 +309,30 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(recorded, 0, 'nothing recorded')
         self.assertEqual([len(r['members']) for r in self.rows()], [2], 'the set is as it was')
 
+    def test_review_n12_a_refused_keep_keeps_the_saved_review(self):
+        # Senua's 0.22.0 release review, N12: Keep clears a set's saved panel values only inside the transaction that splits
+        # the set. A refused Keep leaves them, the approval, the revision and the "Entered by you" record exactly as they were.
+        from unittest import mock
+        from scanner import connect
+        self.seasons()
+        row = self.asked()
+        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Еспер Эрсгорд'}, False, 'Panel Save')
+        listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
+        self.assertTrue(listed[0]['review'], 'positive control: the panel values are saved on the set')
+
+        def stored():
+            with connect(self.inv.database) as db:
+                group = tuple(db.execute('SELECT review,approved,revision,fingerprint,superseded FROM book_groups WHERE id=?', (row['id'],)).fetchone())
+                entered = [tuple(r) for r in db.execute('SELECT * FROM manual_metadata_sources ORDER BY source_id')]
+            return group, entered
+        before = stored()
+        self.assertTrue(before[0][0] and before[1], 'positive control: a saved review and its "Entered by you" record')
+        with mock.patch('groups.sync'), self.assertRaisesRegex(ValueError, 'not accepted. Nothing was changed'):
+            self.service.keep_separate(listed[0]['id'], listed[0]['revision'])
+        self.assertEqual(stored(), before, 'the saved review, approval, revision and "Entered by you" record are as they were')
+        again = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
+        self.assertEqual([(r['id'], r['review']) for r in again], [(row['id'], listed[0]['review'])], 'still asked, with its saved values')
+
     def test_kept_files_without_a_number_or_a_title_of_their_own_never_return_as_parts(self):
         sources = self.seasons(names=('Тёмный лес', 'Холодный ветер'))
         row = self.asked()
