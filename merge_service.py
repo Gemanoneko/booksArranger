@@ -2385,6 +2385,14 @@ class MergeService:
         self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
 
+    def retract_author_rule(self,rule_id):
+        """Senua's 0.22.0 review, m6: Sergei takes back one author rule, a seed included (author_rules.retract). Every held
+        book whose research it decided is researched again, so it is asked again. Touches no file. Raises ValueError
+        with nothing changed; returns {'retracted', 'requeued'}."""
+        import author_rules
+        with connect(self.inventory.database) as db:author_rules.retract(db,rule_id,actor='user',source='Sergei (taken back)')
+        return {'retracted':rule_id,'requeued':len(self._continue_after_rule())}
+
     def _continue_after_rule(self,skip=None):
         """Futaba's 0.22.0 QA, M-1: a run visits a book once, so a book whose question a new rule answers (the partner of a
         "Same author?" answer) stayed held and listed nowhere ("Still checking") until a new run's scan: Start continued

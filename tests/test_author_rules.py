@@ -44,6 +44,44 @@ class TableTests(unittest.TestCase):
             rows=db.execute('SELECT source,actor,count(*) FROM author_rules GROUP BY source,actor').fetchall()
         self.assertEqual(rows,[('Sergei 2026-10-24','user',len(author_rules.SEEDS))])
 
+    def test_a_rule_a_seed_included_can_be_taken_back_and_the_app_asks_again(self):
+        # Senua's 0.22.0 review, m6: a wrong seed could only be overridden by a contrary rule. Now it can be taken back:
+        # nothing decides the name any more (an older answer for it does not come back), and a later answer still wins.
+        database=self.database()
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            author_rules.setup(db);older=author_rules.append(db,'keep','Андрей Кузнецов',actor='user',source='test')
+            author_rules.seed(db);db.commit()
+            seed=db.execute("SELECT rule_id FROM author_rules WHERE credit_key=? AND kind='not_author'",(author_rules.key('Андрей Кузнецов'),)).fetchone()[0]
+        before=author_rules.load(database)
+        self.assertTrue(before.not_author('Андрей Кузнецов'),'positive control: the reader seed, newer than the keep, decides the name')
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            with self.assertRaisesRegex(ValueError,'already replaced'):author_rules.retract(db,older)
+            author_rules.retract(db,seed);db.commit()
+            for statement in ("UPDATE author_rule_retractions SET rule_id='x'",'DELETE FROM author_rule_retractions'):
+                with self.subTest(statement=statement),self.assertRaisesRegex(sqlite3.IntegrityError,'append-only'):db.execute(statement)
+            with self.assertRaisesRegex(ValueError,'already replaced or taken back'):author_rules.retract(db,seed)
+            with self.assertRaisesRegex(ValueError,'no such author rule'):author_rules.retract(db,'never-stored')
+            author_rules.seed(db);db.commit()
+        rules=author_rules.load(database)
+        self.assertIsNone(rules.rule('Кузнецов Андрей'),'taken back: no rule decides the name, the older keep stays gone')
+        self.assertTrue(rules.not_author('Владимир Князев'),'every other seed still applies')
+        record={'rules_generation':before.generation,'rules_stamp':before.stamp,'rules_seen':[author_rules.key('Андрей Кузнецов')],'rules_folders':['']}
+        self.assertTrue(rules.changed_for(record),'a held book whose research saw the name is researched again')
+        self.assertFalse(rules.changed_for(dict(record,rules_seen=[author_rules.key('Совсем Другой')])),'no other book is')
+        with contextlib.closing(sqlite3.connect(database)) as db:author_rules.append(db,'keep','Андрей Кузнецов',actor='user',source='test');db.commit()
+        self.assertTrue(author_rules.load(database).keep('Андрей Кузнецов'),'a later answer wins')
+
+    def test_the_app_takes_a_rule_back_and_researches_the_held_books_it_decided(self):
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        database=self.database()
+        with contextlib.closing(sqlite3.connect(database)) as db:
+            author_rules.setup(db);rule=author_rules.append(db,'not_author','Иван Петров',actor='user',source='test');db.commit()
+        service=SimpleNamespace(inventory=SimpleNamespace(database=database),_continue_after_rule=lambda:['held-1','held-2'])
+        self.assertEqual(MergeService.retract_author_rule(service,rule),{'retracted':rule,'requeued':2})
+        self.assertIsNone(author_rules.load(database).rule('Иван Петров'))
+        with self.assertRaisesRegex(ValueError,'Nothing was changed'):MergeService.retract_author_rule(service,rule)
+
     def test_a_credit_matches_in_any_word_order_case_and_yo_spelling(self):
         rules=author_rules.Rules([{'rule_id':'r','kind':'not_author','credit_key':author_rules.key('Потёмкин Макс'),'credit_as_seen':'Потёмкин Макс','target':'','scope':'','options':'{}','saved_utc':'1'}])
         for spelling in ('Макс Потемкин','МАКС ПОТЁМКИН','Потёмкин, Макс'):

@@ -138,6 +138,18 @@ class MergeHTTPTests(unittest.TestCase):
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
         self.assertEqual(self.call('/api/candidate/keep-separate',self.identity())[0],409,'never while scanning');self.merge.keep_separate.assert_not_called()
 
+    def test_retract_author_rule_route_takes_one_rule_id(self):
+        # Senua's 0.22.0 review, m6: take back one author rule; a refusal changes nothing and says so.
+        self.merge.retract_author_rule=Mock(return_value={'retracted':'seed-x','requeued':2})
+        status,body,_=self.call('/api/author-rule/retract',{'rule_id':'seed-x'})
+        self.assertEqual((status,body),(200,{'retracted':'seed-x','requeued':2}));self.merge.retract_author_rule.assert_called_once_with('seed-x')
+        self.merge.retract_author_rule=Mock(side_effect=ValueError('This author rule was already replaced or taken back. Nothing was changed.'))
+        status,body,_=self.call('/api/author-rule/retract',{'rule_id':'seed-x'})
+        self.assertEqual((status,body['code'],body['error']),(409,'refused','This author rule was already replaced or taken back. Nothing was changed.'))
+        for bad in ({'rule_id':''},{'rule_id':7},{'rule_id':'x','extra':1},{},{'rule_id':'x'*101}):
+            with self.subTest(body=bad):self.assertEqual(self.call('/api/author-rule/retract',bad)[0],400)
+        self.assertEqual(self.call('/api/author-rule/retract',{'rule_id':'seed-x'},token=False)[0],403)
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)

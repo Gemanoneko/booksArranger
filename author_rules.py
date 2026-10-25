@@ -11,6 +11,9 @@ A rule's credit is normalised the way same_person() compares names (case, ё/е,
 matter). credit '*' with a scope covers every credit in that folder. scope is '' (the whole library) or a folder
 path fragment ("Легенды школы №4 г. Пензы"); a rule applies when the book's folder path contains it. The rows refuse
 UPDATE and DELETE (triggers); a changed mind is a newer row for the same credit and scope, and the newest wins.
+A rule taken back (retract, Senua's 0.22.0 review m6; a seed too) is a row of its own append-only table,
+author_rule_retractions: among the rules it counts as a newer row of kind 'none' for that credit and scope, which
+decides nothing, so no older answer for that name and folder comes back and the app asks again; a later answer wins.
 """
 import contextlib
 import copy
@@ -23,6 +26,7 @@ import uuid
 from pathlib import Path
 
 KINDS = ('same_as', 'not_author', 'collection', 'keep')
+RETRACTED = 'none'  # the kind a retraction takes among the rules (Rules): newest for its credit and scope, it decides nothing
 SEED_SOURCE = 'Sergei 2026-10-24'
 SEED_QUESTION = 'Team/Docs/BooksArranger_AuthorRulings_2026-10-24.md'
 
@@ -39,6 +43,30 @@ def setup(db):
       options TEXT NOT NULL DEFAULT '{}', actor TEXT NOT NULL, source TEXT NOT NULL, question TEXT NOT NULL DEFAULT '', saved_utc TEXT NOT NULL)''')
     db.execute("CREATE TRIGGER IF NOT EXISTS author_rules_no_update BEFORE UPDATE ON author_rules BEGIN SELECT RAISE(ABORT,'author_rules is append-only: add a newer rule instead'); END")
     db.execute("CREATE TRIGGER IF NOT EXISTS author_rules_no_delete BEFORE DELETE ON author_rules BEGIN SELECT RAISE(ABORT,'author_rules is append-only: add a newer rule instead'); END")
+    db.execute('''CREATE TABLE IF NOT EXISTS author_rule_retractions(retraction_id TEXT PRIMARY KEY, rule_id TEXT NOT NULL, credit_key TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL, source TEXT NOT NULL, saved_utc TEXT NOT NULL)''')
+    db.execute("CREATE TRIGGER IF NOT EXISTS author_rule_retractions_no_update BEFORE UPDATE ON author_rule_retractions BEGIN SELECT RAISE(ABORT,'author_rule_retractions is append-only: add a newer rule instead'); END")
+    db.execute("CREATE TRIGGER IF NOT EXISTS author_rule_retractions_no_delete BEFORE DELETE ON author_rule_retractions BEGIN SELECT RAISE(ABORT,'author_rule_retractions is append-only: add a newer rule instead'); END")
+
+
+def retract(db, rule_id, *, actor='user', source=''):
+    """Take back one rule, a seed included (Senua's 0.22.0 review, m6): a retraction row for its credit and scope. Only
+    the rule in force there can be taken back: a rule already replaced by a newer answer or taken back refuses. Raises
+    ValueError, nothing written; returns the retraction's id."""
+    setup(db)
+    row = db.execute('SELECT credit_key, scope FROM author_rules WHERE rule_id=?', (rule_id,)).fetchone()
+    if row is None:
+        raise ValueError('There is no such author rule. Nothing was changed.')
+    credit_key, scope = row[0], row[1]
+    rows = [r for r in db.execute('SELECT rule_id, scope, saved_utc FROM author_rules WHERE credit_key=? UNION ALL '
+                                  'SELECT retraction_id, scope, saved_utc FROM author_rule_retractions WHERE credit_key=?', (credit_key, credit_key))
+            if r[1].casefold() == scope.casefold()]
+    if max(rows, key=lambda r: (r[2], r[0]))[0] != rule_id:  # Rules' own order: the newest wins
+        raise ValueError('This author rule was already replaced or taken back. Nothing was changed.')
+    retraction_id = 'retract-' + str(uuid.uuid4())
+    db.execute('INSERT INTO author_rule_retractions VALUES(?,?,?,?,?,?,?)',
+               (retraction_id, rule_id, credit_key, scope, actor, source or actor, datetime.datetime.now(datetime.timezone.utc).isoformat()))
+    return retraction_id
 
 
 def append(db, kind, credit, *, target='', scope='', options=None, actor='user', source='', question=''):
@@ -75,7 +103,8 @@ def seed(db):
 
 
 class Rules:
-    """The effective rules (newest per credit, kind group and scope), read once. Pure lookups."""
+    """The effective rules (newest per credit and scope), read once. Pure lookups. A 'none' row (a retraction) stays among
+    them: no lookup asks for its kind, and changed_for researches again the books whose names it takes back."""
 
     def __init__(self, rows=(), known_authors=()):
         newest = {}
@@ -203,12 +232,19 @@ def load(database):
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='author_rules'").fetchone():
                 return None
             stamp = tuple(db.execute('SELECT count(*), max(saved_utc) FROM author_rules').fetchone())
+            retractions = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='author_rule_retractions'").fetchone()
+            if retractions:
+                stamp += tuple(db.execute('SELECT count(*), max(saved_utc) FROM author_rule_retractions').fetchone())
             jobs = tuple(db.execute('SELECT count(*), max(updated) FROM audio_jobs').fetchone()) if db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone() else ()
             cache_key = (str(path), stamp, jobs)
             if cache_key in _CACHE:
                 return _CACHE[cache_key]
             rows = [dict(r) for r in db.execute('SELECT * FROM author_rules')]
+            if retractions:  # each a newer 'none' row for the credit and scope it took back
+                rows += [{'rule_id': r['retraction_id'], 'kind': RETRACTED, 'credit_key': r['credit_key'], 'credit_as_seen': '', 'target': '',
+                          'scope': r['scope'], 'options': '{}', 'actor': r['actor'], 'source': r['source'], 'question': '', 'saved_utc': r['saved_utc'],
+                          'retracts': r['rule_id']} for r in db.execute('SELECT * FROM author_rule_retractions')]
             known = []
             if jobs:
                 for (manifest,) in db.execute('SELECT manifest FROM audio_jobs'):

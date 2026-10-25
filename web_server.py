@@ -702,6 +702,14 @@ class Handler(BaseHTTPRequestHandler):
                 text=str(error)
                 self.response(409,{'error':text,'code':'changed' if 'Candidate changed' in text or 'Source files changed' in text else 'refused'});return
             self.response(200,result);return
+        if path=='/api/author-rule/retract':
+            # Senua's 0.22.0 review, m6: take back one author rule, a seed included; touches no file.
+            self.shape(data,{'rule_id'})
+            if not isinstance(data['rule_id'],str) or not 1<=len(data['rule_id'])<=100:raise ValueError('Retract takes one rule id')
+            try:result=self.server.merge.retract_author_rule(data['rule_id'])
+            except ValueError as error:
+                self.response(409,{'error':str(error),'code':'refused'});return
+            self.response(200,result);return
         if path in ('/api/candidate/scan-again','/api/candidate/dismiss'):
             # Missing files (ruling 10): look for them now, or stop listing a book with nothing left. Neither touches a file.
             self.shape(data,{'library','id','revision'})
@@ -779,7 +787,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/delete-preview','/api/candidate/delete'}
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
