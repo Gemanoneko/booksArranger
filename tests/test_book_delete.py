@@ -752,6 +752,79 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
         self.assertEqual((result['failed'], result['forgotten']), ([], True), 'control: with the proof whole, the press goes through')
 
+    def free(self, lock):
+        """True when another thread can take the lock now (the press's own thread could take an RLock it holds)."""
+        got = []
+        def probe():
+            got.append(lock.acquire(blocking=False))
+            if got[0]:
+                lock.release()
+        thread = threading.Thread(target=probe); thread.start(); thread.join()
+        return got[0]
+
+    def test_remove_this_copy_proves_before_it_takes_the_apps_locks(self):
+        # Senua's N19: the press hashed the copy and the audiobook holding operation_lock and group_lock, so the status poll
+        # (merge.state takes group_lock), Approve, Keep and the list waited for the whole proof. Now neither lock is held
+        # while it hashes; every proof still runs (each copy file, then the audiobook), and the press goes through.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        digest, valid, seen = audio_pipeline.digest, self.service._output_valid, []
+        def hashing(path, stop=None, on_bytes=None):
+            seen.append((Path(path).name, self.free(self.service.operation_lock), self.free(self.inv.group_lock)))
+            return digest(path, stop, on_bytes)
+        def checking(record, stop=None, pace=None):
+            seen.append((Path(record['final_path']).name, self.free(self.service.operation_lock), self.free(self.inv.group_lock)))
+            return valid(record, stop, pace)
+        with mock.patch.object(audio_pipeline, 'digest', hashing), mock.patch.object(self.service, '_output_valid', checking):
+            result = self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(seen, [('01.mp3', True, True), ('02.mp3', True, True), (final.name, True, True)], 'each proof once, no lock held')
+        self.assertEqual((result['deleted'], result['failed'], result['forgotten']), (3, [], True))
+        self.assertTrue(final.is_file())
+
+    def test_closing_the_app_stops_remove_this_copy_while_it_proves_and_nothing_is_deleted(self):
+        # N19: drain and close set every press's stop event; the copy's proof had its own, which nothing set, so Quit waited
+        # for the hashes and the press then went on to remove the copy. Now the proof stops and nothing is deleted.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        before, digest = listing(place), audio_pipeline.digest
+        def closing(path, stop=None, on_bytes=None):
+            self.service.drain()  # Quit, while the press reads the first file
+            return digest(path, stop, on_bytes)
+        with mock.patch.object(audio_pipeline, 'digest', closing), self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(refused.exception.code, 'busy')
+        self.assertEqual(listing(place), before, 'nothing deleted')
+
+    def test_closing_the_app_stops_the_copy_preview_too(self):
+        # N19: the preview proves the copy the same way; Quit no longer waits for its hashes either.
+        import audio_pipeline
+        copy, place, final = self.arranged_with_copy()
+        digest = audio_pipeline.digest
+        def closing(path, stop=None, on_bytes=None):
+            self.service.drain()
+            return digest(path, stop, on_bytes)
+        with mock.patch.object(audio_pipeline, 'digest', closing):
+            preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        self.assertEqual(((preview['refusal'] or {}).get('code'), preview['files']), ('busy', []))
+
+    def test_a_copy_file_changed_after_its_proof_refuses_the_press(self):
+        # N19, every proof kept: the proof now runs before the press takes the locks, and under them each file it hashed
+        # must be unchanged since (size, time, identity). A copy file rewritten after its hash, same size: refused.
+        copy, place, final = self.arranged_with_copy()
+        preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
+        member = place / '01.mp3'; data = member.read_bytes()
+        valid = self.service._output_valid
+        def rewritten(record, stop=None, pace=None):
+            answer = valid(record, stop, pace)
+            member.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # after the copy's files were hashed
+            return answer
+        with mock.patch.object(self.service, '_output_valid', rewritten), self.assertRaises(book_delete.DeleteRefused) as refused:
+            self.service.delete_book(copy['id'], copy['revision'], [f['path'] for f in preview['files']], preview['folders'], 'copy')
+        self.assertEqual(refused.exception.code, 'not_identical')
+        self.assertEqual(sorted(p.name for p in place.iterdir()), ['01.mp3', '02.mp3', 'cover.jpg'], 'nothing deleted')
+
     def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):
         copy, place, final = self.arranged_with_copy(possible=True)
         self.assertEqual((copy['ask'].get('duplicate'), copy['ask'].get('copy')), ('possible', None))
