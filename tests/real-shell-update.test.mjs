@@ -133,6 +133,13 @@ async function devtools(port) {
  }
  return { evaluate, close: () => { try { socket?.close(); } catch { /* gone */ } } };
 }
+// The fake release is one patch above package.json's version, read at runtime. A fixed number stops being newer the
+// day the version is bumped to it: at 568712e (0.22.2) the real updater rightly answered "current" to a fake 0.22.2.
+function nextPatch(version) {
+ const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version));
+ if (!match) throw new Error('PA-1 needs a plain x.y.z version in package.json, not ' + JSON.stringify(version));
+ return match[1] + '.' + match[2] + '.' + (Number(match[3]) + 1);
+}
 function alive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 function treeKill(pid) { spawnSync(path.join(SYSTEM32, 'taskkill.exe'), ['/PID', String(pid), '/T', '/F'], { windowsHide: true }); }
 function forgetTrayRecord(fragment) {
@@ -176,18 +183,19 @@ test('PA-1: in the real shell, an installer that cannot start keeps the app runn
   const roots = path.join(home, 'roots.json');
   fs.writeFileSync(roots, JSON.stringify({ Audiobooks: dirs.Audiobooks, Podcasts: dirs.Podcasts, Ebooks: dirs.Books }));
 
-  // The fake GitHub: a release 0.22.2 whose "installer" Windows will not start.
+  // The fake GitHub: a release one patch above this version whose "installer" Windows will not start.
+  const next = nextPatch(pkg.version), tag = 'v' + next;
   const installer = Buffer.from('This is no program: Windows refuses to start it (Books Arranger PA-1).\r\n'.repeat(64));
   const sha512 = crypto.createHash('sha512').update(installer).digest('base64');
-  const name = 'Books-Arranger-Setup-0.22.2.exe', base = '/Gemanoneko/booksArranger/releases';
+  const name = 'Books-Arranger-Setup-' + next + '.exe', base = '/Gemanoneko/booksArranger/releases';
   const requests = [];
   github = https.createServer(selfSigned(['github.com', 'api.github.com', 'objects.githubusercontent.com']), (req, res) => {
    requests.push(req.url);
    const send = (status, type, body) => { res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) }); res.end(body); };
-   if (req.url === base + '.atom') return send(200, 'application/atom+xml', '<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><id>tag:github.com,2008:Repository/1/v0.22.2</id><updated>2026-10-26T00:00:00Z</updated><link rel="alternate" type="text/html" href="https://github.com' + base + '/tag/v0.22.2"/><title>v0.22.2</title><content type="html">PA-1</content></entry></feed>');
-   if (req.url === base + '/latest') return send(200, 'application/json', JSON.stringify({ tag_name: 'v0.22.2' }));
-   if (req.url === base + '/download/v0.22.2/latest.yml') return send(200, 'text/yaml', 'version: 0.22.2\nfiles:\n  - url: ' + name + '\n    sha512: ' + sha512 + '\n    size: ' + installer.length + '\npath: ' + name + '\nsha512: ' + sha512 + "\nreleaseDate: '2026-10-26T00:00:00.000Z'\n");
-   if (req.url === base + '/download/v0.22.2/' + name) { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': installer.length }); return res.end(installer); }
+   if (req.url === base + '.atom') return send(200, 'application/atom+xml', '<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><entry><id>tag:github.com,2008:Repository/1/' + tag + '</id><updated>2026-10-26T00:00:00Z</updated><link rel="alternate" type="text/html" href="https://github.com' + base + '/tag/' + tag + '"/><title>' + tag + '</title><content type="html">PA-1</content></entry></feed>');
+   if (req.url === base + '/latest') return send(200, 'application/json', JSON.stringify({ tag_name: tag }));
+   if (req.url === base + '/download/' + tag + '/latest.yml') return send(200, 'text/yaml', 'version: ' + next + '\nfiles:\n  - url: ' + name + '\n    sha512: ' + sha512 + '\n    size: ' + installer.length + '\npath: ' + name + '\nsha512: ' + sha512 + "\nreleaseDate: '2026-10-26T00:00:00.000Z'\n");
+   if (req.url === base + '/download/' + tag + '/' + name) { res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': installer.length }); return res.end(installer); }
    send(404, 'text/plain', 'Not Found');
   });
   const githubPort = await freePort();
@@ -208,7 +216,7 @@ test('PA-1: in the real shell, an installer that cannot start keeps the app runn
   const until = async (check, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { if (exitedAt) throw new Error('the shell exited while waiting for ' + what + '\n' + output.slice(-3000)); try { const value = await check(); if (value) return value; } catch { /* the page is changing */ } await sleep(500); } throw new Error('timed out waiting for ' + what + '\n' + output.slice(-3000)); };
   await until(async () => (await status()).loaded, 120000, 'the engine to load');
   const checked = await cdp.evaluate('window.booksDesktop.checkUpdates()');
-  assert.deepEqual([checked.check.phase, checked.available], ['available', '0.22.2'], 'positive control: the real updater read the fake GitHub');
+  assert.deepEqual([checked.check.phase, checked.available], ['available', next], 'positive control: the real updater read the fake GitHub');
   const downloaded = await cdp.evaluate('window.booksDesktop.downloadUpdate()');
   assert.equal(downloaded.ready, true, 'positive control: downloaded and verified (sha512)');
   const pressed = Date.now();
@@ -218,7 +226,7 @@ test('PA-1: in the real shell, an installer that cannot start keeps the app runn
   assert.equal(exitedAt, null, 'the shell is still running ' + Math.round((Date.now() - pressed) / 1000) + ' s after Update now');
   assert.equal(failed.update.install.cause, 'installer_blocked');
   assert.match(output, /Installer did not start/, 'positive control: Windows refused to start the installer');
-  assert.ok(requests.includes(base + '/download/v0.22.2/' + name), 'the installer came from the fake GitHub');
+  assert.ok(requests.includes(base + '/download/' + tag + '/' + name), 'the installer came from the fake GitHub');
   const health = await (await fetch('http://127.0.0.1:' + enginePort + '/api/health')).json();
   assert.equal(health.version, pkg.version, 'the old engine answers again');
   // Quit through a second copy (m-12, the ready state): nothing is left running.
