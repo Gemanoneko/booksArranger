@@ -45,6 +45,19 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         page=self.service.reviews.page(status='output_attention',group='title_author')
         self.assertEqual([r['title_clue'] for r in page['rows']],['Безымянная 1','Безымянная 2','Безымянная 10'])
 
+    def test_an_odd_name_question_is_marked_so_the_page_keeps_it_out_of_bulk_approve(self):
+        # 0.22.1 (Judy 11.4, item 2; Jane for Sergei 2026-10-26): the row says it comes from the odd-name check, and the
+        # page never takes it into Select all or bulk Approve as is. A book with no author is not marked: bulk Approve as
+        # is was built for it (section 5).
+        tone(self.audio/'Unsorted'/'Антитела'/'Антитела 128.mp3',self.cover,title='Антитела 128',album='Антитела 128',artist='Кевин Андерсон')
+        tone(self.audio/'Unsorted'/'Утро снайпера'/'01.mp3',self.cover,album='Утро снайпера')
+        self.start();self.research_all()
+        rows,_=self.listed('title_author')
+        odd=[row['ask'] for row in rows.values() if row['ask'].get('why')=='title_bitrate']
+        self.assertEqual(len(odd),1,'positive control: the bitrate title is asked')
+        self.assertIs(odd[0].get('odd_name'),True)
+        self.assertIs(rows['Утро снайпера']['ask'].get('odd_name'),False)
+
     def test_a_suspected_reader_is_never_the_proposed_author_on_the_row(self):
         # Ruling 14: the only credit is a person named in brackets (a reader or uploader). The row asks; its Author
         # field starts empty and Goes to shows Без автора, so "Approve as is" (single or bulk) never files a reader.

@@ -2157,7 +2157,9 @@ class MergeService:
         candidates, the destination and whether it is taken, the missing files, the same-author pair."""
         ask=copy.deepcopy(entry.get('ask') or {})
         payload={'kind':entry['group'],'also':entry.get('also'),'why':ask.get('why',''),'reasons':list(entry.get('reasons') or [])[:4],
-                 'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or []}
+                 'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or [],
+                 # 0.22.1: an odd-name question is approved on its own row only, never in bulk (Judy 11.4, item 2).
+                 'odd_name':ask.get('odd_name') is True}
         if entry['group']=='same_author':
             payload['same_author']={k:ask.get(k) for k in ('new','existing','existing_books','why')}
             payload['same_author']['count']=sum(1 for e in self.needs_you().values() if e['group']=='same_author' and (e.get('ask') or {}).get('new')==ask.get('new'))

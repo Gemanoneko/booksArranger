@@ -1084,7 +1084,8 @@ class PublicResearch:
         if odd:
             # 0.22.1: a name the app should not file without asking (local_identity.odd_identity): a question on the to-do
             # list with the existing rows; the row shows what the app read, nothing is renamed, Approve files what it shows.
-            ask={'kind':odd['kind'],'why':odd['why'],'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},
+            # odd_name: the page keeps it out of Select all and bulk Approve as is (Judy 11.4, item 2).
+            ask={'kind':odd['kind'],'why':odd['why'],'odd_name':True,'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},
                  'author':{'proposal':odd.get('proposal',names[0]),'basis':fields['author'].get('basis','')}}}
             if odd.get('candidates'):
                 ask['candidates']=[{'name':name,'source':'author tag','reader_count':0} for name in odd['candidates']]

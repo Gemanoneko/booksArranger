@@ -54,7 +54,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   run('state='+JSON.stringify(backend)+';view="candidates";filters.candidates="output_attention";attentionGroup="all";viewControls()');
   // 1. Chips: the "Needs your answer" set first, All = the sum = the shortcut = the Jobs line; zero chips hidden.
   run('controls();renderJobs()');
-  assert.equal(get('group-files_missing').textContent,'Missing files · 2');assert.equal(get('group-title_author').textContent,'Missing title or author · 2');
+  assert.equal(get('group-files_missing').textContent,'Missing files · 2');assert.equal(get('group-title_author').textContent,'Title or author · 2');
   assert.equal(get('group-same_author').textContent,'Same author? · 1');assert.equal(get('group-name_taken').hidden,false);assert.equal(get('group-all').textContent,'All · 9');
   assert.equal(get('attention-set-needs').hidden,false);
   assert.equal(get('attention-shortcut').textContent,'Needs attention · 9');assert.equal(get('attention-shortcut').hidden,false);
@@ -70,7 +70,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // Empty list: one plain line.
   paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention.');assert.equal(get('page').textContent,'Nothing needs your attention.');
 
-  // 2. Missing title or author: sentence, fields prefilled with the proposal, the basis line, Goes to under Без автора.
+  // 2. Title or author: sentence, fields prefilled with the proposal, the basis line, Goes to under Без автора.
   paint([noAuthor,both,unclear,reader,taken,someGone,allGone,same]);
   let tr=trOf('cand-a');
   assert.equal(statusCell(tr).textContent,'Author missing');assert.equal(statusCell(tr).children[0].textContent,'No author in the tags, file name or folder name.');

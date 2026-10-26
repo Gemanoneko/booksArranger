@@ -317,6 +317,7 @@ class OddNameTests(Base):
         result = self.lookup(row)
         self.assertTrue(result['reasons'], 'held, never filed by itself')
         self.assertEqual((result['ask']['kind'], result['ask']['why']), (kind, why))
+        self.assertIs(result['ask'].get('odd_name'), True, 'marked, so the page keeps it out of bulk Approve as is')
         return result
 
     def test_a_bitrate_in_the_title_is_asked(self):

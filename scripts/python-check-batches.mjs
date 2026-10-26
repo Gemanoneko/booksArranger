@@ -24,7 +24,7 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 // 403 s per worker (75 % of the deadline), and that run's seven workers really took 384-408 s.
 const measuredSeconds={'test_inplace_m4b.py':377,'test_approve_as_is.py':174,'test_book_delete.py':170,'test_lock_timing.py':130,'test_part_sets.py':160,'test_automatic_media.py':131,
   'test_iron_skazka.py':107,'test_destination_admission.py':100,'test_migration_planning.py':91,'test_split_books.py':89,'test_series_backfill.py':87,
-  'test_standing_admission.py':66,'test_attention_list.py':63,'test_retry_intent.py':62,'test_automatic_media_policy.py':61,'test_todo_holds.py':58,
+  'test_standing_admission.py':66,'test_attention_list.py':71,'test_retry_intent.py':62,'test_automatic_media_policy.py':61,'test_todo_holds.py':58,
   'test_m4b_join.py':57,'test_automatic_processing.py':54,'test_working_lifecycle.py':49,'test_replacement_jobs.py':48,'test_recovery_retention.py':42,
   'test_published_snapshot_lifecycle.py':41,'test_attempt_working_lifecycle.py':39,'test_source_proofs.py':35,'test_cleanup_resume.py':33,'test_output_migration.py':32,
   'test_source_folders.py':32,'test_catalog_paging.py':31,'test_local_admission.py':30,'test_working_precision.py':30,'test_web.py':28,
