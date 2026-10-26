@@ -341,8 +341,9 @@ class SeriesFolderFileTests(Base):
         expected = {'16': 'Севастопольский дозор', '19': 'Масть', '25': 'Чужой Дозор', '27': 'Запах Сумрака', '05': 'Печать сумрака'}
         for name, _ in self.LIVE:
             found = read(self.DOZORY + name)
-            self.assertEqual((found['title'], found['position'], found['series']),
-                             (expected[name[:2]], str(int(name[:2])), 'Вселенная Дозоров - Межавторский'), name)
+            # Rulings 30 and 37 (Sergei 2026-10-26): the universe «Вселенная Дозоров» and its one numbered series «Межавторский цикл».
+            self.assertEqual((found['title'], found['position'], found['universe'], found['series']),
+                             (expected[name[:2]], str(int(name[:2])), 'Вселенная Дозоров', 'Межавторский цикл'), name)
         # With no title tag the name is the only source: the clean title, never the author or a dangling bracket.
         row = next(iter(self.catalog([file_row(self.DOZORY + self.LIVE[2][0], artist='Мария Ясинская')]).values()))
         self.assertEqual(self.approved(row)['title'], 'Чужой Дозор')

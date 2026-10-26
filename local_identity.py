@@ -1893,6 +1893,27 @@ def _balanced(value):
     return text(re.sub(r'[()\[\]{}]', ' ', value))
 
 
+_UNIVERSE = re.compile(r'^\s*(вселенная\s+\S.*?)(?:\s+[-–—]\s+(\S.*?))?\s*$', re.I)
+
+
+def universe_of(name):
+    """Rulings 30 and 37 (Sergei 2026-10-26): a folder named «Вселенная …» is a universe (Universe > Series > Book).
+    ('Вселенная Дозоров', 'Межавторский цикл') for "Вселенная Дозоров - Межавторский цикл" (the universe and the one
+    numbered series in it); ('Вселенная X', '') for a folder that names only its universe; None for any other name."""
+    match = _UNIVERSE.match(text(name))
+    return (text(match[1]), text(match[2] or '')) if match else None
+
+
+def book_universe(row, root):
+    """The universe the book's folders name (universe_of on each folder between the library root and its files, nearest
+    first), else ''."""
+    for name in _ancestors(row, root):
+        place = universe_of(name)
+        if place:
+            return place[0]
+    return ''
+
+
 def _relative_parts(path, root):
     """The path's names below the source root, else None."""
     try:
@@ -1978,13 +1999,18 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
     position = position.replace(',', '.')
     position = str(int(position)) if position.isdigit() else position
     named = _series_name(series, author)
+    place = universe_of(named)
+    if place and not place[1]:
+        return None  # a folder that names only its universe holds books of it, in no series (book_universe)
     # The file names carry the folder's title too ("Энн Маккефри (2012) - Белый дракон (Часть 1).m4b"): folder and file
     # names agree, so they win over a tag that names something else (the series album "Пернский цикл"), item 9. Only for a
     # book FOLDER (Senua's 0.22.1 review, W1): a single file's "folder title" is its own name, so it always "agrees" and
     # beat every clean tag title («Сергей Недоруб - Севастопольский дозор», «Игры Немезиды 1» with the file's part number).
     key = title_key(title)
     files = kind == 'folder' and bool(key) and any(key in title_key(Path(m['path']).stem) for m in members)
-    return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', named)) or named),
+    # Rulings 30 and 37: «Вселенная Дозоров - Межавторский цикл» is the universe and its one numbered series, named in full.
+    return {'version': STRUCTURE_VERSION, 'author': author, 'universe': place[0] if place else '',
+            'series': place[1] if place else latin_lookalikes(text(_SERIES_WORDS.sub('', named)) or named),
             'position': position, 'title': title, 'reader': reader, 'file_series': file_series, 'book': kind, 'book_name': text(book),
             'series_folder': series, 'files_name_title': files, 'uncredited': uncredited}
 
@@ -2547,7 +2573,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     if part and part['series'] and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
         fields['series'], fields['number'] = part['series'], part['number']
     from_folders = False
-    if structure and (fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
+    # Rulings 30 and 37: in a universe folder its one numbered series is the folder's, whatever series a tag names.
+    if structure and (structure.get('universe') or fields['series']['state'] != 'green' or fields['number']['state'] != 'green'):
         # Item 9: the series folder and the book's number in it ("Sigma Force\2. Map of Bones", "Книга 1", "Перерождение 2.").
         fields['series'] = {'state': 'green', 'value': structure['series'], 'how': 'the series folder (Author / Series / N. Title)',
                             'sources': [{'kind': 'folder structure', 'value': structure['series_folder']}]}
@@ -2591,6 +2618,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                  'requires_own_chapters': True} if part and not part['blocked'] else None
     return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
+            # Rulings 30 and 37: the universe the book's folders name («Вселенная Дозоров»), else ''.
+            'universe': (structure or {}).get('universe') or book_universe(row, root),
             'held': piece['detail'] if piece and not ask else '',
             # Judy 2026-10-24 (0.22.0 review, B4): the typed cause of a "Part of a bigger book" row and its numbers.
             'piece': {k: piece[k] for k in ('piece', 'count', 'position', 'parts', 'set') if k in piece} if piece and not ask else None,

@@ -17,8 +17,15 @@ MAX_XML = 8 * 1024 * 1024
 class ScanStopped(Exception):
     pass
 
+_SLASHED_NUMBERS = re.compile(r'\s*\d{1,4}(?:\s*/\s*\d{1,4}){1,3}\s*')
+
+
 def safe_name(value):
-    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', str(value or '')).strip().rstrip('. ')
+    value = str(value or '')
+    if _SLASHED_NUMBERS.fullmatch(value):
+        # Ruling 37 (Sergei 2026-10-26): a title of numbers joined by slashes («11/22/63») is filed with dots, «11.22.63».
+        value = re.sub(r'\s*/\s*', '.', value.strip())
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', value).strip().rstrip('. ')
     if value.upper().split('.')[0] in {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}:
         value = '_' + value
     return value[:160].rstrip('. ') or '_'

@@ -1109,7 +1109,8 @@ class PublicResearch:
         # Edit names (0.22.2; Sergei, «Протоколы SCP»): a collection in a series, with its position, files under Сборники/<Series>.
         review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary,series=(local.get('series') or {}).get('name','') if ('series' in saved_names or 'number' in saved_names) else '',number=(local.get('series') or {}).get('number','') if ('series' in saved_names or 'number' in saved_names) else '')
         review['narrator']='; '.join(route['narrators'])
-        if saved_names.get('universe'):review['universe']=saved_names['universe']
+        if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
+        elif local.get('universe'):review['universe']=local['universe']  # rulings 30 and 37
         facts['work_ids']=[work['id']]
         if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
         reasons=list(reasons)+source_gate(row,work)
@@ -1298,7 +1299,9 @@ class PublicResearch:
                 'Embedded series tags repeated in the folder/file name: '+described('series')+'; '+described('number')+'.')
             evidence('series',review['series'],url,why);evidence('number',review['number'],url,why)
             facts['series_source']=series_source(series)
-        if saved_names.get('universe') is not None and 'universe' in saved_names:review['universe']=saved_names['universe']  # Edit names, ruling 30
+        # Edit names (his universe, also an empty one) over the universe the book's folders name (rulings 30 and 37).
+        if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
+        elif local.get('universe'):review['universe']=local['universe']
         result.update(review=review,metadata_facts=facts)
         result['reasons']=list(dict.fromkeys(reasons))
         # Nothing waits for a source (0.22.1): the missing fields were read from the cache, the rest is filled later.

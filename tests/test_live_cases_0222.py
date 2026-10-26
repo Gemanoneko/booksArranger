@@ -53,6 +53,51 @@ class LiveCaseTests(Base):
         result = self.lookup(row)
         self.assertNotIn('One part of a bigger book', result['reasons'])
         self.assertEqual(result['review']['canonical_author'], 'King Stephen')
+        # Ruling 37 (Sergei 2026-10-26): filed as «11.22.63», the folder's spelling; the title tag keeps its slashes.
+        self.assertEqual(result['review']['title'], '11/22/63')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\King Stephen\\11.22.63 - King Stephen.m4b', 'was 11_22_63')
+
+    def test_a_title_of_numbers_joined_by_slashes_is_written_with_dots_and_any_other_slash_stays_an_underscore(self):
+        from metadata import safe_name
+        self.assertEqual(safe_name('11/22/63'), '11.22.63')
+        self.assertEqual(safe_name('1/2/2020'), '1.2.2020')
+        self.assertEqual(safe_name('AC/DC'), 'AC_DC', 'control: letters')
+        self.assertEqual(safe_name('Часть 1/2'), 'Часть 1_2', 'control: not only numbers')
+        self.assertEqual(safe_name('King Stephen'), 'King Stephen')
+
+    DOZORY = 'Сергей Лукьяненко\\Вселенная Дозоров - Межавторский цикл\\'
+
+    def test_a_dozory_book_files_in_its_universe_and_in_one_numbered_series(self):
+        # Rulings 30 and 37 (Sergei 2026-10-26): the folder «Вселенная Дозоров - Межавторский цикл» is the universe «Вселенная
+        # Дозоров» (Universe > Series > Book) and in it the one numbered series «Межавторский цикл». Live names and tags.
+        rows = [file_row(self.DOZORY + '16 - Сергей Недоруб - Севастопольский дозор (08_00-20_00 16 мая 2016).m4b', title='Севастопольский дозор',
+                         album='Севастопольский дозор', artist='Сергей Недоруб', genre='Фантастика', date='2016', album_artist='Воронецкий Станислав'),
+                file_row(self.DOZORY + 'Виталий Каплан - Корона (июнь 2004).m4b', title='Корона', album='Корона', artist='Виталий Каплан'),
+                file_row(self.DOZORY + '27 - Валерий Пылаев - Запах Сумрака (август-сентябрь 2010).m4b', title='Дозоры. Запах Сумрака',
+                         album='Дозоры. Запах Сумрака', artist='Валерий Пылаев', genre='Фантастика', date='2018', album_artist='Алексей Данков')]
+        books = self.catalog(rows)
+        universe = SORTED + '\\Вселенная Дозоров\\'
+        row = books[rows[0]['path']]
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual((result['review']['universe'], result['review']['series'], result['review']['number']), ('Вселенная Дозоров', 'Межавторский цикл', '16'))
+        self.assertEqual(self.goes_to(row, result), universe + 'Межавторский цикл\\Межавторский цикл - 16 - Севастопольский дозор - Недоруб Сергей.m4b',
+                         'was Недоруб Сергей\\Вселенная Дозоров - Межавторский - 16 - …')
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), self.goes_to(row, result), 'Approve files it where the row says')
+        self.assertEqual(self.research.names_read(row, ROOT)[0]['universe'], 'Вселенная Дозоров', 'Edit names reads the universe')
+        # A book of the universe with no number in its name is in the universe, in no series.
+        row = books[rows[1]['path']]
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), universe + 'Корона - Каплан Виталий.m4b')
+        row = books[rows[2]['path']]
+        # Its clean title tag stays the title (Senua's 0.22.1 review, W1).
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), universe + 'Межавторский цикл\\Межавторский цикл - 27 - Дозоры. Запах Сумрака - Пылаев Валерий.m4b')
+
+    def test_a_series_folder_that_is_no_universe_files_under_its_author_as_before(self):
+        rows = [file_row('Clive Barker\\Books of Blood\\3. Сын целлулоида.m4b', title='Сын целлулоида', album='Сын целлулоида', artist='Clive Barker')]
+        row = next(iter(self.catalog(rows).values()))
+        result = self.research.approved(row, ROOT)
+        self.assertFalse(result['review'].get('universe'))
+        self.assertTrue(self.goes_to(row, result).startswith(SORTED + '\\Barker Clive\\Books of Blood\\Books of Blood - 3 - '), self.goes_to(row, result))
 
     def test_goliath_disc_3_of_3_is_its_place_in_the_trilogy_and_it_waits_for_its_english_title(self):
         import original_titles
