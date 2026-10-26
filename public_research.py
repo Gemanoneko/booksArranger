@@ -360,41 +360,62 @@ class PublicClient:
         lane=budget.get('lane','research') if isinstance(budget,dict) else 'research'
         if lane not in LANES:raise ValueError('Unknown public research lane')
         if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
-        with self.lock:
-            now=self.clock()
-            with connect(self.database) as db:
-                self._expire(db,now)
-                cached=db.execute('SELECT * FROM public_research_cache WHERE url=? AND fetched>?',(url,now-7*86400)).fetchone()
-                if cached:
-                    raw=base64.b64decode(cached['raw'],validate=True)
-                    if len(raw)<=MAX_BYTES and hashlib.sha256(raw).hexdigest()==cached['sha256']:
-                        if budget is not None:budget.setdefault('answered',set()).add(host)
-                        return raw
-                    raise ValueError('Cached evidence changed')
-                if budget is not None:
-                    if budget['remaining']<=0:raise ResearchWait(host,'Public research request bound reached',now+86400,'app_limit','candidate')
-                # Complete cache housekeeping before reserving the request atomically.
-                db.commit()
-                # Reservation is atomic across Books request threads; Comics budgets are untouched.
-                db.execute('BEGIN IMMEDIATE')
-                wait=db.execute('SELECT * FROM public_research_limits WHERE host=?',(host,)).fetchone()
-                delay=max(0,(wait['next_at'] if wait else 0)-now)
-                if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
-                ready=self._host_ready(db,host,now)
-                if host in WIKIMEDIA_HOSTS:
-                    family_ready=self._wikimedia_ready(db,now)
-                    if family_ready-now>7:raise ResearchWait(host,APP_LIMIT_REASON,family_ready,'app_limit','provider')
-                    delay=max(delay,family_ready-now)
-                if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
-                lane_ready=self._lane_ready(db,host,lane,now)
-                if lane_ready>now:raise ResearchWait(host,LANE_LIMIT_REASON,lane_ready,'app_limit','lane')
-                db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
-                db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+host_policy(host)[1],''))
-                db.execute('DELETE FROM public_research_requests WHERE at<?',(now-7*86400,))
-                if lane!='research':
-                    db.execute('INSERT INTO public_research_lanes VALUES(?,?,?)',(host,now+delay,lane))
-                    db.execute('DELETE FROM public_research_lanes WHERE at<?',(now-APP_HOST_WINDOW,))
-                if budget is not None:budget['remaining']-=1
+        fetching=self.__dict__.setdefault('_fetching',{})  # url -> Event: a request in flight, set once it has ended
+        while True:
+            pending=None
+            with self.lock:
+                now=self.clock()
+                with connect(self.database) as db:
+                    self._expire(db,now)
+                    cached=db.execute('SELECT * FROM public_research_cache WHERE url=? AND fetched>?',(url,now-7*86400)).fetchone()
+                    if cached:
+                        raw=base64.b64decode(cached['raw'],validate=True)
+                        if len(raw)<=MAX_BYTES and hashlib.sha256(raw).hexdigest()==cached['sha256']:
+                            if budget is not None:budget.setdefault('answered',set()).add(host)
+                            return raw
+                        raise ValueError('Cached evidence changed')
+                    if budget is not None:
+                        if budget['remaining']<=0:raise ResearchWait(host,'Public research request bound reached',now+86400,'app_limit','candidate')
+                    # Senua's 0.22.1 review, W12: with the fetch outside the lock, a second thread (research beside a
+                    # background lane) missed the cache for the same URL and reserved and fetched it again: two requests
+                    # against the site's bound. It now waits for the request in flight and reads its answer from the cache.
+                    pending=fetching.get(url)
+                    if pending is None:
+                        # Complete cache housekeeping before reserving the request atomically.
+                        db.commit()
+                        # Reservation is atomic across Books request threads; Comics budgets are untouched.
+                        db.execute('BEGIN IMMEDIATE')
+                        wait=db.execute('SELECT * FROM public_research_limits WHERE host=?',(host,)).fetchone()
+                        delay=max(0,(wait['next_at'] if wait else 0)-now)
+                        if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
+                        ready=self._host_ready(db,host,now)
+                        if host in WIKIMEDIA_HOSTS:
+                            family_ready=self._wikimedia_ready(db,now)
+                            if family_ready-now>7:raise ResearchWait(host,APP_LIMIT_REASON,family_ready,'app_limit','provider')
+                            delay=max(delay,family_ready-now)
+                        if ready>now:raise ResearchWait(host,APP_LIMIT_REASON,ready,'app_limit','host')
+                        lane_ready=self._lane_ready(db,host,lane,now)
+                        if lane_ready>now:raise ResearchWait(host,LANE_LIMIT_REASON,lane_ready,'app_limit','lane')
+                        db.execute('INSERT INTO public_research_requests VALUES(?,?)',(host,now+delay))
+                        db.execute('INSERT OR REPLACE INTO public_research_limits VALUES(?,?,?)',(host,now+delay+host_policy(host)[1],''))
+                        db.execute('DELETE FROM public_research_requests WHERE at<?',(now-7*86400,))
+                        if lane!='research':
+                            db.execute('INSERT INTO public_research_lanes VALUES(?,?,?)',(host,now+delay,lane))
+                            db.execute('DELETE FROM public_research_lanes WHERE at<?',(now-APP_HOST_WINDOW,))
+                        if budget is not None:budget['remaining']-=1
+                        flight=fetching[url]=threading.Event()
+            if pending is None:break
+            # Another thread fetches this URL (its pacing wait and the fetch: well under a minute): its answer is cached
+            # when it ends; a failed request leaves no answer, and this thread then asks for itself (and is paced).
+            while not pending.wait(.25):
+                if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
+        try:
+            return self._fetch_reserved(url,host,delay,stop,budget)
+        finally:
+            with self.lock:
+                if fetching.get(url) is flight:del fetching[url]
+            flight.set()
+    def _fetch_reserved(self,url,host,delay,stop,budget):
         # 0.22.1: the pacing wait and the fetch (up to 15 s) run outside the lock; the reservation above already paces the
         # site. A cached answer another thread (research) needs no longer waits behind a background pass's request.
         if delay and (stop.wait(delay) if stop else time.sleep(delay)):raise InterruptedError('Automatic processing paused')

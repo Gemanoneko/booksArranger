@@ -174,6 +174,33 @@ class ClientLockTests(unittest.TestCase):
         times = sorted(at for _, at in self.started)
         self.assertEqual(len(times), 2); self.assertGreaterEqual(times[1] - times[0], public_research.host_policy('api.fantlab.ru')[1] - 0.05)
 
+    def test_one_url_asked_by_two_threads_is_fetched_once(self):
+        # Senua's 0.22.1 review, W12: with the fetch outside the lock, research and a background lane both missed the cache
+        # for the same URL and both reserved and fetched it: two requests against the site's bound.
+        client = PublicClient(Path(self.temp.name) / 'c.sqlite3', fetch=self.fetch)
+        self.addCleanup(self.release.set)
+        answers = []
+        first = threading.Thread(target=lambda: answers.append(client.read('https://api.fantlab.ru/slow', None, {'remaining': 1, 'lane': 'gap'})), daemon=True)
+        first.start(); self.assertTrue(self.fetching.wait(5))
+        budget = {'remaining': 1}
+        second = threading.Thread(target=lambda: answers.append(client.read('https://api.fantlab.ru/slow', None, budget)), daemon=True)
+        second.start(); time.sleep(0.3)
+        self.assertTrue(second.is_alive(), 'the second reader waits for the request in flight')
+        self.release.set(); first.join(10); second.join(10)
+        self.assertEqual([url for url, _ in self.started], ['https://api.fantlab.ru/slow'], 'one request')
+        self.assertEqual(answers, [b'{"ok": true}'] * 2)
+        self.assertEqual(budget['remaining'], 1, 'the cached answer spent no request of its own')
+        # A stopped reader stops waiting.
+        self.fetching.clear(); self.release.clear()
+        third = threading.Thread(target=lambda: client.read('https://api.fantlab.ru/slow2', None, {'remaining': 1}), daemon=True)
+        third.start(); self.assertTrue(self.fetching.wait(5))
+        stop = threading.Event(); errors = []
+        def stopped():
+            try: client.read('https://api.fantlab.ru/slow2', stop, {'remaining': 1})
+            except InterruptedError as error: errors.append(error)
+        waiter = threading.Thread(target=stopped, daemon=True); waiter.start(); time.sleep(0.2); stop.set(); waiter.join(5)
+        self.assertEqual(len(errors), 1); self.release.set(); third.join(10)
+
 
 if __name__ == '__main__':
     unittest.main()
