@@ -9,6 +9,7 @@ import hashlib
 from html.parser import HTMLParser
 import http.client
 import ssl
+import sqlite3
 import ipaddress
 import json
 import ntpath
@@ -81,6 +82,22 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 RESEARCH_VERSION='standing-22.2-v1'
 
 class ChallengeDetected(ValueError):pass
+
+# 0.22.2 (a live SQLITE_BUSY stop): a catalog busy for longer than a connection waits (a regroup inside one write
+# transaction took 10.3-10.5 s on the live copy) is a short wait for that book or request, never the end of a run.
+CATALOG_BUSY_REASON='The catalog was busy; this book is checked again in a minute'
+CATALOG_BUSY_WAIT=60
+
+
+def catalog_busy(error):
+    """True for SQLite's busy or locked answer (another connection holds the write lock)."""
+    import sqlite3
+    if not isinstance(error,sqlite3.OperationalError):return False
+    code=getattr(error,'sqlite_errorcode',None)
+    if type(code) is int and code&255 in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):return True
+    message=str(error).casefold()
+    return 'database is locked' in message or 'database is busy' in message or 'database table is locked' in message
+
 
 class ResearchWait(Exception):
     def __init__(self,source,reason,retry_at,kind='source_unavailable',scope=None):
@@ -369,7 +386,10 @@ class PublicClient:
             with self.lock:
                 now=self.clock()
                 with connect(self.database) as db:
-                    self._expire(db,now)
+                    # 0.22.2 (the 7th SQLITE_BUSY stop since 10-11): a cache read never writes. Expiry ran here on every
+                    # read, cache-only ones included, so a read waited 10 s for the write lock behind a regroup and the
+                    # whole automatic run stopped. It runs at start and with each new answer (cache_fetched); an expired
+                    # answer is never returned either way (fetched > now - 7 days).
                     cached=db.execute('SELECT * FROM public_research_cache WHERE url=? AND fetched>?',(url,now-7*86400)).fetchone()
                     if cached:
                         raw=base64.b64decode(cached['raw'],validate=True)
@@ -384,10 +404,13 @@ class PublicClient:
                     # against the site's bound. It now waits for the request in flight and reads its answer from the cache.
                     pending=fetching.get(url)
                     if pending is None:
-                        # Complete cache housekeeping before reserving the request atomically.
                         db.commit()
-                        # Reservation is atomic across Books request threads; Comics budgets are untouched.
-                        db.execute('BEGIN IMMEDIATE')
+                        # Reservation is atomic across Books request threads; Comics budgets are untouched. 0.22.2: a busy
+                        # catalog here is a short wait for this source (CATALOG_BUSY_WAIT), never an error that stops a run.
+                        try:db.execute('BEGIN IMMEDIATE')
+                        except sqlite3.OperationalError as error:
+                            if not catalog_busy(error):raise
+                            raise ResearchWait(host,CATALOG_BUSY_REASON,now+CATALOG_BUSY_WAIT,'source_unavailable','host') from None
                         wait=db.execute('SELECT * FROM public_research_limits WHERE host=?',(host,)).fetchone()
                         delay=max(0,(wait['next_at'] if wait else 0)-now)
                         if delay>5:raise ResearchWait(host,wait['reason'] or 'Public source cooling down',now+delay,'source_pause' if wait['reason'] in PAUSE_REASONS else 'source_unavailable','host')
@@ -460,6 +483,7 @@ class PublicClient:
             raise ResearchWait(host,reason,retry,'source_pause' if reason in PAUSE_REASONS else 'source_unavailable','host') from None
         def cache_fetched(db):
             encoded=base64.b64encode(raw).decode('ascii');fetched=self.clock()
+            self._expire(db,fetched)  # 0.22.2: expiry with each new answer, in this retried transaction (never on a read)
             db.execute('INSERT OR REPLACE INTO public_research_cache VALUES(?,?,?,?)',(url,encoded,hashlib.sha256(raw).hexdigest(),fetched))
             db.execute('INSERT OR REPLACE INTO public_research_cache_index VALUES(?,?,?)',(url,fetched,len(encoded)))
             # Keep the newest responses within both an entry and a byte bound, so
@@ -1194,6 +1218,10 @@ class PublicResearch:
         def attempt(source,function):
             try:return function()
             except ResearchWait as wait:waits.append(wait);found['closed'].append(source)
+            except sqlite3.OperationalError as error:
+                # 0.22.2: a busy catalog is a closed source for now, never the end of the run (the live stop at _expire).
+                if not catalog_busy(error):raise
+                waits.append(ResearchWait(source,CATALOG_BUSY_REASON,getattr(self.client,'clock',time.time)()+CATALOG_BUSY_WAIT,'source_unavailable','host'));found['closed'].append(source)
             except (ValueError,TypeError,KeyError,AttributeError):pass
             return None
         if gaps&{'original_title','author_full'}:

@@ -649,6 +649,14 @@ class AutomaticProcessing:
                   except ValueError:
                       # Unsupported input or malformed public evidence holds only this candidate.
                       result={'sources':[],'reasons':['Public research input or evidence exceeds supported limits']}
+                  except sqlite3.OperationalError as error:
+                      # 0.22.2 (the 7th SQLITE_BUSY stop since 10-11): a catalog busy behind another writer (a regroup)
+                      # during one book's research puts that book in "Waiting for source" for a minute; the run goes on.
+                      # Any other catalog error still stops the run.
+                      from public_research import catalog_busy,CATALOG_BUSY_REASON,CATALOG_BUSY_WAIT
+                      if not catalog_busy(error):raise
+                      at=self.clock()+CATALOG_BUSY_WAIT
+                      result={'sources':[],'reasons':[CATALOG_BUSY_REASON],'wait':{'source':'catalog','reason':CATALOG_BUSY_REASON,'retry_at':at,'kind':'source_unavailable','scope':'candidate'}}
                   research_failed=False
                   if self.stop_event.is_set():raise InterruptedError()
                   # Human choices are scoped constraints; a matching researched draft

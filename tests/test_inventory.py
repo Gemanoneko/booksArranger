@@ -63,17 +63,18 @@ class InventoryTests(unittest.TestCase):
                 finally:writer.close()
             finally:release.set();reader.join(10)
         self.assertEqual(len(results),1)
-        # Positive control: when the groups must be rebuilt, the list takes the write lock as before.
+        # When the groups must be rebuilt: 0.22.2 builds them outside the write transaction and writes them in a short one
+        # first (groups.presync), so the list page again reads with no write lock. Positive control: the groups were stale.
         with connect(self.database) as db:db.execute('UPDATE book_catalog_revision SET revision=revision+1 WHERE id=1')
         with connect(self.database) as db:self.assertFalse(groups.current(db,self.roots['Audiobooks']))
         inside.clear();release.clear()
         with unittest.mock.patch.object(groups,'page',slow):
             reader=threading.Thread(target=lambda:inventory.candidates('Audiobooks'));reader.start()
             try:
-                self.assertTrue(inside.wait(5));writer=connect(self.database,timeout=.2)
-                try:
-                    with self.assertRaises(sqlite3.OperationalError):writer.execute('BEGIN IMMEDIATE')
+                self.assertTrue(inside.wait(5));writer=connect(self.database,timeout=.5)
+                try:writer.execute('BEGIN IMMEDIATE');writer.rollback()
                 finally:writer.close()
+                with connect(self.database) as db:self.assertTrue(groups.current(db,self.roots['Audiobooks']),'rebuilt before the page read')
             finally:release.set();reader.join(10)
 
     def test_source_preservation_incremental_changes_and_deletion(self):

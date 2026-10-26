@@ -79,6 +79,9 @@ def synchronize_groups(inventory,roots):
         db.execute('BEGIN')
         fresh=_groups_current(db,roots,groups)
     if fresh:return
+    # 0.22.2: each stale root is built outside the write transaction first (groups.presync); only what is still stale
+    # (a first setup, a new grouping version, inputs that kept changing) is rebuilt inside it.
+    for root in roots:groups.presync(inventory.database,root)
     def synchronize(db):
         for root in roots:
             if not _groups_current(db,[root],groups):groups.sync(db,root)

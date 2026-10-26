@@ -716,6 +716,10 @@ class Inventory:
             if all(groups.current(connection,root) for root in roots):
                 return self._candidate_page(connection,roots,limit,offset,search,status,ids)
             connection.execute('ROLLBACK')
+        with self.group_lock:
+            # 0.22.2: the stale groups are built outside the write transaction (groups.presync); only a first setup, a
+            # new grouping version or inputs that kept changing still rebuild inside it, below.
+            for root in roots:groups.presync(self.database,root)
         with self.group_lock,connect(self.database) as connection:
             # v0.16.12: a plain read when the stored groups are current, so the page (11-13 s on the live catalog)
             # no longer holds the write lock every other write waited behind, a Retry press included.
@@ -752,9 +756,14 @@ class Inventory:
             db.execute('BEGIN')
             if groups.current(db,root):return self._candidate_row(db,root,identity)
             db.execute('ROLLBACK')
-        with self.group_lock,connect(self.database) as db:
-            db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
-            return self._candidate_row(db,root,identity)
+        with self.group_lock:
+            if groups.presync(self.database,root):  # 0.22.2: built outside the write transaction
+                with connect(self.database) as db:
+                    db.execute('BEGIN')
+                    if groups.current(db,root):return self._candidate_row(db,root,identity)
+            with connect(self.database) as db:
+                db.execute('BEGIN IMMEDIATE');groups.sync(db,root)
+                return self._candidate_row(db,root,identity)
 
     @staticmethod
     def _candidate_row(db,root,identity):

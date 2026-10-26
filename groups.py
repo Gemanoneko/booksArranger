@@ -641,18 +641,13 @@ def current(connection,root):
     except sqlite3.OperationalError:return False  # not set up yet: the first page sets it up
     return bool(revision and saved and saved[0]==revision[0])
 
-def sync(connection,root):
-    setup(connection)
-    revision=connection.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()[0]
-    saved=connection.execute('SELECT revision FROM book_group_sync WHERE root=?',(root,)).fetchone()
-    if saved and saved[0]==revision:return
-    rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
+def _sync_inputs(connection,root):
+    """What a regroup depends on beyond the catalog revision (files, retirements, part chapters and volumes bump that):
+    the retired sources, the reacquire markers and the protected groups (approved, reviewed or with a job)."""
     retired=retired_sources(connection,root)
     import reacquire_sources
     archived=reacquire_sources.archived_ids(connection,root)
     frozen={json.loads(item['snapshot'])['group']['scope']:json.loads(item['snapshot']) for item in reacquire_sources.markers(connection,root) if item['state']=='required'}
-    frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
-    rows=[row for row in rows if row['path'] not in frozen_paths]
     protected={}
     jobs=set()
     if connection.execute("SELECT 1 FROM sqlite_master WHERE name='audio_jobs'").fetchone():
@@ -660,8 +655,71 @@ def sync(connection,root):
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
-    groups=build(rows,protected,chaptered_parts(connection,root),volume_parts(connection,root),kept_parts(connection,root))
+    return {'retired':retired,'archived':archived,'frozen':frozen,'protected':protected,
+            'parts':(chaptered_parts(connection,root),volume_parts(connection,root),kept_parts(connection,root))}
+
+
+def _sync_build(connection,root,inputs):
+    rows=connection.execute('SELECT * FROM files WHERE root=? ORDER BY path',(root,)).fetchall()
+    frozen=inputs['frozen']
+    frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
+    rows=[row for row in rows if row['path'] not in frozen_paths]
+    groups=build(rows,inputs['protected'],*inputs['parts'])
     for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
+    return groups
+
+
+def presync(database,root,attempts=3):
+    """0.22.2 (the live SQLITE_BUSY stop: one regroup of both roots inside one BEGIN IMMEDIATE took 10.3-10.5 s on the live
+    copy, and every other writer waited past its timeout). The groups are built from one read snapshot, outside any write
+    transaction; then a short BEGIN IMMEDIATE checks that the catalog revision and every other input are unchanged and
+    writes only the rows that changed, exactly as sync() would. Callers hold Inventory.group_lock, as for sync(). True when
+    the stored groups are current afterwards; False leaves the work to sync() in the caller's own transaction (a first
+    setup, a new grouping version, or inputs that kept changing)."""
+    from scanner import connect
+    for _ in range(attempts):
+        with connect(database) as db:
+            db.execute('BEGIN')
+            try:
+                algorithm=db.execute('SELECT version FROM book_group_algorithm WHERE id=1').fetchone()
+                if not algorithm or algorithm[0]!=GROUP_VERSION:return False
+                if current(db,root):return True
+                revision=db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()
+                if revision is None:return False
+                revision=revision[0]
+                inputs=_sync_inputs(db,root)
+                built=_sync_build(db,root,inputs)
+            except sqlite3.OperationalError as error:
+                if 'no such table' in str(error):return False
+                raise
+            db.execute('ROLLBACK')
+        try:
+            with connect(database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                if current(db,root):return True
+                if db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()[0]!=revision or _sync_inputs(db,root)!=inputs:
+                    db.execute('ROLLBACK');continue
+                _sync_write(db,root,revision,built,inputs)
+                return True
+        except sqlite3.OperationalError as error:
+            # Busy past the connection's wait: the caller's own (retried) path decides, as before.
+            if 'locked' in str(error).casefold() or 'busy' in str(error).casefold():return False
+            raise
+    return False
+
+
+def sync(connection,root):
+    setup(connection)
+    revision=connection.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone()[0]
+    saved=connection.execute('SELECT revision FROM book_group_sync WHERE root=?',(root,)).fetchone()
+    if saved and saved[0]==revision:return
+    inputs=_sync_inputs(connection,root)
+    _sync_write(connection,root,revision,_sync_build(connection,root,inputs),inputs)
+
+
+def _sync_write(connection,root,revision,groups,inputs):
+    """Store a regroup: new and changed groups, superseded ones, then the root's synced revision."""
+    retired,archived,frozen,protected=inputs['retired'],inputs['archived'],inputs['frozen'],inputs['protected']
     for scope,evidence in groups.items():
         if scope in frozen:continue
         old=connection.execute('SELECT * FROM book_groups WHERE root=? AND scope=?',(root,scope)).fetchone()
