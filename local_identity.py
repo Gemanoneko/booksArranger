@@ -1841,6 +1841,37 @@ def folder_structure(row, root, index=None):
             'series_folder': series, 'files_name_title': files}
 
 
+_BARE_NUMBER = re.compile(r'(?:\s*[-_.,]\s*|\s+)\d{1,3}\s*$')
+
+
+def whole_in_book_folder(row, siblings):
+    """Backlog item 10(b) (Sergei 2026-10-25: a single file is a whole book unless real sibling parts exist), applied by Jane
+    to numbered files (2026-10-26, Senua's 0.22.1 review W1): a single file whose name ends in a bare number ("5. Игры
+    Немезиды 1.m4b", one 16 h file) with no other audio file beside it, in a folder that names the book without that
+    number ("5. Игры Немезиды"), is the whole book: the folder's title, never "set name + number". Rulings 13 and 15 name
+    a numbered file set name + number only when sibling files exist. Returns that title, else ''. siblings None (not
+    read) is never "no siblings"; a volume or part word ("Том 5", "Часть 1") is not a bare number, and a bitrate is
+    still asked."""
+    members = row.get('members') or []
+    if len(members) != 1 or siblings is None or siblings:
+        return ''
+    path = Path(members[0]['path'])
+    stem = clean_title(_index_stripped(path.stem))
+    if not _BARE_NUMBER.search(stem) or _BITRATE_TAIL.search(stem):
+        return ''  # a number that looks like a bitrate ("Антитела 128") is asked (Q3, odd_identity), never dropped
+    book = text(_BARE_NUMBER.sub('', stem))
+    folder = text(path.parent.name)
+    while True:
+        tail = _READER_TAIL.search(folder)
+        if not tail or not text(folder[:tail.start()]):
+            break
+        folder = text(folder[:tail.start()])
+    folder = _UPLOADER.sub('', folder)
+    match = _BOOK_POSITION.match(folder)
+    folder = clean_title(match[2] if match else folder)
+    return book if book and re.search(r'[^\W\d_]{2}', book) and title_key(folder) == title_key(book) else ''
+
+
 def _transliterated_title(a, b):
     """The same words in two scripts ("Kosti volhvov" / "Кости волхвов"): a transliteration, not a translation."""
     left, right = words(a), words(b)
@@ -2006,6 +2037,14 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     if structure:
         # Its own book of a series (Sergei: "Перерождение 2. Двенадцать" is book 2, "Двенадцать"): no chapter or part of another.
         pieces = [p for p in pieces if p.get('piece') not in ('part_title', 'chapter', 'numbered_part', 'siblings')]
+    whole = '' if structure or part else whole_in_book_folder(row, siblings)
+    if whole:
+        # Item 10(b) as Jane applied it (above): the whole book in its own folder, its number no part number.
+        pieces = [p for p in pieces if p.get('piece') not in ('part_title', 'numbered_part')]
+        value = clean_title(title['value']) if title is not None else ''
+        if value and _BARE_NUMBER.search(value) and title_key(_BARE_NUMBER.sub('', value)) == title_key(whole):
+            # A title read from the name ("Игры Немезиды 1", no title tag) loses the number too.
+            title = dict(title, value=whole, how=title['how'] + '; the whole book in its own folder, no part number (item 10(b))')
     for piece in pieces:
         if piece['piece'] == 'numbered_part' and title and title['basis'] == 'tag':
             # Ruling 13: "Торадора! Том 5" with the title tag "Торадора!" is part 5, named after its set.

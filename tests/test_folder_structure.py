@@ -363,10 +363,29 @@ class SeriesFolderFileTests(Base):
         self.assertFalse(review.get('series') or review.get('number'), 'no series from a book folder')
         if review:
             self.assertNotIn('\\5. Игры Немезиды\\', self.goes_to(row, result))
-        # Without the folder structure the file is what it was in 0.22.0: a .m4b numbered "1" whose set cannot be proven,
-        # named set name + number by rulings 13 and 15. Whether a lone numbered file in its own book folder is the whole
-        # book (and loses the "1") is Sergei's call, asked in Ender's 0.22.1 W1 report; this pins today's behaviour.
-        self.assertEqual(self.approved(row)['title'], 'Игры Немезиды 1')
+        # Backlog item 10(b) (a single file is a whole book unless real sibling parts exist), as Jane applied it on
+        # 2026-10-26: alone in a folder that names the book without the number, it is the whole book, never "set name +
+        # number" (0.22.0 and c26bc58 both said «Игры Немезиды 1»).
+        self.assertEqual(self.approved(row)['title'], 'Игры Немезиды')
+        self.assertEqual((result['reasons'], review.get('title')), ([], 'Игры Немезиды'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Corey James S. A\\Игры Немезиды - Corey James S. A.m4b')
+        # Without a tag the name is read the same way.
+        row = next(iter(self.catalog([file_row(live, artist='Джеймс Кори')]).values()))
+        self.assertEqual(self.approved(row)['title'], 'Игры Немезиды')
+        # Controls, rulings 13 and 15 unchanged: a sibling part beside it, a folder that does not name the book, a volume.
+        books = self.catalog([file_row('James S. A. Corey\\Разное\\Игры Немезиды 1.m4b', **tags)])
+        self.assertEqual(self.approved(next(iter(books.values())))['title'], 'Игры Немезиды 1', 'the folder names no book')
+        books = self.catalog([file_row('Takemiya Yuyuko\\Торадора!\\Торадора! Том 5.m4b', title='Торадора!', album='Торадора!', artist='Такэмия Ююко')])
+        self.assertEqual(self.approved(next(iter(books.values())))['title'], 'Торадора! 5', 'a volume keeps its number (ruling 13)')
+        # Files beside it (two parts in one folder group as one book, held to be joined; ruling 19), or siblings not read:
+        # never a whole book by this rule.
+        lone = {'members': [{'path': ROOT + '\\' + live, 'filename': Path(live).name}]}
+        self.assertEqual(local_identity.whole_in_book_folder(lone, []), 'Игры Немезиды')
+        self.assertEqual(local_identity.whole_in_book_folder(lone, [{'filename': '5. Игры Немезиды 2.m4b', 'tags': {}}]), '')
+        self.assertEqual(local_identity.whole_in_book_folder(lone, None), '')
+        # A bitrate is no part number: "Антитела 128" alone in "Антитела" is still asked (Q3), never cut to «Антитела».
+        bitrate = {'members': [{'path': ROOT + '\\Unsorted\\Антитела\\Антитела 128.mp3', 'filename': 'Антитела 128.mp3'}]}
+        self.assertEqual(local_identity.whole_in_book_folder(bitrate, []), '')
         # The same file in a real series folder is book 5 of the series, a whole book: series and number from the folders,
         # the title from the tag, never the file's part number.
         row = next(iter(self.catalog([file_row('James S. A. Corey\\The Expanse\\5. Игры Немезиды 1.m4b', **tags)]).values()))
