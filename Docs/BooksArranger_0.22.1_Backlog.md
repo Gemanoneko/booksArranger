@@ -64,6 +64,11 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
   - a conversion that loses the Sorted drive mid-run stops with no Retry;
   - the first scan after a dropped root ends "failed".
 
+## 0.22.2 additions from Sergei (2026-10-26)
+
+- **Ruling 29:** translated books wait for their English title unless they were written in Russian. If no English title can be found, they convert under the Russian title.
+- **Ruling 30:** "Вселенная …" folders become a Universe, laid out as Universe > Series > Book, like Warhammer. Detection is needed for new books; the 14 Дозоры and 5 Warhammer books already converted move in the rename pass.
+
 ## Universe routing miss (Sergei, 2026-10-25)
 
 - `Z:\Audiobooks Sorted\де Клемешье Алекс\Сын Дога - де Клемешье Алекс.m4b`, converted 10-20, belongs to Lukyanenko's **Дозоры** universe. It was filed under its author alone, not routed into the Дозоры universe the way the 2026-10-20 Universe/Cycle routing decisions intend (Brief: "confirmed Universe/Cycle routing", 11 existing Дозоры/Warhammer routing decisions).
