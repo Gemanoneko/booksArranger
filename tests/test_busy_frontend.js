@@ -61,6 +61,11 @@ const shown=text=>assert.doesNotMatch(text,/Connection interrupted|Local server 
   assert.equal(get('retry-job').textContent,'Checking…');assert.equal(get('retry-job').getAttribute('aria-disabled'),'true','never back to Retry, never a second press');
   run('pressTick('+(at+70000)+')');assert.equal(get('retry-note').textContent,'Checking this book… Still waiting (1 min). The app is busy with background work.');
   assert.equal(run('PRESS_TIMEOUT'),600000,'the 15 s abort is gone');
+  // While the press waits, a status answer does not end the notice (no flicker each poll) and keeps one status format.
+  run('for(const key of [...inflight.keys()])inflight.set(key,Date.now()-5000);pressTick()');
+  assert.match(get('connection-notice').textContent,/^The app is busy with background work/);
+  await run('refresh()');run('clearConnectionNotice()');
+  assert.equal(get('connection-notice').hidden,false,'still shown: the press still waits');assert.match(get('status').textContent,/^Last update \d\d:\d\d:\d\d · /);
   run('retryPending=null;busy=false;retryResult=null;inflight.clear();controls()');
   // 4. No answer at all: the "not confirmed" lines replace every "Connection interrupted…" (4.3).
   assert.equal(run('lostLine()'),"This hasn't been confirmed yet. The app is busy with background work, so it may still go through. Check this row in a moment.");

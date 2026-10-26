@@ -155,7 +155,11 @@ function pressTick(now=Date.now()){
   const since=[retryPending?.at,askPending?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
   if(since.some(at=>now-at>=3000)){ladderClock=now;try{controls();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
 }
-function clearConnectionNotice(){recoveryDisconnected=false;busyShown=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';updateRecovery();renderAutomatic();renderJobs();controls();}
+function clearConnectionNotice(){
+  recoveryDisconnected=false;
+  // A status answer does not end the busy notice while another request (a slow press) still waits (4.2): no flicker.
+  if(busyShown && oldestWait()>=3000)renderBusy();
+  else{busyShown=false;connectionNotice.hidden=true;if(connectionNotice.textContent)connectionNotice.textContent='';}updateRecovery();renderAutomatic();renderJobs();controls();}
 function refreshFailed(error){
   if(ended)return;
   if(loadingActive)return;  // the load strip owns silence while it is up: no notice, no "Last received" (Judy 7.7)
@@ -628,7 +632,7 @@ async function refresh(force=false) {
   const activity=state.stopping ? 'Stopping…' : state.active_library ? `Scanning ${state.active_library}` : status.state;
   const scanLabel=!state.active_library && status.state==='failed'?'Last scan':'Discovery';
   const statusText=`${scanLabel}: ${activity} · Files cataloged ${status.count} · Files checked this scan ${status.checked} · Metadata reused this scan ${status.reused} · Pending tasks ${status.pending} · Read failures this scan ${status.errors} · Files with read errors ${status.unresolved_errors ?? status.errors}`;
-  receivedStatus.set(library,statusText);receivedAt.set(library,Date.now());$('status').textContent=statusText;
+  receivedStatus.set(library,statusText);receivedAt.set(library,Date.now());$('status').textContent=statusText;if(busyShown)renderBusy();  // one format while the notice shows
   $('error-shortcut').hidden=!(status.unresolved_errors ?? status.errors);$('error-shortcut').textContent=`Read errors · ${status.unresolved_errors ?? status.errors}`;
   $('scan-issues').hidden=!status.scan_issues?.length;$('scan-issues-text').textContent=(status.scan_issues || []).map(issue=>`${issue.path}\n${issue.error}\n${issue.time}`).join('\n\n');
   $('current').textContent=status.current || 'Choose a file to inspect existing metadata and its sorting preview.';
