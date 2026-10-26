@@ -424,6 +424,52 @@ class RealWorkerResumeTests(unittest.TestCase):
                 self.assertTrue(worker.thread.is_alive())
                 self.assertFalse(worker.stop.is_set())
 
+    def test_a_new_engine_leaves_the_queue_the_scan_and_automatic_processing_stopped(self):
+        # Judy 12.4, offer 2: when the engine ends and the update does not install, the shell starts a new engine and names
+        # what stays stopped. Checked here on the real classes: a new engine (MergeService, Inventory, AutomaticProcessing
+        # on the same catalog) starts none of the three by itself; the lookups start with every engine.
+        import contextlib
+        from merge_service import MergeService
+        from scanner import Inventory, connect
+        import uuid
+        from encoding_policy import PROFILE
+        self.merge.jobs.enqueue({'job_id': str(uuid.uuid4()), 'candidate_id': str(uuid.uuid4()), 'candidate_revision': 1, 'sources': [{'sha256': 'a' * 64, 'fingerprint': {}}],
+                                 'metadata': {}, 'destination': 'fixture', 'profile': PROFILE, 'evidence': {}, 'cover': {}})
+        self.slow_read = True
+        self.inventory.launch('Audiobooks')
+        self.assertTrue(wait_until(lambda: self.reads, 10))
+        close_scan(self.inventory)
+        self.assertEqual(self.inventory.status('Audiobooks')['state'], 'stopped', 'positive control: a stopped scan')
+        with connect(self.inventory.database) as db:
+            db.execute("INSERT INTO automatic_runs VALUES('run-1','Running','research','{}','','now','now',0)")
+        stopped = {'automatic': True, 'converting': True, 'scanning': True}
+        self.assertEqual(DesktopControl._stopped_kinds(stopped), ['automatic'], 'automatic processing starts the queue and its scan again itself')
+        self.assertEqual(DesktopControl._stopped_kinds({'converting': True, 'scanning': True}), ['conversion', 'scan'])
+        self.assertEqual(DesktopControl._stopped_kinds({}), [])
+        base = Path(self.temp.name)
+        inventory = Inventory(self.inventory.database, self.inventory.roots, self.read, output_root=str(base / 'sorted'))
+        merge = MergeService(inventory, base / 'cache')
+        try:
+            automatic = merge.automatic
+            merge.start_retention(contextlib.nullcontext)
+            self.assertIsNone(merge.jobs._thread, 'the queue waits for Resume audiobook jobs')
+            self.assertEqual(merge.jobs.status()['state'], 'Paused')
+            self.assertIsNone(inventory.worker); self.assertEqual(inventory.status('Audiobooks')['state'], 'stopped', 'the scan waits for Resume scanning')
+            self.assertEqual(automatic.status()['state'], 'Paused', 'automatic processing waits for Start')
+            self.assertTrue(merge.series_backfill.thread.is_alive() and merge.gap_fill.thread.is_alive(), 'the lookups start by themselves')
+        finally:
+            merge.close()
+
+    def test_the_update_answer_says_what_it_stops_that_a_new_engine_leaves_stopped(self):
+        server, _ = engine(converting=True, scanning=True, stubborn=True)
+        value = control(server)
+        self.assertEqual(value.prepare_update()['update']['stopped'], ['conversion', 'scan'])
+        value.cancel_update()
+        server, _ = engine(automatic=True, converting=True)
+        value = control(server)
+        self.assertEqual(value.prepare_update()['update']['stopped'], ['automatic'])
+        finish(value)
+
     def test_work_still_stopping_at_the_bound_is_named_never_as_before(self):
         jobs = self.merge.jobs
         entered, release = threading.Event(), threading.Event()

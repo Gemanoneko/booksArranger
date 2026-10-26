@@ -35,6 +35,12 @@ function downloadCause(error) {
  return 'other';
 }
 const INSTALL_BUSY = ['starting', 'pausing', 'forcing', 'updating', 'installing'];
+// Judy 12.4, offer 2: once the engine has ended and the update did not install, a new engine runs; it does not start
+// automatic processing, the audiobook jobs or the scan by itself (desktop_backend.py _stopped_kinds). The engine says at
+// the start of the update which of them it stops ('stopped'); these lines name them.
+const ENGINE_ENDED = ['installer_blocked', 'engine_exit', 'engine_stuck', 'engine_restart'];
+const STOPPED_KINDS = ['automatic', 'conversion', 'scan'];
+function stoppedProblems(kinds) { return (Array.isArray(kinds) ? kinds : []).filter(kind => STOPPED_KINDS.includes(kind)).map(kind => ({ kind, cause: 'engine_ended' })); }
 
 // Senua's 0.22.1 review, W7. electron-updater 6.8.9 answers a failed installer spawn by itself
 // (NsisUpdater.doInstall: EACCES or UNKNOWN runs it again through elevate.exe, ENOENT opens it with shell.openPath),
@@ -60,7 +66,7 @@ class UpdateController {
     this.busy={check:false,download:false,install:false};
     this.check_={phase:packaged?'idle':'dev',at:'',cause:'',code:0,attempt:0};
     this.download_={phase:'idle',at:'',cause:'',progress:0};
-    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[]};
+    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};
     provider.autoDownload=false;provider.autoInstallOnAppQuit=false;provider.autoRunAppAfterInstall=true;
     provider.on('update-available',info=>{this.seen={available:String(info.version||'')};});
     provider.on('update-not-available',()=>{this.seen={current:true};});
@@ -76,7 +82,7 @@ class UpdateController {
     const installing=this.busy.install;
     return {version:this.version,available:this.available||(this.ready&&this.ready.version)||'',ready:!!this.ready,packaged:!!this.packaged,
       busy:{...this.busy},check:{...this.check_},download:{...this.download_},
-      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item}))},
+      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item})),stopped:[...this.install_.stopped]},
       canCancel:installing&&!this.cancelRequested&&['starting','pausing','forcing'].includes(this.install_.phase),
       showInstaller:this.installerShown&&!!this.ready&&this.exists(this.ready.path),installerPath:this.ready?this.ready.path:''};
   }
@@ -130,7 +136,8 @@ class UpdateController {
     const phase=update.phase==='exiting'?'updating':update.phase;
     if(!INSTALL_BUSY.includes(phase)||this.install_.phase==='installing')return;
     this.install_={...this.install_,phase,waiting:Array.isArray(update.waiting)?update.waiting:[],critical:Array.isArray(update.critical)?update.critical:[],
-      elapsed:Number(update.elapsed)||0,safe:Number(update.safe_seconds)||this.install_.safe};
+      elapsed:Number(update.elapsed)||0,safe:Number(update.safe_seconds)||this.install_.safe,
+      stopped:Array.isArray(update.stopped)?update.stopped.filter(kind=>STOPPED_KINDS.includes(kind)):this.install_.stopped};
     this.emit();
   }
   cancel(){
@@ -141,7 +148,7 @@ class UpdateController {
     if(!this.packaged||!this.ready)throw new Error('A verified downloaded update is required');
     if(this.busy.install||this.busy.download)return this.value;
     this.busy.install=true;this.cancelRequested=false;this.installerShown=false;
-    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[]};this.emit();
+    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};this.emit();
     const ready=this.ready;let lease=null,engineEnded=false;
     try{
       // Keep the exact checksum-verified installer write/delete denied from before the engine stops until the
@@ -165,7 +172,8 @@ class UpdateController {
       // Senua's 0.22.1 review, W3: what the engine could not start again after Cancel, its bound or a failed close.
       this.install_={...this.install_,phase:cause==='cancelled'?'cancelled':'failed',at:this.stamp(),cause,
         waiting:Array.isArray(error.waiting)&&error.waiting.length?error.waiting:this.install_.waiting,
-        problems:Array.isArray(error.resumeProblems)?error.resumeProblems.map(item=>({kind:String(item.kind),cause:String(item.cause)})):[]};
+        problems:ENGINE_ENDED.includes(cause)?stoppedProblems(this.install_.stopped)
+          :Array.isArray(error.resumeProblems)?error.resumeProblems.map(item=>({kind:String(item.kind),cause:String(item.cause)})):[]};
       return this.value;
     }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();}
   }
@@ -176,7 +184,7 @@ class UpdateController {
     this.log('The engine ended for the update after the shell stopped waiting; starting it again');
     let cause='engine_exit';
     try{await this.restartEngine();}catch(error){this.log('Engine restart failed: '+text(error));cause='engine_restart';}
-    this.install_={...this.install_,phase:'failed',at:this.stamp(),cause,problems:[]};this.emit();
+    this.install_={...this.install_,phase:'failed',at:this.stamp(),cause,problems:stoppedProblems(this.install_.stopped)};this.emit();
     return this.value;
   }
 }

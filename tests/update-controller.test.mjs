@@ -157,3 +157,38 @@ test('a failed installer start never lets the updater start its own fallback; a 
   assert.deepEqual(provider.calls,['spawn C:/owned/update.exe'],code+': no elevate.exe, no opening the file');assert.match(log[0],/Installer did not start/);
   hold.restore();assert.equal(provider.spawnLog,original);}
  const provider=nsisLike(null);const hold=holdInstallerSpawn(provider);provider.quitAndInstall();assert.equal(await hold.spawned(),true);hold.restore();});
+// Judy 12.4 (2026-10-26). Offer 1: background lookups alone leave nothing to press, so the Cancel line keeps its plain tint.
+// Offer 2: when the engine has ended and the update did not install, the new engine leaves automatic processing, the
+// audiobook jobs and the scan stopped (desktop_backend.py _stopped_kinds); the line names what was running.
+test('lookups alone: the Cancel line names them without the warning tint; anything to press keeps it',()=>{const t=page();const base={version:'0.22.1',available:'0.22.2',check:{},download:{}};
+ const line=problems=>t.installLine({...base,install:{phase:'cancelled',at:'21:07',problems}});
+ assert.deepEqual(line([{kind:'lookups',cause:'still_stopping'}]),{text:"Update cancelled (tried 21:07). Background lookups didn't start again. Background lookups start again by themselves the next time Books Arranger opens.",failed:false});
+ assert.equal(line([{kind:'lookups',cause:'still_stopping'},{kind:'scan',cause:'refused'}]).failed,true);
+ assert.equal(line([{kind:'automatic',cause:'refused'}]).failed,true);
+ assert.equal(t.installLine({...base,install:{phase:'failed',cause:'bound',at:'21:07',waiting:[],problems:[{kind:'lookups',cause:'still_stopping'}]}}).failed,true,'a failed update stays a failure');});
+test('an ended engine: the installer, engine exit and engine restart lines name the work that stays stopped',async()=>{
+ const run=async(cause,stopped,extra={})=>{const f=fixture();await ready(f);
+  f.controller.parkEngine=async({progress})=>{progress({phase:'pausing',waiting:[],elapsed:1,safe_seconds:90,stopped});if(cause==='engine_exit'||cause==='engine_stuck')throw typed(cause);};
+  if(cause==='installer_blocked'||cause==='engine_restart')f.controller.install=async()=>{throw typed('installer_blocked');};
+  if(cause==='engine_restart')f.controller.restartEngine=async()=>{throw new Error('port taken');};
+  Object.assign(f.controller,extra);await f.controller.restart();return f;};
+ let f=await run('installer_blocked',['automatic','scan','nonsense']);
+ assert.deepEqual(f.controller.value.install.problems,[{kind:'automatic',cause:'engine_ended'},{kind:'scan',cause:'engine_ended'}]);
+ const blocked=page().installLine(f.controller.value);
+ assert.deepEqual([blocked.text,blocked.path],["The installer couldn't start (tried 21:04). Windows or your antivirus may have blocked it. Books Arranger is running again on 0.22.1. Automatic processing and the library scan didn't start again. Press Start automatic processing to continue. Continue the scan with Resume scanning. Run the installer yourself:",'C:/owned/update.exe']);
+ f=await run('engine_exit',['conversion']);
+ assert.equal(page().installLine(f.controller.value).text,"The engine stopped during the update and was started again (tried 21:04). It is loading now. The audiobook jobs didn't start again. Press Resume audiobook jobs to continue. Press Restart to update to try again.");
+ f=await run('engine_restart',['conversion']);
+ assert.equal(page().installLine(f.controller.value).text,"Books Arranger couldn't restart its engine (tried 21:04). Choose Quit Books Arranger in the tray, then open it again. The audiobook jobs didn't start again. Press Resume audiobook jobs to continue.");
+ f=await run('engine_stuck',['automatic']);
+ assert.equal(page().installLine(f.controller.value).text,"Books Arranger couldn't restart its engine (tried 21:04). Choose Quit Books Arranger in the tray, then open it again. Automatic processing didn't start again. Press Start automatic processing to continue.");
+ await f.controller.lateEngineExit();  // W5: the late exit's line keeps naming it
+ assert.equal(page().installLine(f.controller.value).text,"The engine stopped during the update and was started again (tried 21:04). It is loading now. Automatic processing didn't start again. Press Start automatic processing to continue. Press Restart to update to try again.");
+ // Nothing was running: the lines stay as Judy wrote them in 2.6.
+ f=await run('installer_blocked',[]);
+ assert.equal(page().installLine(f.controller.value).text,"The installer couldn't start (tried 21:04). Windows or your antivirus may have blocked it. Books Arranger is running again on 0.22.1. Run the installer yourself:");
+ // A failure before the engine ended (the bound) never takes the ended engine's list.
+ f=await run('bound',['automatic'],{parkEngine:async({progress})=>{progress({phase:'pausing',stopped:['automatic']});throw typed('bound',{waiting:[{kind:'research'}],resumeProblems:[]});}});
+ assert.deepEqual([f.controller.value.install.cause,f.controller.value.install.problems],['bound',[]]);
+ // A new restart clears what the last one recorded.
+ f.controller.parkEngine=async()=>{};await f.controller.restart();assert.deepEqual(f.controller.value.install.stopped,[]);});

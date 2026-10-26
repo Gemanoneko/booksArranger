@@ -290,7 +290,24 @@ class DesktopControl:
         return {'phase': self.phase, 'update': {'phase': self.phase if self.phase in self.UPDATE_PHASES + ('exiting', 'blocked') else 'running',
                 'waiting': [dict(item) for item in update.get('waiting') or []], 'critical': list(update.get('critical') or []),
                 'elapsed': round(elapsed, 1), 'safe_seconds': self.UPDATE_SAFE, 'force_seconds': self.UPDATE_FORCE,
-                'outcome': dict(update['outcome']) if update.get('outcome') else None}}
+                'outcome': dict(update['outcome']) if update.get('outcome') else None, 'stopped': self._stopped_kinds(update.get('before'))}}
+
+    @staticmethod
+    def _stopped_kinds(before):
+        """What the update stops that a new engine does not start by itself (Judy 12.4, offer 2): automatic processing (a
+        new engine marks the run Paused after server restart), the audiobook jobs (the queue waits for Resume audiobook
+        jobs; the interrupted book is pending again) and the library scan (stopped until Resume scanning). The lookups
+        start with every engine, so they are never listed. The shell names these when the engine has ended and the update
+        did not install (installer_blocked, engine_exit, engine_stuck, engine_restart)."""
+        before = before or {}
+        kinds = []
+        if before.get('automatic'):
+            kinds.append('automatic')
+        elif before.get('converting') or before.get('cleanup'):
+            kinds.append('conversion')
+        if before.get('scanning') and not before.get('automatic'):
+            kinds.append('scan')
+        return kinds
 
     def _update_waiting(self):
         """[{kind, title}] of what the update still waits for: the conversion of a book, its cleanup, the library scan,

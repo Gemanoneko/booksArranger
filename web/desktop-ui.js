@@ -46,18 +46,22 @@
   return `${cap(list)} didn't start again. ${kinds.map(kind=>RESTART[kind][1]).join(' ')}`;
  }
  function installLine(u){
-  const i=u.install||{},stopped=notRestarted(i.problems),asBefore=stopped||'Books Arranger is running as before.';
-  if(i.phase==='cancelled')return stopped?{text:`Update cancelled (tried ${i.at}). ${stopped}`,failed:true}:{text:'Update cancelled. Books Arranger is running as before.',failed:false};
+  const i=u.install||{},stopped=notRestarted(i.problems),asBefore=stopped||'Books Arranger is running as before.',also=stopped?stopped+' ':'';
+  // Judy 12.4, offer 1: background lookups alone left nothing to press, so the Cancel line keeps its plain tint.
+  const toPress=(i.problems||[]).some(item=>item&&RESTART[item.kind]&&item.kind!=='lookups');
+  if(i.phase==='cancelled')return stopped?{text:`Update cancelled (tried ${i.at}). ${stopped}`,failed:toPress}:{text:'Update cancelled. Books Arranger is running as before.',failed:false};
   if(i.phase!=='failed')return {text:'',failed:false};
   // M2 (Judy's implementation check): no number; the engine gives up at 150 s and the shell at 180 s.
+  // Judy 12.4, offer 2: when the engine has ended (installer_blocked, engine_*), a new engine leaves automatic
+  // processing, the audiobook jobs and the scan stopped; the line names what was running, with the same tails.
   const line={bound:`Update cancelled: ${what(i.waiting)} did not stop in time (tried ${i.at}). ${asBefore} Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
-   installer_blocked:`The installer couldn't start (tried ${i.at}). Windows or your antivirus may have blocked it. Books Arranger is running again on ${u.version}. Run the installer yourself:`,
+   installer_blocked:`The installer couldn't start (tried ${i.at}). Windows or your antivirus may have blocked it. Books Arranger is running again on ${u.version}. ${also}Run the installer yourself:`,
    checksum:`Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried ${i.at}). Check for updates, then download it again.`,
    verify_timeout:`Update cancelled: the downloaded installer couldn't be verified in time (tried ${i.at}). Press Restart to update to try again.`,
-   engine_restart:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
-   engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
+   engine_restart:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.${stopped?' '+stopped:''}`,
+   engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.${stopped?' '+stopped:''}`,
    // N3: the engine died while stopping and was started again, so the loading strip is back up.
-   engine_exit:`The engine stopped during the update and was started again (tried ${i.at}). It is loading now. Press Restart to update to try again.`}[i.cause]
+   engine_exit:`The engine stopped during the update and was started again (tried ${i.at}). It is loading now. ${also}Press Restart to update to try again.`}[i.cause]
    ||`Update cancelled (tried ${i.at}). ${asBefore} Press Restart to update to try again.`;
   return {text:line,failed:true,path:i.cause==='installer_blocked'?u.installerPath||'':''};
  }
