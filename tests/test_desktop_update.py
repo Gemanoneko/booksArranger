@@ -166,20 +166,37 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(status['phase'], 'exiting')
         self.assertIn(('automatic stop', False), calls); self.assertIn('scan stop', calls)
 
-    def test_an_approval_in_flight_finishes_or_is_stopped_after_the_safe_wait(self):
+    def test_an_approval_in_flight_is_stopped_at_once_and_the_conversion_behind_its_locks_stops_in_seconds(self):
+        # Futaba's 0.22.1 QA, m-1 (Judy 0.22.2 6.3): Restart to update with a conversion and an approval took 99.1 s. The
+        # approval holds the review and group locks while it checks its files, and the conversion's revision guard waits
+        # behind them, so neither reached a safe point until T_safe stopped the approval. Here the approval holds a real
+        # lock until its press is stopped, and the conversion can end only once it has that lock.
         server, calls = engine(admissions=1)
+        locks = threading.Lock(); held = threading.Event()
         press = threading.Event(); server.merge._approve_stops = {press}
-        def ended():
-            press.wait(10)
+        def approval():
+            with locks:
+                held.set(); press.wait(30)
             with server.control_condition:
                 server.merge_admissions = 0
-        threading.Thread(target=ended, daemon=True).start()
-        value = control(server, safe=0.3, force=5.0); value.prepare_update()
-        time.sleep(0.1)
-        self.assertEqual(value.status()['update']['waiting'][0]['kind'], 'approval')
-        status = finish(value)
-        self.assertTrue(press.is_set(), 'after T_safe the press in flight is stopped')
+        conversion = Worker(lag=0.0)
+        def stop_conversion():
+            def end():
+                with locks:  # its checkpoint needs the lock the approval holds
+                    conversion.alive = False
+            threading.Thread(target=end, daemon=True).start()
+        conversion.stop = stop_conversion
+        server.merge.jobs._thread = conversion
+        server.merge.pause = Mock(side_effect=lambda: (calls.append('pause'), conversion.stop()))
+        threading.Thread(target=approval, daemon=True).start(); self.assertTrue(held.wait(5))
+        busy = DesktopControl(server).busy({'audiobook_jobs': {'state': 'Running'}, 'automatic_processing': {}})
+        value = control(server, safe=30.0, force=30.0)
+        started = time.monotonic(); value.prepare_update()
+        status = finish(value, timeout=20)
+        self.assertLess(time.monotonic() - started, 5.0, 'the conversion and the approval reached their safe points in seconds')
         self.assertEqual(status['phase'], 'exiting')
+        self.assertTrue(press.is_set(), 'the approval in flight was stopped at once')
+        self.assertEqual(busy.get('approvals'), 1, 'the confirm can name the approval in flight')
 
     def test_an_open_file_change_is_never_interrupted(self):
         server, calls = engine()
@@ -212,6 +229,30 @@ class MatrixTests(unittest.TestCase):
         self.assertIn('automatic start', calls, 'the automatic run continues')
         self.assertFalse(server.merge.automatic.thread.is_alive() or server.merge.jobs._thread.is_alive(), 'started only after they ended')
         self.assertNotIn('shutdown', calls)
+
+    def test_while_cancel_waits_the_status_says_cancelling_and_names_what_is_still_to_resume(self):
+        # Judy 0.22.2 6.2 (Futaba m-2): the page answers the press at once and, from 3 s, names the work slow to resume.
+        server, calls = engine(converting=True)
+        server.merge.jobs._thread.lag = 1.0  # the conversion takes a second to reach its checkpoint
+        value = control(server, resume=5.0); value.prepare_update(); time.sleep(0.05)
+        self.assertEqual(value.status()['update']['cancelling'], False, 'positive control: nothing pressed yet')
+        answers = []
+        threading.Thread(target=lambda: answers.append(value.cancel_update()), daemon=True).start()
+        seen = None
+        end = time.monotonic() + 5
+        while time.monotonic() < end and not answers:
+            update = value.status()['update']
+            if update['cancelling'] and update['resuming']:
+                seen = update; break
+            time.sleep(0.02)
+        self.assertIsNotNone(seen, 'the status said it was cancelling and what was resuming')
+        self.assertEqual([item['kind'] for item in seen['resuming']], ['conversion'])
+        self.assertEqual(seen['resume_seconds'], 5.0)
+        end = time.monotonic() + 10
+        while not answers and time.monotonic() < end:
+            time.sleep(0.02)
+        self.assertEqual(answers[0]['update']['cancelling'], False, 'answered: no longer cancelling')
+        self.assertEqual(answers[0]['update']['resuming'], [])
 
     def test_a_cancel_restarts_the_queue_and_the_scan_that_ran(self):
         server, calls = engine(converting=True, scanning=True)
@@ -321,6 +362,32 @@ class RealWorkerResumeTests(unittest.TestCase):
         if meanwhile is not None:
             meanwhile()
         return value, value.cancel_update()
+
+    def test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel(self):
+        # Futaba's 0.22.1 QA, m-3: an update soon after start waited on the engine's own recovery pass (150 s at 8,000
+        # books): the pass purges one finished book's recovery copies after another with _post_current set, which the
+        # update waits for, and nothing stopped it. Here 50 due sets take a second each.
+        import contextlib as context
+        merge = self.merge; purged = []
+        def purge(job_id, actor='automatic', confirmation=None):
+            for _ in range(10):
+                merge._retention_guard()  # the purge's own per-file guard
+                time.sleep(0.1)
+            purged.append(job_id)
+        with patch.object(merge.recovery, 'due', lambda: ['set-%02d' % n for n in range(50) if 'set-%02d' % n not in purged]), patch.object(merge.recovery, 'purge', purge):
+            merge.start_retention(context.nullcontext)
+            self.assertTrue(wait_until(lambda: merge._post_current is not None, 10), 'positive control: the pass is purging')
+            value = control(self.server, safe=30.0, force=30.0, resume=10.0)
+            started = time.monotonic(); value.prepare_update()
+            self.assertTrue(wait_until(lambda: value.status()['phase'] in ('updating', 'exiting', 'running'), 20))
+            self.assertLess(time.monotonic() - started, 5.0, 'the pass stopped at its next safe point')
+            self.assertEqual(value.status()['phase'], 'exiting')
+            done = len(purged)
+            self.assertLess(done, 10, 'the pass did not go on set after set')
+            # Cancel is too late here (the engine is ending); the hold lifts when an update is undone instead:
+            value.update['outcome'] = None
+            value._resume_after_update('cancelled')
+            self.assertTrue(wait_until(lambda: len(purged) > done, 20), 'the pass goes on once the update is undone')
 
     def test_the_conversion_queue_starts_again_once_its_worker_has_stopped(self):
         jobs = self.merge.jobs

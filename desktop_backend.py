@@ -101,7 +101,9 @@ class DesktopControl:
                 'stage': jobs.get('stage', ''),
                 'queued': jobs.get('queued', 0),
                 'automatic': automatic_state,
-                'scanning': self.server.scan_active()}
+                'scanning': self.server.scan_active(),
+                # Judy 0.22.2 6.3: the update's confirm names the approvals in flight (they stop and are not approved).
+                'approvals': len(getattr(self.server.merge, '__dict__', {}).get('_approve_stops') or ())}
 
     def _loading(self):
         """The catalog is still loading (web_server.Loading): nothing runs but the loader."""
@@ -290,7 +292,11 @@ class DesktopControl:
         return {'phase': self.phase, 'update': {'phase': self.phase if self.phase in self.UPDATE_PHASES + ('exiting', 'blocked') else 'running',
                 'waiting': [dict(item) for item in update.get('waiting') or []], 'critical': list(update.get('critical') or []),
                 'elapsed': round(elapsed, 1), 'safe_seconds': self.UPDATE_SAFE, 'force_seconds': self.UPDATE_FORCE,
-                'outcome': dict(update['outcome']) if update.get('outcome') else None, 'stopped': self._stopped_kinds(update.get('before'))}}
+                'outcome': dict(update['outcome']) if update.get('outcome') else None, 'stopped': self._stopped_kinds(update.get('before')),
+                # Judy 0.22.2 6.2: Cancel was pressed and the work is starting again; what is still to resume.
+                'cancelling': bool(update.get('cancel') is not None and update['cancel'].is_set() and not update.get('outcome')),
+                'resuming': [dict(item) for item in update.get('resuming') or []],
+                'resume_seconds': self.UPDATE_RESUME}}
 
     @staticmethod
     def _stopped_kinds(before):
@@ -349,7 +355,16 @@ class DesktopControl:
             if automatic is not None:
                 automatic.stop()  # saves the research checkpoint; pauses the queue when a run is active
             self.server.inventory.stop()  # the scan stops at its checkpoint (Resume scanning continues it)
+            # Futaba's 0.22.1 QA, m-1 (Judy 0.22.2 6.3): an approval checking its files holds the review and group locks
+            # for the whole check, and the conversion's revision guard waits behind them, so a conversion beside an
+            # approval reached its safe point only when the approval was stopped at T_safe (99.1 s). The approval in
+            # flight now stops at once, as for Quit: the book is not approved and Sergei presses Approve again.
+            for press in list(getattr(merge, '__dict__', {}).get('_approve_stops', ())):
+                press.set()
             merge.pause()  # the book in progress stops at its next checkpoint and starts again later
+            hold = getattr(merge, '__dict__', {}).get('_update_hold')
+            if hold is not None:
+                hold.set()  # m-3: the background recovery pass stops at its next safe point
             for name in ('series_backfill', 'gap_fill'):
                 background = getattr(merge, '__dict__', {}).get(name)
                 if background is not None:
@@ -426,6 +441,12 @@ class DesktopControl:
             self.server.closing = False
             self.server.control_condition.notify_all()
         merge = self.server.merge
+        hold = getattr(merge, '__dict__', {}).get('_update_hold')
+        if hold is not None:
+            hold.clear()  # m-3: the recovery pass goes on
+            wake = getattr(merge, '__dict__', {}).get('_retention_wake')
+            if wake is not None:
+                wake.set()
         automatic = self._automatic()
         inventory = self.server.inventory
         live = lambda *threads: [t for t in threads if t is not None and t is not threading.current_thread() and t.is_alive()]
@@ -446,14 +467,22 @@ class DesktopControl:
                 plan.append(('lookups', live(getattr(background, 'thread', None)), background.start))
         deadline = time.monotonic() + self.UPDATE_RESUME
         problems = []
+        title = before.get('title', '')
+        # Judy 0.22.2 6.2: while Cancel waits for the work to start again, the page names what is still to resume.
+        with self.lock:
+            update['resuming'] = [{'kind': kind, 'title': title if kind == 'conversion' else ''} for kind, _, _ in plan]
         for kind, threads, start in plan:
             if not self._ended(threads, deadline):
                 problems.append({'kind': kind, 'cause': 'still_stopping', 'reason': 'it had not stopped after %g s' % self.UPDATE_RESUME})
-                continue
-            try:
-                start()
-            except Exception as error:
-                problems.append({'kind': kind, 'cause': 'refused', 'reason': str(error)[:300] or type(error).__name__})
+            else:
+                try:
+                    start()
+                except Exception as error:
+                    problems.append({'kind': kind, 'cause': 'refused', 'reason': str(error)[:300] or type(error).__name__})
+            with self.lock:
+                update['resuming'] = update['resuming'][1:]
+        with self.lock:
+            update['resuming'] = []
         if problems:
             try:
                 print('Books Arranger update %s: not started again: %s' % (result, json.dumps(problems, ensure_ascii=False)), file=sys.stderr, flush=True)

@@ -222,6 +222,10 @@ class MergeService:
         self.recovery=RecoveryRetention(self.storage_cleanup,guard=self._retention_guard)
         self.cleanup.recovery_status=self.recovery_status
         self._retention_stop=threading.Event();self._retention_wake=threading.Event();self._retention_thread=None;self._manual_recovery=None
+        # 0.22.2 (Futaba's 0.22.1 QA, m-3): Restart to update holds the background recovery pass at its next safe point;
+        # Cancel, the bound or a failed close let it go on (desktop_backend). It used to run set after set while the update
+        # waited for it (_post_current), up to the engine's 150 s bound at 8,000 books.
+        self._update_hold=threading.Event()
         self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
@@ -933,6 +937,7 @@ class MergeService:
         self._no_scan()
         closing=getattr(self,'_retention_stop',None)
         if closing is not None and closing.is_set():raise InterruptedError('Working cleanup is closing')
+        if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise InterruptedError('An update is stopping the work')
         if self.working.in_background:
             if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive() or self._post_current:
                 raise InterruptedError('Foreground audiobook work takes priority over idle working cleanup')
@@ -940,6 +945,7 @@ class MergeService:
     def _retention_guard(self):
         self._no_scan()
         if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
+        if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise InterruptedError('An update is stopping the work; remaining copies preserved')
 
     def _recovery_idle(self):
         """Recovery copies may be deleted now. v0.16.8 (Sergei, 2026-10-18): a book being converted or queued
@@ -947,6 +953,7 @@ class MergeService:
         now (its own copies are what it writes) waits."""
         self._no_scan()
         if self._retention_stop.is_set():raise ValueError('Recovery cleanup is closing')
+        if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise ValueError('An update is stopping the work')
         if self.cleanup.current or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for source cleanup to finish')
 
     def recovery_status(self,job_id):
