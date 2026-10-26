@@ -22,19 +22,26 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 // only): six workers took 2,551 s of module time, seven 2,737 s. A seventh worker; the weights below are each module's real
 // seconds while SEVEN workers ran together (rounded up; modules under 3 s weigh the default 2): 101 modules, 2,814 s, about
 // 403 s per worker (75 % of the deadline), and that run's seven workers really took 384-408 s.
-const measuredSeconds={'test_inplace_m4b.py':377,'test_approve_as_is.py':174,'test_book_delete.py':170,'test_lock_timing.py':130,'test_part_sets.py':160,'test_automatic_media.py':131,
-  'test_iron_skazka.py':107,'test_destination_admission.py':100,'test_migration_planning.py':91,'test_split_books.py':89,'test_series_backfill.py':87,
-  'test_standing_admission.py':66,'test_attention_list.py':71,'test_retry_intent.py':62,'test_automatic_media_policy.py':61,'test_todo_holds.py':58,
-  'test_m4b_join.py':57,'test_automatic_processing.py':54,'test_working_lifecycle.py':49,'test_replacement_jobs.py':48,'test_recovery_retention.py':42,
-  'test_published_snapshot_lifecycle.py':41,'test_attempt_working_lifecycle.py':39,'test_source_proofs.py':35,'test_cleanup_resume.py':33,'test_output_migration.py':32,
-  'test_source_folders.py':32,'test_catalog_paging.py':31,'test_local_admission.py':30,'test_working_precision.py':30,'test_web.py':28,
-  'test_sorted_wiring.py':24,'test_relocated_chapter_repair.py':23,'test_derived_migration.py':21,'test_progress_rows.py':19,'test_local_identity_fixes.py':17,
-  'test_mp3_tag_repair.py':15,'test_source_cleanup.py':14,'test_gap_fill.py':14,'test_desktop_update.py':23,'test_blocked_retry.py':13,'test_openlibrary_index.py':13,'test_review_backend.py':13,
-  'test_groups_filters.py':12,'test_m4b_preservation.py':12,'test_working_cleanup.py':12,'test_attention_repair.py':11,'test_join_parts.py':11,
-  'test_multisource.py':11,'test_public_work_identity.py':11,'test_failed_m4b_retry.py':10,'test_relocated_replacement.py':9,'test_startup_published_check.py':9,
-  'test_storage_cleanup.py':9,'test_catalog_contention.py':8,'test_collection_identity.py':8,'test_desktop_host.py':8,'test_local_identity.py':8,
-  'test_inventory.py':7,'test_author_rules.py':6,'test_producer_recovery.py':6,'test_publication_consumers.py':6,'test_sqlite_busy.py':6,
-  'test_automatic_record_retry.py':5,'test_startup_loading.py':3,'test_desktop_catalog.py':12,'test_attention_actions.py':4,'test_candidate_source_refresh.py':4,'test_series_research.py':4,'test_zone_identifier.py':4};
+// 2026-10-26 (0.22.1, branch ender/0221c): the b03eea7 entry check ran worker 3 at 517.7 s (96 % of the deadline) against
+// 429 s projected, and a fresh-copy gate at 1179f59 at 459.1 s against 430 s. The gate now prints each module's real seconds
+// in its worker (check-desktop.mjs); that run showed test_book_delete.py at 216 s (weighed 170) and test_attention_actions.py
+// at 29 s (weighed 4) on worker 3, while test_inplace_m4b.py took 336 s (weighed 377). Every weight below is that run's real
+// seconds with seven workers running together (rounded up; modules under 3 s weigh the default 2): 64 modules, 2,367 s, about
+// 350 s projected per worker (65 % of the deadline).
+const measuredSeconds={'test_inplace_m4b.py':336,'test_book_delete.py':216,'test_lock_timing.py':148,'test_approve_as_is.py':120,'test_part_sets.py':114,
+  'test_automatic_media.py':112,'test_destination_admission.py':84,'test_series_backfill.py':83,'test_iron_skazka.py':76,'test_split_books.py':67,
+  'test_automatic_media_policy.py':66,'test_migration_planning.py':65,'test_attention_list.py':50,'test_working_lifecycle.py':49,
+  'test_standing_admission.py':47,'test_m4b_join.py':45,'test_retry_intent.py':42,'test_todo_holds.py':41,'test_automatic_processing.py':39,
+  'test_working_precision.py':36,'test_output_migration.py':32,'test_replacement_jobs.py':30,'test_attention_actions.py':29,'test_source_proofs.py':25,
+  'test_catalog_paging.py':22,'test_desktop_update.py':20,'test_local_admission.py':19,'test_progress_rows.py':19,'test_recovery_retention.py':18,
+  'test_sorted_wiring.py':18,'test_attempt_working_lifecycle.py':17,'test_derived_migration.py':17,'test_published_snapshot_lifecycle.py':17,
+  'test_relocated_chapter_repair.py':16,'test_source_folders.py':16,'test_m4b_preservation.py':15,'test_mp3_tag_repair.py':15,'test_web.py':15,
+  'test_cleanup_resume.py':13,'test_gap_fill.py':12,'test_review_backend.py':12,'test_desktop_catalog.py':8,'test_desktop_host.py':8,
+  'test_join_parts.py':8,'test_multisource.py':8,'test_storage_cleanup.py':8,'test_blocked_retry.py':7,'test_collection_identity.py':7,
+  'test_groups_filters.py':7,'test_sqlite_busy.py':7,'test_startup_published_check.py':7,'test_attention_repair.py':6,'test_relocated_replacement.py':6,
+  'test_source_cleanup.py':6,'test_catalog_contention.py':5,'test_folder_structure.py':5,'test_openlibrary_index.py':5,'test_author_rules.py':4,
+  'test_failed_m4b_retry.py':4,'test_inventory.py':4,'test_public_work_identity.py':4,'test_working_cleanup.py':4,'test_automatic_record_retry.py':3,
+  'test_build_guard.py':3};
 export const PYTHON_WORKERS=7;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}

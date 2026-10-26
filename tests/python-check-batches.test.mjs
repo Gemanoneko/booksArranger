@@ -20,7 +20,7 @@ test('server conflicts remain serial and every declared pattern appears exactly 
 test('measured heavy modules spread longest first; serial modules stay together; declared order is kept',()=>{
  const declared=['test_alpha.py','test_desktop_host.py','test_inplace_m4b.py','test_beta.py','test_automatic_media.py','test_web.py','test_series_backfill.py','test_gamma.py','test_iron_skazka.py'];
  const b=pythonBatches(declared);
- assert.deepEqual(b,[['test_desktop_host.py','test_web.py'],['test_inplace_m4b.py'],['test_automatic_media.py'],['test_iron_skazka.py'],['test_series_backfill.py'],['test_alpha.py','test_gamma.py'],['test_beta.py']]);
+ assert.deepEqual(b,[['test_desktop_host.py','test_web.py'],['test_inplace_m4b.py'],['test_automatic_media.py'],['test_series_backfill.py'],['test_iron_skazka.py'],['test_alpha.py','test_gamma.py'],['test_beta.py']]);
  assert.deepEqual(pythonBatches([...declared]),b,'deterministic');
  for(const batch of b)assert.deepEqual(batch,declared.filter(p=>batch.includes(p)),'each worker keeps the declared order');
  assert.throws(()=>pythonBatches(['test_a.py','test_b.py']),/Invalid/);  // fewer modules than workers
