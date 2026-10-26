@@ -7,28 +7,145 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-10-26
 Tool: Books Arranger (Electron / Python)
 Release: v0.22.1
-Commit range: 143b33b733a2c3dfcd86e89f5c70df9fbbe6b03c..b03eea75cd9c51e366ae0cdd3fd3a8f8582d232a (tag v0.22.0 .. origin/main b03eea7): first pass to c26bc58 (51 commits), then the delta c26bc58..b03eea7 (15 commits)
-Release source commit: b03eea75cd9c51e366ae0cdd3fd3a8f8582d232a
-Release artifact manifest SHA256: db44ec92fb9d3aa795d75857caaffd91d3a9d388f0be029a4c36a66fd7c6eec6
-Reviewed source: first pass, C:/Antigravity Projects/Worktrees/Books Arranger/rv0221 (detached at c26bc58); delta, C:/Antigravity Projects/Worktrees/Books Arranger/rv0221b/wt (detached at b03eea7) and a git archive of c26bc58's *.py beside it. Both removed after the review.
+Commit range: 143b33b733a2c3dfcd86e89f5c70df9fbbe6b03c..90594e8b57e55679f8ec1f435cb2a72683c361a2 (tag v0.22.0 .. origin/main 90594e8): first pass to c26bc58 (51 commits), the delta c26bc58..b03eea7 (15 commits), then the final delta b03eea7..90594e8 (14 commits)
+Release source commit: 90594e8b57e55679f8ec1f435cb2a72683c361a2
+Release artifact manifest SHA256: 33e9d9efe9563bdaf783d8071ee973b74c63cfa4372647e16e918fc66a2b169d
+Reviewed source: first pass, C:/Antigravity Projects/Worktrees/Books Arranger/rv0221 (detached at c26bc58); delta, C:/Antigravity Projects/Worktrees/Books Arranger/rv0221b/wt (detached at b03eea7) and a git archive of c26bc58's *.py beside it; final delta, the main checkout at 90594e8 (read only) and git archives of b03eea7's and 90594e8's *.py in my session scratch. All removed after the review.
 Files changed, first pass: 92 files, +9101 / -1333 (git diff --shortstat). Product code and scripts: 39 files, +4028 / -1216. Tests: 46 files, +3787 / -113. Docs and CHANGELOG: 5 files, +1283 / -1. package.json and package-lock.json: version only.
 Files changed, delta: 20 files, +1207 / -104. Product code and scripts: 11 files, +339 / -92. Tests: 6 files, +536 / -10. Docs: 3 files, +332 / -2 (this report, Judy's section 12, the Brief).
+Files changed, final delta: 17 files, +696 / -62 (git diff --numstat). Product code and scripts: 7 files, +120 / -34. Tests: 6 files, +229 / -6. Docs: 4 files, +347 / -22 (this report, Futaba's QA report, the Brief, the backlog). package.json and package-lock.json: unchanged.
 Stand-down dimensions: none
 ```
 
 Rulings checked against: `Team/Docs/BooksArranger_Rulings_2026-10-24.md` (2, 5, 6, 6a, 10, 11a, 14, 16, 19, 19b, 21, 23-28), the backlog `Docs/BooksArranger_0.22.1_Backlog.md` and the Brief's 0.22.1 section.
 
-**Artifact pin (b03eea7).** Ender's manifest is `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0221c/dist/release-artifacts.json`. I recomputed every value myself, read-only, with the repo's own `release-contract.mjs` and `release-flow.mjs` (`gitEntries`) from my b03eea7 worktree:
-- Manifest SHA-256 `db44ec92fb9d3aa795d75857caaffd91d3a9d388f0be029a4c36a66fd7c6eec6` over the file's 57,041 bytes (no BOM). It equals Ender's value.
-- `version` 0.22.1; `source_head` b03eea75cd9c51e366ae0cdd3fd3a8f8582d232a; `build_id` 8c8cd155-0648-4085-9443-7f52e66528ae; `latest.yml` reads `version: 0.22.1`.
-- `product_digest` `ff53722a…d744` equals `productTree(ls-tree b03eea7)` (c26bc58's is `42248363…41db`, so the old pin no longer matches this product).
+**Artifact pin (90594e8).** Ender's manifest is `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0221d/dist/release-artifacts.json`. I recomputed every value myself, read-only, with the repo's own `release-contract.mjs` (`productTree`, `artifactContract`) and `release-flow.mjs` (`gitEntries`) from the `cand-0221d` checkout:
+- Manifest SHA-256 `33e9d9efe9563bdaf783d8071ee973b74c63cfa4372647e16e918fc66a2b169d` over the file's 57,041 bytes (no BOM). It equals Ender's value.
+- `version` 0.22.1; `source_head` 90594e8b57e55679f8ec1f435cb2a72683c361a2; `build_id` f68068a1-6353-45ee-80ad-9acacdd09133; `latest.yml` reads `version: 0.22.1`.
+- `product_digest` `cc14401d…0f04` equals `productTree(ls-tree -rz --full-tree 90594e8)`.
 - `artifactContract(manifest, {version: '0.22.1', productTree})` accepts it: three artifacts; payload `backend_version` and `shell_version` 0.22.1, `verified` and `installer_equivalent` true.
 - Each artifact matches the manifest's size and SHA-256:
-  - `Books-Arranger-Setup-0.22.1.exe`: 174,087,620 bytes, `c1b385219e62c39b7f3388d66d44db2744903ff993805162620fbd75cbe6a3d5` (Ender's value);
-  - the `.blockmap` (181,629 bytes) and `latest.yml` (360 bytes).
-- The `cand-0221c` worktree is at b03eea7 with a clean tree. I only read and hashed it.
+  - `Books-Arranger-Setup-0.22.1.exe`: 174,090,910 bytes, `962c17d7a04ec0a18e2647d765d66cc6c07818372474ec21494c5fbb179f3ec2` (Ender's value);
+  - the `.blockmap` (181,693 bytes) and `latest.yml` (360 bytes).
+- The `cand-0221d` worktree is at 90594e8 with a clean tree. I only read and hashed it.
 
-The first pass pinned the earlier candidate (`cand-0221b`, c26bc58, manifest `72a0f4f7…a6585`, installer `b24f23a3…e6ab`). That pin is superseded.
+Earlier pins are superseded: the first pass's (`cand-0221b`, c26bc58, manifest `72a0f4f7…a6585`, installer `b24f23a3…e6ab`) and the first delta's (`cand-0221c`, b03eea7, manifest `db44ec92…c6eec6`, installer `c1b38521…a3d5`).
+
+---
+
+## Delta b03eea7..90594e8
+
+**Scope and method.**
+- 14 commits on origin/main after b03eea7, starting with this report's delta commit (9b7ee92):
+  - Futaba's M-2 and M-3;
+  - my W8, W13, W14 and W15;
+  - Futaba's m-6, m-7 and m-10;
+  - the gate's re-weights;
+  - the Brief and the backlog.
+- Sergei moved the updater items (Futaba's M-1, W16 and the rest) to 0.22.2 (backlog, `## 0.22.2`). This pass checks none of them as fixed.
+- I read every product and script hunk in full, and the new tests.
+- Lean verification: no full suite, no mutation sweep, no test module run. I ran four small probes (P13-P16), each behind one question or finding, lightly, because Futaba was testing at the same time.
+
+**Status at 90594e8.**
+
+| # | Was | Now | Evidence |
+|---|-----|-----|----------|
+| W13 | Minor | **Closed** | `reserved` is set inside the reservation. The in-flight mark and the budget follow the block's commit, still under the client lock (`public_research.py:405`, `:410`). A failed commit leaves no mark. `delay` and `flight` are set on every path that reaches the fetch. |
+| W14 | Minor | **Closed** | `whole_in_book_folder` returns '' unless the folder carries a position or an uploader number (`local_identity.py:1901`). It runs only when no structure applies (`:2080`), so it cannot touch a structure's title. |
+| W15 | Minor | **Closed**, with a side effect (W17) | A single file whose title came from its file name takes the structure's title (`:1939`). A title tag still wins: P14's clean-tag control keeps «Севастопольский дозор». |
+| W8 | Minor | **Partly closed** | The folder-structure strip now drops only this book's credits (`_title_credit`, `:1750`). The first pass's shape is unchanged: the title-tag "Person. Title" rule (`:2031`) can still make a character the author when no author tag exists. |
+| W16 | Minor | **Open**, moved to 0.22.2 by Sergei | — |
+| W2, W4, W9, W11 | Minor | Open, unchanged | — |
+
+**Answers to the four questions.**
+
+1. **M-3: the check stays read-only, and a damaged catalog is still refused.**
+   - The change (`desktop_catalog.py:39-40`): with a `-wal` file beside the catalog, the check opens it `mode=ro` instead of `mode=ro&immutable=1`. Without a WAL nothing changes.
+   - Three layers keep it from writing:
+     - SQLite opens the main file read-only.
+     - The check holds the catalog through `VerifiedFile`, whose handle shares read only (share mode 1), so nothing can write the file while the check runs.
+     - A read-only connection never checkpoints or deletes the WAL when it closes.
+   - P13 measured this on a catalog whose writer was killed (TerminateProcess) with its last commits only in the WAL:
+     - The immutable view misses the WAL's 50 `jobs` rows; the check's view sees them.
+     - `inspect_folder` accepts the catalog. The main file and the WAL keep their exact SHA-256 and size. The only file written is `-shm`, the shared-memory index, which the engine's own open rebuilds anyway.
+     - A bare `mode=ro` open and close of a copy, without `VerifiedFile`, also leaves both files byte-identical. So the guarantee does not rest on the share lock alone.
+   - A damaged catalog is still refused with its WAL beside it, and nothing is written:
+     - ten zeroed pages in the main file: "Catalog integrity check failed; folder retained";
+     - a damaged header: `DatabaseError: file is not a database`. The CLI and the startup guard treat it as a refusal, as before.
+   - The new `CrashRecoveryTests` cover the torn checkpoint and the no-WAL control. Their positive control (the main file alone fails `quick_check`) shows the test can fail.
+   - WAL frames that fail their checksums are ignored, exactly as the engine's own open ignores them. That is correct, not a finding.
+2. **W8: no live title is wrongly stripped, but one latent shape leaves an author in the title (W17).**
+   - The rule (`_title_credit`, `local_identity.py:1750-1770`): a leading "Person - " piece is a credit when every person in it is one of these:
+     - the folder author, or an author tag of the book's files (a matching name, or the same surname);
+     - a known reader: narrator tags, the library's readers, `RULED_NARRATORS`;
+     - any person-like name, when the files have no author tag.
+     - An author tag that names a reader, or one of Sergei's `not_author` names, does not count as an author tag.
+   - *Wrong strip.*
+     - With an author tag, a person is stripped only if they share the author's surname (four letters or more, not a given name) or are exactly a known reader. Example: a memoir by the author's relative. Latent; none is live.
+     - With no author tag, any person-like name is stripped, as in the 0.22.0 file-name reading, and that person becomes the author. P14: the tagless "Стефан Цвейг\Биографии\03 - Жозеф Фуше - Портрет политического деятеля.m4b" shows «Портрет политического деятеля» by Фуше Жозеф at both b03eea7 and 90594e8. The Brief documents this clause. Not new, not a finding.
+   - *Author left in the title (W17).* The strip needs every person in the piece to be credited. W15 now lets the structure's title win (`:1939`), so a piece that is not fully credited stays in the title. This happens when the file has no title tag and its author tag names only some of the people in the piece (a co-author missing), or names the universe's owner.
+     - P14, "…\Вселенная Дозоров - Межавторский цикл\05 - С. Лукьяненко, И. Кузнецов - Печать сумрака (август 2003 - апрель 2004).m4b", artist «Сергей Лукьяненко», no title tag:
+       - b03eea7: «Печать сумрака»;
+       - 90594e8: «С. Лукьяненко, И. Кузнецов - Печать сумрака». It converts with no question, to `Лукьяненко Сергей\Вселенная Дозоров - Межавторский\Вселенная Дозоров - Межавторский - 5 - С. Лукьяненко, И. Кузнецов - Печать сумрака - Лукьяненко Сергей.m4b`.
+     - The same file name pattern with «Сергей Недоруб» and the owner tagged is held. Approve as is now shows «Сергей Недоруб - Севастопольский дозор»; at b03eea7 it showed «Севастопольский дозор».
+     - The controls keep their titles: both co-authors tagged, no tags at all, an author tag in Latin letters ("Sergey Nedorub" matches across scripts), and a clean title tag.
+     - Live: none. The live «Печать сумрака» has a title tag and both authors tagged, and Ender's live-catalog measurement says W8, W14 and W15 change no live book.
+3. **W14 and W15 do not bring W1 back, apart from W17's latent shape.** W1 had three parts:
+   - *A file name beat a clean title tag.* W15's branch fires only when the title's basis is `file_name`, which means there is no usable title tag. W14 changes only whether a lone file is a whole book. P14's clean-tag control keeps the tag title.
+   - *An author's name stayed in the title.* Only in W17's shape: no title tag, and an author tag that misses someone.
+   - *A dangling bracket.* The structure's title still goes through `_balanced` (`:1857`), and W15 uses that title.
+   - The W1 controls are in the new tests and hold: «Игры Немезиды» in "5. Игры Немезиды" (the folder carries the position, so it is still the whole book) and the five live «Дозоры» rows.
+4. **Nothing new can delete or move a file wrongly.**
+   - The delta adds no file operation:
+     - M-3 only reads the catalog (and may create `-shm` beside it);
+     - M-2, W8, W14 and W15 change only names: the author folder, the title, and whether a lone file is a whole book;
+     - W13 touches the research cache's in-flight marks;
+     - m-6, m-7 and m-10 are display only;
+     - the gate changes only its weights and a timing print.
+   - Every destination is still refused when anything exists there (`merge_service.py`, unchanged in this delta).
+   - M-2:
+     - A spelling with underscores never wins the one-spelling vote (`:996-997`).
+     - Approve with nothing typed files the underscore-free name the Author field shows (`shown()`, `:2477`). Typed names still go through Sergei's `same_as` rules.
+     - When every spelling is dropped, `canonical_author` falls back to the agreed name (`:1022`), so an empty list cannot crash it. An agreed name with underscores is still asked (Q3, `odd_identity`).
+
+**New findings in the final delta.**
+- **W17 [Minor]** `local_identity.py:1939` with `:1758-1766`. **A single file with no title tag keeps in its title a person its author tag does not name, and can convert with no question** (question 2). It is W1's shape, latent: by Ender's measurement no live book changes, and the live «Печать сумрака» carries a title tag and both authors.
+- **W18 [Minor]** `local_identity.py:1756-1759`, reached from `folder_structure` (`:1851`) and from `groups.build` (`groups.py:625`). **`_title_credit` builds its reader and author lists eagerly, one entry per file with no de-duplication, and compares every author-tag person with every reader.**
+  - The cost grows as files × author people × (library readers + reader-tagged files). It is paid for every structured book, even one whose title has no " - ".
+  - P15, a synthetic 240-file book folder (Map of Bones' shape):
+    - with 1,000 library readers: 21.3 s per `folder_structure` call, against 0.006 s at b03eea7;
+    - with no library readers and a reader tag on every file (the `groups.build` call): 1.2 s, against 0.005 s.
+  - P16, the live catalog: 56 library readers; the largest structured book (216 files) takes 0.32 s. The live cost is small today and grows with the library.
+
+**Final-delta rubric.**
+1. Security: Pass. No new route, IPC channel or shell string. m-10's text goes through `textContent`. M-3 widens no write.
+2. Correctness & Logic: Concerns (W17; W8's first-pass shape is still open).
+3. Crash / Stability Safety: Pass.
+   - m-7's early returns call `loadPlaceholders`, which calls neither renderer back, so there is no recursion.
+   - W13 can no longer leave a reader waiting for ever.
+4. Performance: Concerns (W18, Minor; 0.32 s at most on the live catalog).
+5. State & Data Safety: Pass. M-3 writes neither the catalog nor its WAL (P13). No new delete, move or overwrite path.
+6. Input Handling: Pass. `plain()` only strips Electron's fixed IPC prefix from text shown through `textContent`.
+7. Maintainability: Pass.
+   - The gate still runs the same declared modules; the re-weights only change how modules are batched.
+   - `Timed` adds each module's seconds to the batch report and does not change the exit test.
+8. Doc/Code Drift: Pass.
+   - The Brief's W8 row states the code's no-author-tag clause.
+   - Its "W8, W14 and W15 change no live book" is Ender's measurement on a catalog copy. I did not repeat it; P16 measured only cost.
+9. Build & Release Hygiene: Pass. The artifact matches its manifest, 90594e8 and version 0.22.1 (pin above). The version and lockfile are unchanged since the bump.
+
+**Final-delta probes.**
+- No test module ran.
+- The live catalog was opened `immutable`: no WAL, journal or `-shm` use, never a write. Its files' sizes and times were the same after the probe.
+- Probe scripts, the git archives and the outputs lived in my session scratch and were removed with it.
+
+| # | What | Result |
+|---|------|--------|
+| P13 | M-3: a WAL catalog whose writer was killed. `inspect_folder` at 90594e8; a bare read-only open; ten zeroed pages, and a damaged header, each with the WAL beside it | Accepted; main and WAL byte-identical (only `-shm` written); the bare open the same; both damaged catalogs refused, nothing written |
+| P14 | Synthetic single files through the test pipeline (catalog, lookup, Approve as is, destination), b03eea7 against 90594e8 | W17; four controls keep their titles; the tagless biography is unchanged |
+| P15 | `folder_structure` time on a synthetic 240-file book folder, at both commits | W18: 21.3 s against 0.006 s with 1,000 readers; 1.2 s against 0.005 s with reader tags only |
+| P16 | Live catalog: library readers, structured books (grouped by their first three folder names), comparisons per book, and the largest timed | 56 readers, 332 structured groups, largest 0.32 s |
+| P17 | Artifact pin with the repo's helpers | Header and pin above |
 
 ---
 
@@ -139,7 +256,7 @@ The first pass pinned the earlier candidate (`cand-0221b`, c26bc58, manifest `72
 
 ## Summary
 
-*This summary, the nine answers and the rubric below are the first pass, at c26bc58. W1 and W3 are closed at b03eea7; the delta section above has the current status.*
+*This summary, the nine answers and the rubric below are the first pass, at c26bc58. W1 and W3 are closed at b03eea7. The two delta sections above have the current status, the newest (b03eea7..90594e8) first.*
 
 **No Critical finding, and the safety floor is intact. Two Major findings, both worth fixing before 0.22.1 ships.**
 
@@ -375,22 +492,32 @@ The same pattern as the 0.22.0 grouping findings (G1-G3, N1): new automatic iden
 
 The delta repeats the first pattern on a smaller scale. The W1 fixes were checked on the live names (P10 and Ender's catalog copy both agree), and the live library is clean. The new rules' edges sit just beside the motivating names, though: a volume numbered without "Том" (W14), and a tagless title with a dash (W15). The tests hold the controls next to those shapes, not the shapes themselves.
 
+The final delta shows it once more, where two fixes meet. W15 and W8 are each right on their own. Together they let a title the W1 fix used to clean keep a person. That happens only when the author tag misses someone, and every test row tags every credited person (W17). The other lesson is cost: a rule that compares lists of people per file needs a timing at the size of the largest real book, not only at the size of the test rows (W18).
+
 ---
 
 ## Verdict
 
-At b03eea7, first pass and delta together:
+At 90594e8, first pass and both deltas together:
 - Total Critical: 0
 - Total Major: 0 open. W1 and W3 are closed.
-- Total Minor: 9 open: W2 (second shape only), W4, W8, W9, W11, and the delta's W13, W14, W15, W16. W5, W7, W10 and W12 are closed; W6 is accepted by Judy's ruling.
+- Total Minor: 8 open:
+  - W2 (second shape only), W4, W8 (the first pass's title-tag shape only), W9, W11;
+  - W16, moved to 0.22.2 by Sergei;
+  - the final delta's W17 and W18.
+- Closed: W5, W7, W10, W12, W13, W14 and W15. W6 is accepted by Judy's ruling.
 
-No Critical finding is open, and the safety floor is intact. The candidate's manifest and installer match b03eea7 and version 0.22.1. The new Minors are latent: none of them occurs on the live library today.
+No Critical finding is open, and the safety floor is intact:
+- M-3's check writes neither the catalog nor its WAL, and it still refuses a damaged catalog.
+- Nothing new deletes, moves or overwrites a file.
+- The candidate's manifest and installer match 90594e8 and version 0.22.1.
+
+Both new Minors are latent. W17 changes no live book (Ender's catalog-copy measurement). W18 costs at most 0.32 s per book on the live catalog today (P16).
 
 | # | Sev | Dim | file:line | Finding | Fix (next cycle) |
 |---|-----|-----|-----------|---------|------------------|
-| W13 | Minor | 4 | `public_research.py:406` | The in-flight marker is registered before the reservation commits; a failed commit leaves the URL waiting for ever (or until Pause) | Register the marker after the commit, or set and remove it on any error |
-| W14 | Minor | 2 | `local_identity.py:1847`, `:2040` | A lone bare-numbered volume in its set's own folder ("Торадора!\Торадора! 6.m4b") loses its number and converts with no question | Treat the folder as the book's only when it carries a book position or uploader number ("5. Игры Немезиды"), or ask otherwise |
-| W15 | Minor | 2 | `local_identity.py:1838` | A tagless single file in a series folder loses the first half of a " - " title (the file-name fallback reads it as "Author - Title") | For a single file, let the structure's title win over a title whose basis is `file_name` |
-| W16 | Minor | 3 | `desktop/update-controller.js:183`, `:178` | An engine exit during `restart()`'s lease close is never followed by a restart (the engine_stuck line still says what to do) | Keep the late-exit request until `busy.install` clears, then restart |
+| W16 | Minor | 3 | `desktop/update-controller.js:183`, `:178` | An engine exit during `restart()`'s lease close is never followed by a restart (the engine_stuck line still says what to do). Moved to 0.22.2 by Sergei | Keep the late-exit request until `busy.install` clears, then restart |
+| W17 | Minor | 2 | `local_identity.py:1939`, `:1758-1766` | A single file with no title tag keeps in its title a person its author tag does not name («С. Лукьяненко, И. Кузнецов - Печать сумрака» tagged only Лукьяненко), and can convert with no question | When the structure's title still opens with a person-like "X - " piece that is not credited, keep the file-name reading's title or ask, never file it silently |
+| W18 | Minor | 4 | `local_identity.py:1756-1759` (`folder_structure` `:1851`, `groups.py:625`) | `_title_credit` compares every author-tag person of every file with every reader, eagerly: 21.3 s for a 240-file book with 1,000 library readers (0.006 s at b03eea7) | De-duplicate both lists (sets) and build them only when a " - " piece is to be judged |
 
 **Verdict:** RELEASE CLEAR
