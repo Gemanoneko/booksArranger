@@ -110,6 +110,22 @@ semyon semen arseny arseniy bogdan taras olga tatyana tatiana natalia natalya sv
 lyudmila ludmila galina larisa yulia yuliya daria darya ksenia kseniya oksana hanna ganna olena nadia zinaida polina alina alyona alena
 '''.split())
 GIVEN_NAMES |= SLAVIC_LATIN_GIVEN
+# Ruling 29 («Голиаф», Sergei 2026-10-26): first names that are Russian spellings of English and other foreign names
+# («Скотт», «Стивен», «Роджер»). An author credited so writes in another language: the book is a translation. The
+# Russian names (and those both languages share: Анна, Мария, Марк, Лена, Марта, Влад) never are.
+RUSSIAN_GIVEN = frozenset('''
+александр алексей анатолий андрей антон аркадий артем артём артур борис вадим валентин валерий василий виктор виталий владимир владислав
+всеволод вячеслав геннадий георгий герман глеб григорий даниил денис дмитрий евгений егор иван игорь илья кирилл константин лев леонид максим
+марк михаил никита николай олег павел петр пётр роман руслан сергей станислав степан тимур федор фёдор юрий ярослав яков эдуард
+александра алена алёна алина алла анастасия анна валентина вера виктория галина дарья евгения екатерина елена ирина кира лариса любовь
+людмила марина мария наталья наталия наташа надежда ольга светлана софья татьяна юлия яна уна лена марта влад
+'''.split())
+FOREIGN_CYRILLIC_GIVEN = frozenset(w for w in GIVEN_NAMES if re.fullmatch(r'[а-яё]+', w) and w not in RUSSIAN_GIVEN)
+
+
+def foreign_given(name):
+    """True when a Cyrillic credit's first name is a Russian spelling of a foreign one ("Скотт Вестерфельд")."""
+    return any(w.replace('ё', 'е') in FOREIGN_CYRILLIC_GIVEN or w in FOREIGN_CYRILLIC_GIVEN for w in words(name))
 NAME_PARTICLES = {'de', 'van', 'von', 'der', 'le', 'la', 'du', 'di', 'da', 'де', 'ван', 'фон', 'дер', 'ле', 'ла', 'дю', 'ди', 'да'}
 INITIALS = re.compile(r'^(?:[^\W\d_]\.){1,3}[^\W\d_]?\.?$')
 
@@ -771,6 +787,32 @@ def _chapter_only(row, title):
     return ''
 
 
+def numbered_credit(name, names=()):
+    """True for a credit that is no person's name but a label with a number: initials and a number ("sk 1408"), or any
+    credit carrying the number of the book's own title or file name ("1408"). A person's name holds no number."""
+    numbers = re.findall(r'\d+', str(name or ''))
+    if not numbers:
+        return False
+    letters = [w for w in re.findall(r'[^\W\d_]+', str(name)) if w]
+    if all(len(w) <= 3 for w in letters):
+        return True
+    own = {n.lstrip('0') for value in names for n in re.findall(r'\d+', str(value or ''))}
+    return any(n.lstrip('0') in own for n in numbers if len(n) >= 2)
+
+
+def lone_number(row, title, siblings=None):
+    """0.22.1, item 10 (b): a single file titled only with a number of three or four digits ("1986", "1408") is a whole
+    book, unless files beside it are numbered too; "01" or "05" stays a chapter or part."""
+    return bool(title and len(row.get('members', [])) == 1 and re.fullmatch(r'\W*[1-9]\d{2,3}\W*', clean_title(title))
+                and not any(re.fullmatch(r'\W*\d{1,4}\W*', clean_title(_index_stripped(v)) or v) for s in (siblings or [])
+                            for v in (text(s['tags'].get('title')), filename_identity(s['filename']).get('title') or Path(s['filename']).stem) if v))
+
+
+# «11.22.63» (Sergei 2026-10-26): a title made of three or more numbers joined by dots, slashes or dashes ("11/22/63",
+# "11.22.63") is a name (a date), never a bare part number.
+DATE_TITLE = re.compile(r'^\W*\d{1,4}(?:\s*[./\-]\s*\d{1,4}){2,3}\W*$')
+
+
 def _claims_person(value):
     """A structured name's author slot makes a person claim only when it looks like a name."""
     return bool(value) and not re.search(r'\d', value) and 1 <= len(words(value)) <= 4 and not NARRATOR_MARKER.search(value)
@@ -1271,10 +1313,9 @@ def _piece_conflicts(row, title, part, siblings, components, author='', numbered
     conflicts = []
     # 0.22.1, item 10 (b): a single file titled only with a number of three or four digits ("1986", "1408") is a whole book,
     # unless files beside it are numbered too; "01" or "05" stays a chapter or part.
-    lone_number = bool(title and len(row.get('members', [])) == 1 and re.fullmatch(r'\W*[1-9]\d{2,3}\W*', clean_title(title))
-                       and not any(re.fullmatch(r'\W*\d{1,4}\W*', clean_title(_index_stripped(v)) or v) for s in (siblings or [])
-                                   for v in (text(s['tags'].get('title')), filename_identity(s['filename']).get('title') or Path(s['filename']).stem) if v))
-    if title and not numbered and not lone_number and (PART_TITLE.search(clean_title(title)) or not re.search(r'[^\W\d_]{2}', clean_title(title))):
+    lone = lone_number(row, title, siblings)
+    dated = bool(title and DATE_TITLE.fullmatch(clean_title(title)))
+    if title and not numbered and not lone and (PART_TITLE.search(clean_title(title)) or not dated and not re.search(r'[^\W\d_]{2}', clean_title(title))):
         conflicts.append({'field': 'title', 'detail': 'the title names a part, chapter or numbered file; one part is not the whole book', 'force': True, 'piece': 'part_title'})
     elif title and not part and len(row.get('members', [])) == 1 and _chapter_only(row, title):
         # A single file named or tagged only "Глава 5" / "Часть 3" / "05" beside a book title is one
@@ -2152,7 +2193,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 continue
             parsed = filename_identity(component['value'] + '.x')
             value = clean_title(_index_stripped(named.get('name') or parsed.get('title') or component['value']), component['numbered'])
-            if value and not garbled(value) and re.search(r'[^\W\d_]{2}', value):
+            if not value and component['kind'] == 'file name' and lone_number(row, component['value'], siblings):
+                value = clean_title(component['value'])  # «1408.m4b» (item 10 b): the number is the book's title
+            if value and not garbled(value) and (re.search(r'[^\W\d_]{2}', value) or component['kind'] == 'file name' and lone_number(row, value, siblings)):
                 title = {'state': 'one', 'value': value, 'basis': 'file_name', 'how': 'the %s' % component['kind'],
                          'sources': [{'kind': component['kind'], 'value': component['value']}]}
                 break
@@ -2280,6 +2323,10 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             return
         if garbled(name):
             ignored.append({'field': source, 'value': name, 'why': 'garbled text is not used'})
+            return
+        if kind == 'tag' and numbered_credit(name, [title['value'] if title else '', Path(members[0]['filename']).stem if members else '']):
+            # «1408» (Sergei 2026-10-26): the artist tag "sk 1408", initials and the title's number, is a rip label, no author.
+            ignored.append({'field': source, 'value': name, 'why': 'initials and a number, not a person\'s name'})
             return
         if norm(name) in NOT_PEOPLE or norm(name) in VARIOUS_AUTHORS or EDITOR_MARKER.search(name) or len(re.split(r'\s*[,;]\s*', name)) >= 3:
             collection_credits.append(name)

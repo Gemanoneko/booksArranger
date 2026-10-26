@@ -1251,6 +1251,13 @@ class PublicResearch:
                 if russian not in titles:titles.append(russian)
                 if preferred not in titles:titles.insert(0,preferred)
                 work.update(titles=titles,original_title=preferred,original_language=original['record'].get('language') or 'en')
+                latin=text(original['record'].get('author_latin'))
+                if latin and local_identity.script(names[0])=='cyrillic' and local_identity.script(latin)=='latin' and not fields['author'].get('rule'):
+                    # «Голиаф» (Sergei 2026-10-26; rulings 3 and 22): an author writing in English is filed under the English
+                    # spelling of the name the same answer gives ("Westerfeld Scott", never «Вестерфельд Скотт»).
+                    latin=local_identity.surname_first(latin)[0]
+                    if latin not in authors:authors.append(latin)
+                    names=[latin];work['author_aliases']=author_variants(authors)
         result['work']=work
         if original is not None:result['original_title']={'state':original['state'],'title':original['record'].get('title','') if original['state']=='found' else ''}
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))

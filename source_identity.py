@@ -53,6 +53,18 @@ def partition(member):
     if re.match(r'^\d{1,4}[ _.-]',member['filename']):return str(parent)+'\x1fUnverified numbered source set'
     return str(Path(member['path']))+'\x1fStandalone source'
 
+SERIES_POSITION_TAGS=('sort_album','sortalbum','albumsort','sort_name','sortname','titlesort','grouping','contentgroup','series-part','series_part')
+SERIES_POSITION=re.compile(r'(?:книга|кн\.|book|том|vol\.?|volume|#)\s*№?\s*0*(\d{1,3})(?!\d)',re.I)
+def series_positions(tags):
+    """The book's numbers in a series its own tags name: "Левиафан. Книга 3" (sort album), "Цикл: Левиафан. Книга 2"
+    (grouping), a series-part tag. Part and chapter numbers are not series positions."""
+    found=set()
+    for key in SERIES_POSITION_TAGS:
+        value=str(tags.get(key) or '')
+        if key in ('series-part','series_part') and re.fullmatch(r'\s*0*(\d{1,3})\s*',value):found.add(int(value));continue
+        found.update(int(m) for m in SERIES_POSITION.findall(value))
+    return found
+
 def source_gate(row,work):
     """Observed-source scope only; does not claim commercial recording completeness."""
     members=row['members'];reasons=[]
@@ -108,8 +120,13 @@ def source_gate(row,work):
     sequence=track_order.filename_sequence(track_order.member_names(members)) if len(members)>1 else None
     series_number=str((work.get('verified_series') or {}).get('number') or '') if (work.get('verified_series') or {}).get('folder') else ''
     def series_disc(tags):
+        # «Голиаф» (Sergei 2026-10-26; the VanderMeer bug again): disc 3/3 on the third book of a trilogy, its sort-album tag
+        # "Левиафан. Книга 3". A disc number that is the book's number in its series, named by the folder structure or by
+        # any of its own tags, is no missing disc.
         match=re.fullmatch(r'0*(\d+)(?:/\d+)?',str(tags.get('disc') or tags.get('discnumber') or '').strip())
-        return bool(series_number and match and series_number.isdigit() and int(match[1])==int(series_number))
+        if not match:return False
+        if series_number and series_number.isdigit() and int(match[1])==int(series_number):return True
+        return int(match[1]) in series_positions(tags)
     common_folder=len({str(Path(m['path']).parent) for m in members})==1
     folder_title=filename_identity(Path(members[0]['path']).parent.name).get('title','') if common_folder else ''
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))

@@ -108,7 +108,8 @@ def outcome(found):
 
 
 def translation(title, author):
-    """True when a book waits for its English original title: the title read is Cyrillic and the author is written in
-    Latin letters (a writer in another language, the library's folder language rule)."""
+    """True when a book waits for its English original title: the title read is Cyrillic and the author writes in another
+    language: written in Latin letters (the library's folder language rule), or in Cyrillic with a foreign first name
+    («Скотт Вестерфельд», «Голиаф», Sergei 2026-10-26)."""
     import local_identity
-    return local_identity.script(title) == 'cyrillic' and local_identity.script(author) == 'latin'
+    return local_identity.script(title) == 'cyrillic' and (local_identity.script(author) == 'latin' or local_identity.foreign_given(author))
