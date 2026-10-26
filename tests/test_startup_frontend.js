@@ -35,7 +35,9 @@ function harness({protocol='http:',desktop=true}={}){
     'jobs-status':'Jobs: loading…','book-candidate-counts':'Book candidates: loading…',empty:'Loading your books…',page:'Loading your books…','automatic-start-reason':'Automatic processing can start when loading finishes.'};
   for(const [id,text] of Object.entries(initial))node(id).textContent=text;
   node('jobs-idle').hidden=true;node('version').hidden=true;node('load-actions').hidden=true;node('load-details').hidden=true;node('load-restart').hidden=true;node('load-retry').hidden=true;
-  const body=make('body');body.setAttribute('aria-busy','true');
+  // M3 (Judy's implementation check): the book list's body is busy while the books part is missing; <body> never is,
+  // so the live regions under it (#load-announce) are not held while loading.
+  const body=make('body');node('inventory').setAttribute('aria-busy','true');
   let answer=null,mode='answer',calls={state:0,inventory:0},startupListener=null,restarts=0;
   const shell={startup:async()=>startupValue,onStartup:fn=>{startupListener=fn;},restartEngine:async()=>{restarts++;return true;}};
   let startupValue={phase:'launching',startedAt:clock-500,lastLoadMs:99000,exited:null,portPid:null};
@@ -95,6 +97,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     // The shell reports the exit: Stopped, its last lines, Try again; placeholders become "not loaded".
     h.startup({phase:'stopped',exited:{code:1,lastLines:'RuntimeError: Pending output moves need recovery first'}});
     assert.equal(h.node('load-word').textContent,'Stopped');assert.equal(h.node('load-text').textContent,'The engine stopped while loading. Your files are not touched.');
+    assert.equal(h.node('inventory').getAttribute('aria-busy'),null,'stopped: nothing is on its way, so the list is not busy');
     assert.equal(h.node('load-retry').hidden,false);assert.equal(h.node('load-restart').hidden,true);assert.equal(h.node('load-detail').hidden,true);
     assert.match(h.node('load-technical').textContent,/Pending output moves need recovery first/);
     assert.equal(h.node('status').textContent,'Library status: not loaded.');assert.equal(h.node('empty').textContent,'Your books are not loaded.');
@@ -109,7 +112,8 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     const h=harness();h.answer=answerWith(loading({parts:{...ALL,[withheld]:false}}));await h.poll();await flush();
     if(withheld==='status')digitFree(h,['status']);
     if(withheld==='jobs')digitFree(h,['jobs-status','book-candidate-counts','automatic-status','research-status']);
-    if(withheld==='books'){digitFree(h,['empty','page']);assert.equal(h.calls.inventory,0,'no list read before the books part');assert.equal(h.node('filter').title,'Not yet: your books are still loading. This works as soon as they appear.');}
+    assert.equal(h.body.getAttribute('aria-busy'),null,'never on <body>');
+    if(withheld==='books'){assert.equal(h.node('inventory').getAttribute('aria-busy'),'true','busy while the books part is missing');digitFree(h,['empty','page']);assert.equal(h.calls.inventory,0,'no list read before the books part');assert.equal(h.node('filter').title,'Not yet: your books are still loading. This works as soon as they appear.');}
     else{assert.equal(h.node('load-word').textContent,'Working');}
     assert.equal(h.node('version').hidden,true,'the version shows only after loading');
   }
@@ -132,6 +136,8 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('load-restart').getAttribute('aria-disabled'),'true');
     assert.equal(h.node('load-restart').title,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');
     await h.node('load-restart').handlers.click();assert.equal(h.restarts,0);assert.equal(h.node('message').textContent,'Not safe right now: the engine is changing the catalog. Wait for it to finish.');
+    // N4 (Judy's implementation check): the announcement never offers a Restart engine that is inert.
+    assert.equal(h.node('load-announce').textContent,'Loading is stuck. No progress for 30 s. The engine is changing the catalog, so Restart engine waits.');
     // A "still updating" answer is an answer: no engine-quiet line.
     h.mode='busy';for(let s=0;s<5;s++){h.jump(1000);await h.poll();h.advance(0);}
     assert.doesNotMatch(h.node('load-text').textContent,/hasn't answered/);
@@ -149,7 +155,8 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('start').hasAttribute('data-not-yet'),false);assert.equal(h.node('start').getAttribute('aria-disabled'),null);
     assert.notEqual(h.node('start').title,'Not yet: Books Arranger is still loading. This works when loading finishes.');
     assert.equal(h.node('message').textContent,'','the Not yet sentence leaves the message line');
-    assert.equal(h.body.getAttribute('aria-busy'),null);assert.equal(h.node('load-announce').textContent,'Books Arranger is ready.');
+    assert.equal(h.body.getAttribute('aria-busy'),null);assert.equal(h.node('inventory').getAttribute('aria-busy'),null,'the books arrived');
+    assert.equal(h.node('load-announce').textContent,'Books Arranger is ready.');
     assert.equal(h.node('version').textContent,'v0.22.1');assert.equal(h.node('version').hidden,false);
     assert.match(h.node('status').textContent,/Files cataloged 52311/);
     h.press(h.node('start'));assert.equal(h.node('message').textContent,'','after the settle a press is the control\'s own');

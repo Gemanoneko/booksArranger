@@ -206,6 +206,15 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   await run('refresh(true)');assert.equal(run('queueState.queued.length'),1);
   run('askBulk=true');assert.equal(run('queueS("operation")'),'A bulk approval is in progress');run('askBulk=false');
   assert.equal(run('queueS("no_such_kind")'),'Another operation is in progress','an unknown kind reads as operation');
+  // N1 (Judy's implementation check): Delete book on a row with a queued Retry or Repair says which, not "Another
+  // operation is in progress." (nothing else runs); inert, focus kept. The mirror of the sibling sentence above.
+  paint([missing('w')]);queue({queued_actions:[item('q-r','retry','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
+  del=byText(trOf('cand-w'),'Delete book');assert.equal(del.getAttribute('aria-disabled'),'true');assert.equal(del.title,'A retry is queued for this book. Cancel it to use this.');
+  queue({queued_actions:[item('q-p','repair','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
+  assert.equal(byText(trOf('cand-w'),'Delete book').title,'A repair is queued for this book. Cancel it to use this.');
+  queue({queued_actions:[],queue_running:{id:'q-p',action:'repair',book_id:'cand-w',title:'Title w'},queue_outcomes:[]});run('updateDeleteButtons()');
+  assert.equal(byText(trOf('cand-w'),'Delete book').title,'Another operation is in progress.','a running repair is another operation');
+  queue({queued_actions:[],queue_running:null,queue_outcomes:[]});
   console.log('PASS queued Retry and Delete book: blocked tooltips, queued faces with Cancel, order and count, cancel and too late, every outcome line, the blocked dialog, inert siblings, bulk left out, n = 0 copy');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

@@ -273,7 +273,8 @@ function renderLoad(){
   const stepKey=`${step.n}/${step.of}/${step.id}`;
   if(stepKey!==loadStep && !stopped){if(loadStep)announceLoad(`Step ${step.n} of ${step.of}: ${step.words}.`);loadStep=stepKey;}
   if(verdict.state!==loadVerdict){
-    if(stuck)announceLoad(`Loading is stuck. ${verdict.signal==='answer'?`The engine hasn't answered for ${LS.duration(verdict.quiet)}.`:`No progress for ${LS.duration(verdict.quiet)}.`}${shellApi?' Restart engine is available.':''}`);
+    // N4 (Judy's implementation check): an inert Restart engine is never announced as available.
+    if(stuck)announceLoad(`Loading is stuck. ${verdict.signal==='answer'?`The engine hasn't answered for ${LS.duration(verdict.quiet)}.`:`No progress for ${LS.duration(verdict.quiet)}.`}${!shellApi?'':unsafe?' The engine is changing the catalog, so Restart engine waits.':' Restart engine is available.'}`);
     else if(loadVerdict==='stuck' && verdict.state==='working')announceLoad('Loading is moving again.');
     loadVerdict=verdict.state;
   }
@@ -295,6 +296,9 @@ function loadPlaceholders(){
   if(!books){
     const text=loadStopped()?'Your books are not loaded.':'Loading your books…';
     setText('empty',text);$('empty').hidden=false;setText('page',text);$('list-skeleton').hidden=loadStopped();
+    // M3 (Judy's implementation check): the list's body is busy while its part is on its way, never <body>, which would
+    // hold the live regions under it (#load-announce). The first list render clears it, as after a filter change.
+    if(loadStopped())$('inventory').removeAttribute?.('aria-busy');else $('inventory').setAttribute?.('aria-busy','true');
   }else $('list-skeleton').hidden=true;
 }
 // Settling (3.7): one render pass, then the strip is one quiet line for the session.
@@ -305,7 +309,6 @@ function settleLoad(tookMs){
   ungateAll();
   if(notYetSentences.has($('message').textContent))message();
   $('attention-loading').hidden=true;$('list-skeleton').hidden=true;
-  globalThis.document?.body?.removeAttribute?.('aria-busy');
   if(strip){
     if(loadReadyMs===null)strip.hidden=true;  // an engine that loads before it answers: no strip at all
     else{strip.classList?.remove('alert');strip.classList?.add('ready');setText('load-word','Ready');setText('load-text',LS.readyLine(loadReadyMs).replace(/^Ready · /,''));}
@@ -2590,6 +2593,8 @@ function queueAhead(item){const position=Number(item?.position);return Number.is
 function queueBlocker(item){return item?.blocker?.kind;}
 function deleteQueued(row){return !!(queuedFor(row,'delete') || queueRunning(row,'delete'));}
 const QUEUE_SIBLING='A delete is queued for this book. Cancel it to use this.';
+// Its mirror on Delete book (Judy's implementation check, N1): a queued Retry or Repair on the row.
+const QUEUE_SIBLING_RETRY='A retry is queued for this book. Cancel it to use this.',QUEUE_SIBLING_REPAIR='A repair is queued for this book. Cancel it to use this.';
 // The page's own "busy" before 0.22.1: one press at a time, plus the bulk runs. Other presses keep it (offer 1).
 function pressBusy(){return busy || recoverySubmitting || automaticRequest!==null || !!retryPending || bulkRunning() || releaseRun || !!askPending || askBulk;}
 // What a Retry or Delete pressed now would wait for, as far as the page knows. The engine's answer decides.
@@ -2815,7 +2820,8 @@ function deleteMode(row,kind='delete'){
   if(kind==='delete' && queuedFor(row,'delete'))return 'queued';
   if(deletePending || deleteDialog)return 'busy';  // one dialog at a time
   if(kind!=='delete')return pressBusy()?'busy':'ready';  // Remove this copy keeps its busy state (Judy 1.1, offer 1)
-  if(queuedFor(row) || queueRunning(row) || queuePresses.has(row.id))return 'busy';  // a Retry queued on this row
+  if(queuedFor(row))return 'sibling';  // a Retry or Repair queued on this row: one queued action per row (N1)
+  if(queueRunning(row) || queuePresses.has(row.id))return 'busy';
   // Blocked: enabled; the confirm queues the delete (Judy 1.5).
   return pageBlocker()?'blocked':'ready';
 }
@@ -2830,7 +2836,8 @@ function updateDeleteButton(id){
   const label=state==='pending'?ASK_PENDING[mode][0]:state==='queued'?'Delete queued':state==='running'?'Deleting…':ASK_LABELS[mode];
   const title={offline:'Local server unavailable.',busy:'Another operation is in progress.',pending:sortedText(ASK_PENDING[mode][1]),ready:deleteTip(offer,mode),
     queued:`Delete is queued. Nothing is deleted until it runs, when ${queueP(queueBlocker(item))} finishes.`,running:"Deleting can't be stopped.",
-    blocked:`Delete this book. ${queueS(blocker)}, so the delete is queued after you confirm.`}[state];
+    blocked:`Delete this book. ${queueS(blocker)}, so the delete is queued after you confirm.`,
+    sibling:queuedFor(row)?.action==='repair'?QUEUE_SIBLING_REPAIR:QUEUE_SIBLING_RETRY}[state];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',(state==='queued'?'Delete queued':state==='running'?'Deleting':ASK_LABELS[mode])+': '+queueTitle(row));
   if(state==='ready' || state==='blocked')button.removeAttribute('aria-disabled');else button.setAttribute('aria-disabled','true');
