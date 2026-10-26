@@ -235,22 +235,22 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   run('filters.candidates="held";viewControls();renderRestartSummary()');assert.equal(get('restart-summary').hidden,true,'only in this filter');
 
   // ---- O12: the notice, Cancel automatic start, and its press (follow-up 4, 1.4).
-  setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.',start_pending:{kind:'conversion'}});
+  setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.',start_pending:{kind:'conversion'}});
   assert.equal(get('automatic-start-reason').textContent,'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.');
   assert.equal(get('start-automatic').title,get('automatic-start-reason').textContent,'the Start tooltip carries the same sentence');
   assert.equal(get('cancel-automatic-start').hidden,false);assert.equal(get('cancel-automatic-start').disabled,false);
-  backend={...backend,automatic_processing:{...backend.automatic_processing,...IDLE,can_start:false,start_block_reason:'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.'}};
+  backend={...backend,automatic_processing:{...backend.automatic_processing,...IDLE,can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'}};
   replies['/api/automatic/cancel-start']=()=>accepted({automatic_processing:backend.automatic_processing});
   await run('automaticAction("cancel-start")');
   assert.equal(posts.at(-1).route,'/api/automatic/cancel-start');assert.deepEqual(posts.at(-1).body,{});
-  assert.equal(get('automatic-start-reason').textContent,'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.','back to the block reason');
+  assert.equal(get('automatic-start-reason').textContent,'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.','back to the block reason');
   assert.equal(get('cancel-automatic-start').hidden,true);assert.equal(document.activeElement,get('automatic-start-reason'),'focus moves to the notice');
   assert.equal(get('automatic-start-reason').getAttribute('tabindex'),'-1');
   // Page contract for Senua M2 (v0.19.0): Stop, Quit or a safety stop (disk full, working-file hold) ends the pending
   // start on the server, with no Cancel press. The next poll carries no start_pending: the row and the notice stop
   // promising a start, in place, and read as after Cancel (follow-up 4, section 1.4).
   run('filters.candidates="restarted";viewControls()');paint([marked('w',{state:'waiting'})]);
-  setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.',start_pending:{kind:'conversion'}});
+  setAuto({state:'Idle',can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.',start_pending:{kind:'conversion'}});
   assert.equal(statusCell(rowOf('w')).textContent,'Started over — waiting to start','positive control: the pending start is promised');
   assert.equal(get('cancel-automatic-start').hidden,false);
   setAuto(IDLE);  // the converter stopped on the hold and is Paused; the server ended the pending start

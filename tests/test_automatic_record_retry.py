@@ -167,9 +167,12 @@ class AutomaticRecordRetryTests(unittest.TestCase):
 
     def test_running_and_pausing_audio_disable_start_without_changing_lifecycle(self):
         self.set_paused()
-        for state,reason in [('Running','Audiobook conversion is running.'),('Pausing','Audiobook jobs are pausing.')]:
+        for state,reason in [('Pausing','Audiobook jobs are pausing.')]:
             value=self.auto.status(jobs={'state':state},scanning=False)
             self.assertEqual(value['state'],'Paused');self.assertFalse(value['can_start']);self.assertTrue(value['start_block_reason'].startswith(reason))
+        # Ruling 34 (Sergei 2026-10-26, option A): a running conversion no longer disables Start.
+        value=self.auto.status(jobs={'state':'Running'},scanning=False)
+        self.assertEqual(value['state'],'Paused');self.assertTrue(value['can_start']);self.assertEqual(value['start_block_reason'],'')
     def test_discovery_closed_failed_checkpoint_and_unknown_gates(self):
         self.set_paused()
         cases=[({'jobs':{'state':'Paused'},'scanning':True},'Discovery is in progress.'),({'jobs':{'state':'Paused'},'server_closing':True},'The local server is stopping or stopped.'),({'jobs':{'state':'unrecognized'}},'Start availability is unknown.')]
@@ -189,8 +192,9 @@ class AutomaticRecordRetryTests(unittest.TestCase):
         self.set_paused();value=self.auto.status();self.assertFalse(value['can_start']);self.assertTrue(value['start_block_reason'].startswith('Start availability is unknown.'))
     def test_start_revalidates_new_audio_conflict_before_any_mutation(self):
         self.set_paused();self.assertTrue(self.auto.status(jobs={'state':'Paused'},scanning=False)['can_start'])
-        self.merge.state.return_value={'state':'Running'}
-        with self.assertRaisesRegex(ValueError,'Audiobook conversion is running'):self.auto.start()
+        # Ruling 34 (Sergei 2026-10-26): a running conversion no longer blocks Start; jobs still pausing do.
+        self.merge.state.return_value={'state':'Pausing'}
+        with self.assertRaisesRegex(ValueError,'Audiobook jobs are pausing'):self.auto.start()
         self.assertIsNone(self.auto.thread);self.research.lookup.assert_not_called();self.merge.approve_automatic.assert_not_called()
         self.assertEqual(self.auto._run_row()['state'],'Paused')
     def test_start_revalidates_scan_before_any_worker_or_checkpoint(self):

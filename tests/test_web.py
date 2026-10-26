@@ -433,10 +433,13 @@ class BrowserTests(unittest.TestCase):
 
 
     def test_automatic_start_status_matches_audio_conflict_and_preserves_run(self):
-        with patch.object(self.server.merge,'state',return_value={'state':'Running'}) as jobs:
+        # Ruling 34 (Sergei 2026-10-26, option A): a running conversion no longer blocks Start; pausing jobs still do.
+        running=self.server.merge.automatic.status(jobs={'state':'Running'},scanning=False)
+        self.assertTrue(running['can_start']);self.assertEqual(running['start_block_reason'],'')
+        with patch.object(self.server.merge,'state',return_value={'state':'Pausing'}) as jobs:
             status,value=self.json_call('/api/state?library=Audiobooks')
             self.assertEqual(status,200);automatic=value['automatic_processing']
-            self.assertFalse(automatic['can_start']);self.assertEqual(automatic['start_block_reason'],'Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.')
+            self.assertFalse(automatic['can_start']);self.assertEqual(automatic['start_block_reason'],'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.')
             status,rejected=self.json_call('/api/automatic/start',{})
             self.assertEqual(status,409);self.assertEqual(rejected['error'],automatic['start_block_reason'])
             self.assertEqual(rejected['automatic_processing']['state'],automatic['state'])

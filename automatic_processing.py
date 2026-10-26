@@ -238,9 +238,9 @@ class AutomaticProcessing:
             scanning=bool(worker and worker.is_alive())
         if scanning:return 'scan','Discovery is in progress. Wait for it to stop before starting automatic processing.'
         job_state=jobs.get('state') if isinstance(jobs,dict) else None
-        if job_state=='Running':return 'conversion','Audiobook conversion is running. Pause audiobook jobs before starting automatic processing.'
+        # Ruling 34 (Sergei 2026-10-26, option A): a running conversion no longer blocks Start (the run's scan waits for it).
         if job_state=='Pausing':return 'conversion','Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'
-        if job_state not in ('Idle','Paused','Completed','Needs attention'):
+        if job_state not in ('Idle','Paused','Completed','Needs attention','Running'):
             return 'unknown','Start availability is unknown. Waiting for the local server.'
         return None,''
     def status(self,*,jobs=None,scanning=None,server_closing=False):
@@ -545,25 +545,34 @@ class AutomaticProcessing:
             if getattr(refused,'start_state',None) in ('closing','stale') or self.stop_event.is_set():raise InterruptedError() from refused
             raise
 
+    def _discover(self):
+        """The run's library scan, once conversion is idle (never scan while encoding or cleanup runs)."""
+        while not self._idle_jobs():
+            if self.stop_event.wait(.2):raise InterruptedError()
+        saved=self.inventory.status('Audiobooks')
+        self.inventory.launch('Audiobooks',resume=saved['state'] in ('stopped','offline','failed'))
+        while self.inventory.worker and self.inventory.worker.is_alive():
+            if self.stop_event.wait(.2):self.inventory.stop();self.inventory.worker.join(20);raise InterruptedError()
+        if self.inventory.status('Audiobooks')['state'] not in ('completed',):
+            raise ValueError('Discovery incomplete or has read errors; saved progress preserved')
+
     def _work(self,id):
         row=None;identity=None;phase='unknown';research_failed=False;checkpoint={}
         try:
             run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase'];self.live_checkpoint=checkpoint
             if phase=='discovery':
                 # Existing queued jobs finish before a scan; never scan while encoding/cleanup runs.
-                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):
-                    self._resume_queue()
-                    while not self._idle_jobs():
-                        if self.stop_event.wait(.2):raise InterruptedError()
-                saved=self.inventory.status('Audiobooks')
-                self.inventory.launch('Audiobooks',resume=saved['state'] in ('stopped','offline','failed'))
-                while self.inventory.worker and self.inventory.worker.is_alive():
-                    if self.stop_event.wait(.2):self.inventory.stop();self.inventory.worker.join(20);raise InterruptedError()
-                if self.inventory.status('Audiobooks')['state'] not in ('completed',):
-                    raise ValueError('Discovery incomplete or has read errors; saved progress preserved')
-                candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
-                checkpoint={'pending':[r['id'] for r in candidates],'done':[]};self.live_checkpoint=checkpoint
-                self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
+                if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self._resume_queue()
+                if not self._idle_jobs():
+                    # Ruling 34 (Sergei 2026-10-26, option A): Start works while audiobooks convert. The books already
+                    # in the catalog are researched now; the scan waits until conversion is idle (scan_after, below).
+                    candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
+                    checkpoint={'pending':[r['id'] for r in candidates],'done':[],'scan_after':True};self.live_checkpoint=checkpoint
+                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
+                else:
+                    self._discover();candidates=self.inventory.candidates('Audiobooks',limit=1000000)['rows']
+                    checkpoint={'pending':[r['id'] for r in candidates],'done':[]};self.live_checkpoint=checkpoint
+                    self._update(id,phase='research',checkpoint=json.dumps(checkpoint));phase='research'
             else:
                 # Resume saved queued work; the immutable queue already owns each manifest.
                 if self.merge.state().get('queued') or self.merge.state().get('postprocessing_pending'):self._resume_queue()
@@ -709,6 +718,14 @@ class AutomaticProcessing:
                   if self.merge.state()['state']=='Paused':raise InterruptedError()
                   if self._requeued:break  # a book put back meanwhile is researched in this run
               if self.stop_event.is_set():raise InterruptedError()
+              if checkpoint.get('scan_after'):
+                  # Ruling 34: the scan a Start during conversion put off runs now that conversion is idle; the books it
+                  # finds are researched in this run.
+                  phase='discovery';self._update(id,phase='discovery',checkpoint=json.dumps(checkpoint))
+                  self._discover()
+                  checkpoint.pop('scan_after',None);self._add_current_candidates(checkpoint)
+                  phase='research';self._update(id,phase='research',checkpoint=json.dumps(checkpoint))
+                  continue
               with self._requeue_guard():
                   if not self._requeued:self._closing_run=True
               if self._closing_run:break
