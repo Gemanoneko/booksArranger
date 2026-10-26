@@ -2228,7 +2228,13 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   both_missing:['Title and author missing','No title or author in the tags, file name or folder name.'],garbled:['Tags unreadable',"The tags show garbled text, so they aren't used."],
   two_people:['Author unclear',"Two people are credited. The app can't tell who wrote it."],tag_and_name:['Author unclear','The tags and the folder name give different authors.'],
   names_differ:['Author unclear','The file name and the folder name give different authors.'],reader:['Author unclear',"The only name credited may be the reader. The app can't tell who wrote it."],
-  name_taken:['Name taken','A book with this name is already in Audiobooks Sorted.'],other:['Needs you','This book needs your decision.']};
+  name_taken:['Name taken','A book with this name is already in Audiobooks Sorted.'],other:['Needs you','This book needs your decision.'],
+  // Odd names (0.22.1, Q3): the engine asks instead of filing a name that looks wrong; nothing is renamed by itself.
+  title_bitrate:['Title unclear',"The title ends with a number that looks like the recording's bitrate. Check it before approving."],
+  title_series:['Title unclear','The title carries a series name or number. Check it before approving.'],
+  title_latin:['Title unclear','The title is Russian written in Latin letters. Check it before approving.'],
+  author_folder:['Author unclear','The author comes from a folder name, not a credit. Check it before approving.']};
+const ODD_TITLE=['title_bitrate','title_series','title_latin'];
 // The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
 function holdSentence(kind,cause,f={}){
@@ -2294,7 +2300,7 @@ function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 function askFieldPlan(ask){
   if(ask.kind==='files_missing' && !(ask.missing?.present>0))return {title:false,author:null};
   const kind=askKind(ask),guess=Object.hasOwn(BASIS_LINES,ask.fields?.title?.basis),why=ask.why;let plan={title:false,author:null};
-  if(kind==='title_author')plan={title:guess || ['title_missing','both_missing','garbled'].includes(why),author:!askProposal(ask,'author') || ['author_missing','both_missing','garbled'].includes(why)?'input':null};
+  if(kind==='title_author')plan={title:guess || ['title_missing','both_missing','garbled',...ODD_TITLE].includes(why),author:!askProposal(ask,'author') || ['author_missing','both_missing','garbled','author_folder'].includes(why)?'input':null};
   else if(kind==='author_unclear')plan={title:guess,author:'radio'};
   else if(kind==='same_author')plan={title:false,author:'same'};
   else if(kind==='name_taken')plan={title:true,author:'input'};

@@ -11,6 +11,7 @@ import http.client
 import ssl
 import ipaddress
 import json
+import ntpath
 import re
 import socket
 import subprocess
@@ -1077,6 +1078,19 @@ class PublicResearch:
         preferred=title
         if language=='ru':preferred=catalog.get('title_native') or title
         elif language=='en':preferred=catalog.get('original_title') or title
+        sergei=fields['title'].get('state') in ('entered','approved') or fields['author'].get('state') in ('entered','approved')
+        folders={name for member in row.get('members') or [] for name in (ntpath.basename(ntpath.dirname(member['path'])),ntpath.basename(ntpath.dirname(ntpath.dirname(member['path']))))}
+        odd=None if not one_source or reasons or sergei or part else local_identity.odd_identity(preferred,names[0],author,NO_AUTHOR,ruled=bool(fields['author'].get('rule')),folders=sorted(folders))
+        if odd:
+            # 0.22.1: a name the app should not file without asking (local_identity.odd_identity): a question on the to-do
+            # list with the existing rows; the row shows what the app read, nothing is renamed, Approve files what it shows.
+            ask={'kind':odd['kind'],'why':odd['why'],'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},
+                 'author':{'proposal':odd.get('proposal',names[0]),'basis':fields['author'].get('basis','')}}}
+            if odd.get('candidates'):
+                ask['candidates']=[{'name':name,'source':'author tag','reader_count':0} for name in odd['candidates']]
+                ask['fields']['author']['proposal']=odd['candidates'][0]
+            return result|{'reasons':[local_identity.ASK_REASONS[odd['kind']]],'ask':ask,'identity_hold':{'kind':odd['kind'],'detail':''},'wait':None,
+                           'rules_generation':rules.generation if rules else ''}
         result['work']=work
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids

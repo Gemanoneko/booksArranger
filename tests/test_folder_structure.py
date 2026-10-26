@@ -304,5 +304,95 @@ class StructureGuardTests(Base):
         self.assertEqual(self.lookup(row)['review']['title'], 'Единая теория всего. Том 1')
 
 
+class OddNameTests(Base):
+    """0.22.1 (Jane for Sergei, 2026-10-26): the live books that items 9 and 10 let through with odd names are asked, never
+    filed by themselves. Each becomes a question on the to-do list with the existing rows (Title or author missing,
+    Author unclear); nothing is renamed by the app, and Sergei's Approve still files what the row shows."""
+
+    def book(self, folder, names, **tags):
+        rows = [file_row(folder + '\\' + name, **{k: (v % n if isinstance(v, str) and '%' in v else v) for k, v in tags.items()}) for n, name in enumerate(names, 1)]
+        return self.catalog(rows)[ROOT + '\\' + folder]
+
+    def asked(self, row, kind, why):
+        result = self.lookup(row)
+        self.assertTrue(result['reasons'], 'held, never filed by itself')
+        self.assertEqual((result['ask']['kind'], result['ask']['why']), (kind, why))
+        return result
+
+    def test_a_bitrate_in_the_title_is_asked(self):
+        row = self.book('Кевин Андерсон - Антитела-128', ['Anderson_Antitela_%02d.mp3' % n for n in (1, 2, 3)],
+                        title='Anderson_Antitela_%02d', artist='Кевин Андерсон', album='Антитела 128', track='%d')
+        result = self.asked(row, 'title_author', 'title_bitrate')
+        self.assertEqual(result['ask']['fields']['title']['proposal'], 'Антитела 128', 'nothing renamed: the row shows what the app read')
+        self.assertEqual(result['reasons'], ['Title or author missing'])
+        self.assertEqual(self.approved(row)['title'], 'Антитела 128', "Sergei's Approve still files what the row shows")
+
+    def test_two_people_in_one_author_are_asked_with_each_as_a_choice(self):
+        # Good Omens as it is on the drive: 177 files over CDs, each CD's files numbered from 1, the album naming the CD.
+        rows = [file_row("Niel Gaiman\\Good Omens\\Neil Gaiman &Terry Pratchett   - ''GOOD OMENS'' CD%d - %02d - unknown title.m4a" % (cd, n),
+                         artist='Neil Gaiman &Terry Pratchett  ', album='"GOOD OMENS" CD%d' % cd, track='%d' % n) for cd in (1, 2) for n in (1, 2)]
+        row = self.catalog(rows)[ROOT + '\\Niel Gaiman\\Good Omens']
+        result = self.asked(row, 'author_unclear', 'two_people')
+        self.assertEqual([c['name'] for c in result['ask']['candidates']][:2], ['Neil Gaiman', 'Terry Pratchett'])
+        row = self.book('William Gibson\\Gibson_i _Sterling_-_Mashina_razlichiy_-_Kirsanov Sergei', ['Гибсон Уильям, Стерлинг Брюс - Машина различий - %02d - unknown title.m4a' % n for n in (1, 2)],
+                        artist=' Гибсон Уильям, Стерлинг Брюс', album='Машина различий', track='%d/-1')
+        result = self.asked(row, 'author_unclear', 'two_people')
+        self.assertEqual([c['name'] for c in result['ask']['candidates']][:2], ['Гибсон Уильям', 'Стерлинг Брюс'])
+        row = self.book('Сергей Лукьяненко\\Лукьяненко Сергей, Громов Александр - Реверс (Владимир Маслаков)', ['01-0%d.mp3' % n for n in (1, 2)],
+                        title='Глава 1-0%d', artist='С. Лукьяненко, А. Громов', album='Реверс', album_artist='Владимир Маслаков', track='%d/49')
+        self.asked(row, 'author_unclear', 'two_people')
+
+    def test_a_folder_name_with_underscores_is_never_the_author(self):
+        row = self.book('Sbornik_Astronomikon\\Richard_Ford_Labirint\\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
+                        title='Лабиринт', artist='Ричард Форд', album='Лабиринт', track='%d/-1')
+        result = self.lookup(row)
+        self.assertTrue(result['reasons'], 'held')
+        self.assertNotIn('_', (result.get('review') or {}).get('canonical_author') or '', 'never filed under the folder name')
+        if result.get('ask', {}).get('why') == 'author_folder':
+            self.assertEqual(result['ask']['fields']['author']['proposal'], 'Ричард Форд', 'the credit is offered, Sergei confirms')
+
+    def test_a_series_or_number_inside_the_title_is_asked(self):
+        cases = (('Max Fray\\Сновидения Эхо\\Frai_Maks_Vsya_pravda_o_nas (Ovuor)', ['Макс Фрай - Сновидения Ехо #3 - Вся правда о нас  - %02d - %02d - Maks Frai - Vsya pravda o nas - (Ovuor).m4a' % (n, n) for n in (1, 2)],
+                  dict(title='%02d - Maks Frai - Vsya pravda o nas - (Ovuor)', artist='Макс Фрай', album='Сновидения Ехо #3 - Вся правда о нас ', track='%d')),
+                 ('Max Fray\\Сновидения Эхо\\Макс Фрай_Мертвый ноль_Гмыза Игорь', ['Макс Фрай - Мертвый ноль 7. Мертвый ноль - %02d - %02d.m4a' % (n, n) for n in (1, 2)],
+                  dict(title='%02d', artist='Макс Фрай', album='Мертвый ноль 7. Мертвый ноль', track='%d/-1')),
+                 ('Unsorted\\Дивов. Профессия инквизитор\\7\\Олег Дивов_ Война миров_Ирина Зубкова', ['%02d  Война миров.mp3' % n for n in (0, 1)],
+                  dict(title='Глава %d', artist='Олег Дивов', album='Профессия: инквизитор 7. Война миров', album_artist='И. Зубкова', track='%d')))
+        for folder, names, tags in cases:
+            self.asked(self.book(folder, names, **tags), 'title_author', 'title_series')
+        # The book folder names the title without the series (Шваб, live): asked.
+        row = self.book('Unsorted\\Шваб Виктория - Сотворение света (Иванов_С)', ['01_Razrushennyy mir.mp3', '02_Razrushennyy mir.mp3'],
+                        title='Глава %d', artist='Виктория Шваб', album='Оттенки магии 03. Сотворение света', track='%d')
+        self.asked(row, 'title_author', 'title_series')
+
+    def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
+        # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
+        # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before.
+        for folder, names, tags in (('Червь', ['Червь 1. Созревание.m4b'], dict(title='Червь 1. Созревание', artist='Джон МакКрэй', album='Червь 1. Созревание')),
+                                    ('Wheel of Time\\Колесо времени - 01. Око мира', ['Джордан Роберт (2013) - Колесо времени - 01. Око мира.m4b'],
+                                     dict(title='Колесо времени - 01. Око мира', artist='Джордан Роберт', album='Колесо времени - 01. Око мира')),
+                                    ('Terry Pratchet\\Discworld\\City Watch', ['Discworld 19. Feet of Clay.m4b'], dict(title='Discworld 19. Feet of Clay', artist='Terry Pratchett', album='Discworld 19. Feet of Clay')),
+                                    # "40000" is no series 40 and book 000, though the folder names the story (live).
+                                    ('Unsorted\\WH40K\\Брукс Майк-Месть Гоббо+Агрессивное вождение+Самые сообразительные и выдающиеся(Casper Valter)', ['Warhammer 40000. Месть Гоббо.m4b'],
+                                     dict(title='Warhammer 40000. Месть Гоббо', artist='Майк Брукс', album='Warhammer 40000. Месть Гоббо'))):
+            books = self.catalog([file_row(folder + '\\' + name, **tags) for name in names])
+            self.assertEqual(len(books), 1, 'positive control: one book')
+            result = self.lookup(next(iter(books.values())))
+            self.assertNotEqual((result.get('ask') or {}).get('why'), 'title_series', (folder, result.get('ask'), result['reasons']))
+
+    def test_russian_written_in_latin_letters_as_the_title_is_asked(self):
+        row = self.book('Max Fray\\Сновидения Эхо\\Frai_Maks_Master_vetrov_i_zakatov (Ovuor)', ['Maks Frai - Master vetrov i zakatov - 00 - %03d Snovideniya Eho 1 (Ovuor).m4a' % n for n in (1, 2)],
+                        title='%03d Snovideniya Eho 1 (Ovuor)', artist='Макс Фрай', album='Master vetrov i zakatov', track='%d')
+        self.asked(row, 'title_author', 'title_latin')
+
+    def test_controls_clean_names_are_still_filed_by_themselves(self):
+        for folder, names, tags in (('Мецрих Бен - Кожа128', ['Mezrich_Kozha_%02d.mp3' % n for n in (1, 2)], dict(title='Mezrich_Kozha_%02d', artist='Бен Мецрих', album='Кожа', track='%d')),
+                                    ('Matheson Richard\\I Am Legend', ['%02d.mp3' % n for n in (1, 2)], dict(title='I Am Legend', artist='Richard Matheson', album='I Am Legend', track='%d')),
+                                    ('Грей Майкл', ['Комната ужасов 2 - %02d.mp3' % n for n in (1, 2)], dict(title='Комната ужасов 2', artist='Майкл Грей', album='Комната ужасов 2', track='%d')),
+                                    ('Sapkowski\\Ostatnie zyczenie', ['%02d.mp3' % n for n in (1, 2)], dict(title='Ostatnie zyczenie', artist='Sapkowski, Andrzej', album='Ostatnie zyczenie', track='%d'))):
+            result = self.lookup(self.book(folder, names, **tags))
+            self.assertFalse(result.get('ask'), (folder, result.get('ask'), result['reasons']))
+
+
 if __name__ == '__main__':
     unittest.main()

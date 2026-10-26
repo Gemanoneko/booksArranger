@@ -2396,6 +2396,85 @@ def settled(record, title, author, state, typed=(), collection=False, rules=None
     return record
 
 
+# 0.22.1 (Jane for Sergei, 2026-10-26, after the outcome measurement on the live copy): names the app reads but should
+# not file without asking. Once the file-name order (item 9) let held books through, some went to Sorted with names
+# like "Антитела 128" (the bitrate), "Neil Gaiman &Terry Pratchett" (two people as one author), "Richard_Ford_Labirint"
+# (a folder name as the author), "Мертвый ноль 7. Мертвый ноль" (the series and number in the title) or "Master vetrov
+# i zakatov" (Russian in Latin letters). Each is a question on the to-do list with the existing rows (Title or author
+# missing, Author unclear); the app renames nothing. When unsure, asking is the safe default.
+_BITRATE_TAIL = re.compile(r'(?:[\s_\-–—]+|(?<=[^\W\d_]))(?:64|96|112|128|160|192|256|320)\s*(?:kbps|kb/s|kbit/s)?\s*$', re.I)
+# "<Series> N. Title", "<Series> - 01. Title", "<Series> #3 - Title": the series before the number, the title after it.
+# The number stands alone ("Warhammer 40000. Месть Гоббо" is no series 40 and book 000).
+_SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)\d{1,3}(?:[.,]5)?\s*[.:\-–—]\s+(?P<title>.*?[^\W\d_].*)$')
+_PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
+_RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
+_TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
+
+
+def _people(author):
+    """The people a credit names when it joins two or more ("Neil Gaiman &Terry Pratchett", "С. Лукьяненко, А. Громов");
+    [] for one person, "Sapkowski, Andrzej" (surname, name) or a name with a suffix ("King, Jr.")."""
+    parts = [text(p) for p in _PEOPLE_JOIN.split(str(author or '')) if text(p)]
+    people = [p for p in parts if len(words(p)) >= 2 or re.match(r'^[^\W\d_]\.\s*[^\W\d_]', p)]
+    return people if len(parts) >= 2 and len(people) >= 2 else []
+
+
+def _russian_in_latin(title, author):
+    """A Russian title written in Latin letters ("Master vetrov i zakatov") on a book whose author the app writes in
+    Cyrillic. Lower-case Russian small words and transliteration endings both count; English titles have neither."""
+    if script(title) != 'latin' or script(author) != 'cyrillic':
+        return False
+    tokens = re.findall(r'[A-Za-z]+', str(title))
+    small = sum(1 for t in tokens if t in _RUSSIAN_WORDS)  # lower case only: "I Am Legend" is English
+    endings = sum(1 for t in tokens if len(t) > 3 and _TRANSLIT.search(t.lower()))
+    return small + endings >= 2 and (small or endings >= 2)
+
+
+def _series_in_title(title, folders=()):
+    """True when the title carries a series and number its own names show it should not: a "#N" marker ("Сновидения Ехо
+    #3 - Вся правда о нас"), the title repeated after the number ("Мертвый ноль 7. Мертвый ноль", "Крысы 1. Крысы"), or a
+    book folder that names the title without the series ("Профессия: инквизитор 7. Война миров" in "Олег Дивов_ Война
+    миров_Ирина Зубкова"). A name the files carry the same way everywhere ("Червь 1. Созревание" in "Червь", "Колесо
+    времени - 01. Око мира" in a folder of that name) is filed as it is: measured on the live copy, the plain pattern
+    alone asked 91 books, 31 of them one consistently named series."""
+    found = _SERIES_PARTS.match(text(title))
+    if not found:
+        return False
+    series, tail = words(found['series']), words(found['title'])
+    if not tail or found['hash']:
+        return bool(tail)
+    if len(tail) <= len(series) and series[-len(tail):] == tail:
+        return True
+    for folder in folders:
+        named = words(folder)
+        inside = any(named[i:i + len(tail)] == tail for i in range(len(named) - len(tail) + 1))
+        if inside and not set(series) <= set(named):
+            return True
+    return False
+
+
+def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=()):
+    """{'kind', 'why', 'proposal'?, 'candidates'?} when the title or author the app would file needs Sergei's answer,
+    else None. kind is an existing question row: 'title_author' or 'author_unclear'. ruled: a rule chose the author (his
+    answer, or the library's own folder for that name), so only the title is checked. folders: the names of the book's
+    own folders and their parents, which may name the title without its series."""
+    title, author = text(title), text(author)
+    if title and re.search(r'[^\W\d_]', _BITRATE_TAIL.sub('', title)) and _BITRATE_TAIL.search(title):
+        return {'kind': 'title_author', 'why': 'title_bitrate'}
+    if title and _series_in_title(title, folders):
+        return {'kind': 'title_author', 'why': 'title_series'}
+    if author and author != no_author and not ruled:
+        if '_' in author:
+            clean = text(local_author) if local_author and '_' not in local_author else text(author.replace('_', ' '))
+            return {'kind': 'title_author', 'why': 'author_folder', 'proposal': clean}
+        people = _people(author)
+        if people:
+            return {'kind': 'author_unclear', 'why': 'two_people', 'candidates': people}
+    if title and author and _russian_in_latin(title, author):
+        return {'kind': 'title_author', 'why': 'title_latin'}
+    return None
+
+
 def author_forms(record):
     """Every local spelling of the agreed author, as written."""
     forms = []
