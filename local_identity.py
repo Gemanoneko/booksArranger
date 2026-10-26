@@ -1716,6 +1716,28 @@ def latin_lookalikes(value):
     return re.sub(r'[^\W\d_]+', fix, str(value or ''))
 
 
+def _series_name(name, author):
+    """The series a series folder names, without the author written before it, a count of its books or a reader in
+    brackets (the live "Ли Патрик – Трэвис Чейз 1-3 [Пухов Сергей]" is "Трэвис Чейз", "Робин Хобб - Сага о Видящих" is
+    "Сага о Видящих"). A dash after something that is not the author keeps the name whole ("Книга Крови - Том 4")."""
+    value = text(name)
+    while True:
+        tail = _READER_TAIL.search(value)
+        if not tail or not text(value[:tail.start()]):
+            break
+        value = text(value[:tail.start()])
+    value = text(re.sub(r'\s*\(?\d{1,3}\s*[-–—]\s*\d{1,3}\)?\s*$', '', value)) or value
+    pieces = re.split(r'\s+[-–—]\s+', value, maxsplit=1)
+    if len(pieces) == 2 and re.search(r'[^\W\d_]{2}', pieces[1]) and compare_names(_without_year(pieces[0]), author):
+        value = text(pieces[1])
+    return value
+
+
+def _without_year(value):
+    """A name with a year beside it ("Энн Маккефри (2012)") without the year."""
+    return text(re.sub(r'\s*[(\[]?\s*(?:1[89]|20)\d{2}\s*[)\]]?\s*', ' ', str(value or '')))
+
+
 def _relative_parts(path, root):
     """The path's names below the source root, else None."""
     try:
@@ -1742,7 +1764,7 @@ def folder_structure(row, root, index=None):
     author, series = text(first[0]), text(first[1])
     if norm(author) in CONTAINER_NAMES or norm(series) in CONTAINER_NAMES or COLLECTION_FOLDER.search(author) or COLLECTION_FOLDER.search(series):
         return None
-    if not looks_like_person(author, index) or looks_like_person(series, index) or DISC.fullmatch(series.strip()):
+    if not looks_like_person(author, index) or looks_like_person(_series_name(series, author), index) or DISC.fullmatch(series.strip()):
         return None
     if len(first) == 3:
         if len(members) != 1:
@@ -1766,18 +1788,24 @@ def folder_structure(row, root, index=None):
             return None
         file_series, position, title = text(match[1]), match[2], match[3]
     title = text(re.sub(r'\s*[-–—]\s*$', '', title))
-    # "Title - Author" or "Author - Title" written into the book's name: the author is not part of the title.
+    # "Title - Author" or "Author - Title" written into the book's name: the author is not part of the title, nor a year
+    # beside the author ("08. Энн Маккефри (2012) - Белый дракон").
     for piece in re.split(r'\s+[-–—]\s+', title):
-        if piece != title and compare_names(piece, author):
+        if piece != title and (compare_names(piece, author) or compare_names(_without_year(piece), author)):
             title = text(re.sub(r'(?:^|\s+[-–—]\s+)' + re.escape(piece) + r'(?:\s+[-–—]\s+|$)', ' - ', title).strip(' -–—'))
     title = clean_title(title)
     if not title or not re.search(r'[^\W\d_]{2}', title) or garbled(title) or NARRATOR_MARKER.search(title) or CHAPTER_LABEL.match(title)             or set(words(title)) <= PART_WORDS or PART_FOLDER.search(name) or DISC.search(name):
         return None  # a disc, part or chapter folder ("1 часть", "CD 2") is a piece of a book, not a book of a series
     position = position.replace(',', '.')
     position = str(int(position)) if position.isdigit() else position
-    return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', series)) or series),
+    named = _series_name(series, author)
+    # The file names carry the folder's title too ("Энн Маккефри (2012) - Белый дракон (Часть 1).m4b"): folder and file
+    # names agree, so they win over a tag that names something else (the series album "Пернский цикл"), item 9.
+    key = title_key(title)
+    files = bool(key) and any(key in title_key(Path(m['path']).stem) for m in members)
+    return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', named)) or named),
             'position': position, 'title': title, 'reader': reader, 'file_series': file_series, 'book': kind, 'book_name': text(book),
-            'series_folder': series}
+            'series_folder': series, 'files_name_title': files}
 
 
 def _transliterated_title(a, b):
@@ -1807,6 +1835,10 @@ def _structured_title(title, structure, author_names, index=None):
         return record, value
     if key.endswith(folder_key) and any(key.startswith(title_key(s)) for s in series_names):
         return record, value
+    if structure.get('files_name_title') and folder_key not in key and script(folder) == script(value):
+        # The folder and the file names name this book; the tag names something else (a series album, item 9). A tag
+        # that adds to the folder's title ("Единая теория всего. Том 1" in "4. Единая Теория Всего") is kept above.
+        return dict(record, how=record['how'] + '; the file names agree, the tag "%s" names something else' % value), value
     if script(folder) == 'latin' and script(value) == 'cyrillic' and not _transliterated_title(value, folder):
         # The folder names the original title in Latin letters; the tag carries the translation (ruling 16).
         return dict(record, how=record['how'] + '; the original title, the tag "%s" is the translation (ruling 16)' % value, aliases=[value]), value

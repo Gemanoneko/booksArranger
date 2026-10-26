@@ -256,7 +256,7 @@ class CroninTests(Base):
         self.assertEqual((result['review']['title'], result['review']['canonical_author']), ('Перерождение', 'Кронин Джастин'))
 
 
-class StructureGuardTests(unittest.TestCase):
+class StructureGuardTests(Base):
     def row(self, *relative):
         return {'members': [{'path': ROOT + '\\' + r, 'filename': Path(r).name} for r in relative]}
 
@@ -270,6 +270,38 @@ class StructureGuardTests(unittest.TestCase):
         self.assertEqual((found['series'], found['position'], found['title'], found['reader']), ('Annihilation', '1', 'Аннигиляция', 'Сергей Пухов'))
         found = read(SIGMA + '\\2. Map of Bones\\01.m4a', SIGMA + '\\2. Map of Bones\\02.m4a')
         self.assertEqual((found['author'], found['series'], found['position'], found['title']), ('James Rollins', 'Sigma Force', '2', 'Map of Bones'))
+
+    # The measurement on the live copy (0.22.1): series folders written with their author, a count of books and a reader
+    # became series names ("Lee Patrick\Ли Патрик – Трэвис Чейз 1-3 [Пухов Сергей]\Ли Патрик – Трэвис Чейз 1-3 [Пухов
+    # Сергей] - 1 - Брешь"), and a book folder "Author (year) - Title" lost its title to a series album tag.
+    def test_a_series_folder_with_its_author_a_count_and_a_reader_names_the_series_only(self):
+        rows = [file_row('Patrick Lee\\Ли Патрик – Трэвис Чейз 1-3 [Пухов Сергей]\\1. Брешь\\Патрик Ли - Патрик Ли - Брешь - %02d - Брешь.m4a' % n,
+                         title='Брешь', artist='Патрик Ли', album='Патрик Ли - Брешь', track='%d/-1' % n, disc='1/1') for n in (1, 2, 3)]
+        row = self.catalog(rows)[ROOT + '\\Patrick Lee\\Ли Патрик – Трэвис Чейз 1-3 [Пухов Сергей]\\1. Брешь']
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), ('Брешь', 'Трэвис Чейз', '1'))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Lee Patrick\\Трэвис Чейз\\Трэвис Чейз - 1 - Брешь - Lee Patrick.m4b')
+        rows = [file_row('Robin Hobb\\Робин Хобб - Сага о Видящих\\1. Ученик убийцы\\Ученик убийцы, часть %d.m4b' % n, title='Ученик убийцы', album='Ученик убийцы',
+                         artist='Хобб Робин', track='%d/2' % n, disc='1/3') for n in (1, 2)]
+        row = self.catalog(rows)[ROOT + '\\Robin Hobb\\Робин Хобб - Сага о Видящих\\1. Ученик убийцы']
+        review = self.lookup(row)['review']
+        self.assertEqual((review['title'], review['series'], review['number']), ('Ученик убийцы', 'Сага о Видящих', '1'))
+        read = lambda *r: local_identity.folder_structure(self.row(*r), ROOT)
+        found = read('Clive Barker\\Книга Крови - Том 4\\2 - Нечеловеческое состояние\\01.mp3')
+        self.assertEqual(found['series'], 'Книга Крови - Том 4', 'control: a dash that is no author keeps the series name whole')
+
+    def test_a_book_folder_named_author_year_title_names_the_book_over_a_series_album_tag(self):
+        rows = [file_row('Anne McCaffrey\\Dragonriders of Pern\\08. Энн Маккефри (2012) - Белый дракон\\Энн Маккефри (2012) - Белый дракон (Часть %d).m4b' % n,
+                         title='Белый дракон (Часть %d)' % n, album='Пернский цикл', artist='Энн Маккефри', track='%d/2' % n, disc='4') for n in (1, 2)]
+        row = self.catalog(rows)[ROOT + '\\Anne McCaffrey\\Dragonriders of Pern\\08. Энн Маккефри (2012) - Белый дракон']
+        review = self.lookup(row)['review']
+        self.assertEqual((review['title'], review['series'], review['number']), ('Белый дракон', 'Dragonriders of Pern', '8'), 'was "Пернский цикл", the album')
+        # Control: a tag title that adds to the folder's ("Единая теория всего. Том 1" in "4. Единая Теория Всего") stays.
+        rows = [file_row('Константин Образцов\\Красные цепи\\4. Единая Теория Всего\\Том 1 - Единая теория всего. - Горизонт Событий.m4b',
+                         title='Единая теория всего. Том 1', album='Единая теория всего. Том 1', artist='Константин Образцов')]
+        row = next(iter(self.catalog(rows).values()))
+        self.assertEqual(self.lookup(row)['review']['title'], 'Единая теория всего. Том 1')
 
 
 if __name__ == '__main__':
