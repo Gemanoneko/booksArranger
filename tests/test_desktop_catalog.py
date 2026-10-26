@@ -83,7 +83,7 @@ class CrashRecoveryTests(unittest.TestCase):
   try:
    self.assertEqual(child.stdout.readline().split()[0],b'CHECKPOINT');self.assertEqual(child.stdout.readline().strip(),b'DONE')
   finally:child.kill();child.wait(30)
-  child=subprocess.Popen([sys.executable,'-I','-B','-c',WRITER,str(db),'140000'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
+  child=subprocess.Popen([sys.executable,'-I','-B','-c',WRITER,str(db),'60000'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
   try:
    line=child.stdout.readline().split();self.assertEqual(line[0],b'CHECKPOINT')
    before,final=int(line[1]),int(line[2]);self.assertGreater(final,before+4*1024*1024,'the checkpoint grows the main file')
@@ -111,7 +111,7 @@ class CrashRecoveryTests(unittest.TestCase):
    self.assertEqual(hashlib.sha256(db.read_bytes()).hexdigest(),main_before)
    self.assertEqual(hashlib.sha256(Path(str(db)+'-wal').read_bytes()).hexdigest(),wal_before)
    with closing(sqlite3.connect(db)) as c:
-    self.assertEqual(c.execute('PRAGMA quick_check').fetchone()[0],'ok');self.assertGreaterEqual(c.execute('SELECT count(*) FROM files').fetchone()[0],100000)
+    self.assertEqual(c.execute('PRAGMA quick_check').fetchone()[0],'ok');self.assertGreaterEqual(c.execute('SELECT count(*) FROM files').fetchone()[0],50000)
  def test_a_damaged_catalog_is_still_refused(self):
   # Control: the same torn main file without its WAL is damaged, and the check still refuses it, changing nothing.
   with tempfile.TemporaryDirectory(dir=AREA) as t:

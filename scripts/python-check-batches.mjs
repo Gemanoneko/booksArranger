@@ -34,7 +34,7 @@ const measuredSeconds={'test_inplace_m4b.py':377,'test_approve_as_is.py':174,'te
   'test_multisource.py':11,'test_public_work_identity.py':11,'test_failed_m4b_retry.py':10,'test_relocated_replacement.py':9,'test_startup_published_check.py':9,
   'test_storage_cleanup.py':9,'test_catalog_contention.py':8,'test_collection_identity.py':8,'test_desktop_host.py':8,'test_local_identity.py':8,
   'test_inventory.py':7,'test_author_rules.py':6,'test_producer_recovery.py':6,'test_publication_consumers.py':6,'test_sqlite_busy.py':6,
-  'test_automatic_record_retry.py':5,'test_startup_loading.py':3,'test_attention_actions.py':4,'test_candidate_source_refresh.py':4,'test_series_research.py':4,'test_zone_identifier.py':4};
+  'test_automatic_record_retry.py':5,'test_startup_loading.py':3,'test_desktop_catalog.py':12,'test_attention_actions.py':4,'test_candidate_source_refresh.py':4,'test_series_research.py':4,'test_zone_identifier.py':4};
 export const PYTHON_WORKERS=7;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}
