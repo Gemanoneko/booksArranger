@@ -30,6 +30,13 @@ GAP_DEFER_REASON = 'Optional metadata sources cooling down; converter busy, book
 # Start over / "Let the app handle it" (RefusedRetry follow-ups 3 and 4): a blocker that clears by itself leaves one
 # pending start for the app, checked every PENDING_POLL seconds (Judy: within 15 s of the blocker clearing).
 CLEARS = ('conversion', 'scan', 'stopping')
+# 0.22.2 (Sergei 2026-10-26): a media check past its deadline waits and is tried again; held only after MEDIA_TRIES in a
+# row (provisional copy, sent to Judy).
+MEDIA_TRIES = 5
+MEDIA_BACKOFF = 120.0  # seconds; doubled at each try: 2, 4, 8, 16 minutes
+MEDIA_WAIT = 'The library drive answered slowly while the app checked this book. It tries again by itself.'
+MEDIA_HELD = ("The library drive answered too slowly 5 times while the app checked this book. Check that the drive is connected "
+              "and not busy, then press Scan again.")
 PENDING_POLL = 3.0
 
 def failure_diagnostic(error,run_id,phase,candidate_id):
@@ -177,7 +184,7 @@ class AutomaticProcessing:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
         return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
-                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0)}
+                'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0)}
     def _rules_generation(self):
         """The current author-rules generation ('' with none): a held book is researched again when it changes."""
         value=self._rules()
@@ -713,7 +720,20 @@ class AutomaticProcessing:
                           if self.stop_event.is_set():raise InterruptedError()
                           try:fresh=self.merge.reviews._row('Audiobooks',identity)
                           except ValueError:fresh=row
-                          result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
+                          if isinstance(error,TimeoutError):
+                              # 0.22.2 (Sergei, «Потаённое окно в потаённый сад», «Регуляторы»): a media check past its
+                              # deadline (a busy machine, a slow library drive) is transient. The book waits and is tried
+                              # again by itself, the wait doubling from two minutes; it is held, with a plain reason and
+                              # what to do, only after MEDIA_TRIES in a row. Never the raw deadline text, never a decision.
+                              count=int((previous or {}).get('media_timeouts') or 0)+1;result['media_timeouts']=count
+                              if count<MEDIA_TRIES:
+                                  retry=self.clock()+MEDIA_BACKOFF*2**(count-1)
+                                  result['reasons']=[MEDIA_WAIT];result['wait']={'kind':'media_slow','source':'library','reason':MEDIA_WAIT,'retry_at':retry,'scope':'book'}
+                                  self._record(fresh,'Waiting for source',result,retry);deferred.append(identity)
+                              else:
+                                  result['reasons']=[MEDIA_HELD];self._record(fresh,'Held',result,self.clock()+86400);deferred.append(identity)
+                          else:
+                              result['reasons']=[str(error)[:300] or 'Automatic source checks failed'];self._record(fresh,'Held',result,self.clock()+min(86400,900*2**min((previous or {}).get('research_attempt',0),7)));deferred.append(identity)
                   checkpoint['pending'].pop(0)
                   if identity not in checkpoint['done']:checkpoint['done'].append(identity)
                   self._update(id,checkpoint=json.dumps(checkpoint))

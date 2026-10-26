@@ -2264,7 +2264,9 @@ function cellTip(row){const producer=producerRecoveryText(row)?.tip;if(producer)
 // the file specified.") becomes one plain sentence wherever a reason is printed; the raw text stays in Technical details.
 const OS_TEXT=/\[(?:WinError|Errno)\s*-?\d+\]|cannot find the (?:file|path) specified|Access is denied|Cannot protect exact file/i;
 const OS_PLAIN="A source file is missing or can't be opened.";
-function plainReason(reason){return typeof reason==='string' && OS_TEXT.test(reason)?OS_PLAIN:reason;}
+// 0.22.2: a media check past its deadline is transient; a record saved before 0.22.2 never shows the raw text.
+const MEDIA_SLOW_PLAIN='The library drive answered slowly while the app checked this book. It tries again by itself.';
+function plainReason(reason){return typeof reason==='string' && /^Owned (media operation|decode verification) exceeded its deadline$/.test(reason)?MEDIA_SLOW_PLAIN:typeof reason==='string' && OS_TEXT.test(reason)?OS_PLAIN:reason;}
 function rawReasons(row){return (row?.automatic?.reasons || []).filter(reason=>typeof reason==='string' && OS_TEXT.test(reason));}
 function technicalText(row){
   const ask=askOf(row);if(ask)return 'Technical detail: '+([...(ask.reasons || []),...rawReasons(row)].filter(item=>typeof item==='string' && item).join('; ') || 'Unavailable');

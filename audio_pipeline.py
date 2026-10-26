@@ -17,6 +17,9 @@ INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac
 
 class Paused(InterruptedError):pass
 class ValidationError(ValueError):pass
+class MediaTimeout(TimeoutError):
+    """A media operation (probe, hash, decode, encode) ran past its deadline: a busy machine or a slow library drive, so
+    transient (0.22.2). Automatic processing tries the book again by itself; every TimeoutError handler still catches it."""
 
 def digest(path,stop=None,on_bytes=None):
     value=hashlib.sha256()
@@ -191,7 +194,7 @@ def run_owned(arguments,directory,stop,deadline=300,max_output=8*1024*1024,telem
                     drain=threading.Thread(target=consume,name='BooksArrangerEncodingProgress',daemon=True);drain.start()
                 while process.poll() is None:
                     if stop.is_set():raise Paused('Audiobook operation paused; interrupted book restarts')
-                    if time.monotonic()-started>deadline:raise TimeoutError('Owned media operation exceeded its deadline')
+                    if time.monotonic()-started>deadline:raise MediaTimeout('Owned media operation exceeded its deadline')
                     if stdout.stat().st_size>max_output or stderr.stat().st_size>1024*1024:raise ValidationError('Media diagnostic output exceeded its limit')
                     if failure:raise ValidationError('Encoding progress stream failed') from failure[0]
                     time.sleep(.1)
@@ -236,7 +239,7 @@ def owned_stream(arguments,directory,stop,deadline,write=False,read=False):
         def watch():
             while not finished.wait(.1):
                 if stop.is_set():cause.append(Paused('Audiobook operation paused; interrupted book restarts'))
-                elif time.monotonic()-started>deadline:cause.append(TimeoutError('Owned media operation exceeded its deadline'))
+                elif time.monotonic()-started>deadline:cause.append(MediaTimeout('Owned media operation exceeded its deadline'))
                 elif stderr.stat().st_size>1024*1024 or not read and stdout.stat().st_size>8*1024*1024:cause.append(ValidationError('Media diagnostic output exceeded its limit'))
                 else:continue
                 with contextlib.suppress(OSError):process.terminate()
@@ -309,7 +312,7 @@ def decoded_duration(path,stage,stop,estimated):
             with closed_media_job(process):
                 while process.poll() is None:
                     if stop.is_set():raise Paused('Decode verification paused; this book restarts')
-                    if time.monotonic()-started>max(300,estimated*2):raise TimeoutError('Owned decode verification exceeded its deadline')
+                    if time.monotonic()-started>max(300,estimated*2):raise MediaTimeout('Owned decode verification exceeded its deadline')
                     if stderr.stat().st_size>1024*1024:raise ValidationError('Decode diagnostics exceeded their limit')
                     time.sleep(.05)
         finally:

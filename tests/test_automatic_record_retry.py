@@ -202,4 +202,66 @@ class AutomaticRecordRetryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Discovery is in progress'):self.auto.start()
         self.assertIsNone(self.auto.thread);self.assertEqual(self.auto._run_row()['state'],'Paused')
 
+
+class MediaDeadlineTests(unittest.TestCase):
+    setUp=AutomaticRecordRetryTests.setUp;tearDown=AutomaticRecordRetryTests.tearDown  # the same private fixture, not its tests
+    """Sergei 2026-10-26 (0.22.2): «Потаённое окно в потаённый сад» and «Регуляторы» were "Needs you — This book needs
+    your decision. Reason: Owned media operation exceeded its deadline". A media check that runs past its deadline (a busy
+    machine, a slow library drive) is transient: the book waits and is tried again by itself, with backoff; only after
+    MEDIA_TRIES in a row is it held, with a plain reason and what to do, never the raw text."""
+    def attempt(self,error,previous=None):
+        import audio_pipeline  # noqa: F401  the class the pipeline raises
+        if previous is not None:
+            with scanner.connect(self.database) as db:
+                db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',(self.row['id'],self.row['revision'],self.row['fingerprint'],previous[0],json.dumps(previous[1]),1,'old-time','old-version'))
+        self.merge.reviews=SimpleNamespace(_row=lambda *_:self.row)
+        self.auto.manual_draft=lambda _:False;self.auto._refresh_observed_sources=lambda *_:None;self.auto.clock=lambda:1000.0
+        self.research.lookup.side_effect=lambda *_:{'reasons':[],'sources':[{'kind':'local_agreement'}],'review':{'title':'T'}}
+        self.merge.approve_automatic=Mock(side_effect=error)
+        original=self.auto._record
+        def record(row,state,*args):
+            original(row,state,*args)
+            if state in ('Held','Waiting for source'):self.auto.stop_event.set()
+        self.auto._record=record
+        thread=threading.Thread(target=self.auto._work,args=(self.run,));self.auto.thread=thread;self.threads.append(thread);thread.start();thread.join(5)
+        self.assertFalse(thread.is_alive());self.merge.approve_automatic.assert_called_once()
+        with scanner.connect(self.database) as db:
+            candidate=dict(db.execute('SELECT * FROM automatic_candidates WHERE id=?',(self.row['id'],)).fetchone())
+        return candidate,json.loads(candidate['result'])
+
+    def test_a_media_deadline_waits_and_is_tried_again_by_itself(self):
+        from audio_pipeline import MediaTimeout
+        import automatic_processing
+        candidate,result=self.attempt(MediaTimeout('Owned media operation exceeded its deadline'))
+        self.assertEqual(candidate['state'],'Waiting for source','a wait, never a "Needs you" decision')
+        self.assertEqual((result['wait']['kind'],result['media_timeouts']),('media_slow',1))
+        self.assertEqual(result['reasons'],[automatic_processing.MEDIA_WAIT],'never the raw "Owned media operation exceeded its deadline"')
+        self.assertEqual(candidate['retry_at'],1000.0+automatic_processing.MEDIA_BACKOFF,'tried again in two minutes')
+
+    def test_the_backoff_doubles_and_after_repeated_deadlines_the_book_is_held_with_what_to_do(self):
+        from audio_pipeline import MediaTimeout
+        import automatic_processing
+        previous={'research_attempt':3,'media_timeouts':2,'reasons':[automatic_processing.MEDIA_WAIT],'wait':{'kind':'media_slow'}}
+        candidate,result=self.attempt(MediaTimeout('Owned media operation exceeded its deadline'),('Waiting for source',previous))
+        self.assertEqual((candidate['state'],result['media_timeouts'],candidate['retry_at']),('Waiting for source',3,1000.0+automatic_processing.MEDIA_BACKOFF*4))
+        self.auto.stop_event.clear();self.auto._record=AutomaticProcessing._record.__get__(self.auto)
+        previous=dict(previous,media_timeouts=automatic_processing.MEDIA_TRIES-1)
+        candidate,result=self.attempt(MediaTimeout('Owned media operation exceeded its deadline'),('Waiting for source',previous))
+        self.assertEqual(candidate['state'],'Held')
+        self.assertEqual(result['reasons'],[automatic_processing.MEDIA_HELD],'a plain reason with what to do')
+        self.assertNotIn('Owned media operation', json.dumps(result['reasons']))
+
+    def test_any_other_check_failure_is_held_as_before(self):
+        candidate,result=self.attempt(ValueError('Source files changed'))
+        self.assertEqual((candidate['state'],result['reasons']),('Held',['Source files changed']))
+        self.assertNotIn('media_timeouts',result)
+
+    def test_the_pipeline_raises_a_media_timeout_that_is_still_a_timeout(self):
+        from audio_pipeline import MediaTimeout,run_owned
+        self.assertTrue(issubclass(MediaTimeout,TimeoutError),'every existing TimeoutError handler still catches it')
+        import sys
+        stage=Path(self.temp.name)/'stage';stage.mkdir()
+        with self.assertRaises(MediaTimeout):
+            run_owned([sys.executable,'-c','import time;time.sleep(5)'],stage,threading.Event(),deadline=.3)
+
 if __name__=='__main__':unittest.main()

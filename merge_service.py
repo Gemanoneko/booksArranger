@@ -3111,6 +3111,7 @@ class MergeService:
                                 # may since be retired): the job's frozen chapter plan is the evidence.
                                 if admitted.get((other,),0)>1:continue
                                 try:count=len(probe(other,self.reviews.cache,stop).get('chapters') or [])
+                                except TimeoutError:raise  # a media deadline is transient (0.22.2): the book waits and is tried again
                                 except (ValueError,OSError):raise ValueError('Another part of this set could not be checked; the whole set is held') from None
                                 if count<2:raise ValueError('Another part of this set has no chapters of its own; the whole set is held (never published piecemeal)')
                         # Split book (v0.15.0): every part must be the same recording profile; the v4

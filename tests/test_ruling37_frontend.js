@@ -83,6 +83,9 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
   assert.equal(run('deleteRefusalText('+JSON.stringify({code:'link',message:link})+')'),link);
   assert.equal(run('queueDeleteText('+JSON.stringify({code:'second_name',message:'A file of this book is a link or has a second name on disk (a hard link), so deleting it wouldn\'t remove it safely. Nothing was deleted.'})+')'),
                "Delete cancelled: a file of this book is a link or has a second name on disk (a hard link), so deleting it wouldn't remove it safely. Nothing was deleted.");
+  // 6. A media check past its deadline (0.22.2): a record saved before is never shown raw; any other reason as it is.
+  assert.equal(run('plainReason("Owned media operation exceeded its deadline")'),'The library drive answered slowly while the app checked this book. It tries again by itself.');
+  assert.equal(run('plainReason("Source files changed")'),'Source files changed','control');
   console.log('PASS the rest of ruling 35 on the page: Resume kept while pausing and cancelled by a second press, Retry all and Convert wait for a scan, recovery deletion queued with Cancel, S6 delete refusals in the engine\'s words');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
