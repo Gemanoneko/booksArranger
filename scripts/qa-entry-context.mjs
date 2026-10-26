@@ -72,7 +72,9 @@ export async function manifestOf(root){const files=[];for(const rel of await wal
 // One digest for a whole tree: the SHA-256 of its sorted "path<TAB>sha256" lines (the gate prints the runtime's, E1).
 export function treeDigest(manifest){return sha(manifest.files.map(item=>item.path+'\t'+item.sha256).join('\n'));}
 
-// E3: the QA runtime must be the one the snapshot pins (python.exe, ffmpeg.exe, ffprobe.exe by SHA-256 and size).
+// E3: the QA runtime must be the one the snapshot pins (python.exe, ffmpeg.exe, ffprobe.exe by SHA-256 and size), and,
+// since Senua's 0.22.1 review (W10), every other file too: the codec DLLs and python314.zip were trusted on first use.
+// pins.tree is the whole runtime tree (python/ and ffmpeg/): its file count and treeDigest; no extra or missing file.
 export async function checkRuntime(runtime,pins){
   const python=path.join(runtime,'python','python.exe');
   if(await fileSha(python).catch(()=>'')!==pins.python.sha256)throw Error('QA runtime refused: python.exe differs from scripts/qa-runtime.json');
@@ -80,6 +82,10 @@ export async function checkRuntime(runtime,pins){
     const file=path.join(runtime,'ffmpeg',name),stat=await fs.lstat(file).catch(()=>null);
     if(!stat?.isFile()||stat.size!==expected.size||await fileSha(file)!==expected.sha256)throw Error('QA runtime refused: '+name+' differs from scripts/qa-runtime.json');
   }
+  if(!pins.tree||!Number.isInteger(pins.tree.files)||!/^[0-9a-f]{64}$/.test(String(pins.tree.sha256)))throw Error('QA runtime refused: scripts/qa-runtime.json pins no runtime tree');
+  const manifest=await manifestOf(runtime);
+  if(manifest.files.length!==pins.tree.files||treeDigest(manifest)!==pins.tree.sha256)
+    throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+manifest.files.length+' files, '+pins.tree.files+' pinned)');
 }
 
 export async function assemble(options,{node=process.execPath,log=console.log,git=gitIn(options.worktree)}={}){

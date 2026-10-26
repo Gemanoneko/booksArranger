@@ -11,7 +11,7 @@ import {readdirSync,readFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {assemble,parseArgs,cleanGitEnv,gitIn,CORE} from '../scripts/qa-entry-context.mjs';
+import {assemble,parseArgs,cleanGitEnv,gitIn,manifestOf,treeDigest,CORE} from '../scripts/qa-entry-context.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 
@@ -52,10 +52,13 @@ async function fixture(t){
   await fs.writeFile(path.join(W,'scripts','check-desktop.mjs'),'// gate\n');
   await fs.writeFile(path.join(W,'package.json'),JSON.stringify({version:'0.22.1',scripts:{check:'node scripts/check-desktop.mjs'}}));
   await fs.writeFile(path.join(W,'.gitignore'),'node_modules/\n');
-  await fs.writeFile(path.join(W,'scripts','qa-runtime.json'),JSON.stringify({schema:1,python:{sha256:sha(python)},ffmpeg:{files:{'ffmpeg.exe':{sha256:sha(ffmpeg),size:ffmpeg.length},'ffprobe.exe':{sha256:sha(ffprobe),size:ffprobe.length}}}}));
-  const committed=new Map(listed(W).map(rel=>[rel,readFileSync(path.join(W,rel))])),head=sha('fixture commit').slice(0,40),calls=[];
   await fs.mkdir(path.join(runtime,'python'),{recursive:true});await fs.mkdir(path.join(runtime,'ffmpeg'),{recursive:true});
   await fs.writeFile(path.join(runtime,'python','python.exe'),python);await fs.writeFile(path.join(runtime,'ffmpeg','ffmpeg.exe'),ffmpeg);await fs.writeFile(path.join(runtime,'ffmpeg','ffprobe.exe'),ffprobe);
+  await fs.writeFile(path.join(runtime,'ffmpeg','avcodec.dll'),'fake codec');  // pinned only by the whole tree (W10)
+  const tree=await manifestOf(runtime);
+  await fs.writeFile(path.join(W,'scripts','qa-runtime.json'),JSON.stringify({schema:1,python:{sha256:sha(python)},ffmpeg:{files:{'ffmpeg.exe':{sha256:sha(ffmpeg),size:ffmpeg.length},'ffprobe.exe':{sha256:sha(ffprobe),size:ffprobe.length}}},
+    tree:{files:tree.files.length,sha256:treeDigest(tree)}}));
+  const committed=new Map(listed(W).map(rel=>[rel,readFileSync(path.join(W,rel))])),head=sha('fixture commit').slice(0,40),calls=[];
   await fs.mkdir(checker,{recursive:true});for(const name of CORE)await fs.writeFile(path.join(checker,name),'// '+name);
   await fs.mkdir(path.join(nodeDir,'node_modules','npm','bin'),{recursive:true});await fs.writeFile(path.join(nodeDir,'node.exe'),'node');
   await fs.writeFile(path.join(nodeDir,'npm.cmd'),'npm');await fs.writeFile(path.join(nodeDir,'node_modules','npm','bin','npm-cli.js'),'cli');
@@ -128,6 +131,13 @@ test('refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a
   await fs.writeFile(path.join(f.runtime,'ffmpeg','ffprobe.exe'),'fake ffprobX');
   await assert.rejects(assemble(f.options,deps),/ffprobe.exe differs/);await absent(C);
   await fs.writeFile(path.join(f.runtime,'ffmpeg','ffprobe.exe'),'fake ffprobe');
+  // Senua's 0.22.1 review, W10: a codec DLL that differs, or a file added, is refused like an executable.
+  await fs.writeFile(path.join(f.runtime,'ffmpeg','avcodec.dll'),'another codec');
+  await assert.rejects(assemble(f.options,deps),/files differ from the runtime tree/);await absent(C);
+  await fs.writeFile(path.join(f.runtime,'ffmpeg','avcodec.dll'),'fake codec');
+  await fs.writeFile(path.join(f.runtime,'python','extra.pyd'),'x');
+  await assert.rejects(assemble(f.options,deps),/5 files, 4 pinned/);await absent(C);
+  await fs.rm(path.join(f.runtime,'python','extra.pyd'));
   await fs.symlink(path.join(f.base,'checker'),path.join(f.W,'node_modules','linked'),'junction');
   await assert.rejects(assemble(f.options,deps),/Link refused/);await absent(C);
 });

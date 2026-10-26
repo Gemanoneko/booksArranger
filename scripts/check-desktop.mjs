@@ -151,5 +151,7 @@ console.log('Integrated Python cases: '+pythonCount);
 const {manifestOf,treeDigest}=await import('./qa-entry-context.mjs');  // loaded only here: the source guard runs first
 const usedRuntime=runtimeRoot || path.dirname(path.dirname(python)),fixtureFile=process.env.BOOKS_MP3_REAL_FIXTURE || '';
 const qaRuntime={root:usedRuntime,sha256:treeDigest(await manifestOf(usedRuntime))};
+// Senua's 0.22.1 review, W10: the whole runtime tree is pinned, not only its three executables.
+if(!fixture.tree||qaRuntime.sha256!==fixture.tree.sha256)throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+qaRuntime.sha256+')');
 const mp3Fixture={path:fixtureFile,sha256:fixtureFile?createHash('sha256').update(fs.readFileSync(fixtureFile)).digest('hex'):''};
 console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture}));

@@ -16,5 +16,10 @@
         "size": 226816
       }
     }
+  },
+  "tree": {
+    "files": 47,
+    "sha256": "a3cb3b5e0903b98e3a9e4865321a199eb6f4f53f5739be509bd61d50bbacb031",
+    "note": "every file of python/ and ffmpeg/ as provisioned from desktop/runtime-pins.json (Stack and commands, Gate QA runtime): treeDigest of manifestOf in scripts/qa-entry-context.mjs; Senua 0.22.1 W10"
   }
 }
