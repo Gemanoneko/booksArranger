@@ -37,7 +37,17 @@ async function parkOwnedEngine({ state, request, sleep, broadcast, now = Date.no
   // The engine undoes the update and starts again what it stopped; a 409 'started' means it is already ending.
   for (let attempt = 1; attempt <= CANCEL_TRIES; attempt++) {
    try {
-    const answer = await request('POST', '/api/desktop/update-cancel', { desktop: true, timeout: cancelTimeoutMs });
+    // Judy 0.22.2 6.2: the engine answers Cancel once the work has started again (up to its 25 s resume bound); meanwhile
+    // its status says what is still to resume, which the page names from 3 s on.
+    const posting = request('POST', '/api/desktop/update-cancel', { desktop: true, timeout: cancelTimeoutMs });
+    let settled = false; posting.then(() => { settled = true; }, () => { settled = true; });
+    (async () => {
+     while (!settled && !exited()) {
+      await sleep(pollMs); if (settled) break;
+      try { const status = await request('GET', '/api/desktop/status', { desktop: true, timeout: 3000 }); if (!settled && status && status.update) progress(status.update); } catch { /* busy */ }
+     }
+    })();
+    const answer = await posting;
     const outcome = answer && answer.update && answer.update.outcome;
     return stopped(cause, cause === 'bound' ? 'The engine did not stop within the update bound' : 'Update cancelled',
      { waiting: (outcome && outcome.waiting) || (last && last.waiting) || [], resumeProblems: problemsOf(outcome) });

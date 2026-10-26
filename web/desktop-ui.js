@@ -66,9 +66,18 @@
   return {text:line,failed:true,path:i.cause==='installer_blocked'?u.installerPath||'':''};
  }
  // The .desktop-status line while an update runs (2.5); the counter is separate, outside the live region.
- function phaseLine(u){
+ // Futaba's 0.22.1 QA, m-2 (Judy 0.22.2 6.2): Cancel is answered at the press; from 3 s the line names what is slow to
+ // resume and the engine's bound for it; the counter is dropped.
+ function cancellingLine(i,now){
+  if(!(now-(Number(i.cancelAt)||now)>=3000))return {text:'Cancelling the update…',counter:''};
+  const work=(i.resuming&&i.resuming.length?i.resuming:i.waiting||[]).filter(item=>item.kind!=='critical'),bound=Number(i.resumeSeconds)||25;
+  if(!work.length)return {text:`Cancelling the update… The engine is resuming. This can take up to ${bound} s.`,counter:''};
+  return {text:`Cancelling the update… ${cap(what(work))} ${new Set(work.map(name)).size>1?'are':'is'} slow to resume. This can take up to ${bound} s.`,counter:''};
+ }
+ function phaseLine(u,now=Date.now()){
   const i=u.install||{},critical=(i.critical||[])[0],work=(i.waiting||[]).filter(item=>item.kind!=='critical');
   const finishing={text:`Finishing ${critical} first, so nothing is left half-done. This takes a few seconds.`,counter:''};
+  if(i.cancelling&&['starting','pausing','forcing'].includes(i.phase))return cancellingLine(i,now);
   switch(i.phase){
    case 'starting':return {text:'Starting the update…',counter:''};
    case 'pausing':if(critical)return finishing;if(!work.length)return {text:'Starting the update…',counter:''};
@@ -76,7 +85,8 @@
    case 'forcing':if(critical)return finishing;
     // N2: lookups start with the engine by themselves; there is nothing for Sergei to start again.
     if(work.length&&work.every(item=>item.kind==='lookups'))return {text:`Background lookups didn't reach a safe point in ${i.safe} s. Stopping them now; they continue by themselves after the update.`,counter:''};
-    return {text:`${cap(what(work))} didn't reach a safe point in ${i.safe} s. Stopping it now; ${work.length&&work.every(item=>item.kind==='conversion')?'it restarts after the update':'start it again after the update'}.`,counter:''};
+    // Judy 0.22.2 6.3 (Futaba m-11): a stopped conversion comes back Paused, so it is continued with Resume audiobook jobs.
+    return {text:`${cap(what(work))} didn't reach a safe point in ${i.safe} s. Stopping it now; ${work.length&&work.every(item=>item.kind==='conversion')?'continue it with Resume audiobook jobs':'start it again after the update'}.`,counter:''};
    case 'updating':return {text:'Stopping the engine now. Saved work is kept.',counter:''};
    case 'installing':return {text:`Installing ${u.available}… No installer window opens. Books Arranger reopens by itself and shows its loading progress.`,counter:''};
   }
@@ -86,7 +96,10 @@
  function workLines(desktop){
   const busy=desktop&&desktop.busy;if(!busy)return {known:false,lines:[]};
   const lines=[];
-  if(busy.converting)lines.push(`Converting ${busy.current_title||'the current book'}. It stops and starts again from the beginning.`);
+  // Judy 0.22.2 6.3 (Futaba m-11): the job comes back Paused after an update, so the line says how to continue it.
+  if(busy.converting)lines.push(`Converting ${busy.current_title||'the current book'}. It stops. Continue it with Resume audiobook jobs.`);
+  const approvals=Number(busy.approvals)||0;
+  if(approvals)lines.push(approvals===1?'An approval in progress stops, and the book is not approved. Press Approve again afterwards.':`${approvals} approvals in progress stop, and those books are not approved. Press Approve again afterwards.`);
   if(busy.scanning)lines.push('Scanning the library. It stops. Continue it with Resume scanning.');
   if(['Running','Stopping'].includes(busy.automatic))lines.push('Automatic processing stops. Press Start automatic processing to continue.');
   const queued=Array.isArray(desktop.queued_actions)?desktop.queued_actions.length:Number(desktop.queued_actions)||0;
@@ -102,7 +115,9 @@
     title:b.download?`Downloading version ${n}…`:`Download version ${n} and verify it. Books Arranger isn't changed until you press Restart to update.`},
    restart:{face:b.install?'Updating…':'Restart to update',busy:!!(b.install||b.download),hidden:!u.ready,
     title:b.install?'Updating Books Arranger…':running?`Install version ${n} now. Running work stops safely and restarts afterwards. Your source files are not touched. You confirm first.`:`Install version ${n} now. Books Arranger closes, updates and reopens by itself. No installer window opens.`},
-   cancel:{face:'Cancel update',busy:false,hidden:!u.canCancel,title:'Stop the update. Books Arranger keeps running as before.'},
+   // Judy 0.22.2 6.2: once pressed, Cancel stays on screen (inert, with its focus) until the engine answers.
+   cancel:(u.install||{}).cancelling?{face:'Cancelling…',busy:true,hidden:false,title:'Cancelling can’t be stopped.'}
+    :{face:'Cancel update',busy:false,hidden:!u.canCancel,title:'Stop the update. Books Arranger keeps running as before.'},
    installer:{face:'Show installer file',busy:false,hidden:!u.showInstaller,title:'Open the folder that holds the downloaded installer.'},
   };
  }
@@ -112,8 +127,11 @@
  function loadingWaits(value){return !!value&&value.loaded===false&&!['stuck','stopped'].includes(value.verdict);}
  // M1 (Judy's implementation check): during an update the window's Quit is inert with its reason, never silent.
  const QUIT_UPDATE_CANCEL='An update is in progress. Press Cancel update first if you want to quit.',QUIT_UPDATE_INSTALL='Books Arranger is installing an update and reopens by itself.';
- function quitBlock(value){const u=value&&value.update;if(!(u&&(u.busy||{}).install)&&!['updating','installing'].includes(value&&value.quit))return '';return u&&u.canCancel?QUIT_UPDATE_CANCEL:QUIT_UPDATE_INSTALL;}
- globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons,loadingWaits,quitBlock,NOT_YET_UPDATE,QUIT_LOADING,QUIT_UPDATE_CANCEL,QUIT_UPDATE_INSTALL});
+ // Judy 0.22.2 6.2: while cancelling, the installing sentence was wrong.
+ const QUIT_UPDATE_CANCELLING='The update is being cancelled. Quit works when it finishes.';
+ function quitBlock(value){const u=value&&value.update;if(!(u&&(u.busy||{}).install)&&!['updating','installing'].includes(value&&value.quit))return '';
+  return u&&(u.install||{}).cancelling?QUIT_UPDATE_CANCELLING:u&&u.canCancel?QUIT_UPDATE_CANCEL:QUIT_UPDATE_INSTALL;}
+ globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons,loadingWaits,quitBlock,NOT_YET_UPDATE,QUIT_LOADING,QUIT_UPDATE_CANCEL,QUIT_UPDATE_INSTALL,QUIT_UPDATE_CANCELLING});
 
  const api=window.booksDesktop;if(!api)return;
  const header=document.querySelector('header');const toolbar=document.querySelector('#shutdown')?.parentElement;
@@ -138,10 +156,14 @@
  const installerPath=document.createElement('p');installerPath.className='path';installerPath.hidden=true;update.append(installerPath);
  const actions=document.createElement('div');actions.className='toolbar';update.append(actions);panel.after(update);
  // Busy buttons use aria-disabled and keep focus (2.1); a press on one does nothing.
- function button(fn,quiet){const b=document.createElement('button');b.type='button';if(quiet)b.className='quiet';b.addEventListener('click',()=>{if(b.getAttribute('aria-disabled')==='true')return;fn();});actions.append(b);return b;}
+ // inert: what an inert press still says (Futaba's 0.22.1 QA, m-5: Restart to update while loading wrote nothing).
+ function button(fn,quiet,inert){const b=document.createElement('button');b.type='button';if(quiet)b.className='quiet';b.addEventListener('click',()=>{if(b.getAttribute('aria-disabled')==='true'){if(inert)inert();return;}fn();});actions.append(b);return b;}
  const quietly=promise=>Promise.resolve(promise).catch(error=>console.warn(error));
  const check=button(()=>quietly(api.checkUpdates()).then(poll));const download=button(()=>quietly(api.downloadUpdate()).then(poll));
- const restart=button(()=>requestRestart());const cancel=button(()=>quietly(api.cancelUpdate()).then(poll));const installer=button(()=>quietly(api.showInstaller()),true);
+ const restart=button(()=>requestRestart(),false,()=>{if(loadingWaits(last)){const line=document.getElementById('message');if(line)line.textContent=NOT_YET_UPDATE;}});
+ // Judy 0.22.2 6.2 (Futaba m-2): the line is written at the press, not at the engine's answer (up to 35 s later).
+ const cancel=button(()=>{const u=last&&last.update;if(u)render({...last,update:{...u,canCancel:false,install:{...(u.install||{}),cancelling:true,cancelAt:Date.now()}}});quietly(api.cancelUpdate()).then(poll);});
+ const installer=button(()=>quietly(api.showInstaller()),true);
  const controls={check,download,restart,cancel,installer};
  // Confirm (2.4): the approve-dialog pattern. Cancel is focused; no form, so Enter in the body confirms nothing.
  const dialog=document.createElement('dialog');dialog.id='update-dialog';dialog.setAttribute('aria-labelledby','update-dialog-title');dialog.setAttribute('aria-describedby','update-dialog-lead');

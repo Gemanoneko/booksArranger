@@ -89,14 +89,14 @@ test('page: phase lines, with the seconds counter apart from the live text',()=>
  assert.deepEqual(u({phase:'starting'}),{text:'Starting the update…',counter:''});
  assert.deepEqual(u({phase:'pausing',elapsed:12.6,waiting:[{kind:'conversion',title:'Fixture'},{kind:'scan'},{kind:'research'},{kind:'approval'}]}),{text:'Stopping safely for the update. Waiting for the conversion of Fixture and the library scan and 2 more to reach a safe point…',counter:'(12 s of 90 s)'});
  assert.deepEqual(u({phase:'pausing',waiting:[{kind:'critical',title:'a tag edit'}],critical:['a tag edit']}),{text:'Finishing a tag edit first, so nothing is left half-done. This takes a few seconds.',counter:''});
- assert.equal(u({phase:'forcing',waiting:[{kind:'conversion',title:'Fixture'}]}).text,"The conversion of Fixture didn't reach a safe point in 90 s. Stopping it now; it restarts after the update.");
+ assert.equal(u({phase:'forcing',waiting:[{kind:'conversion',title:'Fixture'}]}).text,"The conversion of Fixture didn't reach a safe point in 90 s. Stopping it now; continue it with Resume audiobook jobs.");  // Judy 0.22.2 6.3 (m-11)
  assert.equal(u({phase:'forcing',waiting:[{kind:'approval'}]}).text,"An approval didn't reach a safe point in 90 s. Stopping it now; start it again after the update.");
  // N2: series backfill and optional-field lookups run by themselves, so they are "background lookups" and need no restart.
  assert.equal(u({phase:'pausing',waiting:[{kind:'lookups'}]}).text,'Stopping safely for the update. Waiting for background lookups to reach a safe point…');
  assert.equal(u({phase:'forcing',waiting:[{kind:'lookups'}]}).text,"Background lookups didn't reach a safe point in 90 s. Stopping them now; they continue by themselves after the update."); assert.equal(u({phase:'updating'}).text,'Stopping the engine now. Saved work is kept.');
  assert.equal(u({phase:'installing'}).text,'Installing 0.22.2… No installer window opens. Books Arranger reopens by itself and shows its loading progress.');});
 test('page: the confirm names the running work; idle starts at once; unknown work confirms',()=>{const t=page();
- assert.deepEqual(t.workLines({busy:{converting:true,current_title:'Лабиринты Ехо 3',scanning:true,automatic:'Running'},queued_actions:2}).lines,['Converting Лабиринты Ехо 3. It stops and starts again from the beginning.','Scanning the library. It stops. Continue it with Resume scanning.','Automatic processing stops. Press Start automatic processing to continue.','2 queued actions are dropped. Press them again afterwards.']);
+ assert.deepEqual(t.workLines({busy:{converting:true,current_title:'Лабиринты Ехо 3',scanning:true,automatic:'Running'},queued_actions:2}).lines,['Converting Лабиринты Ехо 3. It stops. Continue it with Resume audiobook jobs.','Scanning the library. It stops. Continue it with Resume scanning.','Automatic processing stops. Press Start automatic processing to continue.','2 queued actions are dropped. Press them again afterwards.']);
  assert.deepEqual(t.workLines({busy:{converting:false,scanning:false,automatic:'Idle'},queued_actions:[{id:1}]}).lines,['1 queued action is dropped. Press it again afterwards.']);
  assert.deepEqual(t.workLines({busy:{converting:false,scanning:false,automatic:'Idle'}}),{known:true,lines:[]},'no queue count in status: no queue line');
  assert.equal(t.workLines({busy:null}).known,false);});
@@ -206,3 +206,26 @@ test('a download the connection cut short reads as the connection dropped',async
  for(const message of ['net::ERR_CONTENT_LENGTH_MISMATCH','net::ERR_INCOMPLETE_CHUNKED_ENCODING','Error: aborted','Premature close']){
   const g=fixture();await g.controller.check();g.provider.downloadUpdate=async()=>{throw new Error(message);};await g.controller.download();
   assert.deepEqual([g.controller.value.download.phase,g.controller.value.download.cause],['failed','dropped'],message);}});
+// Futaba's 0.22.1 QA, m-2 and m-11 (Judy 0.22.2 6.2 and 6.3): Cancel answers at the press and keeps its focus; the confirm
+// names an approval in flight and tells the truth about what comes back after an update.
+test('page: Cancel update answers at the press, names what is slow to resume from 3 s, and keeps its button',()=>{const t=page();
+ const cancelling={available:'0.22.2',busy:{install:true},canCancel:false,install:{phase:'pausing',cancelling:true,cancelAt:1000,safe:90,elapsed:12,waiting:[{kind:'conversion',title:'Fixture'}],resuming:[],resumeSeconds:25}};
+ assert.deepEqual(t.phaseLine(cancelling,1500),{text:'Cancelling the update…',counter:''},'at the press, no counter');
+ assert.deepEqual(t.phaseLine({...cancelling,install:{...cancelling.install,resuming:[{kind:'conversion',title:'Fixture'}]}},4100),{text:'Cancelling the update… The conversion of Fixture is slow to resume. This can take up to 25 s.',counter:''});
+ assert.deepEqual(t.phaseLine({...cancelling,install:{...cancelling.install,waiting:[]}},4100),{text:'Cancelling the update… The engine is resuming. This can take up to 25 s.',counter:''});
+ const button=t.buttons({version:'0.22.1',ready:true,packaged:true,check:{},download:{},...cancelling},{}).cancel;
+ assert.deepEqual([button.face,button.busy,button.hidden,button.title],['Cancelling…',true,false,'Cancelling can’t be stopped.'],'it stays on screen with its focus');
+ assert.equal(t.quitBlock({quit:'updating',update:cancelling}),'The update is being cancelled. Quit works when it finishes.');
+});
+test('page: the confirm names approvals in flight; the conversion line says it comes back with Resume audiobook jobs',()=>{const t=page();
+ assert.deepEqual(t.workLines({busy:{approvals:1}}).lines,['An approval in progress stops, and the book is not approved. Press Approve again afterwards.']);
+ assert.deepEqual(t.workLines({busy:{approvals:2}}).lines,['2 approvals in progress stop, and those books are not approved. Press Approve again afterwards.']);
+ assert.deepEqual(t.workLines({busy:{converting:true,current_title:'Fixture'}}).lines,['Converting Fixture. It stops. Continue it with Resume audiobook jobs.']);});
+test('a Cancel press is answered at once: cancelling, its time, and the button stays',async()=>{const f=fixture();await ready(f);
+ f.controller.parkEngine=async({progress})=>{progress({phase:'pausing',waiting:[{kind:'conversion',title:'Fixture'}],elapsed:3,safe_seconds:90,resume_seconds:25});
+  assert.equal(f.controller.cancel(),true);const value=f.controller.value;
+  assert.deepEqual([value.install.cancelling,value.install.cancelAt,value.canCancel],[true,f.clock,false]);
+  progress({phase:'pausing',waiting:[],resuming:[{kind:'conversion',title:'Fixture'}],resume_seconds:25});
+  assert.deepEqual([f.controller.value.install.resuming,f.controller.value.install.resumeSeconds],[[{kind:'conversion',title:'Fixture'}],25]);
+  throw typed('cancelled');};
+ await f.controller.restart();assert.equal(f.controller.value.install.cancelling,false,'answered');});

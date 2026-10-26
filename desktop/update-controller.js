@@ -69,7 +69,7 @@ class UpdateController {
     this.busy={check:false,download:false,install:false};
     this.check_={phase:packaged?'idle':'dev',at:'',cause:'',code:0,attempt:0};
     this.download_={phase:'idle',at:'',cause:'',progress:0};
-    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};
+    this.install_={phase:'idle',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[],resuming:[],resumeSeconds:0,cancelAt:0};
     provider.autoDownload=false;provider.autoInstallOnAppQuit=false;provider.autoRunAppAfterInstall=true;
     provider.on('update-available',info=>{this.seen={available:String(info.version||'')};});
     provider.on('update-not-available',()=>{this.seen={current:true};});
@@ -85,7 +85,8 @@ class UpdateController {
     const installing=this.busy.install;
     return {version:this.version,available:this.available||(this.ready&&this.ready.version)||'',ready:!!this.ready,packaged:!!this.packaged,
       busy:{...this.busy},check:{...this.check_},download:{...this.download_},
-      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item})),stopped:[...this.install_.stopped]},
+      install:{...this.install_,waiting:this.install_.waiting.map(item=>({...item})),critical:[...this.install_.critical],problems:this.install_.problems.map(item=>({...item})),stopped:[...this.install_.stopped],
+        resuming:(this.install_.resuming||[]).map(item=>({...item})),cancelling:installing&&this.cancelRequested},
       canCancel:installing&&!this.cancelRequested&&['starting','pausing','forcing'].includes(this.install_.phase),
       showInstaller:this.installerShown&&!!this.ready&&this.exists(this.ready.path),installerPath:this.ready?this.ready.path:''};
   }
@@ -140,18 +141,23 @@ class UpdateController {
     if(!INSTALL_BUSY.includes(phase)||this.install_.phase==='installing')return;
     this.install_={...this.install_,phase,waiting:Array.isArray(update.waiting)?update.waiting:[],critical:Array.isArray(update.critical)?update.critical:[],
       elapsed:Number(update.elapsed)||0,safe:Number(update.safe_seconds)||this.install_.safe,
-      stopped:Array.isArray(update.stopped)?update.stopped.filter(kind=>STOPPED_KINDS.includes(kind)):this.install_.stopped};
+      stopped:Array.isArray(update.stopped)?update.stopped.filter(kind=>STOPPED_KINDS.includes(kind)):this.install_.stopped,
+      // Judy 0.22.2 6.2: what Cancel is still starting again, and the engine's bound for it.
+      resuming:Array.isArray(update.resuming)?update.resuming.filter(item=>item&&typeof item.kind==='string').map(item=>({kind:item.kind,title:String(item.title||'')})):this.install_.resuming||[],
+      resumeSeconds:Number(update.resume_seconds)||this.install_.resumeSeconds||0};
     this.emit();
   }
+  // Futaba's 0.22.1 QA, m-2 (Judy 0.22.2 6.2): the press is answered at once. cancelling and cancelAt let the page write
+  // "Cancelling the update…" and, from 3 s, what is slow to resume, while the engine starts the work again (up to 25 s).
   cancel(){
     if(!this.value.canCancel)return false;
-    this.cancelRequested=true;this.emit();return true;
+    this.cancelRequested=true;this.install_={...this.install_,cancelAt:this.now()};this.emit();return true;
   }
   async restart(){
     if(!this.packaged||!this.ready)throw new Error('A verified downloaded update is required');
     if(this.busy.install||this.busy.download)return this.value;
     this.busy.install=true;this.cancelRequested=false;this.installerShown=false;
-    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[]};this.emit();
+    this.install_={phase:'starting',at:'',cause:'',waiting:[],critical:[],elapsed:0,safe:0,problems:[],stopped:[],resuming:[],resumeSeconds:0,cancelAt:0};this.emit();
     const ready=this.ready;let lease=null,engineEnded=false;
     try{
       // Keep the exact checksum-verified installer write/delete denied from before the engine stops until the

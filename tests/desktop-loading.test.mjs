@@ -103,3 +103,36 @@ test('during an update the window Quit is inert with its reason and a press is a
  assert.equal(shutdown.getAttribute('aria-disabled'), 'false'); assert.equal(shutdown.title, 'Finish the current book and cleanup, keep queued books, then close the app');
  assert.equal(t.quitBlock({ quit: 'none', update: { busy: {} } }), '', 'no update: no reason');
 });
+
+// Futaba's 0.22.1 QA, m-5: a click on the inert Restart to update while loading wrote nothing (only the tray's request
+// was answered).
+test('m-5: a click on the inert Restart to update while loading writes the not-yet line', async () => {
+ const loading = { loaded: false, verdict: 'working', quit: 'none', update, desktop: { phase: 'running', loading: { step: 'session' } } };
+ const p = page([loading, loading, loading]);
+ await flush(); await flush();
+ const restart = p.restart();
+ assert.equal(restart.getAttribute('aria-disabled'), 'true');
+ for (const fn of restart.handlers.click) await fn({});
+ await flush();
+ assert.equal(p.byId.message.textContent, p.context.booksUpdateText.NOT_YET_UPDATE);
+ assert.equal(p.installs(), 0);
+});
+
+// Futaba's 0.22.1 QA, m-2 (Judy 0.22.2 6.2): Cancel update showed nothing for up to 33.7 s and its button vanished.
+test('Cancel update: the line is written at the press, and the button stays with its new face', async () => {
+ const pausing = { loaded: true, quit: 'updating', update: { ...update, busy: { install: true }, canCancel: true, install: { phase: 'pausing', safe: 90, elapsed: 4, waiting: [{ kind: 'conversion', title: 'Fixture' }] } }, desktop: { phase: 'pausing' } };
+ let answered = null;
+ const p = page([pausing, pausing]);
+ p.context.window.booksDesktop.cancelUpdate = () => new Promise((resolve) => { answered = resolve; });  // the engine answers much later
+ await flush(); await flush();
+ const find = (face) => { const found = []; const walk = (node) => { if (!node || typeof node !== 'object') return; if (node.tagName === 'BUTTON' && node.textContent.startsWith(face)) found.push(node); for (const child of node.children || []) walk(child); for (const child of node.placed || []) walk(child); }; walk(p.byId['load-strip']); return found[0]; };
+ const cancel = find('Cancel update');
+ assert.equal(cancel.hidden, false);
+ for (const fn of cancel.handlers.click) fn({});
+ const texts = []; const walk = (node) => { if (!node || typeof node !== 'object') return; if (node.textContent) texts.push(node.textContent); for (const child of node.children || []) walk(child); for (const child of node.placed || []) walk(child); }; walk(p.byId['load-strip']);
+ assert.ok(texts.includes('Cancelling the update…'), 'the line at the press: ' + texts.join(' | '));
+ assert.equal(cancel.textContent, 'Cancelling…'); assert.equal(cancel.hidden, false, 'it keeps its focus');
+ assert.equal(cancel.getAttribute('aria-disabled'), 'true'); assert.equal(cancel.title, 'Cancelling can’t be stopped.');
+ assert.equal(p.byId.shutdown.title, 'The update is being cancelled. Quit works when it finishes.');
+ answered && answered(true);
+});
