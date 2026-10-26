@@ -77,8 +77,8 @@ def acceptance(row,review):
 
 def approved(row,ctx):
     proof=ctx.get('manual_metadata_acceptance')
-    return bool(ctx.get('metadata_approved') and ctx.get('metadata_actor')=='user' and ctx.get('manual_note','').strip()
-                and proof==acceptance(row,row.get('review') or {}))
+    # Ruling 36 (Sergei 2026-10-26): his approved values stand without any evidence text.
+    return bool(ctx.get('metadata_approved') and ctx.get('metadata_actor')=='user' and proof==acceptance(row,row.get('review') or {}))
 
 
 # Conversion of the existing producer's exact legacy reasons, never UI text heuristics.

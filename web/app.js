@@ -35,6 +35,7 @@ let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=n
 // The one to-do list (Judy, AttentionTodo UX 2026-10-24): rows that ask Sergei, by book id. Drafts survive polls, paging and
 // chip changes and are dropped on Approve; done/results/checked are the per-row outcomes shown until the row leaves.
 let askPending=null,askBulk=false,approveConfirm=null;
+let editSeq=0,metaSave=null,metaAgain=false,metaQueued=false;  // Save preview metadata (2026-10-26)
 const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map(),askChecked=new Map();
 // Delete book (ruling 23): its row buttons, its row hints, the press reading the list, and the open dialog.
 const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null;
@@ -151,7 +152,7 @@ function clearBusy(){
 // Once a second: the notice, and the ladder of any press waiting 3 s or more.
 function pressTick(now=Date.now()){
   renderBusy(now);
-  const since=[retryPending?.at,askPending?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
+  const since=[retryPending?.at,askPending?.at,metaSave?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
   if(since.some(at=>now-at>=3000)){ladderClock=now;try{controls();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
 }
 function clearConnectionNotice(){
@@ -402,7 +403,9 @@ function controls() {
   if($('release-selected'))renderReleaseSelected();
   if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
   if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  renderMetaSave();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
+  if(metaQueued && !busy && !metaSave)saveMetadata();  // a Save pressed during another press runs now (ruling 35)
 }
 async function action(route, data) {
   if (busy || ended) return;
@@ -716,18 +719,69 @@ $('search').addEventListener('input',()=>{cancelSearchRefresh();++refreshSequenc
 $('search-form').addEventListener('submit',event=>{event.preventDefault();return updateList();});
 $('previous').addEventListener('click',()=>{offset=Math.max(0,offset-100);return updateList(false);});
 $('next').addEventListener('click',()=>{offset+=100;return updateList(false);});
-form.addEventListener('input',event=>{const note=event?.target===$('manual-evidence');noteOnlyDirty=(dirty?noteOnlyDirty:true) && note;if(!dirty)reviewRow=selectedRow;dirty=true;manualMetadataTouched=true;syncManualDraft();routingControls();queueRoutingPreview();updateMetadataChoiceControls();controls();$('review-note').textContent='Unsaved local review.';});
-form.addEventListener('submit',async event=>{
-  event.preventDefault();if(!selectedRow || busy || ended || recoveryDisconnected)return;
-  const row=reviewRow || selectedRow;const review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
+form.addEventListener('input',event=>{noteOnlyDirty=false;editSeq++;if(!dirty)reviewRow=selectedRow;dirty=true;manualMetadataTouched=true;syncManualDraft();routingControls();queueRoutingPreview();updateMetadataChoiceControls();controls();$('review-note').textContent='Unsaved local review.';});
+// "Save preview metadata" (2026-10-26, the diagnosis of "Save does nothing": the save succeeded and the page never said
+// so). The press shows Saving… at once and keeps its focus (aria-disabled); "Saved." lands with the answer, the list reload
+// follows outside the save's own error path; a press is never dropped: during a save the newest values are saved next,
+// and while another press of this page runs the save waits for it (ruling 35). Edits typed meanwhile stay unsaved. A book
+// a background update moved on (Candidate changed) keeps his values and is saved again on its new revision, once.
+const SAVE_METADATA_FACE='Save preview metadata',SAVE_METADATA_TIP='Save these values as a draft and a metadata source for this book.';
+function metadataReview(){
+  const review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
   review.multi_author=form.elements.namedItem('multi_author').checked;
   review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && form.elements.namedItem('anthology').checked;
   if(!['audiobook','candidate'].includes(selectedRow.kind)){review.canonical_author='';review.narrator='';}
-  busy=true;controls();message();
-  try {if(row.kind==='candidate'){const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext()});dirty=false;if(trackDraft?.id===row.id && trackDraft.revision===row.revision)trackDraft.revision=result.row.revision;select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},false);}else await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});dirty=false;manualMetadataTouched=false;syncManualDraft();await refresh(true);message('Metadata source saved. Review or check this book to continue.');}
-  catch(error){message(error.message);}
-  finally{busy=false;controls();}
-});
+  return review;
+}
+function renderMetaSave(){
+  const button=$('save-metadata');if(!button)return;const pending=!!metaSave || metaQueued;
+  const face=pending?'Saving…':SAVE_METADATA_FACE,tip=pending?ladderNote('Saving these values…',metaSave?.at):SAVE_METADATA_TIP;
+  if(button.textContent!==face)button.textContent=face;if(button.title!==tip)button.title=tip;
+  if(pending)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+}
+async function sendMetadata(row,review){
+  if(row.kind!=='candidate'){await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});return {row:null};}
+  for(let attempt=0;;attempt++){
+    try{return {...await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext(row)}),sent:row};}
+    catch(error){
+      const fresh=error.body?.row;
+      if(attempt===0 && error.body?.code==='changed' && fresh && fresh.id===row.id){row={...fresh,path:fresh.id,kind:'candidate',library:selectedLibrary};reviewRow=row;continue;}
+      throw error;
+    }
+  }
+}
+async function saveMetadata(){
+  if(!selectedRow)return;
+  if(ended || recoveryDisconnected){message('Local server unavailable. Nothing was saved.');return;}
+  if(metaSave){metaAgain=true;return;}  // never dropped: the newest values are saved when this save lands
+  if(busy){metaQueued=true;renderMetaSave();setText('review-note','Saving after the current operation finishes…');return;}
+  metaQueued=false;
+  const row=reviewRow || selectedRow,review=metadataReview(),seq=editSeq;
+  metaSave={at:Date.now(),seq,id:row.id};busy=true;renderMetaSave();controls();message();setText('review-note','Saving…');
+  let saved=null,failure=null;
+  try{saved=await sendMetadata(row,review);}
+  catch(error){failure=error;}
+  finally{metaSave=null;busy=false;}
+  if(saved){
+    const current=editSeq===seq;
+    if(saved.row){
+      const fresh={...saved.row,path:saved.row.id,kind:'candidate',library:selectedLibrary};
+      if(trackDraft?.id===fresh.id && trackDraft.revision===saved.sent.revision)trackDraft.revision=fresh.revision;
+      reviewRow=fresh;  // a later save goes to the book's new revision
+      if(selectedRow?.id===fresh.id)select(fresh,false);
+    }
+    if(current){dirty=false;manualMetadataTouched=false;syncManualDraft();setText('review-note','Saved.');}
+    else setText('review-note','Unsaved local review.');  // typed while it saved: those edits are not saved yet
+    message('Metadata source saved. Review or check this book to continue.');
+  }else{
+    setText('review-note','Not saved.');message(failure?.message || 'Save was not accepted. Nothing was changed.');
+    if(!failure?.httpStatus)refreshFailed(failure);
+  }
+  renderMetaSave();controls();
+  if(metaAgain){metaAgain=false;if(dirty)return saveMetadata();}
+  if(saved)refresh(true).catch(()=>{});  // the list follows; its failure is not the save's
+}
+form.addEventListener('submit',event=>{event.preventDefault();return saveMetadata();});
 $('approve-candidate').addEventListener('click',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || busy || ended)return;busy=true;controls();try{const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review:row.review,approve:true,...reviewContext()});select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},true);await refresh(true);message('Candidate metadata approved. Tracks still require review; source files unchanged.');}catch(error){message(error.message);}finally{busy=false;controls();}});
 $('shutdown').addEventListener('click',async()=>{
   if(busy || ended)return;busy=true;controls();message();
@@ -761,7 +815,9 @@ function renderInspector(inspector,row,sequence){closeRecoveryDialog(false);reco
 }
 async function inspectorCover(cover,holder,sequence){const caption=node('p',cover.label || 'Source artwork'),status=node('p',cover.error || cover.status || 'Loading artwork…');holder.append(caption,status);if(!cover.thumbnail_url){status.textContent=cover.error || cover.status || 'Cover not found';return;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Cover preview unavailable');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover could not be read');const blob=await response.blob();if(sequence!==inspectSequence)return;const object=URL.createObjectURL(blob);inspectorObjects.push(object);const image=node('img');image.alt=cover.label || 'Source artwork';image.src=object;image.addEventListener('error',()=>{image.hidden=true;status.textContent='Cover could not be read';});holder.append(image);status.textContent=cover.status || '';}catch(error){if(sequence===inspectSequence)status.textContent=cover.error || error.message || 'Cover preview unavailable';}}
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
-function reviewContext(){return {manual_note:$('manual-evidence').value,proposal_id:proposalId,cover_id:coverId,actor:'user'};}
+// Ruling 36 (Sergei 2026-10-26): no evidence field; a save keeps whatever note the catalog already holds (unused).
+function keptNote(row){const note=row?.review_context?.manual_note;return typeof note==='string'?note:'';}
+function reviewContext(row=reviewRow || selectedRow){return {manual_note:keptNote(row),proposal_id:proposalId,cover_id:coverId,actor:'user'};}
 function readyForQueue(row){return !!row.creation?.can_create && row.creation?.status!=='Single audiobook file' && selectedBooks.get(row.id)===row.revision && !(selectedRow?.id===row.id && (dirty || trackDirty));}
 function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),selected=visible.filter(row=>selectedBooks.has(row.id)),ready=selected.filter(row=>readyForQueue(row));const retryItems=attentionSelection()?retrySelectable():[],retryable=retryItems.length,conditional=conditionalRetries(retryItems),waiting=selected.filter(row=>readmissionOf(row)?.state==='queued').length,queuedSel=selected.filter(row=>queuedFor(row) || queueRunning(row)).length,leftOut=selected.length-retryable-waiting-queuedSel,already=queuedSel?` · ${queuedSel} already queued`:'';const releasable=releaseSelection()?releaseSelectable().length:0;
   // Let the app handle selected (O14): in Started over the selection is counted against it; in Held it is added to the usual line.
@@ -937,7 +993,7 @@ $('save-metadata-choices').addEventListener('click',async()=>{
   const choices=saved.snapshot.questions.map(question=>{const answer=saved.answers[question.id] || {mode:'unresolved'},choice={question_id:question.id,...answer};if(answer.mode==='corrected'){choice.values={};for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])choice.values[field]=form.elements.namedItem(field)?.value.trim() || '';}return choice;});
   saved.pending=true;saved.error='';busy=true;controls();updateMetadataChoiceControls();
   try{
-    const result=await request('/api/candidate/metadata-choice',{library:selectedLibrary,id:saved.id,revision:saved.revision,signature:saved.snapshot.signature,choices,manual_note:$('manual-evidence').value});
+    const result=await request('/api/candidate/metadata-choice',{library:selectedLibrary,id:saved.id,revision:saved.revision,signature:saved.snapshot.signature,choices,manual_note:keptNote(selectedRow)});
     if(selectedRow?.id===saved.id && result.row){
       if(trackDraft?.id===saved.id && trackDraft.revision===saved.revision)trackDraft.revision=result.row.revision;
       dirty=false;manualMetadataTouched=false;syncManualDraft();
@@ -958,13 +1014,12 @@ function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';
   const context=row.review_context || {},creation=row.creation || {},matching=row.matching || {};
   if(!dirty){++routingPreviewSequence;$('routing-preview-label').textContent='Output folder';$('routing-preview-path').textContent=creation.destination || row.preview?.reason || '';}
   const metadataHolds=row.metadata_holds || [],questionsPending=(row.metadata_questions?.unresolved_count || 0)>0;const metadataRemedy=questionsPending?'Resolve metadata question':'Edit metadata';$('edit-held-metadata').hidden=!metadataHolds.length && !questionsPending;$('edit-held-metadata').textContent=metadataRemedy;$('edit-held-metadata').setAttribute('aria-label',metadataRemedy+': '+(row.title_clue || row.id));$('metadata-hold-fields').hidden=!metadataHolds.length && !questionsPending;$('metadata-hold-fields').textContent=questionsPending?'Choose which recorded values this book should use. Your answer saves a draft for review.':metadataHolds.map(item=>item.reason).join(' · ');
-  if(reset || (!dirty && !$('manual-review').contains?.(document.activeElement))){$('manual-evidence').value=context.manual_note || '';proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
+  if(reset || (!dirty && !$('manual-review').contains?.(document.activeElement))){proposalId=context.proposal_id || null;coverId=context.cover_id || row.selected_cover?.id || null;}
   if(reset || (!trackDirty && !$('track-review').contains?.(document.activeElement) && !$('candidate-details').contains?.(document.activeElement))){trackDraft={id:row.id,revision:row.revision,order:row.track_order || row.members.map(member=>member.member_key || member.path),included:row.included || row.members.map(member=>member.member_key || member.path)};trackDirty=false;$('source-coverage').checked=!!context.source_coverage_confirmed;$('playback-order').checked=!!context.order_confirmed;const chapterDefault=context.chapters_choice_saved===false && creation.chapters_default===true && creation.chapters_available===true && !creation.job && !/queued|creating|checking|created|completed/i.test(creation.status || '');$('add-chapters').checked=chapterDefault || !!context.chapters;if(chapterDefault)trackDirty=true;}
   const actor=actorValue=>actorValue==='assistant'?'Assistant review':actorValue==='user'?'User review':'Needs review';
   $('candidate-facts').textContent=`Metadata: ${actor(context.metadata_actor)} · ${context.source_coverage_confirmed?'Source files reviewed: '+actor(context.track_actor):'Source files need review'} · Playback order: ${context.order_confirmed?actor(context.track_actor):'Needs review'} · Recording completeness unknown`;
-  $('accepted-evidence').textContent=plainEvidence(JSON.stringify({proposal_id:context.proposal_id,metadata_reviewer:context.metadata_actor,metadata_date:context.metadata_utc,track_reviewer:context.track_actor,track_date:context.track_utc,entered_by_you:row.manual_metadata_sources || [],metadata_conflicts:row.matching?.conflicts || [],metadata_evidence:context.metadata_evidence || [],track_evidence:context.track_evidence || '',manual_note:context.manual_note || ''},null,2));
-  $('matching-status').textContent=matching.error || (matching.conflicts?.length?`${matching.conflicts.length} metadata disagreements need review. See View evidence.`:null) || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
-  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey && !$('metadata-proposals').contains?.(document.activeElement)){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),proposal.manual_source?node('p','Entered by you · '+(proposal.per_field_evidence?.saved_utc || '')):sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.setAttribute('aria-describedby','lookup-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.universe)form.elements.namedItem('universe').value=proposal.universe;if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;noteOnlyDirty=false;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
+  $('matching-status').textContent=matching.error || (matching.conflicts?.length?`${matching.conflicts.length} metadata disagreements need review.`:null) || (matching.state==='finding' || matching.state==='pending'?'Finding metadata…':matching.proposals?.length?'Original work matches; recording unverified':matching.state==='completed'?'No reliable match found. Review the title and author, then try again.':'Find possible identities or enter verified metadata manually.');
+  const proposalKey=JSON.stringify([row.id,matching]);if(proposalKey!==proposalRenderKey && !$('metadata-proposals').contains?.(document.activeElement)){proposalRenderKey=proposalKey;$('metadata-proposals').replaceChildren();for(const proposal of matching.proposals || []){const panel=node('section','','proposal'),authors=Array.isArray(proposal.authors)?proposal.authors.join('; '):proposal.authors || '';panel.append(node('p',`${proposal.title || 'Unknown title'} · ${authors || 'Author unknown'}`),node('p',[proposal.original_language,proposal.series,proposal.number,'Original work match; recording unverified'].filter(Boolean).join(' · ')),proposal.manual_source?node('p','Entered by you · '+(proposal.per_field_evidence?.saved_utc || '')):sourceLink(proposal.public_url,`${proposal.provider || 'Source'}: ${proposal.title || 'book identity'}`));const evidence=node('details');evidence.append(node('summary','View evidence'),node('pre',JSON.stringify(proposal.per_field_evidence || {},null,2)));panel.append(evidence);const use=node('button','Use as proposal');use.type='button';use.title='Fill draft metadata from this match. Review the fields before approving.';use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;proposalId=proposal.id;if(proposal.title)form.elements.namedItem('title').value=proposal.title;if(authors)form.elements.namedItem('canonical_author').value=authors;if(proposal.original_language && !['unknown','und'].includes(proposal.original_language.toLowerCase())){const lang=proposal.original_language.toLowerCase();form.elements.namedItem('original_language').value=['russian','ru','rus'].includes(lang)?'Russian':'Other';}if(proposal.universe)form.elements.namedItem('universe').value=proposal.universe;if(proposal.series)form.elements.namedItem('series').value=proposal.series;if(proposal.number!==null && proposal.number!==undefined)form.elements.namedItem('number').value=String(proposal.number);dirty=true;noteOnlyDirty=false;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Proposal copied to draft. Review its sourced fields before saving.';controls();});panel.append(use);$('metadata-proposals').append(panel);}}
   renderMembers(row);renderCovers(row);
   $('chapters-control').hidden=!creation.chapters_available;$('add-chapters').disabled=!creation.chapters_available || busy;$('chapters-help').textContent=creation.chapters_available?"Preserves source track names when available. Unnamed tracks use Track 01, Track 02, and so on. These markers may differ from the book's written chapters.":creation.chapters_description || 'Chapter boundaries unavailable.';
   $('output-status').textContent=candidateStatus(row);$('output-path').textContent=creation.destination || 'No reviewed destination yet.';
@@ -985,10 +1040,8 @@ $('find-metadata').addEventListener('click',()=>candidateRequest('/api/candidate
 $('edit-held-metadata').addEventListener('click',()=>{if(!selectedRow || ended)return;if(selectedRow.metadata_questions?.unresolved_count){$('manual-review').open=true;const heading=$('metadata-questions-heading');heading.scrollIntoView?.({block:'center',behavior:'auto'});heading.focus?.({preventScroll:true});return;}$('manual-review').open=true;const field=(selectedRow.metadata_holds || []).flatMap(item=>item.fields || [])[0] || 'title';const control=form.elements.namedItem(field) || form.elements.namedItem('title');control?.scrollIntoView?.({block:'center',behavior:'auto'});control?.focus?.({preventScroll:true});});
 $('check-metadata').addEventListener('click',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');});
 $('find-covers').addEventListener('click',()=>candidateRequest('/api/candidate/covers'));
-$('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:$('manual-evidence').value});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;
-  // Futaba's 0.22.0 QA, M-3: the note typed for this save went with it (evidence_note), so a note alone no longer counts as
-  // unsaved metadata; and the rows update now, not at the next poll, so Approve this order works as soon as the save lands.
-  if(dirty && noteOnlyDirty){dirty=false;noteOnlyDirty=false;manualMetadataTouched=false;reviewRow=selectedRow;$('review-note').textContent='Saved only in the local catalog.';}
+$('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:''});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;
+  // The rows update now, not at the next poll, so Approve this order works as soon as the save lands (Futaba 0.22.0 M-3).
   syncManualDraft();renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');controls();}});
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
 $('create-audiobook').addEventListener('click',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');});
@@ -2201,8 +2254,8 @@ function renderAutomaticResult(row){
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row),members.get(key).missing?'Not found':''].filter(Boolean).join('\n')));
   const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(source.kind==='manual_metadata'?node('span','Entered by you'):sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
-  const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',manual_note:context.manual_note || '',metadata_provenance:row.metadata_facts || null,recording_review:row.duplicate_review || null};
-  $('automatic-accepted-evidence').textContent=plainEvidence(JSON.stringify(accepted,null,2));$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.manual_note && !accepted.metadata_provenance && !accepted.recording_review;
+  const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',metadata_provenance:row.metadata_facts || null,recording_review:row.duplicate_review || null};
+  $('automatic-accepted-evidence').textContent=plainEvidence(JSON.stringify(accepted,null,2));$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.metadata_provenance && !accepted.recording_review;
 }
 async function ensureCandidateInspector(row){
   const identity=recordIdentity(row),key=JSON.stringify([identity,row.revision,row.creation?.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook]);

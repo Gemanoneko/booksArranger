@@ -606,7 +606,9 @@ class CandidateReviewService:
             if approve and not user_approval:
                 import metadata_choices
                 metadata_choices.admission(self.metadata_questions(row,ctx),review)
-            if approve and (not manual_note.strip() or not (review.get('canonical_author') or '').strip()):raise ValueError('Confirm the author role and record metadata evidence')
+            # Ruling 36 (Sergei 2026-10-26): his entries are final (ruling 6a); nothing asks him for evidence. The assistant's
+            # own approvals still carry theirs (_actor).
+            if approve and (actor=='assistant' and not manual_note.strip() or not (review.get('canonical_author') or '').strip()):raise ValueError('Confirm the author first.' if actor=='user' else 'Confirm the author role and record metadata evidence')
             if cover_id is not None and not any(c['id']==cover_id for c in ctx.get('cover_choices',[])):raise ValueError('Choose a discovered local cover')
             trial=copy.deepcopy(ctx);trial['cover_id']=cover_id or ctx.get('cover_id')
             if approve and not self._cover(trial):raise ValueError('Choose a usable cover')

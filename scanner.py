@@ -563,7 +563,9 @@ class Inventory:
                 context=db.execute('SELECT * FROM candidate_context WHERE id=?',(identity,)).fetchone()
                 if context:
                     data=json.loads(context['data'])
-                    if data.get('metadata_approved') or data.get('automatic_pending') or data.get('manual_draft_active') or data.get('manual_note') or data.get('metadata_actor')=='user' or data.get('track_actor')=='user':
+                    # Ruling 36: Sergei's "Entered by you" values protect the book, never an evidence text.
+                    entered=table(db,'manual_metadata_sources') and db.execute('SELECT 1 FROM manual_metadata_sources WHERE candidate_id=? LIMIT 1',(identity,)).fetchone() is not None
+                    if data.get('metadata_approved') or data.get('automatic_pending') or data.get('manual_draft_active') or entered or data.get('metadata_actor')=='user' or data.get('track_actor')=='user':
                         raise ValueError('Approved metadata or manual editing evidence is preserved')
             else:context=None
             automatic_unapproved=bool(context and context['revision']==revision and data.get('automatic_approval'))

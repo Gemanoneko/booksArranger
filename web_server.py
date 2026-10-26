@@ -1090,7 +1090,14 @@ class Handler(BaseHTTPRequestHandler):
             evidence=data.get('evidence')
             if evidence is not None and (not isinstance(evidence,list) or len(evidence)>30 or any(not isinstance(item,dict) for item in evidence)): raise ValueError('Invalid evidence records')
             kwargs['evidence']=evidence
-            row=reviews.save(library,id,revision,self.review_data(data['review']),**kwargs)
+            try:row=reviews.save(library,id,revision,self.review_data(data['review']),**kwargs)
+            except ValueError as error:
+                if 'Candidate changed' not in str(error):raise
+                # A background update moved the book on (2026-10-26, Save preview metadata): typed, with the book as it is
+                # now, so the page keeps Sergei's values and saves them again on the new revision (ruling 35).
+                try:current=reviews.enrich(reviews._row(library,id))
+                except ValueError:current=None
+                self.response(409,{'error':str(error),'code':'changed','row':current});return
         else:
             for key in ('order','included'):
                 values=data[key]

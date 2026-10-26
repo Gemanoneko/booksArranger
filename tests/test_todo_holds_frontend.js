@@ -78,7 +78,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     const o1=JSON.parse(run('JSON.stringify(rows.find(row=>row.id==="cand-o1"))'));inventoryRows=context.fixture.map(row=>({...row}));
     tracksAnswer=()=>({ok:true,status:200,json:async()=>({saved:true,row:o1})});
     run('trackDraft={id:"cand-o1",revision:2,order:[],included:[]};trackDirty=true;manualTrackTouched=true;controls()');
-    get('manual-evidence').value='Listened to every join.';get('review-form').handlers.input({target:get('manual-evidence')});
+    // Ruling 36 (Sergei 2026-10-26): there is no evidence note to type any more; the unsaved order alone holds Approve.
     assert.equal(buttonsOf(tr)[0].title,'Save or discard the edits in the details panel first.','positive control: inert while the edits are unsaved');
     await get('save-tracks').handlers.click();await tick();
     tr=trOf('cand-o1');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null,'Approve works as soon as the save lands');
