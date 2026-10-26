@@ -2772,7 +2772,10 @@ class MergeService:
         entries=entered_names.plan(row,values,read,scope,now)
         press=entered_names.save(self.inventory.database,row,entries) if entries else ''
         try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values)
-        except BaseException:
+        except BaseException as error:
+            if press and (self.draining or self.__dict__.get('_closing')):
+                # Ruling 35: closing is no reason to lose his input; the names stay saved for the next session.
+                raise ValueError('Books Arranger is closing. Your names are saved; approve again after it restarts.') from error
             if press:self._names_take_back(press)
             raise
 
@@ -2795,7 +2798,9 @@ class MergeService:
             include=set(present)
         safety=[r for r in result.get('reasons',[]) if r in self.APPROVAL_SAFETY_REASONS and not (include and r=='Source files unavailable or unreadable')]
         if safety:raise ValueError('; '.join(dict.fromkeys(safety)))
-        if not result.get('work') or not result.get('review'):raise ValueError('Approve was not accepted. Nothing was changed.')
+        if not result.get('work') or not result.get('review'):
+            # «Спящие красавицы» (2026-10-26): never the bare sentence; the reason the research gave, else the identity.
+            raise ValueError("Approve was not accepted: the app couldn't read this book's identity from its files"+(' ('+'; '.join(dict.fromkeys(result.get('reasons') or []))[:300]+')' if result.get('reasons') else '')+'. Type its title and author, then approve. Nothing was changed.')
         # Futaba's 0.22.0 QA, m-9: a name taken since the row was shown refused only in build_manifest, after the approval
         # (the review, "Approved by you", the track order) was written, so the row said "Nothing was changed" while the book
         # left the to-do list until the next Start. The destination is checked before anything is written; the late check

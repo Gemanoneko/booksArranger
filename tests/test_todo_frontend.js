@@ -103,7 +103,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // Ctrl+Enter approves with exactly what is shown: the typed author, not the untouched title.
   buttonsOf(tr)[0].focus();document.activeElement=author;
   await author.handlers.keydown(key('Enter',{ctrlKey:true}));await tick();
-  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-a',revision:2,author:'Лей Бардуго',path:'Лей Бардуго\\x.m4b'},'the Goes to line shown (m1)');
+  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-a',revision:2,author:'Лей Бардуго',path:'Лей Бардуго\\x.m4b',queue:true,label:'Title a'},'the Goes to line shown (m1)');
   // The cell's own text changes in place (statusInPlace, a text node the doubles don't model): read it as a rebuild would.
   assert.equal(run('candidateStatus(rows.find(row=>row.id==="cand-a"))'),'Queued');assert.equal(statusCell(tr).children[0].textContent,'Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.');
   assert.equal(buttonsOf(tr)[0].textContent,'Queued');assert.equal(buttonsOf(tr)[0].disabled,true);
@@ -112,7 +112,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(document.activeElement,inputs(trOf('cand-b'))[0],"focus moves to the next row's first field");
   // Approve as is: nothing typed sends no values.
   await buttonsOf(trOf('cand-b'))[0].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-b',revision:2,path:'Без автора\\Sbornik_Deti_Primarhov.m4b'});
+  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-b',revision:2,path:'Без автора\\Sbornik_Deti_Primarhov.m4b',queue:true,label:'Title b'});
   // The approved rows leave at the next refresh, even with focus elsewhere in the list.
   document.activeElement=buttonsOf(trOf('cand-u'))[0];context.fixture=[unclear,reader,taken,someGone,allGone,same];run('rows=fixture.map(row=>({...row}));renderRows(false)');
   assert.equal(trOf('cand-a'),undefined);assert.equal(trOf('cand-b'),undefined);assert.ok(trOf('cand-u'));
@@ -143,7 +143,8 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'An audiobook already exists at this path.',code:'name_taken',row:null})});
   previewAnswer=data=>({ok:true,status:200,json:async()=>({preview:{path:'Льюис\\'+data.title+'.m4b',absolute:'',taken:true}})});
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,'Approve was not accepted. Nothing was changed.');assert.ok(statusCell(tr).children[0].classes.has('retry-refused'));
+  // «Спящие красавицы» (2026-10-26): the gate's own reason and next step, never the bare refusal.
+  assert.equal(statusCell(tr).children[0].textContent,'An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve.');assert.ok(statusCell(tr).children[0].classes.has('retry-refused'));
   assert.match(goesTo(tr),/^Already there /);assert.equal(inputs(tr)[0].value,'Хроники Нарнии 2 (другое издание)');
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Candidate changed; reload evidence before reviewing',code:'changed',row:null})});previewAnswer=null;
   title.value='Хроники Нарнии 2 (третье)';title.handlers.input();await title.handlers.blur();await tick();
@@ -159,17 +160,18 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
   {const hint=statusCell(tr).children[0];assert.match(hint.textContent+hint.children.map(span=>span.textContent).join(''),/^1 of 9 files is missing\. Checked \d\d:\d\d\. Not found\.$/);}
   await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,without_missing:true,path:'Без автора\\Новая плоть.m4b'});
+  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-m',revision:2,without_missing:true,path:'Без автора\\Новая плоть.m4b',queue:true,label:'Title m'});
   assert.equal(statusCell(tr).children[0].textContent,'Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.');
   assert.equal(get('retry-all-status').textContent,'Approved 1 book without its missing files. Track it under Queued / creating.');
   tr=trOf('cand-g');assert.equal(statusCell(tr).textContent,'All files missing');assert.equal(statusCell(tr).children[0].textContent,'All 5 files are missing.');
   assert.equal(goesTo(tr),'','no destination for a book with nothing left');
   assert.ok(walk(statusCell(tr)).some(e=>e.textContent==='+ 2 more, listed in the details panel.'),'up to 3 names in the row');
   assert.deepEqual([...buttonsOf(tr)].slice(0,2).map(b=>b.textContent),['Scan again','Remove from list']);
-  scanAnswer=()=>({ok:false,status:409,json:async()=>({error:'refused',code:'refused'})});await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,'Scan did not finish. Nothing was changed.');scanAnswer=null;
+  // The engine's own sentence (2026-10-26), never the bare "Scan did not finish".
+  scanAnswer=()=>({ok:false,status:409,json:async()=>({error:"The book's folder can't be read",code:'refused'})});await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
+  assert.equal(statusCell(tr).children[0].textContent,"The book's folder can't be read. Nothing was changed.");scanAnswer=null;
   await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(posted('/api/candidate/dismiss').at(-1),{library:'Audiobooks',id:'cand-g',revision:2});
+  assert.deepEqual(posted('/api/candidate/dismiss').at(-1),{library:'Audiobooks',id:'cand-g',revision:2,queue:true,title:'Title g'});
   assert.equal(get('retry-all-status').textContent,'Removed 1 book from the list. No files were touched.');
 
   // 6. Same author?: nothing preselected; Approve with no choice remembers nothing; a choice is sent and announced.
@@ -182,7 +184,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   radios(tr)[0].checked=true;await radios(tr)[0].handlers.change();await tick();
   assert.deepEqual(posted('/api/candidate/approve-preview').at(-1),{library:'Audiobooks',id:'cand-s',revision:2,author:'Terry Pratchett'});
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-s',revision:2,choice:'same',path:'Terry Pratchett\\x.m4b'});
+  assert.deepEqual(posted('/api/candidate/approve').at(-1),{library:'Audiobooks',id:'cand-s',revision:2,choice:'same',path:'Terry Pratchett\\x.m4b',queue:true,label:'Title s'});
   assert.equal(get('retry-all-status').textContent,'Remembered. 3 books continue.');
 
   // 7. Bulk Approve as is: only in the two chips, selected rows only, never typed rows, inert rows or a reader author.
@@ -201,12 +203,12 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(get('approve-dialog-left').textContent,'2 selected books are left out. They need a different action.');assert.equal(get('approve-dialog-left').hidden,false);
   get('approve-cancel').handlers.click();assert.equal(document.activeElement,get('approve-selected'));
   get('approve-selected').handlers.click();
-  let first=true;approveAnswer=data=>{if(data.id==='cand-u3')return {ok:false,status:409,json:async()=>({error:'refused',code:'refused'})};return {ok:true,status:200,json:async()=>({approved:true,job_id:'j',row:{}})};};
+  let first=true;approveAnswer=data=>{if(data.id==='cand-u3')return {ok:false,status:409,json:async()=>({error:'Split book parts are different recordings (audio profiles differ)',code:'profiles'})};return {ok:true,status:200,json:async()=>({approved:true,job_id:'j',row:{}})};};
   const before=posted('/api/candidate/approve').length;const runs=[get('approve-confirm').handlers.click(),get('approve-confirm').handlers.click()];await Promise.all(runs);await tick();
   const bulk=posted('/api/candidate/approve').slice(before);
-  assert.deepEqual(bulk,[{library:'Audiobooks',id:'cand-u2',revision:2,path:'Шрайбер Джо\\Солдаты смерти - Шрайбер Джо.m4b'},{library:'Audiobooks',id:'cand-u3',revision:2,path:'Шрайбер Джо\\Другая.m4b'}],'once each, as is, despite a double click; each with the path the dialog listed');
+  assert.deepEqual(bulk,[{library:'Audiobooks',id:'cand-u2',revision:2,path:'Шрайбер Джо\\Солдаты смерти - Шрайбер Джо.m4b',queue:true,label:'Title u2'},{library:'Audiobooks',id:'cand-u3',revision:2,path:'Шрайбер Джо\\Другая.m4b',queue:true,label:'Title u3'}],'once each, as is, despite a double click; each with the path the dialog listed');
   assert.equal(get('retry-all-status').textContent,'Approved 1 of 2. 1 stays listed with its reason.');
-  assert.equal(statusCell(trOf('cand-u3')).children[0].textContent,'Approve was not accepted. Nothing was changed.');
+  assert.equal(statusCell(trOf('cand-u3')).children[0].textContent,'The files are different recordings (their audio differs). Choose the files that belong in the details panel, then approve.');
   assert.equal(document.activeElement,get('group-author_unclear'),'focus returns to the active chip');
   approveAnswer=null;
 
@@ -240,7 +242,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     const note='author tag; Sergei\'s rule (ruling 12) for "Терри Пратчетт"; a reader named in Sergei ruling 1 (2026-10-13); Set name + part number (rulings 13 and 15); Sergei: not an author';
     const stored={...noAuthor,kind:'candidate',review_context:{metadata_actor:'user',metadata_evidence:[{field:'title',reviewer_identity:'Sergei (Approve)',basis,note}],manual_note:'(Sergei 2026-10-24, ruling 6a)'}};
     run('select('+JSON.stringify(stored)+',true)');
-    for(const id of ['accepted-evidence','automatic-accepted-evidence']){
+    for(const id of ['automatic-accepted-evidence']){  // ruling 36: the metadata panel's evidence display is gone
       const text=get(id).textContent;assert.ok(text.includes('Approved by you on 2026-10-25'),id+': positive control, the evidence is shown');
       assert.doesNotMatch(text,/Sergei|ruling/i,id);
     }

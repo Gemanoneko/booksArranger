@@ -58,7 +58,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(run('damageHint('+JSON.stringify({damage:[{kind:'truncated_final_frames',frames:1,replaced_ticks:1024,timescale:44100}]})+')'),'The last 0.02 s of audio is missing. Repair fills it with silence.');
   assert.equal(run('patchCopy('+JSON.stringify({kind:'truncated_final_frames'})+')'),'Filled the missing end of the audio with silence.','no amount from the API, no number');
   // 0.22.1 (Judy 1.1): Retry is no longer disabled while another press runs; it stays enabled and a press is queued.
-  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
+  run('busy=true;controls()');assert.equal(actionButtons(trs[0])[0].disabled,false);assert.equal(actionButtons(trs[0])[0].title,'Queue this retry. The app is working on another action; it starts when the current action finishes.');assert.equal(statusCell(trs[0]).children[0].textContent,'Safe to retry now.','busy is tooltip only');run('busy=false;controls()');
 
   // Row Retry: one request, pending hint, then the book is queued; focus lands back in the list.
   let answer;retryOverride=()=>new Promise(resolve=>{answer=resolve;});inventoryRows=[space,unsupported,other,repair];const sent=calls.length;

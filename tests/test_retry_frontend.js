@@ -71,7 +71,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   show(row);assert.equal(button.disabled,false);assert.equal(note.hidden,true);
   // States 4 and 5, busy and offline, in the specified resolution order.
   // 0.22.1 (Judy 1.1): another press running no longer disables Retry; it stays enabled and a press is queued.
-  run('busy=true;controls()');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(note.hidden,true);
+  run('busy=true;controls()');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. The app is working on another action; it starts when the current action finishes.');assert.equal(note.hidden,true);
   run('recoveryDisconnected=true;controls()');assert.equal(button.title,'Local server unavailable.','offline wins over busy');assert.equal(note.textContent,'Local server unavailable.');
   run('busy=false;recoveryDisconnected=false;ended=true;controls()');assert.equal(button.disabled,true);assert.equal(button.title,'Local server unavailable.');
   run('ended=false;controls()');assert.equal(button.disabled,false);assert.equal(note.hidden,true);
@@ -111,7 +111,7 @@ const button=get('retry-job'),note=get('retry-note'),block=get('retry-block');
   let late;retryOverride=()=>new Promise(resolve=>{late=resolve;});show(row);inventoryRows=[row];document.activeElement=button;const switching=run('retryJob()');
   const other=blocked({id:'cand-b',path:'cand-b',title_clue:'Другая книга',review:{title:'Другая книга'}},{job_id:'job-b'});show(other);
   // 0.22.1 (Judy 1.1): the other book's Retry stays enabled while the first press runs; a press there would be queued.
-  assert.equal(button.textContent,'Retry');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. Another operation is in progress; it starts when the current operation finishes.');assert.equal(button.getAttribute('aria-label'),'Retry: Другая книга');
+  assert.equal(button.textContent,'Retry');assert.equal(button.disabled,false);assert.equal(button.title,'Queue this retry. The app is working on another action; it starts when the current action finishes.');assert.equal(button.getAttribute('aria-label'),'Retry: Другая книга');
   inventoryRows=[other];late({ok:false,status:409,json:async()=>({error:refused})});await switching;
   assert.notEqual(note.textContent,refused,'no stale note from the other book');assert.equal(button.disabled,false);assert.notEqual(document.activeElement,get('details-heading'));
   retryOverride=null;

@@ -184,7 +184,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   answers['/api/candidate/delete']=()=>ok({queued:true,id:'d-2',position:1,blocker:{kind:'operation'}},202);
   await get('delete-confirm').handlers.click({});for(let i=0;i<4;i++)await tick();
   assert.equal(run('deleteDialog'),null);assert.equal(buttonsOf(trOf('cand-n')).find(b=>b.className.includes('danger')).textContent,'Delete queued');
-  assert.equal(hint(trOf('cand-n')),'Delete queued. Nothing is deleted yet. It runs when the current operation finishes.');
+  assert.equal(hint(trOf('cand-n')),'Delete queued. Nothing is deleted yet. It runs when the current action finishes.');
   // Approve as is leaves a row with a queued delete out (1.3).
   assert.equal(run('deleteQueued(rows[0])'),true);
   // Section 5 (n = 0): the files line and the face.
@@ -205,7 +205,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   backend={...backend,queued_actions:[item('q-9','retry','cand-a',1,'operation')],queue_running:null,queue_outcomes:[]};
   await run('refresh(true)');assert.equal(run('queueState.queued.length'),1);
   run('askBulk=true');assert.equal(run('queueS("operation")'),'A bulk approval is in progress');run('askBulk=false');
-  assert.equal(run('queueS("no_such_kind")'),'Another operation is in progress','an unknown kind reads as operation');
+  assert.equal(run('queueS("no_such_kind")'),'The app is working on another action','an unknown kind reads as operation (ruling 35: never "Another operation is in progress")');
   // N1 (Judy's implementation check): Delete book on a row with a queued Retry or Repair says which, not "Another
   // operation is in progress." (nothing else runs); inert, focus kept. The mirror of the sibling sentence above.
   paint([missing('w')]);queue({queued_actions:[item('q-r','retry','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
@@ -213,7 +213,7 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   queue({queued_actions:[item('q-p','repair','cand-w',1)],queue_running:null,queue_outcomes:[]});run('updateDeleteButtons()');
   assert.equal(byText(trOf('cand-w'),'Delete book').title,'A repair is queued for this book. Cancel it to use this.');
   queue({queued_actions:[],queue_running:{id:'q-p',action:'repair',book_id:'cand-w',title:'Title w'},queue_outcomes:[]});run('updateDeleteButtons()');
-  assert.equal(byText(trOf('cand-w'),'Delete book').title,'Another operation is in progress.','a running repair is another operation');
+  assert.equal(byText(trOf('cand-w'),'Delete book').title,'Delete this book. The app is working on another action, so the delete is queued after you confirm.','a running repair: the delete queues behind it (ruling 35)');
   queue({queued_actions:[],queue_running:null,queue_outcomes:[]});
   console.log('PASS queued Retry and Delete book: blocked tooltips, queued faces with Cancel, order and count, cancel and too late, every outcome line, the blocked dialog, inert siblings, bulk left out, n = 0 copy');
 })().catch(error=>{console.error(error);process.exitCode=1;});

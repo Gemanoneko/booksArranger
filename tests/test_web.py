@@ -202,7 +202,7 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual(self.json_call('/api/queue/cancel',{'id':second['id']}),(409,{'error':'It has already started.','code':'started'}),'gone: too late')
             self.server.actions.drop()
         self.assertEqual(self.call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':'yes'})[0],400,'an explicit boolean')
-        self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True,'mode':'copy'})[0],400,'Remove this copy does not queue')
+        self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True,'mode':'copy'})[0],200,'ruling 35: Remove this copy queues too')
         # Retry all leaves queued presses out (Judy 1.3); with nothing queued it is asked exactly as before.
         with patch.object(merge,'retry_all',return_value={'id':'run','state':'running','total':2}) as asked,patch.object(self.server.actions,'queued_jobs',return_value={job}):
             self.assertEqual(self.call('/api/audiobook/retry-all',{'library':'Audiobooks'})[0],202)
@@ -260,7 +260,10 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(saved['row']['review']['universe'],'QA Universe')
         self.assertEqual(saved['row']['review']['canonical_author'],'Jane Writer')
         self.assertIn('QA Universe',saved['row']['preview']['path'])
-        self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400)
+        # A stale revision (2026-10-26, Save preview metadata): typed 409 with the book as it is now, so the page saves his
+        # values again on the new revision (ruling 35).
+        code,stale=self.json_call('/api/candidate/review',payload)
+        self.assertEqual((code,stale['code'],stale['row']['revision']),(409,'changed',saved['row']['revision']))
         payload['revision']=saved['row']['revision'];payload['approve']=True
         self.assertEqual(self.json_call('/api/candidate/review',payload)[0],400,'Unreadable members block approval')
         self.assertEqual(self.json_call('/api/inventory?library=Ebooks&view=candidates')[0],400)

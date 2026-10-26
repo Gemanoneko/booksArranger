@@ -46,7 +46,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(keep.textContent,'Keep files');assert.equal(keep.title,"Keep this book's files and stop flagging it. Nothing is deleted.");
   assert.equal(keep.getAttribute('aria-label'),'Keep files: Title a');assert.ok(keep.className.split(' ').includes('quiet'));assert.equal(keep.disabled,false);
   for(const tr of trs)assert.ok(![...actionButtons(tr)].some(button=>/^(Retry|Repair|Check again|Convert again)$/.test(button.textContent)),'no remedy button and no disabled ghost');
-  run('busy=true;controls()');assert.equal(keep.disabled,true);assert.equal(keep.title,'Another operation is in progress.');run('busy=false;controls()');
+  run('busy=true;controls()');assert.equal(keep.disabled,false,'ruling 35: another press never disables it');assert.notEqual(keep.title,'Another operation is in progress.');run('busy=false;controls()');
 
   // Keep files: one request (double press ignored), pending copy, then "Files kept at your choice." before the list reloads.
   let answer;keepOverride=()=>new Promise(resolve=>{answer=resolve;});let listGate;inventoryOverride=()=>new Promise(resolve=>{listGate=resolve;});

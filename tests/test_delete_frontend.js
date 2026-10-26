@@ -204,7 +204,7 @@ const FILES=[{path:FOLDER+'\\01.m4b',size:700*1024*1024},{path:FOLDER+'\\02.m4b'
   prevented=false;get('delete-dialog').handlers.keydown({key:'Enter',target:get('delete-dialog-list'),preventDefault(){prevented=true;}});assert.ok(prevented,'Enter confirms nothing in copy mode either');
   deleteAnswer=()=>ok({deleted:2,bytes:20,failed:[],forgotten:true,folders:{removed:0,stayed:0}});
   await get('delete-confirm').handlers.click({});await tick();
-  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-v',revision:2,paths:COPY.map(f=>f.path),folders:[],mode:'copy'});
+  assert.deepEqual(posted('/api/candidate/delete').at(-1),{library:'Audiobooks',id:'cand-v',revision:2,paths:COPY.map(f=>f.path),folders:[],mode:'copy',queue:true,title:'Title v'});
   assert.match(get('retry-all-status').textContent,/^Removed 1 copy and 2 files \(.+\)\.$/);assert.equal(run('deleteNotes.get("cand-v").text'),'Removed. The copy is gone from the app.');
   // Refusals in copy mode: the audiobook gone, changed, a copy file no longer matching; never next to the Sorted block.
   previewAnswer=()=>ok({files:[],bytes:0,folders:[],stay:{items:0},last_copy:null,sorted:null,refusal:{code:'sorted_missing',message:'x'}});

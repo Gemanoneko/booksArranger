@@ -93,7 +93,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(get('retry-job').hidden,true,'no Retry, no Start over on the held row');
   assert.equal(get('automatic-status').textContent,'Automatic processing: Running');
   backend={...backend,automatic_processing:{...backend.automatic_processing,...IDLE}};
-  assert.equal(document.activeElement?.textContent,'View metadata','focus: the row\'s first remaining button');
+  assert.equal(document.activeElement?.textContent,'Edit names','focus: the row\'s first remaining button');
   assert.ok([...actionButtons(tr)].includes(document.activeElement),'in the row as painted now, never a detached button');
   assert.ok(!/Pending|Needs attention/.test(get('automatic-result-status').textContent));
 
@@ -162,7 +162,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   const release=actionButtons(tr)[0];
   assert.equal(release.textContent,'Let the app handle it');assert.equal(release.getAttribute('aria-label'),'Let the app handle it: Title h');
   assert.equal(release.title,"Discard this book's saved review, including any edits you made by hand, and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. Your audio files are not touched.");
-  assert.equal(actionButtons(tr)[1].textContent,'View metadata','first slot, then View metadata');
+  assert.equal(actionButtons(tr)[1].textContent,'Edit names','first slot, then Edit names (Judy 0.22.2 1.1)');assert.equal(actionButtons(tr)[2].textContent,'View metadata','then View metadata');
   assert.equal(status(heldRow('l',{automatic:{state:'Held',reasons:['Manual draft retained'],hold:'manual_draft',lease:true},release:{allowed:false}})),'Held — Manual draft retained','negative control: an editor open, no button');
   assert.ok(![...actionButtons(rowOf('l'))].some(button=>button.textContent==='Let the app handle it'));
   replies['/api/audiobook/release']=()=>accepted({released:true,outcome:'automatic',pass:{action:'running',visit:'this_run'},automatic_processing:RUNNING,row:marked('h',{state:'waiting',kind:'release'})});
@@ -271,7 +271,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   const clear=actionButtons(tr)[1];
   assert.equal(clear.textContent,'Clear working files');assert.equal(clear.disabled,false);assert.equal(clear.getAttribute('aria-label'),'Clear working files: Title cw');
   assert.equal(clear.title,'Delete the working files an earlier attempt left behind. Originals are not touched. Frees about 637 MB.');
-  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','View metadata','Source folders'],'Retry, Clear, then navigation');
+  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','Edit names','View metadata','Source folders'],'Retry, Clear, then navigation');
   assert.equal(techOf(tr),'Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   // Repair: the same rule with its own verb.
   const repairable=m4bRow('rw',{retry:undefined,repair:{allowed:true,reason:''},attention:{group:'repair',cause:null,originals_untouched:true,damage:[{kind:'dangling_chapter_reference'}],working:{state:'cleanable',bytes:10,reason:'r'}}});
@@ -320,17 +320,18 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
     assert.equal(statusCell(rowOf('cw')).children[0].textContent,words,cause);assert.ok(statusCell(rowOf('cw')).children[0].classes.has('retry-refused'));
     assert.equal(actionButtons(rowOf('cw'))[1].hidden,false,'still cleanable: the button stays');
   }
-  // Another request in flight: the button is not disabled; the press is answered in the note.
+  // Another request in flight (ruling 35): the press is accepted and waits for it, with Cancel; never "Another operation".
   paint([cleanable]);run('retryPending={key:"other",kind:"retry"};controls()');assert.equal(actionButtons(rowOf('cw'))[1].disabled,false);
-  assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. Another operation is in progress/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
+  assert.match(actionButtons(rowOf('cw'))[0].title,/^Queue this retry\. The app is working on another action/,'positive control: Retry sees the other press (0.22.1: it would be queued)');
   const sent=posts.length;await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
-  assert.equal(posts.length,sent);assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Another operation is in progress. Try again in a moment.');run('retryPending=null;retryResult=null;controls()');
+  assert.equal(posts.length,sent,'nothing is sent while the other press runs');assert.equal(statusCell(rowOf('cw')).children[0].textContent,'Clear working files queued. It runs when the current action finishes.');
+  assert.equal(run('laterPresses.length'),1);run('laterPresses.length=0;retryPending=null;retryResult=null;controls()');
   // Blocked: its own status, no Retry, no Clear; the reason and the folder in Technical detail only.
   const blockedRow=m4bRow('bw',{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,working:{state:'blocked',stops:true,bytes:null,reason:'A file the app did not record is in the working folder: x.wav'},working_folder:FOLDER}});
   paint([blockedRow]);tr=rowOf('bw');
   assert.equal(statusCell(tr).textContent,"Stopped — can't clear working files");
   assert.equal(statusCell(tr).children[0].textContent,"Working files from an earlier attempt are still present, and the app can't clear them safely right now.");
-  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['View metadata','Source folders']);
+  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Edit names','View metadata','Source folders']);
   assert.equal(techOf(tr),'Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   const unreachable={...blockedRow,creation:{...blockedRow.creation,job:{...blockedRow.creation.job,attention:{...blockedRow.creation.job.attention,working:{state:'blocked',stops:true,cause:'originals_unreachable',reason:'r'}}}}};
   assert.equal(text(unreachable).hint,"Working files from an earlier attempt are still present, and the app can't clear them while the original files can't be reached. Check that the library drive is connected.");

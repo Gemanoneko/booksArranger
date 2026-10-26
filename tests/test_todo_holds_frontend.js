@@ -87,7 +87,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   }
   // Approve this order sends the row as shown.
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b'},'with the Goes to line shown (m1)');
+  assert.deepEqual(JSON.parse(calls.filter(c=>c.route==='/api/candidate/approve').at(-1).options.body),{library:'Audiobooks',id:'cand-o1',revision:2,path:'Джордан Роберт\\Колесо Времени - Джордан Роберт.m4b',queue:true,label:'Title o1'},'with the Goes to line shown (m1)');
   // Scan again on a hold row: unchanged -> "Checked hh:mm. No change."; changed -> the book leaves and is checked again.
   tr=trOf('cand-o2');await buttonsOf(tr)[2].handlers.click({stopPropagation(){}});await tick();
   assert.match(hint(tr),/^3 of 12 files have no track number\. Checked \d\d:\d\d\. No change\.$/);
@@ -159,13 +159,13 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   {const sent=calls.filter(c=>c.route==='/api/candidate/keep-separate').length;
    await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
    const posts=calls.filter(c=>c.route==='/api/candidate/keep-separate');assert.equal(posts.length,sent+1);
-   assert.deepEqual(JSON.parse(posts.at(-1).options.body),{library:'Audiobooks',id:'cand-s1',revision:2});
+   assert.deepEqual(JSON.parse(posts.at(-1).options.body),{library:'Audiobooks',id:'cand-s1',revision:2,queue:true,title:'Title s1'});
    assert.equal(statusCell(tr).children[0].textContent,'Kept as separate books. Each is checked again.');
    assert.equal(get('retry-all-status').textContent,'Kept as 4 separate books. Each is checked again.');}
   // Refused: its own line; the row stays.
-  keepAnswer=()=>({ok:false,status:409,json:async()=>({error:'not a set',code:'refused'})});tr=trOf('cand-s2');
+  keepAnswer=()=>({ok:false,status:409,json:async()=>({error:'These files are not a set of parts asked about. Nothing was changed.',code:'refused'})});tr=trOf('cand-s2');
   await buttonsOf(tr)[1].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,'Keep as separate books was not accepted. Nothing was changed.');keepAnswer=null;
+  assert.equal(statusCell(tr).children[0].textContent,'These files are not a set of parts asked about. Nothing was changed.');keepAnswer=null;
   paint(parts);
   tr=trOf('cand-p1');assert.equal(walk(statusCell(tr)).filter(e=>e.type==='text')[0].value,'Колесо Времени','Title always shows here');
   assert.equal(buttonsOf(tr)[0].title,'File what is shown as one whole book: convert if needed, rename, move to Audiobooks Sorted.');

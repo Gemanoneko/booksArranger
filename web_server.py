@@ -129,6 +129,23 @@ LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
 NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
 # Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
 LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names'}  # 0.22.2: opening Edit names only reads (Judy 1.7)
+def approve_code(text):
+    """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
+    the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
+    for code, marks in APPROVE_CODES:
+        if any(mark in text for mark in marks):
+            return code
+    return 'title' if text == 'Type a title first.' else 'refused'
+
+
+APPROVE_CODES = (('changed', ('Candidate changed', 'Source files changed', 'evidence changed')), ('moved', ('Destination changed',)),
+                 ('job_exists', ('Audiobook job already exists',)), ('name_taken', ('already exists',)),
+                 ('format', ('Audio format needs an encoding decision',)), ('profiles', ('audio profiles differ',)),
+                 ('chapters', ('carry their own chapters', 'must keep its chapters', 'has no chapters of its own', 'without its own chapters', 'could not be checked; the whole set')),
+                 ('cover', ('Cover not verified', 'Cover evidence bytes changed', 'Cover decoder unavailable', 'Neutral artwork cache changed')),
+                 ('sources', ('Source files unavailable or unreadable', 'Folder contents could not be checked')),
+                 ('draft', ('Manual draft retained',)), ('closing', ('is closing',)), ('binding', ('Collection source/component binding changed',)),
+                 ('identity', ('Book identity uncertain', 'Author and work not independently verified', "couldn't read this book's identity")))
 NAMES_ROUTES = ('/api/candidate/names', '/api/candidate/names-save', '/api/candidate/names-forget')
 NAME_FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection')
 NAMES_QUEUED = {'retry': 'A retry is queued for this book. Cancel it to use this.', 'repair': 'A repair is queued for this book. Cancel it to use this.',
@@ -402,6 +419,57 @@ class BrowserServer(ThreadingHTTPServer):
     def scan_active(self):
         return bool(self.inventory.worker and self.inventory.worker.is_alive())
 
+    def run_queued(self, item):
+        """ActionQueue's runner for the presses ruling 35 queues (Approve and its kin, Keep as separate books, Scan again, Remove
+        from list, Remove this copy, Save and Forget names, Start or Resume scanning): the same call the press makes, every
+        check made again now. Returns the outcome fields ({'result': 'done', 'answer'} or {'result': 'refused', 'code', 'error'}),
+        or None when a blocker came back (the action waits again)."""
+        merge = self.merge
+        action, book, args = item['action'], item['book_id'], item['args']
+        try:
+            if action in ('approve', 'convert'):
+                extra = {'names': args['names']} if args.get('names') is not None else {}
+                result = merge.approve_book(book, args['revision'], args.get('title'), args.get('author'), without_missing=action == 'convert',
+                                            choice=args.get('choice'), path=args.get('path'), **extra)
+                return {'result': 'done', 'answer': {'job_id': result['job_id']}}
+            if action == 'separate':
+                return {'result': 'done', 'answer': merge.keep_separate(book, args['revision'])}
+            if action == 'scan_again':
+                return {'result': 'done', 'answer': merge.scan_again(book, args['revision'])}
+            if action == 'dismiss':
+                return {'result': 'done', 'answer': merge.dismiss_attention(book, args['revision'])}
+            if action == 'names':
+                return {'result': 'done', 'answer': {k: v for k, v in merge.names_save(book, args['revision'], args['names']).items() if k != 'row'}}
+            if action == 'names_forget':
+                return {'result': 'done', 'answer': {k: v for k, v in merge.names_forget(book, args['revision'], args['entry_id']).items() if k != 'row'}}
+            if action == 'copy':
+                import book_delete
+                try:
+                    result = merge.delete_book(book, args['revision'], args['paths'], args.get('folders', []), 'copy')
+                except book_delete.DeleteRefused as refusal:
+                    if refusal.code == 'busy' and self.actions.blocker('copy', book):
+                        return None
+                    payload = refusal.payload()
+                    return {'result': 'refused', 'code': payload.get('code', 'refused'), 'error': str(refusal)}
+                return {'result': 'done', 'answer': {k: result.get(k) for k in ('deleted', 'bytes', 'forgotten', 'folders')}}
+            if action in ('scan_start', 'scan_resume'):
+                with self.control_lock:
+                    if self.closing:
+                        return {'result': 'refused', 'code': 'closing', 'error': 'Books Arranger is closing. The scan was not started.'}
+                    if self.actions.blocker(action, book):
+                        return None
+                    library = args['library']
+                    self.inventory.launch(library, resume=action == 'scan_resume')
+                    self.active_library = library
+                return {'result': 'done', 'answer': {'library': library}}
+        except ValueError as error:
+            text = str(error)
+            if self.actions.blocker(action, book):
+                return None  # the thing it waited for came back between the look and the run: it waits again
+            code = approve_code(text) if action in ('approve', 'convert') else getattr(error, 'code', None) or ('changed' if 'changed' in text.casefold() else 'refused')
+            return {'result': 'refused', 'code': code, 'error': text[:500]}
+        return {'result': 'refused', 'code': 'failed', 'error': 'Unknown queued action'}
+
     def jobs_active(self):
         return self.merge.state().get('state') in {'Running','Pausing','running','pausing'}
 
@@ -472,8 +540,12 @@ class BrowserServer(ThreadingHTTPServer):
                          activities=activities(jobs, None, None, automatic, self.__dict__.setdefault('_activity_started', {})))
         return value
 
-# The presses that queue (0.22.1, Judy 1.1); Start over, Approve, Scan again and the rest keep their refusals.
+# The presses that queue (0.22.1, Judy 1.1).
 QUEUED_ROUTES = frozenset({'/api/audiobook/retry', '/api/audiobook/repair', '/api/candidate/delete', '/api/candidate/delete-preview'})
+# Ruling 35 (Sergei 2026-10-26): these presses queue too, Approve always (Handler.queue_press, Server.run_queued).
+QUEUE_PRESSES = {'/api/candidate/approve': 'approve', '/api/candidate/keep-separate': 'separate', '/api/candidate/scan-again': 'scan_again',
+                 '/api/candidate/dismiss': 'dismiss', '/api/candidate/names-save': 'names', '/api/candidate/names-forget': 'names_forget',
+                 '/api/scan/start': 'scan_start', '/api/scan/resume': 'scan_resume'}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -721,6 +793,56 @@ class Handler(BaseHTTPRequestHandler):
         value=data.get('title','')
         if not isinstance(value,str) or len(value)>500:raise ValueError('Title exceeds its allowed bound')
         return value
+
+    def queue_press(self,path,data,always=False):
+        """Ruling 35 (Sergei 2026-10-26): a press with queue: true on one of QUEUE_PRESSES is accepted whatever is happening,
+        with Sergei's values kept in the queued action: queued when something is in the way (always, for Approve), else None
+        (the caller runs it now). The same validation as the press itself; nothing of the engine is read, so it works while
+        loading."""
+        if path in ('/api/audiobook/retry','/api/audiobook/repair'):
+            self.shape(data,{'library','id','revision','job_id','queue'},{'title'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            return self.server.actions.enqueue('retry' if path.endswith('/retry') else 'repair',id,self.queue_title(data),{'revision':revision,'job_id':self.uuid_value(data['job_id'])},always=always)
+        if path=='/api/candidate/delete':
+            import book_delete
+            self.shape(data,{'library','id','revision','paths','queue'},{'mode','folders','title'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            mode=data.get('mode','delete')
+            if mode not in book_delete.MODES:raise ValueError('Delete takes a known mode')
+            paths,folders=data['paths'],data.get('folders',[])
+            for values in (paths,folders):
+                if not isinstance(values,list) or len(values)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in values):raise ValueError('Delete takes the listed file and folder paths')
+            return self.server.actions.enqueue('delete' if mode=='delete' else 'copy',id,self.queue_title(data),{'revision':revision,'paths':paths,'folders':folders},always=always)
+        action=QUEUE_PRESSES[path]
+        if path in ('/api/scan/start','/api/scan/resume'):
+            self.shape(data,{'library','queue'},{'title'})
+            library=self.library(data['library'])
+            return self.server.actions.enqueue(action,'library:'+library,library,{'library':library},always=always)
+        title=self.queue_title(data)
+        if path=='/api/candidate/approve':
+            self.shape(data,{'library','id','revision','queue'},{'title','author','names','without_missing','choice','path','label'})
+            library,id,revision=self.candidate_identity(data)
+            if type(data.get('without_missing',False)) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
+            if data.get('choice') not in (None,'same','different'): raise ValueError('Same author? takes same or different')
+            args={'revision':revision,'title':self.text_value(data.get('title'),1000,nullable=True),'author':self.text_value(data.get('author'),1000,nullable=True),
+                  'choice':data.get('choice'),'path':self.text_value(data.get('path'),1000,nullable=True),
+                  'names':self.names_value(data['names'],partial=True) if data.get('names') is not None else None}
+            label=data.get('label','')
+            if not isinstance(label,str) or len(label)>500:raise ValueError('Title exceeds its allowed bound')
+            return self.server.actions.enqueue('convert' if data.get('without_missing') else 'approve',id,label or args['title'] or '',args,always=always)
+        if path in ('/api/candidate/keep-separate','/api/candidate/scan-again','/api/candidate/dismiss'):
+            self.shape(data,{'library','id','revision','queue'},{'title'})
+            library,id,revision=self.candidate_identity(data)
+            return self.server.actions.enqueue(action,id,title,{'revision':revision},always=always)
+        if path=='/api/candidate/names-save':
+            self.shape(data,{'library','id','revision','names','queue'},{'title'})
+            library,id,revision=self.candidate_identity(data)
+            return self.server.actions.enqueue(action,id,title,{'revision':revision,'names':self.names_value(data['names'])},always=always)
+        if path=='/api/candidate/names-forget':
+            self.shape(data,{'library','id','revision','entry_id','queue'},{'title'})
+            library,id,revision=self.candidate_identity(data)
+            return self.server.actions.enqueue(action,id,title,{'revision':revision,'entry_id':self.text_value(data['entry_id'],64)},always=always)
+        raise ValueError('This press does not queue')
 
     @staticmethod
     def shape(data,required,optional=()):
@@ -974,21 +1096,20 @@ class Handler(BaseHTTPRequestHandler):
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
             mode=data.get('mode','delete')
             if mode not in book_delete.MODES:raise ValueError('Delete takes a known mode')
-            queued=self.queue_flag(data)
-            if queued and mode!='delete':raise ValueError('Only Delete book is queued')
+            queued=self.queue_flag(data)  # ruling 35: Remove this copy queues too (action 'copy')
             if path.endswith('/delete-preview'):
                 if not queued:
                     self.response(200,self.server.merge.delete_preview(id,revision,mode));return
                 result=self.server.merge.delete_preview(id,revision,mode,wait=True)
                 if result.get('refusal') is None and not result.get('blocked'):
-                    kind=self.server.actions.waiting('delete',id)
+                    kind=self.server.actions.waiting('delete' if mode=='delete' else 'copy',id)
                     if kind:result['blocked']={'kind':kind}
                 self.response(200,result);return
             paths,folders=data['paths'],data.get('folders',[])
             for values in (paths,folders):
                 if not isinstance(values,list) or len(values)>10000 or any(not isinstance(p,str) or not 1<=len(p)<=1000 for p in values):raise ValueError('Delete takes the listed file and folder paths')
             if queued:
-                answer=self.server.actions.enqueue('delete',id,self.queue_title(data),{'revision':revision,'paths':paths,'folders':folders})
+                answer=self.server.actions.enqueue('delete' if mode=='delete' else 'copy',id,self.queue_title(data),{'revision':revision,'paths':paths,'folders':folders})
                 if answer is not None:self.response(202,answer);return
             try:result=self.server.merge.delete_book(id,revision,paths,folders,mode)
             except book_delete.DeleteRefused as refusal:
@@ -1058,7 +1179,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as error:
                 text=str(error)
                 # Judy 2026-10-24 (0.22.0 review B5.4): a safety gate is named in the row's refusal line.
-                code='changed' if 'Candidate changed' in text or 'Source files changed' in text or 'evidence changed' in text else 'moved' if text.startswith('Destination changed') else 'name_taken' if 'already exists' in text else 'title' if text=='Type a title first.' else 'format' if 'Audio format needs an encoding decision' in text else 'refused'
+                code=approve_code(text)
                 try:row=reviews.enrich(reviews._row(library,id))
                 except ValueError:row=None
                 self.response(409,{'error':text,'code':code,'row':row});return
@@ -1123,9 +1244,18 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
+                pressed=data.get('queue') is True and path in QUEUE_PRESSES
                 if still_loading(self.server) and not (path=='/api/shutdown' and not data) and not (path in LOOKING and self.loaded('books')):
+                    if pressed or data.get('queue') is True and path in ('/api/audiobook/retry','/api/audiobook/repair','/api/candidate/delete'):
+                        # Ruling 35: accepted while loading, his values kept; it runs when loading finishes.
+                        self.response(202,self.queue_press(path,data,always=True));return
                     # Looking is free, changing waits (Judy 3.6): refused, never queued, with the page's own sentence.
                     self.response(409,{'error':NOT_YET,'code':'loading'});return
+                if pressed and path in ('/api/scan/start','/api/scan/resume'):
+                    # Ruling 35: a scan pressed while conversion or automatic processing runs is queued and starts when they end.
+                    answer=self.queue_press(path,data)
+                    if answer is not None:self.response(202,answer);return
+                    data={'library':data['library']}
                 if path in {'/api/scan/start','/api/scan/resume','/api/scan/stop'}:
                     if set(data)!={'library'}: raise ValueError('Scan controls require only a library')
                     library=self.library(data['library'])
@@ -1157,7 +1287,11 @@ class Handler(BaseHTTPRequestHandler):
                 if path in merge_routes:
                     # Queued Retry, Repair and Delete book (0.22.1, Judy 1.1): a press with queue: true is accepted while a scan
                     # runs and waits for it (action_queue); without it the scan refusals below stand.
-                    queued=data.get('queue') is True and path in QUEUED_ROUTES and data.get('mode','delete')=='delete'
+                    queued=data.get('queue') is True and path in QUEUED_ROUTES
+                    if pressed:
+                        answer=self.queue_press(path,data)
+                        if answer is not None:self.response(202,answer);return
+                        data={key:value for key,value in data.items() if key not in ('queue','label') and not (key=='title' and path!='/api/candidate/approve')}
                     if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
                         self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
                     if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active() and not queued:

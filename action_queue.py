@@ -18,8 +18,17 @@ import threading
 import time
 import uuid
 
-ACTIONS = ('retry', 'repair', 'delete')
-KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book')
+ACTIONS = ('retry', 'repair', 'delete',
+           # Ruling 35 (Sergei 2026-10-26): every press that acts on a book is accepted, queued when something else is happening.
+           'approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume')
+KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic')
+# The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
+SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy')
+# Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
+# wait for; the row shows it running and its outcome (ruling 35).
+ALWAYS = ('approve', 'convert')
+# Run by the server (run_queued): the same call the press makes, every check again at run time.
+SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume')
 KEEP = 24 * 3600     # an outcome nobody acknowledged is forgotten after a day
 POLL = 0.5           # how often a blocked head is looked at again
 LIMIT = 1000         # queued actions; a press beyond it is refused, never dropped silently
@@ -53,12 +62,33 @@ class ActionQueue:
 
     # ------------------------------------------------------------------ what an action waits for
     def blocker(self, action, book_id):
-        """The kind that keeps this action from running now, or None. Reads only: a thread probe, the scan flag, the
-        Retry all run and, for Delete, the book's own jobs and research row."""
+        """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
+        flag, the Retry all run and, for Delete, the book's own jobs and research row."""
         server = self.server
-        if server.scan_active():
-            return 'scan'
+        loading = getattr(server, 'loading', None)
+        if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
+            return 'loading'
         merge = server.merge
+        if action in ('scan_start', 'scan_resume'):
+            # Ruling 34: a scan waits for conversion to go idle; automatic processing owns discovery while it runs.
+            automatic = getattr(merge, 'automatic', None)
+            if automatic is not None and automatic.status().get('state') in ('Running', 'Stopping'):
+                return 'automatic'
+            if server.scan_active():
+                return 'scan'
+            try:
+                if server.jobs_active():
+                    return 'jobs'
+            except Exception:
+                return 'jobs'
+            return None
+        if action in SCAN_WAITS and server.scan_active():
+            return 'scan'
+        if action in ('names', 'names_forget'):
+            job = merge._names_job(book_id) if hasattr(merge, '_names_job') else {'state': 'none'}
+            return 'book' if job.get('state') == 'running' else None
+        if action not in ('retry', 'repair', 'delete', 'copy'):
+            return None
         if action in ('retry', 'repair'):
             run = merge.__dict__.get('_retry_all_run') if hasattr(merge, '__dict__') else None
             return 'retry_run' if isinstance(run, dict) and run.get('state') == 'running' else None
@@ -84,7 +114,7 @@ class ActionQueue:
         return self.items[0]['blocker'] if self.items else 'operation'
 
     # ------------------------------------------------------------------ presses
-    def enqueue(self, action, book_id, title, args):
+    def enqueue(self, action, book_id, title, args, always=False):
         """None when the queue is empty and nothing blocks the action: the caller runs it now, in its own request, as
         before. Otherwise the action is queued and the answer is {'queued': True, 'id', 'position', 'blocker'}. A second
         press of the same action for a book that already waits answers that action; another action for it is refused
@@ -100,7 +130,7 @@ class ActionQueue:
                 return self._answer(same)
             if same is not None:
                 raise ValueError('This book already has a queued action. Cancel it first.')  # one per row (Judy 1.1)
-            if kind is None and not self.items and self.running is None:
+            if kind is None and not self.items and self.running is None and not (always or action in ALWAYS):
                 return None
             if len(self.items) >= LIMIT:
                 raise QueueFull('Too many queued actions. Wait for some to run.')
@@ -161,7 +191,7 @@ class ActionQueue:
     def _shown(item):
         """What the page shows of an action: n is a delete's confirmed file count ("Deleting 8 files…")."""
         value = {key: item[key] for key in ('id', 'action', 'book_id', 'title')}
-        if item['action'] == 'delete':
+        if item['action'] in ('delete', 'copy'):
             value['n'] = len(item['args'].get('paths') or [])
         return value
 
@@ -265,6 +295,12 @@ class ActionQueue:
         merge = self.server.merge
         args = item['args']
         outcome = {'id': item['id'], 'action': item['action'], 'book_id': item['book_id'], 'title': item['title'], 'at': time.time()}
+        if item['action'] in SERVER_RUN:
+            try:
+                found = self.server.run_queued(item)
+            except Exception as error:
+                return outcome | {'result': 'refused', 'code': 'failed', 'error': (str(error) or type(error).__name__)[:300]}
+            return None if found is None else outcome | found
         if item['action'] in ('retry', 'repair'):
             from audio_jobs import RetryRefused, RETRY_BOOK_CHANGED
             call = merge.retry_blocked_job if item['action'] == 'retry' else merge.repair_blocked_job

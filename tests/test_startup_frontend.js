@@ -52,6 +52,7 @@ function harness({protocol='http:',desktop=true}={}){
     fetch:async route=>{
       if(route.startsWith('/api/state')){calls.state++;if(mode==='silent')return new Promise(()=>{});if(mode==='busy')return response({error:'Status is still updating; retrying'},false,503);return response(JSON.parse(JSON.stringify(answer)));}
       if(route.startsWith('/api/inventory')){calls.inventory++;return response({rows:[],total:0});}
+      if(route==='/api/scan/start'){calls.scan=(calls.scan || 0)+1;return response({});}  // ruling 35: a press held while loading runs after it
       throw new Error('Unexpected fixture route '+route);
     }});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/load-state.js'),'utf8'),context);
@@ -79,13 +80,17 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('filter').children.length,1);assert.equal(h.node('filter').children[0].textContent,'Loading…');
     assert.equal(h.node('version').hidden,true);assert.equal(h.node('jobs-idle').hidden,true);
     digitFree(h,['status','root','automatic-status','research-status','jobs-status','book-candidate-counts','empty','page']);
-    assert.equal(h.node('start').getAttribute('aria-disabled'),'true');assert.equal(h.node('start').disabled,false,'inert, never the disabled attribute');
-    assert.equal(h.node('start').title,'Not yet: Books Arranger is still loading. This works when loading finishes.');
+    // Ruling 35 (Sergei 2026-10-26): a changing press is accepted while loading and runs when loading finishes.
+    assert.equal(h.node('start').hasAttribute('data-not-yet'),false);assert.equal(h.node('start').disabled,false,'never the disabled attribute');
     assert.equal(h.node('library').title,'Not yet: Books Arranger is still loading. You can switch library when loading finishes.');
     assert.equal(h.node('filter').title,'Not yet: your books are still loading. This works as soon as they appear.');
     const event=h.press(h.node('start'));
-    assert.equal(event.prevented && event.stopped,true,'the press does nothing else');
-    assert.equal(h.node('message').textContent,'Not yet: Books Arranger is still loading. This works when loading finishes.');
+    assert.equal(event.prevented,false,'not refused');
+    h.node('start').handlers.click();
+    assert.equal(h.node('message').textContent,'Start scanning queued. It runs when loading finishes. Press it again to cancel.');
+    assert.equal(h.node('start').getAttribute('aria-disabled'),'true','its face is held, with the sentence as its tooltip');
+    h.node('start').handlers.click();
+    assert.equal(h.node('start').getAttribute('aria-disabled'),null,'pressed again: taken back');assert.equal(h.calls.scan || 0,0);
     // No answer: Waiting at 3 s, Stuck at 10 s, with Restart engine (desktop), Copy details and Technical details.
     h.advance(2600);assert.equal(h.node('load-word').textContent,'Waiting');
     assert.equal(h.node('load-text').textContent,"Step 1 of 4: Starting the engine. The engine hasn't answered for 3 s.");
@@ -157,8 +162,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     const h=harness();await flush();
     h.answer=answerWith(loading({step:'books',n:4,parts:ALL,took_ms:null}));await h.poll();await flush();
     assert.equal(h.node('filter').getAttribute('aria-disabled'),null,'looking works once the books are on screen');
-    assert.equal(h.node('start').getAttribute('aria-disabled'),'true','changing still waits');
-    h.press(h.node('start'));
+    h.node('start').handlers.click();assert.equal(h.node('start').getAttribute('aria-disabled'),'true','held until loading finishes (ruling 35)');assert.equal(h.calls.scan || 0,0);
     h.node('load-strip').getBoundingClientRect=()=>({height:111.5});  // the loading strip's rendered height
     h.answer=answerWith(loading({step:'done',n:4,parts:ALL,took_ms:99400}));await h.poll();await flush();
     assert.equal(h.node('load-word').textContent,'Ready');assert.equal(h.node('load-text').textContent,'Loaded in 1 min 39 s');
@@ -168,6 +172,7 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     for(const id of ['load-bar','load-detail','load-actions','load-details'])assert.equal(h.node(id).hidden,true,id);
     assert.equal(h.node('start').hasAttribute('data-not-yet'),false);assert.equal(h.node('start').getAttribute('aria-disabled'),null);
     assert.notEqual(h.node('start').title,'Not yet: Books Arranger is still loading. This works when loading finishes.');
+    await flush();assert.equal(h.calls.scan,1,'the press held while loading ran once loading finished');
     assert.equal(h.node('message').textContent,'','the Not yet sentence leaves the message line');
     assert.equal(h.body.getAttribute('aria-busy'),null);assert.equal(h.node('inventory').getAttribute('aria-busy'),null,'the books arrived');
     assert.equal(h.node('load-announce').textContent,'Books Arranger is ready.');

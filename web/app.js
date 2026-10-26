@@ -34,11 +34,14 @@ const pendingFolders=new Set(),folderMessages=new Map();
 let restartResult=null,discardConfirmation=null,releaseRun=false,restartCounts=null;
 // The one to-do list (Judy, AttentionTodo UX 2026-10-24): rows that ask Sergei, by book id. Drafts survive polls, paging and
 // chip changes and are dropped on Approve; done/results/checked are the per-row outcomes shown until the row leaves.
-let askPending=null,askBulk=false,approveConfirm=null;
+let askBulk=false,approveConfirm=null;
+const askPendings=new Map();  // book id -> {id, kind, at}: a row's press on its way (one per row; rows never hold each other)
 let editSeq=0,metaSave=null,metaAgain=false,metaQueued=false;  // Save preview metadata (2026-10-26)
 const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map(),askChecked=new Map();
 // Delete book (ruling 23): its row buttons, its row hints, the press reading the list, and the open dialog.
-const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null;
+const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null,deleteNext=null;
+// The Delete book or Remove this copy pressed while another book's dialog was being prepared or open: it opens next (ruling 35).
+function deleteNextPress(){const id=deleteNext;deleteNext=null;if(id && deleteButtons.has(id) && !deletePending && !deleteDialog)deletePress(id);}
 // Queued Retry, Repair and Delete book (0.22.1, Judy's spec section 1): the engine's queue as last read, and the page's own
 // notes. queuePresses: a Retry press on its way while the page is busy (book id). queueNotes: an outcome's row line until
 // the next press, a filter change or a status change. queueLate: queued ids whose Cancel came too late (its line, Cancel
@@ -152,7 +155,7 @@ function clearBusy(){
 // Once a second: the notice, and the ladder of any press waiting 3 s or more.
 function pressTick(now=Date.now()){
   renderBusy(now);
-  const since=[retryPending?.at,askPending?.at,metaSave?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
+  const since=[retryPending?.at,...[...askPendings.values()].map(item=>item.at),metaSave?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
   if(since.some(at=>now-at>=3000)){ladderClock=now;try{controls();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
 }
 function clearConnectionNotice(){
@@ -349,9 +352,11 @@ function gateLoading(){
   const books=booksOnScreen();
   gate($('library'),NOT_YET_LIBRARY);
   for(const id of LOOKING_CONTROLS)gate($(id),books?'':NOT_YET_BOOKS);
-  for(const id of CHANGING_CONTROLS)gate($(id),NOT_YET);
+  // Ruling 35 (Sergei 2026-10-26): changing presses are accepted while loading. The toolbar's wait in this page (later())
+  // and run when loading finishes; a row's go to the engine, which queues them until it has loaded. Only what cannot work
+  // before the books are on screen stays inert: switching library, and the list's own controls.
   for(const element of globalThis.document?.querySelectorAll?.('#inventory button,#inventory input,#details button,#details input,#details select,#details textarea') || [])
-    gate(element,lookingOnly(element)?(books?'':NOT_YET_BOOKS):NOT_YET);
+    if(lookingOnly(element))gate(element,books?'':NOT_YET_BOOKS);
 }
 function ungateAll(){for(const element of globalThis.document?.querySelectorAll?.('[data-not-yet]') || [])gate(element,'');}
 // A press on an inert control is answered in the message line; focus does not move (3.6).
@@ -380,37 +385,43 @@ function controls() {
   updateRecovery();updateRetry();updateRowRetries();renderAttentionGroups();updateAskRows();updateDeleteButtons();renderApproveSelected();renderAttentionShortcut();
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
-  $('start-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
+  // Ruling 35: another press of this page never disables a button (later() holds the press until it is free).
+  $('start-automatic').disabled=ended || recoveryDisconnected || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
   renderAutomaticEligibility();
-  $('stop-automatic').disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || automatic?.can_stop!==true;
+  $('stop-automatic').disabled=ended || recoveryDisconnected || automatic?.can_stop!==true;
   // Cancel automatic start (O12): shown only while a start is pending; the notice above says what it waits for.
   if($('cancel-automatic-start')){const cancel=$('cancel-automatic-start'),active=globalThis.document?.activeElement;cancel.hidden=!startPending(automatic) && active!==cancel;cancel.disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || !startPending(automatic);}
   const stopped = ['stopped','offline','failed'].includes(state?.status?.state);
-  $('start').disabled = busy || ended || recoveryDisconnected || !!active || stopped || !state || automaticOwnsScanner;
-  $('resume').disabled = busy || ended || recoveryDisconnected || !!active || !stopped || automaticOwnsScanner;
-  $('stop').disabled = busy || ended || recoveryDisconnected || !active || state?.stopping || automaticOwnsScanner;
-  $('shutdown').disabled = busy || ended || recoveryDisconnected;
-  $('approve-candidate').disabled=busy || ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve;
+  // Start and Resume scanning queue behind conversion or automatic processing (ruling 35): only a running scan holds them.
+  $('start').disabled = ended || recoveryDisconnected || !!active || stopped;
+  $('resume').disabled = ended || recoveryDisconnected || !!active || !stopped;
+  $('stop').disabled = ended || recoveryDisconnected || !active || state?.stopping || automaticOwnsScanner;
+  $('shutdown').disabled = ended || recoveryDisconnected;
+  $('approve-candidate').disabled=ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate' || !selectedRow?.can_approve;
   if(selectedRow?.kind==='candidate')$('approval-reason').textContent=dirty ? 'Save the draft metadata before approving it.' : selectedRow.approval_reason || '';
   $('approval-reason').hidden=!$('approval-reason').textContent;
-  if($('create-audiobook'))$('create-audiobook').disabled=busy || ended || recoveryDisconnected || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
-  for(const id of ['source-coverage','playback-order'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected;
-  if($('add-chapters'))$('add-chapters').disabled=busy || ended || recoveryDisconnected || !selectedRow?.creation?.chapters_available;
-  if($('check-metadata')){$('check-metadata').hidden=selectedRow?.kind!=='candidate';$('check-metadata').disabled=busy || ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate';$('check-metadata-save').hidden=!dirty;}
-  for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=busy || ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
-  if($('queue-books'))$('queue-books').disabled=busy || ended || recoveryDisconnected || !rows.some(readyForQueue);
+  if($('create-audiobook'))$('create-audiobook').disabled=ended || recoveryDisconnected || dirty || trackDirty || !selectedRow?.creation?.can_create || selectedRow?.creation?.status==='Single audiobook file';
+  for(const id of ['source-coverage','playback-order'])if($(id))$(id).disabled=ended || recoveryDisconnected;
+  if($('add-chapters'))$('add-chapters').disabled=ended || recoveryDisconnected || !selectedRow?.creation?.chapters_available;
+  if($('check-metadata')){$('check-metadata').hidden=selectedRow?.kind!=='candidate';$('check-metadata').disabled=ended || recoveryDisconnected || dirty || selectedRow?.kind!=='candidate';$('check-metadata-save').hidden=!dirty;}
+  for(const id of ['find-metadata','find-covers','save-tracks'])if($(id))$(id).disabled=ended || recoveryDisconnected || selectedRow?.kind!=='candidate';
+  if($('queue-books'))$('queue-books').disabled=ended || recoveryDisconnected || !rows.some(readyForQueue);
   if($('retry-selected'))renderRetrySelected();
   if($('release-selected'))renderReleaseSelected();
-  if($('pause-jobs'))$('pause-jobs').disabled=busy || ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
-  if($('resume-jobs'))$('resume-jobs').disabled=busy || ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
-  renderMetaSave();
+  if($('pause-jobs'))$('pause-jobs').disabled=ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
+  if($('resume-jobs'))$('resume-jobs').disabled=ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  renderMetaSave();updateNamesRows();renderLaterButtons();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
+  drainLater();
   if(metaQueued && !busy && !metaSave)saveMetadata();  // a Save pressed during another press runs now (ruling 35)
 }
 async function action(route, data) {
-  if (busy || ended) return;
+  if (ended) return;
+  if (busy){pressLater('press:'+route,{'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/scan/stop':'scan_stop','/api/audiobook/pause':'pause','/api/audiobook/resume':'resume'}[route],'',()=>action(route,data));return;}
   busy=true; controls(); message();
-  try { await request(route,data); lastKey=null; await refresh(true); }
+  // Ruling 35: Start and Resume scanning are accepted while conversion or automatic processing runs and start when they end.
+  const queueable=route==='/api/scan/start' || route==='/api/scan/resume';
+  try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. It starts when ${queueP(answer.blocker?.kind)} finishes.`); lastKey=null; await refresh(true); }
   catch(error) { message(error.message); }
   finally { busy=false; controls(); }
 }
@@ -490,15 +501,17 @@ function renderRows(force=false) {
     // The to-do rows take fresh data in place too; a row Sergei settled (approved, removed, found) leaves at this
     // refresh unless it holds focus.
     for(const entry of askRows.values()){const fresh=rows.find(row=>row.id===entry.row.id);if(fresh)entry.row=fresh;}
+    updateNamesRows();  // Edit names takes fresh data in place too (its draft stays)
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && (!tr.contains?.(focused) || deletedBooks.has(id))){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
-  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();
+  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
   // In this filter the list window grows with the viewport: rows with fields are 150-230 px tall (section 9).
-  $('inventory-scroll')?.classList?.toggle('tall',attentionList);
+  // Edit names (Judy 1.2): while any editor is open, in every filter, so an open editor is never clipped.
+  $('inventory-scroll')?.classList?.toggle('tall',attentionList || namesAny());
   $('inventory-head').replaceChildren();const heading=document.createElement('tr');heading.setAttribute('role','row');
   // The narrow table (follow-up 3, section 5): the bands come from CSS; explicit roles keep the table's meaning when a
   // narrow band shows each row as a block.
@@ -523,6 +536,7 @@ function renderRows(force=false) {
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
         }
+        buildNamesBlock(row,td);  // Edit names (Judy 0.22.2 section 1): Place, Entered by you, the editor when open
       }
       tr.append(td); }
     const actions=node('td'),buttons=node('div','','row-actions'),name=row.title_clue || row.metadata?.title || row.path.split(/[\\/]/).pop();actions.setAttribute('role','cell');
@@ -533,7 +547,8 @@ function renderRows(force=false) {
       retry.addEventListener('click',event=>{event.stopPropagation();if(retry.getAttribute?.('aria-disabled')==='true' || retryPending)return;retryFromRow(row,retry);});
       retry.addEventListener('keydown',event=>event.stopPropagation());buttons.append(retry);
       // Cancel retry beside the queued face (Judy 1.3): its own target, hidden until a press is queued.
-      if(['retry','repair'].includes(action.kind)){rowRetry.cancel=queueCancelButton(row,action.kind);buttons.append(rowRetry.cancel);}
+      // Ruling 35: every row action can be queued (by the engine, or held by the page), so every one has its Cancel.
+      rowRetry.cancel=queueCancelButton(row,action.kind);buttons.append(rowRetry.cancel);
     }
     // Clear working files (decision B): beside the action, only while the server says the files are cleanable; never disabled.
     if(rowRetry && workingOf(row)?.state==='cleanable'){
@@ -542,6 +557,7 @@ function renderRows(force=false) {
       clear.addEventListener('keydown',event=>event.stopPropagation());buttons.append(clear);
     }
     if(askOf(row))buildAskActions(row,buttons);
+    if(row.kind==='candidate')buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
     if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
     else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title=row.kind==='candidate'?"Open this book's source folder in File Explorer.":"Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
@@ -691,9 +707,9 @@ async function poll() {
   }
   if (!ended) timer=setTimeout(poll,800);
 }
-$('start').addEventListener('click',()=>action('/api/scan/start',{library:$('library').value}));
-$('resume').addEventListener('click',()=>action('/api/scan/resume',{library:$('library').value}));
-$('stop').addEventListener('click',()=>action('/api/scan/stop',{library:state.active_library}));
+$('start').addEventListener('click',later('toolbar:start','scan_start',()=>action('/api/scan/start',{library:$('library').value})));
+$('resume').addEventListener('click',later('toolbar:resume','scan_resume',()=>action('/api/scan/resume',{library:$('library').value})));
+$('stop').addEventListener('click',later('toolbar:stop','scan_stop',()=>action('/api/scan/stop',{library:state.active_library})));
 let searchTimer=null;
 function listContext(){return JSON.stringify([$('library').value,view,filters[view],offset,search,$('search').value,filters[view]==='output_attention'?attentionGroup:'all']);}
 // While a different list is on its way, the old rows are not shown as the new filter's result.
@@ -737,7 +753,7 @@ function renderMetaSave(){
   const button=$('save-metadata');if(!button)return;const pending=!!metaSave || metaQueued;
   const face=pending?'Saving…':SAVE_METADATA_FACE,tip=pending?ladderNote('Saving these values…',metaSave?.at):SAVE_METADATA_TIP;
   if(button.textContent!==face)button.textContent=face;if(button.title!==tip)button.title=tip;
-  if(pending)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  if(pending)button.setAttribute?.('aria-disabled','true');else button.removeAttribute?.('aria-disabled');
 }
 async function sendMetadata(row,review){
   if(row.kind!=='candidate'){await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});return {row:null};}
@@ -782,13 +798,13 @@ async function saveMetadata(){
   if(saved)refresh(true).catch(()=>{});  // the list follows; its failure is not the save's
 }
 form.addEventListener('submit',event=>{event.preventDefault();return saveMetadata();});
-$('approve-candidate').addEventListener('click',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || busy || ended)return;busy=true;controls();try{const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review:row.review,approve:true,...reviewContext()});select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},true);await refresh(true);message('Candidate metadata approved. Tracks still require review; source files unchanged.');}catch(error){message(error.message);}finally{busy=false;controls();}});
-$('shutdown').addEventListener('click',async()=>{
+$('approve-candidate').addEventListener('click',later('toolbar:approve-candidate','approve_candidate',async()=>{const row=reviewRow || selectedRow;if(!row || row.kind!=='candidate' || dirty || busy || ended)return;busy=true;controls();try{const result=await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review:row.review,approve:true,...reviewContext()});select({...result.row,path:result.row.id,kind:'candidate',library:selectedLibrary},true);await refresh(true);message('Candidate metadata approved. Tracks still require review; source files unchanged.');}catch(error){message(error.message);}finally{busy=false;controls();}}));
+$('shutdown').addEventListener('click',later('toolbar:shutdown','shutdown',async()=>{
   if(busy || ended)return;busy=true;controls();message();
   try{await request('/api/shutdown',{});ended=true;clearConnectionNotice();clearTimeout(timer);$('status').textContent='Server stopping. Saved catalog and pending scans remain available on the next launch.';message('You can close this browser tab.');}
   catch(error){message(error.message);}
   finally{busy=false;controls();}
-});
+}));
 function node(tag,text='',className=''){const element=document.createElement(tag);element.textContent=text;if(className)element.className=className;return element;}
 function recordIdentity(row){return {library:row.library || $('library').value,view:row.kind==='candidate'?'candidates':'files',id:row.kind==='candidate'?row.id:row.record_id};}
 function folderKey(row,kind='source',directory=null){return JSON.stringify([recordIdentity(row),kind,directory]);}
@@ -1036,21 +1052,21 @@ function renderMembers(row,force=false){if(!force && $('candidate-members').cont
 function tracksChanged(){trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();$('source-coverage').checked=false;$('playback-order').checked=false;controls();$('output-reasons').textContent='Save the changed source selection and playback order. Review confirmations were reset.';}
 async function renderCovers(row){const coverKey=JSON.stringify([row.id,row.cover_choices,coverId]);if(coverKey===coverRenderKey || $('selected-cover').contains?.(document.activeElement) || $('cover-choices').contains?.(document.activeElement))return;coverRenderKey=coverKey;const seq=++coverSequence;for(const url of coverObjects)URL.revokeObjectURL(url);coverObjects.length=0;$('selected-cover').replaceChildren();$('cover-choices').replaceChildren();for(const cover of row.cover_choices || []){const panel=node('section','','cover-choice');panel.append(node('p',`${cover.source_label || 'Artwork'} · ${cover.evidence_kind || 'Local artwork — edition unverified'}`));if(cover.source_url)panel.append(sourceLink(cover.source_url,`Cover source: ${cover.source_label || 'Artwork'}`));const image=node('img');image.alt=`Cover: ${row.review?.title || row.title_clue}`;image.hidden=true;panel.append(image);const imageState=node('p','Loading cover…');panel.append(imageState);const use=node('button','Use this cover','quiet');use.type='button';use.title='Select this image as the single cover in the output audiobook.';use.setAttribute('aria-describedby','cover-help');use.disabled=ended;use.addEventListener('click',()=>{if(busy || ended)return;if(!dirty)reviewRow=selectedRow;coverId=cover.id;dirty=true;noteOnlyDirty=false;manualMetadataTouched=true;syncManualDraft();$('review-note').textContent='Cover selection is an unsaved draft.';renderCovers(row);controls();});panel.append(use);(cover.id===coverId?$('selected-cover'):$('cover-choices')).append(panel);if(!cover.thumbnail_url){imageState.textContent='Cover image unavailable';continue;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Invalid local thumbnail route');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover image unavailable');const blob=await response.blob();if(seq!==coverSequence)return;const object=URL.createObjectURL(blob);coverObjects.push(object);image.src=object;image.hidden=false;imageState.textContent='';}catch(error){if(seq===coverSequence)imageState.textContent=error.message || 'Cover image unavailable';}}if(!coverId)$('selected-cover').append(node('p',row.metadata_facts?.cover?.kind==='absent'?'No artwork available; the saved policy permits processing without artwork.':'Artwork not selected. Artwork alone does not establish recording identity.'));}
 $('select-page').addEventListener('change',()=>{const on=$('select-page').checked;for(const row of on?pageSelectable():rows.filter(item=>item.kind==='candidate')){if(on)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);}renderRows();});
-$('find-metadata').addEventListener('click',()=>candidateRequest('/api/candidate/match'));
+$('find-metadata').addEventListener('click',later('toolbar:find-metadata','find_metadata',()=>candidateRequest('/api/candidate/match')));
 $('edit-held-metadata').addEventListener('click',()=>{if(!selectedRow || ended)return;if(selectedRow.metadata_questions?.unresolved_count){$('manual-review').open=true;const heading=$('metadata-questions-heading');heading.scrollIntoView?.({block:'center',behavior:'auto'});heading.focus?.({preventScroll:true});return;}$('manual-review').open=true;const field=(selectedRow.metadata_holds || []).flatMap(item=>item.fields || [])[0] || 'title';const control=form.elements.namedItem(field) || form.elements.namedItem('title');control?.scrollIntoView?.({block:'center',behavior:'auto'});control?.focus?.({preventScroll:true});});
-$('check-metadata').addEventListener('click',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');});
-$('find-covers').addEventListener('click',()=>candidateRequest('/api/candidate/covers'));
-$('save-tracks').addEventListener('click',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:''});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;
+$('check-metadata').addEventListener('click',later('toolbar:check-metadata','check_metadata',()=>{if(dirty || busy || ended)return;$('matching-status').textContent='Checking metadata…';return candidateRequest('/api/candidate/match');}));
+$('find-covers').addEventListener('click',later('toolbar:find-covers','find_covers',()=>candidateRequest('/api/candidate/covers')));
+$('save-tracks').addEventListener('click',later('toolbar:save-tracks','save_tracks',async()=>{if(!trackDraft)return;const draft=trackDraft;const result=await candidateRequest('/api/candidate/tracks',{revision:draft.revision,order:draft.order,included:draft.included,source_coverage_confirmed:$('source-coverage').checked,order_confirmed:$('playback-order').checked,chapters:$('add-chapters').checked,actor:'user',evidence_note:''});if(result?.row && selectedRow?.id===draft.id){trackDirty=false;manualTrackTouched=false;
   // The rows update now, not at the next poll, so Approve this order works as soon as the save lands (Futaba 0.22.0 M-3).
-  syncManualDraft();renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');controls();}});
+  syncManualDraft();renderMergeCandidate(selectedRow,false);message('Track review saved. Source files unchanged.');controls();}}));
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
-$('create-audiobook').addEventListener('click',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');});
-$('queue-books').addEventListener('click',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}});
-$('pause-jobs').addEventListener('click',()=>action('/api/audiobook/pause',{}));$('resume-jobs').addEventListener('click',()=>action('/api/audiobook/resume',{}));
+$('create-audiobook').addEventListener('click',later('toolbar:create-audiobook','create',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');}));
+$('queue-books').addEventListener('click',later('toolbar:queue-books','queue_books',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}}));
+$('pause-jobs').addEventListener('click',later('toolbar:pause-jobs','pause',()=>action('/api/audiobook/pause',{})));$('resume-jobs').addEventListener('click',later('toolbar:resume-jobs','resume',()=>action('/api/audiobook/resume',{})));
 function recoveryDate(value){if(!value)return 'Unavailable';const date=new Date(value);if(!Number.isFinite(date.getTime()))return 'Unavailable';const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:zone}).format(date)+` (${zone})`;}
 function recoverySpace(value){return verifiedCount(value)===null?'Unavailable':`${(value/(value>0 && value<1000000?1000:1000000)).toLocaleString('en-US',{maximumFractionDigits:2})} ${value>0 && value<1000000?'KB':'MB'} (${value.toLocaleString('en-US')} bytes)`;}
 function recoveryScope(row){const r=row?.cleanup?.recovery;return r?{job_id:row.creation?.job_id || row.creation?.job?.job_id || row.creation?.job?.id,token:r.token,count:r.count,bytes:r.bytes}:null;}
-function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoverySubmitting || busy)return 'Another operation is in progress';if(!r)return 'Recovery details unavailable';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
+function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoverySubmitting)return 'Deleting the recovery copies…';if(!r)return 'Recovery details unavailable';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
 function recoveryStatus(r){if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies waiting to be deleted. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');return 'Deleting after the audiobook check';}
 function makeRecoveryPanel(){const panel=node('section','','recovery-copies'),facts=node('dl'),values={};panel.append(node('h2','Recovery copies'));for(const key of ['Status','Original tracks backed up','Space on C:','Recovery location','Automatic deletion']){const label=node('dt',key),value=node('dd');facts.append(label,value);values[key]={label,value};}panel.append(facts);const help=node('p',"Deleting these copies permanently removes the app's backup of the original tracks. The finished audiobook stays in place.",'field-help');help.id='recovery-loss-help';const expiry=node('p','Automatic deletion happens while the app is running; overdue copies are checked when it starts.','field-help');const button=node('button','Delete recovery copies…','quiet');button.type='button';button.title='Permanently delete the verified recovery copies for this book. Keep the finished audiobook.';button.setAttribute('aria-describedby','recovery-loss-help recovery-reason');const reason=node('p','','field-help');reason.id='recovery-reason';const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');panel.append(help,expiry,button,reason,status);recoveryPanel={panel,values,expiry,button,reason,status,path:selectedPath};button.addEventListener('click',openRecoveryDialog);updateRecovery();return panel;}
 function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath)return;const r=selectedRow?.cleanup?.recovery;if(!r){recoveryPanel.panel.hidden=true;closeRecoveryDialog();return;}recoveryPanel.panel.hidden=false;const v=recoveryPanel.values;v.Status.value.textContent=recoveryStatus(r);v['Original tracks backed up'].value.textContent=verifiedCount(r.count)===null?'Unavailable':r.count.toLocaleString('en-US');v['Space on C:'].value.textContent=recoverySpace(r.bytes);v['Recovery location'].label.textContent=r.state==='deleted'?'Former recovery location':'Recovery location';v['Recovery location'].value.textContent=r.location || 'Unavailable';v['Recovery location'].value.className='path';v['Automatic deletion'].value.textContent=r.state==='deleted'?(r.expires_at?'Completed':'Not applicable — copies already deleted'):recoveryDate(r.expires_at);recoveryPanel.expiry.hidden=r.state==='deleted';const reason=recoveryReason();recoveryPanel.button.disabled=!!reason;recoveryPanel.reason.textContent=reason;if(recoveryConfirmation && !recoverySubmitting && (reason || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(recoveryConfirmation.scope))){closeRecoveryDialog();recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';}}
@@ -1243,7 +1259,8 @@ function updateRetry(){
     if(lost && !producer)nextRowButton(rowButtons(selectedPath))?.focus?.({preventScroll:true});return;}
   const mode=qmode;
   const reason=typeof retry?.reason==='string' && retry.reason.trim()?retry.reason:copy.label+' is unavailable. Refresh and check again.';
-  let label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,busy:'Another operation is in progress.',sibling:QUEUE_SIBLING,blocked:retryBlockedTip(copy),unavailable:reason,ready:copy.ready}[mode];
+  const held=key?laterFor(key):null;  // ruling 35: held by the page until it is free
+  let label=mode==='pending'?copy.pending:mode==='later'?'Queued':copy.label,title={offline:'Local server unavailable.',pending:retryPending?.checking?'Checking…':copy.note,later:held?laterLine(held):'',sibling:QUEUE_SIBLING,blocked:retryBlockedTip(copy),unavailable:reason,ready:copy.ready}[mode];
   let aria=(label==='Convert…'?'Convert':label)+': '+((copy.kind==='prepare'?row.title_clue || row.review?.title:row.review?.title || row.title_clue) || 'Book');
   if(queueMode){const face=retryQueueFace(row,mode);label=face.label;title=face.title;aria=face.aria;}
   const result=mode!=='pending' && !queueMode && !clearing && retryResult,queued=queueMode?queueHint(row) || copy.note:null,later=!queueMode && !result?queueNoteFor(row):null;
@@ -1252,7 +1269,7 @@ function updateRetry(){
   if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',aria);
   // Pending, queued and running keep keyboard focus: aria-disabled with a disabled look, never the disabled attribute.
-  const inert=mode==='pending' || queueMode || mode==='sibling';
+  const inert=mode==='pending' || queueMode || mode==='sibling' || mode==='later';
   if(inert)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=!inert && mode!=='ready' && mode!=='blocked';
   if(note.textContent!==text)note.textContent=text;
@@ -1294,7 +1311,7 @@ function retryMode(row){
   if(queuedFor(row) && !queuedFor(row,'delete'))return 'queued';
   if(deleteQueued(row))return 'sibling';
   const queueable=action?.kind==='retry' || action?.kind==='repair';
-  if(!queueable && pressBusy())return 'busy';
+  if(key && laterFor(key))return 'later';  // ruling 35: held by the page until it is free, with Cancel
   if(retry?.allowed!==true)return 'unavailable';
   // Blocked: enabled, and a press is queued (1.1). Only the server's "not allowed" disables Retry and Repair.
   return queueable && pageBlocker()?'blocked':'ready';
@@ -1320,22 +1337,24 @@ function updateRowRetries(){
     else if(!queueMode){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued action's outcome (1.6)
     const deleted=deleteNotes.get(row.id);if(deleted){hint=deleted.text;warn=deleted.warn;clause='';lines=deleted.lines;}  // Delete book's outcome (ruling 23)
     const queued=queueHint(row);if(queued!==null || mode==='sending'){hint=queued ?? ladderNote(copy.note,queuePresses.get(row.id)?.at);warn=false;clause='';lines=null;}  // the queued line replaces the hint (1.3)
+    const later=key?laterFor(key):null;if(later){hint=laterLine(later);warn=false;clause='';lines=null;}  // ruling 35: held by the page, with Cancel
     setHint(entry.hint,hint,clause,warn,lines);
     statusInPlace(entry.cell,candidateStatus(row));if(attentionOf(row) && entry.cell && entry.cell.title!==cellTip(row))entry.cell.title=cellTip(row);
     if(deleted?.done){if(entry.button)entry.button.hidden=true;if(entry.clear)entry.clear.hidden=true;continue;}  // deleted: its buttons go
     if(entry.clear)updateClearButton(entry.clear,row);
     updateQueueCancel(entry.cancel,row,['retry','repair']);
+    if(entry.cancel && later){entry.cancel.hidden=false;const label='Cancel '+lowerFirst(laterWord(later.kind));if(entry.cancel.textContent!==label)entry.cancel.textContent=label;entry.cancel.title=`Take this ${lowerFirst(laterWord(later.kind))} out of the queue. Nothing was started.`;entry.cancel.setAttribute('aria-label',label+': '+queueTitle(row));entry.cancel.removeAttribute('aria-disabled');}
     if(!entry.button)continue;
     const gone=!action && mode!=='pending' && !queueMode,hadFocus=gone && document.activeElement===entry.button;
     entry.button.hidden=gone;if(hadFocus && !producerRecoveryOf(row))nextRowButton(entry.button.parentElement,entry.button)?.focus?.({preventScroll:true});
     if(entry.button.hidden)continue;
-    let label=mode==='pending'?copy.pending:copy.label,title={offline:'Local server unavailable.',pending:copy.note,busy:'Another operation is in progress.',sibling:QUEUE_SIBLING,blocked:retryBlockedTip(copy),unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
+    let label=mode==='pending'?copy.pending:mode==='later'?'Queued':copy.label,title={offline:'Local server unavailable.',pending:copy.note,later:later?laterLine(later):'',sibling:QUEUE_SIBLING,blocked:retryBlockedTip(copy),unavailable:retry?.reason || copy.label+' is unavailable. Refresh and check again.',ready:copy.ready}[mode];
     let aria=(label==='Convert…'?'Convert':label)+': '+(row.title_clue || row.review?.title || 'Book');
     if(queueMode){const face=retryQueueFace(row,mode);label=face.label;title=face.title;aria=face.aria;}
     if(entry.button.textContent!==label)entry.button.textContent=label;
     if(entry.button.title!==title)entry.button.title=title;
     entry.button.setAttribute('aria-label',aria);
-    const inert=mode==='pending' || queueMode || mode==='sibling';
+    const inert=mode==='pending' || queueMode || mode==='sibling' || mode==='later';
     if(inert)entry.button.setAttribute('aria-disabled','true');else entry.button.removeAttribute('aria-disabled');
     entry.button.disabled=!inert && mode!=='ready' && mode!=='blocked';
   }
@@ -1381,7 +1400,10 @@ async function retryJob(origin=null){
   if(!key || !action || ended || action.data.allowed!==true)return;
   // Retry and Repair while another operation runs are queued by the engine (Judy 1.1); the press never waits here.
   const queueable=action.kind==='retry' || action.kind==='repair',mode=retryMode(row);
-  if(queueable && mode==='blocked')return queuePress(row,action,origin);
+  if(queueable && (mode==='blocked' || mode==='ready' && pressBusy()))return queuePress(row,action,origin);
+  if(mode==='later')return;
+  // Ruling 35: another press of this page never refuses this one; it waits for it (pressLater) and runs then.
+  if(mode==='ready' && !recoveryDisconnected && pressBusy()){const path=row.path;pressLater(key,action.kind,queueTitle(row),()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return retryFromRow(fresh,origin?.button || null);});return;}
   if(mode!=='ready' || retryPending || busy || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun || $('retry-job').disabled)return;
   dropQueueNote(row.id);
   if(action.kind==='prepare')return prepareProducerRecovery(row,origin);
@@ -1517,7 +1539,8 @@ function placeRow(row,fresh,origin){
   if(selectedRow?.path===row.path)select(fresh,false);
 }
 async function restartPress(row,action,origin){
-  const key=retryKey(row);if(retryPending || busy || ended || recoveryDisconnected)return false;
+  const key=retryKey(row);if(ended || recoveryDisconnected)return false;
+  if(retryPending || busy){const path=row.path;pressLater(key,action.kind,queueTitle(row),()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return restartPress(fresh,action,origin);});return false;}
   const body=action.kind==='release'?{library:'Audiobooks',id:row.id,revision:row.revision}:{library:'Audiobooks',id:row.id,revision:row.revision,job_id:row.creation.job.job_id,...(action.kind==='combined'?{discard_review:true}:{})};
   retryPending={key,kind:action.kind,at:Date.now()};retryResult=null;restartResult=null;busy=true;controls();
   let answer=null,failure=null;
@@ -1548,7 +1571,10 @@ async function clearWorking(origin=null){
   const row=selectedRow,key=retryKey(row),job=row?.creation?.job;
   if(!key || !job || workingOf(row)?.state!=='cleanable' || clearPending(row))return false;
   if(ended || recoveryDisconnected){retryResult={key,text:'Local server unavailable.',warn:true};controls();return false;}
-  if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun){retryResult={key,text:'Another operation is in progress. Try again in a moment.',warn:true};controls();return false;}
+  if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun){
+    // Ruling 35: never "Another operation is in progress"; it waits for the current press and runs then.
+    const path=row.path;pressLater(key,'clear',queueTitle(row),()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return clearFromRow(fresh,origin?.button || null);});return false;
+  }
   retryPending={key,kind:'clear',at:Date.now()};retryResult=null;busy=true;controls();
   let answer=null,failure=null;
   try{answer=await request('/api/audiobook/clear-working',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id},PRESS_TIMEOUT);}catch(error){failure=error;}
@@ -1663,7 +1689,7 @@ function renderReleaseSelected(){
   button.hidden=!shown;if(!shown)return;
   const label=releaseRun?'Discarding…':`Let the app handle selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
   button.title=count?`Discard the saved reviews of these ${count.toLocaleString()} selected books, including any edits you made by hand, and let automatic processing take them. Starts automatic processing if it isn't running. This can't be undone.`:'Select books held for a saved review.';
-  const unavailable=!count || releaseRun || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning();
+  const unavailable=!count || releaseRun || ended || recoveryDisconnected || bulkRunning();
   if(releaseRun || unavailable)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=unavailable && !releaseRun;
   const help='Only selected books held for a saved review can be handed to the app. The others stay as they are.';
@@ -1679,7 +1705,8 @@ function bulkPassSentence(pass){
   return '';
 }
 async function startReleaseSelected(items){
-  if(releaseRun || busy || ended || recoveryDisconnected || !items.length)return;
+  if(releaseRun || ended || recoveryDisconnected || !items.length)return;
+  if(busy){pressLater('toolbar:release-selected','release_selected','',()=>startReleaseSelected(items));message(laterLine(laterFor('toolbar:release-selected')));return;}  // ruling 35
   releaseRun=true;busy=true;$('release-selected-status').textContent='';controls();
   let text='',warn=false;
   try{
@@ -1794,14 +1821,14 @@ function renderAttentionGroups(){
   all.hidden=attentionGroup!=='retry' || value('retry')<2 || !!confirm;
   if(all.textContent!==allLabel)all.textContent=allLabel;
   all.title=`Request retries for these ${value('retry').toLocaleString()} books. Each book is checked before a conversion job can be queued.`;
-  all.disabled=running || busy || ended || recoveryDisconnected;
+  all.disabled=running || ended || recoveryDisconnected;  // ruling 35: another press of the page never disables it
   // The confirmation keeps the count it opened with; polls never rebuild it.
   $('retry-all-confirm').hidden=!confirm || attentionGroup!=='retry';
   if(confirm){
     const question=`Request retries for ${confirm.count.toLocaleString()} books? Each book is checked before a conversion job can be queued.`+clearsClause(confirm.cleanable),go=`Request ${confirm.count.toLocaleString()} retries`;
     if($('retry-all-question').textContent!==question)$('retry-all-question').textContent=question;
     if($('retry-all-go').textContent!==go)$('retry-all-go').textContent=go;
-    $('retry-all-go').disabled=running || busy || ended || recoveryDisconnected;
+    $('retry-all-go').disabled=running || ended || recoveryDisconnected;
   }
   // The live region announces only the start and the end; the running count sits outside it.
   const countsForRun=run?.progress?.schema==='books-retry-progress-v1'?run.progress.counts:null;
@@ -1829,7 +1856,7 @@ function renderRetrySelected(){
   $('queue-books').hidden=shown;button.hidden=!shown || !!confirm || needsChip();
   const label=`Retry selected (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
   button.title=count?`Request retries for these ${count.toLocaleString()} selected books. Each book is checked before a conversion job can be queued.`:'Select books that can be retried or repaired.';
-  button.disabled=!count || busy || ended || recoveryDisconnected || !!retryPending || bulkRunning() || retrySelectedRun;
+  button.disabled=!count || ended || recoveryDisconnected || bulkRunning() || retrySelectedRun;
   // A "Needs your answer" chip without bulk Approve has no batch action, so no help line (0.22.0 review B3).
   const help=bulkChip()?'Approve as is uses the names shown on each row. Books that need a different action are left out.':needsChip()?'':shown?(conditionalRetries(retrySelectable())?'Previous attempts were refused. Check each book\'s reason before retrying.':'Only selected books that can be retried or repaired can request new checks.'):'Only ready selected revisions are queued. Candidates needing review remain selected.';
   if($('batch-help').textContent!==help)$('batch-help').textContent=help;$('batch-help').hidden=!help;
@@ -1838,7 +1865,7 @@ function renderRetrySelected(){
     const question=`Request retries for ${confirm.items.length.toLocaleString()} selected books? Each book is checked before a conversion job can be queued.`+clearsClause(confirm.items.filter(item=>workingOf(item.row)?.state==='cleanable').length),go=`Request ${confirm.items.length.toLocaleString()} retries`;
     if($('retry-selected-question').textContent!==question)$('retry-selected-question').textContent=question;
     if($('retry-selected-go').textContent!==go)$('retry-selected-go').textContent=go;
-    $('retry-selected-go').disabled=busy || ended || recoveryDisconnected || retrySelectedRun;
+    $('retry-selected-go').disabled=ended || recoveryDisconnected || retrySelectedRun;
   }
 }
 function closeRetrySelected(){if(!retrySelectedConfirm)return;retrySelectedConfirm=null;controls();$('retry-selected').focus?.({preventScroll:true});}
@@ -1856,10 +1883,10 @@ $('retry-selected').addEventListener('click',()=>{
   if($('retry-selected').disabled)return;const items=retrySelectable();if(!items.length)return;
   retrySelectedConfirm={items};$('retry-selected-status').textContent='';controls();$('retry-selected-cancel').focus?.({preventScroll:true});
 });
-$('retry-selected-go').addEventListener('click',()=>{if($('retry-selected-go').disabled)return;return startRetrySelected();});
+$('retry-selected-go').addEventListener('click',later('toolbar:retry-selected-go','retry_selected',()=>{if($('retry-selected-go').disabled)return;return startRetrySelected();}));
 $('retry-selected-cancel').addEventListener('click',()=>closeRetrySelected());
 $('retry-selected-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetrySelected();}});
-$('retry-all-go').addEventListener('click',()=>{if($('retry-all-go').disabled)return;return startRetryAll();});
+$('retry-all-go').addEventListener('click',later('toolbar:retry-all-go','retry_all',()=>{if($('retry-all-go').disabled)return;return startRetryAll();}));
 $('retry-all-cancel').addEventListener('click',()=>closeRetryAll());
 $('retry-all-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetryAll();}});
 $('retry-job').addEventListener('click',()=>{if($('retry-job').getAttribute?.('aria-disabled')==='true' || retryPending)return;retryJob();});
@@ -1959,8 +1986,8 @@ async function automaticAction(kind){
   if(kind==='cancel-start'){const notice=$('automatic-start-reason');notice.setAttribute('tabindex','-1');notice.focus?.({preventScroll:true});}
 }
 $('cancel-automatic-start').addEventListener('click',()=>automaticAction('cancel-start'));
-$('start-automatic').addEventListener('click',()=>automaticAction('start'));
-$('stop-automatic').addEventListener('click',()=>automaticAction('stop'));
+$('start-automatic').addEventListener('click',later('toolbar:start-automatic','start_automatic',()=>automaticAction('start')));
+$('stop-automatic').addEventListener('click',later('toolbar:stop-automatic','stop_automatic',()=>automaticAction('stop')));
 function recordedApproval(row){
   if(row.metadata_approved!==true)return '';
   const approval=row.review_context?.automatic_approval;
@@ -2208,7 +2235,7 @@ function candidateStatus(row){
 function originalTitleFact(row){
   if(askOf(row)?.kind==='original_title' || row.automatic?.wait?.kind==='original_title')return 'Waiting for an English title.';
   const lookup=row.metadata_facts?.original_title_lookup;
-  if(row.review_context?.metadata_actor==='user' && lookup)return 'Entered by you.';
+  if((row.review_context?.metadata_actor==='user' || (Array.isArray(row.entered) && row.entered.includes('title'))) && lookup)return 'Entered by you.';
   if(lookup?.state==='found' && typeof lookup.title==='string' && lookup.title)return lookup.title;
   if(lookup && ['none','russian'].includes(lookup.state))return lookup.state==='none'?'Not found. Filed under the Russian title.':'';
   return '';
@@ -2381,7 +2408,13 @@ function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'
 function askProposal(ask,name){const value=ask?.fields?.[name]?.proposal;return typeof value==='string'?value:'';}
 function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 // Which fields the row shows: Title when it is missing or a guess, Author when it is missing or unclear (section 3).
-function askFieldPlan(ask){
+function askFieldPlan(ask,row=null){
+  const plan=askFieldPlanOf(ask);
+  // Edit names open (Judy 1.1, item 2): Title and Author are the editor's, the same inputs and draft as the ask fields.
+  if(row && namesOpen(row.id) && !(ask.kind==='files_missing' && !(ask.missing?.present>0)))return {title:true,author:plan.author || 'input'};
+  return plan;
+}
+function askFieldPlanOf(ask){
   if(ask.kind==='files_missing' && !(ask.missing?.present>0))return {title:false,author:null};
   const kind=askKind(ask),guess=Object.hasOwn(BASIS_LINES,ask.fields?.title?.basis),why=ask.why;let plan={title:false,author:null};
   if(kind==='title_author')plan={title:guess || ['title_missing','both_missing','garbled',...ODD_TITLE].includes(why),author:!askProposal(ask,'author') || ['author_missing','both_missing','garbled','author_folder'].includes(why)?'input':null};
@@ -2395,19 +2428,22 @@ function askFieldPlan(ask){
 }
 // What Approve sends: only what Sergei changed. forPreview turns a same-author choice into the name it files under.
 function askValues(row,forPreview=false){
-  const ask=askOf(row),d=askDrafts.get(row.id) || {},plan=askFieldPlan(ask),values={},title=askProposal(ask,'title'),author=askProposal(ask,'author');
+  const ask=askOf(row),d=askDrafts.get(row.id) || {},plan=askFieldPlan(ask,row),values={},title=askProposal(ask,'title'),author=askProposal(ask,'author');
   if(plan.title && typeof d.title==='string' && d.title.trim()!==title)values.title=d.title.trim();
   if(plan.author==='input' && typeof d.author==='string' && d.author.trim()!==author)values.author=d.author.trim();
   if(plan.author==='radio' && d.choice){const name=d.choice==='other'?(d.other || '').trim():ask.candidates?.[Number(d.choice.slice(1))]?.name;if(typeof name==='string' && name!==author)values.author=name;}
   if(plan.author==='same' && d.choice){if(d.choice==='other')values.author=(d.other || '').trim();else if(forPreview)values.author=(d.choice==='same'?ask.same_author?.existing:ask.same_author?.new) || '';else values.choice=d.choice;}
   return values;
 }
-function askTitleEmpty(row){const ask=askOf(row),d=askDrafts.get(row.id) || {};return askFieldPlan(ask).title && typeof d.title==='string'?!d.title.trim():!askProposal(ask,'title');}
+function askTitleEmpty(row){const ask=askOf(row),d=askDrafts.get(row.id) || {};return askFieldPlan(ask,row).title && typeof d.title==='string'?!d.title.trim():!askProposal(ask,'title');}
 function askDestination(row){const d=askDrafts.get(row.id);return d?.preview || askOf(row)?.destination || null;}
 function outputName(){const root=state?.audiobook_output_root;return typeof root==='string' && root.trim()?root.replace(/[\\/]+$/,'').split(/[\\/]/).pop():'Audiobooks Sorted';}
 // Why Approve does nothing yet ('' when it works): the press is prevented rather than refused.
 function askInert(row){
   if(askTitleEmpty(row))return 'Type a title first.';
+  const names=namesFor(row);  // Edit names open (Judy 1.3): Series and Number go together
+  if(names?.series && !names.number)return 'Type the number in the series, or clear the series.';
+  if(names?.number && !names.series)return 'Type the series name, or clear the number.';
   if(askDestination(row)?.taken===true)return 'That name is taken. Change the title or author.';
   return askPanelEdits(row);
 }
@@ -2478,7 +2514,7 @@ function askRadio(entry,group,value,label,tip,extra=''){
   entry.controls.push(input);return wrap;
 }
 function buildAskFields(entry){
-  const row=entry.row,ask=askOf(row),plan=askFieldPlan(ask),d=askDraft(row.id),box=entry.fields;
+  const row=entry.row,ask=askOf(row),plan=askFieldPlan(ask,row),d=askDraft(row.id),box=entry.fields;
   if(plan.title || plan.author==='input'){
     const grid=node('div','','ask-grid');
     if(plan.title){const cell=node('div');cell.append(askInput(entry,'title','Title',typeof d.title==='string'?d.title:askProposal(ask,'title'),'','The title this book is filed under.'));const basis=BASIS_LINES[ask.fields?.title?.basis];if(basis)cell.append(node('p',basis,'field-help ask-basis'));grid.append(cell);}
@@ -2559,6 +2595,8 @@ function buildAskActions(row,buttons){
   entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
     button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
   entry.primaryKind=kinds[0];entry.primary=entry.buttons[0]?.button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
+  // Ruling 35: a queued press on this row has its own Cancel beside the buttons (Judy 0.22.1 1.1).
+  if(kinds.some(kind=>ASK_QUEUE[kind])){entry.cancel=queueCancelButton(row,ASK_QUEUE[kinds.find(kind=>ASK_QUEUE[kind])]);buttons.append(entry.cancel);}
   updateAskRow(entry);
 }
 function askMode(row,kind){
@@ -2566,8 +2604,13 @@ function askMode(row,kind){
   if(askDone.has(row.id))return 'done';
   if(kind==='order' || kind==='choose')return 'ready';  // they only open the details panel
   if(deleteQueued(row))return 'queued';  // a delete is queued for this book (Judy 1.3)
-  if(askPending?.id===row.id)return askPending.kind===kind?'pending':'busy';
-  if(busy || askPending || askBulk || retryPending || bulkRunning() || recoverySubmitting || automaticRequest!==null || releaseRun)return 'busy';
+  const own=ASK_QUEUE[kind];
+  if(own && queueRunning(row,own))return 'pending';  // ruling 35: its queued press runs now
+  if(own && queuedFor(row,own))return 'waiting';    // queued behind what is happening, with Cancel
+  const mine=askPendings.get(row.id);
+  if(mine)return mine.kind===kind?'pending':'sibling';
+  if(queuedFor(row) || queueRunning(row))return 'sibling';  // one queued action per row (Judy 0.22.1 1.1)
+  // Ruling 35 (Sergei 2026-10-26): nothing else holds a press back; the engine queues it if it must wait.
   if((kind==='approve' || kind==='convert') && askInert(row))return 'inert';
   if(kind==='separate' && askPanelEdits(row))return 'inert';
   return 'ready';
@@ -2576,13 +2619,14 @@ function updateAskButton(entry,button,kind){
   if(!button)return;const row=entry.row,mode=askMode(row,kind),done=askDone.get(row.id),queued=done==='approve' || done==='convert';
   const gone=mode==='done' && button!==entry.primary,hadFocus=gone && document.activeElement===button;button.hidden=gone;
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
-  const label=mode==='done' && queued?'Queued':mode==='pending'?ASK_PENDING[kind][0]:askLabel(entry,kind);
-  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',busy:'Another operation is in progress.',queued:QUEUE_SIBLING,inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
+  const label=mode==='done' && queued?'Queued':mode==='waiting'?'Queued':mode==='pending'?ASK_PENDING[kind][0]:askLabel(entry,kind);
+  const sibling=queuedFor(row) || (queueState.running?.book_id===row.id?queueState.running:null),siblingTip=sibling?`${queueWord(sibling.action)} is queued for this book. Cancel it to use this.`:(ASK_PENDING[askPendings.get(row.id)?.kind]?.[1] || '');
+  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
-  if(mode==='pending' || mode==='inert' || mode==='queued')button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
-  button.disabled=!['ready','pending','inert','queued'].includes(mode);
+  if(['pending','inert','queued','waiting','sibling'].includes(mode))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  button.disabled=!['ready','pending','inert','queued','waiting','sibling'].includes(mode);
 }
 // Every Stopped row shows where its book goes (Judy's to-do spec 1.6 and section 4; Futaba's m-3): its job's own destination.
 function stoppedGoesTo(row,td){
@@ -2599,10 +2643,10 @@ function renderGoesTo(entry){
 }
 function updateAskRow(entry){
   const row=entry.row,ask=askOf(row);if(!ask)return;
-  const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPending?.id===row.id?askPending.kind:null;
+  const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPendings.get(row.id)?.kind || null;
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
   if(done){status=ASK_DONE[done]?.[0] || status;hint=ASK_DONE[done]?.[1] || hint;}
-  else if(pending)hint=ladderNote(ASK_PENDING[pending][1],askPending?.at);
+  else if(pending)hint=ladderNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
   else if(result){hint=result.text;warn=true;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
@@ -2616,6 +2660,7 @@ function updateAskRow(entry){
   if(entry.nochoice)entry.nochoice.hidden=!!askDraft(row.id).choice;
   renderGoesTo(entry);
   for(const {kind,button} of entry.buttons || [])updateAskButton(entry,button,kind);
+  if(entry.cancel)updateQueueCancel(entry.cancel,row,ASK_QUEUE_ACTIONS);
   const tip=cellTip(row);if(entry.cell.title!==tip)entry.cell.title=tip;
 }
 function updateAskRows(){for(const entry of askRows.values())updateAskRow(entry);}
@@ -2623,27 +2668,43 @@ function askChanged(entry,delay){askResults.delete(entry.row.id);askPreview(entr
 // The Goes to line follows what is shown: on blur, on Enter, and 500 ms after typing stops. Stale replies are ignored and
 // the last good path stays meanwhile (no flicker, no "Loading").
 function askPreview(entry,delay){
-  const row=entry.row,id=row.id,d=askDraft(id),values=askValues(row,true),key=JSON.stringify(values);
+  const row=entry.row,id=row.id,d=askDraft(id),names=namesFor(row),values={...askValues(row,true),...(names?{names}:{})},key=JSON.stringify(values);
   if(d.timer!==null){clearTimeout(d.timer);d.timer=null;}
   if(key===d.previewKey)return;
   if(key==='{}'){d.previewKey=key;d.preview=null;++d.seq;updateAskRow(entry);return;}
   if(values.title!==undefined && !values.title)return;  // an empty title: Approve is inert; the last good path stays
+  if(names && (names.series && !names.number || names.number && !names.series))return;  // Series and Number go together (Judy 1.3)
   const send=async()=>{
     d.timer=null;d.previewKey=key;const seq=++d.seq;
-    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string' && p.path)d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true};}
+    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string' && p.path)d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true};
+      const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,applies:p.applies,path:p.path,absolute:p.absolute};}
     catch(error){if(seq===d.seq)d.previewKey=null;}
     finally{const fresh=askRows.get(id);if(fresh && seq===d.seq)updateAskRow(fresh);batchCounts();}
   };
   if(delay>0)d.timer=setTimeout(send,delay);else return send();
 }
 function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKind==='convert'?'convert':null):entry.primaryKind;if(kind)return askPress(entry,kind);}
+// Each Approve gate's code (web_server.approve_code): the real reason and the next step. Provisional copy, sent to Judy
+// (0.22.2 spec, Ender's notes); a code with no line here shows the engine's own sentence, never the bare refusal.
+const APPROVE_REFUSALS={name_taken:'An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve.',
+  title:'Type a title first.',job_exists:'This book already has an audiobook job. Find it under Queued / creating.',
+  profiles:'The files are different recordings (their audio differs). Choose the files that belong in the details panel, then approve.',
+  chapters:'The parts carry chapters of their own. Approve them as one book on the set row, or keep them as separate books.',
+  cover:"The cover couldn't be checked. Choose a cover in the details panel, then approve.",
+  sources:"A file of this book can't be read. Check that its drive is connected, then approve again.",
+  draft:'Edits in the details panel hold this book. Save or discard them, then approve.',
+  binding:'The collection files changed since they were checked. Scan again, then approve.',
+  closing:'Books Arranger is closing. Approve again after it restarts.'};
+function serverSentence(error,fallback){const text=typeof error?.body?.error==='string'?error.body.error.trim():'';return text?(/Nothing was (changed|deleted)\.$/.test(text)?text:text.replace(/\.?$/,'.')+' Nothing was changed.'):fallback;}
 function askErrorText(error,kind){
   if(!error.httpStatus)return lostLine();
   if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';
   if(error.body?.code==='moved')return 'The destination changed. Check the Goes to line and try again.';  // N7
   // A safety gate is named (0.22.0 review B5.4).
   if(error.body?.code==='format')return "The audio format needs a decision the app can't make yet. Select the row to read why.";
-  return ASK_REFUSED[kind];
+  if((kind==='approve' || kind==='convert') && Object.hasOwn(APPROVE_REFUSALS,error.body?.code))return APPROVE_REFUSALS[error.body.code];
+  // «Спящие красавицы» (2026-10-26): the engine's own sentence, never the bare "… was not accepted. Nothing was changed."
+  return serverSentence(error,ASK_REFUSED[kind]);
 }
 function askClock(date){return String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
 // The strip line (a polite live region): stays until the chip or filter changes; Retry receipts do not overwrite it.
@@ -2664,14 +2725,281 @@ function askLeave(entry){
   }
   $('filter').focus?.({preventScroll:true});
 }
+// ---------------------------------------------------------------- Edit names (Sergei 2026-10-26; Judy 0.22.2 section 1)
+// "Edit names" on every book row opens an editor in the row: Title, Author (the ask fields when the row asks), Series,
+// Number, Universe and Collection. Save records his values (lasting, "Entered by you") and touches no file; Approve records
+// and approves. Values load when the editor opens (one read for one row). The draft lives in memory per book and survives
+// polls, paging and chip changes. Ruling 35: Save is accepted whatever is happening and queued when it must wait (the book
+// converting, loading); the row shows it with Cancel.
+const NAMES_FIELDS=['title','author','series','number','universe','collection'];
+const NAMES_LABELS={title:'Title',author:'Author',series:'Series',number:'Number',universe:'Universe',collection:'Collection of stories'};
+const NAMES_TIPS={series:'The series this book belongs to. Leave empty for a standalone book.',number:'The book\'s number in its series. Needed when a series is set.',
+  universe:'The shared universe this book belongs to, such as Warhammer 40,000. Leave empty if none.',collection:'File this book under Сборники. Use it for story collections by several authors.',
+  title:'The title this book is filed under.',author:'The author this book is filed under. Leave empty to use Без автора.'};
+const NAMES_EDIT_TIP='Correct this book\'s title, author, series or universe. Nothing is converted or moved.';
+const NAMES_SAVE_TIP='Save these values and remember them for other scans of these files. Nothing is converted or moved.';
+const NAMES_SCOPE='Saved values are remembered, so a new scan of these files uses them.';
+const namesState=new Map(),namesNotes=new Map(),namesRows=new Map();
+function namesOpen(id){return !!namesState.get(id)?.open;}
+function namesAny(){for(const value of namesState.values())if(value.open)return true;return false;}
+function namesDropped(id){namesState.delete(id);namesRows.delete(id);}
+function namesData(id){return namesState.get(id)?.data || null;}
+function namesProposal(id,field){const value=namesData(id)?.fields?.[field]?.proposal;return field==='collection'?value===true:typeof value==='string'?value:'';}
+// The values shown: the draft over what the editor read; Title and Author of a question row are its ask draft (one draft).
+function namesValue(row,field){
+  const state=namesState.get(row.id),draft=state?.draft || {};
+  if((field==='title' || field==='author') && askOf(row)){const d=askDrafts.get(row.id) || {};if(typeof d[field]==='string')return d[field];const proposal=askProposal(askOf(row),field);return proposal || namesProposal(row.id,field);}
+  if(Object.hasOwn(draft,field))return draft[field];
+  return namesProposal(row.id,field);
+}
+function namesValues(row){const values={};for(const field of NAMES_FIELDS)values[field]=field==='collection'?namesValue(row,field)===true:String(namesValue(row,field) ?? '').trim();return values;}
+// What Approve and its preview carry while the editor is open (the four fields beside Title and Author).
+function namesFor(row){if(!row || !namesOpen(row.id) || !namesData(row.id))return null;const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection};}
+function namesChanged(row){if(!namesData(row.id))return false;const v=namesValues(row);return NAMES_FIELDS.some(field=>field==='collection'?v[field]!==namesProposal(row.id,field):v[field]!==String(namesProposal(row.id,field)).trim());}
+// Why Save does nothing yet ('' when it works), Judy 1.6.
+function namesInert(row){
+  if(!namesData(row.id))return 'Loading these names…';
+  const v=namesValues(row);
+  if(!v.title)return 'Type a title first.';
+  if(v.series && !v.number)return 'Type the number in the series, or clear the series.';
+  if(v.number && !v.series)return 'Type the series name, or clear the number.';
+  const panel=askPanelEdits(row);if(panel)return panel;
+  if(!namesChanged(row))return 'Change a value first.';
+  return '';
+}
+// The Place line (Judy 2): a collection in a series, or a universe book; parts in order and only when set.
+function placeText(place){
+  if(!place || typeof place!=='object')return '';
+  const series=place.series && place.number?[`Series: ${place.series}`,`No. ${place.number}`]:[];
+  if(place.universe)return [`Universe: ${place.universe}`,...series].join(' · ');
+  if(place.collection===true && series.length)return ['Collection',...series].join(' · ');
+  return '';
+}
+function enteredText(fields){const list=(Array.isArray(fields)?fields:[]).filter(field=>Object.hasOwn(NAMES_LABELS,field));return list.length?`Entered by you: ${list.map(field=>field==='collection'?'collection':field).join(', ')}.`:'';}
+// Edit names on the row (Judy 1.6): inert only while a retry, repair or delete is queued for it (one queued action per
+// row) and when no file is left. Ruling 35: a converting book is no reason (its Save waits for the conversion).
+function namesButtonInert(row){
+  const queued=queuedFor(row) || (queueState.running?.book_id===row.id?queueState.running:null);
+  if(queued && ['retry','repair','delete','copy'].includes(queued.action))return {retry:'A retry is queued for this book. Cancel it to use this.',repair:'A repair is queued for this book. Cancel it to use this.',delete:QUEUE_SIBLING,copy:QUEUE_SIBLING}[queued.action];
+  if(Array.isArray(row.members) && row.members.length && row.members.every(member=>member.missing))return 'No files are left for this book.';
+  return '';
+}
+function buildNamesButton(row,buttons){
+  const button=node('button','Edit names','quiet row-retry names-edit');button.type='button';
+  button.setAttribute('aria-controls','names-editor-'+row.id);
+  button.addEventListener('click',event=>{event.stopPropagation();if(button.getAttribute('aria-disabled')==='true')return;namesToggle(row.id);});
+  button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);
+  const entry=namesRows.get(row.id) || {};entry.button=button;entry.row=row;namesRows.set(row.id,entry);
+  updateNamesButton(row);
+}
+function updateNamesButton(row){
+  const entry=namesRows.get(row.id),button=entry?.button;if(!button)return;
+  const inert=namesButtonInert(row),title=inert || NAMES_EDIT_TIP;
+  if(button.title!==title)button.title=title;button.setAttribute('aria-label','Edit names: '+askName(row));
+  button.setAttribute('aria-expanded',String(namesOpen(row.id)));
+  if(inert)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+}
+async function namesToggle(id){
+  const row=rows.find(item=>item.id===id);if(!row)return;
+  if(namesOpen(id)){namesRows.get(id)?.inputs?.title?.focus?.({preventScroll:true});return;}  // open: focus moves to Title (1.7)
+  const state=namesState.get(id) || {draft:{},seq:0,previewKey:''};state.open=true;namesState.set(id,state);
+  renderRows(true);focusNames(id);
+  if(!state.data){
+    try{const answer=await request('/api/candidate/names',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);state.data=answer?.editor || null;}
+    catch(error){namesNotes.set(id,{text:error.httpStatus?serverSentence(error,'The names could not be read.'):lostLine(),warn:true});state.open=false;}
+    renderRows(true);focusNames(id);namesPreview(id,0);
+  }
+}
+function focusNames(id){const entry=namesRows.get(id),title=entry?.inputs?.title;(title || entry?.button)?.focus?.({preventScroll:true});}
+function namesClose(id,keep=false){
+  const state=namesState.get(id);if(!state)return;state.open=false;if(!keep){state.draft={};askDrafts.delete(id);state.preview=null;state.previewKey='';}
+  renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
+}
+// Fields stop clicks and keys reaching the row; Esc closes only an unchanged editor; Ctrl+Enter presses the row's Approve,
+// else Save (Judy 1.3, 1.7); Enter alone refreshes the Goes to line.
+function namesGuard(row,element){
+  element.addEventListener('click',event=>event.stopPropagation());
+  element.addEventListener('keydown',event=>{event.stopPropagation();
+    if(event.key==='Escape'){if(!namesChanged(row))namesClose(row.id);return;}
+    if(event.key!=='Enter')return;event.preventDefault?.();
+    if(event.ctrlKey){const entry=askRows.get(row.id);if(entry && entry.primaryKind==='approve')askPrimary(entry);else namesSave(row.id);}
+    else namesPreview(row.id,0);});
+}
+function namesChangedField(row,field,value){
+  if((field==='title' || field==='author') && askOf(row)){askDraft(row.id)[field]=value;const entry=askRows.get(row.id);if(entry){askChanged(entry,500);}}
+  else{const state=namesState.get(row.id);state.draft[field]=value;namesPreview(row.id,500);}
+  namesNotes.delete(row.id);updateNamesRows();
+}
+function namesInput(row,field,list){
+  const wrap=node('label','','ask-field'),input=node('input');input.type='text';input.maxLength=1000;input.setAttribute('maxlength','1000');input.setAttribute('autocomplete','off');input.setAttribute('spellcheck','false');
+  input.value=String(namesValue(row,field) ?? '');input.title=NAMES_TIPS[field];input.setAttribute('aria-label',NAMES_LABELS[field]+': '+askName(row));
+  if(field==='series' || field==='universe')input.placeholder='None';
+  if(list){input.setAttribute('list',list);}
+  wrap.append(node('span',NAMES_LABELS[field]),input);namesGuard(row,wrap);namesGuard(row,input);
+  input.addEventListener('input',()=>namesChangedField(row,field,input.value));input.addEventListener('blur',()=>namesPreview(row.id,0));
+  return {wrap,input};
+}
+function namesList(id,name,values){const list=node('datalist');list.id=`names-${name}-${id}`;for(const value of values || []){const option=node('option');option.value=value;list.append(option);}return list;}
+// The lines under Series and Universe (1.6): a new name, or the basis of a guess.
+function namesFieldLine(row,field){
+  const data=namesData(row.id),value=String(namesValue(row,field) || '').trim(),proposal=String(namesProposal(row.id,field) || '').trim();
+  const known=field==='series'?data?.series:field==='universe'?data?.universes:null;
+  if(known && value && value!==proposal && !known.includes(value))return field==='series'?'New series: nothing is filed there yet.':'New universe: nothing is filed there yet.';
+  const basis=data?.fields?.[field]?.basis;
+  if(value && value===proposal && basis==='folder_name')return field==='series'?'Series from the folder name.':'Universe from the folder name.';
+  if(value && value===proposal && basis==='file_name' && field==='universe')return 'Universe from the file name.';
+  return '';
+}
+// The editor's parts in the status cell. A question row keeps its own fields (Title, Author or the radio group) and its own
+// Goes to line; the editor adds the rest around them. Any other row gets the whole editor.
+function buildNamesBlock(row,td){
+  const id=row.id,open=namesOpen(id),entry=namesRows.get(id) || {};entry.row=row;entry.inputs={};namesRows.set(id,entry);
+  const ask=askRows.get(id),before=ask?.dest || [...(td.children || [])].find(child=>String(child.className || '').includes('goes-to')) || null;
+  const place=node('p','','field-help book-place'),entered=node('p','','field-help names-entered');entry.place=place;entry.entered=entered;
+  const insert=element=>{if(before && before.parentElement===td)td.insertBefore(element,before);else td.append(element);};
+  if(!open){insert(place);insert(entered);updateNamesRow(row);return;}
+  const box=node('div','','names-editor');box.id='names-editor-'+id;entry.box=box;
+  if(!namesData(id)){box.append(node('p','Loading these names…','field-help'));insert(box);updateNamesRow(row);return;}
+  const grid=node('div','','ask-grid'),data=namesData(id);
+  if(!ask){
+    for(const field of ['title','author']){const {wrap,input}=namesInput(row,field);entry.inputs[field]=input;const cell=node('div');cell.append(wrap);grid.append(cell);}
+  }else entry.inputs.title=ask.controls.find(control=>control.type==='text') || null;
+  for(const field of ['series','number','universe']){
+    const list=field==='number'?null:`names-${field==='series'?'series':'universes'}-${id}`;
+    const {wrap,input}=namesInput(row,field,list);entry.inputs[field]=input;const cell=node('div');cell.append(wrap);
+    if(field!=='number'){const line=node('p','','field-help ask-basis');entry[field+'Line']=line;cell.append(line);}
+    grid.append(cell);
+  }
+  const check=node('label','','check ask-radio'),box2=node('input');box2.type='checkbox';box2.checked=namesValue(row,'collection')===true;box2.title=NAMES_TIPS.collection;box2.setAttribute('aria-label',NAMES_LABELS.collection+': '+askName(row));
+  check.append(box2,node('span',NAMES_LABELS.collection));namesGuard(row,check);namesGuard(row,box2);entry.inputs.collection=box2;
+  box2.addEventListener('change',()=>namesChangedField(row,'collection',box2.checked));grid.append(check);
+  box.append(grid,namesList(id,'series',data.series),namesList(id,'universes',data.universes));
+  if(askOf(row)?.kind==='original_title')box.append(node('p','Type the English title to stop waiting.','field-help'));
+  entry.scope=node('p','','field-help names-scope');box.append(entry.scope,place,entered);
+  if(!ask){entry.dest=node('p','','goes-to');box.append(entry.dest);}
+  insert(box);
+  // After the Goes to line: Save and Discard, then what is remembered (Judy 1.2).
+  const after=node('div','','names-after'),actions=node('div','','row-actions');
+  const save=node('button','Save','quiet row-retry');save.type='button';save.addEventListener('click',event=>{event.stopPropagation();namesSave(id);});save.addEventListener('keydown',event=>event.stopPropagation());
+  const discard=node('button','Discard','quiet row-retry');discard.type='button';discard.title='Throw away these changes. Nothing is saved.';discard.setAttribute('aria-label','Discard: '+askName(row));
+  discard.addEventListener('click',event=>{event.stopPropagation();namesClose(id);});discard.addEventListener('keydown',event=>event.stopPropagation());
+  actions.append(save,discard);after.append(actions);entry.save=save;entry.discard=discard;
+  const remembered=Array.isArray(data.remembered)?data.remembered:[];
+  if(remembered.length){
+    after.append(node('p','Remembered for this book','field-help ask-list-label'));
+    for(const item of remembered){
+      const line=node('p','','field-help names-remembered'),label=NAMES_LABELS[item.field] || item.field,to=item.field==='collection'?(item.to==='true'?'Yes':'No'):item.to;
+      line.append(node('span',item.from?`${label}: «${item.from}» → «${to}»`:`${label}: «${to}»`));
+      const forget=node('button','Forget','quiet row-retry');forget.type='button';forget.title='Take this correction back. Nothing is renamed or moved.';forget.setAttribute('aria-label',`Forget: ${label}: ${askName(row)}`);
+      forget.addEventListener('click',event=>{event.stopPropagation();namesForget(id,item.id);});forget.addEventListener('keydown',event=>event.stopPropagation());
+      line.append(forget);after.append(line);(entry.forgets=entry.forgets || []).push(forget);
+    }
+  }
+  if(ask?.dest?.nextSibling)td.insertBefore(after,ask.dest.nextSibling);else td.append(after);
+  updateNamesRow(row);
+}
+function updateNamesRow(row){
+  const entry=namesRows.get(row.id);if(!entry)return;const state=namesState.get(row.id),open=namesOpen(row.id);
+  const place=open?(state?.preview?.place || namesData(row.id)?.place):row.place,placeLine=placeText(place);
+  if(entry.place){if(entry.place.textContent!==placeLine)entry.place.textContent=placeLine;entry.place.hidden=!placeLine;}
+  const entered=enteredText(open?namesData(row.id)?.entered:row.entered);
+  if(entry.entered){if(entry.entered.textContent!==entered)entry.entered.textContent=entered;entry.entered.hidden=!entered;}
+  if(open && entry.scope){const n=Number(state?.preview?.applies || namesData(row.id)?.applies) || 1,text=NAMES_SCOPE+(n>1?` Applies to ${n.toLocaleString()} books.`:'');if(entry.scope.textContent!==text)entry.scope.textContent=text;}
+  for(const field of ['series','universe']){const line=entry[field+'Line'];if(line){const text=namesFieldLine(row,field);if(line.textContent!==text)line.textContent=text;line.hidden=!text;}}
+  if(open && entry.dest){
+    const dest=state?.preview || namesData(row.id)?.destination,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
+    entry.dest.hidden=!path;if(path){const key=JSON.stringify(path);if(entry.dest.dataset.key!==key){entry.dest.replaceChildren(node('span','Goes to','goes-label'),node('span',path,'path'));entry.dest.dataset.key=key;}entry.dest.title=dest.absolute || path;}
+  }
+  if(entry.save){
+    const pending=state?.pending,queued=queuedFor(row,'names') || queueRunning(row,'names'),inert=pending || queued?'':namesInert(row);
+    const face=pending || queued?'Saving…':'Save',tip=pending?'Saving these names…':queued?(queueHint(row) || 'Saving these names…'):inert || NAMES_SAVE_TIP;
+    if(entry.save.textContent!==face)entry.save.textContent=face;if(entry.save.title!==tip)entry.save.title=tip;entry.save.setAttribute('aria-label',face.replace(/…$/,'')+': '+askName(row));
+    if(pending || queued || inert)entry.save.setAttribute('aria-disabled','true');else entry.save.removeAttribute('aria-disabled');
+  }
+  const note=namesNotes.get(row.id);
+  if(note){const ask=askRows.get(row.id);if(ask)setHint(ask.hint,note.text,'',note.warn);else{const retry=rowRetries.get(row.path);if(retry)setHint(retry.hint,note.text,'',note.warn);else{if(!entry.note){entry.note=node('p','','field-help attention-hint');(entry.place?.parentElement || null)?.insertBefore?.(entry.note,entry.place);}if(entry.note){entry.note.textContent=note.text;entry.note.classList?.toggle?.('retry-refused',!!note.warn);}}}}
+  updateNamesButton(row);
+}
+function updateNamesRows(){for(const entry of namesRows.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh){entry.row=fresh;updateNamesRow(fresh);}}}
+// The Goes to line, the Place line and "Applies to" follow the draft: 500 ms after typing stops, on blur, on Enter.
+function namesPreview(id,delay){
+  const row=rows.find(item=>item.id===id),state=namesState.get(id);if(!row || !state?.open || !state.data)return;
+  if(askOf(row)){const entry=askRows.get(id);if(entry){askDraft(id).previewKey=null;askPreview(entry,delay);}return;}
+  const v=namesValues(row),key=JSON.stringify(v);if(state.timer){clearTimeout(state.timer);state.timer=null;}
+  if(key===state.previewKey || !v.title || (v.series && !v.number) || (v.number && !v.series))return;
+  const send=async()=>{state.timer=null;state.previewKey=key;const seq=++state.seq;
+    try{const answer=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,title:v.title,author:v.author,names:{series:v.series,number:v.number,universe:v.universe,collection:v.collection}});
+      if(seq===state.seq && answer?.preview)state.preview=answer.preview;}
+    catch(error){if(seq===state.seq)state.previewKey='';}
+    finally{if(seq===state.seq)updateNamesRows();}};
+  if(delay>0)state.timer=setTimeout(send,delay);else return send();
+}
+// The row line after a press (Judy 1.6), by the row's family and the engine's outcome.
+function namesSavedText(row,answer){
+  if(answer?.outcome==='replanned')return 'Saved. The queued job uses these names.';
+  if(answer?.outcome==='ready_only')return 'Saved. The finished audiobook in Audiobooks Sorted keeps its name.';
+  if(answer?.outcome==='unchanged')return 'Nothing changed. Nothing was saved.';
+  const ask=askOf(row);
+  if(ask?.kind==='original_title')return 'Saved. The title is used as entered.';
+  if(ask)return 'Saved. Approve uses these names.';
+  const action=rowAction(row);
+  if(action?.kind==='retry')return 'Saved. Retry uses these names.';
+  if(action?.kind==='repair')return 'Saved. Repair uses these names.';
+  if(row.creation?.job?.state==='Output needs attention')return 'Saved. The next attempt uses these names.';
+  return 'Saved. These names are used when it converts.';
+}
+async function namesSave(id){
+  const row=rows.find(item=>item.id===id),state=namesState.get(id),entry=namesRows.get(id);if(!row || !state || state.pending)return;
+  if(entry?.save?.getAttribute('aria-disabled')==='true')return;
+  const values=namesValues(row);state.pending={at:Date.now()};namesNotes.delete(id);updateNamesRows();
+  let answer=null,failure=null;
+  try{answer=await request('/api/candidate/names-save',{library:'Audiobooks',id,revision:row.revision,names:values,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
+  state.pending=null;
+  if(answer?.queued===true){queueAccepted(row,'names',answer);updateNamesRows();return;}
+  if(answer){namesDone(row,answer);return;}
+  const code=failure?.body?.code;
+  namesNotes.set(id,{text:!failure?.httpStatus?lostLine():code==='changed'?'This book changed. Review its details and try again.':serverSentence(failure,'Save was not accepted. Nothing was changed.'),warn:true});
+  if(!failure?.httpStatus)refreshFailed(failure);
+  updateNamesRows();
+}
+function namesDone(row,answer,forget=false){
+  const id=row.id,n=Number(answer?.applies) || 1;
+  namesNotes.set(id,{text:forget?'Forgotten. Nothing is renamed or moved.':namesSavedText(row,answer),warn:false});
+  if(Array.isArray(answer?.entered))row.entered=answer.entered;
+  if(!forget)askNote(`Saved names for ${askName(row)}.`+(n>1?` Applies to ${n.toLocaleString()} books.`:''));
+  const state=namesState.get(id);if(state){state.open=false;state.data=null;state.draft={};state.preview=null;state.previewKey='';}
+  askDrafts.delete(id);renderRows(true);namesRows.get(id)?.button?.focus?.({preventScroll:true});
+  lastKey=null;refresh(true).catch(()=>{});  // the list follows (Place, Entered, Goes to); its failure is not the save's
+}
+async function namesForget(id,entry){
+  const row=rows.find(item=>item.id===id);if(!row)return;
+  let answer=null,failure=null;
+  try{answer=await request('/api/candidate/names-forget',{library:'Audiobooks',id,revision:row.revision,entry_id:entry,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
+  if(answer?.queued===true){queueAccepted(row,'names_forget',answer);updateNamesRows();return;}
+  if(answer){namesDone(row,answer,true);return;}
+  namesNotes.set(id,{text:!failure?.httpStatus?lostLine():serverSentence(failure,'Forget was not accepted. Nothing was changed.'),warn:true});updateNamesRows();
+}
+// A queued Save or Forget ended (ruling 35).
+function namesQueued(outcome){
+  const row=rows.find(item=>item.id===outcome.book_id);queueAck(outcome.id);
+  if(!row){askNote(`${outcome.title || 'Book'}: ${queueWord(outcome.action)} ${outcome.result==='done'?'done':'cancelled'}.`);return;}
+  if(outcome.result==='done'){namesDone(row,outcome.answer || {},outcome.action==='names_forget');return;}
+  namesNotes.set(row.id,{text:`${queueWord(outcome.action)} cancelled: ${lowerFirst(serverSentence({body:{error:outcome.error}},'it was not accepted. Nothing was changed.'))}`,warn:true});updateNamesRows();
+}
 // ---------------------------------------------------------------- Queued Retry, Repair and Delete book (0.22.1)
 // Judy's 0.22.1 spec, section 1 (backlog 2 and 3): a press while another operation runs is accepted and queued by the
 // engine (action_queue.py), never refused as busy. One queue, first in first out, one action at a time, held in the
 // engine's memory, so a reload, a filter change or a second look read the same state from /api/state. The row says what
 // it waits for and has its own Cancel; a queued action never opens a dialog, moves focus or makes a sound when it runs;
 // its outcome lands in the row, the strip line and a polite announcement. Every check runs again when it runs.
-const QUEUE_WORDS={operation:['Another operation is in progress','the current operation'],scan:['A scan is running','the scan'],
-  retry_run:['A retry run is in progress','the retry run'],approve_run:['A bulk approval is in progress','the bulk approval'],book:['This book is being processed',"this book's processing"]};
+const QUEUE_WORDS={operation:['The app is working on another action','the current action'],scan:['A scan is running','the scan'],
+  retry_run:['A retry run is in progress','the retry run'],approve_run:['A bulk approval is in progress','the bulk approval'],book:['This book is being processed',"this book's processing"],
+  // Ruling 35 (provisional copy, sent to Judy): what a queued press also waits for.
+  loading:['Books Arranger is still loading','loading'],jobs:['Audiobook conversion is running','the conversion'],automatic:['Automatic processing is running','automatic processing']};
+// The word of each queued action (ruling 35), for its queued line, Cancel and outcome.
+const QUEUE_ACTION_WORDS={retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',convert:"Convert what's there",separate:'Keep as separate books',
+  scan_again:'Scan again',dismiss:'Remove from list',copy:'Remove this copy',names:'Save',names_forget:'Forget',scan_start:'Start scanning',scan_resume:'Resume scanning'};
+function queueWord(action){return QUEUE_ACTION_WORDS[action] || 'An action';}
 // The kind's words (1.2). An unknown kind reads as operation; the bulk approval runs in this page, so the page names it.
 function queueKind(kind){const known=Object.hasOwn(QUEUE_WORDS,kind || '')?kind:'operation';return known==='operation' && askBulk?'approve_run':known;}
 function queueS(kind){return QUEUE_WORDS[queueKind(kind)][0];}
@@ -2686,7 +3014,52 @@ const QUEUE_SIBLING='A delete is queued for this book. Cancel it to use this.';
 // Its mirror on Delete book (Judy's implementation check, N1): a queued Retry or Repair on the row.
 const QUEUE_SIBLING_RETRY='A retry is queued for this book. Cancel it to use this.',QUEUE_SIBLING_REPAIR='A repair is queued for this book. Cancel it to use this.';
 // The page's own "busy" before 0.22.1: one press at a time, plus the bulk runs. Other presses keep it (offer 1).
-function pressBusy(){return busy || recoverySubmitting || automaticRequest!==null || !!retryPending || bulkRunning() || releaseRun || !!askPending || askBulk;}
+function pressBusy(){return busy || recoverySubmitting || automaticRequest!==null || !!retryPending || bulkRunning() || releaseRun || askPendings.size>0 || askBulk;}
+// Ruling 35 (Sergei 2026-10-26): a press the page itself would have held back ("Another operation is in progress.") is
+// accepted and waits here, first in first out, then runs when the page is free, every check made again then (the press
+// runs as if pressed then). The row or button shows it queued, with Cancel. Kept in this page's memory, like a draft.
+const laterPresses=[];let laterSeq=0,laterRunning=false;
+const LATER_WORDS={startover:'Start over',combined:'Start over',release:'Let the app handle it',clear:'Clear working files',convert:'Convert',keep:'Keep files',prepare:'Prepare recovery',
+  retry:'Retry',repair:'Repair',scan_start:'Start scanning',scan_resume:'Resume scanning',scan_stop:'Stop scanning',pause:'Pause audiobook jobs',resume:'Resume audiobook jobs',
+  start_automatic:'Start automatic processing',stop_automatic:'Stop automatic processing',create:'Create audiobook',queue_books:'Queue selected',find_metadata:'Find metadata',
+  find_covers:'Find local covers',save_tracks:'Save track review',check_metadata:'Check metadata',approve_candidate:'Approve candidate metadata',retry_all:'Retry all',retry_selected:'Retry selected',release_selected:'Let the app handle selected'};
+function laterWord(kind){return LATER_WORDS[kind] || 'This press';}
+function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
+// Provisional copy (ruling 35, sent to Judy).
+function laterLine(item){return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':'the current action'} finishes.`;}
+function pressLater(key,kind,title,run){
+  if(laterFor(key))return laterFor(key);
+  const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now()};laterPresses.push(item);
+  queueAnnounce(`${laterWord(kind)} queued${item.title?': '+item.title:''}.`);controls();return item;
+}
+function cancelLater(key){
+  const index=laterPresses.findIndex(item=>item.key===key);if(index<0)return false;
+  const [item]=laterPresses.splice(index,1);queueAnnounce(`${laterWord(item.kind)} cancelled${item.title?': '+item.title:''}.`);controls();return true;
+}
+// The toolbar and panel buttons (ruling 35): a press made while another press of this page runs, or while loading, waits
+// (pressLater) and runs then, as if pressed then; the same button pressed again takes it back. Provisional copy, for Judy.
+function later(key,kind,handler){
+  return (...args)=>{
+    if(laterFor(key)){cancelLater(key);return;}
+    if(!ended && (busy || automaticRequest!==null || !!LS && loadingActive)){const item=pressLater(key,kind,'',()=>handler(...args));message(laterLine(item)+' Press it again to cancel.');return;}
+    return handler(...args);
+  };
+}
+const laterDecorated=new Set();
+function renderLaterButtons(){
+  const now=new Set();
+  for(const item of laterPresses){
+    if(!item.key.startsWith('toolbar:'))continue;const id=item.key.slice(8),button=$(id);if(!button?.setAttribute)continue;now.add(id);
+    if(!laterDecorated.has(id)){button.dataset.laterTitle=button.title || '';laterDecorated.add(id);}
+    const tip=laterLine(item)+' Press it again to cancel.';if(button.title!==tip)button.title=tip;button.setAttribute('aria-disabled','true');button.disabled=false;
+  }
+  for(const id of [...laterDecorated])if(!now.has(id)){const button=$(id);laterDecorated.delete(id);if(button?.setAttribute){button.title=button.dataset?.laterTitle || '';button.removeAttribute('aria-disabled');}}
+}
+function drainLater(){
+  if(laterRunning || !laterPresses.length || pressBusy() || loadingActive)return;
+  const item=laterPresses.shift();laterRunning=true;
+  Promise.resolve().then(()=>item.run()).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
+}
 // What a Retry or Delete pressed now would wait for, as far as the page knows. The engine's answer decides.
 function pageBlocker(){
   if(state?.active_library)return 'scan';
@@ -2714,7 +3087,7 @@ function syncQueue(answer){
 function queueAccepted(row,action,answer){
   const item={id:answer.id,action,book_id:row.id,title:queueTitle(row),position:Number(answer.position) || queueState.queued.length+1,blocker:answer.blocker,...(action==='delete'?{n:answer.n}:{})};
   queueState={...queueState,queued:[...queueState.queued.filter(entry=>entry.id!==item.id && entry.book_id!==row.id),item].sort((a,b)=>(Number(a.position) || 0)-(Number(b.position) || 0))};
-  queueAnnounce(`${{retry:'Retry',repair:'Repair',delete:'Delete'}[action]} queued: ${item.title}.`);
+  queueAnnounce(`${queueWord(action)} queued: ${item.title}.`);
 }
 function lowerFirst(text){return text?text[0].toLowerCase()+text.slice(1):text;}
 // A refused queued Retry or Repair (1.6), from its typed code; the server's own sentence for the others.
@@ -2747,6 +3120,11 @@ function applyQueueOutcome(outcome){
   // A row line's status is taken from the first list read after the outcome (the rows on screen predate the run).
   const id=outcome.book_id,row=rows.find(item=>item.id===id),title=outcome.title || queueTitle(row),status=null,gen=listGeneration;
   queueLate.delete(outcome.id);
+  if(outcome.action==='copy' && outcome.result==='done'){
+    deleteNotes.set(id,{text:ASK_DONE.copy_removed[1],warn:false,done:true});if(askRows.has(id))askDone.set(id,'copy_removed');
+    askNote(`Queued removal finished: ${title}. ${ASK_DONE.copy_removed[1]}`);queueStripOutcome=outcome.id;if(row)forgetDeleted(row);queueAnnounce(`${title}: ${ASK_DONE.copy_removed[1]}`);return;
+  }
+  if(outcome.action==='copy'){const text=`Remove this copy cancelled: ${lowerFirst(serverSentence({body:{error:outcome.error}},'it was not accepted. Nothing was deleted.'))}`;queueNotes.set(id,{text,warn:true,outcome:outcome.id,status,gen});queueAnnounce(`${title}: ${text}`);return;}
   if(outcome.action==='delete'){
     if(outcome.result==='done'){
       deleteNotes.set(id,{text:ASK_DONE.deleted[1],warn:false,done:true});if(askRows.has(id))askDone.set(id,'deleted');
@@ -2764,6 +3142,14 @@ function applyQueueOutcome(outcome){
     const text=outcome.result==='refused'?queueDeleteText(outcome):QUEUE_DELETE_UNKNOWN;
     queueNotes.set(id,{text,warn:true,outcome:outcome.id,status,gen});queueAnnounce(`${title}: ${text}`);return;
   }
+  const asked=Object.keys(ASK_QUEUE).find(kind=>ASK_QUEUE[kind]===outcome.action);
+  if(asked){
+    // Ruling 35: a queued Approve, Keep, Scan again or Remove from list ended; the row shows it as its press would have.
+    const entry=askRows.get(id) || {id,row};
+    if(outcome.result==='done'){askSettled(entry,asked,outcome.answer || {},null);queueStripOutcome=outcome.id;queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);return;}
+    const text=queueAskText(outcome,asked);askResults.set(id,{text});queueAnnounce(`${title}: ${text}`);queueAck(outcome.id);return;
+  }
+  if(outcome.action==='names' || outcome.action==='names_forget'){namesQueued(outcome);return;}
   if(outcome.result==='done'){
     // The press ran as today (1.6): the row shows the server's queued state; the existing strip line names the book.
     const key=row?retryKey(row):null;if(key)remember(key,'queued',outcome.action,outcome.answer?.position);
@@ -2772,6 +3158,11 @@ function applyQueueOutcome(outcome){
   }
   const text=queueRetryText(outcome);queueNotes.set(id,{text,warn:true,outcome:outcome.id,status,gen});queueAnnounce(`${title}: ${text}`);
 }
+// A refused queued press (ruling 35): its gate's own words, else the engine's sentence; never the bare refusal.
+function queueAskText(outcome,kind){
+  const error={httpStatus:409,body:{code:outcome.code,error:outcome.error}};
+  return `${queueWord(outcome.action)} cancelled: ${lowerFirst(askErrorText(error,kind))}`;
+}
 // The row line of a queued or running action (1.4), or null.
 function queueHint(row){
   const late=[...queueLate.values()].find(item=>item.book_id===row.id);if(late && (queuedFor(row) || queueRunning(row)))return late.text;
@@ -2779,10 +3170,16 @@ function queueHint(row){
   if(item){
     const p=queueP(queueBlocker(item)),n=queueAhead(item),ahead=n?`, ${n.toLocaleString()} ahead`:'';
     if(item.action==='delete')return `Delete queued${ahead}. Nothing is deleted yet. It runs when ${p} finishes.`;
-    return `${item.action==='repair'?'Repair':'Retry'} queued${ahead}. Starts when ${p} finishes.`;
+    if(item.action==='copy')return `Remove this copy queued${ahead}. Nothing is deleted yet. It runs when ${p} finishes.`;
+    if(['retry','repair'].includes(item.action))return `${item.action==='repair'?'Repair':'Retry'} queued${ahead}. Starts when ${p} finishes.`;
+    // Ruling 35 (provisional copy, sent to Judy): his values are kept with the queued press.
+    return `${queueWord(item.action)} queued${ahead}. Your choices are saved. It runs when ${p} finishes.`;
   }
   const running=queueState.running;if(!queueRunning(row))return null;
-  if(running.action==='delete'){const n=Number(running.n) || 0;return n===0?'Removing this book…':n===1?'Deleting 1 file…':`Deleting ${n.toLocaleString()} files…`;}
+  if(running.action==='delete' || running.action==='copy'){const n=Number(running.n) || 0;return n===0?'Removing this book…':n===1?'Deleting 1 file…':`Deleting ${n.toLocaleString()} files…`;}
+  const asked=Object.keys(ASK_QUEUE).find(kind=>ASK_QUEUE[kind]===running.action);
+  if(asked)return ASK_PENDING[asked][1];
+  if(running.action==='names' || running.action==='names_forget')return 'Saving these names…';
   return rowActions[running.action==='repair'?'repair':'retry'].note;
 }
 // A queued line ends when its status changes (the existing retryResult lifetime, 1.6).
@@ -2804,7 +3201,7 @@ async function cancelQueued(row,action){
   queueCancels.delete(item.id);
   if(answer?.cancelled===true){
     queueState={...queueState,queued:queueState.queued.filter(entry=>entry.id!==item.id).map(entry=>({...entry,position:Number(entry.position)>Number(item.position)?Number(entry.position)-1:entry.position}))};
-    queueAnnounce(`${word==='delete'?'Delete':word==='repair'?'Repair':'Retry'} cancelled: ${item.title || queueTitle(row)}.`);
+    queueAnnounce(`${queueWord(item.action)} cancelled: ${item.title || queueTitle(row)}.`);
   }else if(failure?.httpStatus===409 && failure.body?.code==='started')queueLate.set(item.id,{book_id:row.id,text:`Too late to cancel: the ${word} has already started.`});
   // Focus goes to the row's restored Retry or Delete book button, else the Status filter (1.7); again after the list is
   // read, which rebuilds the row.
@@ -2817,8 +3214,8 @@ async function cancelQueued(row,action){
 }
 // The Cancel button of a queued action: a native button beside the face, never the same target (1.1).
 function queueCancelButton(row,action){
-  const button=node('button','Cancel '+(action==='delete'?'delete':'retry'),'quiet row-cancel');button.type='button';button.hidden=true;
-  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.hidden)return;const item=queuedFor(row);if(item)cancelQueued(row,item.action);});
+  const button=node('button','Cancel '+lowerFirst(queueWord(action)),'quiet row-cancel');button.type='button';button.hidden=true;
+  button.addEventListener('click',event=>{event?.stopPropagation?.();if(event?.repeat || button.hidden)return;const item=queuedFor(row);if(item){cancelQueued(row,item.action);return;}const key=retryKey(row);if(key && laterFor(key))cancelLater(key);});
   button.addEventListener('keydown',event=>event?.stopPropagation?.());
   return button;
 }
@@ -2827,9 +3224,9 @@ function updateQueueCancel(button,row,kinds){
   const lost=!shown && !button.hidden && document.activeElement===button;
   button.hidden=!shown;
   if(shown){
-    const word=item.action==='repair'?'repair':item.action==='delete'?'delete':'retry',label='Cancel '+word;
+    const word=lowerFirst(queueWord(item.action)),label='Cancel '+word;
     if(button.textContent!==label)button.textContent=label;
-    const tip=word==='delete'?'Take this delete out of the queue. Nothing was deleted.':`Take this ${word} out of the queue. Nothing was started.`;if(button.title!==tip)button.title=tip;
+    const tip=['delete','copy'].includes(item.action)?`Take this ${word} out of the queue. Nothing was deleted.`:`Take this ${word} out of the queue. Nothing was started.`;if(button.title!==tip)button.title=tip;
     button.setAttribute('aria-label',`${label}: ${item.title || queueTitle(row)}`);
     if(queueCancels.has(item.id))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   }
@@ -2907,27 +3304,27 @@ function deleteMode(row,kind='delete'){
   if(ended || recoveryDisconnected && !desktopMode())return 'offline';
   if(deleteNotes.get(row.id)?.done || ['approve','convert','deleted','copy_removed'].includes(askDone.get(row.id)))return 'done';
   if(deletePending?.id===row.id)return 'pending';
-  if(kind==='delete' && queueRunning(row,'delete'))return 'running';
-  if(kind==='delete' && queuedFor(row,'delete'))return 'queued';
-  if(deletePending || deleteDialog)return 'busy';  // one dialog at a time
-  if(kind!=='delete')return pressBusy()?'busy':'ready';  // Remove this copy keeps its busy state (Judy 1.1, offer 1)
+  if(queueRunning(row,kind))return 'running';
+  if(queuedFor(row,kind))return 'queued';
+  // One dialog at a time: a press while another book's files are being checked opens its dialog right after (ruling 35).
+  if(deleteNext===row.id)return 'next';
+  if(deletePending || deleteDialog)return 'ready';
   if(queuedFor(row))return 'sibling';  // a Retry or Repair queued on this row: one queued action per row (N1)
-  if(queueRunning(row) || queuePresses.has(row.id))return 'busy';
-  // Blocked: enabled; the confirm queues the delete (Judy 1.5).
-  return pageBlocker()?'blocked':'ready';
+  // Ruling 35: nothing else holds it; the confirm queues the delete behind what is happening (Judy 1.5).
+  return pageBlocker() || queueRunning(row) || queuePresses.has(row.id)?'blocked':'ready';
 }
 function updateDeleteButton(id){
   const entry=deleteButtons.get(id);if(!entry)return;const {row,button,gap,mode}=entry,offer=mode==='copy'?copyOffer(row):deleteOffer(row),state=deleteMode(row,mode);
   const hidden=state==='done' || !offer && !['queued','running'].includes(state);
   const lost=hidden && !button.hidden && document.activeElement===button;button.hidden=hidden;gap.hidden=hidden;
-  updateQueueCancel(entry.cancel,row,['delete']);
+  updateQueueCancel(entry.cancel,row,['delete','copy']);
   if(lost)(nextRowButton(button.parentElement,button) || $('filter')).focus?.({preventScroll:true});
   if(hidden)return;
-  const item=queuedFor(row,'delete'),blocker=state==='blocked'?pageBlocker():null;
-  const label=state==='pending'?ASK_PENDING[mode][0]:state==='queued'?'Delete queued':state==='running'?'Deleting…':ASK_LABELS[mode];
-  const title={offline:'Local server unavailable.',busy:'Another operation is in progress.',pending:sortedText(ASK_PENDING[mode][1]),ready:deleteTip(offer,mode),
-    queued:`Delete is queued. Nothing is deleted until it runs, when ${queueP(queueBlocker(item))} finishes.`,running:"Deleting can't be stopped.",
-    blocked:`Delete this book. ${queueS(blocker)}, so the delete is queued after you confirm.`,
+  const item=queuedFor(row,mode),blocker=state==='blocked'?pageBlocker() || 'operation':null,word=mode==='copy'?'Remove this copy':'Delete';
+  const label=state==='pending'?ASK_PENDING[mode][0]:state==='queued'?`${word} queued`:state==='running'?'Deleting…':state==='next'?ASK_PENDING[mode][0]:ASK_LABELS[mode];
+  const title={offline:'Local server unavailable.',next:"Checking another book's files. This book's opens right after.",pending:sortedText(ASK_PENDING[mode][1]),ready:deleteTip(offer,mode),
+    queued:`${word} is queued. Nothing is deleted until it runs, when ${queueP(queueBlocker(item))} finishes.`,running:"Deleting can't be stopped.",
+    blocked:mode==='copy'?`Remove this copy. ${queueS(blocker)}, so the removal is queued after you confirm.`:`Delete this book. ${queueS(blocker)}, so the delete is queued after you confirm.`,
     sibling:queuedFor(row)?.action==='repair'?QUEUE_SIBLING_REPAIR:QUEUE_SIBLING_RETRY}[state];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',(state==='queued'?'Delete queued':state==='running'?'Deleting':ASK_LABELS[mode])+': '+queueTitle(row));
@@ -2935,16 +3332,18 @@ function updateDeleteButton(id){
 }
 function updateDeleteButtons(){for(const id of deleteButtons.keys())updateDeleteButton(id);}
 async function deletePress(id){
-  const entry=deleteButtons.get(id);if(!entry || deletePending || deleteDialog || !['ready','blocked'].includes(deleteMode(entry.row,entry.mode)))return;
+  const entry=deleteButtons.get(id);if(!entry || !['ready','blocked'].includes(deleteMode(entry.row,entry.mode)))return;
+  if(deletePending || deleteDialog){deleteNext=id;controls();return;}  // ruling 35: never dropped; it opens after the current one
   const row=entry.row,mode=entry.mode;deletePending={id};deleteNotes.delete(id);askResults.delete(id);dropQueueNote(id);controls();
   let preview=null;
   // Delete book asks with queue: true, so a blocker comes back as 'blocked' with the list, not as a busy refusal (Judy 1.5).
   // Remove this copy proves the copy and the audiobook now (both hashed in full): it waits as long as Approve (N19).
   try{preview=await request('/api/candidate/delete-preview',{library:'Audiobooks',id,revision:row.revision,...(mode==='copy'?{mode:'copy'}:{queue:true})},mode==='copy'?APPROVE_TIMEOUT:PRESS_TIMEOUT);}
-  catch(error){deleteNotes.set(id,{text:error.httpStatus?ASK_REFUSED[mode]:lostLine(),warn:true});if(!error.httpStatus)refreshFailed(error);}
+  catch(error){deleteNotes.set(id,{text:error.httpStatus?serverSentence(error,ASK_REFUSED[mode]).replace(/Nothing was changed\.$/,'Nothing was deleted.'):lostLine(),warn:true});if(!error.httpStatus)refreshFailed(error);}
   finally{deletePending=null;}
   if(preview)openDeleteDialog(row,preview,mode);
   controls();
+  if(!deleteDialog)deleteNextPress();
 }
 function deleteCount(n){return n===1?'1 file':n.toLocaleString()+' files';}
 function deleteLines(list,lines){$('delete-dialog-list').replaceChildren(...lines);$('delete-dialog-list').hidden=!lines.length;}
@@ -3033,6 +3432,7 @@ function openDeleteDialog(row,preview,mode='delete'){
 }
 function closeDeleteDialog(returnFocus=true){
   if(!deleteDialog)return;const id=deleteDialog.id;deleteDialog=null;$('delete-dialog').close?.();controls();
+  if(deleteNext){deleteNextPress();return;}
   if(!returnFocus)return;
   const button=deleteButtons.get(id)?.button;
   if(button && !button.hidden)button.focus?.({preventScroll:true});else $('filter').focus?.({preventScroll:true});
@@ -3052,7 +3452,8 @@ async function deleteConfirm(event){
   showDeleteState(d.blocked?'queuing':'deleting');controls();
   let result=null;
   // Delete book confirms with queue: true: the answer decides (Judy 1.5), the result if it ran, or "queued".
-  try{result=await request('/api/candidate/delete',{library:'Audiobooks',id:d.id,revision:d.row.revision,paths:d.paths,folders:d.folders,...(d.mode==='copy'?{mode:'copy'}:{queue:true,title:queueTitle(d.row)})},APPROVE_TIMEOUT);}
+  // Ruling 35: Remove this copy confirms with queue: true too.
+  try{result=await request('/api/candidate/delete',{library:'Audiobooks',id:d.id,revision:d.row.revision,paths:d.paths,folders:d.folders,...(d.mode==='copy'?{mode:'copy'}:{}),queue:true,title:queueTitle(d.row)},APPROVE_TIMEOUT);}
   catch(error){
     if(error.httpStatus===409 && typeof error.body?.code==='string'){const line=deleteRefusalText(error.body,d.mode);showDeleteState('refused',{line,files:error.body.files});deleteNotes.set(d.id,{text:line,warn:true});}
     else{const line=error.httpStatus?t.unknown:t.lost;showDeleteState('unknown',{line});deleteNotes.set(d.id,{text:line,warn:true});if(!error.httpStatus)refreshFailed(error);}
@@ -3060,7 +3461,7 @@ async function deleteConfirm(event){
   }
   if(result?.queued===true){
     // Queued: the dialog closes, focus goes to the row's "Delete queued" face, the announcer says so (Judy 1.5).
-    const row=d.row;closeDeleteDialog(false);queueAccepted(row,'delete',{...result,n:d.n});controls();
+    const row=d.row;closeDeleteDialog(false);queueAccepted(row,d.mode==='copy'?'copy':'delete',{...result,n:d.n});controls();
     const face=()=>{const button=deleteButtons.get(row.id)?.button;(button && !button.hidden?button:$('filter')).focus?.({preventScroll:true});};
     face();const handed=document.activeElement;
     // The list is read again, which rebuilds the row: focus follows the queued face unless it has moved meanwhile.
@@ -3135,49 +3536,65 @@ function openTrackReview(entry){
   if($('manual-review'))$('manual-review').open=true;
   const heading=$('member-count');heading?.scrollIntoView?.({block:'start',behavior:'auto'});heading?.focus?.({preventScroll:true});
 }
+// The queue action each row button sends (ruling 35: every press is accepted, queued when something else is happening).
+const ASK_QUEUE={approve:'approve',convert:'convert',separate:'separate',scan:'scan_again',remove:'dismiss'};
+const ASK_QUEUE_ACTIONS=Object.values(ASK_QUEUE);
+// A press's outcome on its row, whether it ran in its own request or later from the queue (outcome.answer).
+function askSettled(entry,kind,result,values){
+  const row=entry?.row,id=row?.id ?? entry?.id,ask=row?askOf(row):null;
+  if(kind==='approve' || kind==='convert'){
+    askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);namesDropped(id);
+    const settled=Math.max(1,Number(ask?.same_author?.count) || 1);
+    askNote(values?.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
+    return;
+  }
+  if(kind==='separate'){
+    const kept=Number(result?.kept) || (row?.members || []).length;
+    askDone.set(id,'separate');askDrafts.delete(id);selectedBooks.delete(id);
+    askNote(`Kept as ${kept.toLocaleString()} separate books. Each is checked again.`);return;
+  }
+  if(kind==='scan' && ask && holdKind(ask)){
+    // A hold row: "Checked 14:32. No change." on the row, or the book leaves and is checked again (B4).
+    if(result?.changed===true){const later=result.scan_later===true;askDone.set(id,later?'later':'changed');askNote(ASK_DONE[later?'later':'changed'][1]);}
+    else if(result?.found===true)askChecked.set(id,askClock(new Date()));
+    else askResults.set(id,{text:ASK_REFUSED.scan});
+    return;
+  }
+  // A missing part (QA M-2): a new file beside the book is "changed" (its folder's source is scanned), never "found".
+  if(kind==='scan' && result?.found!==true && result?.changed===true){const later=result.scan_later===true;askDone.set(id,later?'later':'changed');askNote(ASK_DONE[later?'later':'changed'][1]);return;}
+  if(kind==='scan' && result?.found!==true){askChecked.set(id,askClock(new Date()));return;}
+  askDone.set(id,kind==='scan'?'found':'removed');askNote(kind==='scan'?'Files found. The book is checked again.':'Removed 1 book from the list. No files were touched.');
+}
 async function askPress(entry,kind){
   const row=entry.row,id=row.id,button=(entry.buttons || []).find(item=>item.kind===kind)?.button;
   if(!button || button.disabled || button.getAttribute?.('aria-disabled')==='true' || askDone.has(id))return;
   if(kind==='order' || kind==='choose')return openTrackReview(entry);
-  if(askPending || askBulk)return;
-  const values=kind==='approve' || kind==='convert'?askValues(row):null,ask=askOf(row);
+  if(askPendings.has(id))return;  // this row's press is on its way; another row's never holds this one (ruling 35)
+  const values=kind==='approve' || kind==='convert'?askValues(row):null;
   // Futaba's 0.22.0 QA, m-11: a Delete book note (a partial delete) took the hint over, so a later Scan again showed no
   // result line. A new press on the row replaces it, as it does an earlier refusal.
-  askPending={id,kind,at:Date.now()};askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
+  askPendings.set(id,{id,kind,at:Date.now()});askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
   try{
+    let result;
     if(values){
       // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
-      const shown=askDestination(row)?.path;
-      await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{})},APPROVE_TIMEOUT);
-      askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);
-      const settled=Math.max(1,Number(ask.same_author?.count) || 1);
-      askNote(values.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');
-    }else if(kind==='separate'){
-      // Keep as separate books: no values; the Title typed on the row is dropped with the row.
-      const result=await request('/api/candidate/keep-separate',{library:'Audiobooks',id,revision:row.revision},PRESS_TIMEOUT);
-      const kept=Number(result?.kept) || (row.members || []).length;
-      askDone.set(id,'separate');askDrafts.delete(id);selectedBooks.delete(id);
-      askNote(`Kept as ${kept.toLocaleString()} separate books. Each is checked again.`);
+      // Ruling 35: always accepted and queued with his values; the row shows it running and its outcome.
+      const shown=askDestination(row)?.path,names=namesFor(row);
+      result=await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{}),
+        ...(names?{names}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
     }else{
-      const result=await request(kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss',{library:'Audiobooks',id,revision:row.revision},kind==='scan'?120000:PRESS_TIMEOUT);
-      if(kind==='scan' && holdKind(ask)){
-        // A hold row: "Checked 14:32. No change." on the row, or the book leaves and is checked again (B4).
-        if(result?.changed===true){const later=result.scan_later===true;askDone.set(id,later?'later':'changed');askNote(ASK_DONE[later?'later':'changed'][1]);}
-        else if(result?.found===true)askChecked.set(id,askClock(new Date()));
-        else askResults.set(id,{text:ASK_REFUSED.scan});
-      }
-      // A missing part (QA M-2): a new file beside the book is "changed" (its folder's source is scanned), never "found".
-      else if(kind==='scan' && result?.found!==true && result?.changed===true){const later=result.scan_later===true;askDone.set(id,later?'later':'changed');askNote(ASK_DONE[later?'later':'changed'][1]);}
-      else if(kind==='scan' && result?.found!==true)askChecked.set(id,askClock(new Date()));
-      else{askDone.set(id,kind==='scan'?'found':'removed');askNote(kind==='scan'?'Files found. The book is checked again.':'Removed 1 book from the list. No files were touched.');}
+      const route=kind==='separate'?'/api/candidate/keep-separate':kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss';
+      result=await request(route,{library:'Audiobooks',id,revision:row.revision,queue:true,title:askName(row)},kind==='scan'?120000:PRESS_TIMEOUT);
     }
+    if(result?.queued===true)queueAccepted(row,ASK_QUEUE[kind],result);
+    else askSettled(entry,kind,result,values);
   }catch(error){
     askResults.set(id,{text:askErrorText(error,kind)});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
     if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
     if(!error.httpStatus)refreshFailed(error);
-  }finally{askPending=null;}
+  }finally{askPendings.delete(id);}
   // Read before the buttons update: a focused button that becomes disabled drops focus to the page.
   const inRow=!!entry.cell.parentElement?.contains?.(document.activeElement);
   batchCounts();
@@ -3199,14 +3616,14 @@ function readerRisk(row){const ask=askOf(row),author=askProposal(ask,'author');r
 function approveSelectable(){
   if(!bulkChip())return {items:[],selected:0};
   const selected=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));
-  const items=selected.filter(row=>{const ask=askOf(row);return ask && ask.kind===attentionGroup && !oddName(row) && !askDone.has(row.id) && askPending?.id!==row.id && !deleteQueued(row) && !askInert(row) && !Object.keys(askValues(row)).length && !readerRisk(row) && !!askDestination(row)?.path;});
+  const items=selected.filter(row=>{const ask=askOf(row);return ask && ask.kind===attentionGroup && !oddName(row) && !askDone.has(row.id) && !askPendings.has(row.id) && !namesOpen(row.id) && !deleteQueued(row) && !askInert(row) && !Object.keys(askValues(row)).length && !readerRisk(row) && !!askDestination(row)?.path;});
   return {items,selected:selected.length};
 }
 function renderApproveSelected(){
   const button=$('approve-selected');if(!button)return;const shown=bulkChip();button.hidden=!shown;if(!shown)return;
   const count=approveSelectable().items.length,label=`Approve as is (${count.toLocaleString()})`;if(button.textContent!==label)button.textContent=label;
   button.title=count?'Approve the selected books with the names shown. Each is converted if needed, renamed and moved to Audiobooks Sorted.':'Select books that can be approved as is.';
-  button.disabled=!count || busy || ended || recoveryDisconnected || !!askPending || askBulk || !!retryPending || bulkRunning() || !!approveConfirm;
+  button.disabled=!count || ended || recoveryDisconnected || askBulk || !!approveConfirm;  // ruling 35: other presses never hold it
 }
 function openApproveDialog(){
   const {items,selected}=approveSelectable();if(!items.length || approveConfirm)return;
@@ -3221,17 +3638,21 @@ function closeApproveDialog(){if(!approveConfirm)return;approveConfirm=null;$('a
 async function runApproveSelected(){
   const confirm=approveConfirm,button=$('approve-confirm');if(!confirm || button.getAttribute?.('aria-disabled')==='true' || askBulk)return;
   button.setAttribute('aria-disabled','true');approveConfirm=null;$('approve-dialog').close?.();
-  const items=confirm.items,n=items.length;let approved=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);controls();
+  const items=confirm.items,n=items.length;let approved=0,queued=0;askBulk=true;askNote(`Approving ${plural(n,'book','books')}.`);controls();
   for(const row of items){
     if(ended || recoveryDisconnected)break;
-    askPending={id:row.id,kind:'approve'};updateAskRows();
+    askPendings.set(row.id,{id:row.id,kind:'approve',at:Date.now()});updateAskRows();
     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
-    try{await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{})},APPROVE_TIMEOUT);askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}
+    // Ruling 35: each Approve is accepted and queued at once; its checks run in the engine's queue, one book at a time.
+    try{const answer=await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
+      if(answer?.queued===true){queueAccepted(row,'approve',answer);selectedBooks.delete(row.id);queued++;}else{askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}}
     catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
-    finally{askPending=null;}
+    finally{askPendings.delete(row.id);}
   }
   askBulk=false;
-  askNote(approved===n?`Approved ${plural(n,'book','books')}. Track ${n===1?'it':'them'} under Queued / creating.`:`Approved ${approved.toLocaleString()} of ${n.toLocaleString()}. ${(n-approved).toLocaleString()} ${n-approved===1?'stays listed with its reason':'stay listed with their reasons'}.`);
+  // Provisional copy for the queued count (ruling 35, sent to Judy).
+  askNote(queued===n?`Queued ${plural(n,'book','books')} for approval. Each is checked, then converted. Each row shows its outcome.`:
+    approved+queued===n?`Approved ${plural(n,'book','books')}. Track ${n===1?'it':'them'} under Queued / creating.`:`Approved ${(approved+queued).toLocaleString()} of ${n.toLocaleString()}. ${(n-approved-queued).toLocaleString()} ${n-approved-queued===1?'stays listed with its reason':'stay listed with their reasons'}.`);
   batchCounts();$('group-'+attentionGroup).focus?.({preventScroll:true});
 }
 $('approve-selected').addEventListener('click',()=>{if($('approve-selected').disabled)return;openApproveDialog();});

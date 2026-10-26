@@ -39,7 +39,8 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(statusCell(tr).children[0].textContent,"Retry was refused: the app doesn't support how this M4B is built. Nothing to do for now. Originals are untouched.");
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning, the existing refused mechanism');
   assert.ok(![...actionButtons(tr)].some(button=>/Retry|Repair/.test(button.textContent)),'no Retry, not even disabled');
-  const left=[...actionButtons(tr)].filter(button=>button.type==='button').map(button=>button.textContent);assert.equal(left.length,2);assert.equal(left[0],'View metadata');assert.match(left[1],/^(Source folders|Open folder)$/);
+  // Edit names (Judy 0.22.2 1.1) sits on every book row, before View metadata.
+  const left=[...actionButtons(tr)].filter(button=>button.type==='button' && !button.hidden).map(button=>button.textContent);assert.equal(left.length,3);assert.equal(left[0],'Edit names');assert.equal(left[1],'View metadata');assert.match(left[2],/^(Source folders|Open folder)$/);
   assert.equal(techOf(tr),'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
   context.fixture=refused;run('select(fixture,true);controls()');
   assert.equal(get('retry-block').hidden,true,'the details panel has no Retry either');
@@ -108,7 +109,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   context.fixture=[refusedRow('x','unsupported_file'),m4bRow('y')];run('rows=fixture.map(row=>({...row}));renderRows(false);controls()');
   tr=rowOf('x');
   assert.equal(document.activeElement,actionButtons(tr)[1],'View metadata of the same row, never the page or a neighbour');
-  assert.equal(document.activeElement.textContent,'View metadata');
+  assert.equal(document.activeElement.textContent,'Edit names');
   assert.equal(statusCell(tr).textContent,"Can't convert — M4B not supported",'the status changed in place');
   assert.match(statusCell(tr).children[0].textContent,/^Retry was refused: the app doesn't support/);
   // The same from the details panel's Retry.
@@ -116,7 +117,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(get('retry-block').hidden,false);get('retry-job').focus();
   context.fixture=[refusedRow('z','unsupported_file')];run('rows=fixture.map(row=>({...row}));renderRows(false);controls()');
   assert.equal(get('retry-block').hidden,true);
-  assert.equal(document.activeElement,actionButtons(rowOf('z'))[0],'the panel Retry hands focus to the row, not to the page');assert.equal(document.activeElement.textContent,'View metadata');
+  assert.equal(document.activeElement,actionButtons(rowOf('z'))[0],'the panel Retry hands focus to the row, not to the page');assert.equal(document.activeElement.textContent,'Edit names');
 
   // While on screen: the pressed book leaves Can retry when refused; it is held in place showing the refusal.
   run('attentionGroup="retry"');
