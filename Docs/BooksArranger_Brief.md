@@ -4,6 +4,105 @@ Repository: https://github.com/Gemanoneko/booksArranger
 
 Books Arranger helps Sergei inventory and arrange his audiobook, podcast and text-book libraries. It produces verified Apple-compatible audiobooks with source-track navigation and recorded metadata evidence. Automatic public research can approve and enqueue a book only after all independent metadata, exact source scope/order, encoding and cover gates pass; uncertain books are held while other candidates continue. The original scanner milestone remains read-only. The current workflow verifies the audiobook before removing its exact included originals. Verified working files are removed after successful cleanup. Original-track recovery copies remain for 24 hours after source cleanup completes, then expire while the app runs; a selected-book button can permanently delete them sooner. Errors preserve remaining files for recovery. Podcasts, ebooks and unrelated siblings remain untouched. It never invents metadata matches.
 
+## Every press is accepted, names are Sergei's, the updater never strands him — 0.22.2, 2026-10-26 (branch `ender/0222`)
+
+Sources: the "0.22.2" parts of `Docs/BooksArranger_0.22.1_Backlog.md`; rulings 27-36 (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`); Judy's `Docs/BooksArranger_0.22.2_UX_2026-10-26.md` (implemented; her confirmations, the differences and the provisional copy are in its section 13).
+
+| Decision | Alternatives rejected | Revisit when |
+| --- | --- | --- |
+| **Updater (M-1, m-1, m-2, m-3, m-4, m-5, m-11, W16, PA-1, m-12).** A failed install keeps the app open: electron-updater's own `app.quit` is neutralised, the shell quits only once the installer process exists, a relaunch after a failure opens the existing catalog (`relaunchConfig`), and the tray says "Books Arranger — update didn't install". Restart to update under load: an approval in flight and the recovery pass stop at once for the update (`_update_park`, `merge._update_hold`), so a conversion and an approval reach their safe points in seconds; the confirm names approvals. Cancel answers at the press ("Cancelling the update…", the work still resuming named). A cut download is "the connection dropped". The first-run form honours `--start-hidden` (tray only, "Choose data folder…") and `--quit` (no second copy). PA-1: the update failure path is tested in the real shell with a hidden window (`tests/real-shell-update.test.mjs`, 16 s). Commits c041d0f, 3f886b8, f7395f4, 6c669e8. | Rewriting the update flow (it is right; three places let it strand Sergei) | electron-updater changes its quit behaviour |
+| **Ruling 32, the empty Windows `Xtra` box** (f714cbc): exactly one empty 8-byte `Xtra` box directly in moov/udta is admitted and dropped, listed as dropped, on the in-place and the copy path; PCM proven identical. | Admitting any `Xtra` box | Another box shape appears |
+| **Identity (W17, W18, m-14, rulings 33 and 29)** (9fc925c, c1ee173). A co-author the tags do not name is asked, never left in the title; reader keys are compared once (240 files x 1,000 readers well under 1 s); «Желязны» matches «Zelazny» (Ж as Z) and Russian spellings of English first names count; a leading "Name - " in the title tag is an author when the composer or a folder names the same person (Shirley Jackson); underscores never reach the Same author? card. Ruling 33: a Latin "Given Surname" name is filed surname first, one folder per person by writing language, an unknown language is asked with both spellings. Ruling 29: a translation waits for its English original title (background lookup), else converts under the Russian title; Sergei's Approve or typed English title ends the wait. | Guessing the writing language from the name alone | Sergei rules on transliterated names |
+| **A busy catalog never stops a run** (2f212d0, 3d71957): cache reads never write, regroup inputs are read before the write lock, a busy answer is "Waiting for source" for a minute; research's one write (the original-title wait) waits at most 1 s and never fails a lookup. | Retrying the whole run | — |
+| **Ruling 34, Start works while converting** (06ec0e4, 1d7bffe): the block and its sentences are gone; a fresh run's scan waits for conversion to go idle. | — | — |
+| **A deleted book's row leaves at once** (a1a9e41): the page keeps the id out of every list and count until a list arrives without it; a focused settled row of a deleted book is removed in the same render. | Waiting for the next full rebuild | — |
+| **Collections in a series** (b2f06be): `Сборники\<Series>\<Series> - <N> - <Title> - <Author>.m4b`. | The backlog's `Протоколы SCP 1 - …` form | — |
+| **Edit names** (e572087, 81b41a4; Judy section 1). Every book row's title, author, series, number, universe and collection can be corrected. `entered_names.py`: an append-only store (triggers refuse UPDATE and DELETE) of Sergei's values per book, keyed by its files (a rescan or regroup keeps them), and of name fixes: a one-word respelling is remembered as the word, a fix reaches the books that read the same text under the same author (a collection: the same folder), never another author's; newest wins; Forget takes back the whole press. Research and Approve use them first. After a Save no job starts under the old names: each job stores the book's names stamp and the queue's claim checks it under its lock (a Save either sees the claim and waits, ruling 35, or the claim sees the Save); a stale queued job is set aside (kept) and its book researched again. A finished audiobook keeps its name. | Rewriting a queued job's frozen manifest (unsafe); a global corrections list (Judy offer 1, later) | The rename pass (ruling 21) moves finished books |
+| **«1408», «11.22.63», «Голиаф»** (6909490): a credit of initials and a number ("sk 1408") is no author, and a single file named only with a 3-4 digit number is its title and the whole book; a title of three numbers joined by dots or slashes is a name, never a part number (so the parts rule can run); a disc number that the book's own tags name as its place in a series is no missing disc; a Cyrillic credit with a foreign first name is a translation (waits for its English title, then files under the English spelling the same answer gives). «Ветер сквозь замочную скважину» stays "As one book". | Tying the disc fix to the "Книга N" folder | — |
+| **Ruling 36, no evidence asked for** (afb11ba): the Manual evidence field and every "verified"/evidence sentence that asked for it are gone; Approve and `manual_metadata.approved` need no note; the source refresh protection keys on "Entered by you" values. "Save preview metadata does nothing": the save had succeeded and the page never said so; now Saving…, Saved., no press dropped, edits typed meanwhile stay unsaved, a stale revision is saved again on the new one. | Keeping the field optional | — |
+| **Ruling 35, every action queues** (81b41a4, b39e180; table below). The engine's 0.22.1 queue takes every press that acts on a book, and Start/Resume scanning; Approve is always queued (its checks run in the queue's worker, never in a page request); presses are accepted while loading. The page never refuses for its own busy state: a press waits for the other one (later()) with Cancel. Each Approve gate has its own code and the row names the gate and the next step («Спящие красавицы»). | Moving Approve's heavy checks into the job runner (a rewrite of the safety-critical approval path: several days, Senua review) | Sergei asks for the remaining refusals below |
+| **Measured on the copy (2026-10-26).** Every current book of a file copy of Sergei's catalog (1,402), researched offline with 0.22.1 (4a107d1) and with a2e097f: converts 1,056 to 606; waits for its English original title (ruling 29) 0 to 513 (offline, every lookup unanswered; 472 of them converted before, 150 of the 161 English authors filed under a Cyrillic folder are among them); errors 40 to 0; held "Source membership uncertain" 26 to 8, "Playback order uncertain" 12 to 3, "Mixed recordings" 11 to 9; part holds 137 to 142; title/author questions 64 to 63, unclear author 48 to 50; one person under a Latin and a Cyrillic folder 2 to 0. «1408»: King Stephen\1408 - King Stephen.m4b; «11.22.63»: King Stephen\11_22_63 - King Stephen.m4b (the file-name spelling, a question for Sergei); «Голиаф» waits for Goliath; «Ветер сквозь замочную скважину» unchanged; «Призрак дома на холме»: Shirley Jackson\The Haunting of Hill House; «Пртоколы SCP» unchanged until Sergei uses Edit names (the respelling and the series are his). | — | — |
+| **Gate** (539df13, 3eaa5e5, a167b03): the four new suites run in the gate. 3eaa5e5 (fresh clone): workers 369.3 / 402.8 / 352.8 / 418.4 / 359.7 / 372.9 / 380.8 s. The final gate at a2e097f: its first run lost workers 3 and 6 to the 540 s deadline (every module 1.29x slower than at 3eaa5e5 under the machine's own load; 1,769 cases ok and none failed before the stop); the second passed with 410.7 / 388.7 / 420.5 / 475.2 / 425.0 / 435.2 / 456.4 s (worker 3 at 88 %). With that run's real seconds as weights seven workers project 440-442 s, over the 80 % bound, so a167b03 adds an eighth worker (385-389 s projected; proven by the batches test, not yet by a full eight-worker run). | Raising the 540 s deadline; keeping the b39e180 weights (the test would pass on stale numbers) | A worker passes 80 % |
+
+### Ruling 35: every busy or precondition refusal and its new behaviour
+
+Inventory by a read-only sweep of `ender/0222` at 6909490 (before the change); file:line as found then. New behaviour: **queued** (accepted, shown with Cancel, run when the blocker ends, every check again), **held** (the page holds the press until it is free, with Cancel), **works** (no longer blocked), **kept** (a real safety or lifecycle case, its reason and next step shown), **open** (not converted in this build).
+
+| # | file:line | Control / route | Blocked by | New behaviour |
+| --- | --- | --- | --- | --- |
+| 1 | web_server.py:1124 | any POST | Quit, update or shutdown in progress | kept: the session is ending; queued actions are dropped at Quit (Q1) |
+| 2 | web_server.py:1126 | any changing POST | loading | queued for every row press, Retry, Repair, Delete, Approve and its kin, names, Start/Resume scanning (202, run when loaded); other routes are never sent while loading (the page holds them) |
+| 3 | web_server.py:1130 | Start / Resume scanning | automatic processing owns discovery | queued (blocker automatic); Stop scanning kept, its sentence names the next step |
+| 4 | web_server.py:1135 | Stop scanning | no scan running | kept (nothing to stop) |
+| 5 | web_server.py:1139 | Start / Resume scanning | audio work running | queued (blocker the conversion, ruling 34) |
+| 6 | web_server.py:1161 | Approve, Scan again, Keep as separate books | library scan | queued |
+| 6b | web_server.py:1161 | Create audiobook, Queue selected, Resume audiobook jobs | library scan | held by the page until the scan ends |
+| 6c | web_server.py:1161 | historical cleanup, restore, recovery delete | library scan | open (legacy controls; refused with the scan sentence) |
+| 7 | web_server.py:1163 | Delete book, Remove this copy | library scan | queued |
+| 8 | web_server.py:1172 | Retry, Repair | library scan | queued (0.22.1) |
+| 8b | web_server.py:1172 | Retry all, Confirm and convert | library scan | open (refused "Scanning is running. Retry when it stops.") |
+| 9 | web_server.py:806 | Start automatic processing | start block | kept where real (closed, failure record); scan, conversion and stopping start by themselves (O12 pending start) |
+| 10-11 | web_server.py:1144, app_launcher.py:159 | Restart Books Arranger (launcher) | work running, recovery copies | kept (a restart needs the app idle; the sentence names what to stop) |
+| 12 | web_server.py:760, 771, 782 | Start over, Clear working files, release | engine refusals (closing, busy, editing, changed) | held by the page when the page is busy; engine causes kept, typed |
+| 13 | web_server.py:836, 850, 864 | Retry, Repair, Confirm and convert | draining | kept (closing) |
+| 14 | web_server.py:893 | Retry all | already running, no targets | kept (the same run; nothing to retry) |
+| 15 | web_server.py:921 | Pause / Resume audiobook jobs | StartRefused (pausing, superseded) | open (engine texts "Retry Start after it stops") |
+| 16 | web_server.py:1031 | Save / Forget names | a retry, repair or delete queued on the row | kept (one queued action per row, Judy 0.22.1 1.1), named |
+| 17 | web_server.py:818 | Cancel a queued action | it already started | kept ("It has already started.") |
+| 18 | web_server.py:1175 | merge admissions | counter | works (no refusal of its own) |
+| 19 | web_server.py:595 | book list read | loading | kept (a read; the page shows its placeholder) |
+| 20-22 | desktop_backend.py:243, 528, 162 | update, cancel update, quit | Quit under way, installer started | kept (safety) |
+| 23-27 | audio_jobs.py:930-998 | Retry admission, queue start | closing, a pause still settling, a start still checking | open (engine-internal; the page shows the sentence; retried by the next poll's press) |
+| 28 | audio_jobs.py:168 | M4B Retry offer | its dry run still checking | kept (the row updates itself) |
+| 29-36 | merge_service.py:296-3085 | create, queue, Retry, Repair, Retry all internals | scan, draining | queued where the press queues (rows 6-8); the rest open |
+| 37-38 | merge_service.py:3325, 3372 | Clear working files, clear-first | scan, catalog busy | held by the page; the engine's "try again in a moment" open |
+| 39-41 | merge_service.py:1398-1482 | Start over, release | closing, catalog busy, editing | kept (closing, editing named); catalog busy open |
+| 42-45 | merge_service.py:790-850 | Start, Resume internals | pause settling, a start still checking | open (engine-internal) |
+| 46-48 | merge_service.py:900-930 | historical cleanup, restore | audio work running | open (legacy) |
+| 49 | merge_service.py:959 | Delete recovery copies | closing, update, cleanup running | kept (shown as the panel's reason) |
+| 50 | merge_service.py:278 | Prepare recovery | draining | kept (closing) |
+| 51 | merge_service.py:2354 | Delete book | closing | kept (closing) |
+| 52 | merge_service.py:2588 | Save / Forget names | the book converting | queued (blocker this book's processing) |
+| 53 | merge_service.py:2769 | Approve | closing | kept, his names stay saved ("approve again after it restarts") |
+| 54 | merge_service.py:3652 | the worker's publish guard | a scan starting during a job | open (engine safety; a scan cannot start while a queued action holds an admission) |
+| 55-61 | automatic_processing.py:228-304 | Start automatic processing | closed, stopping, running, scan, pausing, unknown | kept where real; scan, conversion and stopping start by themselves (O12) |
+| 62 | automatic_processing.py:355 | Start over's own start | blockers that clear | works (pending start, unchanged) |
+| 63-64 | scanner.py:225-256 | scan launch | a scan running, nothing to resume | kept (preconditions) |
+| 65 | scanner.py:561 | source refresh | editing lease | kept (waits) |
+| 66 | merge_service.py:2273 | Scan again's source scan | automatic or a scan owns discovery | works (deferred to that scan, unchanged) |
+| 67-69 | action_queue.py:97-106 | the queue | closing, one queued action per row, 1,000 queued | kept |
+| 70-72 | action_queue.py:54, book_delete.py:530, series_backfill.py:364 | waits | scan, processing | works (they are the waits) |
+| 73 | app.js:2689, 1297, 1246, 1332 | row Start over, release, Convert, Keep files, Prepare recovery | another press of the page | held (Queued, Cancel), run when free |
+| 74 | app.js:1385 | panel Retry and its kin | another press | queued (Retry, Repair) or held (the rest) |
+| 75 | app.js:1520 | Start over, release press | another press | held |
+| 76 | app.js:1551 | Clear working files | another press ("Another operation is in progress. Try again in a moment.") | held |
+| 77-78 | app.js:1115, 1602 | Prepare recovery, Convert | another press | held (through the row press) |
+| 79 | app.js:1296, 2906, 2685 | a row with a queued action | one queued action per row | kept, named per action |
+| 80-81 | app.js:2564-2580, 3140 | Approve, Convert what's there, Keep as separate books, Scan again, Remove from list | another press ("Another operation is in progress.") | works: rows never hold each other; the engine queues |
+| 82-83 | app.js:2909-2938 | Delete book, Remove this copy | another dialog, another press | works; a press while another book's dialog is prepared opens next |
+| 84 | app.js:533, 1452 | row Retry | its own press on its way | kept (the same press) |
+| 85 | app.js:795 | Open folder | the same folder opening | kept (duplicate suppression) |
+| 86 | app.js:1631, 1587 | discard and convert dialogs | another dialog open | kept (modal dialog) |
+| 87-90 | app.js:389-415 | Start, Resume, Stop scanning, Pause / Resume jobs | busy | held (later(), Cancel by pressing again); Start and Resume no longer disabled for automatic processing (queued, row 3) |
+| 91 | app.js:392 | Stop server | busy | held |
+| 92-94 | app.js:383-387 | Start, Stop automatic processing, Cancel automatic start | busy, another automatic press | held; Start's engine availability kept (row 9) |
+| 95-96 | app.js:404-405 | Pause, Resume audiobook jobs | busy | held; Resume during a scan held until the scan ends |
+| 97-100 | app.js:393-401, 931, 1048 | Approve candidate metadata, Create audiobook, track checkboxes, Check, Find metadata, Find covers, Save track review, Queue selected | busy | held (Create and Queue selected also through a scan) |
+| 101 | app.js:945 | Save choices | busy | held |
+| 102 | app.js:753 | Save preview metadata | busy | queued in the page (afb11ba) |
+| 103 | app.js:1053 | Delete recovery copies | busy | works ("Deleting the recovery copies…" only while its own delete runs) |
+| 104 | app.js:1865 | panel Retry | its own press | kept |
+| 105 | app.js:331-356 | loading gate | loading | works: changing presses accepted (toolbar held until loaded, rows queued by the engine); switching library and the list's controls stay inert |
+| 106 | app.js:181 | every POST | the browser lost the server | kept (offline) |
+| 107 | app.js:1706-1804 | Retry all | busy | works; its run itself kept |
+| 108 | app.js:1826-1846 | Retry selected | busy, retryPending | works; the go press held while busy |
+| 109 | app.js:1661-1699 | Let the app handle selected | busy | held |
+| 110-111 | app.js:3205-3227 | Approve as is (N) | busy, another press | works: each book queued by the engine |
+| 112 | app.js:3138-3180 | Approve, Scan again, Keep after a scan 409 | the bare refusal sentence | works: queued; refusals show their gate or the engine's sentence |
+| 113-124 | desktop-ui.js, desktop/*.js | Quit during an update, the update buttons, the tray | update or quit in progress | kept (safety: an installing app quits by itself; each control names why) |
+
+Safety refusals checked for a real reason and a next step: S2 and S3 (Approve) fixed (each gate its code and line); S4 (names save) shows the engine's sentence; S14 (delete preview) shows the engine's sentence; S5 (Start over), S6 (eight delete causes behind one sentence), S9 and S10 remain open with their current texts.
+
 ## Presses never wait, books never wait, the app says what it is doing — 0.22.1, 2026-10-26 (branch `ender/0221`)
 
 Backlog `Docs/BooksArranger_0.22.1_Backlog.md` (all of it, 0.22.2 folded back in by Sergei), Judy's `Docs/BooksArranger_0.22.1_UX_2026-10-25.md` (implemented as written; her open questions as Sergei answered them: queued actions do not survive closing, updates install silently, no "After this book"), the updater proposal `Docs/BooksArranger_Updater_FailLess_Proposal_2026-10-25.md`, rulings 2, 6, 10, 16, 19, 21 and 23-28 (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`). Measurements were made read-only on a copy of the live catalog (706 MB, copied 2026-10-25 21:39) with every write outside the copy refused (`zguard`) and the network stubbed.
