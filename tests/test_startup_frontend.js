@@ -111,7 +111,17 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
   for(const withheld of ['status','jobs','attention','books']){
     const h=harness();h.answer=answerWith(loading({parts:{...ALL,[withheld]:false}}));await h.poll();await flush();
     if(withheld==='status')digitFree(h,['status']);
-    if(withheld==='jobs')digitFree(h,['jobs-status','book-candidate-counts','automatic-status','research-status']);
+    if(withheld==='jobs'){
+      digitFree(h,['jobs-status','book-candidate-counts','automatic-status','research-status']);
+      // Futaba's 0.22.1 QA, m-7: the jobs panel shows its placeholders (it was hidden), and every answer before the jobs
+      // part keeps "loading…" (it said "Automatic processing: status unavailable", words 3.5 removed).
+      assert.equal(h.node('audio-jobs').hidden,false,'the Audiobook jobs panel is shown while loading');
+      assert.equal(h.node('jobs-status').textContent,'Jobs: loading…');assert.equal(h.node('book-candidate-counts').textContent,'Book candidates: loading…');
+      for(let n=0;n<2;n++){await h.poll();await flush();}
+      assert.equal(h.node('automatic-status').textContent,'Automatic processing: loading…');
+      assert.equal(h.node('research-status').textContent,'Research: loading…');
+      for(const id of ['automatic-status','research-status','jobs-status','book-candidate-counts'])assert.doesNotMatch(h.node(id).textContent,/unavailable/i,id);
+    }
     assert.equal(h.body.getAttribute('aria-busy'),null,'never on <body>');
     if(withheld==='books'){assert.equal(h.node('inventory').getAttribute('aria-busy'),'true','busy while the books part is missing');digitFree(h,['empty','page']);assert.equal(h.calls.inventory,0,'no list read before the books part');assert.equal(h.node('filter').title,'Not yet: your books are still loading. This works as soon as they appear.');}
     else{assert.equal(h.node('load-word').textContent,'Working');}

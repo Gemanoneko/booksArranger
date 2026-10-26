@@ -290,6 +290,9 @@ function loadPlaceholders(){
     setText('automatic-start-reason',loadStopped()?'':'Automatic processing can start when loading finishes.');$('automatic-start-reason').hidden=loadStopped();
     setText('jobs-status',loadStopped()?'Jobs: not loaded.':'Jobs: loading…');setText('book-candidate-counts',loadStopped()?'Book candidates: not loaded.':'Book candidates: loading…');
     $('jobs-idle').hidden=true;
+    // Futaba's 0.22.1 QA, m-7: the panel itself was hidden until the jobs part came, so these lines never showed (3.5:
+    // the Audiobook jobs panel is shown at its reserved height with them).
+    $('audio-jobs').hidden=$('library').value!=='Audiobooks';
   }
   const attention=view==='candidates' && filters.candidates==='output_attention' && !(state && partReady('attention'));
   $('attention-loading').hidden=!attention;if(attention)setText('attention-loading',`Output needs attention: ${word}`);
@@ -764,6 +767,7 @@ function batchCounts(){const visible=rows.filter(row=>row.kind==='candidate'),se
     filters[view]==='restarted' && view==='candidates'?`${selected.length} selected · ${releasable} can be handled by the app`+(selected.length-releasable>0?` · ${selected.length-releasable} left out`:''):
     `${selected.length} selected · ${ready.length} ready · ${selected.length-ready.length} need review`+(releaseSelection() && releasable>0?` · ${releasable} can be handled by the app`:'');const takes=pageSelectable(),all=takes.length>0 && takes.every(row=>selectedBooks.has(row.id));$('select-page').checked=all;$('select-page').indeterminate=selected.length>0 && !all;controls();}
 function renderJobs(){
+  if(loadingActive && !(state && partReady('jobs')))return loadPlaceholders();  // m-7: its placeholders until the part comes (3.5)
   const jobs=state?.audiobook_jobs;$('audio-jobs').hidden=!jobs;if(!jobs)return;
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
@@ -1840,6 +1844,9 @@ function renderAutomaticEligibility(){
   $('start-automatic').title=reason || (automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.');
 }
 function renderAutomatic(){
+  // Futaba's 0.22.1 QA, m-7: every answer re-rendered this, so between the library part and the jobs part the page said
+  // "Automatic processing: status unavailable", words 3.5 removed: "unavailable" is for a failure, "loading…" for waiting.
+  if(loadingActive && !(state && partReady('jobs')))return loadPlaceholders();
   const automatic=state?.automatic_processing,known=automaticStates.has(automatic?.state),stale=recoveryDisconnected || ended?'Last confirmed — ':'';
   reconcileAutomaticRequest(automatic);
   const shown=automatic?.state==='Needs attention'?'Stopped — needs attention':automatic?.state;
