@@ -246,6 +246,34 @@ class EligiblePathTests(Fixture):
             self.assertFalse([box for box in mp.boxes(udta.payload) if mp.blank(box)], 'the output movie has no zero box')
             self.assertEqual(decoded(output, self.root, self.stop), audio, 'decoded audio identical to the source')
 
+    def test_one_empty_xtra_box_is_admitted_by_both_paths_and_the_audio_is_unchanged(self):
+        # Ruling 32 (Sergei, 2026-10-26), «Джек из Тени»: one empty 8-byte Xtra box in moov/udta, after the real meta.
+        source = with_udta_child(self.media(cover=True), struct.pack('>I', 8) + b'Xtra', last=True)
+        twin = self.root / 'Unsorted' / 'Twin.m4b'; shutil.copy2(source, twin); original = source.read_bytes()
+        audio = decoded(source, self.root, self.stop); dropped = [{'item': 'udta', 'removed': 'empty_xtra', 'bytes': 8}]
+        manifest = self.manifest(source); edited, validation = self.run_in_place(manifest)
+        self.assertIsInstance(edited, inplace_m4b.Edited, 'edited in place, not the copy-flow fallback')
+        self.assertEqual(validation['metadata_preservation']['metadata_dropped'], dropped)
+        final = Path(published(self.fake(), manifest, edited, validation, lambda *a: None)['final_path'])
+        data = bytearray(final.read_bytes()); at = validation['in_place']['type_offset']; data[at:at + 4] = b'moov'
+        self.assertEqual(bytes(data[:len(original)]), original, 'every original byte is where it was')
+        checked, proof = create_private(self.manifest(twin, self.root / 'Sorted' / 'twin.m4b'), self.root / 'stage-copy', self.stop)
+        self.assertEqual(proof['encoding']['selection'], 'existing_m4b_audio_stream_copy')
+        self.assertEqual(proof['metadata_preservation']['metadata_dropped'], dropped)
+        self.assertEqual(digest(checked), digest(final))
+        for output in (final, checked):
+            udta = [box for box in mp.boxes(live_movie(output).payload) if box.kind == b'udta'][0]
+            self.assertNotIn(b'Xtra', [box.kind for box in mp.boxes(udta.payload)], 'the output movie has no Xtra box')
+            self.assertIn(b'meta', [box.kind for box in mp.boxes(udta.payload)])
+            self.assertEqual(decoded(output, self.root, self.stop), audio, 'decoded audio identical to the source')
+
+    def test_an_xtra_box_with_content_is_still_refused_by_both_paths(self):
+        source = with_udta_child(self.media(), struct.pack('>I', 12) + b'Xtra' + b'\0\0\0\1'); manifest = self.manifest(source)
+        notes = []
+        self.assertIsNone(inplace_m4b.edit(manifest, self.stage('probe'), self.stop, lambda stage, info: notes.append(info), self.session(manifest)))
+        self.assertIn('Unsupported structural box', notes[-1]['in_place']['fallback'])
+        with self.assertRaisesRegex(ValidationError, 'M4B preservation requires review: Unsupported structural box'):self.run_in_place(manifest)
+
     def test_zero_padding_with_a_non_zero_byte_is_still_refused_by_both_paths(self):
         source = with_udta_child(self.media(), struct.pack('>I', 4096) + bytes(4091) + b'\1'); manifest = self.manifest(source)
         notes = []
@@ -254,8 +282,8 @@ class EligiblePathTests(Fixture):
         with self.assertRaisesRegex(ValidationError, 'M4B preservation requires review: Unsupported structural box'):self.run_in_place(manifest)
 
 
-def with_udta_child(path, child):
-    """Put child first in the file's moov/udta; chunk offsets are shifted when moov precedes mdat. Returns path."""
+def with_udta_child(path, child, last=False):
+    """Put child first (or last) in the file's moov/udta; chunk offsets are shifted when moov precedes mdat. Returns path."""
     data = path.read_bytes(); top = mp.boxes(data); kinds = [box.kind for box in top]
     delta = len(child) if kinds.index(b'moov') < kinds.index(b'mdat') else 0
     def rebuild(payload, depth):
@@ -265,7 +293,7 @@ def with_udta_child(path, child):
             elif box.kind in (b'stco', b'co64') and delta:
                 width = 4 if box.kind == b'stco' else 8; p = box.payload
                 parts.append(mp.build(box.kind, p[:8] + b''.join((int.from_bytes(p[a:a + width], 'big') + delta).to_bytes(width, 'big') for a in range(8, len(p), width))))
-            elif box.kind == b'udta' and depth == 0:parts.append(mp.build(b'udta', child + box.payload))
+            elif box.kind == b'udta' and depth == 0:parts.append(mp.build(b'udta', box.payload + child if last else child + box.payload))
             else:parts.append(box.raw)
         return b''.join(parts)
     path.write_bytes(b''.join(mp.build(b'moov', rebuild(box.payload, 0)) if box.kind == b'moov' else box.raw for box in top))

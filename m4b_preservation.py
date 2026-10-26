@@ -2,7 +2,7 @@
 
 No decoder, remuxer, filesystem opening or publication occurs here. Every original
 track and mdat byte remains at its original offset. Only approved Apple metadata
-items change, and blank metadata is dropped in three exact shapes (clean_items and
+items change, and blank metadata is dropped in four exact shapes (clean_items and
 udta_padding, recorded in the receipt); the prior moov becomes same-extent free and a new
 moov is appended.
 
@@ -441,7 +441,17 @@ def udta_padding(up):
     """
     padding=[b for b in up if blank(b)]
     need(len(padding)<=1,'Unsupported structural box')
-    return [b for b in up if not blank(b)],[{'item':'udta','removed':'zero_padding','bytes':b.size} for b in padding]
+    # Ruling 32 (Sergei, 2026-10-26), «Джек из Тени»: one empty Xtra box (an intact 32-bit size field of 8, the type
+    # "Xtra", nothing after it) beside the real meta; the decoded audio is the same without it. Only that exact box,
+    # once, directly here: any content, a 64-bit header, a second one or any other place is still refused.
+    xtra=[b for b in up if empty_xtra(b)]
+    need(len(xtra)<=1,'Unsupported structural box')
+    kept=[b for b in up if not blank(b) and not empty_xtra(b)]
+    return kept,[{'item':'udta','removed':'zero_padding','bytes':b.size} for b in padding]+[{'item':'udta','removed':'empty_xtra','bytes':b.size} for b in xtra]
+
+def empty_xtra(box):
+    """The empty Xtra box of ruling 32: 8 bytes, a 32-bit size of 8 and the type "Xtra"."""
+    return box.kind==b'Xtra' and box.header==8 and box.size==8 and box.raw==b'\0\0\0\x08Xtra'
 
 def rewrite_metadata(movie,tags,cover):
     """(new movie bytes, dropped blank metadata) for the approved tags and cover."""

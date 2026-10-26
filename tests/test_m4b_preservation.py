@@ -726,7 +726,37 @@ class ObservedWriterShapeTests(unittest.TestCase):
         self.refused(change_movie(fixture(),lambda p:p+blank_child(64)),'Unsupported structural box')
         self.refused(with_track_udta(fixture(),atom(b'udta',blank_child(64))),'Unsupported track-local user data')
 
+    # Ruling 32 (Sergei, 2026-10-26): «Джек из Тени» carries one empty 8-byte Xtra box directly in moov/udta (byte
+    # 4,308,674; the audio starts in mdat at 4,484,101; the decoded PCM is the same without it). Exactly that box is
+    # admitted, left out of the new moov and recorded as dropped, like the zero box.
+    def test_one_empty_xtra_box_in_movie_udta_dropped_and_recorded(self):
+        for where in ('before','after'):
+            with self.subTest(where=where):
+                source=with_udta_child(fixture(),EMPTY_XTRA) if where=='before' else change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:u+EMPTY_XTRA))
+                p,candidate,receipt=self.accepted(source)
+                udta=next(b for b in boxes(unpack(candidate)[b'moov'].payload) if b.kind==b'udta')
+                self.assertEqual([b.kind for b in boxes(udta.payload)],[b'meta'],'the new moov does not carry the box')
+                expected=[{'item':'udta','removed':'empty_xtra','bytes':8}]
+                self.assertEqual(list(p.metadata_dropped),expected);self.assertEqual(receipt['metadata_dropped'],expected)
+                from failed_m4b_retry import profile_proof
+                self.assertEqual(profile_proof(p,'b'*64)['metadata_dropped'],expected,'the admission proof records it too')
+    def test_an_empty_xtra_beside_the_zero_box_is_each_dropped_once(self):
+        p,_,receipt=self.accepted(with_udta_child(fixture(),blank_child(64)+EMPTY_XTRA))
+        self.assertEqual(receipt['metadata_dropped'],[{'item':'udta','removed':'zero_padding','bytes':64},{'item':'udta','removed':'empty_xtra','bytes':8}])
+    def test_xtra_near_misses_refused(self):
+        self.accepted(with_udta_child(fixture(),EMPTY_XTRA))  # positive control
+        content=struct.pack('>I',12)+b'Xtra'+b'\0\0\0\1'  # any content
+        extended=struct.pack('>I',1)+b'Xtra'+struct.pack('>Q',16)  # an empty box with a 64-bit header
+        other_case=struct.pack('>I',8)+b'XTRA'  # another type spelled alike
+        for child in (content,extended,other_case,EMPTY_XTRA+EMPTY_XTRA):
+            with self.subTest(child=child):self.refused(with_udta_child(fixture(),child),'Unsupported structural box')
+        # Anywhere but moov/udta: inside meta, directly in moov, in a track's udta.
+        self.refused(change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m+EMPTY_XTRA))),'Unsupported structural box')
+        self.refused(change_movie(fixture(),lambda p:p+EMPTY_XTRA),'Unsupported structural box')
+        self.refused(with_track_udta(fixture(),atom(b'udta',EMPTY_XTRA)),'Unsupported track-local user data')
+
 ZERO_PADDING_SIZE=70903
+EMPTY_XTRA=struct.pack('>I',8)+b'Xtra'
 
 def with_udta_child(source,child):
     """The movie udta with child placed before meta, where both Макс Фрай books carry it."""
