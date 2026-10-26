@@ -31,22 +31,27 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 // 2026-10-26 (0.22.2, branch ender/0222): the gate at b39e180 printed every module's real seconds with seven workers running
 // (115 modules, 2492 s); the weights below are those seconds, rounded up (modules under 3 s weigh the default 2).
 // That run's workers took 323-414 s (worker 1, with test_inplace_m4b.py at 394 s, 77 % of the deadline).
-const measuredSeconds={'test_inplace_m4b.py':395,'test_book_delete.py':235,'test_lock_timing.py':155,'test_approve_as_is.py':130,
-  'test_automatic_media.py':124,'test_part_sets.py':106,'test_series_backfill.py':96,'test_destination_admission.py':82,'test_iron_skazka.py':79,
-  'test_automatic_media_policy.py':67,'test_migration_planning.py':65,'test_attention_list.py':56,'test_working_lifecycle.py':52,
-  'test_standing_admission.py':52,'test_split_books.py':45,'test_retry_intent.py':45,'test_automatic_processing.py':39,'test_entered_names.py':37,
-  'test_working_precision.py':33,'test_output_migration.py':32,'test_attention_actions.py':29,'test_replacement_jobs.py':29,
-  'test_desktop_update.py':24,'test_source_proofs.py':24,'test_catalog_paging.py':22,'test_local_admission.py':22,
-  'test_attempt_working_lifecycle.py':21,'test_published_snapshot_lifecycle.py':20,'test_recovery_retention.py':19,'test_progress_rows.py':19,
-  'test_derived_migration.py':18,'test_todo_holds.py':17,'test_source_folders.py':17,'test_relocated_chapter_repair.py':16,'test_web.py':16,
-  'test_m4b_preservation.py':15,'test_mp3_tag_repair.py':14,'test_cleanup_resume.py':14,'test_original_title_wait.py':13,'test_review_backend.py':12,
-  'test_gap_fill.py':12,'test_catalog_busy.py':10,'test_storage_cleanup.py':9,'test_desktop_catalog.py':9,'test_desktop_host.py':8,
-  'test_multisource.py':8,'test_join_parts.py':8,'test_source_cleanup.py':8,'test_collection_identity.py':7,'test_blocked_retry.py':7,
-  'test_startup_published_check.py':7,'test_sqlite_busy.py':6,'test_relocated_replacement.py':6,'test_folder_structure.py':6,
-  'test_working_cleanup.py':6,'test_attention_repair.py':6,'test_local_identity_fixes.py':6,'test_openlibrary_index.py':5,
-  'test_catalog_contention.py':5,'test_author_rules.py':4,'test_groups_filters.py':4,'test_producer_recovery.py':4,'test_build_guard.py':4,
-  'test_inventory.py':4,'test_public_work_identity.py':4,'test_candidate_source_refresh.py':4};
-export const PYTHON_WORKERS=7;
+// 2026-10-26 (0.22.2, branch ender/0222): the passing gate at a2e097f printed every module's real seconds with seven workers
+// running (115 modules, 3004 s); the weights below are those seconds, rounded up (modules under 3 s weigh the default 2).
+// That run's workers took 389-475 s on the earlier weights (worker 3, test_lock_timing.py at 186 s, 88 % of the deadline): every
+// module ran 1.1-1.3x slower than at b39e180 under the machine's own load, so the total itself is about 80 % of 7 x 540 s.
+const measuredSeconds={'test_inplace_m4b.py':389,'test_book_delete.py':285,'test_lock_timing.py':187,'test_approve_as_is.py':173,
+  'test_part_sets.py':163,'test_automatic_media.py':118,'test_series_backfill.py':110,'test_iron_skazka.py':107,'test_destination_admission.py':85,
+  'test_split_books.py':78,'test_migration_planning.py':70,'test_automatic_media_policy.py':67,'test_m4b_join.py':62,'test_retry_intent.py':62,
+  'test_todo_holds.py':58,'test_attention_list.py':56,'test_working_lifecycle.py':54,'test_standing_admission.py':54,'test_entered_names.py':48,
+  'test_attention_actions.py':41,'test_recovery_retention.py':40,'test_automatic_processing.py':40,'test_working_precision.py':34,
+  'test_output_migration.py':34,'test_source_folders.py':32,'test_local_admission.py':30,'test_replacement_jobs.py':30,'test_desktop_update.py':28,
+  'test_sorted_wiring.py':27,'test_catalog_paging.py':26,'test_source_proofs.py':24,'test_progress_rows.py':19,'test_attempt_working_lifecycle.py':19,
+  'test_original_title_wait.py':18,'test_published_snapshot_lifecycle.py':18,'test_derived_migration.py':18,'test_relocated_chapter_repair.py':17,
+  'test_m4b_preservation.py':16,'test_web.py':16,'test_mp3_tag_repair.py':15,'test_gap_fill.py':14,'test_cleanup_resume.py':14,
+  'test_attention_repair.py':13,'test_review_backend.py':12,'test_multisource.py':12,'test_join_parts.py':11,'test_catalog_busy.py':11,
+  'test_storage_cleanup.py':10,'test_public_work_identity.py':9,'test_desktop_catalog.py':9,'test_desktop_host.py':8,'test_folder_structure.py':8,
+  'test_collection_identity.py':7,'test_source_cleanup.py':7,'test_blocked_retry.py':7,'test_author_rules.py':7,'test_startup_published_check.py':7,
+  'test_sqlite_busy.py':6,'test_relocated_replacement.py':6,'test_working_cleanup.py':6,'test_openlibrary_index.py':5,'test_catalog_contention.py':5,
+  'test_identity_v5.py':5,'test_local_identity.py':4,'test_groups_filters.py':4,'test_startup_loading.py':4,'test_start_while_converting.py':4,
+  'test_inventory.py':4,'test_failed_m4b_retry.py':4,'test_live_cases_0222.py':4,'test_build_guard.py':4};
+// 0.22.2: with those weights seven workers project 440-442 s each (over 80 % of the deadline); an eighth brings it near 375 s.
+export const PYTHON_WORKERS=8;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}
 // Senua 0.22.0 early review, m5: the projection is a proxy (each module timed alone), so the gate prints what every worker
