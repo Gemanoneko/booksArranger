@@ -1,5 +1,34 @@
 # Changelog
 
+## [v0.22.2] - 2026-10-26
+
+### Added
+
+- Edit names on every row. Fix a title, author or series yourself. A correction is kept for later scans, and the app says how many books it applies to before you save.
+- Collections that belong to a series are filed under Сборники, in a folder for the series, with the series number in the file name.
+- Вселенная Дозоров is a universe with one numbered series. «11/22/63» files as «11.22.63».
+- Save shows Saving… and then Saved.
+
+### Changed
+
+- Nothing refuses for being busy any more. A press made while something else runs is queued and shows Cancel. When a press is refused, the row says why and what to do next.
+- Translated books wait for their English title. If none can be found, they convert under the Russian title (ruling 29).
+- Latin names are filed surname first. Authors who write in Russian are filed in Cyrillic. Ж is matched with Z.
+- Co-authors and readers are sorted out before the title is read.
+- Start works while audiobooks convert. The scan waits for the conversion to finish.
+- The "evidence" field is gone. Nothing asks for it and nothing requires it.
+- The "pause audiobook jobs before automatic processing" refusal is gone.
+
+### Fixed
+
+- Updater: a failed install keeps the app open. Restart to update and Cancel answer at once, and an approval in progress stops for the update.
+- The first-run window stays hidden when the app starts hidden.
+- Research no longer stops when the catalog is busy.
+- The empty Xtra box and the Explorer rating are accepted in M4B files, so those books convert.
+- A slow media check waits and is tried again by itself. It no longer lands in "Needs you".
+- A deleted book's row leaves at once, and a stale list cannot bring it back.
+- Odd titles from the live catalog now file correctly («1408», «11.22.63», «Голиаф»).
+
 ## [v0.22.1] - 2026-10-26
 
 Updating from 0.22.0 is manual: right-click the tray icon and choose Quit, then run the installer. From 0.22.1 on, the app updates itself with Restart to update.
