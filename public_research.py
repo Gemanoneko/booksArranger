@@ -362,7 +362,7 @@ class PublicClient:
         if stop and stop.is_set():raise InterruptedError('Automatic processing paused')
         fetching=self.__dict__.setdefault('_fetching',{})  # url -> Event: a request in flight, set once it has ended
         while True:
-            pending=None
+            pending=None;reserved=False
             with self.lock:
                 now=self.clock()
                 with connect(self.database) as db:
@@ -402,8 +402,14 @@ class PublicClient:
                         if lane!='research':
                             db.execute('INSERT INTO public_research_lanes VALUES(?,?,?)',(host,now+delay,lane))
                             db.execute('DELETE FROM public_research_lanes WHERE at<?',(now-APP_HOST_WINDOW,))
-                        if budget is not None:budget['remaining']-=1
-                        flight=fetching[url]=threading.Event()
+                        reserved=True
+                # Senua's 0.22.1 review, W13: the in-flight mark was set inside the block above, before its exit commits the
+                # reservation; a commit that raised left the URL marked with an Event nobody sets, and every later reader of
+                # that URL waited until its stop (or for ever). The mark and the budget now follow the commit, still under
+                # the lock, so no reader can see the reservation without its mark.
+                if reserved:
+                    if budget is not None:budget['remaining']-=1
+                    flight=fetching[url]=threading.Event()
             if pending is None:break
             # Another thread fetches this URL (its pacing wait and the fetch: well under a minute): its answer is cached
             # when it ends; a failed request leaves no answer, and this thread then asks for itself (and is paced).

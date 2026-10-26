@@ -7,6 +7,7 @@ its lock while a request waits for its site or downloads. Private fixture answer
 import json, sqlite3, tempfile, threading, time, unittest, urllib.error, urllib.parse, uuid
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import gap_fill
 import public_research
@@ -200,6 +201,42 @@ class ClientLockTests(unittest.TestCase):
             except InterruptedError as error: errors.append(error)
         waiter = threading.Thread(target=stopped, daemon=True); waiter.start(); time.sleep(0.2); stop.set(); waiter.join(5)
         self.assertEqual(len(errors), 1); self.release.set(); third.join(10)
+
+    def test_a_reservation_that_fails_to_commit_leaves_no_url_waiting(self):
+        # Senua's 0.22.1 review, W13: the in-flight mark was set before the reservation's commit; a commit that raised left
+        # the URL marked for ever, and every later reader of it waited until its stop (or for ever without one).
+        real = public_research.connect
+
+        class FailingCommit:
+            """The catalog connection, except that the commit closing a request reservation raises (a disk error)."""
+            def __init__(self, connection): self.connection, self.reserved = connection, False
+            def __enter__(self): self.connection.__enter__(); return self
+            def __exit__(self, kind, *rest):
+                if kind is None and self.reserved:
+                    self.connection.rollback(); self.connection.close()
+                    raise sqlite3.OperationalError('disk I/O error')
+                return self.connection.__exit__(kind, *rest)
+            def execute(self, sql, *args):
+                self.reserved = self.reserved or 'INSERT INTO public_research_requests' in sql
+                return self.connection.execute(sql, *args)
+            def commit(self): return self.connection.commit()
+
+        failures = [1]
+        def connect(database, *args, **kwargs):
+            connection = real(database, *args, **kwargs)
+            if failures:
+                failures.pop(); return FailingCommit(connection)
+            return connection
+        client = PublicClient(Path(self.temp.name) / 'c.sqlite3', fetch=self.fetch)
+        with mock.patch.object(public_research, 'connect', connect):
+            budget = {'remaining': 1}
+            with self.assertRaises(sqlite3.OperationalError):
+                client.read('https://api.fantlab.ru/q', None, budget)
+            sent, answers, stop = list(self.started), [], threading.Event()
+            reader = threading.Thread(target=lambda: answers.append(client.read('https://api.fantlab.ru/q', stop, {'remaining': 1})), daemon=True)
+            reader.start(); reader.join(5); stop.set(); reader.join(5)
+        self.assertEqual(answers, [b'{"ok": true}'], 'the next reader asks for itself instead of waiting for a mark nobody clears')
+        self.assertEqual((budget['remaining'], sent), (1, []), 'the failed reservation spent no request and sent none')
 
 
 if __name__ == '__main__':
