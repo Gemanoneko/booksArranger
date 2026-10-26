@@ -29,7 +29,7 @@ const measuredSeconds={'test_inplace_m4b.py':377,'test_approve_as_is.py':174,'te
   'test_published_snapshot_lifecycle.py':41,'test_attempt_working_lifecycle.py':39,'test_source_proofs.py':35,'test_cleanup_resume.py':33,'test_output_migration.py':32,
   'test_source_folders.py':32,'test_catalog_paging.py':31,'test_local_admission.py':30,'test_working_precision.py':30,'test_web.py':28,
   'test_sorted_wiring.py':24,'test_relocated_chapter_repair.py':23,'test_derived_migration.py':21,'test_progress_rows.py':19,'test_local_identity_fixes.py':17,
-  'test_mp3_tag_repair.py':15,'test_source_cleanup.py':14,'test_gap_fill.py':14,'test_desktop_update.py':21,'test_blocked_retry.py':13,'test_openlibrary_index.py':13,'test_review_backend.py':13,
+  'test_mp3_tag_repair.py':15,'test_source_cleanup.py':14,'test_gap_fill.py':14,'test_desktop_update.py':23,'test_blocked_retry.py':13,'test_openlibrary_index.py':13,'test_review_backend.py':13,
   'test_groups_filters.py':12,'test_m4b_preservation.py':12,'test_working_cleanup.py':12,'test_attention_repair.py':11,'test_join_parts.py':11,
   'test_multisource.py':11,'test_public_work_identity.py':11,'test_failed_m4b_retry.py':10,'test_relocated_replacement.py':9,'test_startup_published_check.py':9,
   'test_storage_cleanup.py':9,'test_catalog_contention.py':8,'test_collection_identity.py':8,'test_desktop_host.py':8,'test_local_identity.py':8,
