@@ -217,4 +217,17 @@ class RulesChangeResearchAgainTests(unittest.TestCase):
         auto.start();case.wait_auto(auto);self.assertEqual(len(calls),2,'a rule naming its credit: researched again');auto.close()
 
 
+
+
+def setUpModule():
+    # Ruling 29 (0.22.2) has its own tests; these fixtures predate it (tests/original_title_fixture.py).
+    global _no_original_title_wait
+    from original_title_fixture import no_wait
+    _no_original_title_wait = no_wait()
+
+
+def tearDownModule():
+    _no_original_title_wait.stop()
+
+
 if __name__=='__main__':unittest.main()

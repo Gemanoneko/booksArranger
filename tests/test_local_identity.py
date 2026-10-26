@@ -276,4 +276,17 @@ class GapDeferralTests(unittest.TestCase):
         auto,merge,inv=self.fake_merge();state=self.converter(auto,set())
         self.run_until_admitted(auto,merge);merge.approve_automatic.assert_called_once();self.assertEqual(state['lookups'],1)
 
+
+
+def setUpModule():
+    # Ruling 29 (0.22.2) has its own tests; these fixtures predate it (tests/original_title_fixture.py).
+    global _no_original_title_wait
+    from original_title_fixture import no_wait
+    _no_original_title_wait = no_wait()
+
+
+def tearDownModule():
+    _no_original_title_wait.stop()
+
+
 if __name__=='__main__':unittest.main()

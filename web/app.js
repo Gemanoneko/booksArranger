@@ -2151,6 +2151,15 @@ function candidateStatus(row){
   if(row.audiobook_ready===undefined && /created|completed|converted/i.test(creation+' '+status))return 'Ready status unavailable';
   return 'Pending';
 }
+// Ruling 29 (Judy 0.22.2 section 4): the details panel's "Original title" fact.
+function originalTitleFact(row){
+  if(askOf(row)?.kind==='original_title' || row.automatic?.wait?.kind==='original_title')return 'Waiting for an English title.';
+  const lookup=row.metadata_facts?.original_title_lookup;
+  if(row.review_context?.metadata_actor==='user' && lookup)return 'Entered by you.';
+  if(lookup?.state==='found' && typeof lookup.title==='string' && lookup.title)return lookup.title;
+  if(lookup && ['none','russian'].includes(lookup.state))return lookup.state==='none'?'Not found. Filed under the Russian title.':'';
+  return '';
+}
 function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) || value<=0)return '';const date=new Date(value<1e12?value*1000:value);return Number.isFinite(date.getTime())?recoveryDate(date.toISOString()):'';}
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
@@ -2187,6 +2196,7 @@ function renderAutomaticResult(row){
   const values=approval?{'Canonical title':review.title,'Original work language':review.original_language,Author:review.canonical_author,'Reader / narrator':review.narrator,Series:review.series,'Series position':review.number,Cover:row.selected_cover?.source_label || 'Cover details unavailable','Reviewed destination':row.creation?.destination || 'Destination unavailable','Current audiobook':actual}:{'Title clue':row.title_clue || 'Unknown','Reviewed destination':row.creation?.destination || 'No verified destination yet','Current audiobook':actual};
   if(restartOf(row)?.at)values['Started over']=recoveryDate(restartOf(row).at);
   Object.assign(values,provenanceFacts(row),recordingFacts(row));if(row.metadata_facts?.series_state==='omitted_unknown')delete values['Series position'];
+  const original=originalTitleFact(row);if(original)values['Original title']=original;  // ruling 29 (Judy 0.22.2 section 4)
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row),members.get(key).missing?'Not found':''].filter(Boolean).join('\n')));
@@ -2249,7 +2259,12 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   title_bitrate:['Title unclear','The title ends with a number that looks like a bitrate.'],
   title_series:['Title unclear','The title starts with what looks like a series name and number.'],
   title_latin:['Title unclear','The title looks like Russian written in Latin letters.'],
-  author_folder:['Author unclear',"The author's name has underscores and may include more than a name."]};
+  author_folder:['Author unclear',"The author's name has underscores and may include more than a name."],
+  // Ruling 33 (Sergei 2026-10-26): a Latin name with a Russian first name; one folder per person, by writing language.
+  name_language:['Author unclear',"The author's name is in Latin letters. The app can't tell if they write in Russian."],
+  // Ruling 29 (Judy 0.22.2 section 4): an automatic wait, not a to-do; Approve or the English title ends it.
+  original_title:['Waiting for the original title','Looking for its English title. If none is found, it converts under the Russian title.']};
+const ORIGINAL_APPROVE_TIP='Stop waiting: file this book as shown. Converts if needed, renames, moves to Audiobooks Sorted.';
 const ODD_TITLE=['title_bitrate','title_series','title_latin'];
 // The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
@@ -2300,7 +2315,7 @@ function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind=
 // A set of .m4b parts (cause set_*): the join always re-encodes once (ruling 19a, method A), so the tooltip says so (N3).
 const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
-function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
+function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;if(kind==='approve' && ask?.kind==='original_title')return ORIGINAL_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
 const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],copy:['Checking...','Checking the audiobook in {sorted}...'],approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
@@ -2525,7 +2540,7 @@ function renderGoesTo(entry){
   const dest=askDestination(entry.row),line=entry.dest,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
   line.hidden=!path;if(!path)return;
   // On a set row the path is true only for Approve as one book (Keep is the other answer): "As one book" (Judy 2026-10-25).
-  const taken=dest.taken===true && !askDone.has(entry.row.id),label=taken?'Already there':setCause(askOf(entry.row))?'As one book':'Goes to',key=JSON.stringify([label,path]);
+  const taken=dest.taken===true && !askDone.has(entry.row.id),label=taken?'Already there':setCause(askOf(entry.row))?'As one book':askOf(entry.row)?.kind==='original_title'?'If none is found, goes to':'Goes to',key=JSON.stringify([label,path]);
   if(line.dataset.key!==key){line.replaceChildren();line.append(node('span',label,'goes-label'),node('span',path,'path'));line.dataset.key=key;}
   line.title=dest.absolute || path;line.classList?.toggle?.('taken',taken);
 }

@@ -173,3 +173,59 @@ class LatinGivenSurnameTests(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OriginalTitleWaitTests(Base):
+    """Ruling 29 (Sergei 2026-10-26): a translation with only its Russian title waits for its English original title; if
+    none is found it converts under the Russian title; one written in Russian converts now."""
+    JACK = [file_row('Roger Zelazny\\Джек из Тени.m4b', album='Джек из Тени', artist='Роджер Желязны', title='Джек из Тени', album_artist='Роджер Желязны')]
+
+    def test_a_translation_waits_then_converts_under_the_english_title_or_the_russian_one(self):
+        import original_titles
+        row = next(iter(self.catalog(self.JACK).values()))
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], ['Waiting for the original title'])
+        self.assertEqual(result['wait']['kind'], 'original_title', 'a wait, retried; not a question on the to-do list')
+        self.assertNotIn('ask', result)
+        database = self.research.client.database
+        self.assertEqual(original_titles.entry(database, 'Джек из Тени', 'Zelazny Roger')['state'], 'waiting', 'the background pass asks')
+        original_titles.record(database, 'Джек из Тени', 'Zelazny Roger', 'found', {'title': 'Jack of Shadows', 'language': 'en'})
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(result['review']['title'], 'Jack of Shadows')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Zelazny Roger\\Jack of Shadows - Zelazny Roger.m4b')
+        self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Jack of Shadows'})
+        original_titles.record(database, 'Джек из Тени', 'Zelazny Roger', 'none', {'language': 'pl'})
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result['review']['title']), ([], 'Джек из Тени'), 'none found: the Russian title')
+        self.assertEqual(result['metadata_facts']['original_title_lookup']['state'], 'none')
+
+    def test_sergeis_approve_ends_the_wait_and_a_russian_author_never_waits(self):
+        row = next(iter(self.catalog(self.JACK).values()))
+        approved = self.research.approved(row, ROOT)
+        self.assertEqual(approved['reasons'], [], 'Approve files it as shown, no wait')
+        self.assertEqual(approved['review']['title'], 'Джек из Тени')
+        row = next(iter(self.catalog([file_row('Лукьяненко Сергей\\Лабиринт отражений.m4b', title='Лабиринт отражений', artist='Сергей Лукьяненко', album='Лабиринт отражений')]).values()))
+        self.assertEqual(self.lookup(row)['reasons'], [], 'written in Russian: converts now')
+
+    def test_the_background_pass_asks_once_and_records_the_answer(self):
+        import gap_fill, original_titles
+        self.catalog([])
+        database = self.research.client.database
+        answers = {'Джек из Тени': ({'catalog': {'language': 'en', 'original_title': 'Jack of Shadows', 'source_url': 'https://fantlab.ru/work1'}}, {}),
+                   'Лабиринт': ({'catalog': {'language': 'ru', 'original_title': 'Лабиринт'}}, {}),
+                   'Сказка': ({'wait': {'retry_at': 0, 'reason': 'closed'}}, {}), 'Ничто': ({}, {})}
+        asked = []
+        research = type('R', (), {'fill_gaps': lambda self, ask, gaps, stop, budget: (asked.append((ask['title'], gaps, budget['lane'])) or answers[ask['title']])})()
+        requeued = []
+        merge = type('M', (), {})(); merge.inventory = type('I', (), {'database': database})(); merge.automatic = type('A', (), {'requeue': lambda self, identity: requeued.append(identity)})()
+        for title in answers:
+            original_titles.want(database, 'id-' + title, title, 'Writer Some')
+        gap_fill.GapFill(merge, research).original_titles()
+        states = {title: original_titles.entry(database, title, 'Writer Some')['state'] for title in answers}
+        self.assertEqual(states, {'Джек из Тени': 'found', 'Лабиринт': 'russian', 'Сказка': 'deferred', 'Ничто': 'none'})
+        self.assertEqual(original_titles.entry(database, 'Джек из Тени', 'Writer Some')['record']['title'], 'Jack of Shadows')
+        self.assertEqual({lane for _, _, lane in asked}, {'gap'}); self.assertEqual({gaps for _, gaps, _ in asked}, {('original_title',)})
+        self.assertEqual(sorted(requeued), sorted(['id-Ничто', 'id-Джек из Тени', 'id-Лабиринт']), 'each final answer puts its book back on the run')
+        asked.clear(); gap_fill.GapFill(merge, research).original_titles()
+        self.assertEqual([title for title, _, _ in asked], [], 'asked once; the deferred one waits for its source')

@@ -64,12 +64,15 @@ class LocalAdmissionTests(unittest.TestCase):
 
 # 0.21.3: this module's fixtures publish inside their own library; see sorted_fixture (Sergei's deletion rule).
 def setUpModule():
-    global _sorted_fixture
+    global _sorted_fixture, _no_original_title_wait
     from sorted_fixture import patch_merge_service
+    from original_title_fixture import no_wait
     _sorted_fixture = patch_merge_service()
+    _no_original_title_wait = no_wait()  # ruling 29 (0.22.2) has its own tests; these fixtures predate it
 
 
 def tearDownModule():
     _sorted_fixture.stop()
+    _no_original_title_wait.stop()
 
 if __name__=='__main__':unittest.main()

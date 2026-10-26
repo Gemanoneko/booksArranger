@@ -25,6 +25,7 @@ import urllib.request
 from scanner import connect
 from sqlite_retry import transaction
 from source_identity import clues,filename_identity,norm,source_gate,text,VERSION
+import original_titles
 
 MAX_BYTES=2*1024*1024
 APP_HOST_REQUESTS=100
@@ -1157,9 +1158,29 @@ class PublicResearch:
                  'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':spellings[0],'basis':fields['author'].get('basis','')}}}
             return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
+        original=None
+        if one_source and not reasons and not sergei and not part and not language and names[0]!=NO_AUTHOR and original_titles.translation(preferred,names[0]):
+            # Ruling 29 (Sergei 2026-10-26): a translation with only its Russian title waits for its English original title
+            # (the background pass asks); if none is found it converts under the Russian title. Sergei's Approve, or the
+            # English title he types, ends the wait (he is a source: state entered or approved, above).
+            original=original_titles.entry(self.client.database,preferred,names[0])
+            if original is None or original['state'] not in original_titles.FINAL:
+                original_titles.want(self.client.database,row.get('id',''),preferred,names[0])
+                now=getattr(self.client,'clock',time.time)()
+                wait={'source':'original_title','reason':original_titles.WAIT_REASON,'retry_at':now+original_titles.RESEARCH_AGAIN,'kind':'original_title','scope':'candidate',
+                      'title':preferred,'author':names[0]}
+                return result|{'reasons':[original_titles.WAIT_REASON],'wait':wait,'original_title':{'state':'waiting','title':''},
+                               'rules_generation':rules.generation if rules else ''}
+            if original['state']=='found':
+                russian=preferred;preferred=original['record']['title']
+                if russian not in titles:titles.append(russian)
+                if preferred not in titles:titles.insert(0,preferred)
+                work.update(titles=titles,original_title=preferred,original_language=original['record'].get('language') or 'en')
         result['work']=work
+        if original is not None:result['original_title']={'state':original['state'],'title':original['record'].get('title','') if original['state']=='found' else ''}
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
+        if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 29: the details panel's fact
         if spelling:facts['author_spelling']=spelling
         # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series
         # positions are series backfill's (it looks every finished book without a series up and renames it in Sorted).

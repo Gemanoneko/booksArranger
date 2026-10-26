@@ -689,6 +689,11 @@ class AutomaticProcessing:
                       wait=result['wait']
                       self._record(row,'Waiting for source',result,wait.get('retry_at'))
                       deferred.append(identity)
+                      if wait.get('kind')=='original_title':
+                          # Ruling 29: the background pass asks for the English original title now; its answer puts the
+                          # book back on this run (GapFill.original_titles).
+                          background=getattr(self.merge,'__dict__',{}).get('gap_fill')
+                          if background is not None:background.wake.set()
                   elif result.get('reasons'):
                       # Ruling 5 (option B): the outcome follows from the files alone, so the book is held until it changes;
                       # no retry time, no hourly or backoff research.
