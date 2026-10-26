@@ -990,7 +990,11 @@ def canonical_author(agreed, forms, index, language=''):
     if index:
         for k in _spelling_keys(agreed):
             candidates.update(index['keys'].get(k, ()))
-    library = sorted(candidates)
+    # Futaba's 0.22.1 QA, M-2: a name with underscores is a file or folder name ("Richard_Ford_Labirint"), never a
+    # person's spelling. It won the vote as the "local English spelling" of «Ричард Форд», so whatever author Sergei
+    # confirmed, the book went to "Sorted\Richard_Ford_Labirint\". The same mark asks the question (odd_identity).
+    library = sorted(spelling for spelling in candidates if '_' not in spelling)
+    forms = [form for form in forms if '_' not in text(form)]
 
     def same(value):
         # Only the same person: never a surname alone, and never an initial read as a full
@@ -2434,6 +2438,11 @@ def shown(record):
     candidates = list(ask.get('candidates') or [])
     if ask.get('why') == 'reader' or any(c['name'] == author and c.get('reader_count') for c in candidates):
         author, author_basis = '', ''
+    if '_' in author:
+        # Futaba's 0.22.1 QA, M-2 (Judy 11.3: Goes to follows the Author field): a folder or file name read as the author
+        # ("Richard_Ford") is asked with its underscores gone (odd_identity's proposal, which the Author field shows), and
+        # Approve with nothing typed files that, never the underscores.
+        author = text(author.replace('_', ' '))
     return {'title': title, 'title_basis': title_basis, 'author': author, 'author_basis': author_basis,
             'collection': bool(record.get('route')), 'candidates': candidates, 'kind': ask.get('kind', ''), 'why': ask.get('why', ''),
             'piece': record.get('held', '')}

@@ -464,13 +464,40 @@ class OddNameTests(Base):
         self.asked(row, 'author_unclear', 'two_people')
 
     def test_a_folder_name_with_underscores_is_never_the_author(self):
-        row = self.book('Sbornik_Astronomikon\\Richard_Ford_Labirint\\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
+        # The live row: the tags credit «Ричард Форд». Futaba's 0.22.1 QA, M-2: the folder name won the one-spelling vote as
+        # that credit's "local English spelling", so the row was asked and the book filed under "Richard_Ford_Labirint"
+        # whatever the answer. A name with underscores is no spelling of a person: the clean credit files the book by
+        # itself, as any clean tag credit does (ruling 6; Q3 asks only when the name the app would file is odd).
+        row = self.book('Sbornik_Astronomikon\Richard_Ford_Labirint\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
                         title='Лабиринт', artist='Ричард Форд', album='Лабиринт', track='%d/-1')
         result = self.lookup(row)
-        self.assertTrue(result['reasons'], 'held')
-        self.assertNotIn('_', (result.get('review') or {}).get('canonical_author') or '', 'never filed under the folder name')
-        if result.get('ask', {}).get('why') == 'author_folder':
-            self.assertEqual(result['ask']['fields']['author']['proposal'], 'Ричард Форд', 'the credit is offered, Sergei confirms')
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(self.goes_to(row, result), SORTED + '\Форд Ричард\Лабиринт - Форд Ричард.m4b')
+        # The folder name the only credit: asked, the name without underscores proposed, and Approve as is files what the
+        # Author field shows (Judy 11.3), never the underscores.
+        row = self.book('Unsorted\Richard_Ford - Labirint', ['%02d.m4a' % n for n in (1, 2)], title='Лабиринт', album='Лабиринт', track='%d')
+        result = self.asked(row, 'title_author', 'author_folder')
+        self.assertEqual(result['ask']['fields']['author']['proposal'], 'Richard Ford', 'the credit is offered, Sergei confirms')
+        self.assertEqual(self.approved(row)['author'], 'Richard Ford')
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), SORTED + '\Ford Richard\Лабиринт - Ford Richard.m4b')
+
+    def test_the_author_sergei_confirms_on_the_underscore_row_decides_where_it_goes(self):
+        # Futaba's 0.22.1 QA, M-2: on this row the Author field offered «Ричард Форд», yet with nothing typed, «Ричард Форд»
+        # or «Форд Ричард» typed, the Goes to line and the converted book were "Richard_Ford_Labirint\Лабиринт -
+        # Richard_Ford_Labirint.m4b": the one-spelling-per-person vote (ruling 3) took the junk folder name as the
+        # person's local English spelling. His answer is final (rulings 6a, 6b, 12), Cyrillic included.
+        row = self.book('Sbornik_Astronomikon\\Richard_Ford_Labirint\\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
+                        title='Лабиринт', artist='Ричард Форд', album='Лабиринт', track='%d/-1')
+        for typed, folder in ((None, 'Форд Ричард'), ('Ричард Форд', 'Форд Ричард'), ('Форд Ричард', 'Форд Ричард'), ('Richard Ford', 'Ford Richard')):
+            result = self.research.approved(row, ROOT, author=typed)
+            path = self.goes_to(row, result)
+            self.assertEqual(path, SORTED + '\\%s\\Лабиринт - %s.m4b' % (folder, folder), typed)
+            self.assertNotIn('_', path, typed)
+        # Through Sergei's author rules like a tag (ruling 12, Senua's 0.22.0 m2): a same_as rule decides the folder.
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            author_rules.append(db, 'same_as', 'Ричард Форд', target='Ford Richard', source='test')
+            db.commit()
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT, author='Ричард Форд')), SORTED + '\\Ford Richard\\Лабиринт - Ford Richard.m4b')
 
     def test_a_series_or_number_inside_the_title_is_asked(self):
         cases = (('Max Fray\\Сновидения Эхо\\Frai_Maks_Vsya_pravda_o_nas (Ovuor)', ['Макс Фрай - Сновидения Ехо #3 - Вся правда о нас  - %02d - %02d - Maks Frai - Vsya pravda o nas - (Ovuor).m4a' % (n, n) for n in (1, 2)],
