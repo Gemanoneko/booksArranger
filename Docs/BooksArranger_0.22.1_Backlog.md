@@ -75,3 +75,24 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 ## Later, by ruling 21
 
 - The in-app "rename in Sorted" pass (`Docs/BooksArranger_SortedRenames_2026-10-24.md`).
+
+## 0.22.2
+
+**Sergei, 2026-10-26:** the updater items of the 0.22.1 QA and review move out of the 0.22.1 fix round (branch `ender/0221c`). None of them was started there. Sources: `Docs/BooksArranger_QA_v0.22.1_2026-10-26.md` (Futaba) and `Docs/BooksArranger_CodeReview_v0.22.1_2026-10-26.md` (Senua).
+
+- **Futaba M-1 (Major): a failed install still closes the app.** In the real shell with a hidden window, an installer that can't start makes the shell exit with code 0 about 1.7 s after "Update now": no window, no relaunch, no message. Ruling 27 says a failed install reopens the old app with a clear line.
+  - Futaba's reading of the cause: electron-updater 6.8.9's `quitAndInstall` queues `app.quit()` with `setImmediate`. The failed spawn is handled in the same turn, and `restartEngineAfterUpdate` sets `state.quit='none'` at once. The queued quit then reaches `requestQuit` while the old engine is still marked exited, which calls `finishExit(0)`. W7's hold stops the updater's fallback, not this quit.
+  - Reproduce it in the real shell, not with mocks.
+  - Found while reading the same path (not reproduced): the relaunch after a failed install reuses the launch's catalog mode. After a first-run "New catalog" in the same session that mode is `new`, and the engine refuses `new` on a folder that now holds the catalog. `restartEngine` already switches to `existing`; `restartEngineAfterUpdate` does not.
+- **Futaba PA-1: a hidden-window real-shell update-failure test in the gate** (a fake feed, an installer that can't start), because the mocks pass while the real shell fails. Headless and focus-free. Notes for whoever builds it:
+  - the gate has no Electron binary today (`node_modules/electron/dist` is not installed); the pinned `electron-v44.4.5-win32-x64.zip` is in the electron-builder cache;
+  - the GitHub provider needs HTTPS: a self-signed certificate made by the test, `--host-resolver-rules` and `--ignore-certificate-errors`;
+  - the tray icon leaves a `NotifyIconSettings` record per exe path, so the test's app copy needs a fixed path.
+- **Restart to update with a conversion and an approval running took 99.1 s** (Futaba m-1; the conversion alone stops in 1.4 to 1.9 s). The conversion waited the whole 90 s safe-point window and was forced at 90.8 s. Find why the approval in flight holds it, and bound it.
+- **Cancel update gives no feedback for up to 33.7 s** (Futaba m-2). Show immediate feedback with Judy's existing lines. Note: with a stalled worker the engine waits its 25 s resume bound before it answers, and it stays in `pausing` until then, so the page keeps its controls inert and Quit blocked meanwhile.
+- **Senua W16:** an engine exit that lands during `restart()`'s lease close is never followed by a restart (`desktop/update-controller.js:183`, `:178`).
+- **Futaba's updater Minors:**
+  - m-3: an update soon after start on a large catalog waits on the engine's recovery pass (150 s at 8,000 books);
+  - m-4: a download cut by `ERR_CONTENT_LENGTH_MISMATCH` reads the generic line, not "the connection dropped";
+  - m-5: pressing the inert Restart to update while loading writes nothing to the message line;
+  - m-11: the update dialog says a conversion "starts again from the beginning", but it comes back Paused and needs Resume audiobook jobs.
