@@ -41,7 +41,10 @@ const measuredSeconds={'test_inplace_m4b.py':336,'test_book_delete.py':216,'test
   'test_groups_filters.py':7,'test_sqlite_busy.py':7,'test_startup_published_check.py':7,'test_attention_repair.py':6,'test_relocated_replacement.py':6,
   'test_source_cleanup.py':6,'test_catalog_contention.py':5,'test_folder_structure.py':5,'test_openlibrary_index.py':5,'test_author_rules.py':4,
   'test_failed_m4b_retry.py':4,'test_inventory.py':4,'test_public_work_identity.py':4,'test_working_cleanup.py':4,'test_automatic_record_retry.py':3,
-  'test_build_guard.py':3};
+  'test_build_guard.py':3,
+  // 0.22.2 suites, from their run alone times 1.5 for seven workers (2026-10-26); the gate's next run prints their real seconds.
+  'test_entered_names.py':55,'test_catalog_busy.py':15,'test_start_while_converting.py':10,'test_original_title_wait.py':10,'test_identity_0222.py':8,
+  'test_live_cases_0222.py':5,'test_no_evidence.py':4,'test_ruling35.py':3};
 export const PYTHON_WORKERS=7;
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.
 export function projectedSeconds(batches){return batches.map(batch=>batch.reduce((sum,pattern)=>sum+(measuredSeconds[pattern]??2),0));}
