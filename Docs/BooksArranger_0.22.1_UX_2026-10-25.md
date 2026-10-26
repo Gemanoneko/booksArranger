@@ -895,3 +895,53 @@ Basis: Ender's branch `ender/0221`, worktree `C:/Antigravity Projects/Worktrees/
 ### 10.7 Offer (not specced)
 
 A "Cancel update" item in the tray while the update can still be cancelled, so a tray-only user needs one click, not Open then Cancel update.
+
+## 11. 0.22.1 odd-name copy check (Judy, 2026-10-26)
+
+Basis: commit `aca8965` on `ender/0221` (branch HEAD `ed77ab3`), worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0221`, read-only, nothing launched. Strings read in `web/app.js` (`ASK_COPY`, the four new entries; `askFieldPlan`; `buildAskFields`). Each sentence is checked against what the engine tests: `local_identity.py` (`_BITRATE_TAIL`, `_SERIES_PARTS` and `_series_in_title`, `_russian_in_latin`, `odd_identity`) and `public_research._local_lookup`.
+
+**Result:** both status words approved. None of the four sentences approved as written; all four replaced. One cut applies to all four: the second sentence, "Check it before approving.", goes.
+
+### 11.1 Verdicts (exact strings)
+
+| Reason key | Status word | Ender's sentence | Verdict | Final sentence |
+|---|---|---|---|---|
+| `title_bitrate` | Title unclear (approved) | The title ends with a number that looks like the recording's bitrate. Check it before approving. | Replace | The title ends with a number that looks like a bitrate. |
+| `title_series` | Title unclear (approved) | The title carries a series name or number. Check it before approving. | Replace | The title starts with what looks like a series name and number. |
+| `title_latin` | Title unclear (approved) | The title is Russian written in Latin letters. Check it before approving. | Replace | The title looks like Russian written in Latin letters. |
+| `author_folder` | Author unclear (approved) | The author comes from a folder name, not a credit. Check it before approving. | Replace | The author's name has underscores and may include more than a name. |
+
+### 11.2 Why
+
+- **"Check it before approving." goes, in all four.** The row pattern is one sentence (sections 4.1 and 4.2 of the to-do spec; the 0.22.0 hold rows follow it). The field to check and Approve sit directly under the sentence, so the instruction adds nothing: nobody does anything different because of it, and no other row carries one. It cannot protect the bulk path either (11.4, item 2).
+- **Bitrate.** "the recording's" is padding, and not known: the engine matches 64, 96, 112, 128, 160, 192, 256 or 320 at the end of the title, with or without kbps, and cannot tell whose bitrate it is. "a bitrate" is the true claim.
+- **Series.** The engine asks only for the shape series text, number, then a title ("Мертвый ноль 7. Мертвый ноль", "Сновидения Ехо #3 - ..."), and only when the book's own names disagree. So it is a name and a number, not "or", and at the start of the title. "carries" is vague. "looks like" because the engine infers it.
+- **Latin.** The test is a heuristic: a Latin title on a Cyrillic author with at least two Russian small words or transliteration endings. "looks like" keeps the sentence true when it is a real English title.
+- **Author from a folder.** Ender's sentence states something the engine does not test, and can contradict the field under it. The engine tests one thing: the author's name contains an underscore (`'_' in author`), whatever its source. The field is prefilled with the tag credit or the cleaned name, so "comes from a folder name, not a credit" can sit above a field that shows a credit. A folder name is also the normal author source in this app (the field's own line reads "Author from the folder name." when the basis is the folder), so "not a credit" reads as a fault where there is none. The final sentence gives the evidence and the concern once, and does not repeat that helper line.
+
+### 11.3 Row pattern, after the cut
+
+| Row | One sentence | Fields | Approve | Goes to |
+|---|---|---|---|---|
+| Title unclear, three reasons | yes | Title only, prefilled with the title as read; the author has a proposal and stays in the row's header line | Approve with nothing typed files exactly what the row shows | yes, follows the Title field |
+| Author unclear, folder | yes | Author only, prefilled; the Title field appears only when the title itself is a guess, with its basis line | same | yes, follows the Author field |
+
+The status word of the folder row is the one the Author unclear chip uses for different rows (11.4, item 1). No change to the word.
+
+### 11.4 Two things outside the five strings (offers, not specced)
+
+1. **The chip name.** The chip "Missing title or author" now holds rows where nothing is missing, and the folder row reads "Author unclear" inside it, not in the "Author unclear" chip. Offer: rename the chip to "Title or author". It touches `attentionLabels.title_author`, the chip's tooltip, the bulk help line and the Brief. Not done.
+2. **Bulk Approve as is.** Select all in that chip, then "Approve as is (N)", includes these rows (`approveSelectable`: nothing typed, a destination present), so "Антитела 128" can be filed as read without anyone seeing the sentence; the dialog lists only the paths. Offer: keep these rows out of the bulk action, so each is approved on its own row. The dialog's existing line ("N selected books are left out. They need a different action.") then covers them. This changes what bulk does; it is Sergei's call, not copy.
+
+### 11.5 Changes Ender must make
+
+1. `web/app.js`: the four `ASK_COPY` sentences exactly as in 11.1.
+2. `tests/test_odd_names_frontend.js`: the four expected sentences (the three title hints and the folder row's) change to the same text.
+
+Nothing else on the page changes.
+
+### 11.6 Checks to add for Futaba (continue section 10.6)
+
+19. **The four rows:** status word and sentence exactly as 11.1, no second sentence, "Check it" nowhere on the row.
+20. **Fields:** the three Title unclear rows show the Title field only; the folder row shows the Author field only; all prefilled; Approve with nothing typed files exactly what the row and its Goes to line show.
+21. **No "missing" on these rows:** the server attaches the reason "Title or author missing" to them (`ASK_REASONS`). Look at the status cell, its tooltip, the details panel and any list that prints the reason; none may say a title or author is missing.
