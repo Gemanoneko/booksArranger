@@ -75,7 +75,10 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 # researched once more under the new rules, then only when it changes.
 # standing-22-v1 (0.22.1, items 9 and 10): the folder structure, a clean file-name order and the number-titled whole book; every
 # held or waiting book is researched once more under them (research is local only since 0.22.1, so this costs no request).
-RESEARCH_VERSION='standing-22-v1'
+# standing-22.2-v1 (0.22.2): co-authors and readers before a title (Senua W17, «Призрак дома на холме»), Ж as a Latin Z and
+# more first names («Джек из Тени»), the original title in the file name, Latin "Given Surname" names (ruling 33): every held
+# or waiting book is researched once more under them, locally.
+RESEARCH_VERSION='standing-22.2-v1'
 
 class ChallengeDetected(ValueError):pass
 
@@ -1069,13 +1072,16 @@ class PublicResearch:
         rules=self.rules() if one_source else None
         if one_source and not reasons and not fields['author'].get('rule') and names[0]!=NO_AUTHOR and fields['author'].get('state') not in ('entered','approved'):
             spelled,_=local_identity.canonical_author(names[0],authors+names,index,language)
+            # Futaba's 0.22.1 QA, m-14 (Judy 0.22.2 section 8): a credit with underscores ("Robert_Heinlein") is asked, shown,
+            # remembered and filed without them; the rule's credit key is the same either way.
+            if '_' in spelled:spelled=local_identity.text(spelled.replace('_',' '))
             question=local_identity.same_author_question(spelled,authors+names,rules)
             if question and question['kind']=='merge':
                 # Same full name as an author the library has: that folder (the language rule's answer).
                 names=[question['existing']];question=None;fields=dict(fields,author=dict(fields['author'],rule='known-author'))
             if question:
                 # Ruling 12: a new folder name that looks like an author the library has is asked once; the answer is a rule.
-                question['fields']={'title':{'proposal':title,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')}}
+                question['fields']={'title':{'proposal':title,'basis':fields['title'].get('basis','')},'author':{'proposal':question['new'] if '_' in names[0] else names[0],'basis':fields['author'].get('basis','')}}
                 return result|{'reasons':[local_identity.ASK_REASONS['same_author']],'ask':question,'identity_hold':{'kind':'same_author','detail':''},'wait':None,
                                'rules_generation':rules.generation if rules else ''}
         if not reasons and names[0]!=NO_AUTHOR and not fields['author'].get('rule'):
@@ -1118,6 +1124,14 @@ class PublicResearch:
                 ask['candidates']=[{'name':name,'source':'author tag','reader_count':0} for name in odd['candidates']]
                 ask['fields']['author']['proposal']=odd['candidates'][0]
             return result|{'reasons':[local_identity.ASK_REASONS[odd['kind']]],'ask':ask,'identity_hold':{'kind':odd['kind'],'detail':''},'wait':None,
+                           'rules_generation':rules.generation if rules else ''}
+        spellings=[] if not one_source or reasons or sergei or part or language or fields['author'].get('rule') else local_identity.name_language(names[0])
+        if spellings:
+            # Ruling 33 (Sergei 2026-10-26): one person, one folder, picked by the language he writes in. A Latin name with a
+            # Russian first name and nothing that says which ("Ilya Marchenko"): asked with both spellings, each a choice.
+            ask={'kind':'author_unclear','why':'name_language','odd_name':True,'candidates':[{'name':name,'source':'spelling','reader_count':0} for name in spellings],
+                 'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':spellings[0],'basis':fields['author'].get('basis','')}}}
+            return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
         result['work']=work
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))

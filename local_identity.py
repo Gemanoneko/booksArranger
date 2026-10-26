@@ -91,7 +91,25 @@ ruth katherine samantha christine emma catherine rachel janet maria heather juli
 martha neal fritz grady thimoty colin josh simon tim algernon bentley craig isaac jesper jeff rick shaun stanley gordon mitchel michio kinoko
 andrzej guy nick andy ian nate gerald gemma jon todd barbara carlos catherine alex kristina hannu koji soji graham
 джастин джефф лорел лорелл laurell laurel йеспер
+роджер ширли shirley говард гарольд дональд кеннет кевин брайан рональд джейсон джеффри райан джейкоб гэри николас эрик джонатан ларри
+скотт бенджамин грегори сэмюэл сэмюель рэймонд реймонд патрик деннис джерри тайлер аарон натан уолтер джереми лоуренс шон кристиан альберт
+итан джесси брюс ральф юджин уэйн луис алан алистер винсент орсон теодор эрнест курт хью кларк брэм чак дейв дэйв джек джим стив тед вернор
+харлан клиффорд найджел гилберт эдгар оскар редьярд маркус нейл нэйл дэниэл айра агата маргарет патриция сьюзен сьюзан кэрол
+донна мишель джессика эмили оливия шарлотта джоанн дафна лоис кэролайн стефани ребекка кейт хелен луиза элис мэдлин сильвия
+iain ted bram chuck dave jim steve orson theodore ernest kurt hugh clark harlan clifford nigel gilbert edgar oscar rudyard marcus
+agatha olivia charlotte daphne lois caroline kate louise madeline sylvia
 '''.split())
+# Ruling 33 (Sergei 2026-10-26, m-13): Russian and other Slavic first names as written in Latin letters ("Ilya_Marchenko").
+# They show where the surname is (surname first), and that the writing language needs an answer before a Latin folder.
+# Words that are also common title words in Latin letters (Roman, Vera, Lyubov, Nadezhda, Lev) are left out.
+SLAVIC_LATIN_GIVEN = frozenset('''
+ilya ilia oleg pavel igor sergey sergei dmitry dmitri dmitriy andrey andrei alexey alexei aleksey aleksei nikolai nikolay vladimir mikhail
+yuri yuriy yury ivan maxim maksim evgeny evgeniy yevgeny viktor vitaly vitaliy vadim vasily vasiliy kirill konstantin leonid nikita ruslan
+stanislav timur fedor fyodor yaroslav anatoly anatoliy arkady arkadiy gennady gennadiy grigory grigoriy valery valeriy vyacheslav egor yegor
+semyon semen arseny arseniy bogdan taras olga tatyana tatiana natalia natalya svetlana irina elena yelena ekaterina yekaterina anastasia
+lyudmila ludmila galina larisa yulia yuliya daria darya ksenia kseniya oksana hanna ganna olena nadia zinaida polina alina alyona alena
+'''.split())
+GIVEN_NAMES |= SLAVIC_LATIN_GIVEN
 NAME_PARTICLES = {'de', 'van', 'von', 'der', 'le', 'la', 'du', 'di', 'da', 'де', 'ван', 'фон', 'дер', 'ле', 'ла', 'дю', 'ди', 'да'}
 INITIALS = re.compile(r'^(?:[^\W\d_]\.){1,3}[^\W\d_]?\.?$')
 
@@ -204,8 +222,13 @@ def _latin_sequences(word):
 
 
 def _cyrillic_sequences(word):
-    word = unicodedata.normalize('NFC', word).replace('дж', 'ж').replace('тч', 'ч')
+    word = unicodedata.normalize('NFC', word)
+    # 0.22.2 («Джек из Тени»): a Ж that is no Дж may stand for a Latin Z (the Polish Ż: Желязны = Zelazny).
+    zed = re.sub(r'(?<!д)ж', 'з', word) if re.search(r'(?<!д)ж', word) else ''
+    word = word.replace('дж', 'ж').replace('тч', 'ч')
     variants = [word] + ([word[1:]] if word.startswith('г') else [])   # Г for a Latin H: Гарри = Harry
+    if zed:
+        variants.append(zed.replace('дж', 'ж').replace('тч', 'ч'))
     out = set()
     for variant in variants:
         tokens = []
@@ -1747,27 +1770,72 @@ def _credit_people(value):
     return [text(p) for p in re.split(r'\s*[,;&/]\s*|\s+(?:и|and)\s+', _without_year(value), flags=re.I) if text(p)]
 
 
+_READER_KEYS = {}
+
+
+def _reader_keys(readers):
+    """{spelling key: [reader]} of the library's readers and the ruled ones, made once per reader set (W18). A name of
+    short words only has no key ('') and is always compared."""
+    found = _READER_KEYS.get(readers)
+    if found is None:
+        found = {}
+        for reader in list(readers) + list(RULED_NARRATORS):
+            for key in _spelling_keys(reader) or ('',):
+                found.setdefault(key, []).append(reader)
+        _READER_KEYS.clear()
+        _READER_KEYS[readers] = found
+    return found
+
+
 def _title_credit(author_folder, members, index=None, rules=None, folder=''):
     """Whether a piece before a title is a credit of THIS book (Senua's 0.22.1 review, W1 and W8): every person in it is
     the book's own author (its author folder, or an author tag of its files; a slip in a first name aside, "Марина
     Ясинская" tagged "Мария Ясинская") or a known reader (narrator tags, the library's readers, ruling 1). With no author
     tag the file name's own author slot is the book's author (the 0.22.0 file-name reading), so a person there counts.
-    A reader credited in an author tag (Sergei's not_author rules, ruling 12) is no author tag here."""
-    readers = [p for m in members for name in NARRATOR_TAGS for p in _credit_people(text(_tags(m).get(name)))]
-    readers += list((index or {}).get('readers') or ()) + list(RULED_NARRATORS)
-    tagged = [p for m in members for name in AUTHOR_TAGS for p in _credit_people(text(_tags(m).get(name)))
-              if not (rules is not None and rules.not_author(p, folder)) and not any(same_person(p, reader) for reader in readers)]
+    A reader credited in an author tag (Sergei's not_author rules, ruling 12) is no author tag here.
+
+    Senua's 0.22.1 review, W18: both lists are built once, only when a piece is judged, with each distinct name once (a
+    240-file book with 1,000 library readers made 297,840 same_person calls, 21.3 s); a library reader is looked up by
+    its spelling keys, never compared with every credit."""
+    known = {}
+
+    def lists():
+        if not known:
+            own = list(dict.fromkeys(p for m in members for name in NARRATOR_TAGS for p in _credit_people(text(_tags(m).get(name)))))
+            keyed = _reader_keys(frozenset((index or {}).get('readers') or ()))
+            known['own'], known['keyed'] = own, keyed
+
+            def reader(value):
+                if any(same_person(value, r) for r in known['own']):
+                    return True
+                candidates = dict.fromkeys(r for key in list(_spelling_keys(value)) + [''] for r in keyed.get(key, ()))
+                return any(same_person(value, r) for r in candidates)
+            known['reader'] = reader
+            credits = dict.fromkeys(p for m in members for name in AUTHOR_TAGS for p in _credit_people(text(_tags(m).get(name))))
+            known['tagged'] = [p for p in credits if not (rules is not None and rules.not_author(p, folder)) and not reader(p)]
+        return known
 
     def person(value):
-        if any(compare_names(value, own) or _shares_surname(value, own) for own in [author_folder] + tagged if own):
+        facts = lists()
+        if any(compare_names(value, own) or _shares_surname(value, own) for own in [author_folder] + facts['tagged'] if own):
             return True
-        if any(same_person(value, reader) for reader in readers):
+        if facts['reader'](value):
             return True
-        return not tagged and looks_like_person(value, index)
+        return not facts['tagged'] and looks_like_person(value, index)
 
     def credited(piece):
         people = _credit_people(piece)
         return bool(people) and all(_person_like(p) and person(p) for p in people)
+
+    def uncredited(piece):
+        """The people of a piece that names this book's own author beside someone the tags do not credit (W17: «С.
+        Лукьяненко, И. Кузнецов - Печать сумрака» tagged only Лукьяненко), else []."""
+        people = _credit_people(piece)
+        if len(people) < 2 or not all(_person_like(p) for p in people):
+            return []
+        missing = [p for p in people if not person(p)]
+        return missing if missing and len(missing) < len(people) else []
+    credited.uncredited = uncredited
     return credited
 
 
@@ -1849,10 +1917,18 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
     # Her W8 (Jane 2026-10-26): only the book's own author or a known reader is such a credit; any other person is part of
     # the title («Жозеф Фуше - Портрет политического деятеля» in "Стефан Цвейг\Биографии", tagged Стефан Цвейг).
     credited = _title_credit(author, members, index, rules, folder)
+    uncredited = []
     while True:
         pieces = re.split(r'\s+[-–—]\s+', title, maxsplit=1)
-        if len(pieces) < 2 or not re.search(r'[^\W\d_]{2}', _balanced(pieces[1])) or not credited(pieces[0]):
+        if len(pieces) < 2 or not re.search(r'[^\W\d_]{2}', _balanced(pieces[1])):
             break
+        if not credited(pieces[0]):
+            # Senua's 0.22.1 review, W17: the book's own author beside a co-author the tags do not name. The people are
+            # no part of the title; who the author is becomes a question (identify), never filed in silence.
+            missing = credited.uncredited(pieces[0])
+            if not missing:
+                break
+            uncredited += missing
         title = text(pieces[1])
     title = clean_title(_balanced(title))
     if not title or not re.search(r'[^\W\d_]{2}', title) or garbled(title) or NARRATOR_MARKER.search(title) or CHAPTER_LABEL.match(title)             or set(words(title)) <= PART_WORDS or PART_FOLDER.search(name) or DISC.search(name):
@@ -1868,7 +1944,7 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
     files = kind == 'folder' and bool(key) and any(key in title_key(Path(m['path']).stem) for m in members)
     return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', named)) or named),
             'position': position, 'title': title, 'reader': reader, 'file_series': file_series, 'book': kind, 'book_name': text(book),
-            'series_folder': series, 'files_name_title': files}
+            'series_folder': series, 'files_name_title': files, 'uncredited': uncredited}
 
 
 _BARE_NUMBER = re.compile(r'(?:\s*[-_.,]\s*|\s+)\d{1,3}\s*$')
@@ -1951,6 +2027,36 @@ def _structured_title(title, structure, author_names, index=None):
     return title, ''
 
 
+def _named_elsewhere(name, members, ancestors):
+    """«Призрак дома на холме» (Sergei 2026-10-26): a person-shaped "Name - " before a title in a tag is a credit when
+    another local source names the same person: a folder above the book ("Shirley Jackson") or the composer tag. The
+    composer tag alone never names an author (here it often names the reader); it only confirms the name before the dash."""
+    if not _person_like(name):
+        return False
+    others = [text(_tags(m).get('composer')) for m in members] + [clean_title(a) for a in ancestors[:3]]
+    return any(value and _person_like(value) and (compare_names(name, value) or same_person(name, value)) for value in others)
+
+
+def _original_from_file_name(title, author, members, candidates, index=None):
+    """«The Haunting of Hill House.m4b» tagged «Призрак дома на холме» by an author the library writes in Latin letters:
+    the file name carries the English original (rulings 16 and 29), the tag the translation (kept as an alias). Only one
+    file, a Latin name of two or more words with no digit that is no transliteration of the tag title, no person, no
+    chapter or junk name and no Russian written in Latin letters. Returns the title record, or None."""
+    if len(members) != 1 or not title or not author or script(title['value']) != 'cyrillic' or title.get('basis') != 'tag':
+        return None
+    stem = clean_title(Path(members[0]['path']).stem)
+    if script(stem) != 'latin' or len(words(stem)) < 2 or re.search(r'\d|_', stem) or norm(stem) in JUNK_TITLES \
+            or set(words(stem)) <= PART_WORDS or _transliterated_title(stem, title['value']) or looks_like_person(stem, index) \
+            or _russian_in_latin(stem, 'Автор'):
+        return None
+    latin = script(author['name']) == 'latin' or any(script(c['name']) == 'latin' and compare_names(c['name'], author['name']) for c in candidates)
+    if not latin:
+        return None
+    return dict(title, value=stem, basis='file_name', aliases=list(title.get('aliases') or []) + [title['value']],
+                how='the file name, the original title (rulings 16 and 29); the tag "%s" is the translation' % title['value'],
+                sources=title['sources'] + [{'kind': 'file name', 'value': Path(members[0]['path']).stem}])
+
+
 class _Readers:
     """Who reads in this library and this book (guard 1)."""
 
@@ -2024,7 +2130,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             # author credit, the rest is the title.
             parsed = filename_identity(value + '.x')
             dotted = re.match(r'^\s*([^.\d]{3,60}?)\.\s+(\S.*)$', value)
-            if parsed.get('author') and looks_like_person(parsed['author'], index) and re.search(r'[^\W\d_]{2}', parsed.get('title', '')):
+            if parsed.get('author') and (looks_like_person(parsed['author'], index) or _named_elsewhere(parsed['author'], members, ancestors)) \
+                    and re.search(r'[^\W\d_]{2}', parsed.get('title', '')):
                 title['value'] = clean_title(parsed['title'])
                 title['how'] += ' (the author named before the title is set aside)'
                 tag_title_author = parsed['author']
@@ -2297,6 +2404,14 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             ask = {'kind': 'author_unclear', 'why': 'names_differ'}
         elif candidates:
             author = candidates[0]
+    if structure and structure.get('uncredited') and ask is None:
+        # Senua's 0.22.1 review, W17: the name credits the book's author and someone the tags do not name («С. Лукьяненко,
+        # И. Кузнецов - Печать сумрака» tagged only Лукьяненко). Two people: asked, each a choice, never filed in silence.
+        for name in structure['uncredited']:
+            if not any(same_person(name, c['name']) for c in candidates):
+                candidates.append({'name': name, 'source': 'file name', 'basis': 'file_name', 'kind': 'slot', 'person': True})
+        ask = {'kind': 'author_unclear', 'why': 'two_people'}
+        author = None
     if author is None and ask is None and rules is not None:
         # An answer about one of the book's own folders: «Гробница Саргераса» -> Brooks Robert, «Созвездие Льва» -> Сборники.
         found = rules.folder_rule(ancestors)
@@ -2328,6 +2443,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         ask = {'kind': 'title_author', 'why': 'title_missing'}
     if ask and ask['kind'] == 'title_author' and any('garbled' in i['why'] for i in ignored):
         ask['why'] = 'garbled'
+    if not structure and not part:
+        original = _original_from_file_name(title, author, members, candidates, index)
+        if original:
+            ignored.append({'field': 'title', 'value': title['value'], 'why': 'the translation; the file name carries the original title'})
+            title = original
     fields = {}
     if title:
         fields['title'] = {k: title[k] for k in ('state', 'value', 'basis', 'how', 'sources', 'aliases') if k in title}
@@ -2585,13 +2705,69 @@ def odd_identity(title, author, local_author='', no_author='', ruled=False, fold
     if author and author != no_author and not ruled:
         if '_' in author:
             clean = text(local_author) if local_author and '_' not in local_author else text(author.replace('_', ' '))
-            return {'kind': 'title_author', 'why': 'author_folder', 'proposal': clean}
+            # Ruling 33 (Sergei 2026-10-26): a Latin "Given Surname" name is proposed surname first ("Marchenko Ilya").
+            return {'kind': 'title_author', 'why': 'author_folder', 'proposal': surname_first(clean)[0]}
         people = _people(author)
         if people:
             return {'kind': 'author_unclear', 'why': 'two_people', 'candidates': people}
     if title and author and _russian_in_latin(title, author):
         return {'kind': 'title_author', 'why': 'title_latin'}
     return None
+
+
+_LATIN_TO_CYRILLIC = (('shch', 'щ'), ('sch', 'щ'), ('zh', 'ж'), ('kh', 'х'), ('ts', 'ц'), ('ch', 'ч'), ('sh', 'ш'), ('yu', 'ю'), ('ya', 'я'),
+                      ('yo', 'ё'), ('ye', 'е'), ('iy', 'ий'), ('yy', 'ый'), ('a', 'а'), ('b', 'б'), ('v', 'в'), ('w', 'в'), ('g', 'г'), ('d', 'д'),
+                      ('e', 'е'), ('z', 'з'), ('i', 'и'), ('j', 'й'), ('k', 'к'), ('l', 'л'), ('m', 'м'), ('n', 'н'), ('o', 'о'), ('p', 'п'),
+                      ('r', 'р'), ('s', 'с'), ('t', 'т'), ('u', 'у'), ('f', 'ф'), ('h', 'х'), ('c', 'к'), ('q', 'к'), ('x', 'кс'), ('y', 'ы'))
+_SLAVIC_CYRILLIC = {'ilya': 'илья', 'ilia': 'илья', 'igor': 'игорь', 'sergey': 'сергей', 'sergei': 'сергей', 'dmitry': 'дмитрий', 'dmitri': 'дмитрий',
+                    'dmitriy': 'дмитрий', 'andrey': 'андрей', 'andrei': 'андрей', 'alexey': 'алексей', 'alexei': 'алексей', 'aleksey': 'алексей',
+                    'aleksei': 'алексей', 'nikolai': 'николай', 'nikolay': 'николай', 'yuri': 'юрий', 'yuriy': 'юрий', 'yury': 'юрий',
+                    'evgeny': 'евгений', 'evgeniy': 'евгений', 'yevgeny': 'евгений', 'vitaly': 'виталий', 'vitaliy': 'виталий', 'vasily': 'василий',
+                    'vasiliy': 'василий', 'anatoly': 'анатолий', 'anatoliy': 'анатолий', 'arkady': 'аркадий', 'arkadiy': 'аркадий',
+                    'gennady': 'геннадий', 'gennadiy': 'геннадий', 'grigory': 'григорий', 'grigoriy': 'григорий', 'valery': 'валерий',
+                    'valeriy': 'валерий', 'vyacheslav': 'вячеслав', 'yegor': 'егор', 'fyodor': 'фёдор', 'semyon': 'семён', 'arseny': 'арсений',
+                    'arseniy': 'арсений', 'olga': 'ольга', 'tatyana': 'татьяна', 'tatiana': 'татьяна', 'natalia': 'наталья', 'natalya': 'наталья',
+                    'lyudmila': 'людмила', 'ludmila': 'людмила', 'yulia': 'юлия', 'yuliya': 'юлия', 'daria': 'дарья', 'darya': 'дарья',
+                    'ksenia': 'ксения', 'kseniya': 'ксения', 'hanna': 'ханна', 'ganna': 'ганна', 'yelena': 'елена', 'yekaterina': 'екатерина',
+                    'alyona': 'алёна'}
+
+
+def cyrillic_spelling(name):
+    """A Latin name in Cyrillic letters by the usual Russian romanization read backwards ("Marchenko Ilya" -> «Марченко Илья»).
+    A proposal Sergei may correct, never a decision."""
+    result = []
+    for word in text(name).split():
+        low = word.casefold()
+        if low in _SLAVIC_CYRILLIC:
+            result.append(_SLAVIC_CYRILLIC[low].capitalize())
+            continue
+        out, at = '', 0
+        while at < len(low):
+            if not ('a' <= low[at] <= 'z'):
+                out += low[at]; at += 1; continue
+            for latin, cyrillic in _LATIN_TO_CYRILLIC:
+                if low.startswith(latin, at):
+                    if latin in ('e', 'ye') and at == 0:
+                        cyrillic = 'э' if latin == 'e' else 'е'
+                    if latin == 'y' and at == len(low) - 1 and at and low[at - 1] in 'aeiou':
+                        cyrillic = 'й'
+                    out += cyrillic; at += len(latin); break
+            else:
+                at += 1
+        result.append(out.capitalize())
+    return ' '.join(result)
+
+
+def name_language(name):
+    """Ruling 33 (Sergei 2026-10-26): one person, one folder, picked by the language the author writes in. A Latin name
+    whose first name is a Russian or other Slavic one ("Ilya Marchenko") may be a Russian author transliterated or a
+    writer in another language. The caller asks only when nothing decides it (no catalog language, no folder of the
+    person in Audiobooks Sorted, no rule). Returns [Latin surname first, Cyrillic surname first], else []."""
+    name = text(name)
+    if script(name) != 'latin' or not any(w in SLAVIC_LATIN_GIVEN for w in words(name)) or len(words(name)) < 2:
+        return []
+    latin = surname_first(name)[0]
+    return [latin, cyrillic_spelling(latin)]
 
 
 def author_forms(record):

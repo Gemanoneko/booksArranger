@@ -515,7 +515,8 @@ class OddNameTests(Base):
         # Author field shows (Judy 11.3), never the underscores.
         row = self.book('Unsorted\\Richard_Ford - Labirint', ['%02d.m4a' % n for n in (1, 2)], title='Лабиринт', album='Лабиринт', track='%d')
         result = self.asked(row, 'title_author', 'author_folder')
-        self.assertEqual(result['ask']['fields']['author']['proposal'], 'Richard Ford', 'the credit is offered, Sergei confirms')
+        # Ruling 33 (Sergei 2026-10-26): proposed surname first, as the library files it.
+        self.assertEqual(result['ask']['fields']['author']['proposal'], 'Ford Richard', 'the credit is offered, Sergei confirms')
         self.assertEqual(self.approved(row)['author'], 'Richard Ford')
         self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), SORTED + '\\Ford Richard\\Лабиринт - Ford Richard.m4b')
 
