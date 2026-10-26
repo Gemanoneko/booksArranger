@@ -55,10 +55,19 @@ def entry(database, title, author):
 
 
 def want(database, candidate_id, title, author):
-    """Ask the background pass about this work (once): a 'waiting' record, unless one exists."""
-    with connect(database) as db:
-        setup(db)
-        db.execute('INSERT OR IGNORE INTO original_titles VALUES(?,?,?,?,?,?,?)', (key(title, author), candidate_id, title, author, 'waiting', '{}', _stamp()))
+    """Ask the background pass about this work (once): a 'waiting' record, unless one exists. Returns False when the
+    catalog is busy behind another writer: the only write research makes must not fail the book's research (T2 of the
+    SQLITE_BUSY fix); the book still waits, and its next research (RESEARCH_AGAIN) asks again."""
+    from public_research import catalog_busy
+    try:
+        with connect(database, timeout=1) as db:  # never long behind another writer (research waits for nothing)
+            setup(db)
+            db.execute('INSERT OR IGNORE INTO original_titles VALUES(?,?,?,?,?,?,?)', (key(title, author), candidate_id, title, author, 'waiting', '{}', _stamp()))
+    except Exception as error:
+        if not catalog_busy(error):
+            raise
+        return False
+    return True
 
 
 def record(database, title, author, state, value):
