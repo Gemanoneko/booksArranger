@@ -241,7 +241,6 @@ class BrowserServer(ThreadingHTTPServer):
         self.loading = None
         self.loader = None
         self.merge_factory = merge_factory
-        self.actions = ActionQueue(self)  # queued Retry, Repair and Delete book (0.22.1, Judy section 1); memory only
         super().__init__(address, Handler)
         if defer:
             self.loading = Loading()
@@ -253,6 +252,15 @@ class BrowserServer(ThreadingHTTPServer):
         except BaseException:
             super().server_close()
             raise
+
+    @property
+    def actions(self):
+        """Queued Retry, Repair and Delete book (0.22.1, Judy section 1): one per server, in memory only. Made on first
+        use, so a server built without __init__ (tests) has one too."""
+        value = self.__dict__.get('_actions')
+        if value is None:
+            value = self.__dict__['_actions'] = ActionQueue(self)
+        return value
 
     def _open_merge(self, progress=None):
         factory = self.merge_factory
