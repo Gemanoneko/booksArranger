@@ -46,9 +46,11 @@ export function cleanGitEnv(env=process.env){
   const clean={};for(const [key,value] of Object.entries(env))if(!/^GIT_/i.test(key))clean[key]=value;
   clean.GIT_OPTIONAL_LOCKS='0';return clean;
 }
-function gitIn(worktree){
+// The runner is a parameter of assemble() so its test needs no Git: the qa-handoff entry checker gives the checks it
+// runs only Node and System32 on PATH, and the 0.22.1 entry check failed on the test's own `git` (ENOENT, 2026-10-26).
+export function gitIn(worktree,exec=execFileSync){
   const env=cleanGitEnv();
-  return args=>execFileSync('git',['-c','core.fsmonitor=false','-C',worktree,...args],{encoding:'utf8',windowsHide:true,maxBuffer:64*1024*1024,env});
+  return args=>exec('git',['-c','core.fsmonitor=false','-C',worktree,...args],{encoding:'utf8',windowsHide:true,maxBuffer:64*1024*1024,env});
 }
 
 // Same walk shape as the checker's verifyFiles: '/'-joined relative paths, no links, no special entries.
@@ -80,9 +82,9 @@ export async function checkRuntime(runtime,pins){
   }
 }
 
-export async function assemble(options,{node=process.execPath,log=console.log}={}){
+export async function assemble(options,{node=process.execPath,log=console.log,git=gitIn(options.worktree)}={}){
   const W=options.worktree,Q=options.run,C=path.join(Q,'context'),HEAD=options.head;
-  const NODE_DIR=path.dirname(node),git=gitIn(W);
+  const NODE_DIR=path.dirname(node);
   try{await fs.lstat(C);throw Error('Context folder already exists; refusing to adopt it: '+C);}catch(error){if(error.code!=='ENOENT')throw error;}
   if(git(['rev-parse','HEAD']).trim()!==HEAD)throw Error('Worktree HEAD is not '+HEAD);
   if(git(['status','--porcelain']).trim())throw Error('Worktree is dirty');
