@@ -80,6 +80,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(get('message').textContent,'Pause audiobook jobs queued. It runs when the current action finishes. Press it again to cancel.');
   assert.equal(get('pause-jobs').getAttribute('aria-disabled'),'true');get('pause-jobs').handlers.click();
   assert.equal(get('pause-jobs').getAttribute('aria-disabled'),null,'taken back');assert.equal(run('laterPresses.length'),0);run('busy=false;controls()');
+  // 4b. Resume audiobook jobs while a library scan runs (the engine refuses it then): held by the page, run when the scan ends.
+  answers['/api/audiobook/resume']=()=>ok({state:'Running'});
+  run('state={...state,active_library:"Audiobooks",audiobook_jobs:{...state.audiobook_jobs,queued:1,state:"Paused"}};controls()');get('resume-jobs').handlers.click();
+  assert.equal(get('message').textContent,'Resume audiobook jobs queued. It runs when the scan finishes. Press it again to cancel.');assert.equal(sent('/api/audiobook/resume').length,0);
+  run('state={...state,active_library:null};controls()');await tick();await tick();assert.equal(sent('/api/audiobook/resume').length,1,'it ran when the scan ended');
   // 5. Edit names on the SCP row.
   answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Пртоколы SCP. Сейф №1',basis:'tag'},author:{proposal:'Разные авторы',basis:''},series:{proposal:'',basis:''},number:{proposal:'',basis:''},universe:{proposal:'',basis:''},collection:{proposal:true,basis:''}},
     read:{},remembered:[],universes:['Warhammer 40,000'],series:['Протоколы SCP'],job:'none',place:{universe:'',series:'',number:'',collection:true},destination:dest('Сборники\\x.m4b'),entered:[],applies:1}});

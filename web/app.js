@@ -958,7 +958,7 @@ function metadataChoiceDirtyReason(){
 }
 function updateMetadataChoiceControls(){
   const saved=metadataChoiceState;if(!saved || $('metadata-questions').hidden)return;
-  const reason=metadataChoiceDirtyReason();$('save-metadata-choices').disabled=!!(reason || saved.pending || busy || ended || recoveryDisconnected);
+  const reason=metadataChoiceDirtyReason();$('save-metadata-choices').disabled=!!(reason || saved.pending || ended || recoveryDisconnected);  // ruling 35: busy holds the press (later()), never disables it
   $('save-metadata-choices').textContent=saved.pending?'Saving choices…':'Save choices';
   $('metadata-question-status').textContent=[saved.error,reason || saved.status || ''].filter(Boolean).join(' ');
 }
@@ -1004,7 +1004,7 @@ function renderMetadataQuestions(row,reset=false){
   updateMetadataChoiceControls();
 }
 $('resolve-metadata-question').addEventListener('click',()=>{$('manual-review').open=true;$('metadata-questions-heading').scrollIntoView?.({block:'center',behavior:'auto'});$('metadata-questions-heading').focus?.({preventScroll:true});});
-$('save-metadata-choices').addEventListener('click',async()=>{
+$('save-metadata-choices').addEventListener('click',later('toolbar:save-metadata-choices','save_choices',async()=>{
   const saved=metadataChoiceState;if(!saved || busy || ended || recoveryDisconnected || metadataChoiceDirtyReason())return;
   const choices=saved.snapshot.questions.map(question=>{const answer=saved.answers[question.id] || {mode:'unresolved'},choice={question_id:question.id,...answer};if(answer.mode==='corrected'){choice.values={};for(const field of question.type==='work_profile'?(question.profile_fields || ['title','canonical_author','original_language','series','number','universe']):[question.field])choice.values[field]=form.elements.namedItem(field)?.value.trim() || '';}return choice;});
   saved.pending=true;saved.error='';busy=true;controls();updateMetadataChoiceControls();
@@ -1021,7 +1021,7 @@ $('save-metadata-choices').addEventListener('click',async()=>{
     if(selectedRow?.id===saved.id && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
     if(metadataChoiceState?.id===saved.id)metadataChoiceState.error=error.message;
   }finally{saved.pending=false;busy=false;controls();updateMetadataChoiceControls();}
-});
+}));
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';renderMetadataQuestions(row,reset);for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;
   const renderKey=JSON.stringify([row.id,row.revision,row.review_context,row.matching,row.cover_choices,row.creation,row.cleanup,row.audiobook_ready,row.metadata_facts,row.duplicate_review,row.manual_metadata_sources,row.metadata_holds,dirty,trackDirty,coverId]);
   if(!reset && renderKey===mergeRenderKey)return;mergeRenderKey=$('manual-review').contains?.(document.activeElement)?null:renderKey;
@@ -3022,14 +3022,14 @@ const laterPresses=[];let laterSeq=0,laterRunning=false;
 const LATER_WORDS={startover:'Start over',combined:'Start over',release:'Let the app handle it',clear:'Clear working files',convert:'Convert',keep:'Keep files',prepare:'Prepare recovery',
   retry:'Retry',repair:'Repair',scan_start:'Start scanning',scan_resume:'Resume scanning',scan_stop:'Stop scanning',pause:'Pause audiobook jobs',resume:'Resume audiobook jobs',
   start_automatic:'Start automatic processing',stop_automatic:'Stop automatic processing',create:'Create audiobook',queue_books:'Queue selected',find_metadata:'Find metadata',
-  find_covers:'Find local covers',save_tracks:'Save track review',check_metadata:'Check metadata',approve_candidate:'Approve candidate metadata',retry_all:'Retry all',retry_selected:'Retry selected',release_selected:'Let the app handle selected'};
+  find_covers:'Find local covers',save_tracks:'Save track review',check_metadata:'Check metadata',approve_candidate:'Approve candidate metadata',retry_all:'Retry all',retry_selected:'Retry selected',save_choices:'Save choices',release_selected:'Let the app handle selected'};
 function laterWord(kind){return LATER_WORDS[kind] || 'This press';}
 function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
 // Provisional copy (ruling 35, sent to Judy).
-function laterLine(item){return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':'the current action'} finishes.`;}
-function pressLater(key,kind,title,run){
+function laterLine(item){return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':item.waitFor?.()?'the scan':'the current action'} finishes.`;}
+function pressLater(key,kind,title,run,waitFor=null){
   if(laterFor(key))return laterFor(key);
-  const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now()};laterPresses.push(item);
+  const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now(),waitFor};laterPresses.push(item);
   queueAnnounce(`${laterWord(kind)} queued${item.title?': '+item.title:''}.`);controls();return item;
 }
 function cancelLater(key){
@@ -3038,10 +3038,15 @@ function cancelLater(key){
 }
 // The toolbar and panel buttons (ruling 35): a press made while another press of this page runs, or while loading, waits
 // (pressLater) and runs then, as if pressed then; the same button pressed again takes it back. Provisional copy, for Judy.
+// The presses the engine still refuses while a library scan runs (Create audiobook, Queue selected, Resume audiobook jobs):
+// the page holds them until the scan ends.
+const SCAN_HELD=['create','queue_books','resume'];
+function scanRunning(){return !!state?.active_library;}
 function later(key,kind,handler){
   return (...args)=>{
     if(laterFor(key)){cancelLater(key);return;}
-    if(!ended && (busy || automaticRequest!==null || !!LS && loadingActive)){const item=pressLater(key,kind,'',()=>handler(...args));message(laterLine(item)+' Press it again to cancel.');return;}
+    const waitFor=SCAN_HELD.includes(kind)?scanRunning:null;
+    if(!ended && (busy || automaticRequest!==null || !!LS && loadingActive || waitFor?.())){const item=pressLater(key,kind,'',()=>handler(...args),waitFor);message(laterLine(item)+' Press it again to cancel.');return;}
     return handler(...args);
   };
 }
@@ -3056,7 +3061,7 @@ function renderLaterButtons(){
   for(const id of [...laterDecorated])if(!now.has(id)){const button=$(id);laterDecorated.delete(id);if(button?.setAttribute){button.title=button.dataset?.laterTitle || '';button.removeAttribute('aria-disabled');}}
 }
 function drainLater(){
-  if(laterRunning || !laterPresses.length || pressBusy() || loadingActive)return;
+  if(laterRunning || !laterPresses.length || pressBusy() || loadingActive || laterPresses[0].waitFor?.())return;
   const item=laterPresses.shift();laterRunning=true;
   Promise.resolve().then(()=>item.run()).catch(()=>{}).finally(()=>{laterRunning=false;controls();});
 }
