@@ -802,10 +802,11 @@ def numbered_credit(name, names=()):
 
 def lone_number(row, title, siblings=None):
     """0.22.1, item 10 (b): a single file titled only with a number of three or four digits ("1986", "1408") is a whole
-    book, unless files beside it are numbered too; "01" or "05" stays a chapter or part."""
+    book, unless files beside it are named with numbers too (real parts); "01" or "05" stays a chapter or part. A sibling's
+    title tag alone does not count: «1408» sits beside "Stephen King - A Face in the Crowd.m4b" whose title tag is "1"."""
     return bool(title and len(row.get('members', [])) == 1 and re.fullmatch(r'\W*[1-9]\d{2,3}\W*', clean_title(title))
                 and not any(re.fullmatch(r'\W*\d{1,4}\W*', clean_title(_index_stripped(v)) or v) for s in (siblings or [])
-                            for v in (text(s['tags'].get('title')), filename_identity(s['filename']).get('title') or Path(s['filename']).stem) if v))
+                            for v in (filename_identity(s['filename']).get('title') or Path(s['filename']).stem,) if v))
 
 
 # «11.22.63» (Sergei 2026-10-26): a title made of three or more numbers joined by dots, slashes or dashes ("11/22/63",

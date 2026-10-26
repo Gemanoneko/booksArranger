@@ -21,8 +21,10 @@ KING = 'Stephen King\\'
 
 class LiveCaseTests(Base):
     def test_1408_is_a_whole_book_by_the_folders_author_and_sk_1408_is_no_author(self):
+        # The live folder: a sibling whose title tag is the junk "1" (its file name names the book) is no numbered part.
         rows = [file_row(KING + '1408.m4b', artist='sk 1408', comment='fre:ac - free audio converter <https://www.freac.org/>'),
-                file_row(KING + 'Мизери.m4b', title='Мизери', album='Мизери', artist='Стивен Кинг')]
+                file_row(KING + 'Мизери.m4b', title='Мизери', album='Мизери', artist='Стивен Кинг'),
+                file_row(KING + 'Stephen King - A Face in the Crowd.m4b', title='1', album='A Face in the Crowd', artist='Stephen King')]
         row = self.catalog(rows)[ROOT + '\\' + KING + '1408.m4b']
         record, _ = self.research.identity(row, ROOT)
         self.assertEqual((record['fields']['title']['value'], record['fields']['author']['value']), ('1408', 'Stephen King'))
