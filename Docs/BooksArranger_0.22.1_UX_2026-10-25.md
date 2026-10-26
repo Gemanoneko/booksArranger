@@ -945,3 +945,49 @@ Nothing else on the page changes.
 19. **The four rows:** status word and sentence exactly as 11.1, no second sentence, "Check it" nowhere on the row.
 20. **Fields:** the three Title unclear rows show the Title field only; the folder row shows the Author field only; all prefilled; Approve with nothing typed files exactly what the row and its Goes to line show.
 21. **No "missing" on these rows:** the server attaches the reason "Title or author missing" to them (`ASK_REASONS`). Look at the status cell, its tooltip, the details panel and any list that prints the reason; none may say a title or author is missing.
+
+## 12. 0.22.1 resume-problem copy check (Judy, 2026-10-26)
+
+Basis: commit `f2cc148` on `ender/0221b` (branch HEAD `a20ffd0`), worktree `C:/Antigravity Projects/Worktrees/Books Arranger/fx0221b`, read-only, nothing launched. Strings read in `web/desktop-ui.js` (`RESTART`, `notRestarted`, `installLine`). Each is checked against the control faces in `web/index.html`, what `_resume_after_update` in `desktop_backend.py` reports, the commit's tests, and sections 2.4, 2.6 and 10.1 (point 1). Nothing else in the commit reaches the screen: the engine's `reason` goes to its log, and the shell's errors are typed (`updateCause`), never shown.
+
+**Result:** all new strings approved as written, no replacement. W6 is not a problem for Sergei (12.3). Two offers (12.4), not specced.
+
+### 12.1 Verdicts
+
+| # | Part | String | Verdict | Why |
+|---|---|---|---|---|
+| 1 | Name, `automatic` | automatic processing | Approve | The control's face and the confirm's own words (2.4). |
+| 2 | Name, `conversion` | the audiobook jobs | Approve | The panel's heading and the face of its control. The kind covers a conversion and a source cleanup, so "the conversion of {Title}" (2.5) would be wrong for the cleanup. |
+| 3 | Name, `scan` | the library scan | Approve | 2.4 and 2.5 already say it. |
+| 4 | Name, `lookups` | background lookups | Approve | N2 (10.3), as specced. |
+| 5 | Lead | {Names} didn't start again. | Approve | Failure first, then what to press (2.3 and 2.6 pattern). "didn't" and "start it again" match 2.5. The join (commas, "and" before the last) is right for every mix the engine can send. |
+| 6 | Tail, `automatic` | Press Start automatic processing to continue. | Approve | Verbatim from the confirm line. The face exists (`#start-automatic`). If the button is inert, its reason already sits beside it. |
+| 7 | Tail, `conversion` | Press Resume audiobook jobs to continue. | Approve | The face exists (`#resume-jobs`, in the Audiobook jobs panel). "Continue" is that control's own tooltip verb. |
+| 8 | Tail, `scan` | Continue the scan with Resume scanning. | Approve | 2.4's "Continue it with Resume scanning.", with "it" made "the scan": a joined line can name several kinds, so "it" would have no antecedent. The face exists (`#resume`). |
+| 9 | Tail, `lookups` | Background lookups start again by themselves the next time Books Arranger opens. | Approve | True: they start with the engine (`merge_service.py` L231 and L233; N2). The noun repeats on purpose: in a joined line "They" would lose its antecedent. |
+| 10 | Cancel line | Update cancelled (tried {HH:MM}). {Names} didn't start again. {Tails} | Approve | Same shape as the generic line accepted in 10.1 point 1. "running as before" is gone, correctly, and the line turns `--warning` (a failure, 2.1). With nothing stuck it stays the spec's own line, no stamp. |
+| 11 | Bound line | ... did not stop in time (tried {HH:MM}). {Names} didn't start again. {Tails} Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer. | Approve | Replaces only "Books Arranger is running as before."; M2's wording is otherwise untouched. Two "Press" sentences in a row do different jobs (get the work back, retry the update). |
+| 12 | Generic fallback | Update cancelled (tried {HH:MM}). {Names} didn't start again. {Tails} Press Restart to update to try again. | Approve | The same substitution into the line of 10.1 point 1. |
+
+Worked example, all three kinds on a Cancel: "Update cancelled (tried 21:07). The audiobook jobs, the library scan and background lookups didn't start again. Press Resume audiobook jobs to continue. Continue the scan with Resume scanning. Background lookups start again by themselves the next time Books Arranger opens." Long, and rare: it needs three stalls at once. No cut proposed.
+
+### 12.2 Why one sentence covers both causes
+
+`still_stopping` and `refused` leave Sergei in the same place: the work is stopped, and one button restarts it. The engine's wording for each stays in its log, so the page needs no second sentence.
+
+### 12.3 W6 (Senua): the shell kills a loading engine after 15 s
+
+**No, it is not a problem for Sergei.** It fires only after he presses Restart engine, Try again or Quit while loading. Quit hides the window and the tray first, so the 15 s are invisible (`quitWhileLoading`). Every write loading makes is a transaction or a journaled step, so the kill is crash-equivalent: Senua found no lost data, and the worst case is that the next load repeats a step. The old wait of up to 60 s looked like a frozen app. The one step that must not be cut, the catalog change, is already guarded: Restart engine is inert while `restart_safe` is false (N4).
+
+### 12.4 Offers (not specced)
+
+1. **Lookups alone.** If background lookups are the only thing that did not restart, the Install line is tinted `--warning` with nothing for Sergei to press. Offer: no tint in that one case; the sentence stays. His call, as it changes how a failure looks.
+2. **The other failure lines.** `installer_blocked`, `engine_exit`, `engine_stuck` and `engine_restart` say the app is running again, but not what stayed stopped; a new engine has no list to report. The confirm named it beforehand (2.4). I did not check what a fresh engine resumes beyond the lookups. Offer: one more sentence on those lines, "Work that was running stays stopped.", once Ender confirms it is true for the queue.
+
+### 12.5 Changes Ender must make
+
+None. `tests/update-controller.test.mjs` L116 to L130 pin these sentences and stay as they are.
+
+### 12.6 Checks to add for Futaba (continue 11.6)
+
+22. **Cancel with a stalled worker:** with the stub's conversion still stopping when Cancel is pressed, the Install line reads exactly row 10 with the conversion pair, in `--warning`; "Resume audiobook jobs" is enabled and works. With nothing stuck it reads "Update cancelled. Books Arranger is running as before."
