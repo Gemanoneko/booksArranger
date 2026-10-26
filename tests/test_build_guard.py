@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import unittest
@@ -16,10 +17,37 @@ from build_fs_guard import BuildTree,remove_manifest_files,_native_receipt,captu
 from native_io import BoundaryError,OwnedProcessJob,VerifiedFile,publish_no_replace
 BASE=ROOT.parent/'build-guard-probes'
 
+def _remove_tree(path):
+    """Removes a probe folder this run made. A junction or link inside it is removed as a link and never followed, so
+    a probe that points outside (the junction tests) cannot reach what it points at."""
+    try:info=os.lstat(path)
+    except FileNotFoundError:return
+    attributes=getattr(info,'st_file_attributes',0)
+    if stat.S_ISLNK(info.st_mode) or attributes&stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        (os.rmdir if attributes&stat.FILE_ATTRIBUTE_DIRECTORY else os.unlink)(path);return
+    if stat.S_ISDIR(info.st_mode):
+        for entry in os.scandir(path):_remove_tree(entry.path)
+        os.rmdir(path);return
+    if not info.st_mode&stat.S_IWRITE:os.chmod(path,stat.S_IWRITE)
+    os.unlink(path)
+
+def _rmdir_quiet(path):
+    try:os.rmdir(path)
+    except OSError:pass
+
+def discard(test,path):
+    """Each probe folder goes when its test ends (2026-10-26: they used to stay beside the checkout for good), and the
+    shared parent goes with the last one; another run's folders in it are left alone."""
+    base=Path(path).parent
+    def clean():
+        _remove_tree(path)
+        _rmdir_quiet(base)  # left when not empty: another probe or run still uses it
+    test.addCleanup(clean);return path
+
 class GuardTests(unittest.TestCase):
     def fixture(self):
         with BuildTree(ROOT.parent) as guard:
-            return guard.fresh(BASE)
+            return discard(self,guard.fresh(BASE))
     def test_fresh_native_write_and_collision(self):
         root=self.fixture()
         with BuildTree(root) as guard:
@@ -206,7 +234,7 @@ class PriorBundleTests(unittest.TestCase):
     def test_moved_checkout_validates_prior_build_by_native_identity(self):
         # git worktree move: every recorded absolute path changes, every file keeps its native identity.
         root=self.fixture();old_runtime,old_output=self.initial(root)
-        moved=root.with_name(str(uuid.uuid4()));os.rename(root,moved)
+        moved=discard(self,root.with_name(str(uuid.uuid4())));os.rename(root,moved)
         recorded=json.loads((moved/'build-cache'/'runtime-pointer.json').read_text())['root']
         self.assertFalse(Path(recorded).is_relative_to(moved),'positive control: the pointer still names the old location')
         with BuildTree(moved) as guard:
@@ -217,7 +245,7 @@ class PriorBundleTests(unittest.TestCase):
         import shutil
         root=self.fixture();self.initial(root)
         with BuildTree(root) as guard:PriorBuild(guard)  # positive control: the original location validates
-        copied=root.with_name(str(uuid.uuid4()));shutil.copytree(root,copied)
+        copied=discard(self,root.with_name(str(uuid.uuid4())));shutil.copytree(root,copied)
         before=(copied/'build-cache'/'runtime-pointer.json').read_bytes()
         with BuildTree(copied) as guard:
             with self.assertRaises(BoundaryError):PriorBuild(guard)
@@ -238,5 +266,27 @@ class PriorBundleTests(unittest.TestCase):
         with BuildTree(root) as guard:
             with self.assertRaises(BoundaryError):PriorBuild(guard)
         self.assertEqual(ads.read_bytes(),b'unknown data');self.assertTrue((root/'dist'/'release-artifacts.json').exists())
+
+class ProbeCleanupTests(unittest.TestCase):
+    """Nothing this module makes stays on disk: plain, junction, moved and copied probes (2026-10-26)."""
+    def test_every_probe_folder_is_removed_and_a_junction_target_is_kept(self):
+        import _winapi
+        from unittest import mock
+        base=ROOT.parent/'build-guard-probes'/('cleanup-check-'+str(uuid.uuid4()))
+        outside=ROOT.parent/('build-guard-outside-'+str(uuid.uuid4()));outside.mkdir();(outside/'keep').write_bytes(b'keep')
+        self.addCleanup(_rmdir_quiet,base.parent);self.addCleanup(_remove_tree,outside);self.addCleanup(_remove_tree,base)
+        class Linked(unittest.TestCase):
+            fixture=GuardTests.fixture
+            def runTest(self):
+                root=self.fixture();(root/'file').write_bytes(b'x');_winapi.CreateJunction(str(outside),str(root/'link'))
+                self.assertEqual((root/'link'/'keep').read_bytes(),b'keep','positive control: the junction reaches outside')
+        names=['test_junction_ancestor_refuses_without_touching_target','test_moved_checkout_validates_prior_build_by_native_identity','test_copied_checkout_is_refused_by_native_identity']
+        tests=[Linked()]+[(GuardTests if name.startswith('test_junction') else PriorBundleTests)(name) for name in names]
+        with mock.patch.dict(globals(),{'BASE':base}):
+            for test in tests:
+                result=unittest.TestResult();test.run(result)
+                self.assertTrue(result.wasSuccessful(),result.errors+result.failures)
+        self.assertFalse(base.exists(),'%d probe paths left behind' % len(list(base.rglob('*'))) if base.exists() else '')
+        self.assertEqual((outside/'keep').read_bytes(),b'keep','a junction is removed as a link, never followed')
 
 if __name__=='__main__':unittest.main()
