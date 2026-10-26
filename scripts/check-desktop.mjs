@@ -95,7 +95,7 @@ class Timed(unittest.TextTestResult):
  seconds={};last=None
  def startTestRun(self):super().startTestRun();Timed.last=time.perf_counter()
  def stopTest(self,test):
-  super().stopTest(test);now=time.perf_counter();name=test.id().split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
+  super().stopTest(test);now=time.perf_counter();name=type(test).__module__.split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
 r=unittest.TextTestRunner(verbosity=2,resultclass=Timed).run(s)
 report={'batch':int(sys.argv[4]),'patterns':patterns,'ids':inventory,'discovered':len(inventory),'completed':r.testsRun,'skipped':len(r.skipped),'failures':len(r.failures),'errors':len(r.errors),'success':r.wasSuccessful(),
  'module_seconds':{k:round(v,1) for k,v in sorted(Timed.seconds.items(),key=lambda item:-item[1])}}
