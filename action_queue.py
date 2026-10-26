@@ -95,8 +95,10 @@ class ActionQueue:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
             same = next((item for item in self.items if item['book_id'] == book_id), None)
-            if same is not None:
+            if same is not None and same['action'] == action:
                 return self._answer(same)
+            if same is not None:
+                raise ValueError('This book already has a queued action. Cancel it first.')  # one per row (Judy 1.1)
             if kind is None and not self.items and self.running is None:
                 return None
             if len(self.items) >= LIMIT:

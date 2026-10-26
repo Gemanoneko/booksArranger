@@ -103,6 +103,9 @@ class QueueTests(unittest.TestCase):
         second, third = self.delete(1), self.retry(2, 'repair')
         self.assertEqual((second['position'], third['position']), (2, 3))
         self.assertEqual(self.retry(0)['id'], first['id'], 'one queued action per row: a second press answers the first')
+        with self.assertRaises(ValueError):
+            self.delete(0)  # another action for a book that already waits: refused, the queue unchanged
+        self.assertEqual(len(self.queue.view()['queued_actions']), 3)
         view = self.queue.view()
         self.assertEqual([(i['action'], i['position'], i['blocker']['kind'], i['title']) for i in view['queued_actions']],
                          [('retry', 1, 'scan', 'Book 0'), ('delete', 2, 'scan', 'Book 1'), ('repair', 3, 'scan', 'Book 2')])

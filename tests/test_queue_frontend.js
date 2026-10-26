@@ -97,6 +97,12 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   assert.equal(posted('/api/queue/ack').length,0,'kept until the line is dismissed, so a reload still shows it');
   queue({queued_actions:[],queue_running:null,queue_outcomes:[{id:'o-1',action:'retry',book_id:'cand-a',title:'Title a',result:'refused',code:'changed'}]});
   assert.equal(get('queue-announce').textContent,'Title c: Repair cancelled: it was not accepted. Check the status above.','an outcome is applied once');
+  // A line outlives the first list read after the run (the rows on screen predate it), then ends when the status changes.
+  inventoryRows=[attentionRow('a'),attentionRow('b'),attentionRow('c')];await run('refresh(true)');for(let i=0;i<4;i++)await tick();
+  assert.equal(hint(trOf('cand-a')),'Retry cancelled: this book needs another look. Check its status above.','the first list read after the run keeps the line');
+  inventoryRows=[queued(attentionRow('a')),attentionRow('b'),attentionRow('c')];await run('refresh(true)');for(let i=0;i<4;i++)await tick();
+  assert.equal(run('queueNotes.has("cand-a")'),false,'a status change ends it');
+  inventoryRows=[attentionRow('a'),attentionRow('b'),attentionRow('c')];paint(inventoryRows);
   run('resetStrip()');await tick();
   assert.deepEqual(posted('/api/queue/ack').map(body=>body.ids[0]).sort(),['o-1','o-2','o-3'],'a filter change dismisses the lines and acknowledges them');
   // A queued retry that ran: the existing strip line names the book.

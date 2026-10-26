@@ -26,7 +26,7 @@ let retryPending=null,retryResult=null,retryEpoch=0;
 // v0.16.12: a Retry/Repair press the server accepted (or may have) is remembered per book, so a list read from
 // before it never repaints the book as an enabled Retry; only the server's own state or refusal replaces it.
 const pressed=new Map(),PRESS_MEMORY=10*60*1000;let heldRow=null,retrySelectedConfirm=null,retrySelectedRun=false;
-let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='';
+let listTicket=0,listPending='',paintedContext='',attentionGroup='all',retryAllRun=null,retryAllConfirm=null,stripNote='',listGeneration=0;
 const rowRetries=new Map();
 const pendingFolders=new Set(),folderMessages=new Map();
 // Start over, "Let the app handle it" and Clear working files (RefusedRetry follow-ups 2-4, Sergei 2026-10-19).
@@ -584,7 +584,7 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     acknowledgeReacquireArchives(page);
-    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);
+    rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);listGeneration++;pruneQueueNotes();
     restartCounts=requestFilter==='restarted' && page.restart_counts && typeof page.restart_counts==='object'?page.restart_counts:null;
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
     else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
@@ -2644,7 +2644,8 @@ function queuePartial(outcome){
 }
 const QUEUE_DELETE_UNKNOWN="The delete may not have finished. The app hasn't confirmed it. Check the list before trying again.";
 function applyQueueOutcome(outcome){
-  const id=outcome.book_id,row=rows.find(item=>item.id===id),title=outcome.title || queueTitle(row),status=row?candidateStatus(row):null;
+  // A row line's status is taken from the first list read after the outcome (the rows on screen predate the run).
+  const id=outcome.book_id,row=rows.find(item=>item.id===id),title=outcome.title || queueTitle(row),status=null,gen=listGeneration;
   queueLate.delete(outcome.id);
   if(outcome.action==='delete'){
     if(outcome.result==='done'){
@@ -2660,7 +2661,7 @@ function applyQueueOutcome(outcome){
       queueAnnounce(`${title}: ${shown.text}`);return;
     }
     const text=outcome.result==='refused'?queueDeleteText(outcome):QUEUE_DELETE_UNKNOWN;
-    queueNotes.set(id,{text,warn:true,outcome:outcome.id,status});queueAnnounce(`${title}: ${text}`);return;
+    queueNotes.set(id,{text,warn:true,outcome:outcome.id,status,gen});queueAnnounce(`${title}: ${text}`);return;
   }
   if(outcome.result==='done'){
     // The press ran as today (1.6): the row shows the server's queued state; the existing strip line names the book.
@@ -2668,7 +2669,7 @@ function applyQueueOutcome(outcome){
     const next=queuedNextText({position:outcome.answer?.position}),line=`${title} queued — ${next.replace(/^Queued — /,'')}`;
     askNote(line);queueStripOutcome=outcome.id;queueAnnounce(`${title}: ${next}`);return;
   }
-  const text=queueRetryText(outcome);queueNotes.set(id,{text,warn:true,outcome:outcome.id,status});queueAnnounce(`${title}: ${text}`);
+  const text=queueRetryText(outcome);queueNotes.set(id,{text,warn:true,outcome:outcome.id,status,gen});queueAnnounce(`${title}: ${text}`);
 }
 // The row line of a queued or running action (1.4), or null.
 function queueHint(row){
@@ -2686,10 +2687,12 @@ function queueHint(row){
 // A queued line ends when its status changes (the existing retryResult lifetime, 1.6).
 function queueNoteFor(row){
   const note=queueNotes.get(row.id);if(!note)return null;
-  const status=candidateStatus(row);if(note.status===null || note.status===undefined){note.status=status;return note;}
+  const status=candidateStatus(row);if(note.status===null || note.status===undefined){if(listGeneration>(note.gen ?? -1))note.status=status;return note;}
   if(note.status!==status){dropQueueNote(row.id);return null;}
   return note;
 }
+// Every list read checks each queued line against its book's status, shown or not (a Queued row has no line slot).
+function pruneQueueNotes(){for(const id of [...queueNotes.keys()]){const row=rows.find(item=>item.id===id);if(row)queueNoteFor(row);}}
 async function cancelQueued(row,action){
   const item=queuedFor(row,action);if(!item || queueCancels.has(item.id) || queueLate.has(item.id))return false;
   const buttons=rowButtons(row.path),word=action==='delete'?'delete':action;
