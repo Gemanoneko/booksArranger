@@ -55,15 +55,15 @@ CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'ref
          'link', 'working', 'is_sorted', 'no_files', 'has_job', 'not_offered', 'outside', 'second_name', 'invalid')
 # S6 (ruling 35's refusal texts; Sergei 2026-10-26): eight safety refusals said only "Delete was not accepted. Nothing was
 # deleted." Each now names its cause (provisional copy, sent to Judy). They stay refusals: each guards what a delete reaches.
-WHY = {'link': "A folder on the way to these files is a link or a junction, so the app can't prove what deleting would reach. Nothing was deleted.",
+WHY = {'link': "A folder on the path to these files is a link or a junction, so the app can't tell what deleting would reach. Nothing was deleted.",
        'working': "The app's working folder for this book holds something it didn't make (a link or an unknown item), so it can't list what to delete. Nothing was deleted.",
-       'is_sorted': 'A listed file is the finished audiobook in Audiobooks Sorted itself. Nothing was deleted.',
-       'no_files': 'This book has no files left in the catalog, so there is nothing to delete.',
+       'is_sorted': 'A file on the delete list is the finished audiobook in Audiobooks Sorted. Nothing was deleted.',
+       'no_files': 'This book has no files left to delete.',
        'has_job': "This copy has an audiobook job of its own, so it isn't a spare copy. Nothing was deleted.",
-       'not_offered': {'delete': "Delete book isn't offered for this book any more: the app can still fix it. Nothing was deleted. Check its row.",
-                       'copy': "This book is no longer a proven copy of a finished audiobook. Nothing was deleted. Check its row."},
-       'outside': "A listed file isn't an audio file in your library folders, or it's in Audiobooks Sorted. Nothing was deleted.",
-       'second_name': "A file of this book is a link or has a second name on disk (a hard link), so deleting it wouldn't remove it safely. Nothing was deleted.",
+       'not_offered': {'delete': "Delete book doesn't apply: the app can still fix this book. Check its row. Nothing was deleted.",
+                       'copy': "The app can't prove this book is a copy of a finished audiobook. Check its row. Nothing was deleted."},
+       'outside': "A file on the delete list is outside your library folders, isn't audio, or is in Audiobooks Sorted. Nothing was deleted.",
+       'second_name': 'A file of this book is a link or a hard link (a second name for one file), so deleting it isn\'t safe. Nothing was deleted.',
        'invalid': 'The delete request was incomplete. Nothing was deleted. Reload the page and try again.'}
 
 

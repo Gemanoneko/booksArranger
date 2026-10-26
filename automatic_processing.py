@@ -34,7 +34,7 @@ CLEARS = ('conversion', 'scan', 'stopping')
 # row (provisional copy, sent to Judy).
 MEDIA_TRIES = 5
 MEDIA_BACKOFF = 120.0  # seconds; doubled at each try: 2, 4, 8, 16 minutes
-MEDIA_WAIT = 'The library drive answered slowly while the app checked this book. It tries again by itself.'
+MEDIA_WAIT = 'The library drive answered slowly while the app checked this book. It tries again automatically.'  # Judy 14.6
 MEDIA_HELD = ("The library drive answered too slowly 5 times while the app checked this book. Check that the drive is connected "
               "and not busy, then press Scan again.")
 PENDING_POLL = 3.0

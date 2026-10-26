@@ -275,6 +275,26 @@ class SettlingStartTests(unittest.TestCase):
         self.assertEqual(s.state()['start_waiting'], {'reason': 'pause'})
 
 
+class NotSafeSentenceTests(unittest.TestCase):
+    """S10 as Judy decided (14.6): the reason is a plain-language clause, never an id, a path or an engine message, and the
+    working folder is named by its full path (selectable in the row and the details panel; no button)."""
+    def test_the_reason_is_plain_and_the_folder_is_its_full_path(self):
+        import merge_service
+        from pathlib import Path
+        s = merge_service.MergeService.__new__(merge_service.MergeService)
+        s.stage_root = Path(r'C:\Books\data\merge-cache\audio-staging')
+        folder = r'C:\Books\data\merge-cache\audio-staging\job-1'
+        self.assertEqual(s._not_safe('job-1', 'An earlier attempt did not close cleanly; its files are kept'),
+                         "Some working files weren't cleared: an earlier attempt did not close cleanly; its files are kept. If you don't "
+                         "need this earlier attempt, delete " + folder + " in File Explorer; the row then offers Retry.")
+        for technical in ('An item the app did not create is in the working folder: 3c78f364-3226-4afa-a3ef-1b5604d0c254',
+                          'Working files were kept: The working folder could not be read: [WinError 5] Access is denied'):
+            sentence = s._not_safe('job-1', technical)
+            self.assertNotIn('3c78f364', sentence); self.assertNotIn('WinError', sentence)
+            self.assertIn(folder, sentence)
+        self.assertIn(merge_service.MergeService.NOT_SAFE_PLAIN, s._not_safe('job-1', 'Boundary(0x1f) refused'), 'an engine message: the plain clause')
+
+
 class ResumeRouteTests(unittest.TestCase):
     def test_resume_answers_the_kept_start_and_the_same_button_again_cancels_it(self):
         server = Server()

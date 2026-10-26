@@ -1564,13 +1564,14 @@ function restartNote(kind,answer){
 }
 // The rest of ruling 35 (ruling 37): busy is held and sent again (never "try again in a moment"); a file held open is tried
 // again a few times, then its sentence says what to do; a file the app can't prove it made says why and where (S10).
-const CLEAR_FAILURE={busy:"The app is busy, so Clear working files waits and runs when it is free. Nothing was removed yet.",changed:"This book's status changed. Check the updated status above.",
-  not_safe:"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete.",file_problem:"Some working files weren't cleared: a file is open in another program (an antivirus scan can hold one). Close it, then press Clear working files again.",
+const CLEAR_FAILURE={busy:'Clear working files queued. It runs when the app is free.',changed:"This book's status changed. Check the updated status above.",
+  not_safe:"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete.",file_problem:"Some working files weren't cleared: another program, often an antivirus scan, still has a file open. Wait a minute or close that program, then press Clear working files again.",
   unknown:"Working files weren't cleared. Select the row to read why."};
 const CLEAR_TRIES=6;  // a file held open: tried again every 10 s for a minute before its sentence shows
 // S5: each Start over and release cause in its own words; closing is the real refusal, busy is held and sent again.
-const RESTART_CLOSING={startover:'Books Arranger is closing. Start over after it restarts. Nothing was changed.',combined:'Books Arranger is closing. Start over after it restarts. Nothing was changed.',
-  release:'Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed.'};
+// Judy 14.6: two sentences at most; the closing refusal names the press and when to press it again.
+const RESTART_CLOSING={startover:'Books Arranger is closing. Start over after it restarts.',combined:'Books Arranger is closing. Start over after it restarts.',
+  release:'Books Arranger is closing. Let the app handle it after it restarts.'};
 // The words for a refused press come from its typed cause, never from the server's English.
 function refusedText(kind,error){
   const cause=error?.body?.cause,changed="This book's status changed. Check the updated status above.",editing='This book is being edited. Finish editing, then try again.';
@@ -1579,7 +1580,7 @@ function refusedText(kind,error){
   if(cause==='changed')return changed;
   if(cause==='editing')return editing;
   if(cause==='closing')return RESTART_CLOSING[kind] || RESTART_CLOSING.startover;
-  if(cause==='busy')return 'The catalog is busy, so this waits and runs when it is free. Nothing was changed yet.';  // held and sent again (restartPress)
+  if(cause==='busy')return `${laterWord(kind)} queued. It runs when the app is free.`;  // held and sent again (restartPress); Judy 14.6
   return said || (kind==='release'?"The review wasn't discarded. Select the row to read why.":'Start over did not finish. Select the row to read why.');
 }
 function freshRow(value,row){return value && typeof value==='object' && typeof value.id==='string'?{...value,path:value.id,kind:'candidate',library:row.library || 'Audiobooks'}:null;}
@@ -2265,7 +2266,7 @@ function cellTip(row){const producer=producerRecoveryText(row)?.tip;if(producer)
 const OS_TEXT=/\[(?:WinError|Errno)\s*-?\d+\]|cannot find the (?:file|path) specified|Access is denied|Cannot protect exact file/i;
 const OS_PLAIN="A source file is missing or can't be opened.";
 // 0.22.2: a media check past its deadline is transient; a record saved before 0.22.2 never shows the raw text.
-const MEDIA_SLOW_PLAIN='The library drive answered slowly while the app checked this book. It tries again by itself.';
+const MEDIA_SLOW_PLAIN='The library drive answered slowly while the app checked this book. It tries again automatically.';  // Judy 14.6
 function plainReason(reason){return typeof reason==='string' && /^Owned (media operation|decode verification) exceeded its deadline$/.test(reason)?MEDIA_SLOW_PLAIN:typeof reason==='string' && OS_TEXT.test(reason)?OS_PLAIN:reason;}
 function rawReasons(row){return (row?.automatic?.reasons || []).filter(reason=>typeof reason==='string' && OS_TEXT.test(reason));}
 function technicalText(row){
@@ -3109,8 +3110,10 @@ function laterWord(kind){return LATER_WORDS[kind] || 'This press';}
 function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
 // Provisional copy (ruling 35, sent to Judy).
 // The rest of ruling 35 (ruling 37): a press the engine answered "busy" waits here too and is sent again, with why.
-const LATER_WHY={catalog:'It runs when the catalog is free.',app:'It runs when the app is free.',file:'It tries again when the file is released.'};
+// Judy 14.6: every queued line says "the app is free" ("the catalog" is where the data lives, not a busy state).
+const LATER_WHY={catalog:'It runs when the app is free.',app:'It runs when the app is free.',file:'It tries again every 10 s.'};
 function laterLine(item){
+  if(!loadingActive && item.why==='file')return `${laterWord(item.kind)} queued: a file is open in another program. ${LATER_WHY.file}`;
   if(!loadingActive && item.why && LATER_WHY[item.why])return `${laterWord(item.kind)} queued. ${LATER_WHY[item.why]}`;
   return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':item.waitFor?.()?'the scan':'the current action'} finishes.`;
 }

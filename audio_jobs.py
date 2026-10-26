@@ -165,16 +165,16 @@ REPAIR_NOT_CLEARED = "Repair was not accepted: the working files weren't cleared
 # what to do). S10: a file the app can't prove it made says why and where it is.
 WORKING_BUSY = "The app is busy, so Clear working files waits and runs when it is free. Nothing was removed yet."
 WORKING_NOT_SAFE = "Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete."
-WORKING_NOT_SAFE_AT = ("Some working files weren't cleared: %s. The app keeps them in %s. If you don't need this earlier attempt, "
-                       "delete that folder in File Explorer; the row then offers Retry.")
-WORKING_FILE_PROBLEM = ("Some working files weren't cleared: a file is open in another program (an antivirus scan can hold one). "
-                        "Close it, then press Clear working files again.")
+# Judy 14.6: {reason} is a plain-language clause, never an engine code; {folder} the full path, selectable in the row.
+WORKING_NOT_SAFE_AT = "Some working files weren't cleared: %s. If you don't need this earlier attempt, delete %s in File Explorer; the row then offers Retry."
+WORKING_FILE_PROBLEM = ("Some working files weren't cleared: another program, often an antivirus scan, still has a file open. "
+                        "Wait a minute or close that program, then press Clear working files again.")
 # S9 (ruling 35's refusal texts): an M4B Retry or Repair from an outdated view, each cause in its own words.
 RETRY_GATE_UPDATE = "%s was not accepted: the app doesn't support how this M4B is built. Nothing was queued."
 RETRY_GATE_REVIEW = "%s was not accepted: the book's review or source files changed. Start over sends it back to automatic processing."
 RETRY_GATE_WAIT = '%s was not accepted: working files from an earlier attempt are still present. %s after they are cleared.'
 RETRY_GATE_STOPS = "%s was not accepted: working files from an earlier attempt are still present, and the app can't clear them safely. The row says what to do."
-RETRY_GATE_REFUSED = "Retry was not accepted: the app's read-only check of this M4B says it can't be converted as it is. The row shows why."
+RETRY_GATE_REFUSED = "Retry was not accepted: the app's check says this M4B can't be converted as it is. The row shows why."
 # An M4B row whose read-only dry run has not finished yet (RefusedRetry follow-up, section 2, state a).
 RETRY_CHECKING = 'The app is checking this M4B before offering Retry. The row updates itself.'
 # Retry pressed on an outdated view (for example, the job was already queued); the panel updates itself.

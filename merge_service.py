@@ -1433,12 +1433,12 @@ class MergeService:
 
     # S5 (ruling 35's refusal texts): each cause says itself. Closing is the real refusal; a catalog still busy after the
     # transaction's 30 s of retries is no refusal for Sergei: the page holds the press and sends it again (cause 'busy').
-    STARTOVER_REFUSED='Books Arranger is closing. Start over after it restarts. Nothing was changed.'
+    STARTOVER_REFUSED='Books Arranger is closing. Start over after it restarts.'  # Judy 14.6
     STARTOVER_NOTHING=STARTOVER_REFUSED
-    STARTOVER_BUSY='The catalog is busy, so Start over waits and runs when it is free. Nothing was changed yet.'
+    STARTOVER_BUSY='Start over queued. It runs when the app is free.'
     EDITING='This book is being edited. Finish editing, then try again.'
-    RELEASE_BUSY="The catalog is busy, so the review waits and is discarded when it is free. Nothing was changed yet."
-    RELEASE_REFUSED="Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed."
+    RELEASE_BUSY='Let the app handle it queued. It runs when the app is free.'
+    RELEASE_REFUSED='Books Arranger is closing. Let the app handle it after it restarts.'
 
     def _restart_locks(self):
         """The review and grouping locks every review write takes (a save, the automatic approval)."""
@@ -3475,10 +3475,18 @@ class MergeService:
         try:return bool(m4b_repair.eligible(row))
         except Exception:return False
 
-    def _not_safe(self,job_id,reason):
-        """S10: why the app kept working files and where they are, with what Sergei can do."""
+    NOT_SAFE_PLAIN="the app couldn't prove every file in it is its own"
+
+    def _not_safe(self,job_id,reason=None):
+        """S10: why the app kept working files and where they are (the full folder path), with what Sergei can do. Judy
+        14.6: the reason is a plain-language clause, never an id, a path or an engine message: only the classifier's own
+        sentence up to its first colon, else NOT_SAFE_PLAIN."""
+        import re
         from audio_jobs import WORKING_NOT_SAFE,WORKING_NOT_SAFE_AT
-        reason=str(reason or '').strip().rstrip('.')
+        reason=str(reason or '').strip()
+        if reason.startswith('Working files were kept: '):reason=reason[len('Working files were kept: '):]
+        reason=reason.split(': ',1)[0].strip().rstrip('.')
+        if not re.fullmatch(r"[A-Za-z][A-Za-z ,;'’-]*",reason):reason=self.NOT_SAFE_PLAIN
         reason=reason[0].lower()+reason[1:] if reason[:1].isupper() and not reason[1:2].isupper() else reason
         try:folder=str(Path(self.stage_root)/job_id)
         except (TypeError,ValueError):folder=''
@@ -3511,13 +3519,14 @@ class MergeService:
         if failure is None and after is None:
             with _WORKING_LOCK:self.__dict__.setdefault('_working_failed',{}).pop(job_id,None)
             return {'cleared':True,'bytes':before['bytes']}
-        cause,reason=failure or ('not_safe','Verified disposal kept files it could not prove')
+        cause,reason=failure or ('not_safe',"The app couldn't prove every file in it is its own")  # plain: S10 shows it (Judy 14.6)
         try:
             listing,marker=self._working_listing(job_id)
             if listing and cause=='not_safe':
                 with _WORKING_LOCK:self._working_failed[job_id]=(json.dumps([marker,listing]),'Working files were kept: '+reason)
         except (OSError,ValueError):pass
-        raise RetryRefused({'busy':WORKING_BUSY,'file_problem':WORKING_FILE_PROBLEM}.get(cause) or self._not_safe(job_id,reason),cause)
+        # S10's reason is the folder's own classification now (plain), never the exception's text.
+        raise RetryRefused({'busy':WORKING_BUSY,'file_problem':WORKING_FILE_PROBLEM}.get(cause) or self._not_safe(job_id,(after or {}).get('reason') if (after or {}).get('state')=='blocked' else None),cause)
 
     def _clear_first(self,job_id,kind='retry'):
         with self.jobs._lock:

@@ -477,3 +477,33 @@ Sergei's ruling 37: every remaining "can't X while Y" goes before release, and n
 | A record saved before this build | shown as the waiting sentence, never "Owned media operation exceeded its deadline" |
 
 Question: is "the library drive" right for Sergei's Z: share, or should it name the drive ("Z:")?
+
+### 14.6 §14 decisions (Judy, 2026-10-26)
+
+**Answers to 14.4 and the 14.5 question**
+
+1. **S10: File Explorer, no button.** The case is rare, the sentence already names the exact folder, and a button is a new control (IPC, tooltip, focus handling) for one refusal. Condition: `{folder}` is the full path, shown as selectable text in the row or the details, never only in a toast that disappears, so Sergei can copy it into File Explorer's address bar.
+2. **"The catalog is free" is not clear.** "Catalog" is where the data lives (the setup window, "Opening the catalog"), not a busy state. Every queued line says "the app is free", matching "The app is working on another action".
+3. **"The library drive", no "Z:".** It is the app's existing term ("Connect the library drive and try again."), and the library folders are configurable, so a fixed letter would be wrong for another root.
+
+**Exact strings that replace section 14's provisional copy** (everything else in 14.2, 14.3 and 14.5 is approved as written; the replacements below drop history and legality talk and keep two sentences for an error, with "Nothing was deleted." kept on delete refusals because it states the outcome of a destructive press)
+
+| Where | String |
+| --- | --- |
+| 14.2 Start over, the combined press, Let the app handle it, while the app works | "Start over queued. It runs when the app is free." (Cancel as written; the 5 s resend stays internal.) |
+| 14.2 Clear working files, a file held open | "Clear working files queued: a file is open in another program. It tries again every 10 s." |
+| 14.2 After the 6th try | "Some working files weren't cleared: another program, often an antivirus scan, still has a file open. Wait a minute or close that program, then press Clear working files again." |
+| 14.3 S5 Start over / combined press, closing | "Books Arranger is closing. Start over after it restarts." |
+| 14.3 S5 Let the app handle it, closing | "Books Arranger is closing. Let the app handle it after it restarts." |
+| 14.3 S6 a folder on the way is a link or junction | "A folder on the path to these files is a link or a junction, so the app can't tell what deleting would reach. Nothing was deleted." |
+| 14.3 S6 a listed file is the Sorted audiobook | "A file on the delete list is the finished audiobook in Audiobooks Sorted. Nothing was deleted." |
+| 14.3 S6 no files left | "This book has no files left to delete." |
+| 14.3 S6 Delete book not offered | "Delete book doesn't apply: the app can still fix this book. Check its row. Nothing was deleted." |
+| 14.3 S6 copy not proven | "The app can't prove this book is a copy of a finished audiobook. Check its row. Nothing was deleted." |
+| 14.3 S6 outside the library folders or in Sorted | "A file on the delete list is outside your library folders, isn't audio, or is in Audiobooks Sorted. Nothing was deleted." |
+| 14.3 S6 link or hard link | "A file of this book is a link or a hard link (a second name for one file), so deleting it isn't safe. Nothing was deleted." |
+| 14.3 S9 read-only check says it can't convert | "Retry was not accepted: the app's check says this M4B can't be converted as it is. The row shows why." |
+| 14.3 S10 a file the app can't prove it made | "Some working files weren't cleared: {reason}. If you don't need this earlier attempt, delete {folder} in File Explorer; the row then offers Retry." `{reason}` must be a plain-language clause, never an engine code. |
+| 14.5 waiting for a slow media check | "The library drive answered slowly while the app checked this book. It tries again automatically." The details keep "Automatic retry after {time}". |
+
+**Approved as written:** 14.1 (no copy); in 14.2 the Resume queued, cancelled and too-late lines, the Pause-after-start line, the Retry all / Retry selected / Convert line and the Delete recovery copies strings; in 14.3 the S6 working-folder, spare-copy and malformed-request lines and the other five S9 lines; in 14.5 the five-deadline Held line and the record-saved-before-this-build rule.

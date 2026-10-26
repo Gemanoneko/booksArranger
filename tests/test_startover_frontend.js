@@ -130,7 +130,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   replies['/api/audiobook/startover']=()=>refused({error:'server words',cause:'busy'});
   let sentBefore=posts.length;
   await run('retryFromRow(rows[0],rowButtons("cand-r").children[0])');
-  assert.equal(get('retry-note').textContent,'Start over queued. It runs when the catalog is free.');
+  assert.equal(get('retry-note').textContent,'Start over queued. It runs when the app is free.');  // Judy 14.6
   assert.deepEqual([run('laterPresses.length'),run('laterPresses[0].why'),run('laterPresses[0].kind')],[1,'catalog','startover']);
   assert.equal(posts.length,sentBefore+1,'sent once; the next send waits its 5 s');
   run('laterPresses[0].waitFor=()=>false');replies['/api/audiobook/startover']=()=>refused({error:'server words',cause:'changed'});
@@ -140,7 +140,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // S5: the real refusal (closing) names its cause and the next step, never "Start over was not accepted".
   replies['/api/audiobook/startover']=()=>refused({error:'server words',cause:'closing'});
   await run('retryFromRow(rows[0],rowButtons("cand-r").children[0])');
-  assert.equal(get('retry-note').textContent,'Books Arranger is closing. Start over after it restarts. Nothing was changed.');
+  assert.equal(get('retry-note').textContent,'Books Arranger is closing. Start over after it restarts.');
 
   // ---- The combined press: one confirmation, then one request with discard_review (follow-up 4, 3.3 and 3.4).
   paint([stuck('c','manual_draft',true)]);inventoryRows=[stuck('c','manual_draft',true)];tr=rowOf('c');const combined=actionButtons(tr)[0];combined.focus();
@@ -163,7 +163,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   replies['/api/audiobook/startover']=()=>refused({error:'x',cause:'busy'});
   await run('retryFromRow(rows[0],rowButtons("cand-c").children[0])');get('discard-confirm').handlers.click();
   for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(get('retry-note').textContent,'Start over queued. It runs when the catalog is free.','ruling 35: held and sent again');
+  assert.equal(get('retry-note').textContent,'Start over queued. It runs when the app is free.','ruling 35: held and sent again');
   assert.equal(run('laterPresses[0].kind'),'combined');run('laterPresses.length=0;controls()');
 
   // ---- "Let the app handle it" (follow-up 3, section 4): status, hint, button first, tooltip, dialog, request.
@@ -191,8 +191,8 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(get('retry-note').textContent,'Review discarded. Automatic processing is running and will reach this book. Find it under Status: Started over.');
   assert.equal(statusCell(rowOf('h')).textContent,'Started over — waiting for you','held in place in its Started over state, never "Held" (the poll says Idle)');
   for(const [cause,words] of [['changed',"This book's status changed. Check the updated status above."],['editing','This book is being edited. Finish editing, then try again.'],
-                              ['busy','The catalog is busy, so this waits and runs when it is free. Nothing was changed yet.'],['other',"The review wasn't discarded. Select the row to read why."],
-                              ['closing','Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed.']])
+                              ['busy','Let the app handle it queued. It runs when the app is free.'],['other',"The review wasn't discarded. Select the row to read why."],
+                              ['closing','Books Arranger is closing. Let the app handle it after it restarts.']])
     assert.equal(run('refusedText("release",'+JSON.stringify({body:{cause}})+')'),words,cause);
 
   // ---- The Started over states (follow-up 3, 2.2; follow-up 4, 1.3 and 2), with the live pass state.
@@ -336,7 +336,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
     assert.equal(actionButtons(rowOf('cw'))[1].hidden,false,'still cleanable: the button stays');
   }
   // Busy and a file held open (the rest of ruling 35, ruling 37): held and sent again, no warning: it is queued.
-  for(const [cause,why,line] of [['busy','app','Clear working files queued. It runs when the app is free.'],['file_problem','file','Clear working files queued. It tries again when the file is released.']]){
+  for(const [cause,why,line] of [['busy','app','Clear working files queued. It runs when the app is free.'],['file_problem','file','Clear working files queued: a file is open in another program. It tries again every 10 s.']]){
     paint([cleanable]);inventoryRows=[cleanable];replies['/api/audiobook/clear-working']=()=>refused({error:'server words',cause});
     await run('clearFromRow(rows[0],[...rowButtons("cand-cw").children].find(b=>b.textContent==="Clear working files" || b.textContent==="Clearing…"))');
     assert.equal(statusCell(rowOf('cw')).children[0].textContent,line,cause);assert.equal(statusCell(rowOf('cw')).children[0].classes.has('retry-refused'),false,cause);
@@ -345,7 +345,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   // Still held open after CLEAR_TRIES sends: its sentence, with what to do.
   paint([cleanable]);inventoryRows=[cleanable];replies['/api/audiobook/clear-working']=()=>refused({error:'server words',cause:'file_problem'});
   await run('clearWorking({tries:CLEAR_TRIES},rows[0])');
-  assert.equal(statusCell(rowOf('cw')).children[0].textContent,"Some working files weren't cleared: a file is open in another program (an antivirus scan can hold one). Close it, then press Clear working files again.");
+  assert.equal(statusCell(rowOf('cw')).children[0].textContent,"Some working files weren't cleared: another program, often an antivirus scan, still has a file open. Wait a minute or close that program, then press Clear working files again.");
   assert.equal(run('laterPresses.length'),0,'no endless retry');run('retryResult=null;controls()');
   // Another request in flight (ruling 35): the press is accepted and waits for it, with Cancel; never "Another operation".
   paint([cleanable]);run('retryPending={key:"other",kind:"retry"};controls()');assert.equal(actionButtons(rowOf('cw'))[1].disabled,false);
