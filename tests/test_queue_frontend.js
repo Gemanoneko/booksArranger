@@ -64,11 +64,18 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   assert.equal(hint(trOf('cand-c')),'Repair queued, 2 ahead. Starts when the scan finishes.');assert.equal(buttonsOf(trOf('cand-c'))[0].textContent,'Repair queued');
   assert.equal(byText(trOf('cand-c'),'Cancel repair').hidden,false);
   assert.equal(get('queue-line').textContent,'3 actions queued. They run one at a time when the scan finishes.');assert.equal(get('queue-line').hidden,false);
+  // The details panel shows the same pair (1.3): the queued face, Cancel repair beside it, the hint in #retry-note.
+  run('select(rows.find(row=>row.id==="cand-c"),true)');
+  assert.equal(get('retry-job').textContent,'Repair queued');assert.equal(get('retry-job').getAttribute('aria-disabled'),'true');
+  assert.equal(get('retry-cancel').hidden,false);assert.equal(get('retry-cancel').textContent,'Cancel repair');
+  assert.equal(get('retry-note').textContent,'Repair queued, 2 ahead. Starts when the scan finishes.');
+  answers['/api/queue/cancel']=()=>ok({cancelled:true});await get('retry-cancel').handlers.click({});for(let i=0;i<4;i++)await tick();
+  assert.deepEqual(posted('/api/queue/cancel').at(-1),{id:'q-3'});assert.equal(get('queue-announce').textContent,'Repair cancelled: Title c.');
   queue({queued_actions:[item('q-1','retry','cand-a',1)],queue_running:null,queue_outcomes:[]});
   assert.equal(get('queue-line').textContent,'1 action queued. It runs when the scan finishes.');
   // 3. Cancel: out of the queue, nothing starts, the row returns to Retry, focus on the restored button.
   answers['/api/queue/cancel']=data=>ok({cancelled:true});
-  cancel.focus();await cancel.handlers.click({stopPropagation(){}});for(let i=0;i<6;i++)await tick();
+  const cancelA=byText(trOf('cand-a'),'Cancel retry');cancelA.focus();await cancelA.handlers.click({stopPropagation(){}});for(let i=0;i<6;i++)await tick();
   assert.deepEqual(posted('/api/queue/cancel').at(-1),{id:'q-1'});
   tr=trOf('cand-a');assert.equal(buttonsOf(tr)[0].textContent,'Retry');assert.equal(byText(tr,'Cancel retry').hidden,true);
   assert.equal(get('queue-announce').textContent,'Retry cancelled: Title a.');assert.equal(document.activeElement,buttonsOf(tr)[0],'focus on the restored Retry');

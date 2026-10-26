@@ -1790,6 +1790,8 @@ $('retry-all-go').addEventListener('click',()=>{if($('retry-all-go').disabled)re
 $('retry-all-cancel').addEventListener('click',()=>closeRetryAll());
 $('retry-all-confirm').addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault?.();closeRetryAll();}});
 $('retry-job').addEventListener('click',()=>{if($('retry-job').getAttribute?.('aria-disabled')==='true' || retryPending)return;retryJob();});
+// The details panel's Cancel retry / Cancel repair beside a queued face (Judy 1.3), the same press as the row's.
+$('retry-cancel').addEventListener('click',event=>{if(event?.repeat || $('retry-cancel').hidden || !selectedRow)return;const item=queuedFor(selectedRow);if(item && item.action!=='delete')cancelQueued(selectedRow,item.action);});
 $('recovery-cancel').addEventListener('click',()=>closeRecoveryDialog());
 $('recovery-confirm').addEventListener('click',deleteRecoveryCopies);
 $('recovery-dialog').addEventListener('cancel',event=>{event.preventDefault();closeRecoveryDialog();});
