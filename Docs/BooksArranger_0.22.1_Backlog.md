@@ -66,6 +66,22 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 
 ## 0.22.2 additions from Sergei (2026-10-26)
 
+- **A deleted book's row stays on screen** (0.22.1, Sigma Force 9 "All files missing"). After Delete book it shows "Deleted. The book is gone from the app.", but the row is still listed with Scan again / View metadata / Source folders. Judy's spec says the row leaves on success and the list and counts drop within a poll. Find out whether the list cache (30 s) or the forced reload is skipped after Delete. The row must disappear at once.
+- **«Ширли Джексон - Призрак дома на холме» says "Author missing"** (Sergei, 2026-10-26: "There was an author in the name.").
+  - The tag credits the reader «Пухов Сергей», whom the rules map as a reader.
+  - The row says "No author in the tags, file name or folder name." That's false: the title and file name start with "Ширли Джексон - ".
+  - The Author field (prefilled "Jackson Shirley") is right, but the destination keeps "Ширли Джексон - " in the title: `Jackson Shirley\Ширли Джексон - Призрак дома на холме - Jackson Shirley.m4b`.
+  - **Fix:**
+    - when the only credited name is a reader, a leading "Person - " in the title/file name IS the author (Senua's W8 rule, with the reader case included);
+    - strip it from the title;
+    - don't ask.
+  - The title should become "The Haunting of Hill House" (ruling 29: an English original).
+- **«Пртоколы SCP. Сейф №1–3»** (Sergei, 2026-10-26): "This is a series 'SCP Protocols'. All 3 books are story collections. The Russian name is misspelled."
+  - **Spelling:** the title should be «Протоколы SCP» (missing "о"). Record it as a lasting correction, like the author rules, so future scans of these files get the right spelling.
+  - **Collections in a series:** these are three story collections forming the series «Протоколы SCP» (Сейф №1, 2, 3). A collection that belongs to a series files under Сборники with its series and position, using the existing series naming, e.g. `Сборники\Протоколы SCP\Протоколы SCP 1 - Сейф №1 - Разные авторы.m4b`. Ender confirms the exact pattern against the current naming rules.
+  - **Editing on every row:** these rows ("Waiting for retry checks", repair) have no Title/Author fields, so Sergei can't fix the spelling himself. Every row should let him correct the title, author and series (Judy specs where).
+- **«Джек из Тени» (Zelazny):** "Can't convert — M4B not supported", and the destination shows a Russian folder for an English author. Diagnosis is running.
+
 - **Ruling 29:** translated books wait for their English title unless they were written in Russian. If no English title can be found, they convert under the Russian title.
 - **Ruling 30:** "Вселенная …" folders become a Universe, laid out as Universe > Series > Book, like Warhammer. Detection is needed for new books; the 14 Дозоры and 5 Warhammer books already converted move in the rename pass.
 
