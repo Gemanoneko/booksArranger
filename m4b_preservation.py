@@ -445,13 +445,30 @@ def udta_padding(up):
     # "Xtra", nothing after it) beside the real meta; the decoded audio is the same without it. Only that exact box,
     # once, directly here: any content, a 64-bit header, a second one or any other place is still refused.
     xtra=[b for b in up if empty_xtra(b)]
-    need(len(xtra)<=1,'Unsupported structural box')
-    kept=[b for b in up if not blank(b) and not empty_xtra(b)]
-    return kept,[{'item':'udta','removed':'zero_padding','bytes':b.size} for b in padding]+[{'item':'udta','removed':'empty_xtra','bytes':b.size} for b in xtra]
+    # Sergei 2026-10-26 (0.22.2), «The Little Sisters of Eluria»: one Xtra box holding only Windows Explorer's star rating
+    # (the single property WM/SharedUserRating, one 8-byte value of 0-99) beside the real meta; the decoded audio is the
+    # same without it. Only that exact shape, once, directly here, and never beside the empty Xtra box: any other
+    # property, a second value or entry, another type or size, a 64-bit header or any other place is still refused.
+    rating=[b for b in up if windows_rating(b)]
+    need(len(xtra)+len(rating)<=1,'Unsupported structural box')
+    kept=[b for b in up if not blank(b) and not empty_xtra(b) and not windows_rating(b)]
+    return kept,([{'item':'udta','removed':'zero_padding','bytes':b.size} for b in padding]+[{'item':'udta','removed':'empty_xtra','bytes':b.size} for b in xtra]
+                 +[{'item':'udta','removed':'windows_rating','bytes':b.size} for b in rating])
 
 def empty_xtra(box):
     """The empty Xtra box of ruling 32: 8 bytes, a 32-bit size of 8 and the type "Xtra"."""
     return box.kind==b'Xtra' and box.header==8 and box.size==8 and box.raw==b'\0\0\0\x08Xtra'
+
+WINDOWS_RATING=b'WM/SharedUserRating'
+
+def windows_rating(box):
+    """The rating-only Xtra box (Windows Explorer's Rating): a 53-byte box, 32-bit header, one 45-byte entry whose name is
+    WM/SharedUserRating, holding one 14-byte value of type 0x0013 with an 8-byte little-endian rating of 0 to 99."""
+    if box.kind!=b'Xtra' or box.header!=8 or box.size!=53:return False
+    p=box.payload;name=len(WINDOWS_RATING)
+    return (len(p)==45 and int.from_bytes(p[0:4],'big')==45 and int.from_bytes(p[4:8],'big')==name and p[8:8+name]==WINDOWS_RATING
+            and int.from_bytes(p[8+name:12+name],'big')==1 and int.from_bytes(p[12+name:16+name],'big')==14 and p[16+name:18+name]==b'\0\x13'
+            and int.from_bytes(p[18+name:26+name],'little')<=99)
 
 def rewrite_metadata(movie,tags,cover):
     """(new movie bytes, dropped blank metadata) for the approved tags and cover."""

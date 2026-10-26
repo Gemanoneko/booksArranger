@@ -755,8 +755,45 @@ class ObservedWriterShapeTests(unittest.TestCase):
         self.refused(change_movie(fixture(),lambda p:p+EMPTY_XTRA),'Unsupported structural box')
         self.refused(with_track_udta(fixture(),atom(b'udta',EMPTY_XTRA)),'Unsupported track-local user data')
 
+    # Sergei 2026-10-26 (0.22.2), «The Little Sisters of Eluria» (Стивен Кинг, 1 file, "M4B not supported"): moov/udta
+    # holds, after the real meta, one 53-byte Xtra box with Windows Explorer's star rating only (WM/SharedUserRating = 99,
+    # five stars), at byte 1,978,809; the audio is in mdat from 1,984,893. The decoded PCM is the same without it.
+    def test_a_windows_rating_xtra_box_in_movie_udta_dropped_and_recorded(self):
+        for where in ('before','after'):
+            with self.subTest(where=where):
+                source=with_udta_child(fixture(),RATING_XTRA) if where=='before' else change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:u+RATING_XTRA))
+                p,candidate,receipt=self.accepted(source)
+                udta=next(b for b in boxes(unpack(candidate)[b'moov'].payload) if b.kind==b'udta')
+                self.assertEqual([b.kind for b in boxes(udta.payload)],[b'meta'],'the new moov does not carry the box')
+                expected=[{'item':'udta','removed':'windows_rating','bytes':53}]
+                self.assertEqual(list(p.metadata_dropped),expected);self.assertEqual(receipt['metadata_dropped'],expected)
+                from failed_m4b_retry import profile_proof
+                self.assertEqual(profile_proof(p,'b'*64)['metadata_dropped'],expected,'the admission proof records it too')
+        for stars in (1,25,50,75,0):
+            self.accepted(with_udta_child(fixture(),rating_xtra(value=stars)))  # every Windows star value
+    def test_windows_rating_near_misses_refused(self):
+        self.accepted(with_udta_child(fixture(),RATING_XTRA))  # positive control
+        for child in (rating_xtra(name=b'WM/SharedUserRatinG'),rating_xtra(name=b'WM/Publisher\0\0\0\0\0\0\0'),rating_xtra(kind=b'\0\x15'),
+                      rating_xtra(value=100),rating_xtra(count=2),RATING_XTRA+RATING_XTRA,RATING_XTRA+EMPTY_XTRA,
+                      struct.pack('>I',1)+b'Xtra'+struct.pack('>Q',61)+RATING_XTRA[8:]):
+            with self.subTest(child=child):self.refused(with_udta_child(fixture(),child),'Unsupported structural box')
+        # A byte short or a byte more: the box list itself no longer parses, refused before any shape is read.
+        self.refused(with_udta_child(fixture(),RATING_XTRA[:-1]),'Box extent invalid')
+        self.refused(with_udta_child(fixture(),RATING_XTRA+b'\0'),'EOF-sized boxes unsupported')
+        # Anywhere but moov/udta.
+        self.refused(change_movie(fixture(),lambda p:nested(p,b'udta',lambda u:nested(u,b'meta',lambda m:m+RATING_XTRA))),'Unsupported structural box')
+        self.refused(change_movie(fixture(),lambda p:p+RATING_XTRA),'Unsupported structural box')
+
 ZERO_PADDING_SIZE=70903
 EMPTY_XTRA=struct.pack('>I',8)+b'Xtra'
+# The live box, byte for byte (Смиренные сёстры Элурии.m4b, moov/udta, after meta).
+RATING_XTRA=bytes.fromhex('00000035587472610000002d00000013574d2f53686172656455736572526174696e67000000010000000e00136300000000000000')
+
+def rating_xtra(name=b'WM/SharedUserRating',kind=b'\0\x13',value=99,count=1):
+    """A rating-only Xtra box like the live one, one part changed: one entry, one 14-byte value."""
+    entry=struct.pack('>I',len(name))+name+struct.pack('>I',count)+struct.pack('>I',14)+kind+value.to_bytes(8,'little')
+    entry=struct.pack('>I',4+len(entry))+entry
+    return struct.pack('>I',8+len(entry))+b'Xtra'+entry
 
 def with_udta_child(source,child):
     """The movie udta with child placed before meta, where both Макс Фрай books carry it."""
