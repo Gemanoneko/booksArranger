@@ -20,7 +20,9 @@ import uuid
 
 ACTIONS = ('retry', 'repair', 'delete',
            # Ruling 35 (Sergei 2026-10-26): every press that acts on a book is accepted, queued when something else is happening.
-           'approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume')
+           'approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume',
+           # Ruling 37 (the rest of ruling 35): historical cleanup and restore, route-only, wait for a scan and for audiobook work.
+           'cleanup', 'restore')
 KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic')
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
 SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy')
@@ -28,7 +30,7 @@ SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'sc
 # wait for; the row shows it running and its outcome (ruling 35).
 ALWAYS = ('approve', 'convert')
 # Run by the server (run_queued): the same call the press makes, every check again at run time.
-SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume')
+SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume', 'cleanup', 'restore')
 KEEP = 24 * 3600     # an outcome nobody acknowledged is forgotten after a day
 POLL = 0.5           # how often a blocked head is looked at again
 LIMIT = 1000         # queued actions; a press beyond it is refused, never dropped silently
@@ -84,6 +86,25 @@ class ActionQueue:
             return None
         if action in SCAN_WAITS and server.scan_active():
             return 'scan'
+        if action in ('cleanup', 'restore'):
+            # Historical cleanup removes originals and restore puts them back: never beside a scan or audiobook work (their
+            # engine checks); cleanup also waits for queued books and for other source cleanups (it is finite and alone).
+            if server.scan_active():
+                return 'scan'
+            jobs, cleanup = getattr(merge, 'jobs', None), getattr(merge, 'cleanup', None)
+            alive = lambda thread: thread is not None and thread.is_alive()
+            if alive(getattr(jobs, '_thread', None)) or alive(getattr(cleanup, 'thread', None)):
+                return 'jobs'
+            if action == 'cleanup':
+                try:
+                    if jobs is not None and any(j['state'] in ('pending', 'running') for j in jobs.status()['jobs']):
+                        return 'jobs'
+                    if cleanup is not None and any(c['job_id'] != book_id and c['state'] in ('waiting', 'checking', 'removing', 'pausing', 'paused')
+                                                   for c in cleanup.status()):
+                        return 'jobs'
+                except Exception:
+                    return 'jobs'  # unknown: it waits, never removes originals beside work it can't see
+            return None
         if action in ('names', 'names_forget'):
             job = merge._names_job(book_id) if hasattr(merge, '_names_job') else {'state': 'none'}
             return 'book' if job.get('state') == 'running' else None
@@ -327,7 +348,8 @@ class ActionQueue:
             payload = refusal.payload()
             if refusal.code == 'changed' and not self._listed(merge, item['book_id']):
                 payload['code'] = 'not_listed'
-            return outcome | {'result': 'refused', **{key: payload[key] for key in ('code', 'files', 'root') if key in payload}}
+            # The engine's sentence too: a cause the page has no line for is shown in its own words (S6), never bare.
+            return outcome | {'result': 'refused', **{key: payload[key] for key in ('code', 'files', 'root', 'message') if key in payload}}
         except Exception:
             return outcome | {'result': 'unknown'}
         failed = [{'path': entry.get('path', ''), 'cause': entry.get('cause', 'other')} for entry in result.get('failed') or []]

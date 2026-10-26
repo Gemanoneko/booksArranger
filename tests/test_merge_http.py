@@ -79,8 +79,14 @@ class MergeHTTPTests(unittest.TestCase):
         for bad in (dict(body,path='C:/foreign'),dict(body,count=True),dict(body,token='invalid')):self.assertEqual(self.call(route,bad)[0],400)
         h=self.handler(route,body);h.headers['Origin']='https://untrusted.example';h.do_POST();self.assertEqual(h.result[0],403)
         self.assertEqual(self.call(route,body)[0],202);self.merge.delete_recovery.assert_called_once_with(ID,'a'*64,2,4096)
+        # Ruling 35 (the rest of it, ruling 37): during a scan the press reaches the engine, which queues it (it refused 409).
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
-        self.assertEqual(self.call(route,body)[0],409)
+        self.merge.delete_recovery.return_value={'started':False,'queued':True,'job_id':ID,'waits':'scan'}
+        self.assertEqual(self.call(route,body)[:2],(202,{'started':False,'queued':True,'job_id':ID,'waits':'scan'}))
+        self.assertEqual(self.merge.delete_recovery.call_count,2)
+        self.merge.cancel_recovery=Mock(side_effect=[{'cancelled':True},None])
+        self.assertEqual(self.call('/api/audiobook/recovery/cancel',{'job_id':ID})[:2],(200,{'cancelled':True}))
+        self.assertEqual(self.call('/api/audiobook/recovery/cancel',{'job_id':ID})[:2],(409,{'error':'It has already started.','code':'started'}))
 
     def test_approve_and_its_preview_routes(self):
         # Rulings 6a/6b/10/11a: Approve with the values shown (typed values win) and the "Goes to" line before it.
@@ -172,11 +178,24 @@ class MergeHTTPTests(unittest.TestCase):
             self.assertEqual(self.call(route,{'job_id':ID},token=False)[0],403)
             for body in ({'job_id':'../x'},{'job_id':ID,'path':'Z:/other'},{}):self.assertEqual(self.call(route,body)[0],400)
             h=self.handler(route,{'job_id':ID});h.headers['Origin']='https://untrusted.example';h.do_POST();self.assertEqual(h.result[0],403)
+        self.jobs.status=lambda:{'jobs':[]}  # nothing queued or running: each runs now
         self.assertEqual(self.call('/api/audiobook/cleanup',{'job_id':ID})[0],202)
         self.merge.start_historical_cleanup.assert_called_once_with(ID)
         self.jobs.resume.assert_not_called()
         self.assertEqual(self.call('/api/audiobook/restore',{'job_id':ID})[0],200)
         self.merge.restore_cleanup.assert_called_once_with(ID)
+        # Ruling 35 (the rest of it, ruling 37): while a scan or audiobook work runs, each is queued and runs when they end,
+        # every engine check again then; nothing runs now (they refused: "Pause audiobook work before…").
+        self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        status,body,_=self.call('/api/audiobook/restore',{'job_id':ID})
+        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'scan'}))
+        self.merge.restore_cleanup.assert_called_once_with(ID)
+        self.assertEqual(self.server.actions.cancel(body['id']),{'cancelled':True})
+        self.inventory.worker=None;self.jobs._thread=SimpleNamespace(is_alive=lambda:True)
+        status,body,_=self.call('/api/audiobook/cleanup',{'job_id':ID})
+        self.assertEqual((status,body.get('queued'),body.get('blocker')),(202,True,{'kind':'jobs'}))
+        self.merge.start_historical_cleanup.assert_called_once_with(ID)
+        self.assertEqual(self.server.actions.cancel(body['id']),{'cancelled':True})
 
     def test_unknown_fields_invalid_ids_types_duplicates_and_bounds(self):
         for update in ({'id':'../escape'},{'revision':True},{'revision':0},{'library':'Podcasts'},{'command':'ffmpeg'}):

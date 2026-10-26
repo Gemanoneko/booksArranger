@@ -409,7 +409,13 @@ function controls() {
   if($('retry-selected'))renderRetrySelected();
   if($('release-selected'))renderReleaseSelected();
   if($('pause-jobs'))$('pause-jobs').disabled=ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
-  if($('resume-jobs'))$('resume-jobs').disabled=ended || recoveryDisconnected || !(state?.audiobook_jobs?.queued || state?.audiobook_jobs?.retry_checks?.waiting) || ['Running','running','Pausing','pausing'].includes(state?.audiobook_jobs?.state);
+  if($('resume-jobs')){
+    // The rest of ruling 35 (ruling 37): pressed while a Pause settles it is kept, so it is no longer disabled while Pausing;
+    // while it is kept, the same button takes it back.
+    const jobs=state?.audiobook_jobs,waiting=jobs?.start_waiting;
+    $('resume-jobs').disabled=ended || recoveryDisconnected || !waiting && (!(jobs?.queued || jobs?.retry_checks?.waiting) || ['Running','running'].includes(jobs?.state));
+    startWaitTip($('resume-jobs'),waiting);
+  }
   renderMetaSave();updateNamesRows();renderLaterButtons();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
@@ -421,9 +427,27 @@ async function action(route, data) {
   busy=true; controls(); message();
   // Ruling 35: Start and Resume scanning are accepted while conversion or automatic processing runs and start when they end.
   const queueable=route==='/api/scan/start' || route==='/api/scan/resume';
-  try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. It starts when ${queueP(answer.blocker?.kind)} finishes.`); lastKey=null; await refresh(true); }
-  catch(error) { message(error.message); }
+  try { const answer=await request(route,queueable?{...data,queue:true}:data); if(answer?.queued===true)message(`${laterWord(route.endsWith('/start')?'scan_start':'scan_resume')} queued. It starts when ${queueP(answer.blocker?.kind)} finishes.`);
+    // The rest of ruling 35 (ruling 37): Resume while a Pause or an earlier start settles is kept; the same button cancels it.
+    else if(route==='/api/audiobook/resume' && answer?.start_admission?.state==='waiting')message(startWaitLine(answer.start_admission.reason));
+    else if(route==='/api/audiobook/resume-cancel' && answer?.cancelled===true)message('Resume audiobook jobs cancelled. Nothing was started.');
+    lastKey=null; await refresh(true); }
+  catch(error) {
+    const kind={'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/audiobook/resume':'resume'}[route];
+    // A scan that began after the page looked: the press waits for it and is sent again (ruling 35), never refused.
+    if(error.body?.code==='scanning' && kind){const item=pressLater('press:'+route,kind,'',()=>action(route,data),scanSeen());message(laterLine(item)+' Press it again to cancel.');}
+    else if(route==='/api/audiobook/resume-cancel' && error.body?.code==='started')message('Too late to cancel: Resume audiobook jobs has already started.');
+    else message(error.message);
+  }
   finally { busy=false; controls(); }
+}
+// Provisional copy (ruling 35's rest, sent to Judy): what a kept Resume waits for.
+const START_WAITS={pause:'the pause',start:'the earlier start'};
+function startWaitLine(reason){return `Resume audiobook jobs queued. It starts when ${START_WAITS[reason] || 'the pause'} finishes. Press it again to cancel.`;}
+function startWaitTip(button,waiting){
+  if(!button?.setAttribute || !button.dataset || laterFor('toolbar:resume-jobs'))return;  // a press the page holds says its own line
+  if(waiting){if(button.dataset.waitTitle===undefined)button.dataset.waitTitle=button.title || '';const tip=startWaitLine(waiting.reason);if(button.title!==tip)button.title=tip;}
+  else if(button.dataset.waitTitle!==undefined){button.title=button.dataset.waitTitle;delete button.dataset.waitTitle;}
 }
 // One rule (Judy, MissingFiles UX 2026-10-24): a read error is an error on a file that is not gone. A gone file's old error
 // stays in the catalog, never on screen; the server's counts and filters use the same predicate.
@@ -1062,17 +1086,36 @@ $('save-tracks').addEventListener('click',later('toolbar:save-tracks','save_trac
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
 $('create-audiobook').addEventListener('click',later('toolbar:create-audiobook','create',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');}));
 $('queue-books').addEventListener('click',later('toolbar:queue-books','queue_books',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}}));
-$('pause-jobs').addEventListener('click',later('toolbar:pause-jobs','pause',()=>action('/api/audiobook/pause',{})));$('resume-jobs').addEventListener('click',later('toolbar:resume-jobs','resume',()=>action('/api/audiobook/resume',{})));
+$('pause-jobs').addEventListener('click',later('toolbar:pause-jobs','pause',()=>action('/api/audiobook/pause',{})));{const resume=later('toolbar:resume-jobs','resume',()=>action('/api/audiobook/resume',{}));$('resume-jobs').addEventListener('click',event=>state?.audiobook_jobs?.start_waiting && !laterFor('toolbar:resume-jobs')?action('/api/audiobook/resume-cancel',{}):resume(event));}
 function recoveryDate(value){if(!value)return 'Unavailable';const date=new Date(value);if(!Number.isFinite(date.getTime()))return 'Unavailable';const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:zone}).format(date)+` (${zone})`;}
 function recoverySpace(value){return verifiedCount(value)===null?'Unavailable':`${(value/(value>0 && value<1000000?1000:1000000)).toLocaleString('en-US',{maximumFractionDigits:2})} ${value>0 && value<1000000?'KB':'MB'} (${value.toLocaleString('en-US')} bytes)`;}
 function recoveryScope(row){const r=row?.cleanup?.recovery;return r?{job_id:row.creation?.job_id || row.creation?.job?.job_id || row.creation?.job?.id,token:r.token,count:r.count,bytes:r.bytes}:null;}
-function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoverySubmitting)return 'Deleting the recovery copies…';if(!r)return 'Recovery details unavailable';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
-function recoveryStatus(r){if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies waiting to be deleted. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');return 'Deleting after the audiobook check';}
-function makeRecoveryPanel(){const panel=node('section','','recovery-copies'),facts=node('dl'),values={};panel.append(node('h2','Recovery copies'));for(const key of ['Status','Original tracks backed up','Space on C:','Recovery location','Automatic deletion']){const label=node('dt',key),value=node('dd');facts.append(label,value);values[key]={label,value};}panel.append(facts);const help=node('p',"Deleting these copies permanently removes the app's backup of the original tracks. The finished audiobook stays in place.",'field-help');help.id='recovery-loss-help';const expiry=node('p','Automatic deletion happens while the app is running; overdue copies are checked when it starts.','field-help');const button=node('button','Delete recovery copies…','quiet');button.type='button';button.title='Permanently delete the verified recovery copies for this book. Keep the finished audiobook.';button.setAttribute('aria-describedby','recovery-loss-help recovery-reason');const reason=node('p','','field-help');reason.id='recovery-reason';const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');panel.append(help,expiry,button,reason,status);recoveryPanel={panel,values,expiry,button,reason,status,path:selectedPath};button.addEventListener('click',openRecoveryDialog);updateRecovery();return panel;}
-function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath)return;const r=selectedRow?.cleanup?.recovery;if(!r){recoveryPanel.panel.hidden=true;closeRecoveryDialog();return;}recoveryPanel.panel.hidden=false;const v=recoveryPanel.values;v.Status.value.textContent=recoveryStatus(r);v['Original tracks backed up'].value.textContent=verifiedCount(r.count)===null?'Unavailable':r.count.toLocaleString('en-US');v['Space on C:'].value.textContent=recoverySpace(r.bytes);v['Recovery location'].label.textContent=r.state==='deleted'?'Former recovery location':'Recovery location';v['Recovery location'].value.textContent=r.location || 'Unavailable';v['Recovery location'].value.className='path';v['Automatic deletion'].value.textContent=r.state==='deleted'?(r.expires_at?'Completed':'Not applicable — copies already deleted'):recoveryDate(r.expires_at);recoveryPanel.expiry.hidden=r.state==='deleted';const reason=recoveryReason();recoveryPanel.button.disabled=!!reason;recoveryPanel.reason.textContent=reason;if(recoveryConfirmation && !recoverySubmitting && (reason || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(recoveryConfirmation.scope))){closeRecoveryDialog();recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';}}
+// The rest of ruling 35 (ruling 37): Delete recovery copies is accepted during a scan, a source cleanup or another book's
+// deletion, and queued; while queued the same button takes it back. Provisional copy, sent to Judy.
+const RECOVERY_WAITS={scan:'It runs when the scan finishes.',cleanup:'It runs when the source cleanup finishes.',deletion:'It runs after the deletion before it.',start:'It starts shortly.'};
+const RECOVERY_WAITING={scan:'A scan is running, so the deletion is queued after you confirm.',cleanup:'A source cleanup is running, so the deletion is queued after you confirm.'};
+const RECOVERY_BUTTON=['Delete recovery copies…','Permanently delete the verified recovery copies for this book. Keep the finished audiobook.'];
+let recoveryCancelling=false;
+function recoveryQueuedLine(waits){return 'Deletion queued. '+(RECOVERY_WAITS[waits] || RECOVERY_WAITS.start);}
+function recoveryReason(){const r=selectedRow?.cleanup?.recovery;if(ended || recoveryDisconnected)return 'Local server unavailable';if(recoveryCancelling)return 'Cancelling the deletion…';if(recoverySubmitting)return 'Deleting the recovery copies…';if(!r)return 'Recovery details unavailable';if(r.queued===true)return '';if(r.state==='deleted')return 'No recovery copies remain';if(r.state==='deleting')return 'Recovery deletion is in progress';if(r.eligible!==true)return r.reason || 'Recovery copies are not eligible for deletion';if(!(verifiedCount(r.count)>0) || verifiedCount(r.bytes)===null || !r.token || !recoveryScope(selectedRow)?.job_id)return 'Verified recovery scope unavailable';return '';}
+function recoveryStatus(r){if(r.queued===true && r.state!=='deleted' && r.state!=='deleting')return recoveryQueuedLine(r.waits);if(r.state==='deleted')return `Recovery copies deleted${r.actor==='automatic'?' automatically':r.actor==='manual'?' manually':''} on ${recoveryDate(r.deleted_at)}`;if(r.state==='deleting')return `Deleting recovery copies: ${verifiedCount(r.removed) ?? 'Unavailable'} of ${verifiedCount(r.total) ?? 'Unavailable'}`;if(r.state==='retained' && !r.eligible)return 'Recovery copies waiting to be deleted. '+(r.reason || 'Deletion is temporarily unavailable');if(r.state==='needs_attention' || !r.eligible)return 'Recovery cleanup needs attention: '+(r.reason || 'Verified recovery scope unavailable');return 'Deleting after the audiobook check';}
+function makeRecoveryPanel(){const panel=node('section','','recovery-copies'),facts=node('dl'),values={};panel.append(node('h2','Recovery copies'));for(const key of ['Status','Original tracks backed up','Space on C:','Recovery location','Automatic deletion']){const label=node('dt',key),value=node('dd');facts.append(label,value);values[key]={label,value};}panel.append(facts);const help=node('p',"Deleting these copies permanently removes the app's backup of the original tracks. The finished audiobook stays in place.",'field-help');help.id='recovery-loss-help';const expiry=node('p','Automatic deletion happens while the app is running; overdue copies are checked when it starts.','field-help');const button=node('button','Delete recovery copies…','quiet');button.type='button';button.title='Permanently delete the verified recovery copies for this book. Keep the finished audiobook.';button.setAttribute('aria-describedby','recovery-loss-help recovery-reason');const reason=node('p','','field-help');reason.id='recovery-reason';const status=node('p');status.setAttribute('role','status');status.setAttribute('aria-live','polite');panel.append(help,expiry,button,reason,status);recoveryPanel={panel,values,expiry,button,reason,status,path:selectedPath};button.addEventListener('click',()=>selectedRow?.cleanup?.recovery?.queued===true?cancelRecoveryDeletion():openRecoveryDialog());updateRecovery();return panel;}
+function updateRecovery(){if(!recoveryPanel || recoveryPanel.path!==selectedPath)return;const r=selectedRow?.cleanup?.recovery;if(!r){recoveryPanel.panel.hidden=true;closeRecoveryDialog();return;}recoveryPanel.panel.hidden=false;const v=recoveryPanel.values;v.Status.value.textContent=recoveryStatus(r);v['Original tracks backed up'].value.textContent=verifiedCount(r.count)===null?'Unavailable':r.count.toLocaleString('en-US');v['Space on C:'].value.textContent=recoverySpace(r.bytes);v['Recovery location'].label.textContent=r.state==='deleted'?'Former recovery location':'Recovery location';v['Recovery location'].value.textContent=r.location || 'Unavailable';v['Recovery location'].value.className='path';v['Automatic deletion'].value.textContent=r.state==='deleted'?(r.expires_at?'Completed':'Not applicable — copies already deleted'):recoveryDate(r.expires_at);recoveryPanel.expiry.hidden=r.state==='deleted';const reason=recoveryReason();recoveryPanel.button.disabled=!!reason;recoveryPanel.reason.textContent=reason;
+  {const queued=r.queued===true && r.state!=='deleted' && r.state!=='deleting',label=queued?'Cancel deletion':RECOVERY_BUTTON[0],tip=queued?'Take this deletion out of the queue. Nothing was deleted.':RECOVERY_WAITING[r.waits]?RECOVERY_BUTTON[1]+' '+RECOVERY_WAITING[r.waits]:RECOVERY_BUTTON[1];
+   if(recoveryPanel.button.textContent!==label)recoveryPanel.button.textContent=label;if(recoveryPanel.button.title!==tip)recoveryPanel.button.title=tip;}if(recoveryConfirmation && !recoverySubmitting && (reason || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(recoveryConfirmation.scope))){closeRecoveryDialog();recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';}}
 function closeRecoveryDialog(restore=true){if(!recoveryConfirmation)return;const initiating=recoveryConfirmation.button;recoveryConfirmation=null;$('recovery-dialog').close?.();if(restore && initiating && initiating===recoveryPanel?.button){if(!initiating.disabled)initiating.focus?.({preventScroll:true});else{recoveryPanel.reason.setAttribute('tabindex','-1');recoveryPanel.reason.focus?.({preventScroll:true});}}}
 function openRecoveryDialog(){if(recoveryReason() || recoveryConfirmation)return;const scope=recoveryScope(selectedRow),r=selectedRow.cleanup.recovery;recoveryConfirmation={scope:{...scope},path:selectedPath,button:recoveryPanel.button};$('recovery-dialog-book').textContent=`${selectedRow.review?.title || selectedRow.title_clue || 'Book'} — ${selectedRow.review?.canonical_author || 'Author unavailable'}`;$('recovery-dialog-size').textContent=`${scope.count} original tracks · ${recoverySpace(scope.bytes)} on C:`;$('recovery-dialog-location').textContent=r.location || 'Unavailable';$('recovery-dialog').showModal?.();$('recovery-cancel').focus?.();}
-async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmitting)return;const saved=recoveryConfirmation;if(recoveryReason() || selectedPath!==saved.path || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(saved.scope)){closeRecoveryDialog();if(recoveryPanel)recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';return;}closeRecoveryDialog();recoverySubmitting=true;updateRecovery();const panel=recoveryPanel;panel.status.textContent='Deleting recovery copies…';try{await request('/api/audiobook/recovery/delete',saved.scope);await refresh(true);if(panel===recoveryPanel)panel.status.textContent='Recovery deletion request completed.';}catch(error){if(panel===recoveryPanel)panel.status.textContent=error.httpStatus===409?'Recovery copies changed. Review the updated details and try again.':error.message;if(!error.httpStatus)refreshFailed(error);}finally{recoverySubmitting=false;updateRecovery();}}
+async function deleteRecoveryCopies(){if(!recoveryConfirmation || recoverySubmitting)return;const saved=recoveryConfirmation;if(recoveryReason() || selectedPath!==saved.path || JSON.stringify(recoveryScope(selectedRow))!==JSON.stringify(saved.scope)){closeRecoveryDialog();if(recoveryPanel)recoveryPanel.status.textContent='Recovery copies changed. Review the updated details and try again.';return;}closeRecoveryDialog();recoverySubmitting=true;updateRecovery();const panel=recoveryPanel;panel.status.textContent='Deleting recovery copies…';try{const answer=await request('/api/audiobook/recovery/delete',saved.scope);await refresh(true);if(panel===recoveryPanel)panel.status.textContent=answer?.queued===true?recoveryQueuedLine(answer.waits):'Recovery deletion request completed.';}catch(error){if(panel===recoveryPanel)panel.status.textContent=error.httpStatus===409?'Recovery copies changed. Review the updated details and try again.':error.message;if(!error.httpStatus)refreshFailed(error);}finally{recoverySubmitting=false;updateRecovery();}}
+// A queued Delete recovery copies taken back (ruling 35's rest): nothing was deleted; once it started, too late.
+async function cancelRecoveryDeletion(){
+  const scope=recoveryScope(selectedRow),panel=recoveryPanel;if(!scope?.job_id || !panel || recoveryCancelling || recoverySubmitting)return;
+  recoveryCancelling=true;updateRecovery();
+  try{await request('/api/audiobook/recovery/cancel',{job_id:scope.job_id});if(panel===recoveryPanel)panel.status.textContent='Deletion cancelled. Nothing was deleted.';}
+  catch(error){if(panel===recoveryPanel)panel.status.textContent=error.body?.code==='started'?'Too late to cancel: the deletion has already started.':error.message;if(!error.httpStatus)refreshFailed(error);}
+  finally{recoveryCancelling=false;}
+  if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
+  updateRecovery();
+}
 // Retry for an audiobook job refused before it started. One static button, updated in place from
 // controls() on every poll; pending and result text belong to one book (candidate id + job id).
 const retryReady='Check this book again and queue its audiobook job.';
@@ -1519,16 +1562,25 @@ function restartNote(kind,answer){
     pass?.action==='running'?'Automatic processing is running and will reach this book.':pass?.action==='pending' && PASS_PENDING[pass.pending_kind]?PASS_PENDING[pass.pending_kind]:'The book goes back to automatic processing.';
   return {text:`${lead} ${middle}${held}${find}`,warn:!!held};
 }
-const CLEAR_FAILURE={busy:"Working files weren't cleared. The app is busy; try again in a moment.",changed:"This book's status changed. Check the updated status above.",
-  not_safe:"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete.",file_problem:"Some working files weren't cleared. A file couldn't be removed; try again in a moment.",
+// The rest of ruling 35 (ruling 37): busy is held and sent again (never "try again in a moment"); a file held open is tried
+// again a few times, then its sentence says what to do; a file the app can't prove it made says why and where (S10).
+const CLEAR_FAILURE={busy:"The app is busy, so Clear working files waits and runs when it is free. Nothing was removed yet.",changed:"This book's status changed. Check the updated status above.",
+  not_safe:"Some working files weren't cleared. The app keeps any file it can't confirm is safe to delete.",file_problem:"Some working files weren't cleared: a file is open in another program (an antivirus scan can hold one). Close it, then press Clear working files again.",
   unknown:"Working files weren't cleared. Select the row to read why."};
+const CLEAR_TRIES=6;  // a file held open: tried again every 10 s for a minute before its sentence shows
+// S5: each Start over and release cause in its own words; closing is the real refusal, busy is held and sent again.
+const RESTART_CLOSING={startover:'Books Arranger is closing. Start over after it restarts. Nothing was changed.',combined:'Books Arranger is closing. Start over after it restarts. Nothing was changed.',
+  release:'Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed.'};
 // The words for a refused press come from its typed cause, never from the server's English.
 function refusedText(kind,error){
   const cause=error?.body?.cause,changed="This book's status changed. Check the updated status above.",editing='This book is being edited. Finish editing, then try again.';
-  if(kind==='clear')return CLEAR_FAILURE[cause] || CLEAR_FAILURE.unknown;
-  if(kind==='release')return {changed,editing,busy:"The review wasn't discarded. The app is busy; try again in a moment."}[cause] || "The review wasn't discarded. Select the row to read why.";
-  if(kind==='combined')return {changed,editing}[cause] || 'Start over was not accepted. Nothing was changed.';
-  return cause==='changed'?changed:'Start over was not accepted. Check the status above.';
+  const said=typeof error?.body?.error==='string' && error.body.error.trim()?error.body.error.trim():'';
+  if(kind==='clear')return cause==='not_safe' && said?said:CLEAR_FAILURE[cause] || said || CLEAR_FAILURE.unknown;  // S10: the server names why and where
+  if(cause==='changed')return changed;
+  if(cause==='editing')return editing;
+  if(cause==='closing')return RESTART_CLOSING[kind] || RESTART_CLOSING.startover;
+  if(cause==='busy')return 'The catalog is busy, so this waits and runs when it is free. Nothing was changed yet.';  // held and sent again (restartPress)
+  return said || (kind==='release'?"The review wasn't discarded. Select the row to read why.":'Start over did not finish. Select the row to read why.');
 }
 function freshRow(value,row){return value && typeof value==='object' && typeof value.id==='string'?{...value,path:value.id,kind:'candidate',library:row.library || 'Audiobooks'}:null;}
 function placeRow(row,fresh,origin){
@@ -1547,6 +1599,12 @@ async function restartPress(row,action,origin){
   try{answer=await request(action.endpoint,body,PRESS_TIMEOUT);}catch(error){failure=error;}
   const focused=document.activeElement===$('retry-job') || document.activeElement===origin?.button;
   retryPending=null;busy=false;
+  if(failure?.httpStatus===409 && failure.body?.cause==='busy'){
+    // The rest of ruling 35 (ruling 37): the catalog was still busy after the engine's own 30 s of tries. Never "try again in a
+    // moment": the press is held and sent again in 5 s, every check again then; the row shows it queued, with Cancel.
+    const path=row.path;holdAgain(key,action.kind,queueTitle(row),()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return restartPress(fresh,action,origin);},'catalog',5);
+    controls();return false;
+  }
   if(answer){
     retryEpoch++;
     // The fresh pass state from the answer, as after Start: the top line and the hints do not wait for the next poll.
@@ -1567,8 +1625,8 @@ async function restartPress(row,action,origin){
 }
 // Clear working files (decision B). No confirmation: the files are the app's own copies and the server deletes only what
 // its verified disposal proves. A press while another request runs is answered in the note; the button never disables.
-async function clearWorking(origin=null){
-  const row=selectedRow,key=retryKey(row),job=row?.creation?.job;
+async function clearWorking(origin=null,target=null){
+  const row=target || selectedRow,key=retryKey(row),job=row?.creation?.job;
   if(!key || !job || workingOf(row)?.state!=='cleanable' || clearPending(row))return false;
   if(ended || recoveryDisconnected){retryResult={key,text:'Local server unavailable.',warn:true};controls();return false;}
   if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun){
@@ -1586,6 +1644,15 @@ async function clearWorking(origin=null){
     }
   }
   retryPending=null;busy=false;
+  const cause=failure?.httpStatus===409?failure.body?.cause:null,tries=Number(origin?.tries) || 0;
+  if(cause==='busy' || cause==='file_problem' && tries<CLEAR_TRIES){
+    // The rest of ruling 35 (ruling 37): busy (a scan, the catalog) waits and is sent again; a file another program holds
+    // open is tried again every 10 s, CLEAR_TRIES times, then its sentence says what to do. Never "try again in a moment".
+    const path=row.path,next={...(origin || {}),tries:tries+(cause==='file_problem'?1:0)},run=()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return clearWorking(next,fresh);};
+    if(cause==='busy' && scanRunning())pressLater(key,'clear',queueTitle(row),run,scanRunning);
+    else holdAgain(key,'clear',queueTitle(row),run,cause==='busy'?'app':'file',cause==='busy'?5:10);
+    controls();return false;
+  }
   const focused=document.activeElement===$('clear-working') || document.activeElement===origin?.button;
   if(answer){
     retryEpoch++;
@@ -1625,11 +1692,18 @@ function confirmConvert(event){
 }
 async function convertPress(row,origin=null){
   const key=retryKey(row),job=row?.creation?.job,capability=producerRecoveryOf(row);
-  if(!key || !job || capability?.can_confirm_origin!==true || retryPending || busy || ended || recoveryDisconnected || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun)return false;
+  if(!key || !job || capability?.can_confirm_origin!==true || ended || recoveryDisconnected)return false;
+  // The rest of ruling 35 (ruling 37): a Convert confirmed while another press runs, or while a scan runs ("Scanning is
+  // running. Convert when it stops."), waits and is sent then, every check again; the row shows it queued, with Cancel.
+  const path=row.path,again=()=>{const fresh=rows.find(item=>item.path===path);if(fresh)return convertPress(fresh,origin);};
+  if(retryPending || busy || recoverySubmitting || automaticRequest!==null || bulkRunning() || releaseRun || scanRunning()){
+    pressLater(key,'convert',queueTitle(row),again,scanRunning()?scanRunning:null);controls();return false;
+  }
   const snapshot=JSON.stringify([capability.state,capability.checkpoint_id,capability.cause]),focused=document.activeElement===(origin?.button || $('retry-job'));let answer=null;
   retryPending={key,kind:'convert',note:rowActions.convert.note};retryResult=null;busy=true;controls();updateProducerRecoverySurface(row);
   try{answer=await request('/api/audiobook/confirm-convert',{library:'Audiobooks',id:row.id,revision:row.revision,job_id:job.job_id,statements:[...ORIGIN_STATEMENTS]},PRESS_TIMEOUT);}
   catch(error){
+    if(error.httpStatus===409 && error.body?.code==='scanning'){retryPending=null;busy=false;pressLater(key,'convert',queueTitle(row),again,scanSeen());controls();updateProducerRecoverySurface(row);return false;}  // a scan began meanwhile
     retryResult={key,producer:true,snapshot,transport:!error.httpStatus,warn:true,status:error.httpStatus?'Conversion not started':'Conversion status unknown',text:!error.httpStatus?(desktopMode()?NOT_CONFIRMED.press:'Could not confirm the request. Reconnect to check its saved state.'):error.body?.cause==='book_changed'?error.message:'Nothing was changed. '+(error.message || '')};
     if(!error.httpStatus)refreshFailed(error);
   }
@@ -1764,9 +1838,13 @@ function acceptBulkResponse(result){
 }
 async function startRetryAll(){
   if(!retryAllConfirm || bulkRunning() || busy || ended || recoveryDisconnected)return;
+  const confirm=retryAllConfirm;
   retryAllConfirm=null;busy=true;stripNote='';retryAllRun={id:bulkRun()?.id,ended:true,suppressReceipt:true};$('retry-selected-status').textContent='';controls();
   try{acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks'}));}
-  catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted. Check the status above.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
+  catch(error){
+    // The rest of ruling 35 (ruling 37): a scan that began after the page looked: Retry all waits for it and is sent again.
+    if(error.body?.code==='scanning'){retryAllConfirm=confirm;const item=pressLater('toolbar:retry-all-go','retry_all','',()=>startRetryAll(),scanSeen());stripNote=laterLine(item)+' Press it again to cancel.';}
+    else stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted. Check the status above.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
   finally{busy=false;}
   controls();$('retry-all-status').focus?.({preventScroll:true});
 }
@@ -1875,7 +1953,9 @@ async function startRetrySelected(){
   try{
     const items=confirm.items.map(({row,action})=>({id:row.id,revision:row.revision,job_id:row.creation.job.job_id,kind:action.kind}));
     acceptBulkResponse(await request('/api/audiobook/retry-all',{library:'Audiobooks',items},PRESS_TIMEOUT));
-  }catch(error){stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
+  }catch(error){
+    if(error.body?.code==='scanning'){retrySelectedConfirm=confirm;const item=pressLater('toolbar:retry-selected-go','retry_selected','',()=>startRetrySelected(),scanSeen());stripNote=laterLine(item)+' Press it again to cancel.';}  // ruling 35's rest
+    else stripNote=error.httpStatus?(error.message || 'Retry requests were not accepted.'):lostLine('bulk');if(!error.httpStatus)refreshFailed(error);}
   finally{retrySelectedRun=false;busy=false;}
   controls();$('retry-all-status').focus?.({preventScroll:true});
 }
@@ -3026,12 +3106,20 @@ const LATER_WORDS={startover:'Start over',combined:'Start over',release:'Let the
 function laterWord(kind){return LATER_WORDS[kind] || 'This press';}
 function laterFor(key){return laterPresses.find(item=>item.key===key) || null;}
 // Provisional copy (ruling 35, sent to Judy).
-function laterLine(item){return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':item.waitFor?.()?'the scan':'the current action'} finishes.`;}
-function pressLater(key,kind,title,run,waitFor=null){
+// The rest of ruling 35 (ruling 37): a press the engine answered "busy" waits here too and is sent again, with why.
+const LATER_WHY={catalog:'It runs when the catalog is free.',app:'It runs when the app is free.',file:'It tries again when the file is released.'};
+function laterLine(item){
+  if(!loadingActive && item.why && LATER_WHY[item.why])return `${laterWord(item.kind)} queued. ${LATER_WHY[item.why]}`;
+  return `${laterWord(item.kind)} queued. It runs when ${loadingActive?'loading':item.waitFor?.()?'the scan':'the current action'} finishes.`;
+}
+function pressLater(key,kind,title,run,waitFor=null,why=''){
   if(laterFor(key))return laterFor(key);
-  const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now(),waitFor};laterPresses.push(item);
+  const item={id:'later-'+(++laterSeq),key,kind,title:title || '',run,at:Date.now(),waitFor,why};laterPresses.push(item);
   queueAnnounce(`${laterWord(kind)} queued${item.title?': '+item.title:''}.`);controls();return item;
 }
+// A press the engine answered "busy" (a catalog still busy after its own 30 s of tries, a file another program holds open):
+// held and sent again after a pause, every check again then (ruling 35); the row shows it queued, with Cancel.
+function holdAgain(key,kind,title,run,why,seconds){const until=Date.now()+seconds*1000;return pressLater(key,kind,title,run,()=>Date.now()<until,why);}
 function cancelLater(key){
   const index=laterPresses.findIndex(item=>item.key===key);if(index<0)return false;
   const [item]=laterPresses.splice(index,1);queueAnnounce(`${laterWord(item.kind)} cancelled${item.title?': '+item.title:''}.`);controls();return true;
@@ -3040,8 +3128,11 @@ function cancelLater(key){
 // (pressLater) and runs then, as if pressed then; the same button pressed again takes it back. Provisional copy, for Judy.
 // The presses the engine still refuses while a library scan runs (Create audiobook, Queue selected, Resume audiobook jobs):
 // the page holds them until the scan ends.
-const SCAN_HELD=['create','queue_books','resume'];
+// The rest of ruling 35 (ruling 37): Retry all and Retry selected too ("Scanning is running. Retry when it stops.").
+const SCAN_HELD=['create','queue_books','resume','retry_all','retry_selected'];
 function scanRunning(){return !!state?.active_library;}
+// After the engine said a scan runs (409 code scanning): wait for it, and at least 3 s, until the page has read the scan too.
+function scanSeen(){const until=Date.now()+3000;return ()=>scanRunning() || Date.now()<until;}
 function later(key,kind,handler){
   return (...args)=>{
     if(laterFor(key)){cancelLater(key);return;}
@@ -3109,7 +3200,8 @@ function queueDeleteText(outcome){
     shared:files.length>1?`${files.length.toLocaleString()} files also belong to other books. Nothing was deleted.`:'a file also belongs to another book. Nothing was deleted.',
     sorted:`a finished audiobook of this book is in ${outputName()}. Nothing was deleted.`,
     offline:`can't reach ${typeof outcome.root==='string' && outcome.root?outcome.root:'the source drive'}. Nothing was deleted.`}[outcome.code];
-  return 'Delete cancelled: '+(line || 'it was not accepted. Nothing was deleted.');
+  const said=typeof outcome.message==='string' && outcome.message.trim()?lowerFirst(outcome.message.trim()):'';  // S6: its own cause
+  return 'Delete cancelled: '+(line || said || 'it was not accepted. Nothing was deleted.');
 }
 // A partial queued delete (1.6): the counts, up to three files with their causes, then what to do.
 function queuePartial(outcome){
@@ -3287,7 +3379,8 @@ function deleteRefusalText(refusal,mode='delete'){
   if(code==='shared')return files.length===1?`"${files[0].path}" also belongs to "${files[0].other}". Nothing was deleted.`:`${files.length.toLocaleString()} of this book's files also belong to other books. Nothing was deleted.`;
   if(code==='sorted')return `A finished audiobook of this book is in ${outputName()}. Nothing was deleted.`;
   if(code==='offline')return `Can't reach ${typeof refusal.root==='string' && refusal.root?refusal.root:'the source drive'}. Nothing was deleted.`;
-  return deleteText(mode).refusal[code] || ASK_REFUSED[mode==='copy'?'copy':'delete'];
+  // S6 (ruling 35's refusal texts): a cause with no line here is said in the engine's own words, never the bare refusal.
+  return deleteText(mode).refusal[code] || (typeof refusal?.message==='string' && refusal.message.trim()) || ASK_REFUSED[mode==='copy'?'copy':'delete'];
 }
 // The row's own sentence, verbatim (Judy, section 4): a Missing files hint, or the first sentence of a Stopped hint; the
 // copy's row hint (update spec 3.1).

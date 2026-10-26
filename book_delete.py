@@ -51,7 +51,26 @@ from metadata import AUDIO
 from native_io import BoundaryError, DirectoryBoundary, FileInUse, VerifiedFile, ordinary
 from scanner import connect, inside
 
-CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused', 'sorted_missing', 'sorted_changed', 'not_identical')
+CODES = ('changed', 'files_changed', 'shared', 'sorted', 'offline', 'busy', 'refused', 'sorted_missing', 'sorted_changed', 'not_identical',
+         'link', 'working', 'is_sorted', 'no_files', 'has_job', 'not_offered', 'outside', 'second_name', 'invalid')
+# S6 (ruling 35's refusal texts; Sergei 2026-10-26): eight safety refusals said only "Delete was not accepted. Nothing was
+# deleted." Each now names its cause (provisional copy, sent to Judy). They stay refusals: each guards what a delete reaches.
+WHY = {'link': "A folder on the way to these files is a link or a junction, so the app can't prove what deleting would reach. Nothing was deleted.",
+       'working': "The app's working folder for this book holds something it didn't make (a link or an unknown item), so it can't list what to delete. Nothing was deleted.",
+       'is_sorted': 'A listed file is the finished audiobook in Audiobooks Sorted itself. Nothing was deleted.',
+       'no_files': 'This book has no files left in the catalog, so there is nothing to delete.',
+       'has_job': "This copy has an audiobook job of its own, so it isn't a spare copy. Nothing was deleted.",
+       'not_offered': {'delete': "Delete book isn't offered for this book any more: the app can still fix it. Nothing was deleted. Check its row.",
+                       'copy': "This book is no longer a proven copy of a finished audiobook. Nothing was deleted. Check its row."},
+       'outside': "A listed file isn't an audio file in your library folders, or it's in Audiobooks Sorted. Nothing was deleted.",
+       'second_name': "A file of this book is a link or has a second name on disk (a hard link), so deleting it wouldn't remove it safely. Nothing was deleted.",
+       'invalid': 'The delete request was incomplete. Nothing was deleted. Reload the page and try again.'}
+
+
+def refused(code, mode='delete'):
+    """The typed refusal for one of WHY's causes."""
+    text = WHY[code]
+    return DeleteRefused(code, text[mode] if isinstance(text, dict) else text)
 CAUSES = ('in_use', 'denied', 'unreachable', 'other')
 MODES = ('delete', 'copy')
 BUSY = 'This book is being processed. Nothing was deleted.'  # Judy's "Book is being processed" line
@@ -277,7 +296,7 @@ def _guard(root, folder, guarded, text):
         with DirectoryBoundary(ordinary(root), ordinary(folder)):
             pass
     except (BoundaryError, OSError):
-        raise DeleteRefused('refused', text)
+        raise refused('link')
     guarded.add(_key(folder))
 
 
@@ -315,7 +334,7 @@ def _others(members, roots, output, holders, guarded, text):
         try:
             f = ordinary(folder)
         except BoundaryError:
-            raise DeleteRefused('refused', text)
+            raise refused('link')
         root = next((r for r in roots if inside(str(f), r) and _key(f) != _key(r)), None)
         if root is None or output and inside(str(f), output) or not os.path.isdir(f):
             continue  # a source folder itself is no book's folder; a folder already gone has nothing left
@@ -379,7 +398,7 @@ def _working(service, jobs, text):
         except DeleteRefused:
             raise
         except Exception:
-            raise DeleteRefused('refused', text)
+            raise refused('working')
     return found
 
 
@@ -507,7 +526,7 @@ def _copy_proof(service, row, source, files, output, text, stop=None, proven=Non
         raise changed
     try:
         if any(_stamp(f['path'])[2:] == held[2:] for f in files):
-            raise DeleteRefused('refused', text)
+            raise refused('is_sorted')
     except OSError:
         raise missing
     stamps[_key(final)] = held
@@ -524,7 +543,7 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
     what the delete waits for: 'blocked' names it ('scan' or 'book') and the plan is made anyway, read-only. The run
     itself always plans with wait=False, so a blocker never lets anything be deleted."""
     if mode not in MODES:
-        raise DeleteRefused('refused', REFUSED)
+        raise refused('invalid')
     text = _TEXT[mode]['refused']
     blocked = None
     if scanning(service) and wait:
@@ -545,7 +564,7 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
     output = str(ordinary(output)) if output else None
     members = [m['path'] for m in row.get('members') or []]
     if not members:
-        raise DeleteRefused('refused', text)
+        raise refused('no_files')
     source = None
     with connect(inventory.database) as db:
         jobs = _jobs(db, identity)
@@ -566,7 +585,7 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
                 if job['state'] == 'completed' or job['output'] or job['job_id'] in cleaned or lineage:
                     raise DeleteRefused('sorted', 'A finished audiobook of this book is in %s. Nothing was deleted.' % _sorted_name(output))
         elif jobs:
-            raise DeleteRefused('refused', text)  # a copy has no job of its own: a book with one is no "Needs you" duplicate
+            raise refused('has_job')  # a copy has no job of its own: a book with one is no "Needs you" duplicate
         if _table(db, 'automatic_candidates'):
             researching = db.execute("SELECT 1 FROM automatic_candidates WHERE id=? AND state='Researching'", (identity,)).fetchone()
             if researching and not wait:
@@ -581,7 +600,7 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
             source = copy_source(service, row, exists=False)  # the press says why the audiobook fails, see _copy_proof
             kind = 'verified_duplicate' if source else None
         if kind is None:
-            raise DeleteRefused('refused', text)
+            raise refused('not_offered', mode)
         # Shared: another current book, another book's job, or another book's reacquire record holds the file. History of
         # a book that is gone does not count (Senua's 0.22.0 final review, N16): an archived marker (its originals are
         # confirmed gone) or a stopped job of that book names the paths it had, and a copy reacquired at those paths is a
@@ -599,11 +618,11 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
         try:
             p = ordinary(path)
         except BoundaryError:
-            raise DeleteRefused('refused', text)
+            raise refused('link')
         root = next((r for r in roots if inside(str(p), r) and _key(p) != _key(r)), None)
         if root is None or output and inside(str(p), output) or p.suffix.lower() not in AUDIO:
             # Never outside a configured source root, never in Sorted, never anything but this book's audio.
-            raise DeleteRefused('refused', text)
+            raise refused('outside')
         if not os.path.isdir(root):
             raise DeleteRefused('offline', "Can't reach %s. Nothing was deleted." % root, root=root)
         try:
@@ -617,7 +636,7 @@ def plan(service, identity, revision, mode='delete', stop=None, proven=None, wai
         # preview now makes removal's own checks first: a single-link ordinary file, and every folder from the drive
         # root down held by the same DirectoryBoundary remove() uses (no junction, symlink or other reparse point).
         if not stat.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
-            raise DeleteRefused('refused', text)
+            raise refused('second_name')
         _guard(root, p.parent, guarded, text)
         files.append({'path': str(p), 'size': facts.st_size, 'root': root, 'kind': 'audio'})
     others, stay, book_folders = _others(members, roots, output, holders, guarded, text)
@@ -750,7 +769,7 @@ def delete(service, identity, revision, paths, folders=None, mode='delete'):
     any file. forgotten is True only after the records transaction committed."""
     folders = [] if folders is None else folders
     if mode not in MODES or not _bounded(paths) or not _bounded(folders):
-        raise DeleteRefused('refused', REFUSED)
+        raise refused('invalid')
     proven = _prove(service, identity, revision) if mode == 'copy' else None  # before the locks (N19)
     with service.operation_lock, service.inventory.group_lock:
         found = plan(service, identity, revision, mode, proven=proven)

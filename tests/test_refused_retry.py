@@ -94,7 +94,7 @@ class TypedRefusalTests(RefusalCase):
         before = self.stored(job_id)
         with self.assertRaises(RetryRefused) as caught:
             self.press(job_id, manifest)
-        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED)
+        self.assertEqual(str(caught.exception), audio_jobs.RETRY_GATE_UPDATE % 'Retry')  # S9: its cause, not "status changed"
         self.assertEqual(self.stored(job_id), before, 'no new attempt, the refusal kept')
         self.assertIsNone(self.s._retry_one(job_id), 'Retry all\'s per-book path refuses it too')
         other, _ = self.l.failed(REFUSED, fixture(), name='other')
@@ -118,7 +118,7 @@ class TypedRefusalTests(RefusalCase):
                          ('other', 'working_files', 'blocked', True, False))
         with self.assertRaises(RetryRefused) as caught:
             self.press(job_id, manifest)
-        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED, 'a press from an outdated view changes nothing')
+        self.assertEqual(str(caught.exception), audio_jobs.RETRY_GATE_STOPS % 'Retry', 'S9; a press from an outdated view changes nothing')
         leftover.unlink()
         self.assertNotIn('working', self.summary(job_id))
         self.assertEqual(self.summary(job_id)['retry'], {'allowed': True, 'reason': ''}, 'enabled once the files are gone')
@@ -279,7 +279,7 @@ class DryRunTests(RefusalCase):
         self.assertEqual((value['group'], 'retry' in value, 'readmission' in value), ('unsupported', False, False))
         with self.assertRaises(RetryRefused) as caught:
             self.press(job_id, manifest)
-        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED)
+        self.assertEqual(str(caught.exception), audio_jobs.RETRY_GATE_REFUSED)  # S9: its cause
         with self.l.jobs._db() as db:
             m4b_readmission.ensure(db)
             self.assertIsNone(db.execute('SELECT 1 FROM m4b_readmissions WHERE parent_job_id=?', (job_id,)).fetchone(), 'nothing queued')
@@ -357,7 +357,7 @@ class PrecheckStateTests(RefusalCase):
         self.assertEqual(str(caught.exception), RETRY_ALL_NONE, 'not in Can retry, so not in the Retry all dialog')
         with self.assertRaises(RetryRefused) as caught:
             self.press(job_id, manifest)
-        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED, 'a forced press is refused')
+        self.assertEqual(str(caught.exception), audio_jobs.RETRY_CHECKING, 'S9; a forced press is refused')
         self.assertIsNone(self.s._retry_one(job_id))
         self.assertFalse(self.queued(job_id), 'and queues nothing')
         # The check ends. Passed: ready in place, Retry back. Refused: M4B not supported.

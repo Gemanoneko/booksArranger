@@ -277,7 +277,8 @@ class StateTests(unittest.TestCase):
     def test_recovery_idle_answer_is_shared_briefly_but_delete_rechecks(self):
         from merge_service import MergeService
         s=MergeService.__new__(MergeService);calls=[]
-        s._recovery_idle=lambda:calls.append(1)
+        # Ruling 35: the shown answer is the real refusals only (closing, an update); a scan or a source cleanup queues.
+        s._recovery_closed=lambda:calls.append(1)
         self.assertIsNone(s._recovery_idle_reason());self.assertIsNone(s._recovery_idle_reason());self.assertEqual(len(calls),1)
         s._idle_cache=(time.monotonic()-2,None);s._recovery_idle_reason();self.assertEqual(len(calls),2)
 

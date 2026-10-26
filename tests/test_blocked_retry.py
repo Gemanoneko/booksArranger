@@ -356,7 +356,7 @@ class HTTPTests(unittest.TestCase):
 
     def test_scan_closing_and_token_gates(self):
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
-        self.assertEqual(self.call(self.body)[:2],(409,{'error':RETRY_SCANNING}))
+        self.assertEqual(self.call(self.body)[:2],(409,{'error':RETRY_SCANNING,'code':'scanning'}))  # typed: the page waits for the scan (ruling 35)
         self.inventory.worker=None;self.server.closing=True
         self.assertEqual(self.call(self.body)[0],409);self.server.closing=False
         self.assertEqual(self.call(self.body,token=False)[0],403)

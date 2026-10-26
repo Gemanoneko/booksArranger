@@ -394,7 +394,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.call(self.body,path='/api/audiobook/repair')[:2],(409,{'error':'This book cannot be repaired.'}))
         self.assertEqual(self.call(self.body|{'extra':1},path='/api/audiobook/repair')[0],400)
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
-        self.assertEqual(self.call(self.body,path='/api/audiobook/repair')[:2],(409,{'error':REPAIR_SCANNING}))
+        self.assertEqual(self.call(self.body,path='/api/audiobook/repair')[:2],(409,{'error':REPAIR_SCANNING,'code':'scanning'}))  # typed: the page waits for the scan (ruling 35)
 
     def test_keep_route(self):
         # v0.16.8 Keep files: same request shape and answers as Retry; nothing is queued or deleted.
@@ -416,7 +416,7 @@ class HTTPTests(unittest.TestCase):
         self.merge.retry_all.side_effect=RetryRefused(RETRY_ALL_RUNNING)
         self.assertEqual(self.call({'library':'Audiobooks'},path='/api/audiobook/retry-all')[:2],(409,{'error':RETRY_ALL_RUNNING}))
         self.inventory.worker=SimpleNamespace(is_alive=lambda:True)
-        self.assertEqual(self.call({'library':'Audiobooks'},path='/api/audiobook/retry-all')[:2],(409,{'error':RETRY_SCANNING}))
+        self.assertEqual(self.call({'library':'Audiobooks'},path='/api/audiobook/retry-all')[:2],(409,{'error':RETRY_SCANNING,'code':'scanning'}))  # typed: the page waits for the scan
         self.assertEqual(self.merge.retry_all.call_count,2)
 
 

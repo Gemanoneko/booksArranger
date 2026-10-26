@@ -169,7 +169,7 @@ class StateTests(Base):
         self.assertEqual(caught.exception.cause, 'not_safe')
         with self.assertRaises(RetryRefused) as caught:
             self.s.retry_blocked_job('Audiobooks', manifest['candidate_id'], 1, job_id)
-        self.assertEqual(str(caught.exception), RETRY_BOOK_CHANGED, 'a forced press on a blocked row changes nothing')
+        self.assertEqual(str(caught.exception), audio_jobs.RETRY_GATE_STOPS % 'Retry', 'S9; a forced press on a blocked row changes nothing')
         self.assertEqual(self.files(legacy), ['source00000.m4b'], 'nothing deleted')
 
     def test_an_ownership_record_without_receipts_or_receipts_without_one_are_blocked(self):

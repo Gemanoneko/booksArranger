@@ -452,6 +452,10 @@ class BrowserServer(ThreadingHTTPServer):
                     payload = refusal.payload()
                     return {'result': 'refused', 'code': payload.get('code', 'refused'), 'error': str(refusal)}
                 return {'result': 'done', 'answer': {k: result.get(k) for k in ('deleted', 'bytes', 'forgotten', 'folders')}}
+            if action == 'cleanup':
+                return {'result': 'done', 'answer': merge.start_historical_cleanup(args['job_id'])}
+            if action == 'restore':
+                return {'result': 'done', 'answer': merge.restore_cleanup(args['job_id'])}
             if action in ('scan_start', 'scan_resume'):
                 with self.control_lock:
                     if self.closing:
@@ -1016,6 +1020,8 @@ class Handler(BaseHTTPRequestHandler):
             skip=self.server.actions.queued_jobs() if items is None else set()  # queued presses are left out (Judy 1.3)
             try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all(skip=skip) if skip else self.server.merge.retry_all()
             except RetryRefused as error:
+                from audio_jobs import RETRY_SCANNING
+                if str(error)==RETRY_SCANNING:self.response(409,{'error':str(error),'code':'scanning'});return  # the page waits for the scan
                 self.fail(409,str(error));return
             self.response(202,{'retry_all':run});return
         if path=='/api/audiobook/replace':
@@ -1042,18 +1048,36 @@ class Handler(BaseHTTPRequestHandler):
             self.response(200,self.server.merge.open_folder(library,view,identity,folder_kind=kind,directory_id=directory_id));return
         if path in {'/api/audiobook/pause','/api/audiobook/resume'}:
             if data: raise ValueError('Audiobook job controls require an empty object')
-            self.response(200,(self.server.merge.automatic.stop() if hasattr(self.server.merge,'automatic') and self.server.merge.automatic.status()['state'] in ('Running','Stopping') else self.server.merge.pause()) if path.endswith('/pause') else self.server.merge.resume())
+            # Ruling 35: Resume while a Pause or an earlier start is still settling is kept and made when it settles.
+            merge=self.server.merge
+            self.response(200,(merge.automatic.stop() if hasattr(merge,'automatic') and merge.automatic.status()['state'] in ('Running','Stopping') else merge.pause()) if path.endswith('/pause') else
+                          merge.resume_press() if hasattr(merge,'resume_press') else merge.resume())
             return
+        if path=='/api/audiobook/resume-cancel':
+            # Resume audiobook jobs pressed again while it waits for the queue to settle: it is taken back.
+            if data: raise ValueError('Audiobook job controls require an empty object')
+            answer=self.server.merge.cancel_waiting_start()
+            if answer is None:self.response(409,{'error':'It has already started.','code':'started'});return
+            self.response(200,answer);return
         if path=='/api/audiobook/recovery/delete':
             if set(data)!={'job_id','token','count','bytes'}:raise ValueError('Recovery deletion requires the displayed book and recovery scope')
             job_id=data['job_id']
             if not isinstance(job_id,str) or str(uuid.UUID(job_id))!=job_id:raise ValueError('Invalid audiobook identity')
             if not isinstance(data['token'],str) or len(data['token'])!=64 or any(c not in '0123456789abcdef' for c in data['token']):raise ValueError('Invalid recovery scope token')
             if type(data['count']) is not int or not 0<data['count']<=10000 or type(data['bytes']) is not int or not 0<=data['bytes']<=9223372036854775807:raise ValueError('Invalid recovery scope count or bytes')
+            # Ruling 35: during a scan, a source cleanup or another deletion it is queued and made when they end.
             self.response(202,self.server.merge.delete_recovery(job_id,data['token'],data['count'],data['bytes']));return
+        if path=='/api/audiobook/recovery/cancel':
+            self.shape(data,{'job_id'})
+            answer=self.server.merge.cancel_recovery(self.uuid_value(data['job_id']))
+            if answer is None:self.response(409,{'error':'It has already started.','code':'started'});return
+            self.response(200,answer);return
         if path in {'/api/audiobook/cleanup','/api/audiobook/restore'}:
             self.shape(data,{'job_id'})
             job_id=self.uuid_value(data['job_id'])
+            # Ruling 35: while a scan or audiobook work runs, queued and run when they end (no page sends these two).
+            answer=self.server.actions.enqueue('cleanup' if path.endswith('/cleanup') else 'restore',job_id,'',{'job_id':job_id})
+            if answer is not None:self.response(202,answer);return
             if path.endswith('/cleanup'):
                 result=self.server.merge.start_historical_cleanup(job_id)
                 self.response(202,result)
@@ -1240,7 +1264,8 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES}
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
+                         '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel'}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
@@ -1292,8 +1317,10 @@ class Handler(BaseHTTPRequestHandler):
                         answer=self.queue_press(path,data)
                         if answer is not None:self.response(202,answer);return
                         data={key:value for key,value in data.items() if key not in ('queue','label') and not (key=='title' and path!='/api/candidate/approve')}
-                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
-                        self.fail(409,'Stop scanning before queueing or resuming audiobook jobs');return
+                    # Ruling 35: historical cleanup, restore and recovery deletion wait for a scan in the engine; the page holds
+                    # these presses until a scan ends and presses again on code 'scanning' (a scan that began meanwhile).
+                    if path in {'/api/audiobook/create','/api/audiobook/queue','/api/audiobook/resume','/api/candidate/approve','/api/candidate/scan-again','/api/candidate/keep-separate'} and self.server.scan_active():
+                        self.response(409,{'error':'A library scan is running. This runs when it ends.','code':'scanning'});return
                     if path in {'/api/candidate/delete-preview','/api/candidate/delete'} and self.server.scan_active() and not queued:
                         # Senua's 0.22.0 final review, N13: Delete waits for a library scan like Keep, Approve and Convert.
                         # Typed (Judy's Delete spec, section 9): the preview opens the dialog in its refusal state, and the
@@ -1305,7 +1332,8 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     if path in {'/api/audiobook/retry','/api/audiobook/retry-all','/api/audiobook/repair','/api/audiobook/confirm-convert'} and self.server.scan_active() and not queued:
                         from audio_jobs import RETRY_SCANNING,REPAIR_SCANNING
-                        self.fail(409,REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING.replace('Retry','Convert') if path=='/api/audiobook/confirm-convert' else RETRY_SCANNING);return
+                        # Typed: the page holds the press until the scan ends and sends it again (ruling 35).
+                        self.response(409,{'error':REPAIR_SCANNING if path=='/api/audiobook/repair' else RETRY_SCANNING.replace('Retry','Convert') if path=='/api/audiobook/confirm-convert' else RETRY_SCANNING,'code':'scanning'});return
                     self.server.merge_admissions+=1;admitted=True
                 elif path!='/api/review':
                     self.fail(404,'No such Books Arranger control');return

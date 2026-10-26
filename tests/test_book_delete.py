@@ -139,13 +139,13 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         before = listing(self.parts[0].parent)
         elsewhere = self.base / 'elsewhere'; elsewhere.mkdir()
         with mock.patch.object(self.inv, 'source_roots', return_value=(str(elsewhere),)):
-            self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'refused')
+            self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'outside')  # S6: its own cause
             with self.assertRaises(book_delete.DeleteRefused) as refused:
                 self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
-            self.assertEqual(refused.exception.code, 'refused')
+            self.assertEqual(refused.exception.code, 'outside')  # S6
         # The configured Sorted folder holding the book's folder: never deleted from.
         with mock.patch.object(self.inv, 'output_root', str(self.parts[0].parent.parent)):
-            self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'refused')
+            self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'outside')  # S6: inside Sorted
             with self.assertRaises(book_delete.DeleteRefused):
                 self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
         self.assertEqual(listing(self.parts[0].parent), before, 'nothing deleted')
@@ -288,10 +288,10 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         self.assertTrue(os.path.isjunction(folder) and self.parts[0].is_file(), 'positive control: the book paths reach Sorted')
         sorted_before = listing(self.sorted)
         preview = self.service.delete_preview(row['id'], row['revision'])
-        self.assertEqual((preview['files'], preview['refusal']), ([], {'code': 'refused', 'message': 'Delete was not accepted. Nothing was deleted.'}))
+        self.assertEqual((preview['files'], preview['refusal']), ([], {'code': 'link', 'message': book_delete.WHY['link']}))  # S6: its own cause
         with self.assertRaises(book_delete.DeleteRefused) as refused:
             self.service.delete_book(row['id'], row['revision'], [str(p) for p in self.parts[:2]])
-        self.assertEqual(refused.exception.code, 'refused')
+        self.assertEqual(refused.exception.code, 'link')  # S6
         self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched')
         self.assertEqual(self.records(row['id'], [])['book_groups'], 1, 'no record deleted')
         # Control: the real folder back, the same press lists the two files.
@@ -303,7 +303,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         # by remove() ("has another name"), so the preview refuses it before the dialog says it will be deleted.
         row = self.book()
         other = self.base / 'second-name.mp3'; os.link(self.parts[0], other)
-        self.assertEqual((self.service.delete_preview(row['id'], row['revision'])['refusal'] or {}).get('code'), 'refused')
+        self.assertEqual((self.service.delete_preview(row['id'], row['revision'])['refusal'] or {}).get('code'), 'second_name')  # S6: its own cause
         other.unlink()
         self.assertIsNone(self.service.delete_preview(row['id'], row['revision'])['refusal'], 'control: one name, listed')
 
@@ -487,7 +487,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         source, row, job_id, folder = self.with_leftovers()
         (folder / 'stray.wav').write_bytes(b'not the app')
         preview = self.service.delete_preview(row['id'], row['revision'])
-        self.assertEqual((preview['files'], (preview['refusal'] or {}).get('code')), ([], 'refused'))
+        self.assertEqual((preview['files'], (preview['refusal'] or {}).get('code')), ([], 'working'))  # S6: its own cause
         with self.assertRaises(book_delete.DeleteRefused):
             self.service.delete_book(row['id'], row['revision'], [str(source)])
         self.assertTrue(source.exists(), 'nothing deleted')
@@ -811,7 +811,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         member.write_bytes(data); before = listing(place)
         moved = self.base / 'moved-copy'; place.rename(moved)
         _winapi.CreateJunction(str(moved), str(place)); self.addCleanup(lambda: os.path.isjunction(place) and os.rmdir(place))
-        self.assertEqual(refusal(), ('refused', 'refused'))
+        self.assertEqual(refusal(), ('link', 'link'))  # S6: a junction, said as such
         os.rmdir(place); moved.rename(place)
         self.assertEqual(listing(self.sorted), sorted_before, 'Audiobooks Sorted untouched by every refusal')
         preview = self.service.delete_preview(copy['id'], copy['revision'], 'copy')
@@ -910,13 +910,13 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
     def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):
         copy, place, final = self.arranged_with_copy(possible=True)
         self.assertEqual((copy['ask'].get('duplicate'), copy['ask'].get('copy')), ('possible', None))
-        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'refused')
+        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'not_offered')  # S6: its own cause
         # Each guard alone: the stored verdict says identical, but the row's own reason is still "Possible duplicate".
         with connect(self.inv.database) as db:
             data = json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?', (copy['id'],)).fetchone()[0])
             data['duplicate_review'].update(state='verified_identical', blocking=False)
             db.execute('UPDATE candidate_context SET data=? WHERE id=?', (json.dumps(data), copy['id']))
-        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'refused')
+        self.assertEqual(self.service.delete_preview(copy['id'], copy['revision'], 'copy')['refusal']['code'], 'not_offered')  # S6
         self.assertEqual(len(list(place.iterdir())), 3)
 
     def test_a_book_folder_directly_inside_the_source_folder_stays(self):
@@ -941,14 +941,14 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
     def test_a_damaged_mp3_the_app_can_still_retry_has_no_offer(self):
         source, row = self.damaged_mp3(repaired=False)
         self.assertNotIn('delete', row['creation']['job']['attention'], '"Retry checks it again": Repair comes first')
-        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'refused')
+        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'not_offered')  # S6: its own cause
         self.assertTrue(source.exists())
 
     def test_no_offer_and_a_refusal_for_a_book_the_app_can_still_fix(self):
         tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера')
         row = self.start()[0]
         self.assertNotIn('delete', row.get('ask') or {})
-        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'refused')
+        self.assertEqual(self.service.delete_preview(row['id'], row['revision'])['refusal']['code'], 'not_offered')  # S6: its own cause
         self.assertTrue((self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3').exists())
 
 

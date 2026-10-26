@@ -139,6 +139,7 @@ _REPAIR_LOCK=threading.Lock()  # M4B repair checks: pending ids and the checker 
 JOB_ONLY_FIELDS=('job_id','attempt_id','m4b_repair')  # never produced by the review's build_manifest
 _PURGE_LOCK=threading.RLock()  # one recovery purge at a time (the converter's and the sweep's never overlap)
 _WORKING_LOCK=threading.Lock()  # the working-folder classification cache and the folders whose clear failed
+_MANUAL_LOCK=threading.Lock()   # the queued Delete recovery copies presses (ruling 35)
 
 def attention_counts(summary):
     """(counts per attention group, Can retry books whose leftover working files Retry clears first) for the strip and
@@ -648,6 +649,8 @@ class MergeService:
         if isinstance(value,dict):
             run=self._bulk_retry_view()
             if run is not None:value['retry_all']=run
+            waiting=self.__dict__.get('_start_waiting')
+            if waiting is not None:value['start_waiting']={'reason':waiting['reason']}  # Resume kept until it settles (ruling 35)
         return value
 
     def _worker_active(self):
@@ -856,7 +859,8 @@ class MergeService:
         def handoff():
             try:return self.jobs.resume(admission_check=allow,admission_token=generation,settle=recheck)
             except Exception as error:
-                self._record_start_failure(error)
+                value=self._record_start_failure(error)
+                if isinstance(value,dict) and value.get('state')=='waiting':return {'start_admission':value}  # kept until it settles (ruling 35)
                 return {'start_admission':{'state':getattr(error,'start_state','blocked'),'reason':str(error)}}
         if historical:started=self.cleanup.resume(historical,follow_audio=False,admission_check=allow,admission_token=generation)
         elif pending:started=self.cleanup.resume(admission_check=allow,after_drain=handoff,admission_token=generation)
@@ -960,32 +964,88 @@ class MergeService:
         if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise ValueError('An update is stopping the work')
         if self.cleanup.current or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for source cleanup to finish')
 
+    RECOVERY_CLOSING='Books Arranger is closing. Delete the recovery copies after it restarts.'
+    RECOVERY_UPDATING='An update is installing. Delete the recovery copies after Books Arranger restarts.'
+
+    def _recovery_closed(self):
+        """The real refusals of Delete recovery copies (ruling 35 keeps them): closing and an update. Else None."""
+        stop=self.__dict__.get('_retention_stop')
+        if stop is not None and stop.is_set():return self.RECOVERY_CLOSING
+        if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():return self.RECOVERY_UPDATING
+        return None
+
+    def _recovery_waits(self):
+        """What a Delete recovery copies press waits for (ruling 35: queued, made when it ends): 'scan', 'cleanup' (a source
+        cleanup removing originals now), else None. Read only."""
+        if self.inventory.worker and self.inventory.worker.is_alive():return 'scan'
+        if self.cleanup.current or self.cleanup.thread and self.cleanup.thread.is_alive():return 'cleanup'
+        return None
+
+    def _manual_queue(self):
+        return self.__dict__.setdefault('_manual_presses',[])
+
     def recovery_status(self,job_id):
         value=self.recovery.status(job_id)
         reason=self._recovery_idle_reason()
         if reason is not None:value=value|{'eligible':False,'reason':reason}
-        if self._manual_recovery:value=value|{'eligible':False,'reason':'Recovery deletion is queued'}
+        else:
+            waits=self._recovery_waits()
+            if waits:value=value|{'waits':waits}  # Delete recovery copies is still offered: it is queued behind it
+        with _MANUAL_LOCK:queued=[item[0] for item in self._manual_queue()]
+        if job_id in queued:value=value|{'queued':True,'waits':value.get('waits') or ('deletion' if queued.index(job_id) else 'start')}
         return value
 
     def _recovery_idle_reason(self,max_age=1.0):
-        """Display only: one idle check shared by every book's recovery status for a second (a page asks
-        once per book). delete_recovery() always re-checks with _recovery_idle() itself."""
+        """Display only: one check shared by every book's recovery status for a second (a page asks once per book):
+        the real refusals only (closing, an update). A scan or a source cleanup no longer makes the copies ineligible:
+        a deletion pressed then is queued (ruling 35)."""
         cached=self.__dict__.get('_idle_cache');now=time.monotonic()
         if cached and 0<=now-cached[0]<max_age:return cached[1]
-        try:self._recovery_idle();reason=None
-        except ValueError as error:reason=str(error)
+        reason=self._recovery_closed()
         self._idle_cache=(now,reason);return reason
 
     @operation
     def delete_recovery(self,job_id,token,count,bytes):
-        self._recovery_idle()
-        if self._manual_recovery:raise ValueError('Recovery deletion is already queued')
+        """Delete recovery copies (the panel's press, after its confirm). Ruling 35 (Sergei 2026-10-26): while a scan or a
+        source cleanup runs, or another book's deletion waits, the press is kept in order and the retention worker makes
+        it when they end, every check again then; {'started', 'queued', 'waits', 'job_id'}. The same book pressed again
+        answers its place. Closing, an update and copies that changed are refused; nothing is deleted then."""
+        closed=self._recovery_closed()
+        if closed:raise ValueError(closed)
+        with _MANUAL_LOCK:
+            queue=self._manual_queue()
+            place=next((n for n,item in enumerate(queue) if item[0]==job_id),None)
+        if place is not None:return {'started':False,'queued':True,'job_id':job_id,'waits':self._recovery_waits() or ('deletion' if place else 'start')}
         status=self.recovery.status(job_id)
         if not status['eligible']:raise ValueError(status['reason'] or 'No eligible recovery copies remain')
         confirmation={'token':token,'count':count,'bytes':bytes}
         if any(status[k]!=confirmation[k] for k in confirmation):raise ValueError('Recovery copies changed. Review the updated details and try again.')
-        self._manual_recovery=(job_id,confirmation);self._retention_wake.set()
+        waits=self._recovery_waits()
+        with _MANUAL_LOCK:
+            queue.append((job_id,confirmation))
+            ahead=len(queue)>1 or self.__dict__.get('_manual_recovery') is not None
+        self._retention_wake.set();self.invalidate_status()
+        if waits or ahead:return {'started':False,'queued':True,'job_id':job_id,'waits':waits or 'deletion'}
         return {'started':True,'job_id':job_id}
+
+    def cancel_recovery(self,job_id):
+        """Take a queued Delete recovery copies back: {'cancelled': True}, or None once it has started (or never was)."""
+        with _MANUAL_LOCK:
+            queue=self._manual_queue()
+            for n,item in enumerate(queue):
+                if item[0]==job_id:
+                    del queue[n];break
+            else:return None
+        self.invalidate_status()
+        return {'cancelled':True}
+
+    def _claim_manual(self,manual):
+        """The retention worker starts a queued deletion: True unless it was cancelled meanwhile."""
+        with _MANUAL_LOCK:
+            queue=self._manual_queue()
+            if manual not in queue:return False
+            queue.remove(manual);self._manual_recovery=manual
+            return True
 
     def start_published_check(self):
         """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover)."""
@@ -1007,12 +1067,15 @@ class MergeService:
                 try:
                     with admission():
                         self._recovery_idle()
-                        manual=self._manual_recovery
+                        # Ruling 35: the queued Delete recovery copies presses, first in first out, one per pass.
+                        with _MANUAL_LOCK:manual=next(iter(self._manual_queue()),None)
                         selected=[manual[0]] if manual else [id for id in self.recovery.due() if id not in self._purge_tried]
                         for id in selected:
                             # One set at a time under the operation lock, so controls interleave between sets.
                             with self.operation_lock,_PURGE_LOCK:
-                                self._recovery_idle();self._post_current=(id,'temporary')
+                                self._recovery_idle()
+                                if manual and not self._claim_manual(manual):break  # taken back meanwhile: nothing deleted
+                                self._post_current=(id,'temporary')
                                 try:
                                     self.recovery.purge(id,'manual' if manual else 'automatic',manual[1] if manual else None)
                                     published_revisits.append(id)
@@ -1029,7 +1092,8 @@ class MergeService:
                 for id in published_revisits:
                     try:self.working.schedule_published(id)
                     except (InterruptedError,ValueError,OSError):pass
-                self._retention_wake.wait(60);self._retention_wake.clear()
+                # A queued deletion is looked at again every 2 s, so it runs right after the scan or cleanup it waited for.
+                self._retention_wake.wait(2 if self._manual_queue() else 60);self._retention_wake.clear()
         self._purge_tried=set()
         self._retention_thread=threading.Thread(target=work,name='books-recovery-retention',daemon=False);self._retention_thread.start()
         for name in ('series_backfill','gap_fill'):
@@ -1367,11 +1431,14 @@ class MergeService:
         except (sqlite3.Error,ValueError):
             for job_id in wanted:summary[job_id].setdefault('startover','automatic');summary[job_id].setdefault('release_ok',False)
 
-    STARTOVER_REFUSED='Start over was not accepted. Check the status above.'
-    STARTOVER_NOTHING='Start over was not accepted. Nothing was changed.'
+    # S5 (ruling 35's refusal texts): each cause says itself. Closing is the real refusal; a catalog still busy after the
+    # transaction's 30 s of retries is no refusal for Sergei: the page holds the press and sends it again (cause 'busy').
+    STARTOVER_REFUSED='Books Arranger is closing. Start over after it restarts. Nothing was changed.'
+    STARTOVER_NOTHING=STARTOVER_REFUSED
+    STARTOVER_BUSY='The catalog is busy, so Start over waits and runs when it is free. Nothing was changed yet.'
     EDITING='This book is being edited. Finish editing, then try again.'
-    RELEASE_BUSY="The review wasn't discarded. The app is busy; try again in a moment."
-    RELEASE_REFUSED="The review wasn't discarded. Select the row to read why."
+    RELEASE_BUSY="The catalog is busy, so the review waits and is discarded when it is free. Nothing was changed yet."
+    RELEASE_REFUSED="Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed."
 
     def _restart_locks(self):
         """The review and grouping locks every review write takes (a save, the automatic approval)."""
@@ -1426,7 +1493,7 @@ class MergeService:
             with self._restart_locks():transaction(self.inventory.database,write)
         except book_restart.Editing:raise RetryRefused(self.EDITING,'editing') from None
         except book_restart.Changed:raise RetryRefused(RETRY_BOOK_CHANGED,'changed') from None
-        except sqlite3.Error:raise RetryRefused(refused,'busy') from None
+        except sqlite3.Error:raise RetryRefused(self.STARTOVER_BUSY,'busy') from None
         return self._after_restart(identity,server_closing)|{'set_aside':True,'released':bool(discard_review),'job_id':job_id}
 
     def _after_restart(self,identity,server_closing=False):
@@ -1819,18 +1886,24 @@ class MergeService:
         view is refused and queues nothing; 'wait' only once the working files are gone; 'user' always. A stale
         refusal (the deciding code changed) does not block: one attempt per book per build."""
         import m4b_readmission
-        from audio_jobs import RetryRefused,RETRY_BOOK_CHANGED
+        from audio_jobs import RetryRefused,RETRY_CHECKING,RETRY_GATE_UPDATE,RETRY_GATE_REVIEW,RETRY_GATE_WAIT,RETRY_GATE_STOPS,RETRY_GATE_REFUSED
+        verb='Repair' if kind=='repair' else 'Retry'
         with self.jobs._db() as db:value=m4b_readmission.describe(db,job_id)
         # A working-files record no longer decides (follow-up 2, section 2.2): the live state of the files does.
+        # S9 (ruling 35's refusal texts): each cause in its own words, never one "status changed" for all of them.
         if value and value.get('state')=='refused' and value.get('stale') is not True and value.get('cause')!='working_files':
-            if value.get('fix')=='user':return
-            raise RetryRefused(RETRY_BOOK_CHANGED)
+            fix=value.get('fix')
+            if fix=='user':return
+            raise RetryRefused(RETRY_GATE_REVIEW%verb if fix=='review' else RETRY_GATE_WAIT%(verb,verb) if fix=='wait' else RETRY_GATE_UPDATE%verb)
         # Files the app cannot clear stop the row (no Retry, no Repair): a press from an outdated view changes nothing.
         stops=self.attention_summary([job_id],retry=False).get(job_id,{}).get('working')
-        if isinstance(stops,dict) and stops.get('stops'):raise RetryRefused(RETRY_BOOK_CHANGED)
+        if isinstance(stops,dict) and stops.get('stops'):raise RetryRefused(RETRY_GATE_STOPS%verb)
         # No current refusal: a Retry still needs a source this build's read-only dry run did not refuse, and a finished
         # check (a pending row offers no Retry; one that could not open the source does, and the press reads it).
-        if kind=='retry' and self._m4b_precheck(job_id) in ('refused','pending'):raise RetryRefused(RETRY_BOOK_CHANGED)
+        if kind=='retry':
+            check=self._m4b_precheck(job_id)
+            if check=='pending':raise RetryRefused(RETRY_CHECKING)
+            if check=='refused':raise RetryRefused(RETRY_GATE_REFUSED)
 
     def _m4b_precheck(self,job_id):
         """The read-only plan() dry run's state for this job under this build (audio_jobs.precheck), or None when the
@@ -1872,7 +1945,88 @@ class MergeService:
         try:return transaction(self.jobs.database,write)
         except sqlite3.Error:return {'accepted':True,'queued_next':False}  # still requeued; it runs in normal queue order
 
+    # ------------------------------------------------------------------ a start kept until the queue settles (ruling 35)
+    def _settling(self):
+        """What a start would wait for now, read only: 'pause' (a Pause still reaching its checkpoints, or a worker still
+        pausing), 'start' (an earlier start still checking), else None."""
+        if self.__dict__.get('_pause_depth',0):return 'pause'
+        if self.__dict__.get('_resume_pending'):return 'start'
+        jobs=getattr(self.jobs,'_thread',None)
+        if jobs is not None and jobs.is_alive() and self.jobs._stop.is_set():return 'pause'
+        cleanup=getattr(self.cleanup,'thread',None)
+        if cleanup is not None and cleanup.is_alive() and self.cleanup.stop.is_set():return 'pause'
+        return None
+
+    def start_when_settled(self,why=None):
+        """Ruling 35 (Sergei 2026-10-26): a start refused only because a Pause, an earlier start or a stopping worker is
+        still settling ("Retry Start after it stops") is kept and made when it settles, every check again then. One waits at
+        a time; a second press joins it. A Pause pressed after it, or closing, drops it (the later press wins).
+        {'state': 'waiting', 'reason': 'pause' | 'start'}."""
+        with _BULK_LOCK:
+            if self.__dict__.get('_closing') or self.draining:raise StartRefused('closing','Books Arranger is closing. Resume audiobook jobs after it restarts.')
+            generation=self.__dict__.get('_start_generation',0)
+            waiting=self.__dict__.get('_start_waiting')
+            if waiting is not None and waiting['generation']==generation:return {'state':'waiting','reason':waiting['reason']}
+            token=object()
+            self._start_waiting={'generation':generation,'reason':why or self._settling() or 'pause','since':time.time(),'token':token}
+            answer={'state':'waiting','reason':self._start_waiting['reason']}
+        threading.Thread(target=self._settle_then_start,args=(token,),name='books-start-when-settled',daemon=True).start()
+        self.invalidate_status()
+        return answer
+
+    def cancel_waiting_start(self):
+        """Resume audiobook jobs pressed again while it waits: {'cancelled': True}, or None when nothing waits."""
+        with _BULK_LOCK:
+            if self.__dict__.get('_start_waiting') is None:return None
+            self._start_waiting=None
+        self.invalidate_status()
+        return {'cancelled':True}
+
+    def _settle_then_start(self,token,poll=.25):
+        def current():
+            waiting=self.__dict__.get('_start_waiting')
+            return waiting if waiting is not None and waiting['token'] is token else None
+        try:
+            while True:
+                with _BULK_LOCK:
+                    waiting=current()
+                    if waiting is None:return  # cancelled, or a newer press waits instead
+                    if waiting['generation']!=self.__dict__.get('_start_generation',0) or self.draining or self.__dict__.get('_closing'):
+                        self._start_waiting=None;return  # a Pause pressed after it, or closing: the later press wins
+                why=self._settling()
+                if why is not None:
+                    with _BULK_LOCK:
+                        if current() is not None:current()['reason']=why
+                    time.sleep(poll);continue
+                with _BULK_LOCK:
+                    if current() is None:return
+                    self._start_waiting=None
+                try:self.resume()
+                except StartRefused as error:
+                    if error.start_state!='busy':self._record_start_failure(error);return
+                    with _BULK_LOCK:
+                        again=self.__dict__.get('_start_generation',0)==waiting['generation'] and self.__dict__.get('_start_waiting') is None and not self.draining
+                        if again:self._start_waiting=dict(waiting)  # settling again between the look and the start: it waits on
+                    if not again:return
+                    time.sleep(poll);continue
+                except Exception as error:self._record_start_failure(error)
+                return
+        finally:self.invalidate_status()
+
+    def resume_press(self):
+        """Resume audiobook jobs (the toolbar): the queue's start, or, while a Pause or an earlier start is still settling,
+        the start kept and made when it settles (start_when_settled; ruling 35)."""
+        try:return self.resume()
+        except StartRefused as error:
+            if error.start_state!='busy':raise
+        return self.state()|{'start_admission':self.start_when_settled()}
+
     def _record_start_failure(self,error):
+        if getattr(error,'start_state',None)=='busy' and not self.draining and not self.__dict__.get('_closing'):
+            # Ruling 35: a start refused only while something settles is kept and made when it settles, never recorded as a
+            # failure that asks Sergei to press Start again.
+            try:return self.start_when_settled()
+            except StartRefused as closing:error=closing
         reason=str(error) or type(error).__name__
         value={'state':getattr(error,'start_state','blocked'),'job_id':None,'reason':reason}
         self.jobs.report_priority(value)
@@ -3320,13 +3474,22 @@ class MergeService:
         try:return bool(m4b_repair.eligible(row))
         except Exception:return False
 
+    def _not_safe(self,job_id,reason):
+        """S10: why the app kept working files and where they are, with what Sergei can do."""
+        from audio_jobs import WORKING_NOT_SAFE,WORKING_NOT_SAFE_AT
+        reason=str(reason or '').strip().rstrip('.')
+        reason=reason[0].lower()+reason[1:] if reason[:1].isupper() and not reason[1:2].isupper() else reason
+        try:folder=str(Path(self.stage_root)/job_id)
+        except (TypeError,ValueError):folder=''
+        return WORKING_NOT_SAFE_AT%(reason,folder) if reason and folder else WORKING_NOT_SAFE
+
     def _clear_working(self,row):
-        from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_NOT_SAFE,WORKING_FILE_PROBLEM
+        from audio_jobs import RetryRefused,WORKING_BUSY,WORKING_FILE_PROBLEM
         from native_io import BoundaryError,FileInUse
         job_id=row['job_id'];audio_only=self._working_kind(row)
         before=self._working_state(row,audio_only,fresh=True)
         if before is None:return {'cleared':True,'bytes':0,'already':True}
-        if before['state']!='cleanable':raise RetryRefused(WORKING_NOT_SAFE,'not_safe')
+        if before['state']!='cleanable':raise RetryRefused(self._not_safe(job_id,before.get('reason')),'not_safe')
         if self.inventory.worker and self.inventory.worker.is_alive():raise RetryRefused(WORKING_BUSY,'busy')
         working=getattr(self,'working',None)
         if working is None or not hasattr(working,'retire'):raise RetryRefused(WORKING_BUSY,'busy')
@@ -3353,7 +3516,7 @@ class MergeService:
             if listing and cause=='not_safe':
                 with _WORKING_LOCK:self._working_failed[job_id]=(json.dumps([marker,listing]),'Working files were kept: '+reason)
         except (OSError,ValueError):pass
-        raise RetryRefused({'busy':WORKING_BUSY,'file_problem':WORKING_FILE_PROBLEM}.get(cause,WORKING_NOT_SAFE),cause)
+        raise RetryRefused({'busy':WORKING_BUSY,'file_problem':WORKING_FILE_PROBLEM}.get(cause) or self._not_safe(job_id,reason),cause)
 
     def _clear_first(self,job_id,kind='retry'):
         with self.jobs._lock:

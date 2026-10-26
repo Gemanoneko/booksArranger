@@ -202,11 +202,44 @@ class AdmissionTests(unittest.TestCase):
         s=self.service
         with self.assertRaisesRegex(ValueError,'changed'):s.delete_recovery('job','b'*64,2,4096)
         s.jobs.status=lambda:{'jobs':[{'state':'pending'}]}
-        s.delete_recovery('job','a'*64,2,4096)  # v0.16.8: queued books no longer hold recovery deletion
-        s._manual_recovery=None;s.cleanup.current='busy-cleanup'
-        with self.assertRaisesRegex(ValueError,'source cleanup'):s.delete_recovery('job','a'*64,2,4096)
-        s.cleanup.current=None;s.jobs.status=lambda:{'jobs':[]};s.delete_recovery('job','a'*64,2,4096)
-        with self.assertRaisesRegex(ValueError,'queued'):s.delete_recovery('job','a'*64,2,4096)
+        self.assertEqual(s.delete_recovery('job','a'*64,2,4096),{'started':True,'job_id':'job'})  # v0.16.8: queued books no longer hold it
+        # Ruling 35 (the rest of it, ruling 37): pressed again it answers its place, never a second deletion or a refusal.
+        self.assertEqual(s.delete_recovery('job','a'*64,2,4096),{'started':False,'queued':True,'job_id':'job','waits':'start'})
+        self.assertEqual(s.cancel_recovery('job'),{'cancelled':True});self.assertIsNone(s.cancel_recovery('job'))
+        # A source cleanup removing originals: queued behind it ("Wait for source cleanup to finish" was the refusal).
+        s.cleanup.current='busy-cleanup'
+        self.assertEqual(s.delete_recovery('job','a'*64,2,4096),{'started':False,'queued':True,'job_id':'job','waits':'cleanup'})
+        status=s.recovery_status('job');self.assertEqual((status['eligible'],status['queued'],status['waits']),(True,True,'cleanup'))
+        # Another book's deletion waits behind it; a scan is the same as a cleanup.
+        s.cleanup.current=None;s.inventory.worker=SimpleNamespace(is_alive=lambda:True)
+        self.assertEqual(s.delete_recovery('other','a'*64,2,4096),{'started':False,'queued':True,'job_id':'other','waits':'scan'})
+        s.inventory.worker=None
+        self.assertEqual(s.recovery_status('other')['waits'],'deletion')
+        self.assertEqual([item[0] for item in s._manual_queue()],['job','other'])
+        # The real refusals stay: closing and an update; nothing is queued then.
+        s._retention_stop.set()
+        with self.assertRaisesRegex(ValueError,'closing'):s.delete_recovery('third','a'*64,2,4096)
+        s._idle_cache=None;self.assertEqual(s.recovery_status('third')['eligible'],False)  # the shown answer is kept 1 s
+        self.assertEqual(len(s._manual_queue()),2)
+
+    def test_the_worker_makes_the_queued_deletions_in_order_and_a_cancelled_one_never(self):
+        s=self.service;purged=[];s._retention_thread=None;s.jobs.close=Mock();s.cleanup.close=Mock()
+        s.recovery.due=lambda:[];s.recovery.purge=lambda id,actor,confirmation:purged.append((id,actor));s.recovery._set=Mock()
+        s.inventory.worker=SimpleNamespace(is_alive=lambda:True)  # a scan runs: both are queued
+        for job in ('first','second','third'):s.delete_recovery(job,'a'*64,2,4096)
+        s.cancel_recovery('second')
+        @contextlib.contextmanager
+        def admission():
+            if s.inventory.worker is not None:raise ValueError('busy')  # the server's admission refuses during a scan
+            yield
+        s.start_retention(admission)
+        time.sleep(.3);self.assertEqual(purged,[],'nothing is deleted while the scan runs')
+        s.inventory.worker=None;s._retention_wake.set()
+        deadline=time.monotonic()+10
+        while len(purged)<2 and time.monotonic()<deadline:time.sleep(.05)
+        s.close()
+        self.assertEqual(purged,[('first','manual'),('third','manual')])
+        self.assertEqual(s._manual_queue(),[])
 
     def test_idle_startup_worker_and_shutdown_and_scan_admission(self):
         s=self.service;called=threading.Event();s._retention_thread=None;s.jobs.close=Mock();s.cleanup.close=Mock()

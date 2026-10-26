@@ -198,5 +198,99 @@ class QueuePressEntryTests(unittest.TestCase):
         self.assertEqual(server.actions.view()['queued_actions'][0]['action'], 'convert')
 
 
+class SettlingStartTests(unittest.TestCase):
+    """The rest of ruling 35 (Sergei, ruling 37, 2026-10-26): Resume audiobook jobs pressed while a Pause or an earlier
+    start is still settling refused "… Retry Start after it stops." It is now kept and made when it settles; a Pause
+    pressed after it, Cancel (the same button again) and closing take it back. The real MergeService methods on a bare
+    instance; resume() stubbed to refuse while the pause settles, as _capture_start_generation does."""
+
+    def service(self):
+        import merge_service
+        from audio_jobs import StartRefused
+        s = merge_service.MergeService.__new__(merge_service.MergeService)
+        s.draining = False; s._pause_depth = 0; s._start_generation = 1
+        s.jobs = SimpleNamespace(_thread=None, _stop=threading.Event(), report_priority=lambda value: self.recorded.append(value), _db=None)
+        s.cleanup = SimpleNamespace(thread=None, stop=threading.Event())
+        s.state = lambda: {'state': 'Paused'}
+        self.started, self.recorded = [], []
+
+        def resume(*_, **__):
+            if s._pause_depth:
+                raise StartRefused('busy', 'Pause is still reaching the queue checkpoints. Retry Start after it completes.')
+            self.started.append(s._start_generation)
+            return {'state': 'Running'}
+        s.resume = resume
+        return s
+
+    def test_resume_while_a_pause_settles_starts_when_it_settles(self):
+        s = self.service()
+        s._pause_depth = 1
+        answer = s.resume_press()
+        self.assertEqual(answer['start_admission'], {'state': 'waiting', 'reason': 'pause'}, 'kept, never "Retry Start after it completes"')
+        token = s._start_waiting['token']
+        self.assertEqual(s.resume_press()['start_admission']['state'], 'waiting')
+        self.assertIs(s._start_waiting['token'], token, 'a second press joins the waiting start')
+        time.sleep(.3)
+        self.assertEqual(self.started, [], 'nothing starts while the pause settles')
+        s._pause_depth = 0
+        self.assertTrue(until(lambda: self.started == [1] and s.__dict__.get('_start_waiting') is None))
+        self.assertEqual(self.recorded, [], 'no start failure is recorded')
+
+    def test_a_pause_pressed_after_it_cancel_and_closing_take_it_back(self):
+        from audio_jobs import StartRefused
+        s = self.service()
+        s._pause_depth = 1
+        s.resume_press()
+        s._start_generation += 1  # Pause pressed after Resume: the later press wins
+        s._pause_depth = 0
+        self.assertTrue(until(lambda: s.__dict__.get('_start_waiting') is None))
+        time.sleep(.3)
+        self.assertEqual(self.started, [])
+        s._pause_depth = 1
+        s.resume_press()
+        self.assertEqual(s.cancel_waiting_start(), {'cancelled': True})
+        self.assertIsNone(s.cancel_waiting_start(), 'nothing waits any more')
+        s._pause_depth = 0
+        time.sleep(.4)
+        self.assertEqual(self.started, [], 'a cancelled start never starts')
+        s._closing = True
+        with self.assertRaises(StartRefused):
+            s.start_when_settled()
+
+    def test_a_retry_pressed_while_a_pause_settles_starts_the_queue_after_it(self):
+        s = self.service()
+        s._pause_depth = 1
+        value = s._record_start_failure(__import__('audio_jobs').StartRefused('busy', 'Pause is still reaching the queue checkpoints.'))
+        self.assertEqual(value, {'state': 'waiting', 'reason': 'pause'})
+        s._pause_depth = 0
+        self.assertTrue(until(lambda: self.started == [1]))
+        self.assertEqual(self.recorded, [], 'never saved as "Retry Start after it stops"')
+
+    def test_the_state_says_a_start_waits(self):
+        import merge_service
+        s = merge_service.MergeService.__new__(merge_service.MergeService)
+        s._state = lambda: {'state': 'Pausing'}
+        s._bulk_retry_view = lambda: None
+        s._start_waiting = {'generation': 1, 'reason': 'pause', 'since': 0, 'token': object()}
+        self.assertEqual(s.state()['start_waiting'], {'reason': 'pause'})
+
+
+class ResumeRouteTests(unittest.TestCase):
+    def test_resume_answers_the_kept_start_and_the_same_button_again_cancels_it(self):
+        server = Server()
+        server.merge.resume_press = lambda: {'state': 'Paused', 'start_admission': {'state': 'waiting', 'reason': 'pause'}}
+        answers = iter([{'cancelled': True}, None])
+        server.merge.cancel_waiting_start = lambda: next(answers)
+        handler = web_server.Handler.__new__(web_server.Handler)
+        handler.server = server
+        sent = []
+        handler.response = lambda status, body: sent.append((status, body))
+        handler.merge_request('/api/audiobook/resume', {})
+        handler.merge_request('/api/audiobook/resume-cancel', {})
+        handler.merge_request('/api/audiobook/resume-cancel', {})
+        self.assertEqual(sent, [(200, {'state': 'Paused', 'start_admission': {'state': 'waiting', 'reason': 'pause'}}), (200, {'cancelled': True}),
+                                (409, {'error': 'It has already started.', 'code': 'started'})])
+
+
 if __name__ == '__main__':
     unittest.main()
