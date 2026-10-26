@@ -1,5 +1,43 @@
 # Changelog
 
+## [v0.22.1] - 2026-10-26
+
+Updating from 0.22.0 is manual: right-click the tray icon and choose Quit, then run the installer. From 0.22.1 on, the app updates itself with Restart to update.
+
+### Added
+
+- Retry, Repair and Delete book can be queued: pressed while the engine is busy, they wait in a queue instead of failing. Each row shows its queued state, the details panel has Cancel retry and Cancel repair, and the outcome is shown on the row. One queued action per book.
+- Delete book is offered on rows whose files are all missing.
+- Odd names are asked instead of filed by themselves (a bitrate in a title, two people in one author folder, a folder name as author).
+- The folder structure Author\Series\N. Title is read, and clean numbering in the file names decides the order. On a copy of the live catalog, Order unclear rows fell from 134 to 19.
+- An author rule, a seed included, can be taken back.
+- The window opens at once and fills in. One loading strip shows Working, Waiting, Stuck or Stopped.
+- An App updates panel with a confirmation dialog and phase lines.
+
+### Changed
+
+- Presses and the book list no longer wait behind background work. On a copy of the live catalog, Remove from list during research went from 46 s at most to 0.4 s.
+- Books are approved at once on their local title and author. Optional details are filled in later, in the background. Approvals per hour during a research run rose from about 58 to about 590.
+- A reader is never taken for the author.
+- A slow answer shows "busy" instead of "Connection interrupted".
+- The update check no longer depends on the engine. Restart to update answers at once and stops the engine in safe steps. It can be cancelled, installs silently, and puts the old engine back if the install fails.
+- The to-do list reuses each row's "Goes to" answer while nothing it reads has changed.
+- The test gate runs the new suites (lock timing, gap fill, folder structure, updater, startup, action queue).
+
+### Fixed
+
+- A copy offer withheld while the audiobook was away comes back without a scan.
+- A conversion that lost its drive offers Retry once the drive is back.
+- A task whose catalog evidence changed during its read is read again; it no longer fails the scan.
+- Remove this copy proves the copy before it takes the app's locks, and Quit stops it.
+- A folder with another book below it, or with other audio, keeps its files when a book is deleted.
+- A series folder names its series only; "Author (year) - Title" folders name the book.
+- The busy notice no longer flickers while a slow press waits, and the status keeps answering.
+- Focus returns to a row's queued face after the list is rebuilt; focus survives re-renders on Stopped rows.
+- The updater panel no longer breaks on a shell status without busy flags.
+- Test probe folders are removed when their test ends.
+
+
 ## [v0.22.0] - 2026-10-25
 
 0.21.3 was never released; its changes ship here.
