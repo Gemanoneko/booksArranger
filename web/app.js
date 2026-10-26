@@ -487,7 +487,7 @@ function renderRows(force=false) {
     // The to-do rows take fresh data in place too; a row Sergei settled (approved, removed, found) leaves at this
     // refresh unless it holds focus.
     for(const entry of askRows.values()){const fresh=rows.find(row=>row.id===entry.row.id);if(fresh)entry.row=fresh;}
-    for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && !tr.contains?.(focused)){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
+    for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && (!tr.contains?.(focused) || deletedBooks.has(id))){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
@@ -593,11 +593,13 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
   const ticket=++listTicket;listPending=context;
   if(context!==paintedContext)showListLoading();
   const groupQuery=requestView==='candidates' && requestFilter==='output_attention' && attentionGroup!=='all'?`&group=${attentionGroup}`:'';
+  const sentAt=Date.now();
   return request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`).then(page=>{
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     acknowledgeReacquireArchives(page);
     rows=page.rows.map(row=>requestView==='candidates'?({...row,path:row.id,kind:'candidate',library}):({...row,library}));totalRows=page.total ?? (requestOffset+rows.length);listGeneration++;pruneQueueNotes();
+    if(requestView==='candidates')rows=withoutDeleted(rows,sentAt);  // Judy 0.22.2 section 5
     restartCounts=requestFilter==='restarted' && page.restart_counts && typeof page.restart_counts==='object'?page.restart_counts:null;
     if(heldRow && (heldRow.context!==context || Date.now()>heldRow.until))heldRow=null;
     else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
@@ -625,7 +627,9 @@ async function refresh(force=false) {
   // once, beside the status read: neither waits for /api/state (v0.16.7 QA: up to 11 s behind a slow status).
   const early=force && booksOnScreen()?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
   early?.catch(()=>{});
+  const stateSent=Date.now();
   const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
+  deletedCounts(current,stateSent);  // Judy 0.22.2 section 5: a status from before a delete still counts that book
   observeLoad(current);  // any answer counts, whatever happens to it below (Judy 3.4)
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
   const libraryWasMissing=!state || !partReady('library');
@@ -2679,6 +2683,7 @@ function applyQueueOutcome(outcome){
     if(outcome.result==='done'){
       deleteNotes.set(id,{text:ASK_DONE.deleted[1],warn:false,done:true});if(askRows.has(id))askDone.set(id,'deleted');
       askNote(`Queued delete finished: ${title}. ${deleteStrip('delete',Number(outcome.deleted) || 0,Number(outcome.bytes) || 0,outcome.folders)}`);queueStripOutcome=outcome.id;
+      if(row)forgetDeleted(row);  // Judy 0.22.2 section 5: a queued delete's row leaves at its outcome too
       queueAnnounce(`${title}: ${ASK_DONE.deleted[1]}`);return;
     }
     if(outcome.result==='refused' && outcome.code==='not_listed'){
@@ -3007,6 +3012,9 @@ async function deleteConfirm(event){
     // 0.22.1 (m-10 on Stopped rows, about one press in three): a later re-render, after this hand-off, replaced the focused
     // button again. For a few seconds every rebuild of the list that drops focus hands it on once more (renderRows).
     focusPlan={next,until:Date.now()+5000};
+    // Judy 0.22.2 section 5 (Sigma Force 9): the row leaves in this render, with its counts, and no list read before the
+    // answer can bring it back.
+    forgetDeleted(d.row);
     refresh(true).catch(()=>{}).then(()=>{if(document.activeElement===handed || !document.activeElement || document.activeElement===document.body)leaveTo(next);});return;
   }
   if(failed.length){
@@ -3015,6 +3023,36 @@ async function deleteConfirm(event){
     askNote(t.partialStrip(k,d.n,f));
   }else{showDeleteState('unknown',{line:t.unknown});deleteNotes.set(d.id,{text:t.unknown,warn:true});}
   $('delete-close').focus?.();controls();
+}
+// Judy 0.22.2 section 5 (Sergei 2026-10-26, Sigma Force 9 "All files missing"): after "Deleted. The book is gone from the
+// app." the row was still listed. A list or status answer computed before the delete (a poll already on its way, the
+// engine's shared answer) repainted it with its settled line, and the rebuild kept the row while it held focus. The
+// deleted book leaves the rows and its chip's count at once, and every list or status answer sent before the delete is
+// kept from bringing it back; a list answer sent after it, and without it, ends the guard.
+const deletedBooks=new Map();  // id -> {at, chip}
+function chipOf(row){const ask=askOf(row);if(ask)return NEEDS_KEYS.includes(ask.kind)?ask.kind:'other';return attentionOf(row)?.group || null;}
+function forgetDeleted(row){
+  if(!row?.id)return;
+  const chip=chipOf(row);deletedBooks.set(row.id,{at:Date.now(),chip});
+  const before=rows.length;rows=rows.filter(item=>item.id!==row.id);if(rows.length<before)totalRows=Math.max(0,totalRows-1);
+  const counts=state?.audiobook_jobs?.attention_counts;if(counts && chip && Number.isInteger(counts[chip]) && counts[chip]>0)counts[chip]--;
+  askRows.delete(row.id);askDone.delete(row.id);deleteButtons.delete(row.id);
+  if(selectedPath===row.path){selectedPath=null;selectedRow=null;}
+  renderRows(true);renderAttentionGroups();if(partReady('jobs'))renderJobs();
+}
+// A list answer: rows of deleted books leave it; sentAt is when its request was sent.
+function withoutDeleted(list,sentAt){
+  let kept=list;
+  for(const [id,entry] of deletedBooks){
+    if(kept.some(item=>item.id===id)){kept=kept.filter(item=>item.id!==id);totalRows=Math.max(0,totalRows-1);}
+    else if(sentAt>=entry.at)deletedBooks.delete(id);
+  }
+  return kept;
+}
+// A status answer sent before a delete still counts the deleted book in its chip.
+function deletedCounts(value,sentAt){
+  const counts=value?.audiobook_jobs?.attention_counts;if(!counts)return;
+  for(const entry of deletedBooks.values())if(sentAt<entry.at && entry.chip && Number.isInteger(counts[entry.chip]) && counts[entry.chip]>0)counts[entry.chip]--;
 }
 $('delete-confirm').addEventListener('click',deleteConfirm);
 $('delete-cancel').addEventListener('click',event=>{if(event?.repeat || deleteDialog?.state==='deleting')return;closeDeleteDialog();});
