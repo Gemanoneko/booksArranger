@@ -875,7 +875,8 @@ class Handler(BaseHTTPRequestHandler):
                     if item['kind'] not in ('retry','repair'):raise ValueError('Invalid retry action')
                 if len({item['job_id'] for item in items})!=len(items):raise ValueError('Duplicate retry target')
             from audio_jobs import RetryRefused
-            try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all(skip=self.server.actions.queued_jobs())
+            skip=self.server.actions.queued_jobs() if items is None else set()  # queued presses are left out (Judy 1.3)
+            try:run=self.server.merge.retry_all(items) if items is not None else self.server.merge.retry_all(skip=skip) if skip else self.server.merge.retry_all()
             except RetryRefused as error:
                 self.fail(409,str(error));return
             self.response(202,{'retry_all':run});return

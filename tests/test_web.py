@@ -203,6 +203,10 @@ class BrowserTests(unittest.TestCase):
             self.server.actions.drop()
         self.assertEqual(self.call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':'yes'})[0],400,'an explicit boolean')
         self.assertEqual(self.call('/api/candidate/delete-preview',{'library':'Audiobooks','id':other,'revision':2,'queue':True,'mode':'copy'})[0],400,'Remove this copy does not queue')
+        # Retry all leaves queued presses out (Judy 1.3); with nothing queued it is asked exactly as before.
+        with patch.object(merge,'retry_all',return_value={'id':'run','state':'running','total':2}) as asked,patch.object(self.server.actions,'queued_jobs',return_value={job}):
+            self.assertEqual(self.call('/api/audiobook/retry-all',{'library':'Audiobooks'})[0],202)
+            asked.assert_called_once_with(skip={job})
         # Nothing waits and nothing blocks: the press runs at once and answers as before.
         with patch.object(merge,'retry_blocked_job',return_value={'job_id':job,'requeued':True}) as retried:
             code,ran=self.json_call('/api/audiobook/retry',{'library':'Audiobooks','id':book,'revision':1,'job_id':job,'queue':True})
