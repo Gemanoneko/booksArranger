@@ -351,3 +351,70 @@ The page writes the line at the press, not at the engine's answer. Cancel stays 
 4. An update pressed soon after start waits silently on the engine's recovery pass (Futaba m-3, 150 s at 8,000 books). A line for it: "Waiting for the engine to finish its start-up check. This can take a few minutes."
 
 Design basis: NN/g user control and freedom (Discard, Forget, Esc that never loses typing), error prevention (the pick-list, Series with Number, nothing runs under old names), visibility of status (Place and Entered lines, the 1 s Cancel line, the Waiting row's stated fallback), recognition over recall (every row editable the same way), Fitts (Save beside the fields), Jakob (native pick-list, inline edit, tray tooltip); WCAG 2.2 AA 1.4.3, 2.1.1, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
+
+---
+
+## 13. Ender's notes and questions for Judy (2026-10-26, branch `ender/0222`)
+
+What the build does where this spec asked Ender to confirm, and the provisional copy that rulings 35 and 36 needed. Every string marked "provisional" is in the build until you replace it.
+
+### 13.1 Confirmed
+
+1. **Collections in a series (section 2).** The planner files `Сборники\<Series>\<Series> - <N> - <Title> - <Author>.m4b`, the series naming of every book (the backlog's `Протоколы SCP 1 - …` form is not used). Without a number, a collection files as before.
+2. **Paused after an update (6.3, Futaba m-11).** The new engine leaves a stopped conversion waiting for Resume audiobook jobs. Your two sentences are in: "Converting {Title}. It stops. Continue it with Resume audiobook jobs." and the forced-stop one.
+3. **Waiting for the original title (section 4)** rows are listed under the Held filter (the Status filter that lists automatic waits). Not in Output needs attention.
+4. **Ruling 34.** The "Pause audiobook jobs before starting automatic processing" refusal is gone with nothing in its place, and so is the panel help sentence "Existing audiobook jobs must be paused before starting automatic discovery."
+5. **Cancel update, second line (6.2).** "{What} is slow to resume" for one piece of work, "are" for several.
+6. **Ruling 33's Author unclear sentence**, as drafted: "The author's name is in Latin letters. The app can't tell if they write in Russian."
+
+### 13.2 Where the build differs from the spec, and why (please confirm or correct)
+
+1. **Edit names while a book converts.** Ruling 35 (every action is accepted and queued) came after this spec. Edit names is no longer inert on a converting book: the editor opens, and Save waits for the conversion and runs then ("Save queued. Your choices are saved. It runs when this book's processing finishes."). The finished audiobook keeps the name it was made with ("Saved. The finished audiobook in Audiobooks Sorted keeps its name."). Edit names stays inert while a retry, repair or delete is queued on the row (one queued action per row), with your tooltips.
+2. **"Re-planned" (1.4).** A queued job's manifest is frozen and cannot be rewritten safely, so a Save on a book with a queued job sets that job aside (kept, as Start over does) and sends the book back to automatic processing, which researches it with the new names and queues a new job. The row says "Saved. The queued job uses these names." The new job does not keep the old one's place in the queue. The "cancelled" outcome ("The queued job is cancelled. Press Retry…") is never produced.
+3. **A Stopped row.** Save leaves the stopped job as it is. When Retry or Repair is pressed, the queue checks the names the job was planned with against the names now in force and re-plans it if they differ, so "Saved. Retry uses these names." is true.
+4. **A fix for a collection is found in its folder**, and a fix for anything else under its author. In Sergei's live «Пртоколы SCP» books the series is not read at all (the title reads "Пртоколы SCP. Сейф №1"), so "Applies to 3 books" appears when he respells the title's word, not when he types a series.
+
+### 13.3 Provisional copy for you to replace (ruling 35)
+
+| Where | Provisional string |
+| --- | --- |
+| A queued row press (Approve, Keep as separate books, Scan again, Remove from list, Save, Forget) | "{Action} queued[, n ahead]. Your choices are saved. It runs when {blocker} finishes." |
+| Its Cancel | "Cancel {action}"; tooltip "Take this {action} out of the queue. Nothing was started." |
+| A queued press refused when it ran | "{Action} cancelled: {reason}" |
+| New blocker words | "Books Arranger is still loading" / "loading"; "Audiobook conversion is running" / "the conversion"; "Automatic processing is running" / "automatic processing" |
+| Replacing "Another operation is in progress" / "the current operation" everywhere | "The app is working on another action" / "the current action" |
+| A press the page holds until its other press ends (Start over, release, Clear working files, Convert, Keep files, Prepare recovery) | "{Action} queued. It runs when the current action finishes." (while loading: "when loading finishes"), face "Queued", with Cancel |
+| A toolbar or panel button pressed while the page is busy or loading | the same line plus " Press it again to cancel." in the message line and as the tooltip; pressing again takes it back |
+| Start or Resume scanning while conversion or automatic processing runs | "Start scanning queued. It starts when {the conversion / automatic processing} finishes." |
+| Bulk Approve as is, all queued | "Queued {n} books for approval. Each is checked, then converted. Each row shows its outcome." |
+| Remove this copy while something else runs | tooltip "Remove this copy. {Blocker sentence}, so the removal is queued after you confirm." |
+| Delete book or Remove this copy pressed while another book's dialog is being prepared | face "Checking...", tooltip "Checking another book's files. This book's opens right after." |
+| Approve while closing, with names typed | "Books Arranger is closing. Your names are saved; approve again after it restarts." |
+| Recovery copies panel while deleting | "Deleting the recovery copies…" |
+
+### 13.4 Approve refusals by gate (the «Спящие красавицы» fix; provisional)
+
+Each gate now has its own code and the row says the gate and the next step; a gate with no line shows the engine's sentence, never "Approve was not accepted. Nothing was changed."
+
+| Code | Provisional row line |
+| --- | --- |
+| name_taken | An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve. |
+| job_exists | This book already has an audiobook job. Find it under Queued / creating. |
+| profiles | The files are different recordings (their audio differs). Choose the files that belong in the details panel, then approve. |
+| chapters | The parts carry chapters of their own. Approve them as one book on the set row, or keep them as separate books. |
+| cover | The cover couldn't be checked. Choose a cover in the details panel, then approve. |
+| sources | A file of this book can't be read. Check that its drive is connected, then approve again. |
+| draft | Edits in the details panel hold this book. Save or discard them, then approve. |
+| binding | The collection files changed since they were checked. Scan again, then approve. |
+| closing | Books Arranger is closing. Approve again after it restarts. |
+| identity (engine) | Approve was not accepted: the app couldn't read this book's identity from its files ({reasons}). Type its title and author, then approve. Nothing was changed. |
+
+### 13.5 Ruling 36: copy removed, replacements wanted
+
+Removed with nothing in their place: the Manual evidence field, its help and "View evidence"; "Enter verified identities. No translated title, author or genre is invented automatically."; "Matches prepare drafts; they do not approve metadata or the recording."; "Surname first when verified; otherwise the full verified name."; the "Only when verified" placeholder; "Saved values are evidence. Conflicting sources still need review."; "See View evidence." after the disagreement count. Still say "verified" and may want your words: the Author for Artist tag help ("Enter the verified author credit…"), the reader help ("Preserve the verified reader…"), the cover help ("Use available artwork when verified…"), the Edit metadata tooltip ("…save it as evidence for this book."), and Approve candidate metadata's refusal with no author, now "Confirm the author first."
+
+Save preview metadata (the "Save does nothing" fix): "Saving…" on the button, "Saved.", "Not saved.", "Saving after the current operation finishes…", and "Unsaved local review." for edits typed during a save.
+
+### 13.6 Kept as real safety refusals (please confirm)
+
+Quit while an update installs or is being cancelled (desktop), a destination that already exists, a missing or offline drive, a source that changed, damaged audio, and the update's own Cancel once the installer has started.
