@@ -418,3 +418,62 @@ Save preview metadata (the "Save does nothing" fix): "Saving…" on the button, 
 ### 13.6 Kept as real safety refusals (please confirm)
 
 Quit while an update installs or is being cancelled (desktop), a destination that already exists, a missing or offline drive, a source that changed, damaged audio, and the update's own Cancel once the installer has started.
+
+## 14. Ender's notes for Judy: the rest of ruling 35 and ruling 37 (2026-10-26, branch `ender/0222`)
+
+Sergei's ruling 37: every remaining "can't X while Y" goes before release, and names change in two places. Everything below is built. Every string marked "provisional" is in the build until you replace it.
+
+### 14.1 Names (ruling 37, no new copy)
+
+1. **Вселенная Дозоров.** The folder «Сергей Лукьяненко\Вселенная Дозоров - Межавторский цикл» is the universe «Вселенная Дозоров», and inside it the one numbered series «Межавторский цикл». A numbered book goes to `Вселенная Дозоров\Межавторский цикл\Межавторский цикл - 16 - Севастопольский дозор - Недоруб Сергей.m4b`. A book with no number in its name goes to `Вселенная Дозоров\Корона - Каплан Виталий.m4b`. The Place line and Edit names show the universe as read from the folder.
+2. **«11/22/63»** is filed as `11.22.63 - King Stephen.m4b`. The title tag keeps its slashes.
+
+### 14.2 Provisional copy: presses that now wait (ruling 35's rest)
+
+| Where | Provisional string |
+| --- | --- |
+| Resume audiobook jobs pressed while jobs pause (no longer disabled while Pausing) | message and tooltip: "Resume audiobook jobs queued. It starts when {the pause / the earlier start} finishes. Press it again to cancel." |
+| The same button pressed again | "Resume audiobook jobs cancelled. Nothing was started." / too late: "Too late to cancel: Resume audiobook jobs has already started." |
+| Pause pressed after a start (the start is dropped) | "Pause or closing stopped this start. Press Resume audiobook jobs to start again." (was "…Retry Start after pending checks stop.") |
+| Retry all, Retry selected and Convert pressed while a scan runs | "{Retry all / Retry selected / Convert} queued. It runs when the scan finishes." and, on the toolbar, " Press it again to cancel." Row: face "Queued", Cancel. |
+| Start over, the combined press or Let the app handle it while the catalog is busy | row and panel: "Start over queued. It runs when the catalog is free." (sent again every 5 s), with Cancel |
+| Clear working files while the app is busy | "Clear working files queued. It runs when the app is free." (a scan: "…when the scan finishes.") |
+| Clear working files while another program holds a file open | "Clear working files queued. It tries again when the file is released." Tried 6 times, 10 s apart. Then: "Some working files weren't cleared: a file is open in another program (an antivirus scan can hold one). Close it, then press Clear working files again." |
+| Delete recovery copies during a scan, a source cleanup or another book's deletion (the button was disabled with the engine's sentence) | button tooltip: "…Keep the finished audiobook. A scan is running, so the deletion is queued after you confirm." (or "A source cleanup is running, …"). Status: "Deletion queued. It runs when the scan finishes." / "…when the source cleanup finishes." / "It runs after the deletion before it." / "It starts shortly." Button: "Cancel deletion", tooltip "Take this deletion out of the queue. Nothing was deleted." Cancelled: "Deletion cancelled. Nothing was deleted." Too late: "Too late to cancel: the deletion has already started." |
+| Historical cleanup and restore (no page sends them) | queued in the engine during a scan or audiobook work; no copy |
+
+### 14.3 Provisional copy: real refusals now say their cause (S5, S6, S9, S10)
+
+| Case | Provisional string (was) |
+| --- | --- |
+| S5 Start over, the combined press, closing | "Books Arranger is closing. Start over after it restarts. Nothing was changed." (was "Start over was not accepted. Check the status above." / "…Nothing was changed.") |
+| S5 Let the app handle it, closing | "Books Arranger is closing. Let the app handle it after it restarts. Nothing was changed." (was "…Select the row to read why.") |
+| S6 a folder on the way is a link or junction | "A folder on the way to these files is a link or a junction, so the app can't prove what deleting would reach. Nothing was deleted." |
+| S6 the working folder holds an item the app didn't make | "The app's working folder for this book holds something it didn't make (a link or an unknown item), so it can't list what to delete. Nothing was deleted." |
+| S6 a listed file is the Sorted audiobook | "A listed file is the finished audiobook in Audiobooks Sorted itself. Nothing was deleted." |
+| S6 no files left | "This book has no files left in the catalog, so there is nothing to delete." |
+| S6 Remove this copy on a book with its own job | "This copy has an audiobook job of its own, so it isn't a spare copy. Nothing was deleted." |
+| S6 Delete book no longer offered / copy no longer proven | "Delete book isn't offered for this book any more: the app can still fix it. Nothing was deleted. Check its row." / "This book is no longer a proven copy of a finished audiobook. Nothing was deleted. Check its row." |
+| S6 outside the library folders or in Sorted | "A listed file isn't an audio file in your library folders, or it's in Audiobooks Sorted. Nothing was deleted." |
+| S6 a link or a second name (hard link) | "A file of this book is a link or has a second name on disk (a hard link), so deleting it wouldn't remove it safely. Nothing was deleted." |
+| S6 malformed request | "The delete request was incomplete. Nothing was deleted. Reload the page and try again." |
+| S9 M4B Retry or Repair from an outdated view (was "This book's status changed. Check the updated status above." for all of them) | "{Retry} was not accepted: the app doesn't support how this M4B is built. Nothing was queued." / "…the book's review or source files changed. Start over sends it back to automatic processing." / "…working files from an earlier attempt are still present. {Retry} after they are cleared." / "…working files from an earlier attempt are still present, and the app can't clear them safely. The row says what to do." / "Retry was not accepted: the app's read-only check of this M4B says it can't be converted as it is. The row shows why." / the check still running: "The app is checking this M4B before offering Retry. The row updates itself." |
+| S10 Clear working files, a file the app can't prove it made | "Some working files weren't cleared: {the app's reason}. The app keeps them in {folder}. If you don't need this earlier attempt, delete that folder in File Explorer; the row then offers Retry." (was "…The app keeps any file it can't confirm is safe to delete.") |
+
+### 14.4 Questions for Judy
+
+1. S10 sends Sergei to File Explorer for files the app refuses to delete. Is that the right next step, or do you want an "Open working folder" button (a new control, Sergei's call)?
+2. "Start over queued. It runs when the catalog is free." Is "the catalog" a word Sergei knows, or should it say "when the app is free"?
+
+### 14.5 Two fold-ins Sergei asked for (2026-10-26)
+
+1. **«The Little Sisters of Eluria»** ("Can't convert — M4B not supported") now converts. Its file carries Windows Explorer's star rating in an Xtra box; the app drops that box like the empty one of ruling 32, and the drop is listed in the receipt. No new copy.
+2. **A media check that runs past its deadline** («Потаённое окно в потаённый сад», «Регуляторы») is no longer "Needs you". Provisional copy:
+
+| Where | Provisional string |
+| --- | --- |
+| The waiting row (status "Waiting for source"), its reason in the details | "The library drive answered slowly while the app checked this book. It tries again by itself." Tried again after 2, 4, 8 and 16 minutes; the details show "Automatic retry after {time}". |
+| After the fifth deadline in a row (Held) | "The library drive answered too slowly 5 times while the app checked this book. Check that the drive is connected and not busy, then press Scan again." |
+| A record saved before this build | shown as the waiting sentence, never "Owned media operation exceeded its deadline" |
+
+Question: is "the library drive" right for Sergei's Z: share, or should it name the drive ("Z:")?
