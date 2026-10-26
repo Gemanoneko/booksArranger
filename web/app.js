@@ -310,8 +310,12 @@ function settleLoad(tookMs){
   if(notYetSentences.has($('message').textContent))message();
   $('attention-loading').hidden=true;$('list-skeleton').hidden=true;
   if(strip){
+    // Futaba's 0.22.1 QA, m-6: the strip shrank by 53 px at the settle (bar, detail line and margins), moving Quit and
+    // everything under it past Judy's 48 px limit (3.7, point 4). Her fallback: the strip keeps its height for the session.
+    const height=strip.getBoundingClientRect?.().height;
     if(loadReadyMs===null)strip.hidden=true;  // an engine that loads before it answers: no strip at all
-    else{strip.classList?.remove('alert');strip.classList?.add('ready');setText('load-word','Ready');setText('load-text',LS.readyLine(loadReadyMs).replace(/^Ready · /,''));}
+    else{strip.classList?.remove('alert');strip.classList?.add('ready');setText('load-word','Ready');setText('load-text',LS.readyLine(loadReadyMs).replace(/^Ready · /,''));
+      if(height>0&&strip.style)strip.style.minHeight=height+'px';}
     for(const id of ['load-bar','load-detail','load-actions','load-details'])$(id).hidden=true;
   }
   if(loadReadyMs!==null)announceLoad('Books Arranger is ready.');

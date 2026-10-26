@@ -149,8 +149,12 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     assert.equal(h.node('filter').getAttribute('aria-disabled'),null,'looking works once the books are on screen');
     assert.equal(h.node('start').getAttribute('aria-disabled'),'true','changing still waits');
     h.press(h.node('start'));
+    h.node('load-strip').getBoundingClientRect=()=>({height:111.5});  // the loading strip's rendered height
     h.answer=answerWith(loading({step:'done',n:4,parts:ALL,took_ms:99400}));await h.poll();await flush();
     assert.equal(h.node('load-word').textContent,'Ready');assert.equal(h.node('load-text').textContent,'Loaded in 1 min 39 s');
+    // Futaba's 0.22.1 QA, m-6: the settled strip keeps the height it had while loading (Judy 3.7, the fallback), so
+    // Quit and everything under it never move (they moved 53 px; the limit is 48).
+    assert.equal(h.node('load-strip').style.minHeight,'111.5px');
     for(const id of ['load-bar','load-detail','load-actions','load-details'])assert.equal(h.node(id).hidden,true,id);
     assert.equal(h.node('start').hasAttribute('data-not-yet'),false);assert.equal(h.node('start').getAttribute('aria-disabled'),null);
     assert.notEqual(h.node('start').title,'Not yet: Books Arranger is still loading. This works when loading finishes.');
