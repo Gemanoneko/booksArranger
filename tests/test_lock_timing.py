@@ -209,6 +209,41 @@ class ApprovalPreviewTests(ApproveFixture):
             self.service.approval_preview(row['id'], row['revision'])
             self.assertEqual(len(calls), 3, 'a new rule computes it again')
 
+    def test_the_goes_to_line_is_reused_while_a_job_only_reports_progress_and_computed_again_when_what_it_reads_changes(self):
+        # 2026-10-26: the stamp read max(updated) of every job, which a converting job moves several times a second, so
+        # the list computed every held row again while anything converted. Research reads the jobs' manifests (library
+        # and confirmed spellings), never their progress. A taken-back rule and an approved book's metadata change it.
+        import author_rules, datetime
+        tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера', title='Глава 1', track='1/1')
+        row = self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db); rule = author_rules.append(db, 'keep', 'Кто-то Новый', source='test')
+            db.execute('CREATE TABLE IF NOT EXISTS audio_jobs (job_id TEXT PRIMARY KEY, manifest TEXT NOT NULL, manifest_hash TEXT NOT NULL, state TEXT NOT NULL, stage TEXT NOT NULL, attempt_id TEXT, journal TEXT NOT NULL, output TEXT, reason TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)')
+            db.execute("INSERT INTO audio_jobs VALUES('fixture-job','{\"candidate_id\":\"elsewhere\"}','h1','Running','encode',NULL,'[]',NULL,'','2026-10-26T00:00:00+00:00','2026-10-26T00:00:00+00:00')")
+        calls = []
+        real = self.service.automatic.research.approved
+        def moment():
+            return datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with patch.object(self.service.automatic.research, 'approved', lambda *a, **k: calls.append(1) or real(*a, **k)):
+            first = self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(len(calls), 1)
+            for _ in range(3):
+                time.sleep(0.01)
+                with connect(self.inv.database) as db: db.execute("UPDATE audio_jobs SET updated=?,stage='encode' WHERE job_id='fixture-job'", (moment(),))
+                self.assertEqual(self.service.approval_preview(row['id'], row['revision']), first)
+            self.assertEqual(len(calls), 1, 'progress of a job is not something the line reads')
+            with connect(self.inv.database) as db: db.execute("UPDATE audio_jobs SET manifest_hash='h2' WHERE job_id='fixture-job'")
+            self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(len(calls), 2, 'a rewritten manifest (series backfill) computes it again')
+            with connect(self.inv.database) as db: author_rules.retract(db, rule, source='test')
+            self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(len(calls), 3, 'a taken-back rule computes it again')
+            with connect(self.inv.database) as db:
+                db.execute('CREATE TABLE IF NOT EXISTS candidate_context(id TEXT PRIMARY KEY,revision INTEGER NOT NULL,data TEXT NOT NULL)') if not db.execute("SELECT 1 FROM sqlite_master WHERE name='candidate_context'").fetchone() else None
+                db.execute("INSERT INTO candidate_context(id,revision,data) VALUES('fixture-context',1,'{}')")
+            self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(len(calls), 4, "another book's saved or approved metadata (confirmed spellings) computes it again")
+
 
 class ListReadLimitTests(ApproveFixture):
     # The limit leaves the gate (seven workers at once) room: one page took 0.2-2.0 s alone on a live-sized catalog (1,572

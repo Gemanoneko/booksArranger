@@ -2380,14 +2380,26 @@ class MergeService:
         return row,result
 
     def _approval_stamp(self):
-        """What research.approved() reads beyond the book: the catalog revision (folder siblings), the finished and queued
-        books (library spellings and confirmed spellings) and Sergei's author rules."""
+        """What research.approved() reads beyond the book: the catalog revision (folder siblings), the job manifests
+        (library and confirmed spellings, the authors already filed), the admitted books and the saved or approved
+        metadata (confirmed spellings), and Sergei's author rules with their retractions.
+
+        2026-10-26: the jobs part was count and max(updated); a converting job moves updated several times a second, so
+        while anything converted every held row of the list was computed again (0.3 s each). A job's progress is not
+        read; its manifest is, and a manifest changes only when a job is added, removed or rewritten (series backfill),
+        each of which changes its hash. The retractions and the saved metadata were not in the stamp at all."""
+        import hashlib
         with connect(self.inventory.database) as db:
-            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules')")}
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules','author_rule_retractions','candidate_context')")}
+            manifests=hashlib.sha256()
+            if 'audio_jobs' in have:
+                for job,digest in db.execute('SELECT job_id,manifest_hash FROM audio_jobs ORDER BY job_id'):manifests.update(f'{job}\0{digest}\n'.encode('utf-8','surrogatepass'))
             return (tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
-                    tuple(db.execute('SELECT count(*),max(updated) FROM audio_jobs').fetchone()) if 'audio_jobs' in have else (),
-                    tuple(db.execute("SELECT count(*) FROM automatic_candidates WHERE state='Queued'").fetchone()) if 'automatic_candidates' in have else (),
-                    tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rules').fetchone()) if 'author_rules' in have else ())
+                    manifests.hexdigest() if 'audio_jobs' in have else (),
+                    tuple(db.execute("SELECT count(*),max(attempted) FROM automatic_candidates WHERE state='Queued'").fetchone()) if 'automatic_candidates' in have else (),
+                    tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rules').fetchone()) if 'author_rules' in have else (),
+                    tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rule_retractions').fetchone()) if 'author_rule_retractions' in have else (),
+                    tuple(db.execute('SELECT count(*),sum(revision) FROM candidate_context').fetchone()) if 'candidate_context' in have else ())
 
     def _approval_destination(self,row,result):
         """(path relative to the output folder, absolute path, reason when there is none) Approve files this result as."""
