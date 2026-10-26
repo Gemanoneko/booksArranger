@@ -15,7 +15,7 @@ import author_rules
 import groups
 import local_identity
 from metadata import propose
-from public_research import PublicResearch, ResearchWait
+from public_research import PublicClient, PublicResearch, ResearchWait
 from source_identity import source_gate
 
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'folder-structure-tests'; AREA.mkdir(parents=True, exist_ok=True)
@@ -383,6 +383,32 @@ class SeriesFolderFileTests(Base):
         self.assertEqual(local_identity.whole_in_book_folder(lone, []), 'Игры Немезиды')
         self.assertEqual(local_identity.whole_in_book_folder(lone, [{'filename': '5. Игры Немезиды 2.m4b', 'tags': {}}]), '')
         self.assertEqual(local_identity.whole_in_book_folder(lone, None), '')
+        # The Expanse #5 (Sergei and Jane, 2026-10-26): the series comes from the series lookup after conversion, never from
+        # the folder, which gives only the position. The converted book has no series, so series backfill takes it up
+        # (candidates: no series, a title and an author), and its Goodreads lookup, with the answers Goodreads gave on
+        # 2026-10-26 (search: the Russian edition «Игры Немезиды (Пространство, #5)», a translator among the credits; its
+        # book page: series The Expanse, #5), supplies The Expanse #5. The rename then files it as below; the English
+        # title «Nemesis Games» is the later rename pass's (rulings 16 and 21).
+        from metadata import propose
+        from test_series_research import Sources, book_page, search_page
+        row = next(iter(self.catalog([file_row(live, **tags)]).values()))
+        result = self.lookup(row)
+        review = dict(result['review'], organization_policy='books-hierarchy-v2')  # as the job's manifest carries it
+        self.assertEqual((review['title'], review['canonical_author'], review.get('series', '')), ('Игры Немезиды', 'Corey James S. A.', ''), 'a series backfill candidate')
+        self.assertEqual(propose('', SORTED, 'audiobook', {}, review, automatic_facts=result.get('metadata_facts'))['path'],
+                         SORTED + '\\Corey James S. A\\Игры Немезиды - Corey James S. A.m4b', 'converted first under its own name')
+        sources = Sources()
+        sources.goodreads_search = search_page(('42482205', 'Игры Немезиды (Пространство, #5)', ['James S.A. Corey', 'Джеймс Кори', 'Галина Соловьева']))
+        sources.goodreads_books['42482205'] = book_page('42482205', 'Игры Немезиды', ['James S.A. Corey', 'Джеймс Кори'], 'The Expanse', '5')
+        hours = iter(range(10 ** 6, 10 ** 9, 3600))  # each request an hour after the last: no real pacing wait in a test
+        research = PublicResearch(PublicClient(str(Path(self.research.client.database).parent / 'series.sqlite3'), fetch=sources.fetch, clock=lambda: next(hours)), leads=[])
+        found = research._series_goodreads(review['title'], review['canonical_author'], threading.Event(), {'remaining': 6, 'lane': 'series'}, {'sources': []})
+        self.assertEqual((found['name'], found['number']), ('The Expanse', '5'))
+        facts = dict(result.get('metadata_facts') or {}, series_state='verified')  # series backfill's own step (SeriesBackfill.apply)
+        renamed = propose('', SORTED, 'audiobook', {}, dict(review, series=found['name'], number=found['number']), automatic_facts=facts)
+        self.assertEqual(renamed['path'], SORTED + '\\Corey James S. A\\The Expanse\\The Expanse - 5 - Игры Немезиды - Corey James S. A.m4b')
+        # Positive control: under the old title «Игры Немезиды 1» Goodreads' edition is no match, so no series came.
+        self.assertIsNone(research._series_goodreads('Игры Немезиды 1', review['canonical_author'], threading.Event(), {'remaining': 6, 'lane': 'series'}, {'sources': []}))
         # A bitrate is no part number: "Антитела 128" alone in "Антитела" is still asked (Q3), never cut to «Антитела».
         bitrate = {'members': [{'path': ROOT + '\\Unsorted\\Антитела\\Антитела 128.mp3', 'filename': 'Антитела 128.mp3'}]}
         self.assertEqual(local_identity.whole_in_book_folder(bitrate, []), '')
