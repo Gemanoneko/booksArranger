@@ -10,6 +10,10 @@ class OrganizationTests(unittest.TestCase):
     def test_universe_cycle(self):self.assertEqual(self.path(universe='Universe'),'Universe/Cycle/Cycle - 2 - Book - Writer.m4b')
     def test_universe_standalone(self):self.assertEqual(self.path(universe='Universe',series='',number=''),'Universe/Book - Writer.m4b')
     def test_cycle_collection(self):self.assertEqual(self.path(anthology=True,number=''),'Writer/Cycle/Book - Cycle - Short Stories.m4b')
+    def test_collection_with_its_series_and_position_files_under_the_collections_folder(self):
+        # 0.22.2 (Sergei 2026-10-26, «Протоколы SCP»): Сборники\<Series>\<Series> - <N> - <Title> - <Author>.m4b.
+        self.assertEqual(self.path(anthology=True,title='Сейф №1',canonical_author='Разные авторы',series='Протоколы SCP',number='1'),
+                         'Сборники/Протоколы SCP/Протоколы SCP - 1 - Сейф №1 - Разные авторы.m4b')
     def test_universe_collection(self):self.assertEqual(self.path(anthology=True,universe='Universe',series='',number=''),'Universe/Book - Universe - Short Stories.m4b')
     def test_multi_author_collection(self):self.assertEqual(self.path(anthology=True,multi_author=True),'Cycle/Book - Cycle - Short Stories.m4b')
     def test_collection_without_title(self):self.assertEqual(self.path(anthology=True,title=''),'Writer/Cycle/Cycle - Short Stories.m4b')

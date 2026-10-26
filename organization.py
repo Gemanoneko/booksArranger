@@ -30,6 +30,14 @@ def plan(output_root,review,*,collection_fallback='legacy',facts=None):
         return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
                 'accepted_routing':{'author':author,'cycle':'','universe':'','number':'','collection':False,'multi_author_cycle':False}}
     if multi and not (cycle or universe or collection):raise ValueError('Confirm the cycle or universe')
+    if collection and cycle and number and title and not universe and not multi:
+        # 0.22.2 (Sergei 2026-10-26, «Протоколы SCP»; Brief: "Сборники/Series for a series of collections"): a collection
+        # with its series and position files under Сборники\<Series>\ with the series naming of every book,
+        # "<Series> - <N> - <Title> - <Author>". Without a position it files as before.
+        destination=append_recording_suffix(os.path.join(output_root,'Сборники',safe_name(cycle),' - '.join(safe_name(v) for v in (cycle,number,title,author))+'.m4b'),review,facts)
+        if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
+        return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
+                'accepted_routing':{'author':author,'cycle':cycle,'universe':'','number':number,'collection':True,'multi_author_cycle':False}}
     folders=[]
     if universe:
         folders.append(safe_name(universe))
