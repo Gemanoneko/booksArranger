@@ -320,6 +320,28 @@ class CandidateReviewService:
     # 0.22.0 review (Judy 2026-10-24, B3): the three hold chips follow Name taken in the same set.
     ATTENTION_ORDER={**{group:n-len(NEEDS_GROUPS) for n,group in enumerate(NEEDS_GROUPS)},**JOB_ORDER}  # files_missing -8 ... order_unclear -1
 
+    def _names_lines(self,rows):
+        """Edit names (Judy 0.22.2 sections 2 and 9), the shown page only: each row's 'place' {universe, series, number,
+        collection} and 'entered' [field...], from stored values alone (the book's saved review and Sergei's saved names;
+        no research per row). An unreadable store leaves the lines out."""
+        import entered_names
+        try:
+            stored=entered_names._rows(self.inventory.database)
+            for row in rows:
+                saved=entered_names.book_values(self.inventory.database,row,stored)
+                review=row.get('review') if isinstance(row.get('review'),dict) and row.get('review') else {}
+                facts=((row.get('automatic') or {}).get('metadata_facts') or row.get('metadata_facts') or {}) if not review else {}
+                # A book not approved yet: its research record's facts (a collection the research filed as one).
+                place={'universe':str(review.get('universe') or ''),'series':str(review.get('series') or ''),'number':str(review.get('number') or ''),
+                       'collection':review.get('anthology') is True or isinstance(facts,dict) and bool((facts.get('collection') or {}).get('kind'))}
+                for field in ('universe','series','number','collection'):
+                    if field in saved:place[field]=saved[field] if field=='collection' else str(saved[field])
+                if not (place['series'] and place['number']):place['series']=place['number']=''
+                row['place']=place
+                row['entered']=entered_names.entered(saved)
+        except (sqlite3.Error,OSError,KeyError,TypeError):
+            for row in rows:row.pop('place',None);row.pop('entered',None)
+
     def page(self,limit=100,offset=0,search='',status='all',group=None):
         """One page of the book list; replacement relations are read once for the page, not once per lookup."""
         snapshot=getattr(getattr(self.jobs,'replacements',None),'snapshot',None) if self.jobs else None
@@ -488,6 +510,7 @@ class CandidateReviewService:
                     row['original_title']={'state':'waiting','destination':destination}
                     # The row's own Approve (rulings 6b and 29) through the to-do row's machinery; never in bulk.
                     row['ask']={'kind':'original_title','why':'','reasons':[original_titles.WAIT_REASON],'fields':fields,'candidates':[],'destination':destination,'odd_name':True}
+            self._names_lines(rows)
             import book_delete
             recheck=False
             for row in rows:

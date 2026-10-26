@@ -555,30 +555,96 @@ class PublicResearch:
         import local_identity
         siblings,index=self._siblings(row,root)
         return local_identity.identify(row,root,siblings,index['readers'] if index else None,index,self.rules()),index
-    def approved(self,row,root,title=None,author=None,chosen=None):
+    def names_read(self,row,root,local=None):
+        """(read, scope, record): the values the app reads for the editor (Judy 0.22.2 section 1) before Sergei's corrections,
+        where a name fix from this book reaches (entered_names.scope_of), and the identity record. A collection's author
+        reads Разные авторы (Judy 2: the Author field of a collection)."""
+        import local_identity,entered_names
+        record=local if local is not None else self.identity(row,root)[0]
+        shown=local_identity.shown(record)
+        series=record.get('series') or {}
+        collection=bool(shown['collection'])
+        read={'title':shown['title'],'author':local_identity.COLLECTION_LABEL if collection else shown['author'],'series':series.get('name','') if series.get('number') else '',
+              'number':series.get('number','') if series.get('name') else '','universe':record.get('universe',''),'collection':collection}
+        return read,entered_names.scope_of(row,shown['author'],collection),record
+    def with_names(self,row,root,local,typed=None):
+        """The identity record with Sergei's saved names (Edit names, entered_names) and any values typed now (typed:
+        {field: value}; typed wins). Title and author become his (state entered, rulings 6a and 6b); series and number
+        are his series (state entered); universe and collection are carried in record['names'] for the policy.
+        record['names_digest'] is entered_names.digest_for the book (stored with the job: a job planned under other names
+        never starts, AudioJobs' claim check). Unchanged when nothing may reach the book and nothing is typed."""
+        import local_identity,entered_names
+        import copy
+        database=self.client.database
+        rows=entered_names._rows(database)
+        stamp=entered_names.digest_for(database,row,rows)
+        found={}
+        if stamp!=entered_names.NONE:
+            read,scope,_=self.names_read(row,root,local)
+            found=entered_names.effective(database,row,read,scope,rows)
+        values={field:item['value'] for field,item in found.items()}
+        values.update({field:value for field,value in (typed or {}).items() if value is not None})
+        if not values and stamp==entered_names.NONE:return local
+        if stamp==entered_names.NONE:read,scope,_=self.names_read(row,root,local)
+        from organization import NO_AUTHOR
+        record=copy.deepcopy(local)
+        record['names_digest']=stamp
+        if not values:
+            record['names_entered']=[]
+            return record
+        collection=bool(values['collection']) if 'collection' in values else read['collection']
+        title=local_identity.text(values.get('title',read['title']));author=local_identity.text(values.get('author',read['author']))
+        if collection and author==local_identity.COLLECTION_LABEL:author=''
+        changed={field for field in ('title','author') if field in values and local_identity.text(values[field])!=local_identity.text(read[field])}
+        if title and (changed or collection!=read['collection']):
+            record=local_identity.settled(local,title,author or ('' if collection else NO_AUTHOR),'entered',changed,collection=collection,rules=self.rules(),
+                                          folder='\\'.join(reversed(local_identity._ancestors(row,root))))
+            if collection and not record.get('route'):
+                # Marked a collection by Sergei: filed under Сборники like a collection the files show.
+                record['route']={'kind':'narrator_collection','signals':['entered by you'],'narrators':[],'credit':local_identity.COLLECTION_LABEL,'credit_basis':'Entered by you'}
+        if 'series' in values or 'number' in values:
+            name=local_identity.text(values.get('series',read['series']));number=local_identity.text(values.get('number',read['number']))
+            record['series']={'name':name,'number':number,'provider':'entered'} if name and number else None
+            for field,value in (('series',name),('number',number)):
+                record['fields'][field]={'state':'entered' if value else 'grey','value':value if name and number else '','basis':'entered','how':'Entered by you (Sergei 2026-10-24, ruling 6a)',
+                                         'sources':[{'kind':'entered by you','value':value}] if value else [],'partial':False}
+            record['gaps']=[gap for gap in record.get('gaps') or [] if gap not in ('series','number')]
+        names={field:local_identity.text(values[field]) for field in ('series','number','universe') if field in values}
+        if names:record['names']=names
+        record['names_entered']=[field for field in entered_names.FIELDS if field in found]
+        record['names_digest']=stamp
+        return record
+    def approved(self,row,root,title=None,author=None,chosen=None,names=None):
         """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
         typed values winning (None: nothing typed; '' for the author: no author), with no Internet request, so the
         destination shown before the press is exactly the one used. An empty author files a collection under
         Сборники when the row is one, else under Без автора. chosen: the author his Same author? answer gives (not a
-        typed value, Senua's 0.22.0 review m3). Raises ValueError('Type a title first.')."""
+        typed value, Senua's 0.22.0 review m3). names (Edit names, Judy 0.22.2 section 1): the editor's series, number,
+        universe and collection, over his saved names. Raises ValueError('Type a title first.')."""
         import local_identity
         from organization import NO_AUTHOR
         record,index=self.identity(row,root)
+        typed_names={field:value for field,value in (names or {}).items() if field in ('series','number','universe','collection')}
+        record=self.with_names(row,root,record,typed=typed_names)
         shown=local_identity.shown(record)
         typed=set()
         if title is not None and text(title):typed.add('title')
         if author is not None and text(author):typed.add('author')
-        final_title=text(title) if 'title' in typed else shown['title']
+        typed|={field for field in record.get('names_entered') or () if field in ('title','author')}
+        final_title=text(title) if title is not None and text(title) else shown['title']
         final_author=text(author) if author is not None else text(chosen) if chosen is not None else shown['author']
         if not final_title:raise ValueError('Type a title first.')
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
         settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
                                        folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
+        for key in ('names','names_entered','names_digest'):
+            if key in record:settled[key]=copy.deepcopy(record[key])
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
-        result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown}
+        result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
+                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or [])}
         return result
     def local_generation(self):
         from openlibrary_index import generation
@@ -812,6 +878,7 @@ class PublicResearch:
                 if title and (author or shown['collection']):
                     local=local_identity.settled(local,title,author,'entered',typed,collection=not author and shown['collection'],rules=self.rules(),
                                                  folder='\\'.join(reversed(local_identity._ancestors(row,root))))
+            local=self.with_names(row,root,local)  # Edit names (Judy 0.22.2 section 1): his corrections come first
             result['local_agreement']=local_identity.summary(local)
             if local.get('route'):return self._local_collection(row,local,result)
             if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)
@@ -1038,9 +1105,13 @@ class PublicResearch:
         if local.get('version')==local_identity.IDENTITY_VERSION:work['identity_rule']=local_identity.IDENTITY_VERSION
         collection={'kind':'narrator_collection','narrators':list(route['narrators']),'signals':list(route['signals']),'credit_basis':route['credit_basis']}
         summary=local_identity.summary(local)
-        review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary)
+        saved_names=local.get('names') or {}
+        # Edit names (0.22.2; Sergei, «Протоколы SCP»): a collection in a series, with its position, files under Сборники/<Series>.
+        review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary,series=(local.get('series') or {}).get('name','') if ('series' in saved_names or 'number' in saved_names) else '',number=(local.get('series') or {}).get('number','') if ('series' in saved_names or 'number' in saved_names) else '')
         review['narrator']='; '.join(route['narrators'])
+        if saved_names.get('universe'):review['universe']=saved_names['universe']
         facts['work_ids']=[work['id']]
+        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
         reasons=list(reasons)+source_gate(row,work)
         result['work']=work
         result['sources'].insert(0,{'url':'','kind':'local_agreement','verified_identity':True,'agreement':summary})
@@ -1124,6 +1195,10 @@ class PublicResearch:
         for value in names+([catalog.get('author_native'),catalog.get('author_latin')] if catalog else []):
             if value and value not in authors:authors.append(value)
         series=dict(local['series']) if local['series'] else dict(filled.get('series') or {})
+        saved_names=local.get('names') or {}
+        if 'series' in saved_names or 'number' in saved_names:
+            # Edit names (Judy 0.22.2 section 1): his series and number (with_names); an empty series makes the book standalone.
+            series=dict(local['series']) if local.get('series') else {}
         work_ids=[catalog['work_id']] if catalog.get('work_id') else [local_identity.work_id(local)]
         work={'id':work_ids[0],'titles':titles,'author_aliases':author_variants(authors),'original_language':language,
             'original_title':catalog.get('original_title') if language else title,'policy_version':'standing-17-v1','full_author_verified':True,
@@ -1180,6 +1255,7 @@ class PublicResearch:
         if original is not None:result['original_title']={'state':original['state'],'title':original['record'].get('title','') if original['state']=='found' else ''}
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
+        if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
         if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 29: the details panel's fact
         if spelling:facts['author_spelling']=spelling
         # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series
@@ -1211,9 +1287,11 @@ class PublicResearch:
         if review['series']:
             url=series.get('source_url','')
             why=(SERIES_WHY.get(series.get('provider'),'Series and position from the catalog record matching the locally agreed title and author.') if url else
+                'Series and number entered by you (Edit names; Sergei 2026-10-24, ruling 6a): '+review['series']+'; '+review['number']+'.' if series.get('provider')=='entered' else
                 'Embedded series tags repeated in the folder/file name: '+described('series')+'; '+described('number')+'.')
             evidence('series',review['series'],url,why);evidence('number',review['number'],url,why)
             facts['series_source']=series_source(series)
+        if saved_names.get('universe') is not None and 'universe' in saved_names:review['universe']=saved_names['universe']  # Edit names, ruling 30
         result.update(review=review,metadata_facts=facts)
         result['reasons']=list(dict.fromkeys(reasons))
         # Nothing waits for a source (0.22.1): the missing fields were read from the cache, the rest is filled later.

@@ -128,7 +128,11 @@ LOAD_STEPS = ('engine', 'catalog', 'session', 'books')
 LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
 NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
 # Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
-LOOKING = {'/api/inspect', '/api/open-folder'}
+LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names'}  # 0.22.2: opening Edit names only reads (Judy 1.7)
+NAMES_ROUTES = ('/api/candidate/names', '/api/candidate/names-save', '/api/candidate/names-forget')
+NAME_FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection')
+NAMES_QUEUED = {'retry': 'A retry is queued for this book. Cancel it to use this.', 'repair': 'A repair is queued for this book. Cancel it to use this.',
+                'delete': 'A delete is queued for this book. Cancel it to use this.'}
 
 
 class LoadAborted(Exception):
@@ -685,6 +689,18 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(value,str) or len(value)>limit: raise ValueError('Text exceeds its allowed bound')
         return value
 
+    @staticmethod
+    def names_value(value,partial=False):
+        """Edit names values: an object of the six fields (texts, collection a boolean); partial: any of series, number,
+        universe and collection (Approve and its preview)."""
+        allowed=('series','number','universe','collection') if partial else NAME_FIELDS
+        if not isinstance(value,dict) or not value and not partial or any(key not in allowed for key in value):raise ValueError('Edit names takes '+', '.join(allowed))
+        for key,item in value.items():
+            if key=='collection':
+                if type(item) is not bool:raise ValueError('Collection must be an explicit boolean')
+            elif not isinstance(item,str) or len(item)>1000:raise ValueError('Text exceeds its allowed bound')
+        return dict(value)
+
     def candidate_identity(self,data):
         library=self.library(data.get('library'))
         if library!='Audiobooks': raise ValueError('Audiobook operations apply only to Audiobooks')
@@ -1003,18 +1019,42 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'});return
             self.response(200,result);return
+        if path in NAMES_ROUTES:
+            # Edit names (Sergei 2026-10-26; Judy 0.22.2 section 1): open (read), Save, Forget. Nothing touches a file.
+            self.shape(data,{'library','id','revision'}|({'names'} if path.endswith('/names-save') else {'entry_id'} if path.endswith('/names-forget') else set()))
+            library,id,revision=self.candidate_identity(data)
+            if path=='/api/candidate/names':
+                try:self.response(200,{'editor':self.server.merge.names_editor(id,revision)})
+                except ValueError as error:self.response(409,{'error':str(error),'code':'changed' if 'changed' in str(error) else 'refused'})
+                return
+            queued=self.server.actions.book_action(id) if getattr(self.server,'actions',None) is not None and hasattr(self.server.actions,'book_action') else None
+            if queued in NAMES_QUEUED:
+                self.response(409,{'error':NAMES_QUEUED[queued],'code':'queued','action':queued});return  # one queued action per row (Judy 1.4)
+            try:
+                if path.endswith('/names-save'):result=self.server.merge.names_save(id,revision,self.names_value(data['names']))
+                else:result=self.server.merge.names_forget(id,revision,self.text_value(data['entry_id'],64))
+            except ValueError as error:
+                code=getattr(error,'code',None) or ('changed' if 'Candidate changed' in str(error) else 'refused')
+                try:row=reviews.enrich(reviews._row(library,id))
+                except ValueError:row=None
+                self.response(409,{'error':str(error),'code':code,'row':row});return
+            try:result['row']=reviews.enrich(reviews._row(library,id))
+            except ValueError:result['row']=None
+            self.response(200,result);return
         if path in ('/api/candidate/approve','/api/candidate/approve-preview'):
             # Sergei's Approve and its "Goes to" line (rulings 6a, 6b, 10, 11a; Judy's attention to-do spec, section 5).
-            self.shape(data,{'library','id','revision'},{'title','author'}|({'without_missing','choice','path'} if path.endswith('/approve') else set()))
+            # names (0.22.2, Judy 1.3): the open Edit names editor's series, number, universe and collection.
+            self.shape(data,{'library','id','revision'},{'title','author','names'}|({'without_missing','choice','path'} if path.endswith('/approve') else set()))
             library,id,revision=self.candidate_identity(data)
             title=self.text_value(data.get('title'),1000,nullable=True);author=self.text_value(data.get('author'),1000,nullable=True)
+            names=self.names_value(data['names'],partial=True) if data.get('names') is not None else None
             if path.endswith('/approve-preview'):
-                self.response(200,{'preview':self.server.merge.approval_preview(id,revision,title,author)});return
+                self.response(200,{'preview':self.server.merge.approval_preview(id,revision,title,author,**({'names':names} if names is not None else {}))});return
             without=data.get('without_missing',False);choice=data.get('choice')
             shown=self.text_value(data.get('path'),1000,nullable=True)  # the "Goes to" line the row showed (Senua's 0.22.0 review, m1)
             if type(without) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
             if choice not in (None,'same','different'): raise ValueError('Same author? takes same or different')
-            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice,path=shown)
+            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice,path=shown,**({'names':names} if names is not None else {}))
             except ValueError as error:
                 text=str(error)
                 # Judy 2026-10-24 (0.22.0 review B5.4): a safety gate is named in the row's refusal line.
@@ -1072,7 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack'}
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES}
             with self.server.control_lock:
                 if self.server.closing:
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return

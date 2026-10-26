@@ -211,6 +211,10 @@ class MergeService:
         self.jobs.m4b_working_clear=self._m4b_working_clear  # live check for a Retry refused on working files
         self.jobs.repair_check_failed=self._repair_check_failed  # a dry run that cannot finish reads "can't open", never "checking"
         self.jobs.working_state=self._working_state  # leftover working files: cleanable or blocked, live (follow-up 2)
+        # Edit names (Judy 0.22.2 section 1.4): a job planned under other names than Sergei's saved ones never starts.
+        self.jobs.names_stamp=self._names_stamp
+        self.jobs.names_stale=self._names_stale
+        self.jobs.names_replan=self._names_replan
         try:
             # Once per catalog: v0.18.0 plain-text Retry/Repair refusals become typed records (RefusedRetry spec).
             import m4b_readmission
@@ -2367,23 +2371,30 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return {'removed':True}
 
-    def _approval_result(self,id,revision,title=None,author=None,chosen=None):
-        """(row, research result) of Approve with the values shown (typed values win); no network, read-only."""
+    def _approval_result(self,id,revision,title=None,author=None,chosen=None,names=None):
+        """(row, research result) of Approve with the values shown (typed values win); no network, read-only. names: the
+        Edit names editor's series, number, universe and collection (Judy 0.22.2 section 1), over his saved names."""
         def bounded(value,name):
             if value is None:return None
             if not isinstance(value,str) or len(value)>1000 or any(c in value for c in '\x00\r\n'):raise ValueError('The '+name+' must be one line of text')
             return value
         title,author=bounded(title,'title'),bounded(author,'author')
+        if names is not None:
+            import entered_names
+            names={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
+            entered_names.check(names)
         row=self.reviews._row('Audiobooks',id,revision)
         # 0.22.1 (item 1, the list read during research): every listed to-do row computes this for its "Goes to" line and
         # Author field, about 0.3 s each (folder siblings, the catalog index, the rules); a page of 100 held rows took
         # 11-30 s while research ran. The answer is reused while the book, the rules and the catalog facts it reads are
         # unchanged; the caller still checks the destination on disk live.
-        key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,self._approval_stamp())
+        key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,json.dumps(names,sort_keys=True,ensure_ascii=False) if names else None,self._approval_stamp())
         cache=self.__dict__.setdefault('_approval_results',{})
         kept=cache.get(key)
         if kept is not None:return row,copy.deepcopy(kept)
-        result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**({'chosen':chosen} if chosen is not None else {}))
+        extra={'chosen':chosen} if chosen is not None else {}
+        if names:extra['names']=names
+        result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**extra)
         if len(cache)>=4096:cache.clear()
         cache[key]=copy.deepcopy(result)
         return row,result
@@ -2399,7 +2410,7 @@ class MergeService:
         each of which changes its hash. The retractions and the saved metadata were not in the stamp at all."""
         import hashlib
         with connect(self.inventory.database) as db:
-            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules','author_rule_retractions','candidate_context')")}
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules','author_rule_retractions','candidate_context','names_entries')")}
             manifests=hashlib.sha256()
             if 'audio_jobs' in have:
                 for job,digest in db.execute('SELECT job_id,manifest_hash FROM audio_jobs ORDER BY job_id'):manifests.update(f'{job}\0{digest}\n'.encode('utf-8','surrogatepass'))
@@ -2408,7 +2419,9 @@ class MergeService:
                     tuple(db.execute("SELECT count(*),max(attempted) FROM automatic_candidates WHERE state='Queued'").fetchone()) if 'automatic_candidates' in have else (),
                     tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rules').fetchone()) if 'author_rules' in have else (),
                     tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rule_retractions').fetchone()) if 'author_rule_retractions' in have else (),
-                    tuple(db.execute('SELECT count(*),sum(revision) FROM candidate_context').fetchone()) if 'candidate_context' in have else ())
+                    tuple(db.execute('SELECT count(*),sum(revision) FROM candidate_context').fetchone()) if 'candidate_context' in have else (),
+                    # Edit names (0.22.2): Sergei's saved names and fixes, with their Forgets.
+                    tuple(db.execute("SELECT count(*),coalesce(max(saved_utc),'') FROM names_entries").fetchone()) if 'names_entries' in have else ())
 
     def _approval_destination(self,row,result):
         """(path relative to the output folder, absolute path, reason when there is none) Approve files this result as."""
@@ -2418,14 +2431,272 @@ class MergeService:
         path=preview.get('path') or ''
         return (os.path.relpath(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
-    def approval_preview(self,id,revision,title=None,author=None):
+    def approval_preview(self,id,revision,title=None,author=None,names=None):
         """Judy's "Goes to" line: what Approve would file this book as, with these values. {'path' relative to the output
-        folder, 'absolute', 'taken' (a file already there: never overwritten), 'title', 'author', 'reason'}. Read-only."""
-        row,result=self._approval_result(id,revision,title,author)
+        folder, 'absolute', 'taken' (a file already there: never overwritten), 'title', 'author', 'reason'}. Read-only.
+        names (Edit names, Judy 0.22.2 section 1): the editor's series, number, universe and collection; the answer then
+        also has 'place' (the Place line's values, the planner's) and 'applies' (the books a Save would reach)."""
+        row,result=self._approval_result(id,revision,title,author,names=names)
         relative,path,reason=self._approval_destination(row,result)
         approval=result['approval']
-        return {'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
+        answer={'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
                 'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':reason}
+        if names is not None:
+            answer['place']=self._place(result.get('review') or {})
+            values=dict(names)
+            if title is not None:values['title']=title
+            if author is not None:values['author']=author
+            answer['applies']=self._names_applies(row,values)
+        return answer
+
+    # ------------------------------------------------------------------ Edit names (Sergei 2026-10-26; Judy 0.22.2 section 1)
+    NAMES_CONVERTING="This book is converting. Its names can't change now."
+    NAMES_REFUSED='Save was not accepted. Nothing was changed.'
+    NAMES_REPLANNED='Set aside: the names were changed (Edit names). Nothing ran; the book is checked again with the new names.'
+    NAMES_REACH_LIMIT=200  # books read to count "Applies to {n} books" (each read is the identity, about 0.3 s)
+
+    class NamesRefused(ValueError):
+        """Nothing was saved; code is the page's: 'converting', 'queued', 'changed', 'refused'."""
+        def __init__(self,code,message):
+            super().__init__(message);self.code=code
+
+    def _names_stamp(self):
+        import entered_names
+        return entered_names.stamp(self.inventory.database)
+
+    def _names_book(self,id,revision=None):
+        """(row, source root, research) of a current book; ValueError ('Candidate changed...') when it is not current."""
+        row=self.reviews._row('Audiobooks',id,revision) if revision is not None else self.reviews._row('Audiobooks',id)
+        return row,self.reviews._source_root(row),self.automatic.research
+
+    def _names_state(self,row,root,research):
+        """(read, scope, now, record): what the files say, where a fix from this book reaches, Sergei's values in force for
+        it (entered_names.effective) and its identity record."""
+        import entered_names
+        read,scope,record=research.names_read(row,root)
+        database=self.inventory.database
+        now=entered_names.effective(database,row,read,scope) if entered_names.may_apply(database,row) else {}
+        return read,scope,now,record
+
+    @staticmethod
+    def _place(review):
+        """The Place line's values (Judy 0.22.2 section 2): {universe, series, number, collection}, the planner's."""
+        return {'universe':str(review.get('universe') or ''),'series':str(review.get('series') or ''),'number':str(review.get('number') or ''),
+                'collection':review.get('anthology') is True}
+
+    def _names_job(self,identity):
+        """The book's current job as Edit names sees it (Judy 1.3, 1.4): {'state': 'none' | 'pending' | 'running' | 'stopped' |
+        'retry_queued' | 'ready', 'row'}. 'running' also while the queue has claimed it or a retry check reads it."""
+        import book_restart,m4b_readmission
+        with self.jobs._db() as db:
+            job_id=book_restart.current_job(db,identity)
+            row=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if job_id else None
+            row=dict(row) if row else None
+            request=db.execute("SELECT state FROM m4b_readmissions WHERE parent_job_id=? AND state='queued'",(job_id,)).fetchone() if row and m4b_readmission._exists(db) else None
+        if row is None:return {'state':'none','row':None}
+        with self.jobs._lock:checking=dict(self.jobs._priority_status)
+        if row['state']=='running' or self.jobs.claimed(row['job_id']) or checking.get('state')=='checking' and checking.get('job_id')==row['job_id']:state='running'
+        elif row['state']=='pending':state='pending'
+        elif row['state']=='completed':state='ready'
+        else:
+            journal=json.loads(row['journal'] or '{}')
+            state='ready' if row['output'] or 'publication_intent' in journal else 'retry_queued' if request else 'stopped'
+        return {'state':state,'row':row}
+
+    def _names_lists(self):
+        """The editor's pick-lists (Judy 3): the universes and series already in use, from the audiobooks queued or made
+        and from Sergei's saved names."""
+        import entered_names
+        from audio_jobs import CURRENT
+        universes,series=set(),set()
+        with self.jobs._db() as db:
+            for universe,name in db.execute("SELECT json_extract(manifest,'$.metadata.universe'),json_extract(manifest,'$.metadata.series') FROM audio_jobs WHERE "+CURRENT):
+                if isinstance(universe,str) and universe.strip():universes.add(universe.strip())
+                if isinstance(name,str) and name.strip():series.add(name.strip())
+        universes.update(entered_names.in_use(self.inventory.database,'universe'));series.update(entered_names.in_use(self.inventory.database,'series'))
+        order=lambda values:sorted(values,key=str.casefold)[:2000]
+        return order(universes),order(series)
+
+    def _names_others(self,row,entries,research):
+        """[(row, read, scope)] of the other current books a press's fixes may reach: those whose folder, file names or tags
+        hold the old text (case variants, in the catalog's evidence), at most NAMES_REACH_LIMIT, each read."""
+        sources=sorted({source for kind,_,_,source,_,_ in entries if kind=='fix' and source})
+        if not sources:return []
+        variants=sorted({form for source in sources for form in (source,source.lower(),source.upper(),source.capitalize(),source.title())})
+        with connect(self.inventory.database) as db:
+            ids=[r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0 AND id!=? AND ('+' OR '.join(['instr(evidence,?)>0']*len(variants))+') LIMIT ?',
+                                          (row['id'],*variants,self.NAMES_REACH_LIMIT))]
+        others=[]
+        for other_id in ids:
+            try:
+                other=self.reviews._row('Audiobooks',other_id)
+                read,scope,_=research.names_read(other,self.reviews._source_root(other))
+            except (ValueError,OSError,KeyError,sqlite3.Error):continue
+            others.append((other,read,scope))
+        return others
+
+    def _names_applies(self,row,values):
+        """Judy 1.5: "Applies to {n} books." The books a Save of these values would change, this one included."""
+        import entered_names
+        research=self.automatic.research
+        root=self.reviews._source_root(row)
+        read,scope,now,_=self._names_state(row,root,research)
+        entries=entered_names.plan(row,values,read,scope,now)
+        if not any(kind=='fix' for kind,*_ in entries):return 1
+        key=(row['id'],row['revision'],json.dumps(entries,ensure_ascii=False),self._approval_stamp())
+        cache=self.__dict__.setdefault('_names_reach',{})
+        if key not in cache:
+            if len(cache)>=256:cache.clear()
+            cache[key]=1+len(entered_names.reach(entries,self._names_others(row,entries,research)))
+        return cache[key]
+
+    def names_editor(self,id,revision):
+        """Edit names, opened (Judy 1.1 item 7: one read for one row): {'fields': {title, author, series, number, universe,
+        collection}: {'proposal', 'basis'}, 'read': what the files say, 'remembered': [{id, field, from, to}], 'universes',
+        'series' (the pick-lists), 'job': the job state (1.3), 'place', 'entered'}. Read-only."""
+        import entered_names
+        row,root,research=self._names_book(id,revision)
+        read,scope,now,record=self._names_state(row,root,research)
+        import local_identity
+        shown=local_identity.shown(record)
+        series=record.get('series') or {}
+        guessed={'title':shown.get('title_basis') or '','author':shown.get('author_basis') or '','series':'folder_name' if series.get('folder') else '','number':'folder_name' if series.get('folder') else '',
+                 'universe':'','collection':''}
+        fields={}
+        for field in entered_names.FIELDS:
+            value=now[field]['value'] if field in now else read[field]
+            fields[field]={'proposal':value,'basis':'entered' if field in now else guessed[field]}
+        universes,names=self._names_lists()
+        try:
+            preview=self.approval_preview(id,revision,names={})
+            place,destination=preview['place'],{'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+        except (ValueError,OSError) as error:
+            place,destination=self._place({'universe':fields['universe']['proposal'],'series':fields['series']['proposal'],'number':fields['number']['proposal'],
+                                           'anthology':fields['collection']['proposal']}),{'path':'','absolute':'','taken':False,'reason':str(error)[:200]}
+        job=self._names_job(row['id'])
+        return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
+                'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
+
+    def names_save(self,id,revision,values):
+        """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
+        job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
+        ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
+        its name ('ready_only'); a converting one refuses with nothing saved. A retry, repair or delete queued from the row
+        is the web layer's refusal ('queued'). {'outcome': 'saved' | 'replanned' | 'ready_only' | 'unchanged', 'applies',
+        'job', 'entered'}. NamesRefused when nothing was saved."""
+        import entered_names
+        if self.draining or self.__dict__.get('_closing'):raise self.NamesRefused('refused','Books Arranger is closing. Nothing was changed.')
+        entered_names.check(values)
+        try:row,root,research=self._names_book(id,revision)
+        except ValueError:raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing') from None
+        read,scope,now,_=self._names_state(row,root,research)
+        entries=entered_names.plan(row,values,read,scope,now)
+        job=self._names_job(row['id'])
+        if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+        if not entries:return {'outcome':'unchanged','applies':1,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+        applies=1+len(entered_names.reach(entries,self._names_others(row,entries,research)))
+        with self.jobs._lock:
+            # Under the queue's lock: its claim either came first (refused here, nothing saved) or reads these names.
+            job=self._names_job(row['id'])
+            if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+            try:entered_names.save(self.inventory.database,row,entries)
+            except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
+        outcome='saved'
+        if job['state']=='pending':
+            try:self._names_replan(job['row'])
+            except (ValueError,sqlite3.Error):pass  # claimed meanwhile or busy: the claim check re-plans it before it starts
+            outcome='replanned'
+        elif job['state']=='retry_queued':outcome='replanned'  # the retry's child is checked against these names
+        elif job['state']=='ready':outcome='ready_only'
+        automatic=getattr(self,'automatic',None)
+        record=automatic.candidate(row) if automatic is not None and hasattr(automatic,'candidate') else None
+        if job['state']=='none' and isinstance(record,dict) and (record.get('wait') or {}).get('kind')=='original_title' and hasattr(automatic,'requeue'):
+            automatic.requeue(row['id'])  # ruling 29: his title ends the wait (research reads it as entered)
+        self.__dict__.pop('_needs_cache',None)
+        self.invalidate_status()
+        return {'outcome':outcome,'applies':applies,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+
+    def names_forget(self,id,revision,entry_id):
+        """Edit names, Forget (Judy 1.5): takes one remembered correction back, with the rest of its press; behaves like a
+        Save of the old values (the same job handling and outcomes) and touches no file. NamesRefused when nothing changed."""
+        import entered_names
+        if not isinstance(entry_id,str) or not 1<=len(entry_id)<=64:raise ValueError('Forget takes one remembered correction')
+        try:row,root,research=self._names_book(id,revision)
+        except ValueError:raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing') from None
+        job=self._names_job(row['id'])
+        if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+        with self.jobs._lock:
+            job=self._names_job(row['id'])
+            if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
+            try:taken=entered_names.forget(self.inventory.database,entry_id)
+            except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
+        if not taken:raise self.NamesRefused('changed','This correction was already taken back. Nothing was changed.')
+        outcome='forgotten'
+        if job['state']=='pending':
+            try:self._names_replan(job['row'])
+            except (ValueError,sqlite3.Error):pass
+        self.__dict__.pop('_needs_cache',None)
+        self.invalidate_status()
+        return {'outcome':outcome,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+
+    def _names_take_back(self,press):
+        """An Approve that saved names and was then refused takes its press back (Forget rows), so nothing stays changed."""
+        import entered_names
+        rows=entered_names._rows(self.inventory.database)
+        for entry in [r for r in entered_names._live(rows) if r['press']==press]:
+            try:entered_names.forget(self.inventory.database,entry['entry_id'])
+            except sqlite3.Error:pass
+
+    def _names_stale(self,job):
+        """AudioJobs' claim check: True when this pending job was planned under other names than those now in force for its
+        book (entered_names.digest_for; the job's is in metadata_facts.entered_names). Reads only the store and the book."""
+        import entered_names
+        manifest=json.loads(job['manifest'])
+        planned=((manifest.get('metadata_facts') or {}).get('entered_names') or {}).get('digest') or entered_names.NONE
+        try:row=self.reviews._row('Audiobooks',manifest['candidate_id'])
+        except (ValueError,KeyError,TypeError):return False  # the book changed: the job's own revision checks refuse it
+        return entered_names.digest_for(self.inventory.database,row)!=planned
+
+    def _names_replan(self,job):
+        """A pending job planned under other names is set aside (its row, journal and working files are kept, as Start
+        over does) and its book goes back to automatic processing, which researches it with the names in force and queues
+        a new job; automatic processing is started if it is not running. A job Sergei approved keeps his title and author
+        (saved as his names), so the new plan does not ask him again. Raises ValueError when nothing was changed."""
+        import book_restart,entered_names
+        from sqlite_retry import transaction
+        manifest=json.loads(job['manifest']);identity=manifest['candidate_id']
+        try:
+            row=self.reviews._row('Audiobooks',identity)
+            approval=(self.reviews._context(row) or {}).get('user_approval')
+        except (ValueError,KeyError,TypeError):row,approval=None,None
+        if row is not None and isinstance(approval,dict) and isinstance(approval.get('values'),dict):
+            values={field:approval['values'][field] for field in ('title','author') if isinstance(approval['values'].get(field),str) and approval['values'][field].strip()}
+            if values:
+                try:
+                    read,scope,now,_=self._names_state(row,self.reviews._source_root(row),self.automatic.research)
+                    entries=[entry for entry in entered_names.plan(row,values,read,scope,now) if entry[0]=='book']
+                    if entries:entered_names.save(self.inventory.database,row,entries)
+                except (ValueError,OSError,sqlite3.Error):pass
+        stamp=__import__('audio_jobs')._now()
+        def write(db):
+            book_restart.ensure(db)
+            current=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
+            if not current or current[0]!='pending':raise book_restart.Changed('Job changed')
+            if book_restart.current_job(db,identity)!=job['job_id']:raise book_restart.Changed('Newer work')
+            facts=book_restart.book(db,identity)
+            if not facts:raise book_restart.Changed('Book changed')
+            db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(self.NAMES_REPLANNED,stamp,job['job_id']))
+            book_restart.set_aside(db,job['job_id'],identity,facts['revision'],kind='names')
+            book_restart.reset_automatic(db,identity,facts['revision'],facts['fingerprint'])
+        with self.jobs._lock:
+            if self.jobs.claimed(job['job_id']):raise book_restart.Changed('Job claimed')
+            transaction(self.inventory.database,write)
+        self.__dict__.pop('_needs_cache',None)
+        automatic=getattr(self,'automatic',None)
+        if automatic is not None and hasattr(automatic,'requeue'):
+            automatic.requeue(identity)
+            if hasattr(automatic,'request_start'):automatic.request_start()
+        self.invalidate_status()
 
     def answer_same_author(self,id,revision,choice):
         """Ruling 12: Sergei's answer to this book's "Same author?" question becomes a lasting rule (same: the new name
@@ -2480,20 +2751,39 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return back
 
-    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None):
+    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None):
         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
         Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
         Convert what's there, leaving out the files missing from disk. choice ('same' / 'different'): his answer to the
         book's Same author? question, saved as a rule first (ruling 12) and used as the author (not a typed value). path:
         the "Goes to" line the row showed (relative to the output folder); a different destination now refuses (Senua's
-        0.22.0 review, m1: the path shown is the path used). Raises ValueError with the reason it is refused."""
+        0.22.0 review, m1: the path shown is the path used). names (Edit names, Judy 0.22.2 1.1: "Approve records and
+        approves"): the open editor's values, saved as his lasting names first, taken back if the approval is refused.
+        Raises ValueError with the reason it is refused."""
+        if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path)
+        import entered_names
+        values={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
+        if title is not None and str(title).strip():values['title']=title
+        if author is not None and str(author).strip():values['author']=author
+        entered_names.check(values)
+        if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
+        row,root,research=self._names_book(id,revision)
+        read,scope,now,_=self._names_state(row,root,research)
+        entries=entered_names.plan(row,values,read,scope,now)
+        press=entered_names.save(self.inventory.database,row,entries) if entries else ''
+        try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values)
+        except BaseException:
+            if press:self._names_take_back(press)
+            raise
+
+    def _approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None):
         import datetime
         if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
         chosen=None
         if choice is not None:
             chosen=self.answer_same_author(id,revision,choice)
             if author is not None:chosen=None
-        row,result=self._approval_result(id,revision,title,author,chosen)
+        row,result=self._approval_result(id,revision,title,author,chosen,names=names)
         if path is not None and result.get('review'):
             relative,_,_=self._approval_destination(row,result)
             if os.path.normcase(os.path.normpath(relative or '.'))!=os.path.normcase(os.path.normpath(str(path) or '.')):

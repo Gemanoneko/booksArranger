@@ -130,6 +130,15 @@ class ActionQueue:
             self.outcomes = [item for item in self.outcomes if item['id'] not in wanted]
         return {'acknowledged': True}
 
+    def book_action(self, book_id):
+        """The action queued or running for this book ('retry', 'repair', 'delete'), else None (Edit names is inert while
+        one waits: one queued action per row, Judy 0.22.2 1.4)."""
+        with self.lock:
+            for item in ([self.running] if self.running is not None else []) + self.items:
+                if item.get('book_id') == book_id:
+                    return item['action']
+        return None
+
     def queued_jobs(self):
         """Job ids of the queued Retry and Repair presses: Retry all leaves them out (Judy 1.3, 1.8)."""
         with self.lock:

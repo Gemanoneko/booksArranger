@@ -345,6 +345,13 @@ class AudioJobs:
         # MergeService hook: (row, audio_only) -> None or the live state of the job's leftover working files.
         self.working_state = None
         self.after_attempt = None
+        # Edit names (Judy 0.22.2 section 1.4: after a Save no job starts under the old names). MergeService hooks:
+        # names_stamp() -> a value any Save or Forget changes; names_stale(row) -> True when the job was planned under other
+        # names than those in force; names_replan(row) -> sets the job aside and sends its book back to research.
+        self.names_stamp = None
+        self.names_stale = None
+        self.names_replan = None
+        self._claimed = None  # the job the worker took, from its claim until its attempt ends (a Save refuses it)
         self.on_working_hold = None
         self.on_space_hold = None
         self._progress = {}
@@ -1096,6 +1103,11 @@ class AudioJobs:
             pending = (self._rows("SELECT * FROM audio_jobs WHERE job_id=? AND state='pending'", (priority,)) if priority else []) or self._rows("SELECT * FROM audio_jobs WHERE state='pending' ORDER BY created, job_id LIMIT 1")
             if not pending: return
             row = pending[0]
+            claim = self._claim(row)
+            if claim == 'gone':continue  # taken out meanwhile (a Save set it aside)
+            if claim == 'stale':
+                self._replan(row)
+                continue
             try:
                 boundary=self.attempt_boundary(copy.deepcopy(row)) if self.attempt_boundary else contextlib.nullcontext()
                 with boundary:proceed=self._work_attempt(row)
@@ -1109,7 +1121,55 @@ class AudioJobs:
                 self._stop.set()
                 if self.on_working_hold:self.on_working_hold()
                 return
+            finally:
+                with self._lock:
+                    if self._claimed == row['job_id']:self._claimed = None
             if proceed is False:return
+
+    NAMES_CHANGED = 'Names changed since this job was queued. Press Retry to queue it with these names.'
+
+    def _claim(self, row):
+        """The worker takes a pending job: 'claimed', 'gone' (no longer pending, or set aside) or 'stale' (planned under other
+        names than Sergei's saved ones). The names check reads outside the lock; the stamp, read again under it, proves no
+        Save or Forget came between (a Save writes under this lock, so it either sees the claim or the claim sees it)."""
+        for _ in range(5):
+            stamp = None
+            stale = False
+            if self.names_stale:
+                try:
+                    stamp = self.names_stamp()
+                    stale = bool(self.names_stale(copy.deepcopy(row)))
+                except Exception:
+                    stamp, stale = None, False  # an unreadable store never stops the queue; the job runs as planned
+            with self._lock:
+                current = self._rows('SELECT state FROM audio_jobs WHERE job_id=? AND ' + CURRENT, (row['job_id'],))
+                if not current or current[0]['state'] != 'pending':
+                    return 'gone'
+                if stamp is not None:
+                    try:
+                        if self.names_stamp() != stamp:
+                            continue
+                    except Exception:
+                        pass
+                if stale:
+                    return 'stale'
+                self._claimed = row['job_id']
+                return 'claimed'
+        return 'gone'
+
+    def claimed(self, job_id):
+        with self._lock:
+            return self._claimed == job_id
+
+    def _replan(self, row):
+        """A job planned under other names never starts: it is set aside and its book researched again with the names in
+        force (names_replan). If that cannot be done now the job stops with NAMES_CHANGED (nothing ran; Retry checks
+        again)."""
+        try:
+            self.names_replan(copy.deepcopy(row))
+        except Exception:
+            with self._lock, self._db() as db:
+                db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'", (self.NAMES_CHANGED, _now(), row['job_id']))
 
     def _hold_destination(self,expected,observation):
         """Atomic admission refusal: immutable queue intent and journal stay exact."""
