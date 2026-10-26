@@ -304,6 +304,81 @@ class StructureGuardTests(Base):
         self.assertEqual(self.lookup(row)['review']['title'], 'Единая теория всего. Том 1')
 
 
+class SeriesFolderFileTests(Base):
+    """Senua's 0.22.1 review, W1 and W2, on the live rows (names and tags as the catalog holds them, 2026-10-26). A single
+    file in an Author\\Series folder took its file name as the title over a clean tag title: another author's name
+    («Сергей Недоруб - Севастопольский дозор»), a dangling bracket («Марина Ясинская - Чужой Дозор )») and the file's part
+    number («Игры Немезиды 1»). A book folder under its author («5. Игры Немезиды») was read as the series."""
+    DOZORY = 'Сергей Лукьяненко\\Вселенная Дозоров - Межавторский цикл\\'
+    LIVE = (('16 - Сергей Недоруб - Севастопольский дозор (08_00-20_00 16 мая 2016).m4b',
+             dict(title='Севастопольский дозор', artist='Сергей Недоруб', album='Севастопольский дозор', genre='Фантастика', date='2016', album_artist='Воронецкий Станислав')),
+            ('19 - Виталий Каплан - Масть (март 1788 - май 1789).m4b',
+             dict(title='Масть', artist='Виталий Каплан', album='Масть', genre='Боевое фэнтези, Городское фэнтези', date='2016', album_artist='Станислав Воронецкий')),
+            ('25 - Марина Ясинская - Чужой Дозор (2017 (с 1932)).m4b',
+             dict(title='Чужой Дозор', artist='Мария Ясинская', album='Чужой Дозор', genre='Фантастика', date='2017', album_artist='Евгения Меркулова')),
+            ('27 - Валерий Пылаев - Запах Сумрака (август-сентябрь 2010).m4b',
+             dict(title='Дозоры. Запах Сумрака', artist='Валерий Пылаев', album='Дозоры. Запах Сумрака', genre='Фантастика', date='2018', album_artist='Алексей Данков')),
+            ('05 - С. Лукьяненко, И. Кузнецов - Печать сумрака (август 2003 - апрель 2004).m4b',
+             dict(title='Печать сумрака', artist='С. Лукьяненко, И. Кузнецов', album='Печать сумрака', genre='аудиокнига', date='2014')))
+
+    def test_a_clean_tag_title_beats_the_file_name_of_a_single_file_in_a_series_folder(self):
+        books = self.catalog([file_row(self.DOZORY + name, **tags) for name, tags in self.LIVE])
+        self.assertEqual(len(books), len(self.LIVE))
+        for name, tags in self.LIVE:
+            row = books[ROOT + '\\' + self.DOZORY + name]
+            result = self.lookup(row)
+            review = result.get('review') or {}
+            shown = self.approved(row)
+            self.assertEqual(shown['title'], tags['title'], name)
+            if review:
+                self.assertEqual(review['title'], tags['title'], name)
+                self.assertNotIn(name.split(' - ')[1] + ' - ', self.goes_to(row, result), 'no author before the title in the file name')
+            for wrong in ('Недоруб - ', 'Каплан - ', 'Ясинская - ', 'Пылаев - ', ')', '('):
+                self.assertNotIn(wrong, shown['title'], name)
+
+    def test_the_title_read_from_a_name_drops_the_people_before_it_and_unbalanced_brackets(self):
+        read = lambda relative: local_identity.folder_structure({'members': [{'path': ROOT + '\\' + relative, 'filename': Path(relative).name}]}, ROOT)
+        expected = {'16': 'Севастопольский дозор', '19': 'Масть', '25': 'Чужой Дозор', '27': 'Запах Сумрака', '05': 'Печать сумрака'}
+        for name, _ in self.LIVE:
+            found = read(self.DOZORY + name)
+            self.assertEqual((found['title'], found['position'], found['series']),
+                             (expected[name[:2]], str(int(name[:2])), 'Вселенная Дозоров - Межавторский'), name)
+        # With no title tag the name is the only source: the clean title, never the author or a dangling bracket.
+        row = next(iter(self.catalog([file_row(self.DOZORY + self.LIVE[2][0], artist='Мария Ясинская')]).values()))
+        self.assertEqual(self.approved(row)['title'], 'Чужой Дозор')
+        # Controls: a title that is no person keeps its dash ("Книга Крови - Том 4" kept its series name above); a title
+        # that only starts with a word that is a first name stays whole.
+        self.assertEqual(read('Clive Barker\\Books of Blood\\3. Сын целлулоида - Ревущий мясник.m4b')['title'], 'Сын целлулоида - Ревущий мясник')
+        self.assertEqual(read('Clive Barker\\Books of Blood\\3. Мария - Ревущий мясник.m4b')['title'], 'Мария - Ревущий мясник', 'one word is no person here')
+
+    def test_a_book_folder_under_its_author_is_no_series_and_the_file_part_number_is_no_title(self):
+        # Live: "James S. A. Corey\5. Игры Немезиды\5. Игры Немезиды 1.m4b" (one 16 h file); c26bc58 read series «5. Игры
+        # Немезиды» #5 and filed it under "Corey James S. A\5. Игры Немезиды\5. Игры Немезиды - 5 - …".
+        live = 'James S. A. Corey\\5. Игры Немезиды\\5. Игры Немезиды 1.m4b'
+        tags = dict(title='Игры Немезиды', artist='Джеймс Кори', album='Игры Немезиды', genre='Speech', date='2018', album_artist='Кирилл Головин')
+        self.assertIsNone(local_identity.folder_structure({'members': [{'path': ROOT + '\\' + live, 'filename': Path(live).name}]}, ROOT))
+        row = next(iter(self.catalog([file_row(live, **tags)]).values()))
+        result = self.lookup(row)
+        review = result.get('review') or {}
+        self.assertFalse(review.get('series') or review.get('number'), 'no series from a book folder')
+        if review:
+            self.assertNotIn('\\5. Игры Немезиды\\', self.goes_to(row, result))
+        # Without the folder structure the file is what it was in 0.22.0: a .m4b numbered "1" whose set cannot be proven,
+        # named set name + number by rulings 13 and 15. Whether a lone numbered file in its own book folder is the whole
+        # book (and loses the "1") is Sergei's call, asked in Ender's 0.22.1 W1 report; this pins today's behaviour.
+        self.assertEqual(self.approved(row)['title'], 'Игры Немезиды 1')
+        # The same file in a real series folder is book 5 of the series, a whole book: series and number from the folders,
+        # the title from the tag, never the file's part number.
+        row = next(iter(self.catalog([file_row('James S. A. Corey\\The Expanse\\5. Игры Немезиды 1.m4b', **tags)]).values()))
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), ('Игры Немезиды', 'The Expanse', '5'))
+        # Other book folders named the same way under their author on the live drive.
+        for relative in ('Joe Hill\\930. Коробка в форме сердца (Михаил Прокопов)\\Коробка в форме сердца.m4b',
+                         'Harry Potter\\62. Книга 1 - Гарри Поттер и философский камень (Александр Клюквин)\\Джоан Роулинг - Книга 1 - Гарри Поттер и философский камень.m4b'):
+            self.assertIsNone(local_identity.folder_structure({'members': [{'path': ROOT + '\\' + relative, 'filename': Path(relative).name}]}, ROOT), relative)
+
+
 class OddNameTests(Base):
     """0.22.1 (Jane for Sergei, 2026-10-26): the live books that items 9 and 10 let through with odd names are asked, never
     filed by themselves. Each becomes a question on the to-do list with the existing rows (Title or author missing,

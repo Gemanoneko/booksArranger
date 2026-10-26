@@ -1738,6 +1738,24 @@ def _without_year(value):
     return text(re.sub(r'\s*[(\[]?\s*(?:1[89]|20)\d{2}\s*[)\]]?\s*', ' ', str(value or '')))
 
 
+def _people_piece(value, index=None):
+    """A piece of a name that is only people: "Сергей Недоруб", "С. Лукьяненко, И. Кузнецов", a year beside them aside."""
+    people = [text(p) for p in re.split(r'\s*[,;&/]\s*|\s+(?:и|and)\s+', _without_year(value), flags=re.I) if text(p)]
+    return bool(people) and all(_person_like(p) and looks_like_person(p, index) for p in people)
+
+
+def _balanced(value):
+    """Bracketed notes removed innermost first ("Чужой Дозор (2017 (с 1932))"), then any bracket left without its pair, so
+    no title keeps a dangling ")" (Senua's 0.22.1 review, W1)."""
+    value = str(value or '')
+    while True:
+        stripped = re.sub(r'\s*[(\[{][^()\[\]{}]*[)\]}]', ' ', value)
+        if stripped == value:
+            break
+        value = stripped
+    return text(re.sub(r'[()\[\]{}]', ' ', value))
+
+
 def _relative_parts(path, root):
     """The path's names below the source root, else None."""
     try:
@@ -1766,6 +1784,11 @@ def folder_structure(row, root, index=None):
         return None
     if not looks_like_person(author, index) or looks_like_person(_series_name(series, author), index) or DISC.fullmatch(series.strip()):
         return None
+    if _BOOK_POSITION.match(_UPLOADER.sub('', _series_name(series, author))):
+        # Senua's 0.22.1 review, W2: a second-level folder named like a book ("James S. A. Corey\5. Игры Немезиды\5. Игры
+        # Немезиды 1.m4b", "Joe Hill\930. Коробка в форме сердца (Михаил Прокопов)") is that book's own folder under its
+        # author, never a series: no series «5. Игры Немезиды» #5.
+        return None
     if len(first) == 3:
         if len(members) != 1:
             return None
@@ -1793,16 +1816,26 @@ def folder_structure(row, root, index=None):
     for piece in re.split(r'\s+[-–—]\s+', title):
         if piece != title and (compare_names(piece, author) or compare_names(_without_year(piece), author)):
             title = text(re.sub(r'(?:^|\s+[-–—]\s+)' + re.escape(piece) + r'(?:\s+[-–—]\s+|$)', ' - ', title).strip(' -–—'))
-    title = clean_title(title)
+    # Senua's 0.22.1 review, W1: in a shared-universe folder the book's own author stands before its title ("16 - Сергей
+    # Недоруб - Севастопольский дозор" in "Сергей Лукьяненко\Вселенная Дозоров - Межавторский цикл", "05 - С. Лукьяненко, И.
+    # Кузнецов - Печать сумрака"): every leading piece that is only people is a credit, never part of the title.
+    while True:
+        pieces = re.split(r'\s+[-–—]\s+', title, maxsplit=1)
+        if len(pieces) < 2 or not re.search(r'[^\W\d_]{2}', _balanced(pieces[1])) or not _people_piece(pieces[0], index):
+            break
+        title = text(pieces[1])
+    title = clean_title(_balanced(title))
     if not title or not re.search(r'[^\W\d_]{2}', title) or garbled(title) or NARRATOR_MARKER.search(title) or CHAPTER_LABEL.match(title)             or set(words(title)) <= PART_WORDS or PART_FOLDER.search(name) or DISC.search(name):
         return None  # a disc, part or chapter folder ("1 часть", "CD 2") is a piece of a book, not a book of a series
     position = position.replace(',', '.')
     position = str(int(position)) if position.isdigit() else position
     named = _series_name(series, author)
     # The file names carry the folder's title too ("Энн Маккефри (2012) - Белый дракон (Часть 1).m4b"): folder and file
-    # names agree, so they win over a tag that names something else (the series album "Пернский цикл"), item 9.
+    # names agree, so they win over a tag that names something else (the series album "Пернский цикл"), item 9. Only for a
+    # book FOLDER (Senua's 0.22.1 review, W1): a single file's "folder title" is its own name, so it always "agrees" and
+    # beat every clean tag title («Сергей Недоруб - Севастопольский дозор», «Игры Немезиды 1» with the file's part number).
     key = title_key(title)
-    files = bool(key) and any(key in title_key(Path(m['path']).stem) for m in members)
+    files = kind == 'folder' and bool(key) and any(key in title_key(Path(m['path']).stem) for m in members)
     return {'version': STRUCTURE_VERSION, 'author': author, 'series': latin_lookalikes(text(_SERIES_WORDS.sub('', named)) or named),
             'position': position, 'title': title, 'reader': reader, 'file_series': file_series, 'book': kind, 'book_name': text(book),
             'series_folder': series, 'files_name_title': files}
@@ -1827,7 +1860,9 @@ def _structured_title(title, structure, author_names, index=None):
     value = title['value']
     key, folder_key = title_key(value), title_key(folder)
     if key == folder_key:
-        return title, ''
+        # The same title; a file name read without a tag ("25 - Марина Ясинская - Чужой Дозор (2017 (с 1932))") keeps no
+        # dangling bracket either (Senua's 0.22.1 review, W1).
+        return (dict(title, value=clean_title(_balanced(value))) if re.search(r'[()\[\]{}]', value) else title), ''
     series_names = [s for s in (structure['series'], structure['file_series'], structure['series_folder']) if s]
     numbered = {title_key('%s %s' % (s, structure['position'])) for s in series_names}
     if NARRATOR_MARKER.search(value) or looks_like_person(value, index) or any(compare_names(value, a) for a in author_names if a) \
