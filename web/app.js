@@ -40,10 +40,9 @@ const askRows=new Map(),askDrafts=new Map(),askDone=new Map(),askResults=new Map
 const deleteButtons=new Map(),deleteNotes=new Map();let deletePending=null,deleteDialog=null,focusPlan=null;
 // Queued Retry, Repair and Delete book (0.22.1, Judy's spec section 1): the engine's queue as last read, and the page's own
 // notes. queuePresses: a Retry press on its way while the page is busy (book id). queueNotes: an outcome's row line until
-// the next press, a filter change or a status change. queueLate: queued ids whose Cancel came too late.
+// the next press, a filter change or a status change. queueLate: queued ids whose Cancel came too late (its line, Cancel
+// hidden).
 let queueState={queued:[],running:null},queueStripOutcome=null;
-// queuePresses: a Retry press on its way while the page is busy (book id). queueNotes: an outcome's row line until the next
-// press, a filter change or a status change. queueLate: queued ids whose Cancel came too late (its line, Cancel hidden).
 const queuePresses=new Map(),queueNotes=new Map(),queueSeen=new Set(),queueCancels=new Set(),queueLate=new Map();
 
 let routingPreviewTimer=null,routingPreviewSequence=0;
@@ -1398,7 +1397,9 @@ async function queuePress(row,action,origin){
   if(!ended){lastKey=null;try{await refresh(true);}catch(error){if(!error.httpStatus)refreshFailed(error);}}
   controls();
   // A row press keeps focus on the row's face after the list read rebuilt it; nothing else moves (1.7).
-  if(origin?.row && button && handed===button && document.activeElement===handed)rowRetries.get(row.path)?.button?.focus?.({preventScroll:true});
+  // In a browser the rebuilt row's old button is gone and focus falls to the page body: it comes back to the new face.
+  const lost=document.activeElement===handed || document.activeElement===document.body || !document.activeElement;
+  if(origin?.row && button && handed===button && lost)rowRetries.get(row.path)?.button?.focus?.({preventScroll:true});
   return !!answer;
 }
 // A queued press that ran at once: the row shows Queued now (v0.16.12) and the strip names the book, as after Retry.

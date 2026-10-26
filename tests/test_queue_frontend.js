@@ -47,7 +47,12 @@ const item=(id,action,book,position,kind='scan',extra={})=>({id,action,book_id:b
   assert.equal(retry.title,'Queue this retry. A scan is running; it starts when the scan finishes.');
   answers['/api/audiobook/retry']=()=>ok({queued:true,id:'q-1',position:1,blocker:{kind:'scan'}},202);
   inventoryRows=[attentionRow('a'),attentionRow('b'),attentionRow('c')];
+  // As a browser does, rebuilding the list drops focus from a removed button to the page body.
+  const inventory=get('inventory'),plainReplace=inventory.replaceChildren.bind(inventory);document.body=new Element('body');
+  inventory.replaceChildren=(...items)=>{const lost=inventory.contains(document.activeElement);plainReplace(...items);if(lost)document.activeElement=document.body;};
+  retry.focus();
   await retry.handlers.click({stopPropagation(){}});for(let i=0;i<6;i++)await tick();
+  assert.equal(document.activeElement,buttonsOf(trOf('cand-a'))[0],"focus is back on the row's queued face after the list is rebuilt (1.7)");
   assert.deepEqual(posted('/api/audiobook/retry').at(-1),{library:'Audiobooks',id:'cand-a',revision:4,job_id:'job-a',queue:true,title:'Title a'});
   tr=trOf('cand-a');retry=buttonsOf(tr)[0];const cancel=byText(tr,'Cancel retry');
   assert.equal(retry.textContent,'Retry queued');assert.equal(retry.getAttribute('aria-disabled'),'true');assert.equal(retry.disabled,false,'keeps keyboard focus');
