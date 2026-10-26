@@ -31,12 +31,26 @@
    disk_full:`Couldn't download version ${n}: not enough disk space (tried ${d.at}). Free some space, then press Download update.`}[d.cause]||`Couldn't download version ${n} (tried ${d.at}). Press Download update to try again.`;
   return u.ready?`Version ${n} is downloaded and verified. Ready to install.`:'';
  }
+ // Senua's 0.22.1 review, W3: what Cancel, the engine's bound or a failed close could not start again (the engine's
+ // resume_problems, typed by the shell), in the pattern of Judy's failure lines: what happened, then what to do, with
+ // the confirm's own words for each kind (2.4). "Running as before" only when everything started again.
+ const RESTART={automatic:['automatic processing','Press Start automatic processing to continue.'],
+  conversion:['the audiobook jobs','Press Resume audiobook jobs to continue.'],
+  scan:['the library scan','Continue the scan with Resume scanning.'],
+  lookups:['background lookups','Background lookups start again by themselves the next time Books Arranger opens.']};
+ function notRestarted(problems){
+  const kinds=[...new Set((problems||[]).map(item=>item&&item.kind).filter(kind=>RESTART[kind]))];
+  if(!kinds.length)return '';
+  const names=kinds.map(kind=>RESTART[kind][0]);
+  const list=names.length>1?names.slice(0,-1).join(', ')+' and '+names[names.length-1]:names[0];
+  return `${cap(list)} didn't start again. ${kinds.map(kind=>RESTART[kind][1]).join(' ')}`;
+ }
  function installLine(u){
-  const i=u.install||{};
-  if(i.phase==='cancelled')return {text:'Update cancelled. Books Arranger is running as before.',failed:false};
+  const i=u.install||{},stopped=notRestarted(i.problems),asBefore=stopped||'Books Arranger is running as before.';
+  if(i.phase==='cancelled')return stopped?{text:`Update cancelled (tried ${i.at}). ${stopped}`,failed:true}:{text:'Update cancelled. Books Arranger is running as before.',failed:false};
   if(i.phase!=='failed')return {text:'',failed:false};
   // M2 (Judy's implementation check): no number; the engine gives up at 150 s and the shell at 180 s.
-  const line={bound:`Update cancelled: ${what(i.waiting)} did not stop in time (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
+  const line={bound:`Update cancelled: ${what(i.waiting)} did not stop in time (tried ${i.at}). ${asBefore} Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
    installer_blocked:`The installer couldn't start (tried ${i.at}). Windows or your antivirus may have blocked it. Books Arranger is running again on ${u.version}. Run the installer yourself:`,
    checksum:`Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried ${i.at}). Check for updates, then download it again.`,
    verify_timeout:`Update cancelled: the downloaded installer couldn't be verified in time (tried ${i.at}). Press Restart to update to try again.`,
@@ -44,7 +58,7 @@
    engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
    // N3: the engine died while stopping and was started again, so the loading strip is back up.
    engine_exit:`The engine stopped during the update and was started again (tried ${i.at}). It is loading now. Press Restart to update to try again.`}[i.cause]
-   ||`Update cancelled (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again.`;
+   ||`Update cancelled (tried ${i.at}). ${asBefore} Press Restart to update to try again.`;
   return {text:line,failed:true,path:i.cause==='installer_blocked'?u.installerPath||'':''};
  }
  // The .desktop-status line while an update runs (2.5); the counter is separate, outside the live region.

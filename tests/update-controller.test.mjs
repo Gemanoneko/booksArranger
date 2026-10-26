@@ -111,3 +111,49 @@ test('page: buttons have real tooltips, busy ones use aria-disabled, and show on
  assert.deepEqual([updating.restart.face,updating.restart.busy,updating.restart.title,updating.cancel.hidden,updating.cancel.title],['Updating…',true,'Updating Books Arranger…',false,'Stop the update. Books Arranger keeps running as before.']);
  const checking=t.buttons({...base,busy:{check:true}},{}).check;assert.deepEqual([checking.face,checking.busy,checking.title],['Checking…',true,'Checking for updates…']);
  const downloading=t.buttons({...base,busy:{download:true},download:{progress:7}},{}).download;assert.deepEqual([downloading.face,downloading.title],['Downloading… 7%','Downloading version 0.22.2…']);});
+// Senua's 0.22.1 review, W3: Cancel, the engine's bound or a failed close that could not start the stopped work again
+// says what stays stopped and what to press, never "running as before".
+test('the Install line names what did not start again after Cancel, the bound or a failed close',async()=>{const t=page();const base={version:'0.22.1',available:'0.22.2',ready:false,check:{},download:{},install:{}};
+ const line=i=>t.installLine({...base,install:{at:'21:07',...i}});
+ assert.deepEqual(line({phase:'cancelled',problems:[{kind:'automatic',cause:'still_stopping'}]}),{text:"Update cancelled (tried 21:07). Automatic processing didn't start again. Press Start automatic processing to continue.",failed:true});
+ assert.deepEqual(line({phase:'cancelled',problems:[]}),{text:'Update cancelled. Books Arranger is running as before.',failed:false},'everything started again: as before');
+ assert.equal(line({phase:'cancelled',problems:[{kind:'conversion',cause:'refused'},{kind:'scan',cause:'still_stopping'},{kind:'lookups',cause:'still_stopping'},{kind:'lookups',cause:'refused'}]}).text,
+  "Update cancelled (tried 21:07). The audiobook jobs, the library scan and background lookups didn't start again. Press Resume audiobook jobs to continue. Continue the scan with Resume scanning. Background lookups start again by themselves the next time Books Arranger opens.");
+ assert.equal(line({phase:'failed',cause:'bound',waiting:[{kind:'conversion',title:'Fixture'}],problems:[{kind:'conversion',cause:'still_stopping'}]}).text,
+  "Update cancelled: the conversion of Fixture did not stop in time (tried 21:07). The audiobook jobs didn't start again. Press Resume audiobook jobs to continue. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.");
+ assert.equal(line({phase:'failed',cause:'blocked',problems:[{kind:'automatic',cause:'refused'}]}).text,
+  "Update cancelled (tried 21:07). Automatic processing didn't start again. Press Start automatic processing to continue. Press Restart to update to try again.");
+ assert.equal(line({phase:'failed',cause:'blocked',problems:[{kind:'unknown',cause:'refused'}]}).text,'Update cancelled (tried 21:07). Books Arranger is running as before. Press Restart to update to try again.','an unknown kind is never shown');
+ // The controller keeps the typed list from the shell, drops the engine's wording, and a new restart clears it.
+ const f=fixture();await ready(f);f.controller.parkEngine=async()=>{throw typed('cancelled',{resumeProblems:[{kind:'scan',cause:'refused'}]});};
+ await f.controller.restart();assert.deepEqual(f.controller.value.install.problems,[{kind:'scan',cause:'refused'}]);
+ assert.equal(page().installLine(f.controller.value).text,"Update cancelled (tried 21:04). The library scan didn't start again. Continue the scan with Resume scanning.");
+ f.controller.parkEngine=async()=>{};await f.controller.restart();assert.deepEqual(f.controller.value.install.problems,[]);});
+// Senua's 0.22.1 review, W5: the engine's exit after the shell gave up on its ending (engine_stuck) starts the old engine
+// again and says so with N3's line; it never closes the app.
+test('a late exit of an engine ending for the update starts the old engine again, with the engine_exit line',async()=>{const f=fixture();await ready(f);
+ f.controller.parkEngine=async()=>{throw typed('engine_stuck');};await f.controller.restart();assert.equal(f.controller.value.install.cause,'engine_stuck');assert(!f.seen.includes('old engine started'));
+ await f.controller.lateEngineExit();assert(f.seen.includes('old engine started'));
+ assert.deepEqual([f.controller.value.install.phase,f.controller.value.install.cause],['failed','engine_exit']);
+ assert.equal(page().installLine(f.controller.value).text,'The engine stopped during the update and was started again (tried 21:04). It is loading now. Press Restart to update to try again.');
+ const g=fixture();g.controller.restartEngine=async()=>{throw new Error('port taken');};await g.controller.lateEngineExit();assert.equal(g.controller.value.install.cause,'engine_restart');});
+// Senua's 0.22.1 review, W7: electron-updater 6.8.9's NsisUpdater.doInstall (node_modules/electron-updater/out/
+// NsisUpdater.js:131-141) answers a failed spawn by itself, after the shell has started the old engine again. The
+// provider below does exactly what that code does with its spawn's rejection.
+function nsisLike(spawnError){const provider={calls:[],quitAndInstallCalled:false,installerPath:'C:/owned/update.exe'};
+ provider.spawnLog=async function(cmd){this.calls.push('spawn '+cmd);if(spawnError&&!cmd.endsWith('elevate.exe'))throw Object.assign(new Error('spawn failed'),{code:spawnError});return true;};
+ provider.quitAndInstall=function(){this.quitAndInstallCalled=true;
+  const elevate=()=>{this.spawnLog('C:/resources/elevate.exe',[this.installerPath]).catch(()=>{});this.calls.push('elevate.exe');};
+  this.spawnLog(this.installerPath,['--updated','/S','--force-run']).catch(e=>{if(e.code==='UNKNOWN'||e.code==='EACCES')elevate();else if(e.code==='ENOENT')this.calls.push('shell.openPath '+this.installerPath);else this.calls.push('dispatchError');});};
+ return provider;}
+test('a failed installer start never lets the updater start its own fallback; a good start goes through',async()=>{const {holdInstallerSpawn}=createRequire(import.meta.url)('../desktop/update-controller.js');
+ const settle=()=>new Promise(resolve=>setTimeout(resolve,10));
+ for(const code of ['ENOENT','EACCES','UNKNOWN']){
+  // Positive control: without the hold the updater's own fallback runs.
+  const bare=nsisLike(code);bare.quitAndInstall();await settle();assert(bare.calls.some(c=>c.startsWith('shell.openPath')||c==='elevate.exe'),'control '+code+': '+bare.calls);
+  const provider=nsisLike(code),original=provider.spawnLog,log=[];const hold=holdInstallerSpawn(provider,line=>log.push(line));
+  provider.quitAndInstall();const spawned=hold.spawned();assert(spawned,'the shell sees the attempt');
+  await assert.rejects(spawned,error=>error.code===code,'the shell learns the start failed');await settle();
+  assert.deepEqual(provider.calls,['spawn C:/owned/update.exe'],code+': no elevate.exe, no opening the file');assert.match(log[0],/Installer did not start/);
+  hold.restore();assert.equal(provider.spawnLog,original);}
+ const provider=nsisLike(null);const hold=holdInstallerSpawn(provider);provider.quitAndInstall();assert.equal(await hold.spawned(),true);hold.restore();});

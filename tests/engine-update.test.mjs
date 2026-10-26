@@ -35,3 +35,35 @@ test('a refusal (a Quit is under way) restores the shell and is not retried',asy
 test('an engine exit other than 0 is typed; update mode stays for the controller to start the old engine again',async()=>{const f=fixture();f.request=async method=>{if(method==='POST')return {};f.exit(1);throw Error('gone');};
  await assert.rejects(f.run(),error=>error.updateCause==='engine_exit');assert.equal(f.state.quit,'updating');});
 test('no update without an owned running engine',async()=>{const f=fixture();f.state.owner=null;await assert.rejects(f.run(),error=>error.updateCause==='refused');assert.equal(f.state.quit,'none');});
+// Senua's 0.22.1 review, W3: what the engine could not start again after Cancel, its bound or a failed close reaches the
+// controller typed (kind and cause only; the engine's wording stays in its log). Cancel waits for the engine's bounded
+// resume (35 s, the engine's UPDATE_RESUME is 25 s inside its own 30 s wait), not the 15 s of the update request.
+test('Cancel and the engine-side outcomes carry what did not start again, typed',async()=>{const {CANCEL_TIMEOUT_MS}=createRequire(import.meta.url)('../desktop/engine-update.js');
+ const problems=[{kind:'automatic',cause:'still_stopping',reason:'it had not stopped after 25 s'},{kind:'scan',cause:'refused',reason:'A scan is already running'},{kind:'nonsense',cause:'refused'}];
+ const f=fixture();let polls=0,cancelTimeout=0;
+ f.request=async(method,path,options)=>{if(path.endsWith('/update-cancel')){cancelTimeout=options.timeout;return {phase:'running',update:{outcome:{result:'cancelled',waiting:[],resume_problems:problems}}};}if(path.endsWith('/status')&&++polls===2)f.cancel=true;return {phase:'pausing',update:{phase:'pausing'}};};
+ await assert.rejects(f.run(),error=>{assert.deepEqual(error.resumeProblems,[{kind:'automatic',cause:'still_stopping'},{kind:'scan',cause:'refused'}]);return error.updateCause==='cancelled';});
+ assert.equal(cancelTimeout,CANCEL_TIMEOUT_MS);assert(CANCEL_TIMEOUT_MS>30000,'longer than the engine waits for its update thread');
+ for(const result of ['bound','blocked']){const g=fixture();
+  g.request=async(method)=>method==='POST'?{update:{phase:'pausing'}}:{phase:'running',update:{phase:'running',outcome:{result,waiting:[],resume_problems:[{kind:'conversion',cause:'refused',reason:'The audiobook worker is still pausing.'}]}}};
+  await assert.rejects(g.run(),error=>error.updateCause===result&&error.resumeProblems.length===1&&error.resumeProblems[0].kind==='conversion'&&!('reason' in error.resumeProblems[0]));}
+ const h=fixture();h.request=async(method)=>method==='POST'?{update:{phase:'pausing'}}:{phase:'running',update:{phase:'running',outcome:{result:'bound',waiting:[]}}};
+ await assert.rejects(h.run(),error=>Array.isArray(error.resumeProblems)&&error.resumeProblems.length===0,'an engine without the field: nothing named');});
+// Senua's 0.22.1 review, W5: once too late to cancel the engine is in its close; when the shell stops waiting for it
+// (engine_stuck) and leaves update mode, the engine's later exit 0 was taken as its own Stop and closed the app with
+// no installer and no reopen. That exit is now marked as the update's ending, read once, and starts the old engine.
+test('the shell gives up on an engine still ending for the update; its later exit never closes the app',async()=>{const {updateExit,BOUND_MS,EXIT_GRACE_MS}=createRequire(import.meta.url)('../desktop/engine-update.js');
+ const f=fixture();f.request=async(method,path)=>method==='POST'?{phase:'updating',update:{phase:'updating'}}:{phase:'exiting',update:{phase:'exiting',waiting:[]}};
+ await assert.rejects(f.run(),error=>error.updateCause==='engine_stuck');
+ assert(f.clock>=BOUND_MS+EXIT_GRACE_MS,'gave up only after the bound and the exit grace: '+f.clock);
+ assert.deepEqual([f.state.quit,f.state.lateUpdateExit],['none',true]);
+ assert.equal(updateExit(f.state),'late','the later exit is the update ending, not a Stop');
+ assert.equal(updateExit(f.state),null,'read once');
+ // Positive control and the other side: given up while it could still be cancelled (the bound), no late exit is marked.
+ const g=fixture();g.request=async(method,path)=>path.endsWith('/update-cancel')?{phase:'running',update:{outcome:{result:'bound',waiting:[]}}}:{phase:'pausing',update:{phase:'pausing',waiting:[]}};
+ await assert.rejects(g.run(),error=>error.updateCause==='bound');assert.deepEqual([g.state.quit,g.state.lateUpdateExit],['none',false]);assert.equal(updateExit(g.state),null);
+ // A Quit asked for meanwhile wins: that exit finishes the Quit.
+ const q={quit:'requested',lateUpdateExit:true};assert.equal(updateExit(q),null);
+ assert.equal(updateExit({quit:'updating'}),'update');assert.equal(updateExit({quit:'installing'}),'update');
+ // A new update clears the mark.
+ const h=fixture();h.state.lateUpdateExit=true;h.request=async method=>{if(method==='POST')return {};h.exit(0);throw Error('gone');};await h.run();assert.equal(h.state.lateUpdateExit,false);});

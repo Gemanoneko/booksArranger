@@ -220,7 +220,10 @@ function startBackend(config) {
     if (generation !== state.generation) return; // a launch Restart engine already replaced
     state.backendExited = true;
     // Restart to update: the update flow reads the exit (code 0 installs; anything else starts the old engine again).
-    if (state.quit === 'updating' || state.quit === 'installing') return;
+    // W5: an exit after the update stopped waiting for the engine's ending is that ending: the old engine starts again.
+    const update = require('./engine-update').updateExit(state);
+    if (update === 'update') return;
+    if (update === 'late') { if (updateController) updateController.lateEngineExit().catch(() => {}); return; }
     if (state.quit !== 'none') return finishExit(code === 0 ? 0 : 1);
     // While loading, an exit is the strip's Stopped (Try again), never an error box (Judy 3.4).
     if (!state.loaded) return setTimeout(() => engineStopped({ code, lastLines: lastLines(state.output) }), 300); // the last output first
@@ -634,17 +637,19 @@ function configureUpdater(config){
 // the app exits only once the installer process exists. Otherwise the old engine starts again (0.21.1 left the
 // shell with no engine at all when the installer did not start).
 async function installUpdate(autoUpdater){
-  const original=autoUpdater.spawnLog;let spawned=null;
-  autoUpdater.spawnLog=function(...args){spawned=original.apply(this,args);return spawned;};
+  // W7 (Senua's 0.22.1 review): the updater never starts its own fallback (elevate.exe, opening the file) after a failed
+  // spawn; the shell has reported installer_blocked and started the old engine by then.
+  const hold=require('./update-controller').holdInstallerSpawn(autoUpdater,logUpdate);
   state.quit='installing';broadcastStatus();
   try{
     autoUpdater.quitAndInstall(true,true);
+    const spawned=hold.spawned();
     if(!autoUpdater.quitAndInstallCalled||!spawned)throw new Error('The updater did not start the installer');
     await Promise.race([spawned,sleep(10000).then(()=>{throw new Error('The installer process did not start within 10 s');})]);
   }catch(error){
     autoUpdater.quitAndInstallCalled=false;state.quit='updating';
     throw Object.assign(error,{updateCause:'installer_blocked'});
-  }finally{autoUpdater.spawnLog=original;}
+  }finally{hold.restore();}
   finishExit(0);
 }
 // The update did not install: the old version starts again from Step 1 and loads as at launch (no time limit).
@@ -706,7 +711,9 @@ ipcMain.handle('books:quit',async event=>{const source=trustedSender(event);if(s
 ipcMain.handle('books:startup',event=>{trustedSender(event);return state.startup?state.startup.value:null;});
 // Restart engine (Stuck) and Try again (Stopped): a new launch from Step 1; only while loading.
 ipcMain.handle('books:restart-engine',async event=>{if(trustedSender(event)!=='app'||!currentConfig)throw new Error('Restart engine is unavailable');return restartEngine(currentConfig);});
-ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null,loaded:state.loaded,verdict:state.verdict};});
+ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=null;if(state.ready&&!state.backendExited){try{desktop=await desktopStatus.get();}catch{desktop={phase:'unavailable',idle:false};}}
+  if(desktop&&desktop.phase==='running')state.lateUpdateExit=false; // W5: the engine undid the update itself; a later exit is its own
+  return {desktop,engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null,loaded:state.loaded,verdict:state.verdict};});
 
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {

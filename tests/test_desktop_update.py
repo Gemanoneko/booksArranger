@@ -6,6 +6,8 @@ the request answers at once, the work stops at its safe points within bounds, th
 running and no file change half done, and Cancel or the bound undo everything. A fake engine; the busy-engine matrix
 of the proposal (section 5E) that does not need a packaged build."""
 import io
+from pathlib import Path
+import tempfile
 import threading
 import time
 from email.message import Message
@@ -15,9 +17,12 @@ from unittest.mock import Mock, patch
 
 import critical_sections
 from desktop_backend import DesktopControl, UpdateStarted, handler_class
+from scan_wait import close_scan, finish_scan
 from web_server import Handler
 
 TOKEN = 'd' * 64
+AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'desktop-update-tests'
+AREA.mkdir(parents=True, exist_ok=True)
 
 
 class Worker:
@@ -35,6 +40,11 @@ class Worker:
 
     def is_alive(self):
         return self.alive
+
+    def join(self, timeout=None):
+        end = time.monotonic() + (timeout if timeout is not None else 1e9)
+        while self.alive and time.monotonic() < end:
+            time.sleep(0.01)
 
 
 def engine(*, converting=False, scanning=False, automatic=False, stubborn=False, admissions=0, slow_state=0.0):
@@ -63,9 +73,9 @@ def engine(*, converting=False, scanning=False, automatic=False, stubborn=False,
     return server, calls
 
 
-def control(server, safe=5.0, force=5.0):
+def control(server, safe=5.0, force=5.0, resume=0.5):
     value = DesktopControl(server)
-    value.UPDATE_SAFE, value.UPDATE_FORCE, value.UPDATE_POLL = safe, force, 0.02
+    value.UPDATE_SAFE, value.UPDATE_FORCE, value.UPDATE_POLL, value.UPDATE_RESUME = safe, force, 0.02, resume
     return value
 
 
@@ -190,21 +200,33 @@ class MatrixTests(unittest.TestCase):
         self.assertGreaterEqual(shutdown, closed[0])
 
     def test_cancel_while_waiting_starts_everything_again(self):
-        server, calls = engine(converting=True, automatic=True, stubborn=True)
+        # Cancel arrives while the work is still stopping (each worker ends 0.2 s after its stop): it is started again
+        # once it has ended, never while it still stops (Senua's 0.22.1 review, W3; the real workers are below).
+        server, calls = engine(converting=True, automatic=True)
         value = control(server); value.prepare_update()
-        time.sleep(0.1)
+        time.sleep(0.05)
         answer = value.cancel_update()
         self.assertEqual(answer['phase'], 'running'); self.assertFalse(server.closing, 'presses work again')
         self.assertEqual(answer['update']['outcome']['result'], 'cancelled')
+        self.assertEqual(answer['update']['outcome']['resume_problems'], [])
         self.assertIn('automatic start', calls, 'the automatic run continues')
+        self.assertFalse(server.merge.automatic.thread.is_alive() or server.merge.jobs._thread.is_alive(), 'started only after they ended')
         self.assertNotIn('shutdown', calls)
 
     def test_a_cancel_restarts_the_queue_and_the_scan_that_ran(self):
-        server, calls = engine(converting=True, scanning=True, stubborn=True)
-        value = control(server); value.prepare_update(); time.sleep(0.1)
+        server, calls = engine(converting=True, scanning=True)
+        value = control(server); value.prepare_update(); time.sleep(0.05)
         value.cancel_update()
         self.assertIn(('resume', {'recheck': False}), calls)
         self.assertIn(('scan resume', 'Audiobooks', True), calls)
+
+    def test_work_that_has_not_stopped_in_time_is_named_and_not_started(self):
+        # A conversion that will not stop: Cancel waits UPDATE_RESUME for it, then says what did not start again.
+        server, calls = engine(converting=True, automatic=True, stubborn=True)
+        value = control(server, resume=0.3); value.prepare_update(); time.sleep(0.05)
+        outcome = value.cancel_update()['update']['outcome']
+        self.assertEqual([(p['kind'], p['cause']) for p in outcome['resume_problems']], [('automatic', 'still_stopping')])
+        self.assertNotIn('automatic start', calls, 'automatic processing cannot start beside a queue that is still pausing')
 
     def test_the_bound_cancels_and_keeps_the_app_running(self):
         # The last resort without proof that every write path survives a forced end: cancel and say what did not stop.
@@ -214,6 +236,7 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(status['phase'], 'running'); self.assertFalse(server.closing)
         outcome = status['update']['outcome']
         self.assertEqual(outcome['result'], 'bound'); self.assertEqual([w['kind'] for w in outcome['waiting']], ['conversion'])
+        self.assertEqual([(p['kind'], p['cause']) for p in outcome['resume_problems']], [('conversion', 'still_stopping')], 'never "as before"')
         self.assertNotIn('shutdown', calls)
 
     def test_too_late_to_cancel_once_the_engine_is_ending(self):
@@ -236,6 +259,193 @@ class MatrixTests(unittest.TestCase):
         server, _ = engine(converting=True, stubborn=True)
         value = control(server); value.prepare_update()
         self.assertEqual(value.quit()['phase'], 'pausing'); value.cancel_update()
+
+
+class RealWorkerResumeTests(unittest.TestCase):
+    """Senua's 0.22.1 review, W3, with the real workers and their real restarts: MergeService and its AudioJobs queue,
+    AutomaticProcessing, the Inventory scan, SeriesBackfill and GapFill on a private catalog. Each worker takes LAG
+    seconds to stop after the update stops it (the step it is in reaches its checkpoint), so Cancel always arrives while
+    it is still stopping: the case the fakes above could not show, because their restarts always succeeded. Before the
+    fix every one stayed stopped: the queue's resume was refused ("still pausing"), the scan's ("already running"), and
+    automatic processing and the lookups returned without starting."""
+    LAG = 0.6
+
+    def setUp(self):
+        from merge_service import MergeService
+        from scanner import Inventory
+        self.temp = tempfile.TemporaryDirectory(dir=AREA)
+        self.addCleanup(self.temp.cleanup)
+        base = Path(self.temp.name)
+        roots = {name: str(base / name) for name in ('Audiobooks', 'Podcasts', 'Ebooks')}
+        for path in roots.values():
+            Path(path).mkdir()
+        (base / 'sorted').mkdir()
+        (Path(roots['Audiobooks']) / 'John Writer - A Book.mp3').write_bytes(b'fixture only')
+        self.reads = []
+        self.slow_read = False
+        self.inventory = Inventory(base / 'catalog.sqlite3', roots, self.read, output_root=str(base / 'sorted'))
+        self.merge = MergeService(self.inventory, base / 'cache')
+        self.addCleanup(self.close)
+        lock = threading.Lock()
+        self.server = SimpleNamespace(merge=self.merge, inventory=self.inventory, closing=False, control_lock=lock, control_condition=threading.Condition(lock),
+                                      merge_admissions=0, scan_active=lambda: bool(self.inventory.worker and self.inventory.worker.is_alive()),
+                                      active_library=None, finish_shutdown=Mock(), state=Mock())
+
+    def close(self):
+        for name in ('series_backfill', 'gap_fill'):
+            worker = self.merge.__dict__.get(name)
+            if worker is not None:
+                worker.close()
+        automatic = self.merge.__dict__.get('automatic')
+        if automatic is not None:
+            automatic.close()
+        close_scan(self.inventory)
+        self.merge.close()
+
+    def read(self, path, kind, stop):
+        """The scan's tag reader: the first read takes LAG to reach its checkpoint once the scan is stopped."""
+        self.reads.append(path)
+        if self.slow_read and len(self.reads) == 1:
+            self.assertTrue(wait_until(stop.is_set, 10), 'the update stopped the scan')
+            time.sleep(self.LAG)
+        return {'title': 'A Book', 'artist': 'John Writer', 'tags': {'title': 'A Book', 'artist': 'John Writer', 'album': 'A Book', 'track': '1'},
+                'probe': {'format': {'duration': '1'}}}
+
+    def cancel_while_stopping(self, entered, value=None, meanwhile=None):
+        """Restart to update once the worker is in its slow step, then Cancel while it is still stopping. meanwhile:
+        the positive control, run while it stops: the restart the old code made at once."""
+        self.assertTrue(entered.wait(10), 'the worker reached its slow step')
+        value = value or control(self.server, resume=10.0)
+        value.prepare_update()
+        time.sleep(0.1)
+        if meanwhile is not None:
+            meanwhile()
+        return value, value.cancel_update()
+
+    def test_the_conversion_queue_starts_again_once_its_worker_has_stopped(self):
+        jobs = self.merge.jobs
+        entered, passes = threading.Event(), []
+        def pending():
+            # Called by each start of the real queue worker (and by state(), which is not counted).
+            if threading.current_thread().name != 'BooksArrangerAudioJobs':
+                return []
+            passes.append(threading.current_thread())
+            return ['fixture-job'] if len(passes) == 1 else []
+        def postprocess(job_id):
+            entered.set()
+            self.assertTrue(wait_until(jobs._stop.is_set, 10), 'the update paused the queue')
+            time.sleep(self.LAG)  # the book in progress reaches its checkpoint
+            raise InterruptedError('Paused; the book restarts')
+        jobs.pending_postprocessing, jobs.postprocessing = pending, postprocess
+        self.merge.resume(recheck=False)
+        def refused():
+            # Positive control: the restart the old code made at once is refused by the real queue while it stops.
+            from audio_jobs import StartRefused
+            with self.assertRaisesRegex(StartRefused, 'still pausing'):
+                self.merge.resume(recheck=False)
+        value, answer = self.cancel_while_stopping(entered, meanwhile=refused)
+        outcome = answer['update']['outcome']
+        self.assertEqual((answer['phase'], outcome['result'], outcome['resume_problems']), ('running', 'cancelled', []))
+        self.assertTrue(wait_until(lambda: len(passes) == 2, 10), 'the real queue worker ran again')
+        self.assertIsNot(passes[0], passes[1], 'a new worker thread, started after the stopped one ended')
+        self.assertFalse(jobs._stop.is_set())
+
+    def test_automatic_processing_continues_its_run_once_it_has_stopped(self):
+        from automatic_processing import AutomaticProcessing
+        entered, calls = threading.Event(), []
+        def lookup(row, root, stop, progress=None):
+            calls.append(row['id'])
+            if len(calls) == 1:
+                entered.set()
+                self.assertTrue(wait_until(stop.is_set, 10), 'the update stopped automatic processing')
+                time.sleep(self.LAG)  # research reaches its checkpoint
+            return {'reasons': ['Book identity uncertain'], 'sources': []}
+        research = SimpleNamespace(client=SimpleNamespace(retry_wait=lambda wait: dict(wait)), lookup=lookup)
+        automatic = AutomaticProcessing(self.merge, research)
+        self.merge.automatic = automatic
+        automatic.start()
+        def skipped():
+            # Positive control: while the old thread lives the real start returns without starting anything.
+            thread = automatic.thread
+            automatic.start()
+            self.assertIs(automatic.thread, thread)
+        value, answer = self.cancel_while_stopping(entered, meanwhile=skipped)
+        self.assertEqual(answer['update']['outcome']['resume_problems'], [])
+        self.assertTrue(wait_until(lambda: automatic.thread is not None and not automatic.thread.is_alive() and automatic.status()['state'] == 'Completed', 10),
+                        'the run went on to its end, not left Paused: ' + automatic.status()['state'])
+        self.assertEqual(len(calls), 2, 'the stopped book was researched again')
+
+    def test_the_library_scan_resumes_once_it_has_stopped(self):
+        self.slow_read = True
+        self.inventory.launch('Audiobooks')
+        self.server.active_library = 'Audiobooks'
+        entered = threading.Event()
+        threading.Thread(target=lambda: wait_until(lambda: self.reads, 10) and entered.set(), daemon=True).start()
+        def refused():
+            # Positive control: the real scan refuses to resume while its stopped worker still runs.
+            with self.assertRaisesRegex(ValueError, 'already running'):
+                self.inventory.launch('Audiobooks', resume=True)
+        value, answer = self.cancel_while_stopping(entered, meanwhile=refused)
+        self.assertEqual(answer['update']['outcome']['resume_problems'], [])
+        finish_scan(self.inventory)
+        self.assertEqual(self.inventory.status('Audiobooks')['state'], 'completed', 'the scan went on to its end')
+        self.assertEqual(len(self.reads), 2, 'the stopped file was read again')
+
+    def test_background_lookups_start_again_once_they_have_stopped(self):
+        import gap_fill, series_backfill
+        entered, passes = threading.Event(), []
+        def lookups(worker):
+            def run_pass():
+                passes.append(worker)
+                if passes.count(worker) == 1:
+                    entered.set()
+                    self.assertTrue(wait_until(worker.stop.is_set, 10), 'the update stopped the lookups')
+                    time.sleep(self.LAG)  # the request in flight answers
+                    raise InterruptedError()
+                wait_until(worker.stop.is_set, 10)
+            return run_pass
+        with patch.object(series_backfill, 'START_DELAY', 0), patch.object(gap_fill, 'START_DELAY', 0):
+            for name, cls in (('series_backfill', series_backfill.SeriesBackfill), ('gap_fill', gap_fill.GapFill)):
+                worker = cls(self.merge)
+                worker.run_pass = lookups(worker)
+                setattr(self.merge, name, worker)
+            self.merge.series_backfill.start(); self.merge.gap_fill.start()
+            self.assertTrue(wait_until(lambda: len(passes) == 2, 10))
+            def skipped():
+                # Positive control: while the old thread lives the real start returns without starting anything.
+                for worker in (self.merge.series_backfill, self.merge.gap_fill):
+                    thread = worker.thread
+                    worker.start()
+                    self.assertIs(worker.thread, thread)
+            value, answer = self.cancel_while_stopping(entered, meanwhile=skipped)
+            self.assertEqual(answer['update']['outcome']['resume_problems'], [])
+            for worker in (self.merge.series_backfill, self.merge.gap_fill):
+                self.assertTrue(wait_until(lambda: passes.count(worker) == 2, 10), 'a new pass started')
+                self.assertTrue(worker.thread.is_alive())
+                self.assertFalse(worker.stop.is_set())
+
+    def test_work_still_stopping_at_the_bound_is_named_never_as_before(self):
+        jobs = self.merge.jobs
+        entered, release = threading.Event(), threading.Event()
+        def postprocess(job_id):
+            entered.set(); release.wait(10)
+            raise InterruptedError()
+        jobs.pending_postprocessing, jobs.postprocessing = (lambda: ['fixture-job']), postprocess
+        self.addCleanup(release.set)
+        self.merge.resume(recheck=False)
+        _, answer = self.cancel_while_stopping(entered, control(self.server, resume=0.3))
+        problems = answer['update']['outcome']['resume_problems']
+        self.assertEqual([(p['kind'], p['cause']) for p in problems], [('conversion', 'still_stopping')])
+        release.set()
+
+
+def wait_until(check, seconds):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if check():
+            return True
+        time.sleep(0.02)
+    return bool(check())
 
 
 class RouteTests(unittest.TestCase):

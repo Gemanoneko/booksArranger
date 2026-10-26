@@ -390,47 +390,88 @@ class DesktopControl:
             except Exception:
                 pass
 
+    UPDATE_RESUME = 25.0  # Cancel, the bound or a failed close: seconds the stopped work gets to end before it starts again
+
     def _resume_after_update(self, result, reason=''):
-        """Cancel, the bound or a failed close: undo the update's stops and start again what was running. The app runs
-        on as before."""
+        """Cancel, the bound or a failed close: undo the update's stops and start again what was running.
+
+        Senua's 0.22.1 review, W3: every worker the update stopped is, by definition, still stopping when this runs (the
+        update waits because it is). A restart while the old thread lives is refused (the queue: "still pausing"; a scan:
+        "already running") or skipped without a word (automatic processing and the background lookups return at once), so
+        the work stayed stopped behind "running as before". Now each is started again once the threads it needs have
+        ended, waited for with one bound for all (UPDATE_RESUME, inside the shell's 30 s margin and Cancel's 30 s wait);
+        presses work again at once. What did not start again is in resume_problems ({kind, cause, reason}; cause
+        'still_stopping' or 'refused'), which the Install line names. Only the threads the update stopped are waited
+        for: work a press starts meanwhile is running, not stopping."""
         update = self.update
         before = update.get('before') or {}
         with self.server.control_condition:
             self.server.closing = False
             self.server.control_condition.notify_all()
-        problems = []
         merge = self.server.merge
         automatic = self._automatic()
-        try:
-            if before.get('automatic') and automatic is not None:
-                automatic.start()  # continues the saved run, which starts the queue again
-            elif before.get('converting') or before.get('cleanup'):
-                resume = merge.resume
-                try:
-                    resume(recheck=False)
-                except TypeError:
-                    resume()
-        except Exception as error:
-            problems.append(str(error)[:300] or type(error).__name__)
-        try:
-            if before.get('scanning') and not before.get('automatic') and before.get('library'):
-                self.server.inventory.launch(before['library'], resume=True)
-                self.server.active_library = before['library']
-        except Exception as error:
-            problems.append(str(error)[:300] or type(error).__name__)
+        inventory = self.server.inventory
+        live = lambda *threads: [t for t in threads if t is not None and t is not threading.current_thread() and t.is_alive()]
+        jobs, cleanup = getattr(merge, 'jobs', None), getattr(merge, 'cleanup', None)
+        queue = live(getattr(jobs, '_thread', None), getattr(cleanup, 'thread', None))
+        scan = live(getattr(inventory, 'worker', None))
+        plan = []
+        if before.get('automatic') and automatic is not None:
+            # Continues the saved run, which starts the queue again; its start needs no scan and no pausing queue.
+            plan.append(('automatic', live(getattr(automatic, 'thread', None)) + queue + scan, automatic.start))
+        elif before.get('converting') or before.get('cleanup'):
+            plan.append(('conversion', queue + scan, self._resume_queue))
+        if before.get('scanning') and not before.get('automatic') and before.get('library'):
+            plan.append(('scan', scan, lambda: self._resume_scan(before['library'])))
         for name in ('series_backfill', 'gap_fill'):
             background = getattr(merge, '__dict__', {}).get(name)
             if background is not None:
-                try:
-                    background.start()
-                except Exception as error:
-                    problems.append(str(error)[:300])
+                plan.append(('lookups', live(getattr(background, 'thread', None)), background.start))
+        deadline = time.monotonic() + self.UPDATE_RESUME
+        problems = []
+        for kind, threads, start in plan:
+            if not self._ended(threads, deadline):
+                problems.append({'kind': kind, 'cause': 'still_stopping', 'reason': 'it had not stopped after %g s' % self.UPDATE_RESUME})
+                continue
+            try:
+                start()
+            except Exception as error:
+                problems.append({'kind': kind, 'cause': 'refused', 'reason': str(error)[:300] or type(error).__name__})
+        if problems:
+            try:
+                print('Books Arranger update %s: not started again: %s' % (result, json.dumps(problems, ensure_ascii=False)), file=sys.stderr, flush=True)
+            except Exception:
+                pass
         with self.lock:
             self.phase = 'running'
             self.error = ''
             update['outcome'] = {'result': result, 'waiting': [dict(item) for item in update.get('waiting') or []], 'at': time.time(),
                                  'reason': reason, 'resume_problems': problems}
         return update['outcome']
+
+    def _ended(self, threads, deadline):
+        """True once every thread has ended; False when the deadline passes first."""
+        for thread in threads:
+            while thread.is_alive():
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                thread.join(min(left, self.UPDATE_POLL))
+        return True
+
+    def _resume_queue(self):
+        resume = self.server.merge.resume
+        try:
+            resume(recheck=False)
+        except TypeError:
+            resume()
+
+    def _resume_scan(self, library):
+        worker = getattr(self.server.inventory, 'worker', None)
+        if worker is not None and worker.is_alive():
+            return  # a press started a scan meanwhile: it runs
+        self.server.inventory.launch(library, resume=True)
+        self.server.active_library = library
 
     def cancel_update(self):
         """POST /api/desktop/update-cancel: the update stops; everything it stopped starts again. Raises UpdateStarted
