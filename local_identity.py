@@ -1742,10 +1742,33 @@ def _without_year(value):
     return text(re.sub(r'\s*[(\[]?\s*(?:1[89]|20)\d{2}\s*[)\]]?\s*', ' ', str(value or '')))
 
 
-def _people_piece(value, index=None):
-    """A piece of a name that is only people: "Сергей Недоруб", "С. Лукьяненко, И. Кузнецов", a year beside them aside."""
-    people = [text(p) for p in re.split(r'\s*[,;&/]\s*|\s+(?:и|and)\s+', _without_year(value), flags=re.I) if text(p)]
-    return bool(people) and all(_person_like(p) and looks_like_person(p, index) for p in people)
+def _credit_people(value):
+    """The people one credit names ("С. Лукьяненко, И. Кузнецов" is two), a year beside them aside."""
+    return [text(p) for p in re.split(r'\s*[,;&/]\s*|\s+(?:и|and)\s+', _without_year(value), flags=re.I) if text(p)]
+
+
+def _title_credit(author_folder, members, index=None, rules=None, folder=''):
+    """Whether a piece before a title is a credit of THIS book (Senua's 0.22.1 review, W1 and W8): every person in it is
+    the book's own author (its author folder, or an author tag of its files; a slip in a first name aside, "Марина
+    Ясинская" tagged "Мария Ясинская") or a known reader (narrator tags, the library's readers, ruling 1). With no author
+    tag the file name's own author slot is the book's author (the 0.22.0 file-name reading), so a person there counts.
+    A reader credited in an author tag (Sergei's not_author rules, ruling 12) is no author tag here."""
+    readers = [p for m in members for name in NARRATOR_TAGS for p in _credit_people(text(_tags(m).get(name)))]
+    readers += list((index or {}).get('readers') or ()) + list(RULED_NARRATORS)
+    tagged = [p for m in members for name in AUTHOR_TAGS for p in _credit_people(text(_tags(m).get(name)))
+              if not (rules is not None and rules.not_author(p, folder)) and not any(same_person(p, reader) for reader in readers)]
+
+    def person(value):
+        if any(compare_names(value, own) or _shares_surname(value, own) for own in [author_folder] + tagged if own):
+            return True
+        if any(same_person(value, reader) for reader in readers):
+            return True
+        return not tagged and looks_like_person(value, index)
+
+    def credited(piece):
+        people = _credit_people(piece)
+        return bool(people) and all(_person_like(p) and person(p) for p in people)
+    return credited
 
 
 def _balanced(value):
@@ -1772,7 +1795,7 @@ def _relative_parts(path, root):
     return list(parts[len(base):])
 
 
-def folder_structure(row, root, index=None):
+def folder_structure(row, root, index=None, rules=None, folder=''):
     """{'author', 'series', 'position', 'title', 'reader', 'file_series', 'book', 'book_name', 'series_folder'} when the
     book sits at Author\\Series\\<book> below its source root and <book> names its place in the series; else None.
     <book> is the folder that holds every file, or the file itself when it sits directly in the series folder."""
@@ -1822,10 +1845,13 @@ def folder_structure(row, root, index=None):
             title = text(re.sub(r'(?:^|\s+[-–—]\s+)' + re.escape(piece) + r'(?:\s+[-–—]\s+|$)', ' - ', title).strip(' -–—'))
     # Senua's 0.22.1 review, W1: in a shared-universe folder the book's own author stands before its title ("16 - Сергей
     # Недоруб - Севастопольский дозор" in "Сергей Лукьяненко\Вселенная Дозоров - Межавторский цикл", "05 - С. Лукьяненко, И.
-    # Кузнецов - Печать сумрака"): every leading piece that is only people is a credit, never part of the title.
+    # Кузнецов - Печать сумрака"): a leading piece that is only such people is a credit, never part of the title.
+    # Her W8 (Jane 2026-10-26): only the book's own author or a known reader is such a credit; any other person is part of
+    # the title («Жозеф Фуше - Портрет политического деятеля» in "Стефан Цвейг\Биографии", tagged Стефан Цвейг).
+    credited = _title_credit(author, members, index, rules, folder)
     while True:
         pieces = re.split(r'\s+[-–—]\s+', title, maxsplit=1)
-        if len(pieces) < 2 or not re.search(r'[^\W\d_]{2}', _balanced(pieces[1])) or not _people_piece(pieces[0], index):
+        if len(pieces) < 2 or not re.search(r'[^\W\d_]{2}', _balanced(pieces[1])) or not credited(pieces[0]):
             break
         title = text(pieces[1])
     title = clean_title(_balanced(title))
@@ -1872,7 +1898,12 @@ def whole_in_book_folder(row, siblings):
         folder = text(folder[:tail.start()])
     folder = _UPLOADER.sub('', folder)
     match = _BOOK_POSITION.match(folder)
-    folder = clean_title(match[2] if match else folder)
+    if not match:
+        # Senua's 0.22.1 review, W14: only a folder that carries the book's position or an uploader number ("5. Игры
+        # Немезиды", "930. Коробка в форме сердца") is that book's own folder. A set's folder is named the same way as its
+        # volumes ("Торадора!\Торадора! 6.m4b", "Ведьмак\Ведьмак 3.m4b"): a lone volume there keeps its number (rulings 13, 15).
+        return ''
+    folder = clean_title(match[2])
     return book if book and re.search(r'[^\W\d_]{2}', book) and title_key(folder) == title_key(book) else ''
 
 
@@ -1905,6 +1936,11 @@ def _structured_title(title, structure, author_names, index=None):
         return record, value
     if key.endswith(folder_key) and any(key.startswith(title_key(s)) for s in series_names):
         return record, value
+    if structure.get('book') == 'file' and title.get('basis') == 'file_name':
+        # Senua's 0.22.1 review, W15: with no title tag, a single file's title was the 0.22.0 file-name reading, which takes
+        # "X - Y" for "Author - Title" («Ревущий мясник» of "3. Сын целлулоида - Ревущий мясник.m4b"). The structure read the
+        # same name knowing the folders and drops only a credit of this book (W1, W8), so it wins.
+        return dict(record, how=record['how'] + '; read from the file name knowing its folders'), value
     if structure.get('files_name_title') and folder_key not in key and script(folder) == script(value):
         # The folder and the file names name this book; the tag names something else (a series album, item 9). A tag
         # that adds to the folder's title ("Единая теория всего. Том 1" in "4. Единая Теория Всего") is kept above.
@@ -2029,7 +2065,7 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     # 0.22.1, item 9 (Sergei 2026-10-25, ruling 6): the folder structure Author\Series\N. Title is a local source. It names the
     # series and the book's place in it, the author, and the title when the tags do not (or carry the translation of a
     # title the folder names in Latin letters, ruling 16).
-    structure = folder_structure(row, root, index) if not (part and part['title']) else None
+    structure = folder_structure(row, root, index, rules, folder_text) if not (part and part['title']) else None
     if structure:
         title, replaced = _structured_title(title, structure, [structure['author'], tag_title_author], index)
         if replaced:

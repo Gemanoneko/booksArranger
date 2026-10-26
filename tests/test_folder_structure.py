@@ -423,6 +423,44 @@ class SeriesFolderFileTests(Base):
                          'Harry Potter\\62. Книга 1 - Гарри Поттер и философский камень (Александр Клюквин)\\Джоан Роулинг - Книга 1 - Гарри Поттер и философский камень.m4b'):
             self.assertIsNone(local_identity.folder_structure({'members': [{'path': ROOT + '\\' + relative, 'filename': Path(relative).name}]}, ROOT), relative)
 
+    def test_a_lone_volume_in_its_set_folder_keeps_its_number(self):
+        # Senua's 0.22.1 review, W14: "Торадора!\Торадора! 6.m4b" became the whole book «Торадора!» because the set's folder
+        # is named like the file without its number. Only a folder that carries the book's position is the book's own folder.
+        for tags in (dict(title='Торадора!', album='Торадора!', artist='Такэмия Ююко'), dict(title='Торадора! 6', album='Торадора! 6', artist='Такэмия Ююко')):
+            row = next(iter(self.catalog([file_row('Takemiya Yuyuko\\Торадора!\\Торадора! 6.m4b', **tags)]).values()))
+            result = self.lookup(row)
+            self.assertEqual(self.approved(row)['title'], 'Торадора! 6', tags)
+            self.assertEqual(self.goes_to(row, result), SORTED + '\\Takemiya Yuyuko\\Торадора! 6 - Takemiya Yuyuko.m4b', tags)
+        row = next(iter(self.catalog([file_row('Анджей Сапковский\\Ведьмак\\Ведьмак 3.m4b')]).values()))
+        self.assertEqual(self.approved(row)['title'], 'Ведьмак 3')
+        lone = lambda relative: {'members': [{'path': ROOT + '\\' + relative, 'filename': Path(relative).name}]}
+        self.assertEqual(local_identity.whole_in_book_folder(lone('Takemiya Yuyuko\\Торадора!\\Торадора! 6.m4b'), []), '')
+        # Controls: the book's own folder by its position, or an uploader number with a reader.
+        self.assertEqual(local_identity.whole_in_book_folder(lone('James S. A. Corey\\5. Игры Немезиды\\5. Игры Немезиды 1.m4b'), []), 'Игры Немезиды')
+        self.assertEqual(local_identity.whole_in_book_folder(lone('Joe Hill\\930. Коробка в форме сердца (Михаил Прокопов)\\Коробка в форме сердца 1.m4b'), []), 'Коробка в форме сердца')
+
+    def test_a_title_with_a_dash_keeps_what_is_no_credit_of_this_book(self):
+        # Senua's 0.22.1 review, W15: with no title tag, «Сын целлулоида - Ревущий мясник» lost its first half (the file-name
+        # reading takes "X - Y" for "Author - Title"). W8: a person who is not the book's author («Жозеф Фуше», the subject
+        # of a biography tagged Стефан Цвейг) was stripped as a credit.
+        for tags in ({}, dict(artist='Clive Barker')):
+            row = next(iter(self.catalog([file_row('Clive Barker\\Books of Blood\\3. Сын целлулоида - Ревущий мясник.m4b', **tags)]).values()))
+            result = self.lookup(row)
+            self.assertEqual(self.approved(row)['title'], 'Сын целлулоида - Ревущий мясник', tags)
+            self.assertEqual(self.goes_to(row, result), SORTED + '\\Barker Clive\\Books of Blood\\Books of Blood - 3 - Сын целлулоида - Ревущий мясник - Barker Clive.m4b', tags)
+        row = next(iter(self.catalog([file_row('Стефан Цвейг\\Биографии\\03 - Жозеф Фуше - Портрет политического деятеля.m4b', artist='Стефан Цвейг')]).values()))
+        self.assertEqual(self.approved(row)['title'], 'Жозеф Фуше - Портрет политического деятеля')
+        self.assertEqual(self.lookup(row)['review']['title'], 'Жозеф Фуше - Портрет политического деятеля')
+        # The book's own author or a known reader before the title is still a credit (W1): the author tag, a slip in the
+        # first name aside (live: "Марина Ясинская" tagged "Мария Ясинская"), the reader of this book, and with no author tag
+        # the person the file name credits.
+        read = lambda relative, **tags: local_identity.folder_structure({'members': [{'path': ROOT + '\\' + relative, 'filename': Path(relative).name,
+                                                                                      'metadata': {'tags': tags}}]}, ROOT)['title']
+        self.assertEqual(read(self.DOZORY + self.LIVE[2][0], artist='Мария Ясинская'), 'Чужой Дозор')
+        self.assertEqual(read('Clive Barker\\Books of Blood\\3. Игорь Князев - Ревущий мясник.m4b', artist='Clive Barker', narrator='Игорь Князев'), 'Ревущий мясник')
+        self.assertEqual(read('Clive Barker\\Books of Blood\\3. Игорь Князев - Ревущий мясник.m4b', artist='Clive Barker'), 'Игорь Князев - Ревущий мясник')
+        self.assertEqual(read(self.DOZORY + self.LIVE[0][0]), 'Севастопольский дозор')
+
 
 class OddNameTests(Base):
     """0.22.1 (Jane for Sergei, 2026-10-26): the live books that items 9 and 10 let through with odd names are asked, never
@@ -468,18 +506,18 @@ class OddNameTests(Base):
         # that credit's "local English spelling", so the row was asked and the book filed under "Richard_Ford_Labirint"
         # whatever the answer. A name with underscores is no spelling of a person: the clean credit files the book by
         # itself, as any clean tag credit does (ruling 6; Q3 asks only when the name the app would file is odd).
-        row = self.book('Sbornik_Astronomikon\Richard_Ford_Labirint\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
+        row = self.book('Sbornik_Astronomikon\\Richard_Ford_Labirint\\Mp3', ['Ричард Форд - Лабиринт - %02d - unknown title.m4a' % n for n in (1, 2)],
                         title='Лабиринт', artist='Ричард Форд', album='Лабиринт', track='%d/-1')
         result = self.lookup(row)
         self.assertEqual(result['reasons'], [])
-        self.assertEqual(self.goes_to(row, result), SORTED + '\Форд Ричард\Лабиринт - Форд Ричард.m4b')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Форд Ричард\\Лабиринт - Форд Ричард.m4b')
         # The folder name the only credit: asked, the name without underscores proposed, and Approve as is files what the
         # Author field shows (Judy 11.3), never the underscores.
-        row = self.book('Unsorted\Richard_Ford - Labirint', ['%02d.m4a' % n for n in (1, 2)], title='Лабиринт', album='Лабиринт', track='%d')
+        row = self.book('Unsorted\\Richard_Ford - Labirint', ['%02d.m4a' % n for n in (1, 2)], title='Лабиринт', album='Лабиринт', track='%d')
         result = self.asked(row, 'title_author', 'author_folder')
         self.assertEqual(result['ask']['fields']['author']['proposal'], 'Richard Ford', 'the credit is offered, Sergei confirms')
         self.assertEqual(self.approved(row)['author'], 'Richard Ford')
-        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), SORTED + '\Ford Richard\Лабиринт - Ford Richard.m4b')
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), SORTED + '\\Ford Richard\\Лабиринт - Ford Richard.m4b')
 
     def test_the_author_sergei_confirms_on_the_underscore_row_decides_where_it_goes(self):
         # Futaba's 0.22.1 QA, M-2: on this row the Author field offered «Ричард Форд», yet with nothing typed, «Ричард Форд»
