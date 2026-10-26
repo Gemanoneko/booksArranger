@@ -74,7 +74,7 @@ patterns.push('test_folder_structure.py');  // 0.22.1: items 9 and 10, Sergei's 
 patterns.push('test_desktop_update.py');  // 0.22.1: the fail-less updater's engine fence, the busy-engine matrix (ruling 27)
 patterns.push('test_startup_loading.py');  // 0.22.1: the engine answers at once and loads in the background (ruling 28)
 patterns.push('test_action_queue.py');  // 0.22.1: queued Retry, Repair and Delete book (backlog 2 and 3; Judy section 1)
-const code=`import sys,unittest,json,pathlib
+const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))
 runroot=pathlib.Path(sys.argv[1]).resolve();mapping=json.loads(sys.argv[3]);mapped=[];absent=[]
@@ -91,8 +91,14 @@ def ids(suite):
   else:yield item.id()
 inventory=list(ids(s));print('Fixture root map:',json.dumps({'mapped':mapped,'absent':absent}),flush=True)
 print('Integrated Python batch cases:',len(inventory),flush=True)
-r=unittest.TextTestRunner(verbosity=2).run(s)
-report={'batch':int(sys.argv[4]),'patterns':patterns,'ids':inventory,'discovered':len(inventory),'completed':r.testsRun,'skipped':len(r.skipped),'failures':len(r.failures),'errors':len(r.errors),'success':r.wasSuccessful()}
+class Timed(unittest.TextTestResult):
+ seconds={};last=None
+ def startTestRun(self):super().startTestRun();Timed.last=time.perf_counter()
+ def stopTest(self,test):
+  super().stopTest(test);now=time.perf_counter();name=test.id().split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
+r=unittest.TextTestRunner(verbosity=2,resultclass=Timed).run(s)
+report={'batch':int(sys.argv[4]),'patterns':patterns,'ids':inventory,'discovered':len(inventory),'completed':r.testsRun,'skipped':len(r.skipped),'failures':len(r.failures),'errors':len(r.errors),'success':r.wasSuccessful(),
+ 'module_seconds':{k:round(v,1) for k,v in sorted(Timed.seconds.items(),key=lambda item:-item[1])}}
 print('BOOKS_PYTHON_BATCH_RESULT '+json.dumps(report),flush=True)
 sys.exit(not r.wasSuccessful() or bool(r.skipped) or r.testsRun!=len(inventory))
 `;
@@ -144,6 +150,9 @@ if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutpu
 if(JSON.stringify(inventory(root))!==JSON.stringify(inputs))throw Error('Gate source changed during the checks');  // the chain ran beside the copies
 const reports=results.map(r=>{const matches=[...r.out.matchAll(/^BOOKS_PYTHON_BATCH_RESULT (.+)$/gm)];if(matches.length!==1)throw Error('Python batch completion missing or duplicated');return JSON.parse(matches[0][1]);});
 const pythonCount=validatePythonReports(patterns,batches,reports).count;
+// What each module really took in its worker, under the gate's own load (each test's time since the one before, so class
+// setups count): the data the weights in python-check-batches.mjs are made from (2026-10-26, a worker at 96 % of its deadline).
+for(const report of reports)console.log('Python worker '+report.batch+' module seconds: '+JSON.stringify(report.module_seconds||{}));
 console.log('Integrated Python cases: '+pythonCount);
 // Senua's v0.21.2 E1: the pass line names the QA runtime the gate really used (its folder and the digest of every file in
 // it, python/ and ffmpeg/, beyond the three pinned executables) and the private MP3 fixture, so a receipt cannot name one
