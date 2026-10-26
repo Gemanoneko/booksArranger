@@ -2,9 +2,8 @@
 (()=>{
  // ── App updates: strings and states (ruling 27; Judy's 0.22.1 UX spec, section 2). Pure, so the node tests read
  // them without a window; the shell sends typed causes only, never raw error text. ──
- const BOUND='3 minutes';
  const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
- function name(item){return {conversion:item.title?'the conversion of '+item.title:'the conversion',scan:'the library scan',research:'research',lookups:'research',automatic:'automatic processing',approval:'an approval',cleanup:'a cleanup',press:'an action'}[item.kind]||'the running work';}
+ function name(item){return {conversion:item.title?'the conversion of '+item.title:'the conversion',scan:'the library scan',research:'research',lookups:'background lookups',automatic:'automatic processing',approval:'an approval',cleanup:'a cleanup',press:'an action'}[item.kind]||'the running work';}
  function what(waiting){
   const names=[...new Set((waiting||[]).filter(item=>item.kind!=='critical').map(name))];
   if(!names.length)return 'the running work';
@@ -36,12 +35,15 @@
   const i=u.install||{};
   if(i.phase==='cancelled')return {text:'Update cancelled. Books Arranger is running as before.',failed:false};
   if(i.phase!=='failed')return {text:'',failed:false};
-  const line={bound:`Update cancelled: ${what(i.waiting)} did not stop within ${BOUND} (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
+  // M2 (Judy's implementation check): no number; the engine gives up at 150 s and the shell at 180 s.
+  const line={bound:`Update cancelled: ${what(i.waiting)} did not stop in time (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.`,
    installer_blocked:`The installer couldn't start (tried ${i.at}). Windows or your antivirus may have blocked it. Books Arranger is running again on ${u.version}. Run the installer yourself:`,
    checksum:`Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried ${i.at}). Check for updates, then download it again.`,
    verify_timeout:`Update cancelled: the downloaded installer couldn't be verified in time (tried ${i.at}). Press Restart to update to try again.`,
    engine_restart:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
-   engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`}[i.cause]
+   engine_stuck:`Books Arranger couldn't restart its engine (tried ${i.at}). Choose Quit Books Arranger in the tray, then open it again.`,
+   // N3: the engine died while stopping and was started again, so the loading strip is back up.
+   engine_exit:`The engine stopped during the update and was started again (tried ${i.at}). It is loading now. Press Restart to update to try again.`}[i.cause]
    ||`Update cancelled (tried ${i.at}). Books Arranger is running as before. Press Restart to update to try again.`;
   return {text:line,failed:true,path:i.cause==='installer_blocked'?u.installerPath||'':''};
  }
@@ -54,6 +56,8 @@
    case 'pausing':if(critical)return finishing;if(!work.length)return {text:'Starting the update…',counter:''};
     return {text:`Stopping safely for the update. Waiting for ${what(work)} to reach a safe point…`,counter:`(${Math.floor(i.elapsed||0)} s of ${i.safe} s)`};
    case 'forcing':if(critical)return finishing;
+    // N2: lookups start with the engine by themselves; there is nothing for Sergei to start again.
+    if(work.length&&work.every(item=>item.kind==='lookups'))return {text:`Background lookups didn't reach a safe point in ${i.safe} s. Stopping them now; they continue by themselves after the update.`,counter:''};
     return {text:`${cap(what(work))} didn't reach a safe point in ${i.safe} s. Stopping it now; ${work.length&&work.every(item=>item.kind==='conversion')?'it restarts after the update':'start it again after the update'}.`,counter:''};
    case 'updating':return {text:'Stopping the engine now. Saved work is kept.',counter:''};
    case 'installing':return {text:`Installing ${u.available}… No installer window opens. Books Arranger reopens by itself and shows its loading progress.`,counter:''};
@@ -88,12 +92,22 @@
  const NOT_YET_UPDATE='Not yet: Books Arranger is still loading. You can update when it finishes, or if loading gets stuck.';
  const QUIT_LOADING='Stop loading and close Books Arranger. Your files are not touched.',QUIT_NORMAL='Finish the current book and cleanup, keep queued books, then close the app';
  function loadingWaits(value){return !!value&&value.loaded===false&&!['stuck','stopped'].includes(value.verdict);}
- globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons,loadingWaits,NOT_YET_UPDATE,QUIT_LOADING});
+ // M1 (Judy's implementation check): during an update the window's Quit is inert with its reason, never silent.
+ const QUIT_UPDATE_CANCEL='An update is in progress. Press Cancel update first if you want to quit.',QUIT_UPDATE_INSTALL='Books Arranger is installing an update and reopens by itself.';
+ function quitBlock(value){const u=value&&value.update;if(!(u&&(u.busy||{}).install)&&!['updating','installing'].includes(value&&value.quit))return '';return u&&u.canCancel?QUIT_UPDATE_CANCEL:QUIT_UPDATE_INSTALL;}
+ globalThis.booksUpdateText=Object.freeze({what,checkLine,downloadLine,installLine,phaseLine,workLines,buttons,loadingWaits,quitBlock,NOT_YET_UPDATE,QUIT_LOADING,QUIT_UPDATE_CANCEL,QUIT_UPDATE_INSTALL});
 
  const api=window.booksDesktop;if(!api)return;
  const header=document.querySelector('header');const toolbar=document.querySelector('#shutdown')?.parentElement;
  const hint=document.createElement('p');hint.className='field-help';hint.textContent='Closing this window keeps Books Arranger running in the tray. Choose Quit Books Arranger to close the app.';(document.getElementById('load-strip')||header).after(hint);  // the load strip sits directly under the header (Judy 3.3)
- const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title=QUIT_NORMAL;quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();api.quit().catch(error=>console.warn(error));},true);}
+ const quit=document.querySelector('#shutdown');if(quit){quit.textContent='Quit Books Arranger';quit.title=QUIT_NORMAL;quit.addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();requestQuit();},true);}
+ // A press during an update is answered in the message line; focus stays (M1, rule 3.6). A fresh status decides.
+ async function requestQuit(){
+  try{render(await api.status());}catch(error){console.warn(error);}  // the tooltip follows the answer at once
+  const blocked=quitBlock(last);
+  if(blocked){const line=document.getElementById('message');if(line)line.textContent=blocked;return;}
+  api.quit().catch(error=>console.warn(error));
+ }
  const panel=document.createElement('section');panel.className='panel desktop-status';panel.hidden=true;panel.setAttribute('aria-label','Desktop status');
  const phaseRow=document.createElement('p');const phase=document.createElement('span');phase.setAttribute('role','status');phase.setAttribute('aria-live','polite');
  const counter=document.createElement('span');counter.className='update-counter';phaseRow.append(phase,counter);panel.append(phaseRow);hint.after(panel);
@@ -143,7 +157,7 @@
  const mutating=['start-automatic','stop-automatic','start','stop','resume','pause-jobs','resume-jobs','queue-books','find-metadata','find-covers','approve-candidate','save-tracks','create-audiobook','recovery-confirm','retry-job','retry-all','retry-all-go'];
  function render(value){
   last=value;
-  if(quit){const title=value.loaded===false?QUIT_LOADING:QUIT_NORMAL;if(quit.title!==title)quit.title=title;}
+  if(quit){const blocked=quitBlock(value),title=blocked||(value.loaded===false?QUIT_LOADING:QUIT_NORMAL);if(quit.title!==title)quit.title=title;quit.setAttribute('aria-disabled',blocked?'true':'false');}
   const desktop=value.desktop||{};const u=value.update;const updating=!!(u&&(u.busy||{}).install)||['updating','installing'].includes(value.quit);
   const quitting=value.quit!=='none'||updating||['finishing','parking','pausing','forcing','updating','blocked'].includes(desktop.phase);
   panel.hidden=!quitting;

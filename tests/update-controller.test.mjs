@@ -75,7 +75,10 @@ test('page: every Check, Download and Install line reads as Judy wrote it',()=>{
  assert.equal(download({phase:'failed',cause:'disk_full',at:'21:05'}),"Couldn't download version 0.22.2: not enough disk space (tried 21:05). Free some space, then press Download update.");
  assert.equal(download({phase:'failed',cause:'other',at:'21:05'}),"Couldn't download version 0.22.2 (tried 21:05). Press Download update to try again.");
  assert.equal(install({phase:'cancelled'}),'Update cancelled. Books Arranger is running as before.');
- assert.equal(install({phase:'failed',cause:'bound',waiting:[{kind:'conversion',title:'Лабиринты Ехо 3'}]}),'Update cancelled: the conversion of Лабиринты Ехо 3 did not stop within 3 minutes (tried 21:07). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.');
+ assert.equal(install({phase:'failed',cause:'bound',waiting:[{kind:'conversion',title:'Лабиринты Ехо 3'}]}),'Update cancelled: the conversion of Лабиринты Ехо 3 did not stop in time (tried 21:07). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.','M2: no number; the engine gives up at 150 s, the shell at 180 s');
+ assert(!fs.readFileSync(new URL('../web/desktop-ui.js',import.meta.url),'utf8').includes('3 minutes'),'M2: the bound has no number anywhere in the page');
+ assert.equal(install({phase:'failed',cause:'engine_exit'}),'The engine stopped during the update and was started again (tried 21:07). It is loading now. Press Restart to update to try again.','N3');
+ assert.equal(install({phase:'failed',cause:'refused'}),'Update cancelled (tried 21:07). Books Arranger is running as before. Press Restart to update to try again.','the generic line stays for refused, blocked and other');
  const blocked=t.installLine({...base,installerPath:'C:/owned/update.exe',install:{phase:'failed',cause:'installer_blocked',at:'21:07'}});
  assert.deepEqual([blocked.text,blocked.path],["The installer couldn't start (tried 21:07). Windows or your antivirus may have blocked it. Books Arranger is running again on 0.22.1. Run the installer yourself:",'C:/owned/update.exe']);
  assert.equal(install({phase:'failed',cause:'checksum'}),"Update cancelled: the downloaded installer is missing or doesn't match its checksum (tried 21:07). Check for updates, then download it again.");
@@ -88,7 +91,9 @@ test('page: phase lines, with the seconds counter apart from the live text',()=>
  assert.deepEqual(u({phase:'pausing',waiting:[{kind:'critical',title:'a tag edit'}],critical:['a tag edit']}),{text:'Finishing a tag edit first, so nothing is left half-done. This takes a few seconds.',counter:''});
  assert.equal(u({phase:'forcing',waiting:[{kind:'conversion',title:'Fixture'}]}).text,"The conversion of Fixture didn't reach a safe point in 90 s. Stopping it now; it restarts after the update.");
  assert.equal(u({phase:'forcing',waiting:[{kind:'approval'}]}).text,"An approval didn't reach a safe point in 90 s. Stopping it now; start it again after the update.");
- assert.equal(u({phase:'updating'}).text,'Stopping the engine now. Saved work is kept.');
+ // N2: series backfill and optional-field lookups run by themselves, so they are "background lookups" and need no restart.
+ assert.equal(u({phase:'pausing',waiting:[{kind:'lookups'}]}).text,'Stopping safely for the update. Waiting for background lookups to reach a safe point…');
+ assert.equal(u({phase:'forcing',waiting:[{kind:'lookups'}]}).text,"Background lookups didn't reach a safe point in 90 s. Stopping them now; they continue by themselves after the update."); assert.equal(u({phase:'updating'}).text,'Stopping the engine now. Saved work is kept.');
  assert.equal(u({phase:'installing'}).text,'Installing 0.22.2… No installer window opens. Books Arranger reopens by itself and shows its loading progress.');});
 test('page: the confirm names the running work; idle starts at once; unknown work confirms',()=>{const t=page();
  assert.deepEqual(t.workLines({busy:{converting:true,current_title:'Лабиринты Ехо 3',scanning:true,automatic:'Running'},queued_actions:2}).lines,['Converting Лабиринты Ехо 3. It stops and starts again from the beginning.','Scanning the library. It stops. Continue it with Resume scanning.','Automatic processing stops. Press Start automatic processing to continue.','2 queued actions are dropped. Press them again afterwards.']);

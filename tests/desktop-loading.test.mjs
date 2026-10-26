@@ -78,3 +78,28 @@ test('stuck, then loaded: Restart to update is live again and Quit keeps its nor
  assert.equal(q.restart().getAttribute('aria-disabled'), 'false');
  assert.equal(q.byId.shutdown.title, 'Finish the current book and cleanup, keep queued books, then close the app');
 });
+
+// Judy's implementation check, M1: the window's Quit used to do nothing during an update, with no answer.
+test('during an update the window Quit is inert with its reason and a press is answered, never silent', async () => {
+ const cancellable = { loaded: true, quit: 'updating', update: { ...update, busy: { install: true }, canCancel: true, install: { phase: 'pausing' } }, desktop: { phase: 'pausing' } };
+ const installing = { loaded: true, quit: 'installing', update: { ...update, busy: { install: true }, canCancel: false, install: { phase: 'installing' } }, desktop: { phase: 'updating' } };
+ const done = { loaded: true, quit: 'none', update: { ...update, install: { phase: 'cancelled' } }, desktop: { phase: 'running', busy: { converting: false } } };
+ const p = page([cancellable, cancellable, installing, done]);  // the first poll, then one fresh status per press
+ let quits = 0; p.context.window.booksDesktop.quit = async () => { quits++; };
+ const shutdown = p.byId.shutdown, press = async () => { for (const fn of shutdown.handlers.click) await fn({ preventDefault() {}, stopImmediatePropagation() {} }); await flush(); };
+ const t = p.context.booksUpdateText;
+ assert.equal(t.QUIT_UPDATE_CANCEL, 'An update is in progress. Press Cancel update first if you want to quit.');
+ assert.equal(t.QUIT_UPDATE_INSTALL, 'Books Arranger is installing an update and reopens by itself.');
+ await flush(); await flush();
+ assert.equal(shutdown.getAttribute('aria-disabled'), 'true', 'aria-disabled, so focus stays on it');
+ assert.equal(shutdown.title, t.QUIT_UPDATE_CANCEL);
+ await press();
+ assert.equal(p.byId.message.textContent, t.QUIT_UPDATE_CANCEL); assert.equal(quits, 0, 'nothing closes');
+ await press();
+ assert.equal(p.byId.message.textContent, t.QUIT_UPDATE_INSTALL, 'once the engine is ending or installing');
+ assert.equal(shutdown.title, t.QUIT_UPDATE_INSTALL); assert.equal(quits, 0);
+ await press();
+ assert.equal(quits, 1, 'after the update ends or is cancelled Quit works again');
+ assert.equal(shutdown.getAttribute('aria-disabled'), 'false'); assert.equal(shutdown.title, 'Finish the current book and cleanup, keep queued books, then close the app');
+ assert.equal(t.quitBlock({ quit: 'none', update: { busy: {} } }), '', 'no update: no reason');
+});
