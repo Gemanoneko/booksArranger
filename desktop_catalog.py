@@ -31,8 +31,13 @@ def inspect_folder(folder,mode,roots,install_roots=(),allow_lock=False):
         with VerifiedFile(database) as held:
             if held.facts()['links']!=1:raise ValueError('Catalog must be an ordinary unique file')
             single_stream(database)
-            # Immutable read-only inspection creates neither WAL nor journal files.
-            with closing(sqlite3.connect(database.as_uri()+'?mode=ro&immutable=1',uri=True)) as db:
+            # Immutable read-only inspection creates neither WAL nor journal files. Futaba's 0.22.1 QA, M-3: immutable also
+            # ignores the WAL, and after a hard kill the catalog's last commits live only there (a checkpoint cut short
+            # leaves the main file half new, half old), so a healthy catalog read as malformed and was refused. With a
+            # WAL beside it, a plain read-only open reads it: never a write to the catalog or the WAL (at most the
+            # shared-memory index is rebuilt), and the engine's own open recovers the same state.
+            wal=Path(str(database)+'-wal').exists()
+            with closing(sqlite3.connect(database.as_uri()+('?mode=ro' if wal else '?mode=ro&immutable=1'),uri=True)) as db:
                 tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 if not {'jobs','queue','files'}.issubset(tables):raise ValueError('This catalog is not a recognized Books Arranger catalog')
                 columns={row[1] for row in db.execute('PRAGMA table_info(files)')}

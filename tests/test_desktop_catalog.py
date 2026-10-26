@@ -51,3 +51,72 @@ class SettingsPreservationTests(unittest.TestCase):
    base=Path(t);file=base/'desktop-settings.json';raw=b'unknown existing settings';file.write_bytes(raw)
    with self.assertRaises(RuntimeError):save(file,base/'data')
    self.assertEqual(file.read_bytes(),raw)
+
+# Futaba's 0.22.1 QA, M-3: after the app was hard-killed while its engine wrote (a 24,000-book catalog), the next start
+# said "Catalog integrity check failed; folder retained" though the catalog was healthy (a normal open: quick_check ok).
+# The writer below is a real process with the catalog's own pragmas (WAL), ended by TerminateProcess in the middle of a
+# checkpoint: the main file then holds the low pages of the new state and none of the pages past its old end.
+WRITER=r'''
+import os,sqlite3,sys
+db=sqlite3.connect(sys.argv[1],isolation_level=None)
+db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA synchronous=NORMAL');db.execute('PRAGMA wal_autocheckpoint=0')
+db.executescript('CREATE TABLE IF NOT EXISTS jobs(root);CREATE TABLE IF NOT EXISTS queue(root);CREATE TABLE IF NOT EXISTS files(root,path,size,modified,kind,metadata);CREATE INDEX IF NOT EXISTS files_path ON files(path)')
+n=0
+while True:
+    db.execute('BEGIN')
+    for i in range(4000):
+        n+=1;db.execute('INSERT INTO files VALUES(?,?,?,?,?,?)',('Z:\\Audiobooks','Z:\\Audiobooks\\Author %d\\Book %d\\%05d.mp3'%(n%977,n%4013,n),n,n,'audiobook',os.urandom(300).hex()))
+    db.execute('DELETE FROM files WHERE rowid%7=0 AND rowid>?',(n-4000,))
+    db.execute('COMMIT')
+    if n>=int(sys.argv[2]):
+        print('CHECKPOINT',os.path.getsize(sys.argv[1]),db.execute('PRAGMA page_count').fetchone()[0]*db.execute('PRAGMA page_size').fetchone()[0],flush=True)
+        db.execute('PRAGMA wal_checkpoint(TRUNCATE)');print('DONE',flush=True);sys.stdin.read()
+'''
+class CrashRecoveryTests(unittest.TestCase):
+ def roots(self,base):return {'Audiobooks':str(base/'a'),'Podcasts':str(base/'p'),'Ebooks':str(base/'e')}
+ def killed_mid_checkpoint(self,folder):
+  """The catalog of a writer ended in the middle of a WAL checkpoint (main file part written, the WAL complete)."""
+  import subprocess,sys,time
+  db=folder/'inventory.sqlite3'
+  # First commits checkpointed, so the main file is a real older state of the catalog.
+  child=subprocess.Popen([sys.executable,'-I','-B','-c',WRITER,str(db),'20000'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
+  try:
+   self.assertEqual(child.stdout.readline().split()[0],b'CHECKPOINT');self.assertEqual(child.stdout.readline().strip(),b'DONE')
+  finally:child.kill();child.wait(30)
+  child=subprocess.Popen([sys.executable,'-I','-B','-c',WRITER,str(db),'140000'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
+  try:
+   line=child.stdout.readline().split();self.assertEqual(line[0],b'CHECKPOINT')
+   before,final=int(line[1]),int(line[2]);self.assertGreater(final,before+4*1024*1024,'the checkpoint grows the main file')
+   deadline=time.monotonic()+60
+   while os.path.getsize(db)<before+(final-before)//3 and time.monotonic()<deadline:time.sleep(.001)
+   child.kill()  # TerminateProcess, as taskkill /F: no close, no checkpoint end
+   child.wait(30)
+  finally:
+   if child.poll() is None:child.kill();child.wait(30)
+  size=os.path.getsize(db)
+  self.assertTrue(before<size<final,'killed in the middle of the checkpoint (%d < %d < %d)'%(before,size,final))
+  self.assertGreater(os.path.getsize(str(db)+'-wal'),0,'the WAL holds the committed state')
+  return db
+ def test_a_healthy_catalog_with_its_wal_is_opened_after_a_hard_kill_mid_write(self):
+  with tempfile.TemporaryDirectory(dir=AREA) as t:
+   base=Path(t);folder=base/'data';folder.mkdir();db=self.killed_mid_checkpoint(folder)
+   main_before=hashlib.sha256(db.read_bytes()).hexdigest();wal_before=hashlib.sha256(Path(str(db)+'-wal').read_bytes()).hexdigest()
+   # Positive control: the main file alone (what an immutable open reads) is not a valid catalog.
+   with closing(sqlite3.connect(db.as_uri()+'?mode=ro&immutable=1',uri=True)) as alone:
+    with self.assertRaises(sqlite3.DatabaseError):
+     verdict=alone.execute('PRAGMA quick_check').fetchone()[0]
+     if verdict!='ok':raise sqlite3.DatabaseError(verdict)
+   self.assertEqual(inspect_folder(folder,'existing',self.roots(base))['mode'],'existing')
+   # Read-only: the catalog and its WAL are untouched, so the engine's own open recovers every committed row.
+   self.assertEqual(hashlib.sha256(db.read_bytes()).hexdigest(),main_before)
+   self.assertEqual(hashlib.sha256(Path(str(db)+'-wal').read_bytes()).hexdigest(),wal_before)
+   with closing(sqlite3.connect(db)) as c:
+    self.assertEqual(c.execute('PRAGMA quick_check').fetchone()[0],'ok');self.assertGreaterEqual(c.execute('SELECT count(*) FROM files').fetchone()[0],100000)
+ def test_a_damaged_catalog_is_still_refused(self):
+  # Control: the same torn main file without its WAL is damaged, and the check still refuses it, changing nothing.
+  with tempfile.TemporaryDirectory(dir=AREA) as t:
+   base=Path(t);folder=base/'data';folder.mkdir();db=self.killed_mid_checkpoint(folder)
+   for suffix in ('-wal','-shm'):Path(str(db)+suffix).unlink(missing_ok=True)
+   raw=hashlib.sha256(db.read_bytes()).hexdigest()
+   with self.assertRaisesRegex((ValueError,sqlite3.DatabaseError),'integrity|malformed'):inspect_folder(folder,'existing',self.roots(base))
+   self.assertEqual(hashlib.sha256(db.read_bytes()).hexdigest(),raw)
