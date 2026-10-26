@@ -11,6 +11,9 @@ const CHECK_ATTEMPT_MS = 30000;
 const CHECK_BACKOFF_MS = [5000, 15000];
 const NO_INTERNET = /ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NAME_RESOLUTION_FAILED|ERR_ADDRESS_UNREACHABLE|ERR_NETWORK_ACCESS_DENIED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|ENETDOWN/;
 const NO_ANSWER = /ERR_TIMED_OUT|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_NETWORK_CHANGED|ETIMEDOUT|ECONNRESET|socket hang up|timed out/i;
+// Futaba's 0.22.1 QA, m-4: a download the connection cut short (a body shorter than its length, a broken chunked body, an
+// aborted or prematurely closed response) is a dropped connection, not "something else".
+const CUT_SHORT = /ERR_CONTENT_LENGTH_MISMATCH|ERR_INCOMPLETE_CHUNKED_ENCODING|ERR_HTTP2_PROTOCOL_ERROR|premature close|\baborted\b|ECONNABORTED/i;
 
 function hhmm(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
 function text(error) { return String((error && (error.stack || error.message)) || error); }
@@ -31,7 +34,7 @@ function downloadCause(error) {
  const message = text(error);
  if ((error && error.code === 'ERR_CHECKSUM_MISMATCH') || /checksum/i.test(message)) return 'checksum';
  if (/ENOSPC|not enough space|disk (is )?full/i.test(message)) return 'disk_full';
- if (NO_INTERNET.test(message) || NO_ANSWER.test(message)) return 'dropped';
+ if (NO_INTERNET.test(message) || NO_ANSWER.test(message) || CUT_SHORT.test(message)) return 'dropped';
  return 'other';
 }
 const INSTALL_BUSY = ['starting', 'pausing', 'forcing', 'updating', 'installing'];
@@ -175,12 +178,15 @@ class UpdateController {
         problems:ENGINE_ENDED.includes(cause)?stoppedProblems(this.install_.stopped)
           :Array.isArray(error.resumeProblems)?error.resumeProblems.map(item=>({kind:String(item.kind),cause:String(item.cause)})):[]};
       return this.value;
-    }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();}
+    }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();
+      // Senua's 0.22.1 review, W16: an engine exit that arrived while the lease was still closing is handled now.
+      if(this.lateExitPending){this.lateExitPending=false;await this.lateEngineExit();}}
   }
   // Senua's 0.22.1 review, W5: the engine ended for the update after the shell had given up waiting for it (engine_stuck,
   // too late to cancel). That exit is no Stop of the app: the old engine starts again and the Install line says so (N3).
+  // W16: while restart() still holds the install (its lease closing), the exit is kept and handled when the install ends.
   async lateEngineExit(){
-    if(this.busy.install)return this.value;
+    if(this.busy.install){this.lateExitPending=true;return this.value;}
     this.log('The engine ended for the update after the shell stopped waiting; starting it again');
     let cause='engine_exit';
     try{await this.restartEngine();}catch(error){this.log('Engine restart failed: '+text(error));cause='engine_restart';}

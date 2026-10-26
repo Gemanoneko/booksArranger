@@ -192,3 +192,17 @@ test('an ended engine: the installer, engine exit and engine restart lines name 
  assert.deepEqual([f.controller.value.install.cause,f.controller.value.install.problems],['bound',[]]);
  // A new restart clears what the last one recorded.
  f.controller.parkEngine=async()=>{};await f.controller.restart();assert.deepEqual(f.controller.value.install.stopped,[]);});
+// Senua's 0.22.1 review, W16: an engine exit that lands while restart() still closes the installer lease (busy.install
+// still true) was dropped by lateEngineExit, so the old engine was never started again.
+test('a late engine exit during the lease close is kept and starts the old engine once the install has ended',async()=>{const f=fixture();await ready(f);
+ f.controller.parkEngine=async()=>{throw typed('engine_stuck');};
+ let late=null;f.lease.close=async()=>{f.seen.push('close');late=f.controller.lateEngineExit();await new Promise(resolve=>setTimeout(resolve,10));};
+ await f.controller.restart();await late;await new Promise(resolve=>setTimeout(resolve,0));
+ assert(f.seen.includes('old engine started'),'the exit is followed by a restart once busy.install clears');
+ assert.deepEqual([f.controller.value.install.phase,f.controller.value.install.cause,f.controller.value.busy.install],['failed','engine_exit',false]);
+ assert.equal(f.seen.filter(s=>s==='old engine started').length,1,'once');});
+// Futaba's 0.22.1 QA, m-4: a download cut by ERR_CONTENT_LENGTH_MISMATCH read the generic line.
+test('a download the connection cut short reads as the connection dropped',async()=>{
+ for(const message of ['net::ERR_CONTENT_LENGTH_MISMATCH','net::ERR_INCOMPLETE_CHUNKED_ENCODING','Error: aborted','Premature close']){
+  const g=fixture();await g.controller.check();g.provider.downloadUpdate=async()=>{throw new Error(message);};await g.controller.download();
+  assert.deepEqual([g.controller.value.download.phase,g.controller.value.download.cause],['failed','dropped'],message);}});

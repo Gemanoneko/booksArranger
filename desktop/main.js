@@ -373,11 +373,15 @@ async function endLoadingEngine(boundMs = 15000) {
     while (child.exitCode === null && child.signalCode === null && Date.now() < end) await sleep(200);
   }
 }
+// A new catalog the first launch already created is opened as an existing one by every later launch of this session.
+function relaunchConfig(config) {
+  if (config.catalogMode === 'new' && fs.existsSync(path.join(config.dataDir, 'inventory.sqlite3'))) config = currentConfig = { ...config, catalogMode: 'existing' };
+  return config;
+}
 async function restartEngine(config) {
   if (state.loaded || state.quit !== 'none' || state.restarting) return false;
   state.restarting = true;
-  // A new catalog the first launch already created is opened as an existing one.
-  if (config.catalogMode === 'new' && fs.existsSync(path.join(config.dataDir, 'inventory.sqlite3'))) config = currentConfig = { ...config, catalogMode: 'existing' };
+  config = relaunchConfig(config);
   try {
     state.generation += 1; // the old launch's exit and watchers no longer speak
     state.startup.launch(); state.verdict = 'working'; pushStartup();
@@ -431,13 +435,20 @@ function createWindow() {
 }
 
 function showWindow() {
+  // First run (Judy 0.22.2 section 7): before a folder is chosen the tray opens the form; it is his own action.
+  if (setupWindow && !setupWindow.isDestroyed() && !state.startup) { setupWindow.show(); setupWindow.focus(); return; }
   if (!state.win || state.win.isDestroyed()) return;
   if (state.win.isMinimized()) state.win.restore();
   state.win.show();
   state.win.focus();
+  if (state.updateTip) { state.updateTip = false; broadcastStatus(); }
 }
 
 function trayMenu() {
+  // First run, before a folder is chosen (Judy 0.22.2 section 7): the form or Quit, nothing else exists yet.
+  if (setupWindow && !setupWindow.isDestroyed() && !state.startup) {
+    return Menu.buildFromTemplate([{ label: 'Choose data folder…', click: showWindow }, { type: 'separator' }, { label: 'Quit Books Arranger', click: () => finishExit(0) }]);
+  }
   const updating = state.quit === 'updating' || state.quit === 'installing' || !!updateController?.busy.install;
   const quitting = state.quit !== 'none' && !updating;
   // Judy 0.22.1 2.7: tray Check and Restart show the window and run into the panel; failures appear only there.
@@ -464,7 +475,8 @@ function createTray() {
 function refreshTray(tooltip) {
   if (!state.tray || state.tray.isDestroyed()) return;
   state.tray.setContextMenu(trayMenu());
-  state.tray.setToolTip(tooltip);
+  // Judy 0.22.2 6.1: "update didn't install" stays over the load's tooltips until the window is shown or a new update starts.
+  state.tray.setToolTip(state.updateTip && state.quit === 'none' ? NOT_INSTALLED_TIP : tooltip);
 }
 // The load's tooltip (3.8) is kept, so an update broadcast during loading repeats it instead of "Books Arranger".
 function loadTip(tooltip) {
@@ -598,8 +610,17 @@ function broadcastStatus(){
   const value={engineVersion:state.engineVersion,quit:state.quit,update:updateController?updateController.value:null};
   if(state.win&&!state.win.isDestroyed())state.win.webContents.send('books:status',value);
   const updating=state.quit==='updating'||state.quit==='installing'||!!updateController?.busy.install;
-  refreshTray(updating?'Books Arranger — updating':state.quit!=='none'?'Books Arranger — '+state.quit:state.trayTip||'Books Arranger');
+  // Judy 0.22.2 6.1: an update that did not install while the window was hidden raises nothing; the tray says so until
+  // the window is shown or a new update starts.
+  const install=value.update&&value.update.install;
+  if(updating)state.updateTip=false;
+  else if(install&&install.phase==='failed'){
+    const key=install.at+' '+install.cause;
+    if(key!==state.lastInstallFailure){state.lastInstallFailure=key;if(!(state.win&&!state.win.isDestroyed()&&state.win.isVisible()))state.updateTip=true;}
+  }
+  refreshTray(updating?'Books Arranger — updating':state.quit!=='none'?'Books Arranger — '+state.quit:state.updateTip?NOT_INSTALLED_TIP:state.trayTip||'Books Arranger');
 }
+const NOT_INSTALLED_TIP='Books Arranger — update didn’t install';
 // The updater's raw error text goes to the shell's own log, never to the page (Judy 0.22.1 2.2).
 function logUpdate(line){
   state.updateLog=(state.updateLog+new Date().toISOString()+' '+String(line)+'\n').slice(-16384);
@@ -621,6 +642,12 @@ function configureUpdater(config){
   const {autoUpdater}=require('electron-updater');
   const {UpdateController}=require('./update-controller');
   if(app.isPackaged)autoUpdater.setFeedURL({provider:'github',owner:'Gemanoneko',repo:'booksArranger',private:false});
+  // Futaba's 0.22.1 QA, M-1: electron-updater 6.8.9's quitAndInstall() queues app.quit() with setImmediate whatever the
+  // installer spawn does (BaseUpdater.js:13-27). A spawn that fails is handled in the same turn: the shell has already
+  // started the old engine again (state.quit 'none') when the queued quit reaches before-quit, which then quit the app
+  // with no window, no relaunch and no line. The updater never quits the app: the shell exits once the installer
+  // process exists (installUpdate), and nothing else of the updater uses this (autoInstallOnAppQuit is off).
+  if(autoUpdater.app&&typeof autoUpdater.app.quit==='function')autoUpdater.app.quit=()=>logUpdate('The updater asked the app to quit; the shell decides when it exits');
   updateController=new UpdateController({provider:autoUpdater,packaged:app.isPackaged,version:app.getVersion(),notify:broadcastStatus,log:logUpdate,
     exists:file=>fs.existsSync(file),
     acquireArtifact:artifact=>acquireUpdateArtifact(config,artifact),
@@ -628,7 +655,7 @@ function configureUpdater(config){
     parkEngine:options=>!state.loaded&&state.backendExited&&state.quit==='none'?(state.quit='updating',broadcastStatus(),Promise.resolve())
       :require('./engine-update').parkOwnedEngine({state,request:engineRequest,sleep,broadcast:broadcastStatus,...options}),
     install:()=>installUpdate(autoUpdater),
-    restartEngine:()=>restartEngineAfterUpdate(config),
+    restartEngine:()=>restartEngineAfterUpdate(currentConfig||config),
   });
   broadcastStatus();
 }
@@ -652,8 +679,11 @@ async function installUpdate(autoUpdater){
   }finally{hold.restore();}
   finishExit(0);
 }
-// The update did not install: the old version starts again from Step 1 and loads as at launch (no time limit).
+// The update did not install: the old version starts again from Step 1 and loads as at launch (no time limit). Futaba's
+// 0.22.1 QA (M-1, found beside it): after a first-run "New catalog" the launch's mode was still 'new', which the engine
+// refuses on a folder that now holds the catalog; the relaunch opens it as an existing one, as Restart engine does.
 async function restartEngineAfterUpdate(config){
+  config=relaunchConfig(config);
   try{
     state.quit='none';
     if(state.win&&!state.win.isDestroyed())await state.win.loadURL(state.firstFrame).catch(()=>{});
@@ -681,12 +711,21 @@ function startConfigured(config){
   launch.catch(()=>{}); // a stop shows in the strip (Stopped, Try again), never as an error box
   return launch;
 }
+// First run (Judy 0.22.2 section 7; Futaba's 0.22.1 QA slip): the form honours --start-hidden (no window: the tray carries
+// the state and opens the form) and --show-inactive (shown without focus), like the main window.
 async function chooseCatalog(){
-  setupWindow=new BrowserWindow({width:1280,height:860,minWidth:950,minHeight:650,title:'Books Arranger — Choose data folder',backgroundColor:'#1B2530',autoHideMenuBar:true,
+  setupWindow=new BrowserWindow({width:1280,height:860,minWidth:950,minHeight:650,show:false,title:'Books Arranger — Choose data folder',backgroundColor:'#1B2530',autoHideMenuBar:true,
     webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
   setupWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   setupWindow.webContents.on('will-navigate',event=>event.preventDefault());
   setupWindow.on('closed',()=>{setupWindow=null;if(!state.ready&&!state.backend)finishExit(0);});
+  const form=setupWindow;
+  form.once('ready-to-show',()=>{
+    if(form.isDestroyed()||flag(argv,'start-hidden'))return;
+    if(flag(argv,'show-inactive'))form.showInactive();else form.show();
+  });
+  if(!state.tray)createTray();
+  refreshTray('Books Arranger — choose a data folder');
   await setupWindow.loadFile(path.join(__dirname,'setup.html'));
 }
 ipcMain.handle('books:setup',event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');return {defaultFolder:currentConfig.dataDir};});
@@ -718,8 +757,14 @@ ipcMain.handle('books:status',async event=>{trustedSender(event);let desktop=nul
 // ── Startup ─────────────────────────────────────────────────────────────────
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
+} else if (flag(argv, 'quit')) {
+  // Futaba's 0.22.1 QA, m-12: --quit is sent to a running copy. A copy that holds the lock has nothing to quit (none was
+  // running, or the one it was sent to has just ended): it never shows a window or a form and never stays running.
+  app.exit(0);
 } else {
-  app.on('second-instance', (_event, args) => handleCommand(args));
+  // m-12: the command runs after the second copy has its answer. A first-run form ending inside the handler (Quit while
+  // loading ends at once) made the second copy take the lock and become a new instance with its own form.
+  app.on('second-instance', (_event, args) => setImmediate(() => handleCommand(args)));
   // Tray tool: closing the window never ends the app (ProcessRules tray exception).
   app.on('window-all-closed', () => {});
   // Any other quit path (menu accelerator, system) goes through the same Quit.
