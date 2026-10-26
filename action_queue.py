@@ -87,7 +87,8 @@ class ActionQueue:
     def enqueue(self, action, book_id, title, args):
         """None when the queue is empty and nothing blocks the action: the caller runs it now, in its own request, as
         before. Otherwise the action is queued and the answer is {'queued': True, 'id', 'position', 'blocker'}. A second
-        press for a book that already has a queued action answers that action (one per row)."""
+        press of the same action for a book that already waits answers that action; another action for it is refused
+        (one queued action per row, Judy 1.1)."""
         if action not in ACTIONS:
             raise ValueError('Only Retry, Repair and Delete book are queued')
         kind = self.blocker(action, book_id)
