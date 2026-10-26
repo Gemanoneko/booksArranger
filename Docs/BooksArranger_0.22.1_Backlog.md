@@ -1,5 +1,7 @@
 # Books Arranger 0.22.1 / 0.22.2 backlog
 
+**0.22.2 scope FROZEN (Sergei, 2026-10-26).** New feedback goes to the "0.22.3" section at the end of this file.
+
 **UPDATE (Sergei, 2026-10-25 night): 0.22.2 is folded back into 0.22.1.** Everything below ships in 0.22.1.
 
 **Earlier release split (superseded):**
@@ -80,6 +82,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
   - **Spelling:** the title should be «Протоколы SCP» (missing "о"). Record it as a lasting correction, like the author rules, so future scans of these files get the right spelling.
   - **Collections in a series:** these are three story collections forming the series «Протоколы SCP» (Сейф №1, 2, 3). A collection that belongs to a series files under Сборники with its series and position, using the existing series naming, e.g. `Сборники\Протоколы SCP\Протоколы SCP 1 - Сейф №1 - Разные авторы.m4b`. Ender confirms the exact pattern against the current naming rules.
   - **Editing on every row:** these rows ("Waiting for retry checks", repair) have no Title/Author fields, so Sergei can't fix the spelling himself. Every row should let him correct the title, author and series (Judy specs where).
+- **The research run stops on SQLITE_BUSY** (2026-10-26, while researching «Свет Джедаев»). A cache-only `read()` writes (`_expire`) while the group rebuild holds the write lock for about 10.5 s, and nothing catches it. Fix plan and tests are in the builder brief. Separately, the "Pause audiobook jobs before starting automatic processing" rule waits on Sergei's answer.
 - **«Джек из Тени» (Zelazny):** "Can't convert — M4B not supported", and the destination shows a Russian folder for an English author. Diagnosis is running.
 
 - **Ruling 29:** translated books wait for their English title unless they were written in Russian. If no English title can be found, they convert under the Russian title.
@@ -117,3 +120,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
   - m-4: a download cut by `ERR_CONTENT_LENGTH_MISMATCH` reads the generic line, not "the connection dropped";
   - m-5: pressing the inert Restart to update while loading writes nothing to the message line;
   - m-11: the update dialog says a conversion "starts again from the beginning", but it comes back Paused and needs Resume audiobook jobs.
+
+## 0.22.3 (new feedback after the 0.22.2 freeze)
+
+- (empty)
