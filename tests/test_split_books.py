@@ -701,12 +701,16 @@ class VersionAndCheckpointTests(unittest.TestCase):
 # 0.21.3: this module's admission fixtures publish inside their own library; see sorted_fixture (Sergei's
 # deletion rule). Without it the two conversion-then-cleanup cases kept their sources and failed.
 def setUpModule():
+    global _no_original_title_wait
+    from original_title_fixture import no_wait
+    _no_original_title_wait = no_wait()  # ruling 29: these fixtures predate it
     global _sorted_fixture
     from sorted_fixture import patch_merge_service
     _sorted_fixture = patch_merge_service()
 
 
 def tearDownModule():
+    _no_original_title_wait.stop()
     _sorted_fixture.stop()
 
 if __name__=='__main__':unittest.main()

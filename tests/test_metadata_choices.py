@@ -215,7 +215,7 @@ const q={id:'q',type:'work_profile',label:'Which book is this recording of?',evi
  {id:'b',values:{title:'Second',canonical_author:'Author B',original_language:'en'},sources:[{id:'B1',provider:'Catalog B',public_url:'https://b.invalid/2'}]}]};
 const makeRow=()=>({id:'candidate',revision:7,kind:'candidate',title_clue:'Actual book',review_context:{},review:{title:'Saved title',canonical_author:'Saved author'},metadata_questions:{signature:'snapshot1',questions:[structuredClone(q)],unresolved_count:1}});
 let requests=[],response,errorNext=null;
-context={console,document:{activeElement:inputs.narrator},$:get,form,fields:names,dirty:false,coverId:null,busy:false,ended:false,recoveryDisconnected:false,trackDraft:null,manualMetadataTouched:false,selectedLibrary:'Audiobooks',selectedRow:makeRow(),
+context={console,later:(key,kind,handler)=>handler,keptNote:row=>row?.review_context?.manual_note || '',document:{activeElement:inputs.narrator},$:get,form,fields:names,dirty:false,coverId:null,busy:false,ended:false,recoveryDisconnected:false,trackDraft:null,manualMetadataTouched:false,selectedLibrary:'Audiobooks',selectedRow:makeRow(),
  node:(tag,text='',className='')=>Object.assign(new Element(tag),{textContent:text,className}),sourceLink:(url,text)=>Object.assign(new Element('a'),{href:url,textContent:text}),controls(){},syncManualDraft(){},
  async request(route,data){requests.push({route,data});if(errorNext)throw errorNext;return response;},select(row){context.selectedRow=row;context.renderMetadataQuestions(row,false);}};
 vm.createContext(context);vm.runInContext(source.slice(start,end),context);

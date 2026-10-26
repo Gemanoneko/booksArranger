@@ -230,7 +230,7 @@ class DesktopStatusTests(unittest.TestCase):
         server = self.server(Mock(return_value=full_state()))
         value = DesktopControl(server).status()
         server.state.assert_called_once_with('Audiobooks', cached=True)
-        self.assertEqual(value['busy'], {'converting': False, 'current_title': 'Fixture', 'stage': 'creating', 'queued': 194, 'automatic': 'Paused', 'scanning': False})
+        self.assertEqual(value['busy'], {'converting': False, 'current_title': 'Fixture', 'stage': 'creating', 'queued': 194, 'automatic': 'Paused', 'scanning': False, 'approvals': 0})  # m-1: approvals in flight (f7395f4)
         self.assertTrue(value['idle'])
 
     def test_converting_snapshot_reports_busy_and_not_idle(self):
