@@ -816,3 +816,82 @@ Problems for someone who "just wants those lines gone":
 6. Typical step times on the load strip ("usually about 40 s") once several launches have been measured. Section 3 shows only live facts until then.
 
 Design basis: Doherty and NN/g visibility of system status (the window answers at once; every wait shows live progress and one of three states, decided by silence, not by total time), Fitts (the destructive button stays the farthest target; Cancel is a different target from the face), Hick (one queue, two cancels, no menu), Jakob (Windows "Restart to update", native dialogs, tray behaviour), NN/g visibility of status (every wait says what it waits for), error prevention (re-check at run time, Cancel default, Enter never confirms), plain-language recovery (every failure names the cause and the fix), and truth over reassurance ("Nothing was deleted" only for a refusal before the first file; "may still go through" for a press with no answer); WCAG 2.2 AA 1.4.3, 1.4.11, 2.1.1, 2.2.2, 2.4.7, 2.5.3, 2.5.8, 4.1.3. Doc-only: no code, git or app launch.
+
+---
+
+## 10. 0.22.1 implementation check (Judy, 2026-10-26)
+
+Basis: Ender's branch `ender/0221`, worktree `C:/Antigravity Projects/Worktrees/Books Arranger/b0221`, read-only, HEAD a699864. Read: `web/app.js` (busy L99-190, startup L197-350, queue block L2574-2742, Delete block L2743-2990), `web/desktop-ui.js`, `web/load-state.js`, `web/index.html`, `web/style.css`, `desktop/main.js` (tray, Quit, update), `desktop/update-controller.js`, `desktop/engine-update.js`, `desktop/startup.js`, `desktop_backend.py` (update phases L230-440). Nothing launched, no rects measured, no tests run: this is a copy-and-behaviour check against sections 1 to 5, not Futaba's pass. Strings were compared one by one.
+
+**Result:** all seven of Ender's points accepted (two with a small change). 3 must-fix, 5 nice-to-have. Queued Retry and Delete book, the busy-engine copy (section 4) and the Delete-on-All-files-missing copy (section 5) match the spec except the items below.
+
+### 10.1 Ender's seven points
+
+| # | Point | Verdict | Reason, and the exact change |
+| --- | --- | --- | --- |
+| 1 | Generic install line "Update cancelled (tried HH:MM). Books Arranger is running as before. Press Restart to update to try again." (`desktop-ui.js` L45) | **Accept** | It is the fallback for the causes 2.6 does not list: `refused`, `blocked` (the engine undid the update itself), `other`. In each the old engine is running, so the sentence is true, and Restart to update stays available. One refinement (nice-to-have N3): `engine_exit` gets its own line. |
+| 2a | "an action" for a press still running in the engine (`name()`, kind `press`) | **Accept** | The engine cannot name the press, and "an approval" and "a delete" already have their own kinds. A vague noun is better than a wrong one. |
+| 2b | "research" for `research` and for `lookups` | **Accept `research`; change `lookups`** (nice-to-have N2) | `lookups` is series backfill and optional-field lookups. Those run by themselves after a grouping change, so Sergei will often see "Waiting for research…" while the Research line says nothing is running. |
+| 3 | Reuse of "Stopping the engine now. Saved work is kept." for the `updating` phase | **Accept** | The engine ends on every update, not only as a last resort (`desktop_backend.py` L365), so the line is the normal step before "Installing…". Cancel update is hidden from exactly there (`canCancel` is false for `updating`), as 2.5 requires. The "(last resort)" label of that row in 2.5 is superseded (10.5). |
+| 4 | Tray Quit disabled while an update runs (`main.js` L446) | **Accept for the tray; must-fix the window** (M1) | In the tray the reason sits next to it: the disabled "Updating…" item and the tooltip "Books Arranger — updating". The window's Quit button is not covered: pressing it does nothing, with no answer (`requestQuit` returns silently at `main.js` L475, and `desktop-ui.js` L146 keeps the tooltip "Finish the current book and cleanup…"). That breaks the 3.6 rule that a press on an inert control is answered. |
+| 5 | Startup announcements go to a hidden live region `#load-announce`, the state line is not live | **Accept, with M3** | Correct, and a flaw in my spec: 3.3 put the quiet-time clock ("Nothing new for {x}") inside a line that 3.9 called a live region rewritten only on a state change. It cannot be both. The event texts in the code match the 3.4 announcer table word for word (step starts, Stuck with and without "Restart engine is available", "Loading is moving again.", "Restarting the engine.", "Books Arranger stopped loading. Try again is available.", "Books Arranger is ready."), and Waiting is not announced. **But** `<body aria-busy="true">` (M3) can silence the region while loading. |
+| 6a | About 7 s of quiet in step 4 | **Accept** | Under the 10 s Waiting mark: nothing changes on screen. No threshold change. |
+| 6b | About 11 s of quiet once, after a grouping change | **Accept for 0.22.1** | Shows Waiting for about one second, once: "Waiting · Step {n} of {N}: {step}. Nothing new for 10 s. The engine is still answering." No announcement, no button, no colour change, no layout jump at desktop width. It is the honest answer for a real quiet stretch, and 3.4 forbids lengthening a threshold to hide one. Futaba does not file it as a defect. Backlog for 0.22.2 (N5): the regroup and step 4 report a count, or any progress mark, at least every 5 s, so the 5 s rule of section 6 holds. |
+| 7 | Drive and file-lock wording built, never reported by the engine | **Accept** | `CAUSES` and `HINTS` in `load-state.js` are verbatim 3.4 and covered by a unit test with a fake `waiting_for`. Until the engine sends it, an offline Z: or a locked catalog reads as the generic "No progress for 34 s. The engine is answering, but this step has not moved." with Restart engine, which helps for neither. Backlog for 0.22.2 (N6): the engine reports `waiting_for` for the source drive and the catalog lock. |
+
+### 10.2 Must-fix (3)
+
+**M1. The window's Quit button is a silent no-op during an update.** While `quit` is `updating` or `installing`, or an install is busy, set Quit `aria-disabled="true"` (keep focus; never `disabled`), and answer a press in `#message` with the same sentence, without moving focus (rule 3.6). Clear it when the update ends or is cancelled. The tray stays as built.
+
+| State | Tooltip, and the sentence a press writes |
+| --- | --- |
+| Cancel update is available (starting, pausing, forcing) | An update is in progress. Press Cancel update first if you want to quit. |
+| Not cancellable (the engine is ending, installing) | Books Arranger is installing an update and reopens by itself. |
+
+**M2. The bound line says "3 minutes"; the engine gives up at 2 min 30 s.** The engine ends the wait at `UPDATE_SAFE + UPDATE_FORCE` = 90 + 60 = 150 s (`desktop_backend.py` L340-341 and L352-353) and reports `bound`; the shell's 180 s (`engine-update.js` L10) fires only when the engine stops answering. One constant cannot be true for both, so the line carries no number. This replaces the "The overall bound ran out" row of 2.6 (the {B} placeholder leaves the copy):
+
+> Update cancelled: {what} did not stop in time (tried {HH:MM}). Books Arranger is running as before. Press Restart to update to try again, or choose Quit Books Arranger in the tray, then run the installer.
+
+**M3. `aria-busy="true"` is on `<body>` (`index.html` L13; removed at `app.js` L308).** It marks every live region under it as busy, and `#load-announce` sits inside `<body>`. Browsers and screen readers may hold or drop changes in a busy subtree, and the announcer's whole job (step starts, Stuck, moving again, Stopped) happens while the flag is on. 3.5 meant the book list's body, not the page: my wording "on the body" was ambiguous (10.5). Change: remove it from `<body>` and from the settle pass; set `aria-busy="true"` on `#inventory` while the books part is missing and clear it when the part arrives (the list already does this on a filter change, `app.js` L556 and L685). Nobody can check this with a screen reader headless, so the safe form costs less than the proof. Test updates: `tests/test_startup_frontend.js` L38 and L152.
+
+### 10.3 Nice-to-have (5)
+
+| # | Where | Change |
+| --- | --- | --- |
+| N1 | Delete book on a row with a queued Retry or Repair reads "Another operation is in progress." (`deleteMode` L2818), though nothing else is running. The inert state itself is right: decision 3 in 1.1 says one queued action per row. | Tooltip: "A retry is queued for this book. Cancel it to use this." (Repair: "A repair is queued for this book. Cancel it to use this."), the mirror of `QUEUE_SIBLING`. |
+| N2 | `name()` maps `lookups` to "research". | `lookups` reads "background lookups". Then the phase line reads "Waiting for background lookups to reach a safe point…", and the forced line for lookups alone reads: "Background lookups didn't reach a safe point in {T} s. Stopping them now; they continue by themselves after the update." (True: they start with the engine, and `_resume_after_update` restarts them on Cancel. The "start it again" clause of 2.5 has no control to press for them.) |
+| N3 | Cause `engine_exit` (the engine died while stopping and was started again) falls to the generic line, which says "running as before" while the loading strip is back up. | "The engine stopped during the update and was started again (tried {HH:MM}). It is loading now. Press Restart to update to try again." |
+| N4 | The Stuck announcement says "Restart engine is available." when `restart_safe` is false and the button is inert. | When `restart_safe` is false: "Loading is stuck. No progress for {x}. The engine is changing the catalog, so Restart engine waits." |
+| N5, N6 | The two quiet stretches and the unreported causes (points 6b and 7). | Engine work, 0.22.2. No copy change. |
+
+### 10.4 Spot-check: what matches
+
+| Area | Checked, matches the spec |
+| --- | --- |
+| Queued Retry and Repair (1.3, 1.4, 1.7) | Faces "Retry queued" and "Repair queued" (`aria-disabled`, focus kept), Cancel button names, tooltips and `aria-label`s, hints with and without "{n} ahead", the five blocker phrases, the queued tooltip, the blocked tooltip, "Checking…" while it runs, the details-panel pair in `#retry-block`, the strip line (one and n actions), "{n} already queued" in the bulk line, the announcer lines, "Too late to cancel: the retry has already started.", focus back to the restored button. |
+| Queued Delete book (1.3 to 1.6) | Faces "Delete queued" and "Deleting…" (tooltip "Deleting can't be stopped.", Cancel hidden), the sibling tooltip, all hints, the blocked dialog (blocked line, "when it runs" Files line, re-check line below the stay line, "Queue delete of {n} files" and "Queue delete", both tooltips, "Queuing…", "Queuing this delete…", "Queuing can't be stopped."), focus to the face after "queued", every cancel line (changed, files differ, shared one and many, Sorted, drive, not listed, not accepted), Done, Partial with up to three path and cause lines, "No answer yet". |
+| Busy engine (4.2 to 4.4) | The notice, the "Busy with:" line, the 2-minute line, "Last update {HH:MM:SS} · …", both ladder steps, the five "not confirmed" lines, Deleting with the ladder. "Connection interrupted" and "Local server unavailable." remain only for browser mode and for `ended` (the browser's Stop server). |
+| Delete on All files missing (5.2) | Files line "No files will be deleted from your disk.", face "Delete book", both tooltips, the row tooltip, the forget line, the queued variant. |
+| Tooltips | Every new control has a sentence, not its own face: Cancel retry and delete, Restart engine, Try again, Copy details, Technical details, Check, Download, Restart, Cancel update, Show installer file. |
+
+### 10.5 Spec corrections (mine)
+
+| Where | Correction |
+| --- | --- |
+| 3.3 and 3.9 | The strip's state line is **not** a live region: it carries the quiet-time clock and is rewritten every second. A hidden `p#load-announce` (`role="status"`, polite, visually hidden, outside `<main>`) carries the 3.4 announcer events only. |
+| 3.5, Book list row | "`aria-busy="true"` on the body" means the list's body, `#inventory`, never `<body>` (M3). |
+| 2.5, "Ending the engine (last resort)" | The row is the normal step after the work has stopped, on every update. Same line, "Stopping the engine now. Saved work is kept." Cancel update is hidden from here. |
+| 2.6, bound row | No number (M2). |
+| 2.7 | While an update runs the tray's Quit Books Arranger is disabled, beside the disabled "Updating…" item. The window's Quit answers with M1. |
+| 1.3 | "On a row with a queued Retry nothing else is inert" is wrong against decision 3 (one queued action per row): Delete book on such a row is inert, with the N1 tooltip. |
+
+### 10.6 Checks to add for Futaba (continue section 8)
+
+15. **Quit during an update:** with a stub update running and Cancel update still shown, press Quit Books Arranger in the window: nothing closes, the message line reads the first M1 sentence, focus stays. After the engine is ending, the second sentence. The tray's Quit is disabled with "Updating…" beside it.
+16. **Bound wording:** stall the stub past T_safe and T_force; the Install line has no number and reads exactly M2.
+17. **Busy flag:** during loading `document.body` has no `aria-busy`; `#inventory` has it while the books part is missing and loses it when the part arrives. `#load-announce` text changes on a step start, Stuck, moving again, Stopped and ready, and never on Waiting.
+18. **One quiet stretch:** after a grouping change, Waiting for about one second once is expected, not a defect; a Stuck, an action row or a second Waiting is.
+
+### 10.7 Offer (not specced)
+
+A "Cancel update" item in the tray while the update can still be cancelled, so a tray-only user needs one click, not Open then Cancel update.
