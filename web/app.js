@@ -2425,8 +2425,8 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   // Ruling 33 (Sergei 2026-10-26): a Latin name with a Russian first name; one folder per person, by writing language.
   name_language:['Author unclear',"The author's name is in Latin letters. The app can't tell if they write in Russian."],
   // Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Russian letters whose English spelling the lookup
-  // didn't find. Provisional copy (Judy's 0.22.2 doc, section 15). The answer is kept for every book of this author.
-  english_spelling:['Author unclear',"No English spelling of this author's name was found. Type it under Other, or keep this name if they write in Russian."]};
+  // didn't find (Judy's 0.22.2 doc, 15.1). The answer is kept for every book of this author.
+  english_spelling:['Author unclear',"The app found no English spelling of this author's name online. Type one under Other, or keep this name if the author writes in Russian."]};
 const ODD_TITLE=['title_bitrate','title_series','title_latin'];
 // The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
@@ -2565,11 +2565,14 @@ function sameWhy(ask){
   if(why==='pen_name')return 'May be a pen name of an author you have.';
   return typeof why==='string' && why.length<=70?why:'';
 }
+// The tag beside an Author unclear choice. Ruling 39's one choice is the credit's Cyrillic spelling (Judy 15.1: "Russian
+// spelling", pairing with the hint's "English spelling"); ruling 33's pair keeps "spelling".
+function candidateTag(ask,c){return ask?.why==='english_spelling' && c?.source==='spelling'?'Russian spelling':c?.source;}
 function askNames(ask){
   const basis={tag:'tag',file_name:'file name',folder_name:'folder name',number_rule:'set name + part number',entered:'entered by you'},lines=[];
   if(askProposal(ask,'title'))lines.push(`Title: ${askProposal(ask,'title')} - ${basis[ask.fields.title.basis] || 'proposed'}`);
   const candidates=Array.isArray(ask.candidates)?ask.candidates:[];
-  for(const c of candidates)if(typeof c?.name==='string')lines.push(`Author: ${c.name} - ${c.source || 'proposed'}`);
+  for(const c of candidates)if(typeof c?.name==='string')lines.push(`Author: ${c.name} - ${candidateTag(ask,c) || 'proposed'}`);
   if(!candidates.length && askProposal(ask,'author'))lines.push(`Author: ${askProposal(ask,'author')} - ${basis[ask.fields.author.basis] || 'proposed'}`);
   if(ask.same_author?.existing)lines.push(`Author you have: ${ask.same_author.existing} (${plural(Number(ask.same_author.existing_books) || 0,'book','books')})`);
   return lines;
@@ -2610,7 +2613,7 @@ function buildAskFields(entry){
   if(plan.author==='radio'){
     const author=askProposal(ask,'author'),candidates=(Array.isArray(ask.candidates)?ask.candidates:[]).filter(c=>typeof c?.name==='string');
     if(d.choice===undefined){const index=candidates.findIndex(c=>c.name===author);d.choice=index>=0?'c'+index:null;}
-    candidates.forEach((c,i)=>{const readers=Number.isInteger(c.reader_count) && c.reader_count>0?`reader on ${plural(c.reader_count,'other book','other books')}`:'';set.append(askRadio(entry,group,'c'+i,c.name,`Use ${c.name} as the author.`,[c.source,readers].filter(Boolean).join(' · ')));});
+    candidates.forEach((c,i)=>{const readers=Number.isInteger(c.reader_count) && c.reader_count>0?`reader on ${plural(c.reader_count,'other book','other books')}`:'';set.append(askRadio(entry,group,'c'+i,c.name,`Use ${c.name} as the author.`,[candidateTag(ask,c),readers].filter(Boolean).join(' · ')));});
   }else{
     const s=ask.same_author || {};
     set.append(askRadio(entry,group,'same',`Same author: use "${s.existing || ''}"`,`Use ${s.existing || ''} as the author.`),askRadio(entry,group,'different',`Different author: keep "${s.new || ''}"`,`Use ${s.new || ''} as the author.`));

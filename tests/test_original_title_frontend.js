@@ -19,6 +19,7 @@ const language=row('l',{kind:'author_unclear',why:'name_language',odd_name:true,
 backend={...backend,audiobook_output_root:ROOT};
 const trOf=id=>[...get('inventory').children].find(tr=>tr.dataset.path===id);
 const statusCell=tr=>tr.children[4];
+function walk(element,found=[]){for(const child of element.children || []){found.push(child);walk(child,found);}return found;}
 function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}));totalRows=rows.length;renderRows(true);controls()');}
 (async()=>{
   const page=fs.readFileSync(path.join(__dirname,'..','web','app.js'),'utf8');
@@ -37,8 +38,13 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   paint([language,spelling]);
   const asked=trOf('cand-s');
   assert.equal(statusCell(asked).textContent,'Author unclear');
-  assert.equal(statusCell(asked).children[0].textContent,"No English spelling of this author's name was found. Type it under Other, or keep this name if they write in Russian.");
+  assert.equal(statusCell(asked).children[0].textContent,"The app found no English spelling of this author's name online. Type one under Other, or keep this name if the author writes in Russian.",'Judy 15.1');
   assert.equal(run('askFieldPlan(fixture[1].ask).author'),'radio','the Author unclear choices: this name, or Other');
+  // Judy 15.1: the Cyrillic choice is tagged "Russian spelling"; ruling 33's pair keeps "spelling" (control).
+  const tags=tr=>walk(statusCell(tr)).filter(e=>e.parentElement?.className==='ask-radio' && String(e.className).includes('field-help')).map(e=>e.textContent);
+  assert.deepEqual(tags(asked),['Russian spelling']);
+  assert.deepEqual(tags(trOf('cand-l')),['spelling','spelling'],'positive control: the name-language row draws its tags');
+  assert.ok(run('askNames(fixture[1].ask)').includes('Author: Вестерфельд Скотт - Russian spelling'),'the names summary says the same');
   assert.equal(run('originalTitleFact({automatic:{state:"Waiting for source",wait:{kind:"original_title"}}})'),'','a record a 0.22.2 candidate left: no waiting line');
   assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"found",title:"Jack of Shadows"}}})'),'Jack of Shadows');
   assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"none",title:""}}})'),'Not found. Filed under the Russian title.');

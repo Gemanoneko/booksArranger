@@ -526,3 +526,18 @@ Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic («В�
 - The answer is kept for every book of the author (a lasting author rule): a typed name files them all under it, and Approve with the name as shown keeps it. The author's other rows go on by themselves, as after a Same author? answer.
 - **Provisional copy, please confirm or replace:** the hint above (ASK_COPY `english_spelling` in `web/app.js`). Status, the radio line and the Other field reuse the existing Author unclear strings; the candidate's tag reuses "spelling" from the name-language row (ruling 33).
 
+### 15.1 §15 decision (Judy, 2026-10-27)
+
+**Not approved as written; one replacement string and one tag change.** The status ("Author unclear", which matches the filter name), the radio line, the Other radio, its field and the tooltips stay as they are.
+
+| Where | String |
+| --- | --- |
+| Hint (ASK_COPY `english_spelling`) | "The app found no English spelling of this author's name online. Type one under Other, or keep this name if the author writes in Russian." |
+| Tag beside the Cyrillic radio (replaces "spelling") | "Russian spelling" |
+
+Why:
+- "Type it" has no clear referent after "No English spelling … was found". "Type one" (an English spelling) names what to type. "The app found no …" is active voice, like the other hints ("The app can't tell who wrote it.").
+- "online" stays: it says where the app looked, so Sergei knows the lookup was tried.
+- "if they write in Russian" → "if the author writes in Russian": "they" read as the name's owner or the reader. The keep path stays conditional because it is the one case where Cyrillic is right.
+- The tag "spelling" was written for the Latin / Cyrillic pair (ruling 33). With one choice it reads as the English spelling the app found. "Russian spelling" pairs with the hint's "English spelling". The engine writes `source: 'spelling'` (`public_research.py`, the ruling 39 ask); map the display string in `web/app.js` or change the engine value, Ender's choice.
+- Scope ("applies to all their books") is not added: it is what ruling 39 promises, the typed name is shown in the Goes to line before the press, and the author's other rows going on by themselves matches the Same author? answer. Two sentences, as the copy standard allows.
