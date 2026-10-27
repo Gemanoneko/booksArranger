@@ -168,6 +168,10 @@ class UpdateController {
       try{await this.parkEngine({progress:update=>this.progress(update),cancelRequested:()=>this.cancelRequested});}
       catch(error){engineEnded=error.updateCause==='engine_exit';throw error;}
       engineEnded=true;
+      // Futaba's 0.22.2 QA, m-1: Cancel pressed while an idle engine was already ending for the update (under a second)
+      // was answered and the install went on. Nothing is installed yet: the old engine starts again and the update is
+      // cancelled; what the engine had stopped is named as for any ended engine.
+      if(this.cancelRequested)throw Object.assign(new Error('Update cancelled after the engine had stopped'),{updateCause:'cancelled',engineEnded:true});
       if(!lease.isAlive())throw Object.assign(new Error('Installer native lease ended; update cancelled'),{updateCause:'checksum'});
       this.install_={...this.install_,phase:'installing'};this.emit();
       await this.install(ready); // resolves once the installer process exists; the app then exits
@@ -181,7 +185,7 @@ class UpdateController {
       // Senua's 0.22.1 review, W3: what the engine could not start again after Cancel, its bound or a failed close.
       this.install_={...this.install_,phase:cause==='cancelled'?'cancelled':'failed',at:this.stamp(),cause,
         waiting:Array.isArray(error.waiting)&&error.waiting.length?error.waiting:this.install_.waiting,
-        problems:ENGINE_ENDED.includes(cause)?stoppedProblems(this.install_.stopped)
+        problems:ENGINE_ENDED.includes(cause)||error.engineEnded===true?stoppedProblems(this.install_.stopped)
           :Array.isArray(error.resumeProblems)?error.resumeProblems.map(item=>({kind:String(item.kind),cause:String(item.cause)})):[]};
       return this.value;
     }finally{if(lease)await lease.close();this.busy.install=false;this.cancelRequested=false;this.emit();

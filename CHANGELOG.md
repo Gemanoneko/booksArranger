@@ -12,7 +12,7 @@
 ### Changed
 
 - Nothing refuses for being busy any more. A press made while something else runs is queued and shows Cancel. When a press is refused, the row says why and what to do next.
-- Translated books wait for their English title. If none can be found, they convert under the Russian title (ruling 29).
+- Translated books don't wait for their English title. If research has it, the book is filed under it; if not, it converts right away under the title it has (ruling 38).
 - Latin names are filed surname first. Authors who write in Russian are filed in Cyrillic. Ж is matched with Z.
 - Co-authors and readers are sorted out before the title is read.
 - Start works while audiobooks convert. The scan waits for the conversion to finish.
@@ -28,6 +28,10 @@
 - A slow media check waits and is tried again by itself. It no longer lands in "Needs you".
 - A deleted book's row leaves at once, and a stale list cannot bring it back.
 - Odd titles from the live catalog now file correctly («1408», «11.22.63», «Голиаф»).
+- Edit names: a correction reaches only books with exactly the same text, numbers included («01» no longer renames «1408»). Typing the files' own text back leaves no correction, and an older one no longer comes back.
+- The author spelling you choose when the app asks (for example «Марченко Илья») decides the folder.
+- A queued scan waits while a delete, an approval or a recovery cleanup is running.
+- Cancel update pressed in the first second stops the update.
 
 ## [v0.22.1] - 2026-10-26
 

@@ -47,6 +47,22 @@ test('the installer would not start: the old engine starts again, and the line a
 test('Cancel update while it waits: no installer, no engine restart, the lease is released',async()=>{const f=fixture();await ready(f);
  f.controller.parkEngine=async({progress,cancelRequested})=>{progress({phase:'pausing',waiting:[{kind:'conversion',title:'Fixture'}],elapsed:12,safe_seconds:90});assert.equal(f.controller.value.canCancel,true);assert.equal(f.controller.cancel(),true);assert.equal(cancelRequested(),true);throw typed('cancelled');};
  await f.controller.restart();assert.deepEqual(f.seen,['lease','close']);assert.deepEqual([f.controller.value.install.phase,f.controller.value.canCancel,f.controller.value.busy.install],['cancelled',false,false]);});
+// Futaba's 0.22.2 QA, m-1: an idle engine ends for the update in under a second; a Cancel pressed meanwhile was answered
+// (true) and the installer still ran.
+test('Cancel pressed while an idle engine already ends for the update: no installer, the old engine starts again',async()=>{
+ const run=async stopped=>{const f=fixture();await ready(f);
+  f.controller.parkEngine=async({progress,cancelRequested})=>{progress({phase:'pausing',waiting:[],elapsed:0,safe_seconds:90,stopped});
+   assert.equal(f.controller.cancel(),true,'answered at the press');assert.equal(cancelRequested(),true);};  // then the engine exits: park resolves
+  await f.controller.restart();return f;};
+ let f=await run([]);
+ assert.deepEqual(f.seen,['lease','old engine started','close'],'never the installer');
+ assert.deepEqual([f.controller.value.install.phase,f.controller.value.install.cause,f.controller.value.canCancel,f.controller.value.busy.install,f.controller.value.ready],['cancelled','cancelled',false,false,true]);
+ assert.equal(page().installLine(f.controller.value).text,'Update cancelled. Books Arranger is running as before.');
+ f=await run(['automatic']);
+ assert.deepEqual(f.controller.value.install.problems,[{kind:'automatic',cause:'engine_ended'}],'what the ended engine had stopped is named');
+ // Control: no Cancel, the same park: the installer runs.
+ const g=fixture();await ready(g);g.controller.parkEngine=async({progress})=>{progress({phase:'pausing',waiting:[],elapsed:0,safe_seconds:90,stopped:[]});};
+ await g.controller.restart();assert.deepEqual(g.seen,['lease','install while installing','close']);});
 test('a tampered artifact never stops the engine and asks for a new download',async()=>{const f=fixture();await ready(f);f.controller.acquireArtifact=async()=>{throw new Error('checksum changed');};
  await f.controller.restart();assert(!f.seen.includes('park'));assert.deepEqual([f.controller.value.install.cause,f.controller.value.ready],['checksum',false]);});
 test('verification that runs out of time keeps the download for another try',async()=>{const f=fixture();await ready(f);f.controller.acquireArtifact=async()=>{throw new Error('Installer integrity check timed out');};
