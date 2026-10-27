@@ -1171,6 +1171,19 @@ class PublicResearch:
             # v5 (Sergei 2026-10-24): a one-word author ("Баошу") is an author; a full name is optional.
             reasons.append('Author full name not established')
             names=names or [author]
+        # Futaba's 0.22.2 QA, m-2 (ruling 39): the research cache's catalog record of a foreign work names its author in
+        # Latin while the files credit him only in Cyrillic ("Lev Grossman" for «Лев Гроссман»). That is the English
+        # spelling ruling 39 looks up: filed surname first (ruling 33) and learned as a lasting rule for the credit, so his
+        # other books (no record of their own) follow, and no Cyrillic folder of the library or spelling vote replaces it.
+        # It used to take the vote or the library's Cyrillic folder, and no rule was learned.
+        if one_source and not reasons and not typed_author and language and language!='ru' and not fields['author'].get('rule') \
+                and fields['author'].get('state') not in ('entered','approved') and local_script=='cyrillic' and names \
+                and names[0]==text(catalog.get('author_latin')) and local_identity.script(names[0])=='latin':
+            latin=_latin_surname_first(names[0],author)
+            self._learn_author('same_as',author,latin,catalog.get('source_url',''),title)
+            result['author_learned']={'credit':author,'name':latin,'source_url':catalog.get('source_url','')}
+            if latin not in authors:authors.append(latin)
+            names=[latin];fields=dict(fields,author=dict(fields['author'],rule='catalog-latin'))
         spelling=None
         from organization import NO_AUTHOR
         rules=self.rules() if one_source else None
@@ -1257,7 +1270,7 @@ class PublicResearch:
             # (Author unclear); only that author's books wait for his answer, which becomes his rule. Never transliterated.
             found=self._author_latin(title,names[0],stop,budget,result)
             if found and found['state']=='found':
-                latin=local_identity.surname_first(found['name'])[0]
+                latin=_latin_surname_first(found['name'],names[0])
                 self._learn_author('same_as',names[0],latin,found['source_url'],preferred)
                 result['author_learned']={'credit':names[0],'name':latin,'source_url':found['source_url']}
                 if latin not in authors:authors.append(latin)
@@ -1865,6 +1878,19 @@ def _wait(waits,answered=()):
     if other:blocked.append(min(other,key=lambda w:w.retry_at))
     wait=max(blocked,key=lambda w:w.retry_at) if blocked else min(waits,key=lambda w:w.retry_at)
     return {'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
+
+
+def _latin_surname_first(latin,credit):
+    """Ruling 33 for the Latin name a source gives a Cyrillic credit (ruling 39): surname first. A catalog writes it
+    "Given Surname"; when its first name is not one the app knows ("Lev Grossman"), the credit's own known first name
+    («Лев») shows the order, so a two-word name is turned around (Grossman Lev), never left as written."""
+    import local_identity
+    chosen,why=local_identity.surname_first(latin)
+    tokens=text(latin).split()
+    if why.startswith('kept as written (surname position') and len(tokens)==2 and len(text(credit).split())==2 \
+            and not local_identity.surname_first(credit)[1].startswith('kept as written'):
+        return tokens[1]+' '+tokens[0]
+    return chosen
 
 
 def _latin_credit(value):

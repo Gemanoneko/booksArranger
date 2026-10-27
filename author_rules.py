@@ -114,12 +114,17 @@ class Rules:
         self.by_key = {}
         for row in self.rules:
             self.by_key.setdefault(row['credit_key'], []).append(row)
-        # casefolded author folder name -> (name, converted books): the authors the library already has.
+        self.seen = None
+        self.folders = None
+        # casefolded author folder name -> (name, converted books): the authors the library already has. A converted
+        # book's author that a rule files under another name counts as that author (0.22.3, Brom: «Бром Джеральд», ruled
+        # the same as Brom, made "Same author?" offer «Бром Джеральд» for «Бром» instead of the Brom folder).
         self.known_authors = {}
         for name in known_authors:
             if name:
-                spelling, count = self.known_authors.get(str(name).casefold(), (str(name), 0))
-                self.known_authors[str(name).casefold()] = (spelling, count + 1)
+                name = self.same_as(str(name)) or str(name)
+                spelling, count = self.known_authors.get(name.casefold(), (name, 0))
+                self.known_authors[name.casefold()] = (spelling, count + 1)
         for row in self.rules:
             name = row['target'] if row['kind'] == 'same_as' else row['credit_as_seen'] if row['kind'] == 'keep' else ''
             if name and name.casefold() not in self.known_authors:
@@ -127,8 +132,6 @@ class Rules:
         self.generation = hashlib.sha256(json.dumps(sorted((r['rule_id'], r['kind'], r['target'], r['scope']) for r in self.rules)).encode()).hexdigest()[:16]
         # The newest rule's time: a research records it, and a rule saved after it is a new rule for that book.
         self.stamp = max((str(r.get('saved_utc') or '') for r in rows), default='')
-        self.seen = None
-        self.folders = None
 
     def recording(self):
         """A copy that records every credit and folder it is asked about (Senua's 0.22.0 review, G6): a research stores
@@ -184,8 +187,19 @@ class Rules:
         return self._rule(name, folder, KINDS)
 
     def same_as(self, name, folder=''):
+        """The author this credit files under. A target that is itself ruled the same as another name follows it (0.22.3,
+        «Бром»: "Бром" same as «Бром Джеральд», which a lookup ruled the same as Brom, files under Brom, never a second
+        folder). Bounded, and a loop stops where it would repeat."""
         row = self.rule(name, folder)
-        return row['target'] if row and row['kind'] == 'same_as' else ''
+        target = row['target'] if row and row['kind'] == 'same_as' else ''
+        seen = {key(name)}
+        while target and key(target) not in seen and len(seen) < 8:
+            seen.add(key(target))
+            row = self.rule(target, folder)
+            if not row or row['kind'] != 'same_as' or not row['target']:
+                break
+            target = row['target']
+        return target
 
     def not_author(self, name, folder=''):
         row = self.rule(name, folder)

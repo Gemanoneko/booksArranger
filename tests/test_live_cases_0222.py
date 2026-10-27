@@ -131,10 +131,90 @@ class LiveCaseTests(Base):
                          album='Ветер сквозь замочную скважину', artist='Стивен Кинг', album_artist='Стивен Кинг', composer='Vargtroms Studio', track='%d/2' % n,
                          sort_album='Тёмная Башня. Книга 4.5', sort_name='Тёмная Башня. Книга 4.5', sort_artist='Тёмная Башня', grouping='Темная башняю Книга 4.5') for n in (1, 2)]
         row = next(iter(self.catalog(rows).values()))
+        # The parts' chapters are this test's own (0.22.3): the case used to probe the live Z: files, so it passed only while
+        # Sergei's two parts were still there, and read his library. Chapters that don't settle it: "As one book" is asked.
+        from unittest.mock import patch
+        import part_sets
+        chapters = lambda paths, *a, **k: {path: ['Пролог', 'Ветер сквозь замочную скважину'] if path.endswith('1.m4b') else ['Ключ', 'Буря'] for path in paths}
+        with patch.object(part_sets, 'read_chapters', side_effect=chapters):
+            result = self.lookup(row)
+            self.assertEqual(result['identity_hold']['piece']['piece'], 'set', 'asked "As one book"')
+            self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)),
+                             SORTED + '\\King Stephen\\Dark Tower\\Dark Tower - 4.5 - The Wind Through the Keyhole - King Stephen.m4b')
+
+
+class CachedCatalogSpellingTests(Base):
+    def test_a_cached_catalog_latin_name_files_english_and_is_learned_for_the_other_book(self):
+        # Futaba's 0.22.2 QA, m-2 (ruling 39): the research cache holds FantLab's record for «Волшебники» (written in English,
+        # "The Magicians", author "Lev Grossman"); the files credit only «Лев Гроссман». It went to «Гроссман Лев\The
+        # Magicians» (or "Lev Grossman\..." as written), no rule was learned and «Волшебная страна» stayed Cyrillic.
+        import contextlib, sqlite3
+        from unittest.mock import patch
+        catalog = {'provider': 'fantlab', 'work_id': 'fantlab:1', 'language': 'en', 'original_title': 'The Magicians', 'title_native': 'Волшебники',
+                   'author_native': 'Лев Гроссман', 'author_latin': 'Lev Grossman', 'source_url': 'https://fantlab.ru/work1'}
+        books = self.catalog([file_row('Fantasy\\Волшебники.m4b', title='Волшебники', album='Волшебники', artist='Лев Гроссман'),
+                              file_row('Fantasy\\Волшебная страна.m4b', title='Волшебная страна', album='Волшебная страна', artist='Лев Гроссман')])
+        magicians, land = books[ROOT + '\\Fantasy\\Волшебники.m4b'], books[ROOT + '\\Fantasy\\Волшебная страна.m4b']
+        real = self.research._gap_fill
+        gap = lambda local, title, *a, **k: {'catalog': dict(catalog), 'closed': [], 'unfilled': []} if title == 'Волшебники' else real(local, title, *a, **k)
+        with patch.object(self.research, '_gap_fill', side_effect=gap):
+            result = self.lookup(magicians)
+            self.assertEqual(result['reasons'], [])
+            self.assertEqual(self.goes_to(magicians, result), SORTED + '\\Grossman Lev\\The Magicians - Grossman Lev.m4b', 'English, surname first')
+            self.assertEqual(result['author_learned'], {'credit': 'Лев Гроссман', 'name': 'Grossman Lev', 'source_url': 'https://fantlab.ru/work1'})
+            with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+                self.assertEqual([tuple(r) for r in db.execute("SELECT kind, target, actor FROM author_rules WHERE rule_id NOT LIKE 'seed-%'")], [('same_as', 'Grossman Lev', 'assistant')])
+            other = self.lookup(land)
+        self.assertEqual(self.goes_to(land, other), SORTED + '\\Grossman Lev\\Волшебная страна - Grossman Lev.m4b', 'the other book follows the rule')
+        # Control: a Russian original's record keeps the Cyrillic credit (the folder language rule).
+        russian = dict(catalog, language='ru', original_title='Волшебники', author_latin='Lev Grossman')
+        books = self.catalog([file_row('Fantasy\\Волшебники.m4b', title='Волшебники', album='Волшебники', artist='Лев Гроссман')])
+        with patch.object(self.research, '_gap_fill', return_value={'catalog': russian, 'closed': [], 'unfilled': []}):
+            result = self.lookup(next(iter(books.values())))
+        self.assertNotIn('author_learned', result)
+        self.assertTrue(self.goes_to(next(iter(books.values())), result).startswith(SORTED + '\\Гроссман Лев\\'))
+
+
+class BromTests(Base):
+    """0.22.3 (Sergei 2026-10-27, «Крампус. Повелитель Йоля»): the author publishes as Brom and his folder stays Brom. The
+    live catalog: a lookup learned «Бром Джеральд» same as Brom; an older job is credited «Бром Джеральд»; the new book
+    credits «Бром». It asked "Same author? «Бром» or «Бром Джеральд»", and either answer could give a second folder."""
+    def library(self, *rules):
+        import author_rules, contextlib, json, sqlite3
+        books = self.catalog([file_row('Unsorted\\Бром - Крампус\\Крампус. Повелитель Йоля.m4b', title='Крампус. Повелитель Йоля', album='Крампус. Повелитель Йоля', artist='Бром')])
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            db.execute('CREATE TABLE audio_jobs(manifest TEXT, updated TEXT)')
+            for author in ('Бром Джеральд', 'Brom', 'Brom'):
+                db.execute('INSERT INTO audio_jobs VALUES(?,?)', (json.dumps({'metadata': {'author': author}}), '2026-10-27'))
+            author_rules.append(db, 'same_as', 'Бром Джеральд', target='Brom', actor='assistant', source='https://fantlab.ru/work843689')
+            for credit, target in rules:
+                author_rules.append(db, 'same_as', credit, target=target, actor='user', source='Sergei (Same author?)')
+            db.commit()
+        return next(iter(books.values()))
+
+    def test_brom_files_under_brom_without_a_question(self):
+        row = self.library()
         result = self.lookup(row)
-        self.assertEqual(result['identity_hold']['piece']['piece'], 'set', 'asked "As one book"')
-        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)),
-                         SORTED + '\\King Stephen\\Dark Tower\\Dark Tower - 4.5 - The Wind Through the Keyhole - King Stephen.m4b')
+        self.assertEqual((result['reasons'], result.get('ask')), ([], None), 'Бром is Brom, the folder the library has')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Brom\\Крампус. Повелитель Йоля - Brom.m4b')
+
+    def test_a_same_author_answer_for_the_old_name_still_files_under_brom(self):
+        # His answer on the old question ("Same author: use «Бром Джеральд»") is a rule to a name that is itself Brom.
+        row = self.library(('Бром', 'Бром Джеральд'))
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Brom\\Крампус. Повелитель Йоля - Brom.m4b', 'never a «Бром Джеральд» folder')
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT, chosen='Бром Джеральд')), SORTED + '\\Brom\\Крампус. Повелитель Йоля - Brom.m4b')
+
+    def test_rules_follow_a_chain_and_stop_on_a_loop(self):
+        import author_rules
+        row = lambda n, credit, target: {'rule_id': 'r%d' % n, 'kind': 'same_as', 'credit_key': author_rules.key(credit), 'credit_as_seen': credit, 'target': target,
+                                         'scope': '', 'options': '{}', 'actor': 'user', 'source': '', 'question': '', 'saved_utc': '2026-10-27T00:00:0%d' % n}
+        rules = author_rules.Rules([row(1, 'Бром', 'Бром Джеральд'), row(2, 'Бром Джеральд', 'Brom')], ['Бром Джеральд'])
+        self.assertEqual(rules.same_as('Бром'), 'Brom')
+        self.assertEqual(rules.known_authors.get('brom'), ('Brom', 1), 'the old job counts as Brom')
+        loop = author_rules.Rules([row(1, 'A Bee', 'C Dee'), row(2, 'C Dee', 'A Bee')])
+        self.assertIn(loop.same_as('A Bee'), ('A Bee', 'C Dee'))
 
 
 if __name__ == '__main__':
