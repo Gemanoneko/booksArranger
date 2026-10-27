@@ -2,7 +2,7 @@
 // Pure-node handoff graph; the outer protocol-2 supervisor owns its descendants.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport} from './python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
@@ -17,7 +17,9 @@ for(const [name,expected] of Object.entries(fixture.ffmpeg.files)){const file=pa
 if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)throw Error('QA Python runtime differs');
 fs.mkdirSync(path.join(root,'scratch','source-fallback-2026-10-11'),{recursive:true});
 const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate","test_series_backfill.AREA":"scratch/s"};
-const deadline=Date.now()+540000;
+// 0.22.3: the gate's start is the process's; each Python worker's own deadline counts from its own start (workerDeadline),
+// and the side chain and every worker stop at the gate's total, inside the entry check's 600 s.
+const gateStart=performance.timeOrigin,deadline=gateStart+GATE_TOTAL_SECONDS*1000;
 // 2026-10-25 (the gate left 4 s of its 540 s deadline on a quiet machine): the syntax checks, the node cases and the page
 // scripts run in one chain beside the Python workers; they used to run before and after them, on the deadline's critical
 // path. Same checks, in the same order inside the chain, each bounded by the same deadline, and a failure still fails the
@@ -53,7 +55,7 @@ patterns.push('test_series_backfill.py','test_quicktime_chapters.py','test_inven
 patterns.push('test_series_fallbacks.py','test_openlibrary_index.py','test_public_work_identity.py');  // v0.18 source/ordinal, shared quotas, authenticated sparse imports
 patterns.push('test_bulk_retry_receipts.py','test_catalog_contention.py');
 patterns.push('test_retry_start_fence.py');
-patterns.push('test_inplace_m4b.py','test_source_proofs.py');  // v0.21.0 in-place single-M4B edit, attempt-scoped source fingerprints
+patterns.push('test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests','test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests','test_source_proofs.py');  // v0.21.0 in-place single-M4B edit, attempt-scoped source fingerprints
 patterns.push('test_iron_skazka.py');  // v0.21.1 legacy MP3 tag-repair retry, Confirm and convert, no-restart proof, verified old-file removal
 patterns.push('test_local_admission.py','test_catalog_paging.py');  // local-agreement identity end to end; review paging/filters without source reads. Both broke unseen outside the gate (0cf4376, d2ff261)
 patterns.push('test_source_cleanup.py','test_source_folders.py','test_safety_boundaries.py','test_cleanup_scope.py');  // 0.21.3 audit M1: the source-removal suites (Sergei's deletion rule, rulings 2 and 1a)
@@ -82,7 +84,20 @@ patterns.push('test_entered_names.py','test_live_cases_0222.py');  // 0.22.2: Ed
 patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (no evidence asked for), ruling 35 (every press queues)
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
-for p in patterns:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p))
+owner={}
+def flat(suite):
+ for item in suite:
+  if isinstance(item,unittest.TestSuite):yield from flat(item)
+  else:yield item
+for p in patterns:
+ if ':' not in p:s.addTests(loader.discover(sys.argv[1]+'/tests',pattern=p));continue
+ # 0.22.3: one half of a split module, by its test classes ("m.py:A,B" those, "m.py:-A,B" every other one).
+ module,spec=p.split(':',1);others=spec.startswith('-');named=set(spec.lstrip('-').split(','))
+ tests=list(flat(loader.discover(sys.argv[1]+'/tests',pattern=module)))
+ found={type(t).__name__ for t in tests}
+ if not named<=found:raise ValueError('Split classes missing from '+module+': '+', '.join(sorted(named-found)))
+ for t in tests:
+  if (type(t).__name__ in named)!=others:s.addTest(t);owner[(type(t).__module__,type(t).__name__)]=p
 runroot=pathlib.Path(sys.argv[1]).resolve();mapping=json.loads(sys.argv[3]);mapped=[];absent=[]
 for target,relative in mapping.items():
  module,attr=target.rsplit('.',1);destination=(runroot/relative).resolve()
@@ -101,7 +116,7 @@ class Timed(unittest.TextTestResult):
  seconds={};last=None
  def startTestRun(self):super().startTestRun();Timed.last=time.perf_counter()
  def stopTest(self,test):
-  super().stopTest(test);now=time.perf_counter();name=type(test).__module__.split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
+  super().stopTest(test);now=time.perf_counter();name=owner.get((type(test).__module__,type(test).__name__)) or type(test).__module__.split('.')[0]+'.py';Timed.seconds[name]=Timed.seconds.get(name,0)+now-Timed.last;Timed.last=now
 r=unittest.TextTestRunner(verbosity=2,resultclass=Timed).run(s)
 report={'batch':int(sys.argv[4]),'patterns':patterns,'ids':inventory,'discovered':len(inventory),'completed':r.testsRun,'skipped':len(r.skipped),'failures':len(r.failures),'errors':len(r.errors),'success':r.wasSuccessful(),
  'module_seconds':{k:round(v,1) for k,v in sorted(Timed.seconds.items(),key=lambda item:-item[1])}}
@@ -133,13 +148,14 @@ const workers=batches.map((batch,i)=>{
  return {directory,temp,batch,i};
 });
 let outputBytes=0,overflow=false;
+const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
 const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
- const started=performance.now();
+ const started=performance.now(),limit=workerDeadline(gateStart,Date.now());
  const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
  for(const key of Object.keys(env))if(/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(key))delete env[key];
  const out=[],err=[];let error=null,timedOut=false;
  const child=spawn(python,['-I','-B','-c',code,worker.directory,JSON.stringify(worker.batch),JSON.stringify(fixtureRootMap),String(worker.i)],{cwd:worker.directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
- const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));
+ const timer=setTimeout(()=>{timedOut=limit.kind;child.kill();},Math.max(1,limit.at-Date.now()));
  const capture=chunks=>data=>{outputBytes+=data.length;if(outputBytes>16*1024*1024){overflow=true;child.kill();return;}chunks.push(data);};
  child.stdout.on('data',capture(out));child.stderr.on('data',capture(err));child.on('error',e=>{error=e.message;});
  child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,seconds:(performance.now()-started)/1000,out:Buffer.concat(out).toString('utf8'),err:Buffer.concat(err).toString('utf8')});});
@@ -149,7 +165,9 @@ for(let i=0;i<results.length;i++){process.stdout.write(results[i].out);process.s
 const sideResult=await side;process.stdout.write(sideResult.log.join(''));
 const workerSeconds=workerSecondsReport(batches,results.map(r=>r.seconds));for(const line of workerSeconds.lines)console.log(line);
 for(const worker of workers)if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))throw Error('Python batch source changed during tests');
-if(overflow||results.some(r=>r.error||r.timedOut||r.status!==0))throw Error('Python batch failed, exceeded output cap or original deadline');
+const late=results.map((r,i)=>r.timedOut?'worker '+i+' ('+r.timedOut+' deadline, '+Math.round(r.seconds)+' s)':'').filter(Boolean);
+if(late.length)throw Error('Python worker deadline: '+late.join(', '));
+if(overflow||results.some(r=>r.error||r.status!==0))throw Error('Python batch failed or exceeded output cap');
 if(sideResult.failure)throw Error('Focused desktop check failed: '+sideResult.failure);
 const nodeOutput=sideResult.nodeOutput,nodeCount=Number(/^# tests (\d+)$/m.exec(nodeOutput)?.[1]);
 if(!nodeCount||!/^# fail 0$/m.test(nodeOutput)||!/^# skipped 0$/m.test(nodeOutput)||!/^# cancelled 0$/m.test(nodeOutput))throw Error('Node cases were not completely executed');
@@ -169,4 +187,4 @@ const qaRuntime={root:usedRuntime,sha256:treeDigest(await manifestOf(usedRuntime
 // Senua's 0.22.1 review, W10: the whole runtime tree is pinned, not only its three executables.
 if(!fixture.tree||qaRuntime.sha256!==fixture.tree.sha256)throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+qaRuntime.sha256+')');
 const mp3Fixture={path:fixtureFile,sha256:fixtureFile?createHash('sha256').update(fs.readFileSync(fixtureFile)).digest('hex'):''};
-console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture}));
+console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,python_workers:workerSeconds.workers,python_worker_deadline_seconds:workerSeconds.deadline,copy_seconds:copySeconds,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture}));
