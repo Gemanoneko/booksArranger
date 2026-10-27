@@ -61,9 +61,9 @@ const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePa
 // printed seconds re-measure them.
 export const PYTHON_WORKERS=9;
 // 0.22.3 (the 0.22.2 gates: workers at 81-88 % of the deadline, and one run lost two workers because copying the sources
-// took 170 s of it): every Python worker has its own 540 s, counted from its own start, so the copies before it no longer
-// eat its time. The gate as a whole still ends inside the entry check's 600 s: past 580 s from its start it stops itself
-// and says which deadline ran out.
+// took 170 s of it): every Python worker has its own 540 s, counted from its own start, so copies taking up to 40 s before
+// it leave its time whole; past that the gate total binds first (workerDeadline). The gate as a whole still ends inside the
+// entry check's 600 s: past 580 s from its start it stops itself and says which deadline ran out.
 export const PYTHON_WORKER_DEADLINE_SECONDS=540,GATE_TOTAL_SECONDS=580;
 export function workerDeadline(gateStartMs,workerStartMs){
   const own=workerStartMs+PYTHON_WORKER_DEADLINE_SECONDS*1000,total=gateStartMs+GATE_TOTAL_SECONDS*1000;
