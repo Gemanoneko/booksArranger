@@ -634,18 +634,39 @@ class PublicResearch:
         final_title=text(title) if title is not None and text(title) else shown['title']
         final_author=text(author) if author is not None else text(chosen) if chosen is not None else shown['author']
         if not final_title:raise ValueError('Type a title first.')
+        # Ruling 49 (Sergei 2026-10-27): a Russian edition of a foreign book files under its original English title, on
+        # Approve as automatically (_local_lookup's preferred title); a title he typed or entered wins.
+        english=self._english_original(record,final_title) if 'title' not in typed else None
+        if english:final_title=english['original_title']
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
         settled=local_identity.settled(record,final_title,final_author,'approved',typed,collection=collection,rules=self.rules(),
                                        folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
         for key in ('names','names_entered','names_digest'):
             if key in record:settled[key]=copy.deepcopy(record[key])
+        if english:
+            settled['fields']['title']=dict(settled['fields']['title'],how=settled['fields']['title']['how']+'; the original English title (ruling 49) of "%s"'%shown['title'],
+                                            sources=list(settled['fields']['title']['sources'])+[{'kind':'catalog original title','value':english['original_title'],'url':english.get('source_url','')}])
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
                             'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or [])}
         return result
+    def _english_original(self,record,title):
+        """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
+        automatic filing uses, asked with the credit the files carry), when it says the work's original is English and
+        names its Latin title; else None. A title in Latin letters is left as it is."""
+        import local_identity
+        if local_identity.script(title)=='latin':return None
+        credit=text(((record.get('fields') or {}).get('author') or {}).get('value'))
+        scratch={'sources':[],'evidence':[],'reasons':[]}
+        try:filled=self._gap_fill(dict(record,gaps=['original_title']),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
+        except Exception:return None  # nothing known: the title shown is filed
+        catalog=(filled or {}).get('catalog') or {}
+        original=text(catalog.get('original_title'))
+        if catalog.get('language')!='en' or not original or local_identity.script(original)!='latin':return None
+        return catalog
     def local_generation(self):
         from openlibrary_index import generation
         return generation(self.local_index)

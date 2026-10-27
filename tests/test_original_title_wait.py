@@ -59,6 +59,47 @@ class CachedSpellingConvertsTests(ApproveFixture):
         self.assertEqual(Path(jobs[0]['output']['final_path']).parent, self.sorted / 'Grossman Lev', 'ruling 39: the English folder')
 
 
+class Ruling49Tests(ApproveFixture):
+    def test_approve_files_a_russian_edition_under_the_original_english_title_as_automatic_filing_does(self):
+        # Ruling 49 (Sergei 2026-10-27, "The Magicians - Grossman Lev"): Futaba's 0.22.3 QA saw automatic filing use the
+        # catalog's original title while a manual Approve of the same book gave «Волшебники - Grossman Lev.m4b».
+        from unittest.mock import patch
+        import author_rules, contextlib, sqlite3
+        tone(self.audio / 'Fantasy' / 'Волшебники' / 'Волшебники.mp3', self.cover, album='Волшебники', title='Волшебники', artist='Лев Гроссман')
+        row = self.start()[0]
+        with contextlib.closing(sqlite3.connect(self.inv.database)) as db:
+            author_rules.setup(db); author_rules.append(db, 'same_as', 'Лев Гроссман', target='Grossman Lev', actor='assistant', source='https://fantlab.ru/work1001'); db.commit()
+        research = self.service.automatic.research
+        catalog = {'provider': 'fantlab', 'work_id': 'fantlab:1001', 'language': 'en', 'original_title': 'The Magicians', 'title_native': 'Волшебники',
+                   'author_native': 'Лев Гроссман', 'author_latin': 'Lev Grossman', 'source_url': 'https://fantlab.ru/work1001'}
+        real = research._gap_fill
+        gap = lambda local, title, *a, **k: {'catalog': dict(catalog), 'closed': [], 'unfilled': []} if title == 'Волшебники' else real(local, title, *a, **k)
+        expected = str(Path('Grossman Lev') / 'The Magicians - Grossman Lev.m4b')
+        with patch.object(research, '_gap_fill', side_effect=gap):
+            self.assertEqual(self.research(row)['review']['title'], 'The Magicians', 'automatic filing: already the original title')
+            typed = self.service.approval_preview(row['id'], row['revision'], title='Волшебники (аудиокнига)')
+            self.assertEqual(typed['path'], str(Path('Grossman Lev') / 'Волшебники (аудиокнига) - Grossman Lev.m4b'), 'a title he types wins')
+            preview = self.service.approval_preview(row['id'], row['revision'])
+            self.assertEqual(preview['path'], expected, 'Approve: the original English title')
+            approved = self.service.approve_book(row['id'], row['revision'], path=preview['path']); self.wait()
+        job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
+        self.assertEqual(job['state'], 'completed', job)
+        self.assertEqual(Path(job['output']['final_path']), self.sorted / expected)
+
+    def test_approve_keeps_the_shown_title_without_an_english_original(self):
+        # Controls: no catalog record (offline, nothing cached), or a Russian original: the title shown is filed.
+        from unittest.mock import patch
+        tone(self.audio / 'Fantasy' / 'Волшебники' / 'Волшебники.mp3', self.cover, album='Волшебники', title='Волшебники', artist='Лев Гроссман')
+        row = self.start()[0]
+        self.assertEqual(Path(self.service.approval_preview(row['id'], row['revision'])['path']).name, 'Волшебники - Гроссман Лев.m4b')
+        research = self.service.automatic.research
+        catalog = {'provider': 'fantlab', 'work_id': 'fantlab:7', 'language': 'ru', 'original_title': 'Волшебники', 'title_native': 'Волшебники',
+                   'author_native': 'Лев Гроссман', 'author_latin': '', 'source_url': 'https://fantlab.ru/work7'}
+        with patch.object(research, '_gap_fill', return_value={'catalog': catalog, 'closed': [], 'unfilled': []}):
+            self.service.__dict__.pop('_approval_results', None)
+            self.assertEqual(Path(self.service.approval_preview(row['id'], row['revision'])['path']).name, 'Волшебники - Гроссман Лев.m4b')
+
+
 class EnglishSpellingAnswerTests(ApproveFixture):
     """Ruling 39: no English spelling found online for a foreign author credited only in Cyrillic: the row asks (Author
     unclear); Sergei's answer is his lasting rule for that author, so his other books are never asked again."""
