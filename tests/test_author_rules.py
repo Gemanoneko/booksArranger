@@ -37,6 +37,32 @@ class TableTests(unittest.TestCase):
         rules=author_rules.load(database)
         self.assertTrue(rules.keep('иван ПЕТРОВ'));self.assertFalse(rules.not_author('Иван Петров'),'a changed mind is a newer row')
 
+    def test_m1_the_apps_undo_takes_back_only_the_answer_it_undoes(self):
+        # Senua's 0.22.3 review, M1: the undo of a refused Approve's answer was a newer "none" row for the credit, so it hid
+        # every older row: an earlier accepted answer, his Take back (ruling 42) and an older learned rule.
+        import time
+        database=self.database()
+        def write(fn):
+            with contextlib.closing(sqlite3.connect(database)) as db:
+                author_rules.setup(db);value=fn(db);db.commit()
+            time.sleep(0.003);return value
+        undo=lambda rule:write(lambda db:author_rules.retract(db,rule,actor=author_rules.APP_RETRACTION,source='refused press'))
+        write(lambda db:author_rules.append(db,'same_as','Dean Koonts',target='Koontz Dean',actor='user',source='the accepted answer'))
+        undo(write(lambda db:author_rules.append(db,'keep','Dean Koonts',actor='user',source='a refused press')))
+        self.assertEqual(author_rules.load(database).same_as('Dean Koonts'),'Koontz Dean','1. his earlier accepted answer stays')
+        learned=write(lambda db:author_rules.append(db,'same_as','Страуд Джонатан',target='Stroud Jonathan',actor='assistant',source='https://fantlab.ru/work1'))
+        write(lambda db:author_rules.retract(db,learned,actor='user',source='Sergei (taken back)'))
+        undo(write(lambda db:author_rules.append(db,'same_as','Страуд Джонатан',target='Stroud Jon',actor='user',source='a refused press')))
+        rules=author_rules.load(database)
+        self.assertEqual((rules.taken_back('Страуд Джонатан'),rules.same_as('Страуд Джонатан')),(True,''),'2. his Take back stays (ruling 42)')
+        write(lambda db:author_rules.append(db,'same_as','Бром',target='Brom',actor='assistant',source='https://fantlab.ru/work2'))
+        undo(write(lambda db:author_rules.append(db,'keep','Бром',actor='user',source='a refused press')))
+        rules=author_rules.load(database)
+        self.assertEqual(rules.same_as('Бром'),'Brom','3. an older learned rule stays')
+        brom=next(r['rule_id'] for r in rules.rules if r['credit_key']==author_rules.key('Бром'))
+        write(lambda db:author_rules.retract(db,brom,actor='user',source='test'))
+        self.assertTrue(author_rules.load(database).taken_back('Бром'),'the rule in force again can be taken back')
+
     def test_seeds_are_stored_once_with_sergeis_source(self):
         database=self.database()
         with contextlib.closing(sqlite3.connect(database)) as db:

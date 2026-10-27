@@ -59,10 +59,12 @@ def retract(db, rule_id, *, actor='user', source=''):
     if row is None:
         raise ValueError('There is no such author rule. Nothing was changed.')
     credit_key, scope = row[0], row[1]
+    # An answer the app undid (and its undo) is not there for this check either (Rules' own view, M1).
+    undone = {r[0] for r in db.execute('SELECT rule_id FROM author_rule_retractions WHERE credit_key=? AND actor=?', (credit_key, APP_RETRACTION))}
     rows = [r for r in db.execute('SELECT rule_id, scope, saved_utc FROM author_rules WHERE credit_key=? UNION ALL '
-                                  'SELECT retraction_id, scope, saved_utc FROM author_rule_retractions WHERE credit_key=?', (credit_key, credit_key))
-            if r[1].casefold() == scope.casefold()]
-    if max(rows, key=lambda r: (r[2], r[0]))[0] != rule_id:  # Rules' own order: the newest wins
+                                  'SELECT retraction_id, scope, saved_utc FROM author_rule_retractions WHERE credit_key=? AND actor<>?', (credit_key, credit_key, APP_RETRACTION))
+            if r[1].casefold() == scope.casefold() and r[0] not in undone]
+    if not rows or max(rows, key=lambda r: (r[2], r[0]))[0] != rule_id:  # Rules' own order: the newest wins
         raise ValueError('This author rule was already replaced or taken back. Nothing was changed.')
     retraction_id = 'retract-' + str(uuid.uuid4())
     db.execute('INSERT INTO author_rule_retractions VALUES(?,?,?,?,?,?,?)',
@@ -108,8 +110,13 @@ class Rules:
     them: no lookup asks for its kind, and changed_for researches again the books whose names it takes back."""
 
     def __init__(self, rows=(), known_authors=()):
+        rows = list(rows)
+        # Senua's 0.22.3 review, M1: the app's undo of a refused Approve's answer (an 'app' retraction) removes that answer
+        # and itself, so the row in force before the press decides again: an earlier answer, a learned rule or his Take back.
+        undone = {row.get('retracts') for row in rows if row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION}
+        effective = [row for row in rows if row['rule_id'] not in undone and not (row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION)]
         newest = {}
-        for row in sorted(rows, key=lambda r: (r['saved_utc'], r['rule_id'])):
+        for row in sorted(effective, key=lambda r: (r['saved_utc'], r['rule_id'])):
             newest[(row['credit_key'], row['scope'].casefold())] = row
         self.rules = list(newest.values())
         self.by_key = {}
