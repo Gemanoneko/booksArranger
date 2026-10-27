@@ -618,7 +618,6 @@ class OddNameTests(Base):
                   ('Хроники Амбера. Книга 1. Девять принцев Амбера', ('Девять принцев Амбера', 'Хроники Амбера', '1'), 'Иванов Петр\\Хроники Амбера\\Хроники Амбера - 1 - Девять принцев Амбера - Иванов Петр.m4b'),
                   ('Ведьмак 3: Кровь эльфов', ('Кровь эльфов', 'Ведьмак', '3'), None),
                   ('Конан 005 - Час дракона', ('Час дракона', 'Конан', '5'), None),
-                  ('Сага о Копье. Т. 3. Драконы', ('Драконы', 'Сага о Копье', '3'), None),
                   ('Черная книга 2. Возвращение', ('Возвращение', 'Черная книга', '2'), None))
         for album, (title, series, number), path in splits:
             row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
@@ -644,6 +643,46 @@ class OddNameTests(Base):
         row = self.book('Unsorted\\Лев Толстой - Война и мир. Том 1. Часть 2', ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Лев Толстой', album='Война и мир. Том 1. Часть 2', track='%d')
         result = self.lookup(row)
         self.assertNotEqual(((result.get('review') or {}).get('series'), (result.get('review') or {}).get('title')), ('Война и мир', 'Часть 2'), 'never series «Война и мир», book 1')
+
+    def warhammer(self, album):
+        row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
+        return row, self.lookup(row)
+
+    def test_m5_a_thousands_group_is_one_number_never_series_warhammer_40_book_0(self):
+        # Senua's 0.22.3 review, M5: «Warhammer 40 000: …» split at its last digit group and filed silently as
+        # `Warhammer 40\Warhammer 40 - 0 - …`, the series «Warhammer 40», book 0. Russian editions write the setting so.
+        for album in ('Warhammer 40 000. Ересь Хоруса', 'Warhammer 40 000 - Ересь Хоруса', 'Warhammer 40,000: Dawn of War',
+                      'Вселенная Warhammer 40 000: Кайафас Каин. Герой Империума'):
+            with self.subTest(album=album):
+                row, result = self.warhammer(album)
+                self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (album, '', ''), 'filed as it is named')
+                self.assertEqual((result['reasons'], result.get('ask')), ([], None))
+                self.assertEqual(self.goes_to(row, result), SORTED + '\\Иванов Петр\\' + album.replace(':', '_') + ' - Иванов Петр.m4b')
+        # Its own series and number come after the setting: not sure which is the series, so it is asked, never filed in «Warhammer 40».
+        with self.subTest(album='Warhammer 40 000: Ересь Хоруса. Книга 1. Возвышение Хоруса'):
+            row, result = self.warhammer('Warhammer 40 000: Ересь Хоруса. Книга 1. Возвышение Хоруса')
+            self.assertEqual(((result.get('ask') or {}).get('kind'), (result.get('ask') or {}).get('why')), ('title_author', 'title_series'), (result.get('review') or {}).get('series'))
+            self.assertEqual(result['ask']['fields']['title']['proposal'], 'Warhammer 40 000: Ересь Хоруса. Книга 1. Возвышение Хоруса', 'nothing renamed')
+        for name in ('Warhammer 40 000: Ересь Хоруса', 'Warhammer 40 000 - 1. Ересь', 'Ведьмак 0. Дорога без возврата'):
+            self.assertIsNone(local_identity.series_title_parts(name), name)
+        self.assertEqual(local_identity._series_split('Ведьмак 0. Дорога без возврата')[1], 'ask', 'never position 0 by the name alone: asked')
+        self.assertEqual(local_identity.series_title_parts('Ведьмак 1. Последнее желание'), {'series': 'Ведьмак', 'number': '1', 'title': 'Последнее желание'}, 'positive control')
+
+    def test_ruling_50_a_disc_volume_part_or_chapter_is_a_part_of_one_book_never_a_series_number(self):
+        # Ruling 50 (Sergei 2026-10-27, "A"; Senua's 0.22.3 review, m16): «Мастер и Маргарита. CD 1. Главы 1-10» filed as
+        # `Мастер и Маргарита\Мастер и Маргарита - 1 - Главы 1-10`, series book 1.
+        album = 'Мастер и Маргарита. CD 1. Главы 1-10'
+        row = self.book('Unsorted\\Михаил Булгаков - ' + album, ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Михаил Булгаков', album=album, track='%d')
+        result = self.lookup(row)
+        self.assertNotEqual(((result.get('review') or {}).get('series'), (result.get('review') or {}).get('number')), ('Мастер и Маргарита', '1'))
+        self.assertEqual(((result.get('review') or {}).get('title'), (result.get('review') or {}).get('series')), (album, ''), (result['reasons'], result.get('ask')))
+        for name in (album, 'Мастер и Маргарита. Диск 2. Главы 11-20', 'Мастер и Маргарита CD 1. Главы 1-10', 'Отцы и дети. Глава 1. Приезд',
+                     'Двенадцать стульев. Часть 1. Одиссея', 'Граф Монте-Кристо. Том 2. Узник замка Иф', 'Сага о Копье. Т. 3. Драконы',
+                     'Война и мир. Том 1 - Аудиоспектакль', 'Kill Bill Vol 2. The Bride', 'Зеленая миля. Часть 2 - Мышь на миле'):
+            self.assertIsNone(local_identity.series_title_parts(name), name)
+        # A word that numbers a book still splits; one written into the series name is part of it.
+        self.assertEqual(local_identity.series_title_parts('Ересь Хоруса. Книга 2. Лживые боги'), {'series': 'Ересь Хоруса', 'number': '2', 'title': 'Лживые боги'})
+        self.assertEqual(local_identity.series_title_parts('The Wheel of Time, Book 3: The Dragon Reborn'), {'series': 'The Wheel of Time', 'number': '3', 'title': 'The Dragon Reborn'})
 
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
