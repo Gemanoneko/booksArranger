@@ -125,6 +125,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 
 - **Done in 0.22.3 (2b8949e, 001b62d; Judy section 4):** **Senua M5:** a wrong online match can create a bad learned author rule (strict match makes it rare). Add a page list of learned author rules with "Take back" (Judy specs it; the `retract_author_rule` route exists but nothing uses it).
 - **Done in 0.22.3 (2ad474a):** **Senua m7:** an author spelling from Approve is saved even when that Approve is refused.
+- **Done in 0.22.3 (4fb1a54):** **Same author? answer on a refused Approve** (Sergei, 2026-10-27, the m7 pattern): the answer is taken back (a retraction by the app, never read as his Take back) and his other books are requeued only once the Approve is accepted.
 - **Done in 0.22.3 (f795a98):** **Gate:** per-worker deadline and worker count (workers at 81–88%).
 - **Done in 0.22.3 (f66d591):** **Futaba m-2:** with a cached FantLab record for a Cyrillic-only foreign author, the book gets its English title but a Cyrillic author folder (`Гроссман Лев\The Magicians`), and no author rule is learned. Ruling 39 says the folder should be English (Grossman Lev).
 - **Done in 0.22.3 (d89cda8; 0.22.2 did not cover it):** **Quit can fail under load** (seen on 0.22.1, 2026-10-27): tray Quit showed "Books Arranger is still running. Quit could not be confirmed; ownership remains held. Request timed out". Quit must always work: stop the work safely, then exit, and never show a bare timeout. Check whether 0.22.2 already covers it.
