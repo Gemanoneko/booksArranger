@@ -137,7 +137,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 
 ## 0.22.4 (Senua's 0.22.3 review: the minors left for later)
 
-Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 itself: M1 (1f80255), M2 and m4 (2be2d0b), M3 (7012da8), m1 (f93455c); from pass 2: M4 (9e8c0c1), m12 (565d912), m13 (6817bb3), m14 (a59914d) and m11; ruling 49 (6d7ec12); from pass 3: M5 and m16 with ruling 50 (3ecfd23), m15 (117044f) and the last m11 comments. From Futaba's 0.22.3 QA (`Docs/BooksArranger_QA_v0.22.3_2026-10-27.md`): M-1 (cd8973d), m-1 (2044249), m-2 (e6d9787).
+Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 itself: M1 (1f80255), M2 and m4 (2be2d0b), M3 (7012da8), m1 (f93455c); from pass 2: M4 (9e8c0c1), m12 (565d912), m13 (6817bb3), m14 (a59914d) and m11; ruling 49 (6d7ec12); from pass 3: M5 and m16 with ruling 50 (3ecfd23), m15 (117044f) and the last m11 comments; from pass 4: M6 with ruling 51 and the `merge_service.py` m11 comment. From Futaba's 0.22.3 QA (`Docs/BooksArranger_QA_v0.22.3_2026-10-27.md`): M-1 (cd8973d), m-1 (2044249), m-2 (e6d9787).
 
 - **m2:** the "Same author?" undo is not atomic. A crash between the answer's commit and the job (power loss, or Quit's 30 s kill during the file check) leaves the rule in force with no Approve, and his books answered by it wait for the next run's scan.
 - **m3:** after a silent or refused Quit the shell closes the pipe and kills the host after 30 s, without waiting for `critical_sections`; `finish_shutdown` alone can take longer, so under load the kill is the likely end, and each forced stop leaves a `web-instance.stale-*.json` in the data folder. Consider a longer bound, or one that waits while critical sections are open.

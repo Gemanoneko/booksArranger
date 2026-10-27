@@ -3012,7 +3012,8 @@ class MergeService:
     def _approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None,press=None):
         # 0.22.3 (Sergei 2026-10-27; the m7 pattern): his Same author? answer is saved before the approval is built, because
         # the approval files the book by that rule, and taken back if this Approve is refused (the path changed, the name is
-        # taken, a safety hold, closing); his other books are requeued only once it is accepted.
+        # taken, a safety hold, closing). Once it is accepted, his other books the answer decides are requeued; once it is
+        # refused, the books the run researched while the answer was in force are (_drop_answer_rule, m15).
         # Senua's 0.22.3 review, m1 and M4: the undo covers only the refusal. approve_automatic marks the press accepted
         # (press['accepted']) the moment it queues the job; what raises after that inside it (the row read, the stop check,
         # starting the queue) or after it (the extras) neither reports a refusal nor takes an answer or a name back.
