@@ -137,7 +137,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 
 ## 0.22.4 (Senua's 0.22.3 review: the minors left for later)
 
-Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 itself: M1 (1f80255), M2 and m4 (2be2d0b), M3 (7012da8), m1 (f93455c).
+Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 itself: M1 (1f80255), M2 and m4 (2be2d0b), M3 (7012da8), m1 (f93455c). From Futaba's 0.22.3 QA (`Docs/BooksArranger_QA_v0.22.3_2026-10-27.md`): M-1 (cd8973d), m-1 (2044249), m-2 (e6d9787).
 
 - **m2:** the "Same author?" undo is not atomic. A crash between the answer's commit and the job (power loss, or Quit's 30 s kill during the file check) leaves the rule in force with no Approve, and his books answered by it wait for the next run's scan.
 - **m3:** after a silent or refused Quit the shell closes the pipe and kills the host after 30 s, without waiting for `critical_sections`; `finish_shutdown` alone can take longer, so under load the kill is the likely end, and each forced stop leaves a `web-instance.stale-*.json` in the data folder. Consider a longer bound, or one that waits while critical sections are open.
@@ -147,5 +147,5 @@ Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 i
 - **m8:** the chain resolution for every known author costs about 32 ms per `Rules()` at 8,000 job authors (2.6 ms before), repeated while converting because the cache key includes `audio_jobs` `max(updated)`.
 - **m9:** the gate stops itself 580 s after its start but still checks the worker inventories and digests the runtime tree afterwards; a gate passing close to 580 s can end in the entry check's outer kill (592 s) instead of its own message.
 - **m10:** `SERIES_SPELLINGS` is a code constant; every future ruling-46 pair needs a release. Sergei's other lasting answers live in the catalog.
-- **m11:** comments that no longer match the code: `desktop/main.js:362` (the forced stop is no longer "only while loading"); `scripts/python-check-batches.mjs:64-65` ("the copies no longer eat its time" holds only under 40 s of copying). The merge_service, local_identity, app.js and Brief items of m11 were corrected with M1, m1, M2 and M3.
-
+- **m11:** comments that no longer match the code (`desktop/main.js:362` was corrected in e6d9787): `scripts/python-check-batches.mjs:64-65` ("the copies no longer eat its time" holds only under 40 s of copying). The merge_service, local_identity, app.js and Brief items of m11 were corrected with M1, m1, M2 and M3.
+- **Futaba 0.22.3 M-1, the open part (a product question):** a book of the same credit researched before the author rule exists (nothing cached, «Лев» reads as a Russian first name) is still filed in Cyrillic (). Should it wait for the rule, or move with the rename pass?
