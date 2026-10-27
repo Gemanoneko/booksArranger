@@ -115,6 +115,9 @@ class Rules:
         # and itself, so the row in force before the press decides again: an earlier answer, a learned rule or his Take back.
         undone = {row.get('retracts') for row in rows if row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION}
         effective = [row for row in rows if row['rule_id'] not in undone and not (row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION)]
+        # m13: the pairs dropped here (each with its credit, scope and saved_utc) still count in changed_for: a book researched
+        # while the undone answer was in force is researched again.
+        self.undone = [row for row in rows if row['rule_id'] in undone or row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION]
         newest = {}
         for row in sorted(effective, key=lambda r: (r['saved_utc'], r['rule_id'])):
             newest[(row['credit_key'], row['scope'].casefold())] = row
@@ -159,7 +162,8 @@ class Rules:
 
     def changed_for(self, record):
         """True when a rule saved after the research in record decides one of the credits or folders it saw (or the
-        record cannot tell: researched before 0.22.0's rule records). Equal generations: nothing changed."""
+        record cannot tell: researched before 0.22.0's rule records). Equal generations: nothing changed. The app's undo of
+        a refused Approve's answer counts as such a rule (Senua's 0.22.3 review, m13)."""
         if (record.get('rules_generation') or '') == self.generation:
             return False
         stamp, seen, folders = record.get('rules_stamp'), record.get('rules_seen'), record.get('rules_folders')
@@ -167,7 +171,7 @@ class Rules:
             return True
         seen = set(seen)
         folders = [str(f).casefold() for f in folders if isinstance(f, str)]
-        for row in self.rules:
+        for row in self.rules + self.undone:
             if str(row.get('saved_utc') or '') <= stamp:
                 continue
             if row['credit_key'] != '*' and row['credit_key'] not in seen:

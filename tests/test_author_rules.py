@@ -63,6 +63,30 @@ class TableTests(unittest.TestCase):
         write(lambda db:author_rules.retract(db,brom,actor='user',source='test'))
         self.assertTrue(author_rules.load(database).taken_back('Бром'),'the rule in force again can be taken back')
 
+    def test_m13_a_book_researched_while_a_refused_answer_was_in_force_is_researched_again(self):
+        # Senua's 0.22.3 review, m13: after M1 the app's undo and the answer it undoes left Rules entirely, so changed_for saw
+        # no rule newer than such a research (the rule back in force is older) and the book kept research decided by an
+        # answer that is no longer kept.
+        import time
+        database=self.database()
+        def write(fn):
+            with contextlib.closing(sqlite3.connect(database)) as db:
+                author_rules.setup(db);value=fn(db);db.commit()
+            time.sleep(0.003);return value
+        write(lambda db:author_rules.append(db,'keep','Koontz Dean',actor='user',source='an author the library has'))
+        before=author_rules.load(database).recording();before.same_as('Dean Koonts','');untouched=dict(before.record(),rules_generation=before.generation)
+        answer=write(lambda db:author_rules.append(db,'same_as','Dean Koonts',target='Koontz Dean',actor='user',source='a press later refused'))
+        during=author_rules.load(database).recording()
+        self.assertEqual(during.same_as('Dean Koonts',''),'Koontz Dean','positive control: researched with the answer in force')
+        record=dict(during.record(),rules_generation=during.generation)
+        write(lambda db:author_rules.retract(db,answer,actor=author_rules.APP_RETRACTION,source='refused press'))
+        after=author_rules.load(database)
+        self.assertEqual(after.same_as('Dean Koonts'),'','the answer is undone')
+        self.assertTrue(after.changed_for(record),'researched again: its research used the undone answer')
+        self.assertFalse(after.changed_for(untouched),'a research from before the press: nothing changed for it')
+        other=author_rules.Rules([]).recording();other.same_as('Совсем Другой','')
+        self.assertFalse(after.changed_for(dict(other.record(),rules_stamp=record['rules_stamp'],rules_generation=record['rules_generation'])),'an undo naming another credit')
+
     def test_seeds_are_stored_once_with_sergeis_source(self):
         database=self.database()
         with contextlib.closing(sqlite3.connect(database)) as db:
