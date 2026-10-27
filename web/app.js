@@ -2531,8 +2531,11 @@ function askInert(row){
 }
 // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
 // only test Keep as separate books takes: the Title field and a taken name belong to the join.
+// 0.22.3 (Sergei 2026-10-27, «Крысы», «Крампус»): only edits Sergei made count (manual*Touched, the draft lease's own
+// test). Selecting a multi-MP3 book applies the panel's chapter default as trackDirty, which is not his edit, and it locked
+// every such row's Save and Approve with nothing to discard.
 function askPanelEdits(row){
-  if((dirty && (reviewRow || selectedRow)?.id===row.id) || (trackDirty && (trackDraft?.id ?? selectedRow?.id)===row.id))return 'Save or discard the edits in the details panel first.';
+  if((dirty && manualMetadataTouched && (reviewRow || selectedRow)?.id===row.id) || (trackDirty && manualTrackTouched && (trackDraft?.id ?? selectedRow?.id)===row.id))return 'Save or discard the edits in the details panel first.';
   return '';
 }
 function askText(row){
