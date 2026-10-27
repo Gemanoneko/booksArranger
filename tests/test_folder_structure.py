@@ -596,6 +596,19 @@ class OddNameTests(Base):
                 for folder, album in (('a', 'Серия А 1. Первая'), ('b', 'Серия А 2. Вторая'), ('c', 'Серия Б 1. Третья')) for n in (1, 2)]
         catalog = self.catalog(rows)
         self.assertEqual(self.lookup(catalog[ROOT + '\\' + other + 'c'])['review']['series'], 'Серия Б', 'Серия А already has a book 1: not this series')
+        # Senua's 0.22.3 review, M2 (ruling 45 as worded): a name that names another series keeps it, number free or not.
+        rows = [file_row(other + folder + '\\%02d.mp3' % n, title='%02d' % n, artist='Петр Иванов', album=album, track='%d' % n)
+                for folder, album in (('a', 'Серия А 1. Первая'), ('b', 'Серия А 2. Вторая'), ('d', 'Серия Б 3. Третья')) for n in (1, 2)]
+        catalog = self.catalog(rows)
+        result = self.lookup(catalog[ROOT + '\\' + other + 'd'])
+        self.assertEqual((result['reasons'], result['review']['series'], result['review']['number']), ([], 'Серия Б', '3'))
+        self.assertEqual(self.goes_to(catalog[ROOT + '\\' + other + 'd'], result), SORTED + '\\Иванов Петр\\Серия Б\\Серия Б - 3 - Третья - Иванов Петр.m4b')
+        # Senua's 0.22.3 review, m4: the split's misfires are not split; a padded half number is the folder's form.
+        for name in ('Война и мир. Том 1. Часть 2', 'Apollo 13: The Untold Story', 'Агент 007 - Казино Рояль'):
+            self.assertIsNone(local_identity.series_title_parts(name), name)
+        self.assertEqual(local_identity.series_title_parts('Ведьмак 01.5. Меч'), {'series': 'Ведьмак', 'number': '1.5', 'title': 'Меч'})
+        self.assertTrue(local_identity._same_number('01.5', '1.5'))
+        self.assertEqual(local_identity.series_title_parts('Сновидения Ехо #3 - Вся правда о нас'), {'series': 'Сновидения Ехо', 'number': '3', 'title': 'Вся правда о нас'}, 'positive control')
 
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When

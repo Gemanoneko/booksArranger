@@ -2594,10 +2594,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
     if found:
         # Ruling 45 (Sergei 2026-10-27): the series its sibling book folders carry decides it when the name only repeats
-        # the title («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца») or names another series.
+        # its own title as the series («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца»). A name
+        # that names another series keeps it (Senua's 0.22.3 review, M2: one parent folder often holds several series).
         # A sibling that already holds this number in that series shows it is another series: the name stands.
         carried, taken = sibling_series(row, root, index, author['name'] if author else '')
-        if carried and found['number'] not in taken and (series_key(found['series']) == series_key(found['title']) or series_key(found['series']) != series_key(carried)):
+        if carried and found['number'] not in taken and series_key(found['series']) == series_key(found['title']):
             found = dict(found, series=carried)
         named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
         whole = fields['title']['value']
@@ -2751,9 +2752,11 @@ def settled(record, title, author, state, typed=(), collection=False, rules=None
 _BITRATE_TAIL = re.compile(r'(?:[\s_\-–—]+|(?<=[^\W\d_]))(?:64|96|112|128|160|192|256|320)\s*(?:kbps|kb/s|kbit/s)?\s*$', re.I)
 # "<Series> N. Title", "<Series> - 01. Title", "<Series> #3 - Title": the series before the number, the title after it.
 # The number stands alone ("Warhammer 40000. Месть Гоббо" is no series 40 and book 000).
-_SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)(?P<number>\d{1,3}(?:[.,]5)?)\s*[.:\-–—]\s+(?P<title>.*?[^\W\d_].*)$')
+_SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)(?P<number>\d{1,3}(?:[.,]5)?)\s*(?P<separator>[.:\-–—])\s+(?P<title>.*?[^\W\d_].*)$')
 # A word that numbers a part, never a series name ("Книга 1. Пробуждение", "Part 2. The Return").
 _NOT_A_SERIES = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|серия|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\W*$', re.I)
+# Senua's 0.22.3 review, m4: a "series" that ends in such a word numbers a part of one work («Война и мир. Том 1. Часть 2»).
+_PART_TAIL = re.compile(r'(?:^|[\s.,;:\-–—])(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\.?\s*$', re.I)
 _PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
 _RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
 _TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
@@ -2812,11 +2815,23 @@ def series_title_parts(title, author=''):
         return None
     series = text(_series_name(text(found['series']).rstrip(' ,;-–—#'), author or ''))
     rest = text(found['title'])
-    if not series or not rest or not re.search(r'[^\W\d_]', series) or _NOT_A_SERIES.match(series) or (author and compare_names(series, author)):
+    if not series or not rest or not re.search(r'[^\W\d_]', series) or _NOT_A_SERIES.match(series) or _PART_TAIL.search(series) \
+            or (author and compare_names(series, author)):
         return None
-    number = found['number'].replace(',', '.')
-    number = str(int(number)) if number.isdigit() else number
-    return {'series': series, 'number': number, 'title': rest}
+    # m4: "Apollo 13: The Untold Story" is a title with a number and a subtitle, never series Apollo, book 13, and a code
+    # number like «Агент 007» is no position in a series. Neither is split; the odd-name check still asks when it should.
+    if found['separator'] == ':' or re.fullmatch(r'00\d', found['number']):
+        return None
+    return {'series': series, 'number': series_number(found['number']), 'title': rest}
+
+
+def series_number(value):
+    """A position as the folder structure writes it: "01" is "1"; "1,5" and "01.5" are "1.5" (Senua's 0.22.3 review, m4)."""
+    value = text(value).replace(',', '.')
+    whole, dot, part = value.partition('.')
+    if whole.isdigit() and (not dot or part.isdigit()):
+        return str(int(whole)) + (dot + part if dot else '')
+    return value
 
 
 # Ruling 46 (Sergei 2026-10-27, "2. Yes. Сновидения Ехо"): series names that are one series, by their key, and the one
@@ -2864,11 +2879,8 @@ def sibling_series(row, root, index, author=''):
 
 
 def _same_number(left, right):
-    """The same position in a series, however it is written ("01" and "1")."""
-    def key(value):
-        value = text(value).replace(',', '.')
-        return str(int(value)) if value.isdigit() else value
-    return key(left) == key(right)
+    """The same position in a series, however it is written ("01" and "1", "01.5" and "1.5")."""
+    return series_number(left) == series_number(right)
 
 
 def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=()):
