@@ -145,3 +145,17 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 #delete-dialog .delete-blocked{color:var(--warning)}.attention-hint .hint-line{display:block}#queue-line{flex-basis:100%;margin:0}
 /* Busy engine (0.22.1, Judy section 4): the notice can carry a second line ("Busy with: ..."). */
 #connection-notice{white-space:pre-line}
+/* 0.22.3 (Judy's 0.22.3 spec): blocked-reason lines and their fixes (3), the clock/result line under Save (2), the names
+   block in the book panel (1), the learned author rules (4). Existing tokens only. */
+.block-why{color:var(--warning)}.block-why .block-fix{margin-left:8px}
+.names-status{margin:4px 0 0}.names-status.warn{color:var(--warning)}
+#names-facts .names-facts-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px}#names-facts h3{margin:0;font-size:15px}
+#names-facts-edit,#strip-show,.block-fix,.author-rule button{min-width:96px;min-height:32px}#strip-show{margin-left:8px}
+#author-rules{margin:8px 0}#author-rules>summary{min-height:32px;cursor:pointer;padding:4px 0}
+#author-rules-find{min-height:32px;min-width:200px}
+.author-rules-list{max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:0 8px;margin:8px 0}
+.author-rules-list:empty{display:none}
+.author-rule{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;padding:8px 0;border-top:1px solid var(--border)}
+.author-rule:first-child{border-top:none}.author-rule-text{flex:1 1 300px;min-width:0;overflow-wrap:anywhere}
+.author-rule-text p{margin:0}.author-rule-confirm{flex-basis:100%}.author-rule-confirm p{margin:0 0 6px}
+.author-rule-confirm button{margin-right:8px}.author-rule .rule-error{flex-basis:100%;color:var(--warning);margin:0}

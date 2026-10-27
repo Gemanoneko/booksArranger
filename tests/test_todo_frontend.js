@@ -135,7 +135,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // 4. Name taken: Approve inert, "Already there"; a free name enables it.
   tr=trOf('cand-t');assert.equal(statusCell(tr).textContent,'Name taken');
   assert.equal(goesTo(tr),'Already there Audiobooks Sorted\\Льюис Клайв Стейплз\\Хроники Нарнии 2 - Льюис Клайв Стейплз.m4b');
-  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'That name is taken. Change the title or author.');
+  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'That name is already in Audiobooks Sorted. Change the title or author.');
   const sent=posted('/api/candidate/approve').length;await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});assert.equal(posted('/api/candidate/approve').length,sent,'a taken name is prevented, not refused');
   [title]=inputs(tr);title.value='Хроники Нарнии 2 (другое издание)';title.handlers.input();await title.handlers.blur();await tick();
   assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.match(goesTo(tr),/^Goes to /);

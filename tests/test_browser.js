@@ -41,7 +41,7 @@ assert.equal(fields.get('title').value,'Old canonical title','polling must prese
   assert.equal(posted.modified,oldRow.modified,'save must retain the fingerprint reviewed by the user');
   assert.equal(posted.size,oldRow.size,'save must not adopt a newer source size from polling');
   assert.equal(posted.review.title,'Old canonical title');
-  assert.match(node('message').textContent,/changed/);
+  assert.match(node('review-note').textContent,/changed/);  // 0.22.3 (Judy 2.5): beside the button
   console.log('PASS browser unsaved-review fingerprint survives source refresh and stale save is surfaced');
   vm.runInContext('select(oldRow,true)',context);
   assert.equal(fields.get('canonical_author').value,'','source artist must never auto-fill canonical author');

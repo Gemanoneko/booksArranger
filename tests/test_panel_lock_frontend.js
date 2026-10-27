@@ -9,7 +9,7 @@ const fs=require('node:fs'),path=require('node:path');
 let harness=fs.readFileSync(path.join(__dirname,'test_retry_frontend.js'),'utf8');
 harness=harness.slice(0,harness.indexOf('(async()=>{'));
 harness+=String.raw`
-const ROOT='Z:\\Audiobooks Sorted',LOCK='Save or discard the edits in the details panel first.';
+const ROOT='Z:\\Audiobooks Sorted',LOCK='The details panel has unsaved edits for this book: the track order or included files. Save them there, or discard them.';
 // A multi-MP3 book whose chapter choice was never saved: the panel defaults chapters on for it (chapter_plan.default).
 function mp3Row(name,folder,ask){
   const members=[1,2,3].map(n=>({path:'Z:\\Audiobooks\\'+folder+'\\0'+n+'.mp3',member_key:'k'+n,duration:600}));
@@ -71,9 +71,19 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   get('add-chapters').checked=false;get('add-chapters').handlers.change();
   approve=buttonsOf(trOf('cand-krampus'))[0];
   assert.equal(approve.title,LOCK,'a real panel edit holds Approve');assert.equal(approve.getAttribute('aria-disabled'),'true');
+  // Judy 0.22.3 section 3: the cause is visible text under Approve, with Discard panel edits; one click and Approve works.
+  const blockOf=id=>trOf(id).children[5].children[1],block=blockOf('cand-krampus');
+  assert.equal(block.hidden,false);assert.equal(block.children[0].textContent,LOCK,'the sentence is on screen, not only in the tooltip');
+  assert.ok(approve.getAttribute('aria-describedby').split(' ').includes('block-why-cand-krampus'));
+  const discard=block.children[1];assert.equal(discard.textContent,'Discard panel edits');
+  assert.equal(discard.title,'Throw away the unsaved edits in the details panel for this book. Nothing is saved.');
+  discard.handlers.click({stopPropagation(){}});
+  approve=buttonsOf(trOf('cand-krampus'))[0];assert.equal(approve.getAttribute('aria-disabled'),null,'the blocked button works at once');
+  assert.equal(blockOf('cand-krampus').children[0].textContent,'Discarded the unsaved edits in the details panel.');
+  assert.equal(run('manualTrackTouched'),false);
   // A different book's row is never held by it.
   assert.notEqual(buttonsOf(trOf('cand-rats'))[0].title,LOCK);
-  console.log('PASS panel lock: the panel\'s own chapter default never holds a row\'s Save or Approve; a real panel edit still does');
+  console.log('PASS panel lock: the panel\'s own chapter default never holds a row\'s Save or Approve; a real panel edit still does, said on screen with Discard panel edits');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_panel_lock_frontend.js'),module);m.filename=path.join(__dirname,'test_panel_lock_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

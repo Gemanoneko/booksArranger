@@ -70,7 +70,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(run('selectedPath'),'cand-o1');assert.equal(get('manual-review').open,true);assert.equal(document.activeElement,get('member-count'));
   // Unsaved order edits Sergei made in the panel: Approve waits for them (0.22.0 review A5; 0.22.3: his edits only).
   run('trackDirty=true;manualTrackTouched=true;trackDraft={id:"cand-o1"};controls()');
-  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'Save or discard the edits in the details panel first.');
+  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'The details panel has unsaved edits for this book: the track order or included files. Save them there, or discard them.');
   run('trackDirty=false;manualTrackTouched=false;trackDraft=null;controls()');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
   // Futaba's 0.22.0 QA, M-3: a real Save track review lands and Approve this order works at once, also with a note typed in
   // the panel. It stayed inert ("Save or discard the edits...") for 33 s and more, until another row was selected.
@@ -79,7 +79,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     tracksAnswer=()=>({ok:true,status:200,json:async()=>({saved:true,row:o1})});
     run('trackDraft={id:"cand-o1",revision:2,order:[],included:[]};trackDirty=true;manualTrackTouched=true;controls()');
     // Ruling 36 (Sergei 2026-10-26): there is no evidence note to type any more; the unsaved order alone holds Approve.
-    assert.equal(buttonsOf(tr)[0].title,'Save or discard the edits in the details panel first.','positive control: inert while the edits are unsaved');
+    assert.equal(buttonsOf(tr)[0].title,'The details panel has unsaved edits for this book: the track order or included files. Save them there, or discard them.','positive control: inert while the edits are unsaved');
     await get('save-tracks').handlers.click();await tick();
     tr=trOf('cand-o1');assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null,'Approve works as soon as the save lands');
     assert.equal(buttonsOf(tr)[0].title,'Approve the order shown: convert if needed, rename, move to Audiobooks Sorted.');
@@ -153,7 +153,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-label').textContent,'As one book');
   // An unsaved panel edit makes Keep inert; a missing title (the join's test) does not.
   run('trackDirty=true;manualTrackTouched=true;trackDraft={id:"cand-s1"};controls()');
-  assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[1].title,'Save or discard the edits in the details panel first.');
+  assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[1].title,'The details panel has unsaved edits for this book: the track order or included files. Save them there, or discard them.');
   run('trackDirty=false;manualTrackTouched=false;trackDraft=null;controls()');assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),null);
   // The press: no values, the row says it, the strip counts the books, the row is done.
   {const sent=calls.filter(c=>c.route==='/api/candidate/keep-separate').length;
