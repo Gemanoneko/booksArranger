@@ -460,7 +460,9 @@ class BrowserServer(ThreadingHTTPServer):
                 with self.control_lock:
                     if self.closing:
                         return {'result': 'refused', 'code': 'closing', 'error': 'Books Arranger is closing. The scan was not started.'}
-                    if self.actions.blocker(action, book):
+                    # Under the control lock every other request is admitted or not: one admitted beside this worker's own
+                    # (a Delete, an Approve, a recovery purge) makes the scan wait, as the direct route refuses (M4).
+                    if self.actions.blocker(action, book, held=1):
                         return None
                     library = args['library']
                     self.inventory.launch(library, resume=action == 'scan_resume')
@@ -468,7 +470,7 @@ class BrowserServer(ThreadingHTTPServer):
                 return {'result': 'done', 'answer': {'library': library}}
         except ValueError as error:
             text = str(error)
-            if self.actions.blocker(action, book):
+            if self.actions.blocker(action, book, held=1):
                 return None  # the thing it waited for came back between the look and the run: it waits again
             code = approve_code(text) if action in ('approve', 'convert') else getattr(error, 'code', None) or ('changed' if 'changed' in text.casefold() else 'refused')
             return {'result': 'refused', 'code': code, 'error': text[:500]}

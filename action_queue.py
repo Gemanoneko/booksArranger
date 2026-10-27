@@ -63,9 +63,10 @@ class ActionQueue:
         self.closed = False
 
     # ------------------------------------------------------------------ what an action waits for
-    def blocker(self, action, book_id):
+    def blocker(self, action, book_id, held=0):
         """The kind that keeps this action from running now, or None. Reads only: the loading flag, a thread probe, the scan
-        flag, the Retry all run and, for Delete, the book's own jobs and research row."""
+        flag, the Retry all run and, for Delete, the book's own jobs and research row. held: the control admissions the
+        caller holds itself (the worker holds one while it runs an action: run_queued passes 1)."""
         server = self.server
         loading = getattr(server, 'loading', None)
         if loading is not None and not loading.finished or getattr(server, 'merge', None) is None:
@@ -83,6 +84,10 @@ class ActionQueue:
                     return 'jobs'
             except Exception:
                 return 'jobs'
+            # Senua's 0.22.2 review, M4: the direct route refuses a scan beside any other admitted request (a Delete, an
+            # Approve, a Retry) and beside the retention worker's recovery purge; queued, the scan waits for them.
+            if getattr(server, 'merge_admissions', 0) > held:
+                return 'operation'
             return None
         if action in SCAN_WAITS and server.scan_active():
             return 'scan'

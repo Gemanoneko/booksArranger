@@ -165,6 +165,29 @@ class QueuedPressTests(unittest.TestCase):
         self.assertEqual(self.outcomes()[0]['result'], 'done')
         self.assertEqual((self.server.launched, self.server.active_library), ([('Audiobooks', False)], 'Audiobooks'))
 
+    def test_m4_a_queued_scan_waits_while_another_request_or_the_recovery_purge_is_admitted(self):
+        # Senua's 0.22.2 review, M4: the direct route refuses a scan while merge_admissions is non-zero ("Pause audiobook
+        # work before starting a scan"); queued, the scan saw only automatic processing, the scan and the jobs.
+        self.server.merge_admissions = 1  # another request's Delete, Approve or Retry, or the retention worker's purge
+        answer = self.queue.enqueue('scan_start', 'library:Audiobooks', 'Audiobooks', {'library': 'Audiobooks'})
+        self.assertIsNotNone(answer, 'queued, never started beside it')
+        self.assertEqual(answer['blocker'], {'kind': 'operation'})
+        time.sleep(.15)
+        self.assertEqual(self.server.launched, [])
+        with self.server.control_condition:
+            self.server.merge_admissions -= 1
+        self.assertEqual(self.outcomes()[0]['result'], 'done')
+        self.assertEqual(self.server.launched, [('Audiobooks', False)])
+        self.assertEqual(self.server.merge_admissions, 0, 'the worker gave its own admission back')
+
+    def test_m4_an_admission_that_arrives_between_the_look_and_the_launch_makes_the_scan_wait_again(self):
+        item = {'action': 'scan_resume', 'book_id': 'library:Audiobooks', 'args': {'library': 'Audiobooks'}}
+        self.server.merge_admissions = 1  # the worker's own (run_queued runs inside it)
+        self.assertEqual(self.server.run_queued(item), {'result': 'done', 'answer': {'library': 'Audiobooks'}}, 'positive control: its own admission alone')
+        self.server.merge_admissions = 2  # and another request's
+        self.assertIsNone(self.server.run_queued(item), 'it waits again')
+        self.assertEqual(self.server.launched, [('Audiobooks', True)], 'launched once, by the control')
+
     def test_scan_again_and_remove_from_list_run_at_once_when_nothing_is_in_the_way(self):
         self.assertIsNone(self.queue.enqueue('scan_again', self.book, 'Book', {'revision': 2}), 'the caller runs it in its own request')
         self.server.scanning = True
