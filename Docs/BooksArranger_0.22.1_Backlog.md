@@ -127,3 +127,4 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 - **Senua m7:** an author spelling from Approve is saved even when that Approve is refused.
 - **Gate:** per-worker deadline and worker count (workers at 81–88%).
 - **Futaba m-2:** with a cached FantLab record for a Cyrillic-only foreign author, the book gets its English title but a Cyrillic author folder (`Гроссман Лев\The Magicians`), and no author rule is learned. Ruling 39 says the folder should be English (Grossman Lev).
+- **Quit can fail under load** (seen on 0.22.1, 2026-10-27): tray Quit showed "Books Arranger is still running. Quit could not be confirmed; ownership remains held. Request timed out". Quit must always work: stop the work safely, then exit, and never show a bare timeout. Check whether 0.22.2 already covers it.
