@@ -655,8 +655,9 @@ class PublicResearch:
         return result
     def _english_original(self,record,title):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
-        automatic filing uses, asked with the credit the files carry), when it says the work's original is English and
-        names its Latin title; else None. A title in Latin letters is left as it is."""
+        automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
+        Lev» for «Лев Гроссман»), when it says the work's original is English and names its Latin title; else None. A title
+        in Latin letters is left as it is."""
         import local_identity
         if local_identity.script(title)=='latin':return None
         credit=text(((record.get('fields') or {}).get('author') or {}).get('value'))

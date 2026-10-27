@@ -12,8 +12,10 @@ matter). credit '*' with a scope covers every credit in that folder. scope is ''
 path fragment ("Легенды школы №4 г. Пензы"); a rule applies when the book's folder path contains it. The rows refuse
 UPDATE and DELETE (triggers); a changed mind is a newer row for the same credit and scope, and the newest wins.
 A rule taken back (retract, Senua's 0.22.0 review m6; a seed too) is a row of its own append-only table,
-author_rule_retractions: among the rules it counts as a newer row of kind 'none' for that credit and scope, which
-decides nothing, so no older answer for that name and folder comes back and the app asks again; a later answer wins.
+author_rule_retractions: among the rules Sergei's retraction counts as a newer row of kind 'none' for that credit and
+scope, which decides nothing, so no older answer for that name and folder comes back and the app asks again; a later
+answer wins. The app's retraction (actor 'app', the undo of a refused Approve's answer; Senua's 0.22.3 review, M1) is
+not such a row: Rules drops it together with the rule it retracts, so the row in force before that press decides again.
 """
 import contextlib
 import copy
@@ -106,8 +108,9 @@ def seed(db):
 
 
 class Rules:
-    """The effective rules (newest per credit and scope), read once. Pure lookups. A 'none' row (a retraction) stays among
-    them: no lookup asks for its kind, and changed_for researches again the books whose names it takes back."""
+    """The effective rules (newest per credit and scope), read once. Pure lookups. A 'none' row (Sergei's retraction) stays
+    among them: no lookup asks for its kind, and changed_for marks for research the books whose names it takes back. An app
+    retraction and the rule it retracts are dropped from them (M1) and kept apart in undone (m13)."""
 
     def __init__(self, rows=(), known_authors=()):
         rows = list(rows)
@@ -116,7 +119,8 @@ class Rules:
         undone = {row.get('retracts') for row in rows if row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION}
         effective = [row for row in rows if row['rule_id'] not in undone and not (row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION)]
         # m13: the pairs dropped here (each with its credit, scope and saved_utc) still count in changed_for: a book researched
-        # while the undone answer was in force is researched again.
+        # while the undone answer was in force is marked for research, and the undo puts it back on the run (m15,
+        # MergeService._drop_answer_rule).
         self.undone = [row for row in rows if row['rule_id'] in undone or row['kind'] == RETRACTED and row.get('actor') == APP_RETRACTION]
         newest = {}
         for row in sorted(effective, key=lambda r: (r['saved_utc'], r['rule_id'])):
