@@ -2866,27 +2866,37 @@ class MergeService:
         self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
 
-    def _answer_english_spelling(self,id,revision,author):
+    def _english_spelling_answer(self,id,revision,author):
         """Ruling 39: Approve on a book asked for the English spelling of a foreign author credited only in Cyrillic is
         Sergei's answer for that author, kept as a lasting rule (once per author): the name he typed or chose files every
         book of that credit under it (same_as, surname first); approving the name as shown keeps it (keep: never asked
-        again). An empty author (no author) teaches nothing. His other books of that credit are researched again now."""
+        again). An empty author (no author) teaches nothing. Returns the rule to save ({'kind', 'credit', 'target',
+        'title'}) or None; nothing is written here (Senua's 0.22.2 review, m7: only an accepted Approve saves it)."""
         import author_rules,local_identity
-        if author is not None and not local_identity.text(author):return
+        if author is not None and not local_identity.text(author):return None
         automatic=getattr(self,'automatic',None)
-        if automatic is None or not hasattr(automatic,'candidate'):return
+        if automatic is None or not hasattr(automatic,'candidate'):return None
         try:row=self.reviews._row('Audiobooks',id,revision)
-        except ValueError:return
+        except ValueError:return None
         ask=(automatic.candidate(row) or {}).get('ask') or {}
         credit=local_identity.text(ask.get('credit'))
-        if ask.get('kind')!='author_unclear' or ask.get('why')!='english_spelling' or not credit:return
+        if ask.get('kind')!='author_unclear' or ask.get('why')!='english_spelling' or not credit:return None
         typed=local_identity.text(author) if author is not None else ''
         title=(((ask.get('fields') or {}).get('title') or {}).get('proposal') or row.get('title_clue') or '')
+        if typed and author_rules.key(typed)!=author_rules.key(credit):
+            return {'kind':'same_as','credit':credit,'target':local_identity.surname_first(typed)[0],'title':title}
+        return {'kind':'keep','credit':credit,'target':None,'title':title}
+
+    def _answer_english_spelling(self,id,answer):
+        """Saves the rule _english_spelling_answer planned, once the Approve that carries it is accepted, and researches
+        his other books of that credit again now."""
+        import author_rules
+        if not answer:return
         with connect(self.inventory.database) as db:
             author_rules.setup(db)
-            if typed and author_rules.key(typed)!=author_rules.key(credit):
-                author_rules.append(db,'same_as',credit,target=local_identity.surname_first(typed)[0],actor='user',source='Sergei (English spelling, ruling 39)',question=title)
-            else:author_rules.append(db,'keep',credit,actor='user',source='Sergei (English spelling, ruling 39)',question=title)
+            if answer['kind']=='same_as':
+                author_rules.append(db,'same_as',answer['credit'],target=answer['target'],actor='user',source='Sergei (English spelling, ruling 39)',question=answer['title'])
+            else:author_rules.append(db,'keep',answer['credit'],actor='user',source='Sergei (English spelling, ruling 39)',question=answer['title'])
         self._continue_after_rule(skip=id)
 
     def retract_author_rule(self,rule_id):
@@ -2959,7 +2969,9 @@ class MergeService:
         if choice is not None:
             chosen=self.answer_same_author(id,revision,choice)
             if author is not None:chosen=None
-        self._answer_english_spelling(id,revision,author)
+        # Senua's 0.22.2 review, m7: the English-spelling answer is planned now and saved only once this Approve is accepted
+        # (below); a refused Approve (the path changed, the name is taken, a safety hold) leaves no rule and requeues nothing.
+        spelling=self._english_spelling_answer(id,revision,author)
         row,result=self._approval_result(id,revision,title,author,chosen,names=names)
         if path is not None and result.get('review'):
             relative,_,_=self._approval_destination(row,result)
@@ -2997,6 +3009,10 @@ class MergeService:
         try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include)
         except InterruptedError:raise ValueError('Books Arranger is closing. The book was not approved.') from None
         finally:presses.discard(stop)
+        # The book is approved: his English-spelling answer becomes his rule for the author (m7). A failure to save it never
+        # turns the accepted Approve into a refusal; the author's other books then ask again.
+        try:self._answer_english_spelling(id,spelling)
+        except Exception:pass
         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
         return {'row':fresh,'job_id':job}

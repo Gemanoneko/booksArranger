@@ -77,6 +77,18 @@ class EnglishSpellingAnswerTests(ApproveFixture):
         preview = self.service.approval_preview(books['Левиафан']['id'], books['Левиафан']['revision'])
         self.assertEqual(Path(preview['path']).parts[0], 'Вестерфельд Скотт', 'the same folder')
 
+    def test_a_refused_approve_saves_no_spelling_rule(self):
+        # Senua's 0.22.2 review, m7: the rule was saved (and his other books requeued) before the Approve could be refused.
+        books = self.books()
+        row = books['Голиаф']
+        with self.assertRaisesRegex(ValueError, 'Destination changed since it was shown'):
+            self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld', path='Somewhere Else\\Голиаф.m4b')
+        self.assertEqual(self.rules(), [], 'no rule from a refused Approve')
+        self.assertEqual(self.research(books['Левиафан'])['ask']['why'], 'english_spelling', 'the other book is still asked')
+        # Positive control: the same answer on an accepted Approve is his rule.
+        self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld'); self.wait()
+        self.assertEqual(self.rules(), [('same_as', 'Westerfeld Scott', 'user')])
+
 
 if __name__ == '__main__':
     unittest.main()
