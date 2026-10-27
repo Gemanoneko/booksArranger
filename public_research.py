@@ -881,7 +881,10 @@ class PublicResearch:
             local=self.with_names(row,root,local)  # Edit names (Judy 0.22.2 section 1): his corrections come first
             result['local_agreement']=local_identity.summary(local)
             if local.get('route'):return self._local_collection(row,local,result)
-            if local['accepted']:return self._local_lookup(row,local,stop,budget,progress,result,index)
+            if local['accepted']:
+                result=self._local_lookup(row,local,stop,budget,progress,result,index)
+                if result.get('author_learned'):result=self._agreement_after_learning(row,root,siblings,index,result)
+                return result
             ask=local.get('ask')
             reason=local_identity.ASK_REASONS[ask['kind']] if ask else local_identity.PIECE_REASON
             hold={'kind':ask['kind'] if ask else 'piece','detail':local.get('held') or ''}
@@ -1086,6 +1089,24 @@ class PublicResearch:
         if not database:return [dict(UNREADABLE)],None
         try:return folder_siblings(database,row,root),catalog_index(database,root)
         except Exception:return [dict(UNREADABLE)],None
+
+    def _agreement_after_learning(self,row,root,siblings,index,result):
+        """Futaba's 0.22.3 QA, M-1: research that learns an author rule (ruling 39, or a cached catalog's Latin name) files
+        the book by it, but the local agreement it recorded was read before the rule existed («Лев Гроссман»). The approval
+        then re-derives the identity with the rule (Grossman Lev), sees the author differ and holds the book "Local identity
+        evidence changed", with no question, run after run. The agreement is read again with the rules as they are now,
+        the same way the approval reads it; nothing else in the result changes."""
+        import local_identity,author_rules
+        database=getattr(self.client,'database',None)
+        rules=author_rules.load(database) if database else None
+        if rules is None:return result
+        relearned=self.with_names(row,root,local_identity.identify(row,root,siblings,index['readers'] if index else None,index,rules))
+        if not relearned.get('accepted'):return result  # the rule changed what the files say: the next research asks
+        summary=local_identity.summary(relearned)
+        result['local_agreement']=summary
+        facts=result.get('metadata_facts')
+        if isinstance(facts,dict) and 'local_agreement' in facts:facts['local_agreement']=copy.deepcopy(summary)
+        return result
 
     def _local_collection(self,row,local,result):
         """Ruling 1 (Sergei 2026-10-13): a collection compiled or read by a narrator, clear from two

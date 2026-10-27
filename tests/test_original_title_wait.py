@@ -32,6 +32,33 @@ class TranslationConvertsNowTests(ApproveFixture):
         self.assertEqual(held, [], 'never listed under Held')
 
 
+class CachedSpellingConvertsTests(ApproveFixture):
+    def test_m1_a_book_whose_cached_record_learns_the_english_name_converts_under_it(self):
+        # Futaba's 0.22.3 QA, M-1: the research cache's FantLab record for «Волшебники» taught the rule «Лев Гроссман» to
+        # Grossman Lev, but the book then stayed Held "Local identity evidence changed" with no question, in every run.
+        from unittest.mock import patch
+        tone(self.audio / 'Fantasy' / 'Волшебники' / 'Волшебники.mp3', self.cover, album='Волшебники', title='Волшебники', artist='Лев Гроссман')
+        self.start()
+        research = self.service.automatic.research
+        catalog = {'provider': 'fantlab', 'work_id': 'fantlab:1001', 'language': 'en', 'original_title': 'The Magicians', 'title_native': 'Волшебники',
+                   'author_native': 'Лев Гроссман', 'author_latin': 'Lev Grossman', 'source_url': 'https://fantlab.ru/work1001'}
+        real = research._gap_fill
+        gap = lambda local, title, *a, **k: {'catalog': dict(catalog), 'closed': [], 'unfilled': []} if title == 'Волшебники' else real(local, title, *a, **k)
+        with patch.object(research, '_gap_fill', side_effect=gap):
+            self.service.automatic.start()
+            limit = time.monotonic() + 90
+            while self.service.automatic.status()['state'] not in ('Completed', 'Needs attention', 'Idle'):
+                if time.monotonic() > limit:
+                    self.fail('automatic processing did not finish: %r' % self.service.automatic.status())
+                time.sleep(.2)
+            self.wait()
+        jobs = self.service.jobs.status()['jobs']
+        held = [(r['status'], (r.get('automatic') or {}).get('reasons')) for r in self.service.reviews.page(status='held')['rows']]
+        self.assertEqual(len(jobs), 1, ('converted by itself', held))
+        self.assertEqual(jobs[0]['state'], 'completed', jobs[0])
+        self.assertEqual(Path(jobs[0]['output']['final_path']).parent, self.sorted / 'Grossman Lev', 'ruling 39: the English folder')
+
+
 class EnglishSpellingAnswerTests(ApproveFixture):
     """Ruling 39: no English spelling found online for a foreign author credited only in Cyrillic: the row asks (Author
     unclear); Sergei's answer is his lasting rule for that author, so his other books are never asked again."""
