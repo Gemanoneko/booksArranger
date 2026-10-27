@@ -1054,7 +1054,7 @@ $('save-metadata-choices').addEventListener('click',later('toolbar:save-metadata
     }
   }catch(error){
     if(selectedRow?.id===saved.id && error.httpStatus===409 && error.body?.row)renderMetadataQuestions({...error.body.row,kind:'candidate'},false);
-    if(metadataChoiceState?.id===saved.id)metadataChoiceState.error='Choices not saved. '+(error.httpStatus?serverSentence(error,'Nothing was changed.'):lostLine());
+    if(metadataChoiceState?.id===saved.id)metadataChoiceState.error='Choices not saved. '+(error.httpStatus?(error.message || 'Nothing was changed.'):lostLine());
   }finally{saved.pending=false;choiceSave=null;busy=false;controls();updateMetadataChoiceControls();}
 }));
 function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';renderMetadataQuestions(row,reset);for(const id of ['metadata-lookup','metadata-evidence','track-review','audiobook-output','create-audiobook'])$(id).hidden=!candidate;if(!candidate)return;

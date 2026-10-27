@@ -216,7 +216,7 @@ const q={id:'q',type:'work_profile',label:'Which book is this recording of?',evi
 const makeRow=()=>({id:'candidate',revision:7,kind:'candidate',title_clue:'Actual book',review_context:{},review:{title:'Saved title',canonical_author:'Saved author'},metadata_questions:{signature:'snapshot1',questions:[structuredClone(q)],unresolved_count:1}});
 let requests=[],response,errorNext=null;
 context={console,later:(key,kind,handler)=>handler,keptNote:row=>row?.review_context?.manual_note || '',document:{activeElement:inputs.narrator},$:get,form,fields:names,dirty:false,coverId:null,busy:false,ended:false,recoveryDisconnected:false,trackDraft:null,manualMetadataTouched:false,selectedLibrary:'Audiobooks',selectedRow:makeRow(),
- node:(tag,text='',className='')=>Object.assign(new Element(tag),{textContent:text,className}),sourceLink:(url,text)=>Object.assign(new Element('a'),{href:url,textContent:text}),controls(){},syncManualDraft(){},
+ node:(tag,text='',className='')=>Object.assign(new Element(tag),{textContent:text,className}),sourceLink:(url,text)=>Object.assign(new Element('a'),{href:url,textContent:text}),controls(){},syncManualDraft(){},choiceSave:null,clockNote:note=>note,lostLine:()=>'not confirmed',namesHold:()=>false,panelEditNames(){},
  async request(route,data){requests.push({route,data});if(errorNext)throw errorNext;return response;},select(row){context.selectedRow=row;context.renderMetadataQuestions(row,false);}};
 vm.createContext(context);vm.runInContext(source.slice(start,end),context);
 const directStart=source.indexOf("$('edit-held-metadata').addEventListener('click'");assert(directStart>=0);vm.runInContext(source.slice(directStart,source.indexOf('\n',directStart)),context);
