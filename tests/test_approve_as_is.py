@@ -224,6 +224,32 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean','his answer is kept')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
 
+    def test_m15_a_book_researched_under_a_refused_answer_is_put_back_on_the_run(self):
+        # Senua's 0.22.3 review, m15: after m13 changed_for marks the book the run researched while the refused press's
+        # answer was in force, but the undo put nothing back on the run: it sat in "Still checking" until a new scan.
+        from unittest import mock
+        import author_rules
+        self.two_files('Часы','Dean Koonts');self.two_files('Ночь','Dean Koonts')
+        rows=self.start()
+        row=next(r for r in rows if 'Часы' in r['members'][0]['path']);other=next(r for r in rows if 'Ночь' in r['members'][0]['path'])
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Koontz Dean',actor='user',source='test')
+        result=self.research(row);self.service.automatic._record(row,'Held',dict(result,until_change=True),None)
+        self.assertEqual(result['ask']['kind'],'same_author','positive control: asked')
+        calls=[];self.service.automatic.requeue=lambda identity:calls.append(identity) or 'this_run'
+        real=self.service._approval_result;seen=[]
+        def inside(*args,**kwargs):
+            # The run researches his other book while the press's answer is in force; it is held for a reason of its own.
+            if not seen:
+                found=self.research(other);seen.append(found)
+                self.service.automatic._record(other,'Held',dict(found,reasons=['fixture hold'],until_change=True),None)
+            return real(*args,**kwargs)
+        with mock.patch.object(self.service,'_approval_result',side_effect=inside),self.assertRaisesRegex(ValueError,'Destination changed'):
+            self.service.approve_book(row['id'],row['revision'],choice='same',path='Elsewhere\\Часы.m4b')
+        self.assertEqual(seen[0]['review']['canonical_author'],'Koontz Dean','positive control: researched under the answer')
+        self.assertTrue(author_rules.load(self.inv.database).changed_for(seen[0]),'positive control: its research is out of date')
+        self.assertEqual(calls,[other['id']],'put back on the run; the refused book itself is not')
+
     def queued_press(self,interrupt):
         """Senua's 0.22.3 review, M4: an Approve carrying all three answers (Same author?, the English spelling and Edit
         names), with interrupt() run in approve_automatic right after the job is queued. Returns the answer and the row."""

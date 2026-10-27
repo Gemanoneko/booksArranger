@@ -3019,22 +3019,25 @@ class MergeService:
         press={} if press is None else press
         try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
         except BaseException:
-            if press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'])
+            if press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'],skip=id)
             raise
         if press.get('rule_id'):
             try:self._continue_after_rule(skip=id)
             except Exception:pass  # the next run's scan researches them; the Approve stands
         return answer
 
-    def _drop_answer_rule(self,rule_id):
+    def _drop_answer_rule(self,rule_id,skip=None):
         """The rules are append-only: the refused press's answer gets an app retraction (actor 'app'), and Rules drops the two
         together, so the row in force before the press decides again (Senua's 0.22.3 review, M1). A newer rule meanwhile
-        stays in force."""
+        stays in force. A book the run researched while the answer was in force is put back on the run (m15; changed_for
+        counts the undo, m13), as the accepted press puts back the books its answer decides; skip: the refused book."""
         import author_rules
         try:
             with connect(self.inventory.database) as db:author_rules.retract(db,rule_id,actor=author_rules.APP_RETRACTION,source='Approve refused; the answer it carried is not kept')
         except ValueError:pass
         self.__dict__.pop('_needs_cache',None)
+        try:self._continue_after_rule(skip=skip)
+        except Exception:pass  # the next run's scan researches it; the refusal stands as it is
 
     def _approve_once(self,id,revision,title,author,without_missing,choice,path,names,press):
         import datetime
