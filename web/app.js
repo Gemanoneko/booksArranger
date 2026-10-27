@@ -774,9 +774,12 @@ form.addEventListener('input',event=>{metaSaveResult=null;panelDiscarded=null;no
 const SAVE_METADATA_FACE='Save preview metadata',SAVE_METADATA_FILE_TIP='Save these values as a draft and a metadata source for this book.',SAVE_METADATA_BOOK_TIP="Save these values as a draft and a metadata source for this book. Names are edited on the book's row.";
 function saveMetadataTip(){return namesLocked()?SAVE_METADATA_BOOK_TIP:SAVE_METADATA_FILE_TIP;}
 function metadataReview(){
-  const review={};for(const field of fields)review[field]=form.elements.namedItem(field).value.trim();
+  // Ruling 40 (Senua's 0.22.3 review, M3): a book's six name fields are hidden and may hold names from before a row Save;
+  // they are sent as the saved draft's values, and the request says the names are the row's (names_row_only).
+  const locked=namesLocked(),saved=(reviewRow || selectedRow)?.review || {};
+  const review={};for(const field of fields)review[field]=locked && NAME_INPUTS.includes(field)?String(saved[field] ?? '').trim():form.elements.namedItem(field).value.trim();
   review.multi_author=form.elements.namedItem('multi_author').checked;
-  review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && form.elements.namedItem('anthology').checked;
+  review.anthology=['audiobook','candidate'].includes(selectedRow.kind) && (locked?saved.anthology===true:form.elements.namedItem('anthology').checked);
   if(!['audiobook','candidate'].includes(selectedRow.kind)){review.canonical_author='';review.narrator='';}
   return review;
 }
@@ -792,7 +795,7 @@ function renderMetaSave(){
 async function sendMetadata(row,review){
   if(row.kind!=='candidate'){await request('/api/review',{library:selectedLibrary || $('library').value,path:row.path,size:row.size,modified:row.modified,review});return {row:null};}
   for(let attempt=0;;attempt++){
-    try{return {...await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext(row)}),sent:row};}
+    try{return {...await request('/api/candidate/review',{library:selectedLibrary,id:row.id,revision:row.revision,review,approve:false,...reviewContext(row),...(namesLocked()?{names_row_only:true}:{})}),sent:row};}
     catch(error){
       const fresh=error.body?.row;
       if(attempt===0 && error.body?.code==='changed' && fresh && fresh.id===row.id){row={...fresh,path:fresh.id,kind:'candidate',library:selectedLibrary};reviewRow=row;continue;}
@@ -3149,7 +3152,8 @@ function saveBlock(row){
   if(!v.title)return {text:'Type a title first.',fix:(namesProposal(row.id,'title') || askProposal(askOf(row),'title'))?'title':null};
   if(v.series && !v.number)return {text:'Type the number in the series, or clear the series.',fix:'series'};
   if(v.number && !v.series)return {text:'Type the series name, or clear the number.',fix:'number'};
-  // Unsaved panel edits never hold Save: the panel has no names since ruling 40, so nothing they write conflicts (Judy 1, 3).
+  // Unsaved panel edits never hold Save: since ruling 40 a book's panel saves no names (names_row_only, Senua's 0.22.3
+  // review M3), so nothing it writes conflicts with the row's names (Judy 1, 3).
   if(!namesChanged(row))return {text:'Nothing to save: these are the names the app already has.',fix:null};
   return {text:'',fix:null};
 }

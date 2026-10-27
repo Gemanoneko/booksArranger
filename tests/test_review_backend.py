@@ -95,6 +95,20 @@ class ReviewTests(unittest.TestCase):
     def test_order_inclusion_requires_exact_keys(self):
         with self.assertRaises(ValueError):self.service.tracks('Audiobooks',self.row['id'],self.row['revision'],['wrong'],[],True,True,False,evidence_note='Reviewed')
 
+    def test_m3_a_books_names_are_never_saved_from_the_panel(self):
+        # Ruling 40 (Senua's 0.22.3 review, M3): the six name fields hidden in a book's panel were still sent and saved,
+        # as an "Entered by you" source, so a stale title held the book against his newer Edit names.
+        import manual_metadata
+        row=self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,False,'')
+        stale=dict(self.review,title='Stale hidden title',author='Stale Folder',series='Old series',number='3',universe='Old universe',anthology=True,narrator='New reader')
+        fresh=self.service.save('Audiobooks',row['id'],row['revision'],stale,False,'',names_row_only=True)
+        self.assertEqual({k:fresh['review'].get(k) for k in ('title','author','series','number','universe','anthology')},
+                         {'title':'Book','author':'Author Name','series':'','number':'','universe':'','anthology':False},'the saved draft keeps its names')
+        self.assertEqual(fresh['review']['narrator'],'New reader','the other fields are saved')
+        with connect(self.inventory.database) as db:latest=manual_metadata.records(db,fresh)[-1]
+        self.assertFalse(set(latest['values'])&{'title','author','series','number','universe','anthology'},latest['values'])
+        self.assertEqual(latest['values'].get('narrator'),'New reader')
+
     def test_async_proposal_cannot_overwrite_draft(self):
         class Client:
             def lookup(self,query,author=''):

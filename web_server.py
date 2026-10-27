@@ -1214,10 +1214,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:row=reviews.enrich(reviews._row(library,id))
                 except ValueError:row=None
                 self.response(409,{'error':text,'code':code,'row':row});return
-            self.response(200,{'approved':True,'job_id':approved['job_id'],'row':approved['row']});return
+            # 0.22.3 (Judy 2.3): the book's list row now, so the strip can say where it went when it leaves the list.
+            self.response(200,{'approved':True,'job_id':approved['job_id'],'row':approved['row'],**({'list_row':approved['list_row']} if approved.get('list_row') else {})});return
         base={'library','id','revision'}
         if path=='/api/candidate/review':
-            self.shape(data,base|{'review','approve'},{'manual_note','proposal_id','cover_id','actor','evidence'})
+            self.shape(data,base|{'review','approve'},{'manual_note','proposal_id','cover_id','actor','evidence','names_row_only'})
         elif path=='/api/candidate/routing-preview':
             self.shape(data,base|{'review'})
         elif path=='/api/candidate/tracks':
@@ -1237,6 +1238,9 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/candidate/review':
             if type(data['approve']) is not bool: raise ValueError('Approval must be an explicit boolean')
             kwargs={'approve':data['approve'],'manual_note':self.text_value(data.get('manual_note','')),'actor':actor}
+            if data.get('names_row_only') is not None:
+                if type(data['names_row_only']) is not bool:raise ValueError('names_row_only must be an explicit boolean')
+                kwargs['names_row_only']=data['names_row_only']  # ruling 40: a book's names are not this Save's
             for key in ('proposal_id','cover_id'):
                 kwargs[key]=None if data.get(key) is None else self.uuid_value(data[key])
             evidence=data.get('evidence')

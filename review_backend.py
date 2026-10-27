@@ -84,6 +84,10 @@ JOB_GROUPS=tuple(JOB_ORDER)
 ATTENTION_GROUPS=frozenset(('all',)+NEEDS_GROUPS+JOB_GROUPS)
 
 
+# Ruling 40: the names a book's row edits (Edit names); the book panel shows them as facts and never saves them.
+ROW_NAME_FIELDS=('title','author','universe','series','number','anthology')
+
+
 class CandidateReviewService:
     def __init__(self,inventory,cache_dir,client=None,jobs=None):
         self.inventory=inventory; self.cache=ordinary(cache_dir)
@@ -539,13 +543,19 @@ class CandidateReviewService:
             draft['organization_policy']='books-hierarchy-v2'
             return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=self._context(row).get('metadata_facts'))
 
-    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False):
+    def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False):
         """user_approval: Sergei's Approve through the private admission (MergeService.approve_book, ruling 6b): the
-        user actor may carry the admission checkpoint and standing facts, and open metadata questions do not refuse."""
+        user actor may carry the admission checkpoint and standing facts, and open metadata questions do not refuse.
+        names_row_only (ruling 40; Senua's 0.22.3 review, M3): a book's names are edited on its row only, so the six name
+        fields keep the saved draft's values and are no part of the "Entered by you" source this Save records."""
         with self.lock:
             row=self._row(library,id,revision); ctx=self._context(row); self._actor(actor,manual_note)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid canonical metadata')
             review=copy.deepcopy(review)
+            if names_row_only:
+                saved=row.get('review') or {}
+                for field in ROW_NAME_FIELDS:review[field]=saved.get(field,False if field=='anthology' else '')
+                manual_source_values={k:v for k,v in review.items() if k not in ROW_NAME_FIELDS}
             review['organization_policy']='books-hierarchy-v2'
             ctx.pop('automatic_approval',None);ctx.pop('automatic_pending',None)
             if not user_approval:ctx.pop('user_approval',None)  # a later save is not covered by an earlier Approve

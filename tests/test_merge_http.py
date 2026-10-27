@@ -97,6 +97,10 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertEqual(body['preview']['path'],'Без автора\\Тайна.m4b');self.merge.approval_preview.assert_called_once_with(ID,1,'Тайна',None)
         status,body,_=self.call('/api/candidate/approve',self.identity()|{'author':'Антон Чехов','without_missing':True})
         self.assertEqual((status,body['job_id']),(200,ID));self.merge.approve_book.assert_called_once_with(ID,1,None,'Антон Чехов',without_missing=True,choice=None,path=None)
+        self.assertNotIn('list_row',body,'no row answered: none sent')
+        # 0.22.3 (Judy 2.3): the book's list row travels with the answer, so the strip can name where it went.
+        self.merge.approve_book=Mock(return_value={'job_id':ID,'row':{'id':ID,'revision':3},'list_row':{'id':ID,'status':'Queued'}})
+        self.assertEqual(self.call('/api/candidate/approve',self.identity())[1]['list_row'],{'id':ID,'status':'Queued'})
         # Senua's 0.22.0 review, m1: the "Goes to" line the row showed travels with the press.
         self.merge.approve_book.reset_mock()
         self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'path':'Без автора\\Тайна.m4b'})[0],200)
@@ -164,6 +168,13 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual((status,body),(200,{'rules':rules,'total':1}));self.merge.learned_author_rules.assert_called_once_with()
         self.assertEqual(self.call('/api/author-rules',{'extra':1})[0],400)
         self.assertEqual(self.call('/api/author-rules',{},token=False)[0],403)
+
+    def test_a_books_save_says_its_names_are_the_rows(self):
+        # Ruling 40 (Senua's 0.22.3 review, M3): the page marks a book's Save preview metadata names_row_only.
+        body=self.identity()|{'review':REVIEW,'approve':False,'names_row_only':True}
+        self.assertEqual(self.call('/api/candidate/review',body)[0],200)
+        self.assertIs(self.reviews.save.call_args.kwargs['names_row_only'],True)
+        self.assertEqual(self.call('/api/candidate/review',self.identity()|{'review':REVIEW,'approve':False,'names_row_only':'yes'})[0],400)
 
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}

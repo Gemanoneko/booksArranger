@@ -65,5 +65,10 @@ function press(){return form.handlers.submit({preventDefault(){}});}
   // 6. A refusal says so; nothing is silent.
   type('narrator','Сейф №6');const sixth=press();await tick();answers[6].resolve({ok:false,status:400,json:async()=>({error:'Invalid canonical metadata'})});await sixth;await tick();
   assert.equal(note(),'Not saved. Invalid canonical metadata. Nothing was changed.','0.22.3 (Judy 2.5): the reason beside the button, not at the page top');assert.equal(run('dirty'),true,'his values stay');
+  // 7. Ruling 40 (Senua's 0.22.3 review, M3): a book's hidden name inputs are never what a Save sends. The request says the
+  // names are the row's, and carries the saved draft's names, whatever stale text the hidden inputs hold.
+  fields.get('title').value='Stale hidden title';fields.get('series').value='Old series';type('narrator','Сейф №7');const seventh=press();await tick();
+  assert.equal(answers[7].body.names_row_only,true);assert.equal(answers[7].body.review.title,'Saved');assert.equal(answers[7].body.review.series,'');
+  assert.equal(answers[7].body.review.narrator,'Сейф №7');answers[7].resolve(answered(12,'Сейф №7'));await seventh;await tick();
   console.log('PASS Save preview metadata: Saving… at the press, Saved. with the answer, no press dropped, typed edits kept unsaved, rebased on Candidate changed, waits for another press');
 })().catch(error=>{console.error(error);process.exitCode=1;});
