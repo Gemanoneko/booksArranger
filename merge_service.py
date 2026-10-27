@@ -2866,6 +2866,29 @@ class MergeService:
         self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
 
+    def _answer_english_spelling(self,id,revision,author):
+        """Ruling 39: Approve on a book asked for the English spelling of a foreign author credited only in Cyrillic is
+        Sergei's answer for that author, kept as a lasting rule (once per author): the name he typed or chose files every
+        book of that credit under it (same_as, surname first); approving the name as shown keeps it (keep: never asked
+        again). An empty author (no author) teaches nothing. His other books of that credit are researched again now."""
+        import author_rules,local_identity
+        if author is not None and not local_identity.text(author):return
+        automatic=getattr(self,'automatic',None)
+        if automatic is None or not hasattr(automatic,'candidate'):return
+        try:row=self.reviews._row('Audiobooks',id,revision)
+        except ValueError:return
+        ask=(automatic.candidate(row) or {}).get('ask') or {}
+        credit=local_identity.text(ask.get('credit'))
+        if ask.get('kind')!='author_unclear' or ask.get('why')!='english_spelling' or not credit:return
+        typed=local_identity.text(author) if author is not None else ''
+        title=(((ask.get('fields') or {}).get('title') or {}).get('proposal') or row.get('title_clue') or '')
+        with connect(self.inventory.database) as db:
+            author_rules.setup(db)
+            if typed and author_rules.key(typed)!=author_rules.key(credit):
+                author_rules.append(db,'same_as',credit,target=local_identity.surname_first(typed)[0],actor='user',source='Sergei (English spelling, ruling 39)',question=title)
+            else:author_rules.append(db,'keep',credit,actor='user',source='Sergei (English spelling, ruling 39)',question=title)
+        self._continue_after_rule(skip=id)
+
     def retract_author_rule(self,rule_id):
         """Senua's 0.22.0 review, m6: Sergei takes back one author rule, a seed included (author_rules.retract). Every held
         book whose research it decided is researched again, so it is asked again. Touches no file. Raises ValueError
@@ -2936,6 +2959,7 @@ class MergeService:
         if choice is not None:
             chosen=self.answer_same_author(id,revision,choice)
             if author is not None:chosen=None
+        self._answer_english_spelling(id,revision,author)
         row,result=self._approval_result(id,revision,title,author,chosen,names=names)
         if path is not None and result.get('review'):
             relative,_,_=self._approval_destination(row,result)

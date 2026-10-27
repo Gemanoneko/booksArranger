@@ -675,6 +675,13 @@ class AutomaticProcessing:
                       result={'sources':[],'reasons':[CATALOG_BUSY_REASON],'wait':{'source':'catalog','reason':CATALOG_BUSY_REASON,'retry_at':at,'kind':'source_unavailable','scope':'candidate'}}
                   research_failed=False
                   if self.stop_event.is_set():raise InterruptedError()
+                  if result.get('author_learned') and hasattr(self.merge,'_continue_after_rule'):
+                      # Ruling 39: this research learned an author's English spelling (a lasting rule): the author's books
+                      # already asked in this run are put back on it, so they follow the rule now.
+                      try:self.merge._continue_after_rule(skip=identity)
+                      except sqlite3.OperationalError as error:
+                          from public_research import catalog_busy
+                          if not catalog_busy(error):raise
                   # Human choices are scoped constraints; a matching researched draft
                   # may discharge only the exact manual/provider conflict hold.
                   # Other source/identity reasons and normal admission proofs remain.

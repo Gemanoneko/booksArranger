@@ -509,3 +509,20 @@ Question: is "the library drive" right for Sergei's Z: share, or should it name 
 | 14.5 waiting for a slow media check | "The library drive answered slowly while the app checked this book. It tries again automatically." The details keep "Automatic retry after {time}". |
 
 **Approved as written:** 14.1 (no copy); in 14.2 the Resume queued, cancelled and too-late lines, the Pause-after-start line, the Retry all / Retry selected / Convert line and the Delete recovery copies strings; in 14.3 the S6 working-folder, spare-copy and malformed-request lines and the other five S9 lines; in 14.5 the five-deadline Held line and the record-saved-before-this-build rule.
+
+## 15. Ender's note for Judy: ruling 39's question (2026-10-27, branch `ender/0222c`)
+
+Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic («Вестерфельд Скотт») is looked up online during research (FantLab, Wikidata, Goodreads); what is found becomes a lasting rule for that author. When nothing is found, the book asks for the English spelling, once per author, with the existing Author unclear row and no new control:
+
+```
+[ ] Голиаф  ·  Скотт Вестерфельд  ·  1 audio file
+    Author unclear                                            [ Approve ] [ Edit names ]
+    No English spelling of this author's name was found. Type it under Other, or keep this name if they write in Russian.
+    ( ) Вестерфельд Скотт   spelling
+    ( ) Other  [__________]
+    Goes to  Audiobooks Sorted\Вестерфельд Скотт\Голиаф - Вестерфельд Скотт.m4b
+```
+
+- The answer is kept for every book of the author (a lasting author rule): a typed name files them all under it, and Approve with the name as shown keeps it. The author's other rows go on by themselves, as after a Same author? answer.
+- **Provisional copy, please confirm or replace:** the hint above (ASK_COPY `english_spelling` in `web/app.js`). Status, the radio line and the Other field reuse the existing Author unclear strings; the candidate's tag reuses "spelling" from the name-language row (ruling 33).
+

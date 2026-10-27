@@ -30,6 +30,15 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const tr=trOf('cand-l');
   assert.equal(statusCell(tr).textContent,'Author unclear');
   assert.equal(statusCell(tr).children[0].textContent,"The author's name is in Latin letters. The app can't tell if they write in Russian.");
+  // Ruling 39: no English spelling found for a foreign author credited only in Cyrillic: keep the name, or type it (Other).
+  const spelling=row('s',{kind:'author_unclear',why:'english_spelling',odd_name:true,credit:'Вестерфельд Скотт',reasons:['Author unclear'],fields:{title:{proposal:'Голиаф',basis:'tag'},author:{proposal:'Вестерфельд Скотт',basis:'tag'}},
+    candidates:[{name:'Вестерфельд Скотт',source:'spelling',reader_count:0}],destination:{path:'Вестерфельд Скотт\\Голиаф - Вестерфельд Скотт.m4b',absolute:'',taken:false,reason:''}},
+    {title_clue:'Голиаф',artists:['Скотт Вестерфельд'],members:[{path:'Z:\\Audiobooks\\Steampunk\\Голиаф.m4b'}]});
+  paint([language,spelling]);
+  const asked=trOf('cand-s');
+  assert.equal(statusCell(asked).textContent,'Author unclear');
+  assert.equal(statusCell(asked).children[0].textContent,"No English spelling of this author's name was found. Type it under Other, or keep this name if they write in Russian.");
+  assert.equal(run('askFieldPlan(fixture[1].ask).author'),'radio','the Author unclear choices: this name, or Other');
   assert.equal(run('originalTitleFact({automatic:{state:"Waiting for source",wait:{kind:"original_title"}}})'),'','a record a 0.22.2 candidate left: no waiting line');
   assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"found",title:"Jack of Shadows"}}})'),'Jack of Shadows');
   assert.equal(run('originalTitleFact({metadata_facts:{original_title_lookup:{state:"none",title:""}}})'),'Not found. Filed under the Russian title.');

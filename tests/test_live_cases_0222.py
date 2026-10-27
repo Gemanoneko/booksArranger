@@ -108,12 +108,11 @@ class LiveCaseTests(Base):
         row = self.catalog(rows)[ROOT + '\\Steampunk\\Голиаф.m4b']
         result = self.lookup(row)
         self.assertNotIn('Source membership uncertain', result['reasons'], 'disc 3/3 is book 3 of the trilogy, no missing disc')
-        # Ruling 38 (Sergei 2026-10-27): an English author's translation never waits for its English title.
-        self.assertEqual(result['reasons'], [], 'converts now')
-        self.assertEqual(result['metadata_facts']['original_title_lookup']['state'], 'none', 'a translation (Cyrillic credit, foreign first name)')
-        # No English spelling of the author anywhere (no Latin folder, no catalog answer): the credit's own spelling, as
-        # before ruling 29. Open for Sergei: ruling 38 says the author folder is English.
-        self.assertEqual(self.goes_to(row, result), SORTED + '\\Вестерфельд Скотт\\Голиаф - Вестерфельд Скотт.m4b')
+        # Ruling 38 (Sergei 2026-10-27): an English author's translation never waits for its English title. Ruling 39: with
+        # no English spelling of the author anywhere (offline: no Latin folder, no catalog answer, no lookup), Sergei is
+        # asked for it, never a transliteration.
+        self.assertEqual(result['reasons'], ['Author unclear'])
+        self.assertEqual((result['ask']['why'], result['ask']['credit']), ('english_spelling', 'Вестерфельд Скотт'))
         catalog = {'language': 'en', 'original_title': 'Goliath', 'title_native': 'Голиаф', 'author_native': 'Скотт Вестерфельд', 'author_latin': 'Scott Westerfeld',
                    'source_url': 'https://fantlab.ru/work2'}
         with patch.object(self.research, '_gap_fill', return_value={'catalog': catalog, 'closed': [], 'unfilled': []}):

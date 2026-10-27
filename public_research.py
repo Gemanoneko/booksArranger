@@ -1246,6 +1246,38 @@ class PublicResearch:
                  'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':spellings[0],'basis':fields['author'].get('basis','')}}}
             return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
+        english_title=False
+        if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
+                and local_identity.script(names[0])=='cyrillic' and original_titles.translation(preferred,names[0]):
+            # Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic (a foreign first name, no Latin
+            # spelling in the library, the cache or a rule). The author's original-language name is looked up now, in the
+            # work's catalog records (FantLab, Wikidata, Goodreads; the client's cache, per-site bounds and research lane),
+            # and what is found is learned as a lasting rule for that credit, so the author's other books follow without a
+            # lookup. Inconclusive (nothing matched, a source closed, the budget spent): Sergei is asked once per author
+            # (Author unclear); only that author's books wait for his answer, which becomes his rule. Never transliterated.
+            found=self._author_latin(title,names[0],stop,budget,result)
+            if found and found['state']=='found':
+                latin=local_identity.surname_first(found['name'])[0]
+                self._learn_author('same_as',names[0],latin,found['source_url'],preferred)
+                result['author_learned']={'credit':names[0],'name':latin,'source_url':found['source_url']}
+                if latin not in authors:authors.append(latin)
+                names=[latin];name_source=found['source_url'];work['author_aliases']=author_variants(authors)
+                if found.get('title'):
+                    # The same record names the English original title: ruling 38 files the book under it.
+                    russian=preferred;preferred=found['title'];english_title=True
+                    if russian not in titles:titles.append(russian)
+                    if preferred not in titles:titles.insert(0,preferred)
+                    work.update(titles=titles,original_title=preferred,original_language='en')
+            elif found and found['state']=='russian':
+                # The work's catalog says it was written in Russian: the Cyrillic name is right (the folder language rule).
+                self._learn_author('keep',names[0],'',found['source_url'],preferred)
+                result['author_learned']={'credit':names[0],'name':names[0],'source_url':found['source_url']}
+            else:
+                ask={'kind':'author_unclear','why':'english_spelling','odd_name':True,'credit':names[0],
+                     'candidates':[{'name':names[0],'source':'spelling','reader_count':0}],
+                     'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')}}}
+                return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
+                               'rules_generation':rules.generation if rules else ''}
         original=None
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and language!='ru':
             # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait): a translation is filed under the English original
@@ -1253,7 +1285,7 @@ class PublicResearch:
             # it has. It never waits; the rename pass can apply the English title later (ruling 21). The author keeps the
             # folder language rule (canonical_author, above: the English spelling when the library or the catalog has
             # one). Recorded for the details panel's "Original title" fact (Judy 0.22.2 section 4).
-            if language=='en' and local_identity.script(title)=='cyrillic' and local_identity.script(preferred)=='latin':
+            if (language=='en' or english_title) and local_identity.script(title)=='cyrillic' and local_identity.script(preferred)=='latin':
                 original={'state':'found','title':preferred}
             elif original_titles.translation(preferred,names[0]):
                 original={'state':'none','title':''}
@@ -1590,6 +1622,54 @@ class PublicResearch:
             'original_title':match['work_name_orig'],'title_native':match['work_name'],'author_native':text(author_names.get('name')),
             'author_latin':text(author_names.get('name_orig')),'series':match.get('verified_series') or None}
 
+    def _author_latin(self,title,author,stop,budget,result):
+        """Ruling 39: the original-language name of a foreign author credited only in Cyrillic, from this work's catalog
+        records: FantLab's original name, then Wikidata's, then a Goodreads search. Every request goes through the client
+        (its cache, per-site bounds and lane). {'state': 'found', 'name', 'source_url'}; {'state': 'russian',
+        'source_url'} when the work was written in Russian; None when inconclusive (nothing matched, a source closed,
+        the budget spent). A name a source gives, never a transliteration."""
+        import local_identity
+        def attempt(function):
+            try:return function()
+            except ResearchWait:return None
+            except sqlite3.OperationalError as error:
+                if not catalog_busy(error):raise
+                return None
+            except (ValueError,TypeError,KeyError,AttributeError):return None
+        for function in (lambda:self._gap_fantlab(title,author,False,stop,budget,result),lambda:self._gap_wikidata(title,author,False,stop,budget,result)):
+            entry=attempt(function)
+            if not entry:continue
+            if entry.get('language')=='ru':return {'state':'russian','source_url':entry.get('source_url','')}
+            latin=text(entry.get('author_latin'))
+            # The record already matched this work's author by the Cyrillic name (its native name) or the Latin one.
+            if latin and local_identity.script(latin)=='latin':
+                original=text(entry.get('original_title'))
+                english=original if entry.get('language')=='en' and original and local_identity.script(original)=='latin' else ''
+                return {'state':'found','name':latin,'source_url':entry.get('source_url',''),'title':english}
+        return attempt(lambda:self._author_goodreads(title,author,stop,budget))
+    def _author_goodreads(self,title,author,stop,budget):
+        """Ruling 39: the Latin credit of this work's Goodreads search results: a result titled as this book whose one
+        Latin-script author is the same person as the Cyrillic credit (compare_names). None unless exactly one."""
+        from local_identity import title_key,script
+        url='https://www.goodreads.com/search?'+urllib.parse.urlencode({'q':title+' '+author,'search_type':'books'})
+        names=set()
+        for _,shown,credited in goodreads_results(self.client.read(url,stop,budget))[:10]:
+            match=GOODREADS_SERIES.match(shown)
+            if title_key(match[1] if match else shown)!=title_key(title):continue
+            names.update(name for name in credited if script(name)=='latin' and _name_matches(author,name))
+        return {'state':'found','name':names.pop(),'source_url':url} if len(names)==1 else None
+    def _learn_author(self,kind,credit,target,source_url,title):
+        """Ruling 39: what the lookup found, kept once per author as a lasting author rule (actor 'assistant', the source
+        cited), so the author's other books follow without a lookup; Sergei's own answer or a retraction replaces it.
+        Research's only write: at most 1 s behind another writer, and a busy catalog never fails the lookup (the book is
+        filed by this research all the same; the next book of the author looks again)."""
+        import author_rules
+        try:
+            with connect(self.client.database,timeout=1) as db:
+                author_rules.setup(db)
+                author_rules.append(db,kind,credit,target=target,actor='assistant',source=source_url or 'public research',question=title)
+        except sqlite3.OperationalError as error:
+            if not catalog_busy(error):raise
     def _full_name(self,title,author,candidates,citation_for):
         """One unique full name whose words include the local partial name."""
         from local_identity import title_key,words,compare_names

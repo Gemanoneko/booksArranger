@@ -13,6 +13,7 @@
 
 - Nothing refuses for being busy any more. A press made while something else runs is queued and shows Cancel. When a press is refused, the row says why and what to do next.
 - Translated books don't wait for their English title. If research has it, the book is filed under it; if not, it converts right away under the title it has (ruling 38).
+- A foreign author named only in Russian letters is looked up online for the English spelling of the name. If none is found, the app asks you once for that author and remembers the answer (ruling 39).
 - Latin names are filed surname first. Authors who write in Russian are filed in Cyrillic. Ж is matched with Z.
 - Co-authors and readers are sorted out before the title is read.
 - Start works while audiobooks convert. The scan waits for the conversion to finish.

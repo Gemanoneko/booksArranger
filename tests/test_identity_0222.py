@@ -227,3 +227,81 @@ class TranslationNoWaitTests(Base):
         result = self.lookup(row)
         self.assertEqual(result['reasons'], [], 'written in Russian: converts now')
         self.assertNotIn('original_title_lookup', result['metadata_facts'], 'no translation, no "Original title" fact')
+
+
+class ForeignCyrillicAuthorTests(Base):
+    """Ruling 39 (Sergei 2026-10-27, "2 and then 3 if not found in 2"): a foreign author credited only in Cyrillic. Research
+    looks the author's original-language name up online (FantLab, Wikidata, Goodreads, through the client); what it
+    finds is a lasting rule for that credit (once per author). Nothing found: Sergei is asked once per author (Author
+    unclear), never a transliteration."""
+    GOLIATH = file_row('Steampunk\\Голиаф.m4b', title='Голиаф', album='Голиаф', artist='Скотт Вестерфельд')
+    LEVIATHAN = file_row('Steampunk\\Левиафан.m4b', title='Левиафан', album='Левиафан', artist='Вестерфельд Скотт')
+    ENTRY = {'provider': 'fantlab', 'work_id': 'fantlab:2', 'source_url': 'https://fantlab.ru/work2', 'language': 'en', 'original_title': 'Goliath',
+             'title_native': 'Голиаф', 'author_native': 'Скотт Вестерфельд', 'author_latin': 'Scott Westerfeld'}
+
+    def rules(self):
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            return [tuple(r) for r in db.execute("SELECT kind, credit_key, target, actor FROM author_rules WHERE rule_id NOT LIKE 'seed-%' ORDER BY saved_utc")]
+
+    def online(self, entries):
+        """_gap_fantlab answering only a request that may go online (research's budget), never the cache-only pass."""
+        asked = []
+        def fantlab(title, author, partial, stop, budget, result):
+            if (budget or {}).get('remaining', 0) <= 0:
+                return None
+            asked.append(title)
+            return dict(entries[title]) if title in entries else None
+        return patch.object(self.research, '_gap_fantlab', side_effect=fantlab), asked
+
+    def test_nothing_found_online_asks_once_per_author_and_never_transliterates(self):
+        books = self.catalog([self.GOLIATH])
+        row = next(iter(books.values()))
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], ['Author unclear'], 'held for his answer, not filed under the Cyrillic credit')
+        ask = result['ask']
+        self.assertEqual((ask['kind'], ask['why'], ask['credit']), ('author_unclear', 'english_spelling', 'Вестерфельд Скотт'))
+        self.assertEqual([c['name'] for c in ask['candidates']], ['Вестерфельд Скотт'], 'keep it, or type the English spelling')
+        self.assertTrue(ask['odd_name'], 'never in a bulk Approve')
+        self.assertEqual(local_identity.script(ask['fields']['author']['proposal']), 'cyrillic', 'no transliteration proposed')
+        calls = ' '.join(self.research.client.calls)
+        for host in ('api.fantlab.ru', 'wikidata.org', 'goodreads.com'):
+            self.assertIn(host, calls, 'looked up online first: ' + host)
+        self.assertEqual(self.rules(), [], 'nothing learned from nothing')
+
+    def test_a_name_found_online_files_the_book_and_every_other_book_of_the_author(self):
+        books = self.catalog([self.GOLIATH, self.LEVIATHAN])
+        goliath, leviathan = books[ROOT + '\\Steampunk\\Голиаф.m4b'], books[ROOT + '\\Steampunk\\Левиафан.m4b']
+        online, asked = self.online({'Голиаф': self.ENTRY})
+        with online:
+            result = self.lookup(goliath)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(self.goes_to(goliath, result), SORTED + '\\Westerfeld Scott\\Goliath - Westerfeld Scott.m4b', 'the English name and title the record gives')
+        self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Goliath'})
+        self.assertEqual(self.rules(), [('same_as', author_rules.key('Скотт Вестерфельд'), 'Westerfeld Scott', 'assistant')], 'learned once, for the credit')
+        online, asked = self.online({})
+        with online:
+            result = self.lookup(leviathan)
+        self.assertEqual(asked, [], 'the author\'s next book needs no lookup')
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(self.goes_to(leviathan, result), SORTED + '\\Westerfeld Scott\\Левиафан - Westerfeld Scott.m4b', 'no English title for it: its own')
+
+    def test_a_work_written_in_russian_keeps_the_cyrillic_name(self):
+        row = next(iter(self.catalog([file_row('Перумов Ник\\Эльфийская стража.m4b', title='Эльфийская стража', album='Эльфийская стража', artist='Ник Перумов')]).values()))
+        online, asked = self.online({'Эльфийская стража': {'provider': 'fantlab', 'source_url': 'https://fantlab.ru/work3', 'language': 'ru', 'original_title': 'Эльфийская стража',
+                                                            'author_native': 'Ник Перумов', 'author_latin': 'Nick Perumov'}})
+        with online:
+            result = self.lookup(row)
+        self.assertEqual(result['reasons'], [])
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Перумов Ник\\Эльфийская стража - Перумов Ник.m4b')
+        self.assertEqual(self.rules(), [('keep', author_rules.key('Ник Перумов'), '', 'assistant')], 'never asked or looked up again')
+
+    def test_sergeis_approve_never_looks_up_and_his_typed_name_decides(self):
+        row = next(iter(self.catalog([self.GOLIATH]).values()))
+        online, asked = self.online({'Голиаф': self.ENTRY})
+        with online:
+            shown = self.research.approved(row, ROOT)
+            typed = self.research.approved(row, ROOT, author='Scott Westerfeld')
+        self.assertEqual(asked, [], 'Approve files what the row shows, with no request (rulings 6b and 39)')
+        self.assertEqual(shown['reasons'], [])
+        self.assertEqual(self.goes_to(row, shown), SORTED + '\\Вестерфельд Скотт\\Голиаф - Вестерфельд Скотт.m4b')
+        self.assertEqual(self.goes_to(row, typed), SORTED + '\\Westerfeld Scott\\Голиаф - Westerfeld Scott.m4b')

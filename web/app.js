@@ -2423,7 +2423,10 @@ const ASK_COPY={title_missing:['Title missing','No title in the tags, file name 
   title_latin:['Title unclear','The title looks like Russian written in Latin letters.'],
   author_folder:['Author unclear',"The author's name has underscores and may include more than a name."],
   // Ruling 33 (Sergei 2026-10-26): a Latin name with a Russian first name; one folder per person, by writing language.
-  name_language:['Author unclear',"The author's name is in Latin letters. The app can't tell if they write in Russian."]};
+  name_language:['Author unclear',"The author's name is in Latin letters. The app can't tell if they write in Russian."],
+  // Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Russian letters whose English spelling the lookup
+  // didn't find. Provisional copy (Judy's 0.22.2 doc, section 15). The answer is kept for every book of this author.
+  english_spelling:['Author unclear',"No English spelling of this author's name was found. Type it under Other, or keep this name if they write in Russian."]};
 const ODD_TITLE=['title_bitrate','title_series','title_latin'];
 // The three hold rows (Judy 2026-10-24, 0.22.0 review B4): status, then one sentence per typed cause; 'unknown' too.
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
