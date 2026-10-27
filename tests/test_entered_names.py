@@ -340,6 +340,19 @@ class EditNamesTests(ApproveFixture):
         self.assertEqual((again['reasons'],again['review']['series'],again['review']['number']),([],'Протоколы SCP','1'),'research plans it with the new names')
         self.assertEqual(again['metadata_facts']['entered_names']['digest'],entered_names.digest_for(self.inv.database,current))
 
+    def test_a_save_answer_says_where_the_book_goes_and_carries_its_row(self):
+        # 0.22.3 (Judy 2.2, 2.3): the strip's "Goes to" and "It left this list: {status}" come from the answer, never guessed.
+        self.scp();row=self.row('1')
+        saved=self.service.names_save(row['id'],row['revision'],{'title':'Протоколы SCP. Сейф №1'})
+        self.assertEqual(saved['destination']['path'],str(Path('Сборники')/'Протоколы SCP. Сейф №1 - Разные авторы.m4b'))
+        self.assertEqual(saved['list_row']['id'],row['id']);self.assertIn('status',saved['list_row'])
+        self.assertNotIn('members',saved['list_row'],'the track list stays out of the answer')
+
+    def test_an_approve_answer_carries_the_books_row(self):
+        self.scp();row=self.row('control')
+        approved=self.service.approve_book(row['id'],row['revision']);self.wait()
+        self.assertEqual(approved['list_row']['id'],row['id']);self.assertNotIn('destination',approved)
+
 
 class ActionQueueTests(unittest.TestCase):
     def test_book_action_names_the_queued_or_running_action_for_a_book(self):

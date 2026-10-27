@@ -1179,11 +1179,15 @@ class PublicResearch:
         if one_source and not reasons and not typed_author and language and language!='ru' and not fields['author'].get('rule') \
                 and fields['author'].get('state') not in ('entered','approved') and local_script=='cyrillic' and names \
                 and names[0]==text(catalog.get('author_latin')) and local_identity.script(names[0])=='latin':
-            latin=_latin_surname_first(names[0],author)
-            self._learn_author('same_as',author,latin,catalog.get('source_url',''),title)
-            result['author_learned']={'credit':author,'name':latin,'source_url':catalog.get('source_url','')}
-            if latin not in authors:authors.append(latin)
-            names=[latin];fields=dict(fields,author=dict(fields['author'],rule='catalog-latin'))
+            ruled=self.rules()
+            if ruled is not None and ruled.taken_back(author):
+                names=[author]  # he took this match back: ruling 39's question asks him (below), the catalog never decides again
+            else:
+                latin=_latin_surname_first(names[0],author)
+                self._learn_author('same_as',author,latin,catalog.get('source_url',''),title)
+                result['author_learned']={'credit':author,'name':latin,'source_url':catalog.get('source_url','')}
+                if latin not in authors:authors.append(latin)
+                names=[latin];fields=dict(fields,author=dict(fields['author'],rule='catalog-latin'))
         spelling=None
         from organization import NO_AUTHOR
         rules=self.rules() if one_source else None
@@ -1261,14 +1265,15 @@ class PublicResearch:
                            'rules_generation':rules.generation if rules else ''}
         english_title=False
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
-                and local_identity.script(names[0])=='cyrillic' and original_titles.translation(preferred,names[0]):
+                and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or rules is not None and rules.taken_back(names[0])):
             # Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic (a foreign first name, no Latin
             # spelling in the library, the cache or a rule). The author's original-language name is looked up now, in the
             # work's catalog records (FantLab, Wikidata, Goodreads; the client's cache, per-site bounds and research lane),
             # and what is found is learned as a lasting rule for that credit, so the author's other books follow without a
             # lookup. Inconclusive (nothing matched, a source closed, the budget spent): Sergei is asked once per author
             # (Author unclear); only that author's books wait for his answer, which becomes his rule. Never transliterated.
-            found=self._author_latin(title,names[0],stop,budget,result)
+            # 0.22.3 (Judy's question 1, its default): a learned rule Sergei took back is never looked up again; he is asked.
+            found=None if rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result)
             if found and found['state']=='found':
                 latin=_latin_surname_first(found['name'],names[0])
                 self._learn_author('same_as',names[0],latin,found['source_url'],preferred)

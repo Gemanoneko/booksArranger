@@ -156,6 +156,15 @@ class MergeHTTPTests(unittest.TestCase):
             with self.subTest(body=bad):self.assertEqual(self.call('/api/author-rule/retract',bad)[0],400)
         self.assertEqual(self.call('/api/author-rule/retract',{'rule_id':'seed-x'},token=False)[0],403)
 
+    def test_learned_author_rules_route_reads_the_list(self):
+        # 0.22.3 (Judy 4.1): the page's list of rules research learned online; it takes no fields and reads only.
+        rules=[{'rule_id':'r1','kind':'same_as','credit':'Страуд Джонатан','target':'Stroud Jonathan','source':'https://fantlab.ru/work1','saved_utc':'2026-10-27','question':'Лестница'}]
+        self.merge.learned_author_rules=Mock(return_value=rules)
+        status,body,_=self.call('/api/author-rules',{})
+        self.assertEqual((status,body),(200,{'rules':rules,'total':1}));self.merge.learned_author_rules.assert_called_once_with()
+        self.assertEqual(self.call('/api/author-rules',{'extra':1})[0],400)
+        self.assertEqual(self.call('/api/author-rules',{},token=False)[0],403)
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)

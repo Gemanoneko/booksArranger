@@ -90,5 +90,28 @@ class EnglishSpellingAnswerTests(ApproveFixture):
         self.assertEqual(self.rules(), [('same_as', 'Westerfeld Scott', 'user')])
 
 
+    def test_a_learned_rule_taken_back_is_listed_then_asked_never_looked_up_again(self):
+        # 0.22.3 (Judy 4; her question 1, its default): the list shows what research learned online; after Take back the
+        # author is asked once (ruling 39's question), and the same online match is never looked up and learned again.
+        from unittest.mock import patch
+        books = self.books()
+        research = self.service.automatic.research
+        found = {'state': 'found', 'name': 'Scott Westerfeld', 'source_url': 'https://fantlab.ru/work9', 'title': ''}
+        with patch.object(research, '_author_latin', return_value=found) as lookup:
+            result = self.research(books['Голиаф'])
+        self.assertEqual((result['reasons'], lookup.call_count), ([], 1), 'positive control: looked up and filed')
+        learned = self.service.learned_author_rules()
+        self.assertEqual([(r['kind'], r['target'], r['source'], r['question']) for r in learned], [('same_as', 'Westerfeld Scott', 'https://fantlab.ru/work9', 'Голиаф')])
+        self.assertIn('Вестерфельд', learned[0]['credit'])
+        self.assertTrue(learned[0]['saved_utc'].startswith('20'))
+        self.service.retract_author_rule(learned[0]['rule_id'])
+        self.assertEqual(self.service.learned_author_rules(), [], 'taken back: off the list')
+        with patch.object(research, '_author_latin', return_value=found) as lookup:
+            result = self.research(books['Левиафан'])
+        self.assertEqual(lookup.call_count, 0, 'never looked up again')
+        self.assertEqual((result['ask']['kind'], result['ask']['why']), ('author_unclear', 'english_spelling'), 'asked once instead')
+        self.assertEqual(self.rules(), [('same_as', 'Westerfeld Scott', 'assistant')], 'nothing new learned')
+
+
 if __name__ == '__main__':
     unittest.main()

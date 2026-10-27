@@ -2764,7 +2764,24 @@ class MergeService:
         elif job['state']=='ready':outcome='ready_only'
         self.__dict__.pop('_needs_cache',None)
         self.invalidate_status()
-        return {'outcome':outcome,'applies':applies,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+        answer={'outcome':outcome,'applies':applies,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}
+        return answer|self._press_after(id,revision,destination=outcome!='ready_only')
+
+    def _press_after(self,id,revision,destination=True):
+        """0.22.3 (Judy 2.2 and 2.3): what a Save or Approve answer adds for the page: the book's list row now ('list_row', its
+        status the page names when the book leaves the list) and, for a Save, where it goes with the names now saved
+        ('destination', the planner's path; absent when it can't be planned, never guessed). Read-only; never fails the press."""
+        extra={}
+        row=self.restart_row(id)
+        if row is not None:
+            # The fields the row's status is made from; the track list and evidence stay out of the answer (and the queue's).
+            extra['list_row']={k:v for k,v in row.items() if k not in ('members','metadata','title_evidence','cover_choices','track_order','included','companions','matching','manual_metadata_sources')}
+        if destination:
+            try:
+                preview=self.approval_preview(id,row['revision'] if row is not None else revision,names={})
+                if preview.get('path'):extra['destination']={'path':preview['path'],'absolute':preview.get('absolute') or ''}
+            except (ValueError,OSError,sqlite3.Error,KeyError,TypeError):pass
+        return extra
 
     def names_forget(self,id,revision,entry_id):
         """Edit names, Forget (Judy 1.5): takes one remembered correction back, with the rest of its press; behaves like a
@@ -2899,6 +2916,12 @@ class MergeService:
             else:author_rules.append(db,'keep',answer['credit'],actor='user',source='Sergei (English spelling, ruling 39)',question=answer['title'])
         self._continue_after_rule(skip=id)
 
+    def learned_author_rules(self):
+        """0.22.3 (Judy 4.1, Senua M5): the rules research learned online (ruling 39) that are in force, newest first, for
+        the page's list with Take back. Read-only."""
+        import author_rules
+        return author_rules.learned(self.inventory.database)
+
     def retract_author_rule(self,rule_id):
         """Senua's 0.22.0 review, m6: Sergei takes back one author rule, a seed included (author_rules.retract). Every held
         book whose research it decided is researched again, so it is asked again. Touches no file. Raises ValueError
@@ -3015,7 +3038,7 @@ class MergeService:
         except Exception:pass
         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
-        return {'row':fresh,'job_id':job}
+        return {'row':fresh,'job_id':job}|self._press_after(id,None,destination=False)
 
     # Sergei's Approve overrides every identity and confidence hold (ruling 6b); these source-gate reasons are safety and
     # stay: unreadable or missing files, an audio format with no encoding decision, a changed collection binding.

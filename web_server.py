@@ -128,7 +128,7 @@ LOAD_STEPS = ('engine', 'catalog', 'session', 'books')
 LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
 NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
 # Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
-LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names'}  # 0.22.2: opening Edit names only reads (Judy 1.7)
+LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/author-rules'}  # 0.22.2: opening Edit names only reads (Judy 1.7)
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -1150,6 +1150,11 @@ class Handler(BaseHTTPRequestHandler):
                 text=str(error)
                 self.response(409,{'error':text,'code':'changed' if 'Candidate changed' in text or 'Source files changed' in text else 'refused'});return
             self.response(200,result);return
+        if path=='/api/author-rules':
+            # 0.22.3 (Judy 4.1, Senua M5): the author rules research learned online that are in force, newest first. Reads only.
+            self.shape(data,set())
+            found=self.server.merge.learned_author_rules()
+            self.response(200,{'rules':found,'total':len(found)});return
         if path=='/api/author-rule/retract':
             # Senua's 0.22.0 review, m6: take back one author rule, a seed included; touches no file.
             self.shape(data,{'rule_id'})
@@ -1266,7 +1271,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
-                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
+                         '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
                          '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel'}
             with self.server.control_lock:
                 if self.server.closing:

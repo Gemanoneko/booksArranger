@@ -209,6 +209,12 @@ class Rules:
         row = self.rule(name, folder)
         return bool(row and row['kind'] == 'collection')
 
+    def taken_back(self, name, folder=''):
+        """0.22.3 (Judy's question 1, its default): the newest rule for this credit is a Take back, so research asks Sergei
+        once (ruling 39's question) instead of looking the name up online again and learning the same match."""
+        row = self._rule(name, folder, KINDS + (RETRACTED,))
+        return bool(row and row['kind'] == RETRACTED)
+
     def keep(self, name, folder=''):
         row = self.rule(name, folder)
         return bool(row and row['kind'] == 'keep')
@@ -234,6 +240,19 @@ class Rules:
 
 
 _CACHE = {}
+
+
+def learned(database):
+    """0.22.3 (Judy 4.1): the rules research learned online (actor 'assistant': a Cyrillic credit filed under its English
+    spelling, or kept as written for a Russian-writing author) still in force, newest first: [{'rule_id', 'kind', 'credit',
+    'target', 'source', 'saved_utc', 'question'}]. Sergei's own answers and the seeds are not listed. Read-only."""
+    rules = load(database)
+    if rules is None:
+        return []
+    found = [r for r in rules.rules if r['kind'] in ('same_as', 'keep') and r.get('actor') == 'assistant']
+    found.sort(key=lambda r: (str(r.get('saved_utc') or ''), str(r['rule_id'])), reverse=True)
+    return [{'rule_id': r['rule_id'], 'kind': r['kind'], 'credit': r.get('credit_as_seen') or r['credit_key'], 'target': r.get('target') or '',
+             'source': r.get('source') or '', 'saved_utc': str(r.get('saved_utc') or ''), 'question': r.get('question') or ''} for r in found]
 
 
 def load(database):
