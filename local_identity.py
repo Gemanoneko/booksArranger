@@ -2581,6 +2581,20 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         fields['number'] = {'state': 'green', 'value': structure['position'], 'how': 'the book\'s number in its series folder',
                             'sources': [{'kind': 'folder structure', 'value': structure['book_name']}]}
         from_folders = True
+    # Ruling 41 (Sergei 2026-10-27, "2. Yes"): a name that reads "Series N. Title" fills Series, Number and Title itself and
+    # the book files without a question; the series never stays inside the title. A series the files already name the
+    # same way keeps its source; one that names another series leaves the title as it is (its own names disagree).
+    found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
+    if found:
+        named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
+        whole = fields['title']['value']
+        if not named:
+            source = [{'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}]
+            fields['series'] = {'state': 'green', 'value': found['series'], 'how': 'the series before the number in "%s" (ruling 41)' % whole, 'sources': source}
+            fields['number'] = {'state': 'green', 'value': found['number'], 'how': 'the number in "%s" (ruling 41)' % whole, 'sources': source}
+        if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
+            fields['title'] = dict(fields['title'], value=found['title'], how=fields['title'].get('how', '') + '; the title after the series and number (ruling 41)',
+                                   aliases=list(fields['title'].get('aliases') or []) + [whole])
     series = {'name': fields['series']['value'], 'number': fields['number']['value']} if fields['series']['state'] == 'green' and fields['number']['state'] == 'green' else {}
     if series and from_folders:
         series['folder'] = True
@@ -2721,7 +2735,9 @@ def settled(record, title, author, state, typed=(), collection=False, rules=None
 _BITRATE_TAIL = re.compile(r'(?:[\s_\-–—]+|(?<=[^\W\d_]))(?:64|96|112|128|160|192|256|320)\s*(?:kbps|kb/s|kbit/s)?\s*$', re.I)
 # "<Series> N. Title", "<Series> - 01. Title", "<Series> #3 - Title": the series before the number, the title after it.
 # The number stands alone ("Warhammer 40000. Месть Гоббо" is no series 40 and book 000).
-_SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)\d{1,3}(?:[.,]5)?\s*[.:\-–—]\s+(?P<title>.*?[^\W\d_].*)$')
+_SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)(?P<number>\d{1,3}(?:[.,]5)?)\s*[.:\-–—]\s+(?P<title>.*?[^\W\d_].*)$')
+# A word that numbers a part, never a series name ("Книга 1. Пробуждение", "Part 2. The Return").
+_NOT_A_SERIES = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|серия|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\W*$', re.I)
 _PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
 _RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
 _TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
@@ -2767,6 +2783,32 @@ def _series_in_title(title, folders=()):
         if inside and not set(series) <= set(named):
             return True
     return False
+
+
+def series_title_parts(title, author=''):
+    """Ruling 41 (Sergei 2026-10-27): {'series', 'number', 'title'} when a name reads "Series N. Title" («Крысы 1.
+    Крысы», «Профессия: инквизитор 1. Леди не движется», «Колесо времени - 01. Око мира», «Сновидения Ехо #3 - Вся
+    правда о нас»), else None. The author written before the series is not part of it ("Робин Хобб - Сага 2. X"); a
+    word that only numbers a part ("Книга 1. X") or the author's own name is no series. The number is written as the
+    folder structure writes it ("01" is "1", "1,5" is "1.5")."""
+    found = _SERIES_PARTS.match(text(title))
+    if not found:
+        return None
+    series = text(_series_name(text(found['series']).rstrip(' ,;-–—#'), author or ''))
+    rest = text(found['title'])
+    if not series or not rest or not re.search(r'[^\W\d_]', series) or _NOT_A_SERIES.match(series) or (author and compare_names(series, author)):
+        return None
+    number = found['number'].replace(',', '.')
+    number = str(int(number)) if number.isdigit() else number
+    return {'series': series, 'number': number, 'title': rest}
+
+
+def _same_number(left, right):
+    """The same position in a series, however it is written ("01" and "1")."""
+    def key(value):
+        value = text(value).replace(',', '.')
+        return str(int(value)) if value.isdigit() else value
+    return key(left) == key(right)
 
 
 def odd_identity(title, author, local_author='', no_author='', ruled=False, folders=()):

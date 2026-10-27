@@ -539,23 +539,42 @@ class OddNameTests(Base):
             db.commit()
         self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT, author='Ричард Форд')), SORTED + '\\Ford Richard\\Лабиринт - Ford Richard.m4b')
 
-    def test_a_series_or_number_inside_the_title_is_asked(self):
-        cases = (('Max Fray\\Сновидения Эхо\\Frai_Maks_Vsya_pravda_o_nas (Ovuor)', ['Макс Фрай - Сновидения Ехо #3 - Вся правда о нас  - %02d - %02d - Maks Frai - Vsya pravda o nas - (Ovuor).m4a' % (n, n) for n in (1, 2)],
-                  dict(title='%02d - Maks Frai - Vsya pravda o nas - (Ovuor)', artist='Макс Фрай', album='Сновидения Ехо #3 - Вся правда о нас ', track='%d')),
+    def test_a_series_and_number_in_the_name_are_split_and_filed_without_a_question(self):
+        # Ruling 41 (Sergei 2026-10-27, "2. Yes"; it replaces the 0.22.1 question): "Series N. Title" fills Series, Number
+        # and Title, and the book files by itself; the series never stays in the title. The ":" Windows refuses in a folder
+        # or file name is the path's "_" (metadata.safe_name), the tags keep it.
+        cases = (('Unsorted\\Джеймс Герберт - Крысы 1. Крысы', ['%02d.mp3' % n for n in (1, 2)], dict(title='Глава %d', artist='Джеймс Герберт', album='Крысы 1. Крысы', track='%d'),
+                  ('Крысы', 'Крысы', '1'), 'Герберт Джеймс\\Крысы\\Крысы - 1 - Крысы - Герберт Джеймс.m4b'),
+                 ('Unsorted\\Дивов Олег\\Профессия_ инквизитор 1. Леди не движется', ['%02d.mp3' % n for n in (1, 2)], dict(title='Глава %d', artist='Олег Дивов', album='Профессия: инквизитор 1. Леди не движется', track='%d'),
+                  ('Леди не движется', 'Профессия: инквизитор', '1'), 'Дивов Олег\\Профессия_ инквизитор\\Профессия_ инквизитор - 1 - Леди не движется - Дивов Олег.m4b'),
+                 ('Max Fray\\Сновидения Эхо\\Frai_Maks_Vsya_pravda_o_nas (Ovuor)', ['Макс Фрай - Сновидения Ехо #3 - Вся правда о нас  - %02d - %02d - Maks Frai - Vsya pravda o nas - (Ovuor).m4a' % (n, n) for n in (1, 2)],
+                  dict(title='%02d - Maks Frai - Vsya pravda o nas - (Ovuor)', artist='Макс Фрай', album='Сновидения Ехо #3 - Вся правда о нас ', track='%d'), ('Вся правда о нас', 'Сновидения Ехо', '3'), None),
                  ('Max Fray\\Сновидения Эхо\\Макс Фрай_Мертвый ноль_Гмыза Игорь', ['Макс Фрай - Мертвый ноль 7. Мертвый ноль - %02d - %02d.m4a' % (n, n) for n in (1, 2)],
-                  dict(title='%02d', artist='Макс Фрай', album='Мертвый ноль 7. Мертвый ноль', track='%d/-1')),
+                  dict(title='%02d', artist='Макс Фрай', album='Мертвый ноль 7. Мертвый ноль', track='%d/-1'), ('Мертвый ноль', 'Мертвый ноль', '7'), None),
                  ('Unsorted\\Дивов. Профессия инквизитор\\7\\Олег Дивов_ Война миров_Ирина Зубкова', ['%02d  Война миров.mp3' % n for n in (0, 1)],
-                  dict(title='Глава %d', artist='Олег Дивов', album='Профессия: инквизитор 7. Война миров', album_artist='И. Зубкова', track='%d')))
-        for folder, names, tags in cases:
-            self.asked(self.book(folder, names, **tags), 'title_author', 'title_series')
-        # The book folder names the title without the series (Шваб, live): asked.
-        row = self.book('Unsorted\\Шваб Виктория - Сотворение света (Иванов_С)', ['01_Razrushennyy mir.mp3', '02_Razrushennyy mir.mp3'],
-                        title='Глава %d', artist='Виктория Шваб', album='Оттенки магии 03. Сотворение света', track='%d')
-        self.asked(row, 'title_author', 'title_series')
+                  dict(title='Глава %d', artist='Олег Дивов', album='Профессия: инквизитор 7. Война миров', album_artist='И. Зубкова', track='%d'), ('Война миров', 'Профессия: инквизитор', '7'), None),
+                 ('Unsorted\\Шваб Виктория - Сотворение света (Иванов_С)', ['01_Razrushennyy mir.mp3', '02_Razrushennyy mir.mp3'],
+                  dict(title='Глава %d', artist='Виктория Шваб', album='Оттенки магии 03. Сотворение света', track='%d'), ('Сотворение света', 'Оттенки магии', '3'), None))
+        for folder, names, tags, (title, series, number), path in cases:
+            row = self.book(folder, names, **tags)
+            result = self.lookup(row)
+            self.assertEqual((result['reasons'], result.get('ask')), ([], None), folder)
+            self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number), folder)
+            if path:
+                self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path, folder)
+            self.assertEqual(self.approved(row)['title'], title, 'the row and Approve show the split title')
+        # Controls: a word that only numbers a part is no series; a name without the pattern is untouched.
+        self.assertIsNone(local_identity.series_title_parts('Книга 1. Начало'))
+        self.assertIsNone(local_identity.series_title_parts('Warhammer 40000. Месть Гоббо'))
+        self.assertIsNone(local_identity.series_title_parts('Комната ужасов 2'))
+        self.assertEqual(local_identity.series_title_parts('Колесо времени - 01. Око мира'), {'series': 'Колесо времени', 'number': '1', 'title': 'Око мира'})
+        self.assertEqual(local_identity.series_title_parts('Робин Хобб - Сага о Видящих 2. Королевский убийца', 'Робин Хобб'),
+                         {'series': 'Сага о Видящих', 'number': '2', 'title': 'Королевский убийца'})
 
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
-        # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before.
+        # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before (since
+        # ruling 41 with the series and number split out of the title).
         for folder, names, tags in (('Червь', ['Червь 1. Созревание.m4b'], dict(title='Червь 1. Созревание', artist='Джон МакКрэй', album='Червь 1. Созревание')),
                                     ('Wheel of Time\\Колесо времени - 01. Око мира', ['Джордан Роберт (2013) - Колесо времени - 01. Око мира.m4b'],
                                      dict(title='Колесо времени - 01. Око мира', artist='Джордан Роберт', album='Колесо времени - 01. Око мира')),
