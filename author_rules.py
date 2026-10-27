@@ -26,6 +26,7 @@ import uuid
 from pathlib import Path
 
 KINDS = ('same_as', 'not_author', 'collection', 'keep')
+APP_RETRACTION = 'app'  # 0.22.3: the actor of a retraction the app writes when the Approve carrying an answer is refused
 RETRACTED = 'none'  # the kind a retraction takes among the rules (Rules): newest for its credit and scope, it decides nothing
 SEED_SOURCE = 'Sergei 2026-10-24'
 SEED_QUESTION = 'Team/Docs/BooksArranger_AuthorRulings_2026-10-24.md'
@@ -213,7 +214,8 @@ class Rules:
         """0.22.3 (Judy's question 1, its default): the newest rule for this credit is a Take back, so research asks Sergei
         once (ruling 39's question) instead of looking the name up online again and learning the same match."""
         row = self._rule(name, folder, KINDS + (RETRACTED,))
-        return bool(row and row['kind'] == RETRACTED)
+        # The app's own retraction of a refused Approve's answer (actor 'app') is no Take back: it only undoes that press.
+        return bool(row and row['kind'] == RETRACTED and row.get('actor') != APP_RETRACTION)
 
     def keep(self, name, folder=''):
         row = self.rule(name, folder)

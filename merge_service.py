@@ -2865,10 +2865,12 @@ class MergeService:
             if hasattr(automatic,'request_start'):automatic.request_start()
         self.invalidate_status()
 
-    def answer_same_author(self,id,revision,choice):
+    def answer_same_author(self,id,revision,choice,press=None):
         """Ruling 12: Sergei's answer to this book's "Same author?" question becomes a lasting rule (same: the new name
         files under the existing author; different: the new name is a separate author, never asked again). Returns the
-        author to file this book under. Only an explicit choice teaches a rule."""
+        author to file this book under. Only an explicit choice teaches a rule. press (the Approve carrying the answer,
+        0.22.3): the rule's id is recorded there and his other books are not requeued yet; the Approve takes the rule
+        back if it is refused, and requeues them once it is accepted."""
         import author_rules
         if choice not in ('same','different'):raise ValueError('Choose Same author or Different author')
         row=self.reviews._row('Audiobooks',id,revision)
@@ -2878,9 +2880,10 @@ class MergeService:
         title=(((question.get('fields') or {}).get('title') or {}).get('proposal') or row.get('title_clue') or '')
         with connect(self.inventory.database) as db:
             author_rules.setup(db)
-            if choice=='same':author_rules.append(db,'same_as',question['new'],target=question['existing'],actor='user',source='Sergei (Same author?)',question=title)
-            else:author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
-        self._continue_after_rule(skip=id)
+            if choice=='same':rule=author_rules.append(db,'same_as',question['new'],target=question['existing'],actor='user',source='Sergei (Same author?)',question=title)
+            else:rule=author_rules.append(db,'keep',question['new'],actor='user',source='Sergei (Same author?)',question=title)
+        if press is not None:press['rule_id']=rule
+        else:self._continue_after_rule(skip=id)
         return question['existing'] if choice=='same' else question['new']
 
     def _english_spelling_answer(self,id,revision,author):
@@ -2986,11 +2989,32 @@ class MergeService:
             raise
 
     def _approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None):
+        # 0.22.3 (Sergei 2026-10-27; the m7 pattern): his Same author? answer is saved before the approval is built, because
+        # the approval files the book by that rule, and taken back if this Approve is refused (the path changed, the name is
+        # taken, a safety hold, closing); his other books are requeued only once it is accepted.
+        press={}
+        try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
+        except BaseException:
+            if press.get('rule_id'):self._drop_answer_rule(press['rule_id'])
+            raise
+        if press.get('rule_id'):self._continue_after_rule(skip=id)
+        return answer
+
+    def _drop_answer_rule(self,rule_id):
+        """The rules are append-only: the refused press's answer is retracted by the app (actor 'app'), so it decides nothing,
+        as before the press, and is never read as Sergei's Take back. A newer rule meanwhile keeps the newer rule."""
+        import author_rules
+        try:
+            with connect(self.inventory.database) as db:author_rules.retract(db,rule_id,actor=author_rules.APP_RETRACTION,source='Approve refused; the answer it carried is not kept')
+        except ValueError:pass
+        self.__dict__.pop('_needs_cache',None)
+
+    def _approve_once(self,id,revision,title,author,without_missing,choice,path,names,press):
         import datetime
         if self.draining:raise ValueError('Books Arranger is closing. Nothing was changed.')
         chosen=None
         if choice is not None:
-            chosen=self.answer_same_author(id,revision,choice)
+            chosen=self.answer_same_author(id,revision,choice,press=press)
             if author is not None:chosen=None
         # Senua's 0.22.2 review, m7: the English-spelling answer is planned now and saved only once this Approve is accepted
         # (below); a refused Approve (the path changed, the name is taken, a safety hold) leaves no rule and requeues nothing.

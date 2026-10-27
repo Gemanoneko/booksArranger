@@ -183,6 +183,30 @@ class ReviewFindingsTests(ApproveFixture):
         with connect(self.inv.database) as db:entered=manual_metadata.records(db,approved['row'])
         self.assertEqual([e for e in entered if 'canonical_author' in (e.get('values') or {})],[],'his answer is a rule, not a typed value')
 
+    def test_a_refused_approve_keeps_no_same_author_answer(self):
+        # 0.22.3 (Sergei 2026-10-27; the m7 pattern): the answer's rule was written, and his other books requeued, before
+        # the Approve could be refused; the refusal left the rule in force.
+        import author_rules
+        self.two_files('Часы','Dean Koonts')
+        row=self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Koontz Dean',actor='user',source='test')  # an author the library has
+        result=self.research(row)
+        self.assertEqual((result['ask']['kind'],result['ask']['existing']),('same_author','Koontz Dean'),'positive control: asked')
+        self.service.automatic._record(row,'Held',dict(result,until_change=True),None)
+        def answers():
+            # The rule in force for the credit (the rules are append-only: a refused press's answer is retracted by the app).
+            rules=author_rules.load(self.inv.database);row=rules.rule('Dean Koonts')
+            return [] if row is None or row['kind']==author_rules.RETRACTED else [(row['kind'],row['target'])]
+        with self.assertRaisesRegex(ValueError,'Destination changed since it was shown'):
+            self.service.approve_book(row['id'],row['revision'],choice='same',path='Elsewhere\\Часы.m4b')
+        self.assertEqual(answers(),[],'no rule from a refused Approve')
+        self.assertFalse(author_rules.load(self.inv.database).taken_back('Dean Koonts'),'the undo by the app is no Take back of his')
+        self.assertEqual(self.research(row)['ask']['kind'],'same_author','still asked')
+        self.service.approve_book(row['id'],row['revision'],choice='same');self.wait()
+        self.assertEqual(answers(),[('same_as','Koontz Dean')],'the accepted Approve keeps his answer')
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['manifest']['metadata']['canonical_author'],'Koontz Dean')
+
     def test_m4_closing_the_app_stops_an_approve_in_progress(self):
         from unittest import mock
         import audio_pipeline
