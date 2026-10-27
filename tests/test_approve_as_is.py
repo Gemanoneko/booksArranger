@@ -224,6 +224,51 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean','his answer is kept')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
 
+    def queued_press(self,interrupt):
+        """Senua's 0.22.3 review, M4: an Approve carrying all three answers (Same author?, the English spelling and Edit
+        names), with interrupt() run in approve_automatic right after the job is queued. Returns the answer and the row."""
+        from unittest import mock
+        import author_rules
+        self.two_files('Часы','Dean Koonts')
+        row=self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Koontz Dean',actor='user',source='test')
+        result=self.research(row);self.service.automatic._record(row,'Held',dict(result,until_change=True),None)
+        self.assertEqual(result['ask']['kind'],'same_author','positive control: asked')
+        spelling={'kind':'same_as','credit':'Лев Гроссман','target':'Grossman Lev','title':'Часы'}
+        real=self.service.jobs.enqueue
+        def enqueue(*args,**kwargs):
+            job=real(*args,**kwargs);interrupt();return job
+        with mock.patch.object(self.service,'_english_spelling_answer',return_value=spelling),mock.patch.object(self.service.jobs,'enqueue',enqueue):
+            approved=self.service.approve_book(row['id'],row['revision'],choice='same',names={'series':'Часовщики','number':'2'})
+        return approved,row
+    def assert_kept(self,approved,row):
+        import author_rules,entered_names
+        jobs=self.service.jobs.status()['jobs']
+        self.assertEqual([(j['job_id'],j['state']) for j in jobs],[(approved['job_id'],'pending')],'the job is queued')
+        rules=author_rules.load(self.inv.database)
+        self.assertEqual(rules.same_as('Dean Koonts'),'Koontz Dean','his Same author? answer is kept')
+        self.assertEqual(rules.same_as('Лев Гроссман'),'Grossman Lev','his English spelling is saved')
+        current=self.service.reviews._row('Audiobooks',row['id'])
+        self.assertEqual(entered_names.book_values(self.inv.database,current).get('series'),'Часовщики','his names stay saved')
+        self.assertEqual(jobs[0]['manifest']['metadata']['canonical_author'],'Koontz Dean')
+
+    def test_m4_an_approve_queued_while_pause_settles_is_accepted_and_keeps_every_answer(self):
+        # Pause still reaching the queue checkpoints (_pause_depth 1): resume raised StartRefused after the job was queued,
+        # the row said the Approve was refused and the Same author? answer was taken back.
+        def settling():self.service._pause_depth=1
+        approved,row=self.queued_press(settling)
+        self.assertTrue(approved['job_id'])
+        self.assert_kept(approved,row)
+        self.service._pause_depth=0;self.service.resume(recheck=False);self.wait()
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed','Start runs it once Pause settles')
+
+    def test_m4_quit_arriving_just_after_the_job_is_queued_reports_the_approve_accepted(self):
+        # drain() sets the press's stop: "Books Arranger is closing. The book was not approved." for a queued book.
+        approved,row=self.queued_press(lambda:self.service.drain())
+        self.assertTrue(approved['job_id'])
+        self.assert_kept(approved,row)
+
     def test_m4_closing_the_app_stops_an_approve_in_progress(self):
         from unittest import mock
         import audio_pipeline

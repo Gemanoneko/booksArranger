@@ -2985,21 +2985,24 @@ class MergeService:
         read,scope,now,_=self._names_state(row,root,research)
         entries=entered_names.plan(row,values,read,scope,now)
         press=entered_names.save(self.inventory.database,row,entries) if entries else ''
-        try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values)
+        approval={}
+        try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values,press=approval)
         except BaseException as error:
+            if approval.get('accepted'):raise  # queued (M4): the job carries his names; they stay
             if press and (self.draining or self.__dict__.get('_closing')):
                 # Ruling 35: closing is no reason to lose his input; the names stay saved for the next session.
                 raise ValueError('Books Arranger is closing. Your names are saved; approve again after it restarts.') from error
             if press:self._names_take_back(press)
             raise
 
-    def _approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None):
+    def _approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None,press=None):
         # 0.22.3 (Sergei 2026-10-27; the m7 pattern): his Same author? answer is saved before the approval is built, because
         # the approval files the book by that rule, and taken back if this Approve is refused (the path changed, the name is
         # taken, a safety hold, closing); his other books are requeued only once it is accepted.
-        # Senua's 0.22.3 review, m1: the undo covers only the refusal; once approve_automatic has queued the job the press
-        # is accepted (press['accepted']), and nothing after it takes the answer back or reports a failure.
-        press={}
+        # Senua's 0.22.3 review, m1 and M4: the undo covers only the refusal. approve_automatic marks the press accepted
+        # (press['accepted']) the moment it queues the job; what raises after that inside it (the row read, the stop check,
+        # starting the queue) or after it (the extras) neither reports a refusal nor takes an answer or a name back.
+        press={} if press is None else press
         try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
         except BaseException:
             if press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'])
@@ -3063,8 +3066,14 @@ class MergeService:
         # Senua's 0.22.0 review, m4: closing or draining the app stops a press still checking the files (hashes, probes).
         stop=threading.Event();presses=self.__dict__.setdefault('_approve_stops',set());presses.add(stop)
         if self.draining or self.__dict__.get('_closing'):stop.set()
-        try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include)
-        except InterruptedError:raise ValueError('Books Arranger is closing. The book was not approved.') from None
+        try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include,queued=press)
+        except Exception as error:
+            # Senua's 0.22.3 review, M4: once the job is queued the Approve is accepted. Pause still settling (Start refused),
+            # Quit arriving (the press's stop) or a failed row read leave the job queued: it is never reported as refused.
+            if not press.get('accepted'):
+                if isinstance(error,InterruptedError):raise ValueError('Books Arranger is closing. The book was not approved.') from None
+                raise
+            fresh,job=self._queued_row(id),press['job_id']
         finally:presses.discard(stop)
         press['accepted']=True
         # The book is approved: his English-spelling answer becomes his rule for the author (m7). A failure to save it never
@@ -3075,13 +3084,23 @@ class MergeService:
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
         return {'row':fresh,'job_id':job}|self._press_after(id,None,destination=False)
 
+    def _queued_row(self,id):
+        """The queued book's row for the Approve's answer (M4); None when it can't be read (the answer leaves it out)."""
+        try:return self.reviews.enrich(self.reviews._row('Audiobooks',id))
+        except Exception:pass
+        try:return self.reviews._row('Audiobooks',id)
+        except Exception:return None
+
     # Sergei's Approve overrides every identity and confidence hold (ruling 6b); these source-gate reasons are safety and
     # stay: unreadable or missing files, an audio format with no encoding decision, a changed collection binding.
     APPROVAL_SAFETY_REASONS=('Source files unavailable or unreadable','Audio format needs an encoding decision','Collection source/component binding changed')
 
     @operation
-    def approve_automatic(self,row,result,stop,client,approved_by=None,include=None):
+    def approve_automatic(self,row,result,stop,client,approved_by=None,include=None,queued=None):
         """Private evidence-gated path. HTTP cannot submit an automatic approval.
+
+        queued (Sergei's Approve, Senua's 0.22.3 review, M4): a dict marked accepted, with the job id, as soon as the job is
+        queued; what raises after that (the row read, the stop check, starting the queue) leaves the job queued.
 
         approved_by (Sergei's Approve, rulings 6a, 6b and 11a; only approve_book passes it): {'actor':'user','at',
         'values','typed','files'}. His approval is the identity: open metadata questions, the local-identity re-check,
@@ -3290,6 +3309,8 @@ class MergeService:
                                 approved['automatic_approval']={'matcher_version':VERSION,'work_id':result['work']['id'],'sources':result['sources'],'approved_utc':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
                                 # Queue insertion and final approval become durable together.
                                 job=self.jobs.enqueue(manifest,approval_context=(fresh['id'],fresh['revision'],context,approved))
+                                # Senua's 0.22.3 review, M4: Sergei's Approve is accepted the moment its job is queued.
+                                if queued is not None:queued.update(accepted=True,job_id=job)
                                 fresh=self.reviews.enrich(self.reviews._row('Audiobooks',fresh['id'],fresh['revision']))
                             except BaseException:
                                 if not self.candidate_status(fresh['id']):
