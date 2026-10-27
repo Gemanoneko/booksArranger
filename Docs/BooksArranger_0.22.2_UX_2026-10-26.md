@@ -190,6 +190,8 @@ New strings use "…". Accessible names start with the visible label: "Edit name
 
 ## 4. Waiting for the original title (ruling 29)
 
+> **Retired by ruling 38 (Sergei 2026-10-27), Ender's note.** There is no waiting state: a translation is filed under the English original title research has, else at once under the title it has. The status, hint, "If none is found, goes to" label, Approve tooltip, the editor's title help, the "Saved. The title is used as entered." line and the fact's "Waiting for an English title." are removed from the page. Nothing replaces them (no row is left in that state), so no new copy is needed. The details panel's "Original title" fact keeps its other three values (the English title, "Not found. Filed under the Russian title.", "Entered by you."); research now records them.
+
 ```
 [ ] Призрак дома на холме  ·  Shirley Jackson  ·  1 audio file
     Waiting for the original title                           [ Approve ] [ Edit names ]

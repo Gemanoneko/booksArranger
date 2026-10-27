@@ -1149,7 +1149,14 @@ class PublicResearch:
         local_script=local_identity.script(author)
         names=[author]
         name_source=''
-        if catalog and language:
+        # Futaba's 0.22.2 QA, M-1 (rulings 6a and 33): an author Sergei typed or picked on the row ("Entered by you",
+        # settled()) is his answer. Its spelling and script decide the folder: «Марченко Илья» chosen for the credit
+        # "Ilya Marchenko" files in Cyrillic. Neither a catalog nor the library's other spellings replace it; only the
+        # order is the library's (surname first, ruling 3). His same_as rules were applied before (settled()).
+        typed_author=any(source.get('kind')=='entered by you' for source in fields['author'].get('sources') or ())
+        if typed_author:
+            pass
+        elif catalog and language:
             names=[catalog['author_native'] if language=='ru' else catalog['author_latin'] or catalog['author_native']]
             name_source=catalog['source_url']
         elif filled.get('author_full'):
@@ -1181,7 +1188,12 @@ class PublicResearch:
                 question['fields']={'title':{'proposal':title,'basis':fields['title'].get('basis','')},'author':{'proposal':question['new'] if '_' in names[0] else names[0],'basis':fields['author'].get('basis','')}}
                 return result|{'reasons':[local_identity.ASK_REASONS['same_author']],'ask':question,'identity_hold':{'kind':'same_author','detail':''},'wait':None,
                                'rules_generation':rules.generation if rules else ''}
-        if not reasons and names[0]!=NO_AUTHOR and not fields['author'].get('rule'):
+        if not reasons and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and typed_author:
+            # M-1: his spelling, surname first. (The vote below took the library's Latin "Ilya Marchenko" over it.)
+            chosen,order=local_identity.surname_first(names[0])
+            spelling={'chosen':chosen,'spelling':names[0],'why':'entered by you (rulings 6a and 33): your spelling decides the folder','order':order,'counts':[[names[0],1]]}
+            names=[chosen]
+        elif not reasons and names[0]!=NO_AUTHOR and not fields['author'].get('rule'):
             # Ruling 3 (Sergei 2026-10-13): one canonical spelling per author across the library.
             canonical,spelling=local_identity.canonical_author(names[0],authors+names,index,language)
             if spelling['spelling']!=names[0] or canonical!=names[0]:
@@ -1235,36 +1247,22 @@ class PublicResearch:
             return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
         original=None
-        if one_source and not reasons and not sergei and not part and not language and names[0]!=NO_AUTHOR and original_titles.translation(preferred,names[0]):
-            # Ruling 29 (Sergei 2026-10-26): a translation with only its Russian title waits for its English original title
-            # (the background pass asks); if none is found it converts under the Russian title. Sergei's Approve, or the
-            # English title he types, ends the wait (he is a source: state entered or approved, above).
-            original=original_titles.entry(self.client.database,preferred,names[0])
-            if original is None or original['state'] not in original_titles.FINAL:
-                original_titles.want(self.client.database,row.get('id',''),preferred,names[0])
-                now=getattr(self.client,'clock',time.time)()
-                wait={'source':'original_title','reason':original_titles.WAIT_REASON,'retry_at':now+original_titles.RESEARCH_AGAIN,'kind':'original_title','scope':'candidate',
-                      'title':preferred,'author':names[0]}
-                return result|{'reasons':[original_titles.WAIT_REASON],'wait':wait,'original_title':{'state':'waiting','title':''},
-                               'rules_generation':rules.generation if rules else ''}
-            if original['state']=='found':
-                russian=preferred;preferred=original['record']['title']
-                if russian not in titles:titles.append(russian)
-                if preferred not in titles:titles.insert(0,preferred)
-                work.update(titles=titles,original_title=preferred,original_language=original['record'].get('language') or 'en')
-                latin=text(original['record'].get('author_latin'))
-                if latin and local_identity.script(names[0])=='cyrillic' and local_identity.script(latin)=='latin' and not fields['author'].get('rule'):
-                    # «Голиаф» (Sergei 2026-10-26; rulings 3 and 22): an author writing in English is filed under the English
-                    # spelling of the name the same answer gives ("Westerfeld Scott", never «Вестерфельд Скотт»).
-                    latin=local_identity.surname_first(latin)[0]
-                    if latin not in authors:authors.append(latin)
-                    names=[latin];work['author_aliases']=author_variants(authors)
+        if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and language!='ru':
+            # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait): a translation is filed under the English original
+            # title research has (the research cache's catalog answer: preferred, above), else right away under the title
+            # it has. It never waits; the rename pass can apply the English title later (ruling 21). The author keeps the
+            # folder language rule (canonical_author, above: the English spelling when the library or the catalog has
+            # one). Recorded for the details panel's "Original title" fact (Judy 0.22.2 section 4).
+            if language=='en' and local_identity.script(title)=='cyrillic' and local_identity.script(preferred)=='latin':
+                original={'state':'found','title':preferred}
+            elif original_titles.translation(preferred,names[0]):
+                original={'state':'none','title':''}
         result['work']=work
-        if original is not None:result['original_title']={'state':original['state'],'title':original['record'].get('title','') if original['state']=='found' else ''}
+        if original is not None:result['original_title']=original
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
         if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
-        if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 29: the details panel's fact
+        if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 38: the details panel's fact
         if spelling:facts['author_spelling']=spelling
         # background: the gaps the background pass fills later (gap_fill), with what it asks the sources about. Series
         # positions are series backfill's (it looks every finished book without a series up and renames it in Sorted).

@@ -155,6 +155,20 @@ class LatinGivenSurnameTests(Base):
         self.assertFalse(result['reasons'], result.get('ask'))
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Марченко Илья\\Звезда - Марченко Илья.m4b')
 
+    def test_m1_his_answer_to_the_spelling_question_decides_the_folder(self):
+        # Futaba's 0.22.2 QA, M-1 (rulings 6a and 33): choosing «Марченко Илья» for the credit "Ilya Marchenko" filed the
+        # book under "Marchenko Ilya": the library's Latin spelling won the vote over his answer.
+        rows = [file_row('Unsorted\\Ilya Marchenko - Zvezda.m4b', title='Звезда', artist='Ilya Marchenko', album='Звезда')]
+        row = next(iter(self.catalog(rows).values()))
+        self.assertEqual(self.lookup(row)['ask']['why'], 'name_language', 'positive control: the row asks')
+        for typed, folder in (('Марченко Илья', 'Марченко Илья'), ('Илья Марченко', 'Марченко Илья'), ('Ilya Marchenko', 'Marchenko Ilya'), ('Marchenko Ilya', 'Marchenko Ilya')):
+            with self.subTest(typed=typed):
+                result = self.research.approved(row, ROOT, author=typed)
+                self.assertFalse(result['reasons'], result['reasons'])
+                self.assertEqual(self.goes_to(row, result), SORTED + '\\%s\\Звезда - %s.m4b' % (folder, folder))
+        # Control: an approval without a typed author still takes the library's spelling (one person, one folder).
+        self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT)), SORTED + '\\Marchenko Ilya\\Звезда - Marchenko Ilya.m4b')
+
     def test_an_unknown_writing_language_is_asked_with_both_spellings(self):
         rows = [file_row('Unsorted\\Ilya Marchenko - Zvezda.m4b', title='Звезда', artist='Ilya Marchenko', album='Звезда')]
         row = next(iter(self.catalog(rows).values()))
@@ -175,57 +189,41 @@ if __name__ == '__main__':
     unittest.main()
 
 
-class OriginalTitleWaitTests(Base):
-    """Ruling 29 (Sergei 2026-10-26): a translation with only its Russian title waits for its English original title; if
-    none is found it converts under the Russian title; one written in Russian converts now."""
+class TranslationNoWaitTests(Base):
+    """Ruling 38 (Sergei 2026-10-27; it replaces the waiting part of ruling 29): a translation with only its Russian title
+    never waits. Research uses the English original title when it has it (the research cache's catalog answer); else
+    the book converts right away under the title it has, its author folder English for a non-Russian author. The
+    background pass still asks for the English title once it is converted (the rename pass applies it later)."""
     JACK = [file_row('Roger Zelazny\\Джек из Тени.m4b', album='Джек из Тени', artist='Роджер Желязны', title='Джек из Тени', album_artist='Роджер Желязны')]
+    CATALOG = {'language': 'en', 'original_title': 'Jack of Shadows', 'title_native': 'Джек из Тени', 'author_native': 'Роджер Желязны',
+               'author_latin': 'Roger Zelazny', 'source_url': 'https://fantlab.ru/work1'}
 
-    def test_a_translation_waits_then_converts_under_the_english_title_or_the_russian_one(self):
-        import original_titles
+    def test_a_translation_with_no_english_title_converts_now_under_its_title_in_the_english_author_folder(self):
         row = next(iter(self.catalog(self.JACK).values()))
         result = self.lookup(row)
-        self.assertEqual(result['reasons'], ['Waiting for the original title'])
-        self.assertEqual(result['wait']['kind'], 'original_title', 'a wait, retried; not a question on the to-do list')
-        self.assertNotIn('ask', result)
-        database = self.research.client.database
-        self.assertEqual(original_titles.entry(database, 'Джек из Тени', 'Zelazny Roger')['state'], 'waiting', 'the background pass asks')
-        original_titles.record(database, 'Джек из Тени', 'Zelazny Roger', 'found', {'title': 'Jack of Shadows', 'language': 'en'})
-        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], 'no "Waiting for the original title"')
+        self.assertFalse(result.get('wait'), 'no wait of any kind')
+        self.assertEqual(result['review']['title'], 'Джек из Тени')
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Zelazny Roger\\Джек из Тени - Zelazny Roger.m4b', 'the author folder stays English')
+        self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'none', 'title': ''}, 'the details panel: not found, filed under its title')
+        self.assertIn('original_title', result['metadata_facts']['gap_search']['background'], 'asked in the background once converted (the rename pass, later)')
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='original_titles'").fetchone(), 'research writes nothing to wait on')
+
+    def test_an_english_title_the_research_has_is_used(self):
+        row = next(iter(self.catalog(self.JACK).values()))
+        with patch.object(self.research, '_gap_fill', return_value={'catalog': dict(self.CATALOG), 'closed': [], 'unfilled': []}):
+            result = self.lookup(row)
         self.assertEqual(result['reasons'], [])
-        self.assertEqual(result['review']['title'], 'Jack of Shadows')
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Zelazny Roger\\Jack of Shadows - Zelazny Roger.m4b')
         self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Jack of Shadows'})
-        original_titles.record(database, 'Джек из Тени', 'Zelazny Roger', 'none', {'language': 'pl'})
-        result = self.lookup(row)
-        self.assertEqual((result['reasons'], result['review']['title']), ([], 'Джек из Тени'), 'none found: the Russian title')
-        self.assertEqual(result['metadata_facts']['original_title_lookup']['state'], 'none')
 
-    def test_sergeis_approve_ends_the_wait_and_a_russian_author_never_waits(self):
+    def test_sergeis_approve_files_it_as_shown_and_a_russian_author_converts_with_no_lookup_fact(self):
         row = next(iter(self.catalog(self.JACK).values()))
         approved = self.research.approved(row, ROOT)
-        self.assertEqual(approved['reasons'], [], 'Approve files it as shown, no wait')
+        self.assertEqual(approved['reasons'], [], 'Approve files it as shown')
         self.assertEqual(approved['review']['title'], 'Джек из Тени')
         row = next(iter(self.catalog([file_row('Лукьяненко Сергей\\Лабиринт отражений.m4b', title='Лабиринт отражений', artist='Сергей Лукьяненко', album='Лабиринт отражений')]).values()))
-        self.assertEqual(self.lookup(row)['reasons'], [], 'written in Russian: converts now')
-
-    def test_the_background_pass_asks_once_and_records_the_answer(self):
-        import gap_fill, original_titles
-        self.catalog([])
-        database = self.research.client.database
-        answers = {'Джек из Тени': ({'catalog': {'language': 'en', 'original_title': 'Jack of Shadows', 'source_url': 'https://fantlab.ru/work1'}}, {}),
-                   'Лабиринт': ({'catalog': {'language': 'ru', 'original_title': 'Лабиринт'}}, {}),
-                   'Сказка': ({'wait': {'retry_at': 0, 'reason': 'closed'}}, {}), 'Ничто': ({}, {})}
-        asked = []
-        research = type('R', (), {'fill_gaps': lambda self, ask, gaps, stop, budget: (asked.append((ask['title'], gaps, budget['lane'])) or answers[ask['title']])})()
-        requeued = []
-        merge = type('M', (), {})(); merge.inventory = type('I', (), {'database': database})(); merge.automatic = type('A', (), {'requeue': lambda self, identity: requeued.append(identity)})()
-        for title in answers:
-            original_titles.want(database, 'id-' + title, title, 'Writer Some')
-        gap_fill.GapFill(merge, research).original_titles()
-        states = {title: original_titles.entry(database, title, 'Writer Some')['state'] for title in answers}
-        self.assertEqual(states, {'Джек из Тени': 'found', 'Лабиринт': 'russian', 'Сказка': 'deferred', 'Ничто': 'none'})
-        self.assertEqual(original_titles.entry(database, 'Джек из Тени', 'Writer Some')['record']['title'], 'Jack of Shadows')
-        self.assertEqual({lane for _, _, lane in asked}, {'gap'}); self.assertEqual({gaps for _, gaps, _ in asked}, {('original_title',)})
-        self.assertEqual(sorted(requeued), sorted(['id-Ничто', 'id-Джек из Тени', 'id-Лабиринт']), 'each final answer puts its book back on the run')
-        asked.clear(); gap_fill.GapFill(merge, research).original_titles()
-        self.assertEqual([title for title, _, _ in asked], [], 'asked once; the deferred one waits for its source')
+        result = self.lookup(row)
+        self.assertEqual(result['reasons'], [], 'written in Russian: converts now')
+        self.assertNotIn('original_title_lookup', result['metadata_facts'], 'no translation, no "Original title" fact')

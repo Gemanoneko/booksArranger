@@ -2762,10 +2762,6 @@ class MergeService:
             outcome='replanned'
         elif job['state']=='retry_queued':outcome='replanned'  # the retry's child is checked against these names
         elif job['state']=='ready':outcome='ready_only'
-        automatic=getattr(self,'automatic',None)
-        record=automatic.candidate(row) if automatic is not None and hasattr(automatic,'candidate') else None
-        if job['state']=='none' and isinstance(record,dict) and (record.get('wait') or {}).get('kind')=='original_title' and hasattr(automatic,'requeue'):
-            automatic.requeue(row['id'])  # ruling 29: his title ends the wait (research reads it as entered)
         self.__dict__.pop('_needs_cache',None)
         self.invalidate_status()
         return {'outcome':outcome,'applies':applies,'job':job['state'],'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row))}

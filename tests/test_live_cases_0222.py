@@ -99,8 +99,8 @@ class LiveCaseTests(Base):
         self.assertFalse(result['review'].get('universe'))
         self.assertTrue(self.goes_to(row, result).startswith(SORTED + '\\Barker Clive\\Books of Blood\\Books of Blood - 3 - '), self.goes_to(row, result))
 
-    def test_goliath_disc_3_of_3_is_its_place_in_the_trilogy_and_it_waits_for_its_english_title(self):
-        import original_titles
+    def test_goliath_disc_3_of_3_is_its_place_in_the_trilogy_and_it_converts_without_waiting(self):
+        from unittest.mock import patch
         rows = [file_row('Steampunk\\Голиаф.m4b', title='Голиаф', album='Голиаф', artist='Скотт Вестерфельд', composer='Cubear', track='1/1', disc='3/3',
                          genre='Фантастика, Стимпанк', sort_album='Левиафан. Книга 3'),
                 file_row('Steampunk\\Левиафан.m4b', title='Левиафан', album='Левиафан', artist='Вестерфельд Скотт', album_artist='Вестерфельд Скотт', track='1',
@@ -108,14 +108,19 @@ class LiveCaseTests(Base):
         row = self.catalog(rows)[ROOT + '\\Steampunk\\Голиаф.m4b']
         result = self.lookup(row)
         self.assertNotIn('Source membership uncertain', result['reasons'], 'disc 3/3 is book 3 of the trilogy, no missing disc')
-        self.assertEqual(result['reasons'], ['Waiting for the original title'], 'an English author: a translation (ruling 29)')
-        database = self.research.client.database
-        waiting = original_titles.due(database)
-        self.assertEqual([(w['title'], w['author']) for w in waiting], [('Голиаф', 'Вестерфельд Скотт')])
-        original_titles.record(database, 'Голиаф', 'Вестерфельд Скотт', 'found', {'title': 'Goliath', 'language': 'en', 'author_latin': 'Scott Westerfeld'})
-        result = self.lookup(row)
+        # Ruling 38 (Sergei 2026-10-27): an English author's translation never waits for its English title.
+        self.assertEqual(result['reasons'], [], 'converts now')
+        self.assertEqual(result['metadata_facts']['original_title_lookup']['state'], 'none', 'a translation (Cyrillic credit, foreign first name)')
+        # No English spelling of the author anywhere (no Latin folder, no catalog answer): the credit's own spelling, as
+        # before ruling 29. Open for Sergei: ruling 38 says the author folder is English.
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Вестерфельд Скотт\\Голиаф - Вестерфельд Скотт.m4b')
+        catalog = {'language': 'en', 'original_title': 'Goliath', 'title_native': 'Голиаф', 'author_native': 'Скотт Вестерфельд', 'author_latin': 'Scott Westerfeld',
+                   'source_url': 'https://fantlab.ru/work2'}
+        with patch.object(self.research, '_gap_fill', return_value={'catalog': catalog, 'closed': [], 'unfilled': []}):
+            result = self.lookup(row)
         self.assertEqual(result['reasons'], [])
-        self.assertEqual(self.goes_to(row, result), SORTED + '\\Westerfeld Scott\\Goliath - Westerfeld Scott.m4b', 'was Вестерфельд Скотт\\Голиаф')
+        self.assertTrue(self.goes_to(row, result).startswith(SORTED + '\\Westerfeld Scott\\'), 'a catalog answer: the English title and spelling')
+        self.assertIn('Goliath - Westerfeld Scott.m4b', self.goes_to(row, result))
 
     def test_a_real_missing_disc_is_still_held(self):
         rows = [file_row('Unsorted\\Шторм.m4b', title='Шторм', album='Шторм', artist='Иван Петров', track='1/1', disc='2/3')]

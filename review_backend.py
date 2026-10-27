@@ -390,11 +390,6 @@ class CandidateReviewService:
         def approved_context(cid):
             saved=self.page_local.contexts.get(cid);ctx=saved['data'] if saved else {}
             return bool(not ctx.get('automatic_pending') and ctx.get('metadata_approved'))
-        def held_or_waiting(item):
-            # Judy 0.22.2 section 4: "Waiting for the original title" (ruling 29) is an automatic wait, not a to-do; it is
-            # listed under Held, beside the books held until they change.
-            import original_titles
-            return item['state']=='Held' or item['state']=='Waiting for source' and original_titles.WAIT_REASON in (item.get('reasons') or [])
         def group_of(cid):
             job=self.page_local.jobs.get(cid)
             if job:return (attention.get(job['job_id']) or {}).get('group','other')
@@ -415,7 +410,7 @@ class CandidateReviewService:
             elif status=='output_attention':ids={cid for cid in set(jobs)|set(needs) if attention_listed(cid) and group in (None,'all',group_of(cid))}
             elif status=='converted':ids=set(converted)
             elif status in ('approved','ready'):ids={cid for cid in self.page_local.contexts if approved_context(cid)}
-            elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if held_or_waiting(item)}
+            elif status=='held' and automatic is not None:ids={cid for cid,item in automatic.items() if item['state']=='Held'}
             elif status=='recording_review' and automatic is not None:ids={cid for cid,item in automatic.items() if item['duplicate_review']}|{cid for cid,saved in self.page_local.contexts.items() if saved['data'].get('duplicate_review')}
             elif status=='restarted':ids=set(restart)
         result=self.inventory.candidates('Audiobooks',limit if direct else 1000000,offset if direct else 0,search,status if direct else 'all',ids=ids) if ids is not None else \
@@ -435,7 +430,7 @@ class CandidateReviewService:
                 return bool(ctx.get('duplicate_review') or auto and auto.get('duplicate_review'))
             if status=='held':
                 auto=current_auto(row)
-                return bool(auto and held_or_waiting(auto))
+                return bool(auto and auto['state']=='Held')
             if status=='restarted':return row['id'] in restart
             if status=='review':return not approved
             if status=='approved':return approved
@@ -498,18 +493,6 @@ class CandidateReviewService:
                     # The shown page only: the question, its proposals and the destination (Judy's section 11).
                     try:row['ask']=self.jobs.ask_payload(row,needs[row['id']])
                     except (ValueError,OSError,sqlite3.Error) as error:row['ask']={'kind':needs[row['id']]['group'],'reasons':needs[row['id']]['reasons'],'fields':{},'candidates':[],'destination':{'path':'','taken':False,'reason':str(error)[:200]}}
-                elif ((row.get('automatic') or {}).get('wait') or {}).get('kind')=='original_title' and self.jobs and hasattr(self.jobs,'approval_preview'):
-                    # Judy 0.22.2 section 4 (ruling 29): "If none is found, goes to" what Approve would file now; shown rows only.
-                    import original_titles
-                    try:
-                        preview=self.jobs.approval_preview(row['id'],row['revision'])
-                        destination={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
-                        fields={'title':{'proposal':preview['title'],'basis':''},'author':{'proposal':preview['author'],'basis':''}}
-                    except (ValueError,OSError,sqlite3.Error) as error:
-                        destination={'path':'','absolute':'','taken':False,'reason':str(error)[:200]};fields={}
-                    row['original_title']={'state':'waiting','destination':destination}
-                    # The row's own Approve (rulings 6b and 29) through the to-do row's machinery; never in bulk.
-                    row['ask']={'kind':'original_title','why':'','reasons':[original_titles.WAIT_REASON],'fields':fields,'candidates':[],'destination':destination,'odd_name':True}
             self._names_lines(rows)
             import book_delete
             recheck=False

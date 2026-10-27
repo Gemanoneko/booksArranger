@@ -77,7 +77,7 @@ patterns.push('test_action_queue.py');  // 0.22.1: queued Retry, Repair and Dele
 patterns.push('test_identity_0222.py');  // 0.22.2: W17, W18, «Призрак дома на холме», «Джек из Тени», m-14, ruling 33
 patterns.push('test_catalog_busy.py');  // 0.22.2: a busy catalog never stops a run (cache reads never write, presync, busy is a wait)
 patterns.push('test_start_while_converting.py');  // 0.22.2: ruling 34, Start works while audiobooks convert; the scan waits
-patterns.push('test_original_title_wait.py');  // 0.22.2: ruling 29, a translation waits for its English original title
+patterns.push('test_original_title_wait.py');  // 0.22.2: ruling 38, a translation converts at once (it replaced ruling 29's wait)
 patterns.push('test_entered_names.py','test_live_cases_0222.py');  // 0.22.2: Edit names (lasting corrections, no job under old names); «1408», «11.22.63», «Голиаф»
 patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (no evidence asked for), ruling 35 (every press queues)
 const code=`import sys,unittest,json,pathlib,time

@@ -142,46 +142,12 @@ class GapFill:
     def run_pass(self):
         if self.research is None or not hasattr(self.research, 'fill_gaps'):
             return
-        self.original_titles()
         books = self.candidates()
         for index, (job_id, manifest) in enumerate(books):
             if self.stop.is_set():
                 return
             self.progress = {'title': (manifest.get('metadata') or {}).get('title', ''), 'done': index, 'total': len(books)}
             self.fill(job_id, manifest)
-
-    def original_titles(self):
-        """Ruling 29: the translations waiting for their English original title, asked first (before any finished book's
-        optional fields), each once, in this pass's lane. A final answer puts the book back on the automatic run, which
-        converts it under the English title (found) or the Russian one (none, or written in Russian)."""
-        import original_titles
-        for item in original_titles.due(self.database, self.clock):
-            if self.stop.is_set():
-                return
-            self.progress = {'title': item['title'], 'done': 0, 'total': 0}
-            now = self.clock()
-            try:
-                found, _ = self.research.fill_gaps({'title': item['title'], 'author': item['author'], 'partial': False}, ('original_title',), self.stop,
-                                                   {'remaining': BUDGET, 'lane': 'gap'})
-            except InterruptedError:
-                raise
-            except Exception as error:
-                original_titles.record(self.database, item['title'], item['author'], 'deferred',
-                                       {'next_attempt': now + PASS_WAIT, 'reason': (str(error) or type(error).__name__)[:300]})
-                continue
-            wait = found.get('wait')
-            if wait and not found.get('catalog'):
-                original_titles.record(self.database, item['title'], item['author'], 'deferred',
-                                       {'next_attempt': max(now + MIN_WAIT, float(wait.get('retry_at') or now + PASS_WAIT)), 'reason': str(wait.get('reason') or '')[:300]})
-                continue
-            state, value = original_titles.outcome(found)
-            original_titles.record(self.database, item['title'], item['author'], state, dict(value, asked=now))
-            automatic = getattr(self.merge, 'automatic', None)
-            if item.get('candidate_id') and automatic is not None and hasattr(automatic, 'requeue'):
-                try:
-                    automatic.requeue(item['candidate_id'])
-                except Exception:
-                    pass  # the run's own retry time reads the answer anyway (original_titles.RESEARCH_AGAIN)
 
     def fill(self, job_id, manifest):
         """Ask the sources about one book's background gaps and record the outcome: found, none, or deferred."""
