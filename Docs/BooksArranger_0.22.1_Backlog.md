@@ -123,4 +123,7 @@ These are Sergei's 0.22.0 feedback and the carried items. Collected by Jane; wor
 
 ## 0.22.3 (new feedback after the 0.22.2 freeze)
 
-- (empty)
+- **Senua M5:** a wrong online match can create a bad learned author rule (strict match makes it rare). Add a page list of learned author rules with "Take back" (Judy specs it; the `retract_author_rule` route exists but nothing uses it).
+- **Senua m7:** an author spelling from Approve is saved even when that Approve is refused.
+- **Gate:** per-worker deadline and worker count (workers at 81–88%).
+- **Futaba m-2:** with a cached FantLab record for a Cyrillic-only foreign author, the book gets its English title but a Cyrillic author folder (`Гроссман Лев\The Magicians`), and no author rule is learned. Ruling 39 says the folder should be English (Grossman Lev).

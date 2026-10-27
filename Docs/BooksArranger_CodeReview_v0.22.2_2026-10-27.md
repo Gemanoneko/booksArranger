@@ -7,16 +7,27 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-10-27
 Tool: Books Arranger (Electron / Python)
 Release: v0.22.2
-Commit range: d50a05f9606af8a2fc08f55684b1b14340700e51..7dcb4bc1c6217406c883c91bc87397630a9e2fe5 (tag v0.22.1 .. origin/main 7dcb4bc, 36 commits)
-Release source commit: 7dcb4bc1c6217406c883c91bc87397630a9e2fe5
-Release artifact manifest SHA256: 3b7d119897d2a1d422f93c3a54b7d4f8214c0bbc3231cc8b47269944e940128a
-Reviewed source: the main checkout at 7dcb4bc (clean, read only). No worktree was needed.
+Commit range: d50a05f9606af8a2fc08f55684b1b14340700e51..4b9fdba5ebf3a3825348e118b1b44918af9b9cca (tag v0.22.1 .. origin/main 4b9fdba, 42 commits: 36 reviewed in full up to 7dcb4bc, then the 6-commit delta 7dcb4bc..4b9fdba below)
+Release source commit: 4b9fdba5ebf3a3825348e118b1b44918af9b9cca
+Release artifact manifest SHA256: 9c7867859a47800b70c67844b66870bd4fe97b6cec5047bbc9b620497fe5c37d
+Reviewed source: the main checkout at 4b9fdba (clean, read only). No worktree was needed.
 Files changed: 101 files, +6613 / -538 (git diff --shortstat). Product code and scripts: 33 files, +3090 / -396. Tests: 62 files, +2850 / -139. Docs and CHANGELOG: 4 files, +670. package.json and package-lock.json: version only.
 Method: LEAN (ProcessRules § Lean verification). I read the diff. I ran only the targeted tests behind the Xtra question and two throwaway probes behind M1 and M2. No suite, no mutation sweep.
 Stand-down dimensions: none
 ```
 
-**Artifact pin (7dcb4bc).** I recomputed every value myself, read only, with the repo's own `release-contract.mjs` (`productTree`, `artifactContract`) and `release-flow.mjs` (`gitEntries`) from `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0222b`:
+**Artifact pin (4b9fdba, the final candidate).** I recomputed every value myself, read only, with the repo's own `release-contract.mjs` (`productTree`, `artifactContract`) and `release-flow.mjs` (`gitEntries`) from `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0222c`:
+- The manifest SHA-256 is `9c786785…5c37d`, over 57,747 bytes with no BOM. It matches the expected value.
+- `version` is 0.22.2, and `package.json` at 4b9fdba reads 0.22.2. `source_head` is 4b9fdba5ebf3…. `build_id` is 4f1680bc-4970-4273-aa32-41970cd702cf. `latest.yml` reads `version: 0.22.2`.
+- `product_digest` `9f79443e…67e33` equals `productTree(ls-tree -rz --full-tree 4b9fdba)`.
+- `artifactContract(manifest, {version: '0.22.2', productTree})` accepts the manifest: three artifacts; payload `backend_version` and `shell_version` 0.22.2; `verified` and `installer_equivalent` true.
+- Each artifact matches its manifest size and SHA-256:
+  - `Books-Arranger-Setup-0.22.2.exe`: 174,204,274 bytes, `e19fefe1fcf747ff0c7f72144f8d18dcc96e8a09f66a51ef97b69f744cb4f4ab`. This is the expected value.
+  - the `.blockmap`: 181,639 bytes.
+  - `latest.yml`: 360 bytes.
+- The `cand-0222c` checkout is at 4b9fdba with a clean tree.
+
+**Superseded artifact pin (7dcb4bc, kept as history).** I recomputed every value myself, read only, with the repo's own `release-contract.mjs` (`productTree`, `artifactContract`) and `release-flow.mjs` (`gitEntries`) from `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0222b`:
 - The manifest SHA-256 is `3b7d1198…40128a`, over 57,748 bytes with no BOM. It matches the expected value.
 - `version` is 0.22.2. `source_head` is 7dcb4bc1c621…. `build_id` is 6d611429-0003-4a2a-bfd3-d2f71cb7025c. `latest.yml` reads `version: 0.22.2`.
 - `product_digest` `1db4b4fe…6303e` equals `productTree(ls-tree -rz --full-tree 7dcb4bc)`.
@@ -26,6 +37,48 @@ Stand-down dimensions: none
   - the `.blockmap`: 181,654 bytes.
   - `latest.yml`: 360 bytes.
 - The `cand-0222b` checkout is at 7dcb4bc with a clean tree.
+
+---
+
+## Delta 7dcb4bc..4b9fdba
+
+Six commits: faf2172 (M1, M2), 7b554fd (M4), 311014a (Futaba M-1; ruling 38), 3ee505b (Futaba m-1), 647b720 (ruling 39), 4b9fdba (Judy's copy). 25 files, +866 / -334; product code 11 files. Method: LEAN. I read the whole product diff. I ran only the delta's targeted suites: `test_entered_names`, `test_ruling35`, `test_identity_0222`, `test_original_title_wait`, `test_live_cases_0222` (71 tests, OK), `update-controller.test.mjs` (30 pass) and `test_original_title_frontend.js` (PASS). Each new test has a negative control or a before/after case in it.
+
+**(1) M1, M2 and M4 are closed.**
+- **M1, closed.** `entered_names._same()` (line 63) compares casefolded text with digits kept. An empty value never matches. `_word_fix` refuses a change whose numbers differ ("Том1" to "Том2" stays a whole value). The `_live` slot key uses `_same` too. The tests cover «01» against «1408», "Книга 1" against "Книга 12", and the "Applies to n" count.
+- **M2, closed.** A field set back to the files' text now writes a `book` entry with scope `files` (`plan`, line 268). It is the newest entry for that slot, so no older value comes back. It also stops any fix from reaching that field of this book. It is never listed or "Entered by you". It also closes **m3**: a `files` entry is a live book row, so `_names_take_back` takes it back when the Approve is refused.
+- **M4, closed.** `ActionQueue.blocker(..., held)` returns `operation` for a queued scan while `merge_admissions > held`. `run_queued` passes `held=1` both under the control lock and in its `ValueError` path, because the worker holds its own admission there. The worker's pre-admission look (held 0) and `blocker_after` (after `_release`) are right too.
+- **M3** is closed by ruling 38 (the wait is gone; see 3).
+
+**(2) Ruling 39.**
+- **Never transliterates. Pass.** The name comes from a source only: FantLab `name_orig`, the Wikidata English label, or a Goodreads credit. Each is checked `script == 'latin'`. A CJK FantLab name with no Latin form fails that check and moves on to the next source. `surname_first` only reorders words. `compare_names` is used to match, never to make a name.
+- **Uses the per-site limits. Pass.** Every request goes through `self.client.json` or `self.client.read` with research's own `stop` and `budget`. A closed source or a spent budget (`ResearchWait`) counts as inconclusive. So do a busy catalog and malformed evidence (`EvidenceConflict` is a `ValueError`).
+- **Approve makes no request. Pass.** `approved()` sets the author state to `approved`, so `sergei` is true and the ruling 39 block (`not sergei`) never runs. `_answer_english_spelling` writes one local rule and calls `_continue_after_rule`, which only calls `requeue`. The only `research.lookup` caller is the automatic run thread.
+- **Can a wrong match make a bad lasting rule? Yes, but it takes a two-key match.**
+  - FantLab needs exactly one search hit by title and author, a work with exactly one author, and that author's name matching. Wikidata needs exactly one single-author work. Goodreads needs exactly one distinct Latin credit on results titled as this book.
+  - A false hit is a same-titled work by a homonymous author. A "true" hit can also give a spelling Sergei would not choose (a middle initial, for example).
+  - The rule is `same_as` for the credit, library-wide, actor `assistant`. Every not-yet-converted book of that credit then converts under it automatically, with no question.
+  - Already filed books are not moved. Only the automatic run calls `lookup`, and `_continue_after_rule` skips books with jobs.
+- **How is it undone? In practice, it isn't (M5).** The Brief names `retract_author_rule` as the undo. But no page calls `/api/author-rule/retract` (Brief, carried Minors: "no page uses it yet"; `web/app.js` has no caller). Sergei never sees a question for that author again. His only fix is Edit names on each book.
+- **No loop.** If `_learn_author`'s write is swallowed as busy, the rules generation does not change. `changed_for` is then false, and nothing is put back. The automatic lock is an `RLock`, so `requeue` from the run thread is safe.
+
+**(3) Ruling 38: no new indefinite wait. Pass.**
+- The `original_title` wait is removed, with its table code, gap-fill lane, wake, `requeue` hook, Held listing and page copy. Nothing in product code still refers to them; only `translation()` is left.
+- An inconclusive ruling 39 lookup returns an `author_unclear` ask with `wait: None`. That is a question with an Approve path, not a timed wait.
+- The M4 scan wait lasts only as long as other admissions, which are per request.
+- In the m-1 fix, Cancel after the park throws `cancelled`; the old engine restarts and the installer is never started. There is no `await` between that check and `phase: 'installing'`, so no late Cancel can slip in.
+- Note (Sergei's ruling, not a finding): when a source is closed, the book gets the question instead of a later retry.
+
+**(4) Nothing new deletes or moves a file wrongly. Pass.**
+- The product diff adds no unlink, rmtree, replace, move, rename or child process.
+- Futaba M-1 changes the destination only when Sergei typed or picked the author.
+- Ruling 39 changes the destination of unconverted books by design. When the rule is wrong, the cost is wrong folder names (M5), not lost or overwritten audio.
+
+**New findings in the delta**
+- **M5 [Major]** `public_research.py:1661-1672` (`_learn_author`) with `web_server.py:1153`. A learned ruling 39 rule has no undo Sergei can reach. A catalog spelling that is wrong, or that he would not choose, files every not-yet-converted book of that credit under it without asking. `retract_author_rule` exists only as an HTTP route that no page calls. Fix direction: list the learned author rules with a Take back control (Judy specs it). Or show the learned spelling with its source on the first book it filed.
+- **m7 [Minor]** `merge_service.py:2869-2890, 2962`. `_answer_english_spelling` saves Sergei's author rule and puts his other books back on the run before `_approval_result`. If that Approve is then refused (the path changed, or the destination is taken), the rule and the requeue stay. Edit names on the same Approve are taken back. His answer is probably still what he meant, so the impact is low.
+
+**Status of the earlier findings:** M1, M2, M3, M4 and m3 are closed. m1, m2, m4, m5 and m6 are still open (`action_queue.py:144` still reads "Only Retry, Repair and Delete book are queued").
 
 ---
 
@@ -144,17 +197,22 @@ I read every product file in the diff, with depth on the eight red-team question
 
 ## Verdict
 
+Open findings at 4b9fdba (the whole range, delta included):
 - Total Critical: 0
-- Total Major: 4
-- Total Minor: 6
+- Total Major: 1 (M5)
+- Total Minor: 6 (m1, m2, m4, m5, m6, m7)
+
+Closed in the delta: M1, M2, M3, M4 and m3.
 
 **Verdict:** RELEASE CLEAR
 
-No Critical finding, and the safety floor is intact. Nothing in the range deletes or moves a file outside the checks it already had. M1 is the finding most likely to hurt Sergei's library: wrong names, not lost audio, and "Applies to n books" shows it before Save. I recommend fixing it first in 0.22.3, or before shipping if Sergei prefers.
+No Critical finding, and the safety floor is intact. Nothing in the range deletes or moves a file outside the checks it already had. The artifact pin above is verified for 4b9fdba. M5 is the open finding most likely to touch Sergei's library: wrong author folder names, never lost audio. I recommend a Take back control for learned author rules in 0.22.3.
 
-| # | Sev | Dim | file:line | Finding | Fix direction |
+| # | Sev | Dim | file:line | Finding | Status / fix direction |
 |---|-----|-----|-----------|---------|---------------|
-| M1 | Major | 2 | `entered_names.py:56-58, 95` | A digit-blind `_norm` makes a whole-value fix rename the wrong books ("01" fix renames «1408»; "Книга 1" renames "Книга 12") | Exact casefolded comparison for whole values; never match an empty normalised value |
-| M2 | Major | 2 | `entered_names.py:78-88, 247-249` | Setting a field back to the files' value brings back an older correction; that press's fix stays live | Set-back retracts every book entry for the slot, or writes an explicit "files" entry |
-| M3 | Major | 2 | `public_research.py:1242`, `gap_fill.py:166-176` | A ruling 29 wait has no automatic fallback when no final answer ever arrives | Convert under the Russian title after N deferrals or an age limit |
-| M4 | Major | 5 | `web_server.py:459-466` | A queued scan start ignores other merge admissions, which the direct route refuses | Wait while `merge_admissions > 1` |
+| M1 | Major | 2 | `entered_names.py:56-58, 95` | A digit-blind `_norm` made a whole-value fix rename the wrong books | **Closed** in faf2172 (`_same`, numbers kept) |
+| M2 | Major | 2 | `entered_names.py:78-88, 247-249` | Setting a field back to the files' value brought back an older correction | **Closed** in faf2172 (a `files` book entry) |
+| M3 | Major | 2 | `public_research.py:1242`, `gap_fill.py:166-176` | A ruling 29 wait had no automatic fallback | **Closed** in 311014a (ruling 38: no wait) |
+| M4 | Major | 5 | `web_server.py:459-466` | A queued scan start ignored other merge admissions | **Closed** in 7b554fd (`blocker(held=1)`) |
+| M5 | Major | 5 | `public_research.py:1661-1672`, `web_server.py:1153` | A wrong or unwanted learned ruling 39 author rule files every unconverted book of that credit, and no page can take it back | A Take back list for learned author rules (Judy specs it) |
+| m7 | Minor | 5 | `merge_service.py:2869-2890, 2962` | The english-spelling rule is saved before the Approve that carries it can be refused | Save it after `_approval_result`, or take it back as names are |
