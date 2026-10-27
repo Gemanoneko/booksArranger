@@ -617,8 +617,7 @@ class OddNameTests(Base):
                   ('Перри Родан 001. Звездная пыль', ('Звездная пыль', 'Перри Родан', '1'), 'Иванов Петр\\Перри Родан\\Перри Родан - 1 - Звездная пыль - Иванов Петр.m4b'),
                   ('Хроники Амбера. Книга 1. Девять принцев Амбера', ('Девять принцев Амбера', 'Хроники Амбера', '1'), 'Иванов Петр\\Хроники Амбера\\Хроники Амбера - 1 - Девять принцев Амбера - Иванов Петр.m4b'),
                   ('Ведьмак 3: Кровь эльфов', ('Кровь эльфов', 'Ведьмак', '3'), None),
-                  ('Конан 005 - Час дракона', ('Час дракона', 'Конан', '5'), None),
-                  ('Черная книга 2. Возвращение', ('Возвращение', 'Черная книга', '2'), None))
+                  ('Конан 005 - Час дракона', ('Час дракона', 'Конан', '5'), None))
         for album, (title, series, number), path in splits:
             row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
             result = self.lookup(row)
@@ -626,9 +625,8 @@ class OddNameTests(Base):
             self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number), album)
             if path:
                 self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path, album)
-        for name, parts in (('Dune 2: Dune Messiah', {'series': 'Dune', 'number': '2', 'title': 'Dune Messiah'}),
-                            ('Star Wars Episode 4. A New Hope', {'series': 'Star Wars Episode', 'number': '4', 'title': 'A New Hope'})):
-            self.assertEqual(local_identity.series_title_parts(name), parts, name)
+        self.assertEqual(local_identity.series_title_parts('Dune 2: Dune Messiah'), {'series': 'Dune', 'number': '2', 'title': 'Dune Messiah'})
+        # Ruling 51: «Черная книга 2» and "Star Wars Episode 4" end their series name in a marker word: asked (M6 test).
         # The misfires m4 stopped stay unsplit: a code number files as it is, a part of one work is never a series book,
         # and a two-digit number before ":" ("Apollo 13: The Untold Story") may be the title's own: it is asked.
         for name in ('Война и мир. Том 1. Часть 2', 'Apollo 13: The Untold Story', 'Агент 007 - Казино Рояль'):
@@ -684,6 +682,36 @@ class OddNameTests(Base):
         self.assertEqual(local_identity.series_title_parts('Ересь Хоруса. Книга 2. Лживые боги'), {'series': 'Ересь Хоруса', 'number': '2', 'title': 'Лживые боги'})
         self.assertEqual(local_identity.series_title_parts('The Wheel of Time, Book 3: The Dragon Reborn'), {'series': 'The Wheel of Time', 'number': '3', 'title': 'The Dragon Reborn'})
 
+    def outcome(self, n, album, author=''):
+        """How one name files end to end: ('split', series, number, title), ('whole', title), ('ask', why) or ('held', reasons)."""
+        row = self.book('Unsorted\\%03d' % n, ['%02d.mp3' % k for k in (1, 2)], title='Глава %d', artist=author or 'Петр Иванов', album=album, track='%d')
+        result = self.lookup(row); ask = result.get('ask') or {}; review = result.get('review') or {}
+        if ask:
+            return ('ask', ask.get('why') or ask.get('kind'))
+        if review.get('series'):
+            return ('split', review['series'], review.get('number'), review.get('title'))
+        return ('whole', review.get('title')) if review else ('held', '; '.join(result.get('reasons') or []))
+
+    def test_m6_a_series_name_that_is_not_clean_is_asked_never_filed_under_it(self):
+        # Ruling 51 (Sergei 2026-10-27: "When unsure, ask; never guess a series"; Senua's 0.22.3 review, M6): a marker the
+        # split's word lists did not hold stayed in the series name, and the book filed silently under a junk series
+        # folder: "Harry Potter Book", «Хроники Амбера №», «Отцы и дети. Гл.», "Discworld No.", a Cyrillic «СD».
+        for n, album in enumerate(RULING_51_M6):
+            with self.subTest(album=album):
+                self.assertEqual(self.outcome(n, album), ('ask', 'title_series'))
+        # A marker word written into the series name is just as unsure: asked, never guessed.
+        for n, album in enumerate(RULING_51_MARKER_IN_NAME, 50):
+            with self.subTest(album=album):
+                self.assertEqual(self.outcome(n, album), ('ask', 'title_series'))
+        self.assertEqual(local_identity._skeleton('\u0421D'), local_identity._skeleton('CD'), 'look-alike letters are one letter')
+
+    def test_ruling_51_every_other_name_keeps_how_it_filed_before(self):
+        # Senua's pass-4 name hunt, rebuilt (98 names, end to end on 92376c7): every split stays the same split, every
+        # name kept whole stays whole, and every question stays a question.
+        for n, (album, author, expected) in enumerate(RULING_51_KEPT, 100):
+            with self.subTest(album=album):
+                self.assertEqual(self.outcome(n, album, author), expected)
+
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
         # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before (since
@@ -714,6 +742,127 @@ class OddNameTests(Base):
             self.assertFalse(result.get('ask'), (folder, result.get('ask'), result['reasons']))
 
 
+
+
+# Ruling 51 (Senua's 0.22.3 review, pass 4): the names read end to end on 92376c7 and what each did there.
+RULING_51_KEPT = (
+    ('Крысы 1. Крысы', '', ('split', 'Крысы', '1', 'Крысы')),
+    ('Профессия: инквизитор 1. Леди не движется', '', ('split', 'Профессия: инквизитор', '1', 'Леди не движется')),
+    ('Колесо времени - 01. Око мира', '', ('split', 'Колесо времени', '1', 'Око мира')),
+    ('Сновидения Ехо #3 - Вся правда о нас', '', ('split', 'Сновидения Ехо', '3', 'Вся правда о нас')),
+    ('Мертвый ноль 7. Мертвый ноль', '', ('split', 'Мертвый ноль', '7', 'Мертвый ноль')),
+    ('Профессия: инквизитор 7. Война миров', '', ('split', 'Профессия: инквизитор', '7', 'Война миров')),
+    ('Оттенки магии 03. Сотворение света', '', ('split', 'Оттенки магии', '3', 'Сотворение света')),
+    ('Робин Хобб - Сага о Видящих 2. Королевский убийца', 'Робин Хобб', ('split', 'Сага о Видящих', '2', 'Королевский убийца')),
+    ('Ведьмак 01.5. Меч', '', ('split', 'Ведьмак', '1.5', 'Меч')),
+    ('Гарри Поттер 1: Философский камень', '', ('split', 'Гарри Поттер', '1', 'Философский камень')),
+    ('Перри Родан 001. Звездная пыль', '', ('split', 'Перри Родан', '1', 'Звездная пыль')),
+    ('Хроники Амбера. Книга 1. Девять принцев Амбера', '', ('split', 'Хроники Амбера', '1', 'Девять принцев Амбера')),
+    ('Ведьмак 3: Кровь эльфов', '', ('split', 'Ведьмак', '3', 'Кровь эльфов')),
+    ('Конан 005 - Час дракона', '', ('split', 'Конан', '5', 'Час дракона')),
+    ('Dune 2: Dune Messiah', '', ('split', 'Dune', '2', 'Dune Messiah')),
+    ('Ересь Хоруса. Книга 2. Лживые боги', '', ('split', 'Ересь Хоруса', '2', 'Лживые боги')),
+    ('The Wheel of Time, Book 3: The Dragon Reborn', '', ('split', 'The Wheel of Time', '3', 'The Dragon Reborn')),
+    ('Ведьмак. Кн. 1. Последнее желание', '', ('split', 'Ведьмак', '1', 'Последнее желание')),
+    ('Ведьмак - книга 1 - Последнее желание', '', ('split', 'Ведьмак', '1', 'Последнее желание')),
+    ('Ведьмак, книга 1: Последнее желание', '', ('split', 'Ведьмак', '1', 'Последнее желание')),
+    ('Тёмная Башня. Книга 4.5. Ветер сквозь замочную скважину', '', ('split', 'Тёмная Башня', '4.5', 'Ветер сквозь замочную скважину')),
+    ('Ведьмак 1. Последнее желание', '', ('split', 'Ведьмак', '1', 'Последнее желание')),
+    ('Серия А 1. Первая', '', ('split', 'Серия А', '1', 'Первая')),
+    ('Серия Б 3. Третья', '', ('split', 'Серия Б', '3', 'Третья')),
+    ('Сновидения Эхо 2 - Слишком много кошмаров', '', ('split', 'Сновидения Ехо', '2', 'Слишком много кошмаров')),
+    ('Сновидения Ехо 5. Сундук мертвеца', '', ('split', 'Сновидения Ехо', '5', 'Сундук мертвеца')),
+    ('Discworld 19. Feet of Clay', '', ('split', 'Discworld', '19', 'Feet of Clay')),
+    ('Червь 1. Созревание', '', ('split', 'Червь', '1', 'Созревание')),
+    ('Перерождение 3. Город зеркал', '', ('split', 'Перерождение', '3', 'Город зеркал')),
+    ('Anita Blake 0.5 - Beauty', '', ('split', 'Anita Blake', '0.5', 'Beauty')),
+    ('S.T.A.L.K.E.R. 2 - 1. Зона', '', ('split', 'S.T.A.L.K.E.R.', '2', '1. Зона')),
+    ('Sigma Force 2. Map of Bones', '', ('split', 'Sigma Force', '2', 'Map of Bones')),
+    ('Ведьмак 0.5. Дорога', '', ('split', 'Ведьмак', '0.5', 'Дорога')),
+    ('Книга 1. Начало', '', ('whole', 'Книга 1. Начало')),
+    ('Warhammer 40000. Месть Гоббо', '', ('whole', 'Warhammer 40000. Месть Гоббо')),
+    ('Комната ужасов 2', '', ('held', 'One part of a bigger book')),
+    ('Война и мир. Том 1. Часть 2', '', ('held', 'One part of a bigger book')),
+    ('Агент 007 - Казино Рояль', '', ('whole', 'Агент 007 - Казино Рояль')),
+    ('Warhammer 40 000. Ересь Хоруса', '', ('whole', 'Warhammer 40 000. Ересь Хоруса')),
+    ('Warhammer 40 000 - Ересь Хоруса', '', ('whole', 'Warhammer 40 000 - Ересь Хоруса')),
+    ('Warhammer 40,000: Dawn of War', '', ('whole', 'Warhammer 40,000: Dawn of War')),
+    ('Вселенная Warhammer 40 000: Кайафас Каин. Герой Империума', '', ('whole', 'Вселенная Warhammer 40 000: Кайафас Каин. Герой Империума')),
+    ('Warhammer 40.000: Dawn of War', '', ('whole', 'Warhammer 40.000: Dawn of War')),
+    ('Warhammer 40\xa0000: Ересь Хоруса', '', ('whole', 'Warhammer 40 000: Ересь Хоруса')),
+    ('Warhammer 40\u202f000: Ересь Хоруса', '', ('whole', 'Warhammer 40 000: Ересь Хоруса')),
+    ('Warhammer 40  000: Ересь Хоруса', '', ('whole', 'Warhammer 40 000: Ересь Хоруса')),
+    ('Warhammer 40 000 1. Ересь Хоруса', '', ('whole', 'Warhammer 40 000 1. Ересь Хоруса')),
+    ('Колесо времени 1.2. Око мира', '', ('whole', 'Колесо времени 1.2. Око мира')),
+    ('Мастер и Маргарита. CD 1. Главы 1-10', '', ('whole', 'Мастер и Маргарита. CD 1. Главы 1-10')),
+    ('Мастер и Маргарита. Диск 2. Главы 11-20', '', ('whole', 'Мастер и Маргарита. Диск 2. Главы 11-20')),
+    ('Мастер и Маргарита CD 1. Главы 1-10', '', ('whole', 'Мастер и Маргарита CD 1. Главы 1-10')),
+    ('Мастер и Маргарита - CD1 - Главы 1-10', '', ('whole', 'Мастер и Маргарита - CD1 - Главы 1-10')),
+    ('Мастер и Маргарита CD-1. Главы 1-10', '', ('whole', 'Мастер и Маргарита CD-1. Главы 1-10')),
+    ('Мастер и Маргарита. CD 01. Главы 1-10', '', ('whole', 'Мастер и Маргарита. CD 01. Главы 1-10')),
+    ('Мастер и Маргарита, диск 1: Главы 1-10', '', ('whole', 'Мастер и Маргарита, диск 1: Главы 1-10')),
+    ('Мастер и Маргарита. Disc 1. Главы 1-10', '', ('whole', 'Мастер и Маргарита. Disc 1. Главы 1-10')),
+    ('Двенадцать стульев. Часть 1. Одиссея', '', ('whole', 'Двенадцать стульев. Часть 1. Одиссея')),
+    ('Двенадцать стульев. Ч. 1. Одиссея', '', ('whole', 'Двенадцать стульев. Ч. 1. Одиссея')),
+    ('Двенадцать стульев. Ч.1. Одиссея', '', ('whole', 'Двенадцать стульев. Ч.1. Одиссея')),
+    ('Зеленая миля. Часть 2 - Мышь на миле', '', ('whole', 'Зеленая миля. Часть 2 - Мышь на миле')),
+    ('Граф Монте-Кристо. Том 2. Узник замка Иф', '', ('whole', 'Граф Монте-Кристо. Том 2. Узник замка Иф')),
+    ('Граф Монте-Кристо, т.2. Узник замка Иф', '', ('whole', 'Граф Монте-Кристо, т.2. Узник замка Иф')),
+    ('Граф Монте-Кристо т2. Узник замка Иф', '', ('whole', 'Граф Монте-Кристо т2. Узник замка Иф')),
+    ('Граф Монте-Кристо - Том 2 - Узник замка Иф', '', ('whole', 'Граф Монте-Кристо - Том 2 - Узник замка Иф')),
+    ('Сага о Копье. Т. 3. Драконы', '', ('whole', 'Сага о Копье. Т. 3. Драконы')),
+    ('Война и мир. Том 1 - Аудиоспектакль', '', ('whole', 'Война и мир. Том 1 - Аудиоспектакль')),
+    ('Отцы и дети. Глава 1. Приезд', '', ('whole', 'Отцы и дети. Глава 1. Приезд')),
+    ('Treasure Island. Chapter 1. The Old Sea-dog', '', ('whole', 'Treasure Island. Chapter 1. The Old Sea-dog')),
+    ('Treasure Island. Part 1. The Old Buccaneer', '', ('whole', 'Treasure Island. Part 1. The Old Buccaneer')),
+    ('Treasure Island. Pt. 2. The Sea Cook', '', ('whole', 'Treasure Island. Pt. 2. The Sea Cook')),
+    ('Kill Bill Vol. 2. The Bride', '', ('whole', 'Kill Bill Vol. 2. The Bride')),
+    ('Kill Bill Volume 2. The Bride', '', ('whole', 'Kill Bill Volume 2. The Bride')),
+    ('Kill Bill Vol 2. The Bride', '', ('whole', 'Kill Bill Vol 2. The Bride')),
+    ('Звёздные войны. Эпизод 4. Новая надежда', '', ('whole', 'Звёздные войны. Эпизод 4. Новая надежда')),
+    ('Радиоспектакли. Выпуск 3. Ревизор', '', ('whole', 'Радиоспектакли. Выпуск 3. Ревизор')),
+    ('Метро. Сезон 2. Питер', '', ('whole', 'Метро. Сезон 2. Питер')),
+    ('Иванов. Книга 1. Начало', 'Петр Иванов', ('whole', 'Иванов. Книга 1. Начало')),
+    ('Метро 2033: Питер', '', ('whole', 'Метро 2033: Питер')),
+    ('Apollo 13: The Untold Story', '', ('ask', 'title_series')),
+    ('Warhammer 40 000: Ересь Хоруса. Книга 1. Возвышение Хоруса', '', ('ask', 'title_series')),
+    ("Warhammer 40'000: Dawn of War", '', ('ask', 'title_series')),
+    ('Warhammer 40’000: Dawn of War', '', ('ask', 'title_series')),
+    ('Warhammer 40 000. Ересь Хоруса 2. Лживые боги', '', ('ask', 'title_series')),
+    ('Warhammer 40 000. Ересь Хоруса - 02 - Лживые боги', '', ('ask', 'title_series')),
+    ('Warhammer 40 000. Ересь Хоруса #3 - Галактика в огне', '', ('ask', 'title_series')),
+    ('Warhammer 40 000 - 1. Ересь Хоруса', '', ('ask', 'title_series')),
+    ('Warhammer 40K 1. Ересь Хоруса', '', ('ask', 'title_series')),
+    ('Колесо времени 1, 2. Око мира', '', ('ask', 'title_series')),
+    ('Ведьмак 0. Дорога без возврата', '', ('ask', 'title_series')),
+    ('Ведьмак 00. Дорога без возврата', '', ('ask', 'title_series')),
+    ('Anita Blake 0 - Those Who Seek Forgiveness', '', ('ask', 'title_series')),
+    ('13-й отдел 2. Новое дело', '', ('ask', 'title_series')),
+    ('Война 1812 года 2. Бородино', '', ('ask', 'title_series')),
+    ('Вселенная Метро 2033. Питер 2. Война', '', ('ask', 'title_series')),
+    ('Отцы и дети. Главы 1-5. Приезд', '', ('ask', 'title_series')),
+    ('Хроники Амбера. Книга 12: Рыцарь теней', '', ('ask', 'title_series')),
+    ('Ведьмак 12: Сезон гроз', '', ('ask', 'title_series')),
+    ('Перри Родан 101: Корабль', '', ('ask', 'title_series')),
+)
+RULING_51_M6 = (
+    "Harry Potter Book 1 - The Philosopher's Stone",
+    'Discworld Book 1 - The Colour of Magic',
+    'The Wheel of Time Book 3 - The Dragon Reborn',
+    'The Wheel of Time Book 3: The Dragon Reborn',
+    'Хроники Амбера Книга 1. Девять принцев Амбера',
+    'The Hobbit, Ch. 1: An Unexpected Party',
+    'Хроники Амбера №1. Девять принцев Амбера',
+    'Хроники Амбера № 1. Девять принцев Амбера',
+    'Калейдоскоп № 2. Мистика и ужасы',
+    'Discworld No. 1. The Colour of Magic',
+    'The Wheel of Time Bk. 3 - The Dragon Reborn',
+    'Отцы и дети. Гл. 1. Приезд',
+    'Радиоспектакли. Вып. 3. Ревизор',
+    'Доктор Кто. Серия 3. Далеки',
+    'Мастер и Маргарита. \u0421D 1. Главы 1-10',  # «СD» typed with a Cyrillic С
+)
+RULING_51_MARKER_IN_NAME = ('Черная книга 2. Возвращение', 'Star Wars Episode 4. A New Hope')
 
 
 def setUpModule():

@@ -2770,6 +2770,31 @@ _PART_TAIL = re.compile(r'(?:(?:^|[\s.,;:\-–—])(?:том|т|часть|ч|г
 _PART_TITLE = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\.?\s*\d', re.I)
 # m4: a number that is a title's own, never a position in a series (James Bond's code: «Агент 007 - Казино Рояль»).
 _TITLE_NUMBERS = {'007'}
+# Ruling 51 (Sergei 2026-10-27, "When unsure, ask; never guess a series"; Senua's 0.22.3 review, M6): a split files by
+# itself only when its series name is clean. The test is turned round instead of listing more words: a series name
+# whose last word is any marker the split knows (or an abbreviation of one), a number sign, a short abbreviation with a
+# dot, or a word mixing Latin and Cyrillic letters is asked. Look-alike letters are read as one (С and C, Т and T …), so
+# «СD» typed with a Cyrillic С is the marker CD.
+_LOOKALIKE = str.maketrans('авекмнорстухіј', 'abekmhopctyxij')
+def _skeleton(word):
+    return text(word).casefold().replace('ё', 'е').translate(_LOOKALIKE)
+_MARKERS = {_skeleton(w) for w in ('книга', 'кн', 'том', 'т', 'часть', 'ч', 'глава', 'главы', 'гл', 'диск', 'выпуск', 'вып', 'сезон',
+                                   'эпизод', 'серия', 'book', 'bk', 'volume', 'vol', 'part', 'pt', 'chapter', 'ch', 'episode', 'season',
+                                   'issue', 'disc', 'disk', 'cd', 'series', 'number', 'no', 'nr')}
+
+
+def _unsure_series(series):
+    """Ruling 51: True when the series name the split read may not be filed by itself ("Harry Potter Book", «Хроники
+    Амбера №», «Отцы и дети. Гл.», "Discworld No.", «Мастер и Маргарита. СD», «Черная книга»)."""
+    token = (re.findall(r'\S+', text(series)) or [''])[-1]
+    word = token.strip('.,;:-–—#()[]«»"\'')
+    if not word or '№' in token:
+        return True
+    if re.search(r'[A-Za-z]', word) and re.search(r'[А-Яа-яЁё]', word):
+        return True
+    if _skeleton(word) in _MARKERS:
+        return True
+    return token.endswith('.') and word.isalpha() and len(word) <= 4
 _PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
 _RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
 _TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
@@ -2831,8 +2856,8 @@ def _series_split(title, author=''):
     """(parts, verdict) for series_title_parts: 'split' when the name reads "Series N. Title"; 'ask' when it may as well
     be something else (Senua's 0.22.3 review: m12, a title with its own number and a subtitle, "Apollo 13: The Untold
     Story", a number of two digits or more before ":"; M5, a position 0 or a series name holding a number itself,
-    «Warhammer 40 000: Ересь Хоруса. Книга 1. …»), which the odd-name check asks about (title_series); (None, None)
-    otherwise, a part of one book included (ruling 50)."""
+    «Warhammer 40 000: Ересь Хоруса. Книга 1. …»; M6 and ruling 51, a series name that is not clean, _unsure_series),
+    which the odd-name check asks about (title_series); (None, None) otherwise, a part of one book included (ruling 50)."""
     found = _SERIES_PARTS.match(text(title))
     if not found:
         return None, None
@@ -2845,6 +2870,8 @@ def _series_split(title, author=''):
             or found['number'] in _TITLE_NUMBERS or (author and compare_names(series, author)):
         return None, None
     parts = {'series': series, 'number': series_number(found['number']), 'title': rest}
+    if _unsure_series(series):
+        return parts, 'ask'  # ruling 51
     # m12: a one-digit position before ":" is a series book ("Гарри Поттер 1: Философский камень", "Dune 2: Dune
     # Messiah"); a padded number is a series' numbering («Перри Родан 001. Звездная пыль», «Конан 005 - Час дракона»).
     if found['separator'] == ':' and float(parts['number']) >= 10:
