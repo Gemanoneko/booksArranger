@@ -102,6 +102,9 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(control.status()['busy']['converting'])
         self.assertEqual(control.quit()['phase'], 'finishing')
         self.assertTrue(server.closing)
+        limit = time.monotonic() + 5
+        while not server.merge.automatic.stop.called and time.monotonic() < limit:
+            time.sleep(.02)  # 0.22.3: the stops run on the quit thread
         server.merge.drain.assert_called_once_with(); server.inventory.stop.assert_called(); server.merge.automatic.stop.assert_called_once_with()
         time.sleep(.8)
         server.finish_shutdown.assert_not_called()  # the book is still converting
@@ -109,6 +112,23 @@ class ControlTests(unittest.TestCase):
         jobs_thread.is_alive.return_value = False; server.merge.drained.return_value = True
         control.thread.join(5)
         server.finish_shutdown.assert_called_once_with(); server.shutdown.assert_not_called()
+        self.assertEqual(control.status()['phase'], 'exiting')
+
+    def test_quit_answers_at_once_while_its_stops_wait(self):
+        # 0.22.3 (seen on 0.22.1 under load): automatic processing's stop waited on the catalog inside the request, the
+        # shell's 5 s request ran out and the accepted Quit read "Quit could not be confirmed ... Request timed out".
+        server, jobs_thread = fake_server(converting=False)
+        release = threading.Event()
+        server.merge.automatic.stop = Mock(side_effect=lambda: release.wait(10))
+        control = DesktopControl(server)
+        started = time.monotonic()
+        self.assertEqual(control.quit()['phase'], 'finishing')
+        self.assertLess(time.monotonic() - started, 1, 'the request answers before the stops end')
+        self.assertTrue(server.closing)
+        self.assertEqual(control.quit()['phase'], 'finishing', 'a second Quit while the stops wait is the same Quit')
+        server.finish_shutdown.assert_not_called()
+        release.set(); control.thread.join(5)
+        server.finish_shutdown.assert_called_once_with()
         self.assertEqual(control.status()['phase'], 'exiting')
 
     def test_shutdown_failure_retains_serving_and_can_retry_after_safe_checkpoint(self):

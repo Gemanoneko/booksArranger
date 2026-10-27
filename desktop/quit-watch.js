@@ -16,4 +16,24 @@ function outcomeOf(error) {
  if (!error) return 'reply';
  return error.code === 'ECONNREFUSED' ? 'refused' : 'other';
 }
-module.exports = { createQuitWatch, outcomeOf };
+// 0.22.3 (Sergei 2026-10-27, seen on 0.22.1 under load: "Quit could not be confirmed; ownership remains held. Request
+// timed out"): one unanswered request is no refusal. The Quit is sent again (the engine takes a repeated Quit as the same
+// one) until it is accepted, the engine is gone, or boundMs pass with no answer ('silent': the shell then stops the
+// engine safely through its pipe). An HTTP answer that refuses is 'refused', with the engine's own reason.
+async function sendQuit({ post, sleep, now = () => Date.now(), boundMs = 45000, retryMs = 1000, gone = () => false } = {}) {
+ const watch = createQuitWatch({ now });
+ const deadline = now() + boundMs;
+ let last = null;
+ while (!gone()) {
+  try { await post(); return { outcome: 'accepted' }; }
+  catch (error) {
+   if (error && error.status) return { outcome: 'refused', error };
+   last = error;
+   if (watch.observe(outcomeOf(error))) return { outcome: 'gone' };
+  }
+  if (now() >= deadline) return { outcome: 'silent', error: last };
+  await sleep(retryMs);
+ }
+ return { outcome: 'gone' };
+}
+module.exports = { createQuitWatch, outcomeOf, sendQuit };

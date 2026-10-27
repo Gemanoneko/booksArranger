@@ -489,14 +489,15 @@ async function requestQuit({ confirmed }) {
   if(state.backendExited)return finishExit(state.backend?.exitCode===0?0:1);
   if (state.quit !== 'none') return;
   if (!state.loaded) return quitWhileLoading();
-  let status;
+  let status = null;
   try {
     status = await desktopStatus.get();
   } catch (error) {
-    reportError('Books Arranger is still running', 'The engine did not confirm a safe Quit. Try Quit again when it responds.\n\n' + error.message);
-    return;
+    // 0.22.3 (Sergei 2026-10-27: Quit must always work): an engine too busy to answer is no reason to stay open. Quit goes
+    // on, without the "Quit after the current book?" question; the engine still lets the book in progress stop safely.
+    remember('\nQuit: the status did not answer (' + error.message + '); quitting without the question.\n');
   }
-  const busy = status.busy || {};
+  const busy = (status && status.busy) || {};
   if (busy.converting && !confirmed) {
     const title = busy.current_title ? `“${busy.current_title}”` : 'The current book';
     const choice = await dialog.showMessageBox({
@@ -509,20 +510,23 @@ async function requestQuit({ confirmed }) {
   }
   state.quit = 'requested';
   refreshTray(busy.converting ? 'Books Arranger — quitting after the current book' : 'Books Arranger — quitting');
-  try {
-    await engineRequest('POST', '/api/desktop/quit', { desktop: true });
-  } catch (error) {
-    state.quit = 'none';
-    refreshTray('Books Arranger — Quit could not be confirmed');
-    reportError('Books Arranger is still running', 'Quit could not be confirmed; ownership remains held.\n\n' + error.message);
-    return;
-  }
-  watchQuit();
+  // 0.22.3 (seen on 0.22.1 under load: "Quit could not be confirmed; ownership remains held. Request timed out"): one
+  // request that runs out is no refusal. The Quit is sent again until the engine takes it (sendQuit); with no answer at
+  // all, or a refusal, the engine is stopped through its pipe, the same safe stop as a Windows sign-out (the book in
+  // progress converts again next time), and the app exits. Quit never ends in a bare timeout.
+  const sent = await sendQuit({ post: () => engineRequest('POST', '/api/desktop/quit', { desktop: true, timeout: 10000 }), sleep, gone: () => state.backendExited });
+  if (sent.outcome === 'accepted') return watchQuit();
+  if (sent.outcome === 'gone') return engineGoneExit();
+  remember('\nQuit: the engine ' + (sent.outcome === 'refused' ? 'refused it (' : 'did not answer (') + (sent.error ? sent.error.message : 'no reply') + '); stopping it safely through its pipe.\n');
+  refreshTray('Books Arranger — stopping safely');
+  if (state.win && !state.win.isDestroyed()) state.win.hide();
+  await endLoadingEngine(30000);
+  finishExit(0);
 }
 
 // HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
 // own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
-const { createQuitWatch, outcomeOf } = require('./quit-watch');
+const { createQuitWatch, outcomeOf, sendQuit } = require('./quit-watch');
 async function engineGoneExit() {
   // Tell the host the shell is done, give it a moment to report the engine's exit, then leave.
   try { if (state.backend && !state.backendExited) state.backend.stdin.end(); } catch { /* host gone */ }

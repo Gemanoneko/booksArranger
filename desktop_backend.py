@@ -173,16 +173,21 @@ class DesktopControl:
         with self.server.control_condition:
             # New controls are refused from here on; reads and polling keep working.
             self.server.closing = True
+        # 0.22.3 (Quit under load, seen on 0.22.1: "Quit could not be confirmed ... Request timed out"): the stops below
+        # wait for locks and catalog writes (automatic processing records "Stopping"), which took longer than the shell's
+        # request under load, so the accepted Quit looked refused. They run on the quit thread; the request answers now.
+        self.thread = threading.Thread(target=self._park, name='books-desktop-quit', daemon=True)
+        self.thread.start()
+        return {'phase': 'finishing'}
+
+    def _stop_work(self):
+        """Quit's stops, in their order: the queued presses, new conversions, the scan, automatic processing."""
         self._drop_queue()
-        merge = self.server.merge
-        merge.drain()
+        self.server.merge.drain()
         self.server.inventory.stop()
         automatic = self._automatic()
         if automatic is not None:
             automatic.stop()
-        self.thread = threading.Thread(target=self._park, name='books-desktop-quit', daemon=True)
-        self.thread.start()
-        return {'phase': 'finishing'}
 
     def _drop_queue(self):
         """Quit and Restart to update drop the queued Retry, Repair and Delete book presses (Sergei, Q1; Judy 1.8)."""
@@ -197,6 +202,7 @@ class DesktopControl:
 
     def _park(self):
         try:
+            self._stop_work()
             while not self._parked():
                 if not (self.server.merge.jobs._thread and self.server.merge.jobs._thread.is_alive()):
                     with self.lock:
