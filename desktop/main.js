@@ -359,19 +359,17 @@ function launchEngine(config, { fresh = true } = {}) {
   return watchEngine(state.generation);
 }
 // Ends the current engine: its pipe closes (a checkpoint stop, as at a failed start); an engine still there after the
-// bound is ended through its native host (its kill-on-close job). Only while loading: nothing else runs yet.
+// bound is ended through its native host (its kill-on-close job). Used while loading, at a restart, and since 0.22.3 by
+// every Quit that ends the shell (endOwnEngine: our own child only, never a name or PID).
 async function endLoadingEngine(boundMs = 15000) {
   const child = state.backend;
   if (!child || state.backendExited) return;
-  try { child.stdin.end(); } catch { /* host gone */ }
-  const deadline = Date.now() + boundMs;
-  while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) await sleep(200);
-  if (child.exitCode === null && child.signalCode === null) {
-    remember('\nThe engine did not stop within ' + Math.round(boundMs / 1000) + ' s; ending it.\n');
-    try { child.kill(); } catch { /* already gone */ }
-    const end = Date.now() + 5000;
-    while (child.exitCode === null && child.signalCode === null && Date.now() < end) await sleep(200);
-  }
+  const outcome = await endOwnEngine({
+    exited: () => state.backendExited || child.exitCode !== null || child.signalCode !== null,
+    closePipe: () => child.stdin.end(), kill: () => child.kill(), sleep, boundMs,
+    onKill: () => remember('\nThe engine did not stop within ' + Math.round(boundMs / 1000) + ' s; ending it.\n'),
+  });
+  if (outcome === 'still-running') remember('\nThe engine host did not end after it was stopped.\n');
 }
 // A new catalog the first launch already created is opened as an existing one by every later launch of this session.
 function relaunchConfig(config) {
@@ -526,12 +524,12 @@ async function requestQuit({ confirmed }) {
 
 // HTTP failure never proves a safe checkpoint, but a closed server after an accepted Quit is the engine's
 // own last step: once connections are refused for a few seconds the engine is gone and the shell exits.
-const { createQuitWatch, outcomeOf, sendQuit } = require('./quit-watch');
+const { createQuitWatch, outcomeOf, sendQuit, endOwnEngine } = require('./quit-watch');
 async function engineGoneExit() {
-  // Tell the host the shell is done, give it a moment to report the engine's exit, then leave.
-  try { if (state.backend && !state.backendExited) state.backend.stdin.end(); } catch { /* host gone */ }
-  const deadline = Date.now() + 5000;
-  while (!state.backendExited && Date.now() < deadline) await sleep(200);
+  // Tell the host the shell is done and wait until it has really exited (it exits only after its engine), then leave.
+  // Futaba's 0.22.3 QA, m-2: this waited 5 s at most, so the shell could exit while its engine was still finishing its
+  // stop. Now the host gets 30 s, then is ended through its own handle (its kill-on-close job takes the engine).
+  await endLoadingEngine(30000);
   finishExit(state.backendExited && state.backend?.exitCode !== 0 ? 1 : 0);
 }
 async function watchQuit() {

@@ -40,3 +40,24 @@ test('refused connections mean the engine is gone; an HTTP refusal keeps its rea
  assert.equal(refused.outcome,'refused');assert.equal(refused.error.status,403);
  assert.equal((await sendQuit({now,sleep,gone:()=>true,post:async()=>{throw timedOut();}})).outcome,'gone','the engine exited meanwhile');
 });
+
+// Futaba's 0.22.3 QA, m-2: one busy-engine Quit left a python.exe 2.5 s after the shell exited (engineGoneExit waited 5 s).
+const {endOwnEngine}=createRequire(import.meta.url)('../desktop/quit-watch.js');
+const host=(exitsAt)=>{const {clock,now,sleep}=fakeClock();const calls=[];return {clock,calls,options:{now,sleep,exited:()=>clock.t>=exitsAt(calls),closePipe:()=>calls.push('pipe'),kill:()=>{calls.push('kill');}}};};
+test('Quit waits until its own engine host has exited, however long its safe stop takes within the bound',async()=>{
+ const h=host(()=>12000);
+ assert.equal(await endOwnEngine({...h.options,boundMs:30000}),'exited');assert.deepEqual(h.calls,['pipe'],'never ended: it stopped by itself');assert.ok(h.clock.t>=12000);
+});
+test('past the bound the host is ended through its own handle, and Quit waits for that too',async()=>{
+ const h=host(calls=>calls.includes('kill')?h.clock.t:Infinity);
+ const outcome=await endOwnEngine({...h.options,boundMs:30000,killWaitMs:5000});
+ assert.equal(outcome,'ended');assert.deepEqual(h.calls,['pipe','kill']);assert.ok(h.clock.t>=30000);
+ const stuck=host(()=>Infinity);assert.equal(await endOwnEngine({...stuck.options,boundMs:1000,killWaitMs:1000}),'still-running');
+ const gone=host(()=>0);assert.equal(await endOwnEngine(gone.options),'exited');assert.deepEqual(gone.calls,[],'an exited host is left alone');
+});
+test('the shell ends Quit through endOwnEngine on its own child only',async()=>{
+ const fs=await import('node:fs');const main=fs.readFileSync(new URL('../desktop/main.js',import.meta.url),'utf8');
+ const gone=main.slice(main.indexOf('async function engineGoneExit()'),main.indexOf('async function watchQuit()'));
+ assert.match(gone,/await endLoadingEngine\(30000\);/,'the host gets 30 s, then is ended, before the shell exits');
+ assert.ok(!/taskkill|process\.kill\(/.test(main),'never a kill by name or PID');
+});

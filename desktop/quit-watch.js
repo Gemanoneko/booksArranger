@@ -36,4 +36,19 @@ async function sendQuit({ post, sleep, now = () => Date.now(), boundMs = 45000, 
  }
  return { outcome: 'gone' };
 }
-module.exports = { createQuitWatch, outcomeOf, sendQuit };
+// Futaba's 0.22.3 QA, m-2: Quit ends the shell only once its own engine host has exited. Its pipe closes (the engine's
+// safe stop); after boundMs the host is ended through its own handle (its kill-on-close job takes the engine with it),
+// never by name or PID. 'exited' | 'ended' (it had to be ended) | 'still-running' (even that did not end it in killWaitMs).
+async function endOwnEngine({ exited, closePipe, kill, sleep, onKill = () => {}, now = () => Date.now(), boundMs = 30000, killWaitMs = 5000 } = {}) {
+ if (exited()) return 'exited';
+ try { closePipe(); } catch { /* host gone */ }
+ let deadline = now() + boundMs;
+ while (!exited() && now() < deadline) await sleep(200);
+ if (exited()) return 'exited';
+ onKill();
+ try { kill(); } catch { /* already gone */ }
+ deadline = now() + killWaitMs;
+ while (!exited() && now() < deadline) await sleep(200);
+ return exited() ? 'ended' : 'still-running';
+}
+module.exports = { createQuitWatch, outcomeOf, sendQuit, endOwnEngine };
