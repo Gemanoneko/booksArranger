@@ -571,6 +571,32 @@ class OddNameTests(Base):
         self.assertEqual(local_identity.series_title_parts('Робин Хобб - Сага о Видящих 2. Королевский убийца', 'Робин Хобб'),
                          {'series': 'Сага о Видящих', 'number': '2', 'title': 'Королевский убийца'})
 
+    def test_sibling_folders_decide_the_series_and_one_series_has_one_spelling(self):
+        # Rulings 45 and 46 (Sergei 2026-10-27), the live folder Max Fray\Сновидения Эхо: «Мертвый ноль 7. Мертвый ноль» is
+        # book 7 of «Сновидения Ехо», the series its sibling folders carry, not series «Мертвый ноль»; «Сновидения Эхо 2» and
+        # «Сновидения Ехо #3» are one series, filed «Сновидения Ехо».
+        parent = 'Max Fray\\Сновидения Эхо\\'
+        books = [('Frai_Maks_Slishkom_mnogo_koshmarov (Ovuor)', 'Сновидения Эхо 2 - Слишком много кошмаров'), ('Frai_Maks_Vsya_pravda_o_nas (Ovuor)', 'Сновидения Ехо #3 - Вся правда о нас '),
+                 ('Frai_Maks_Ya_idu_iskat (Ovuor)', 'Сновидения Ехо #4 - Я иду искать'), ('Макс Фрай_Сундук мертвеца_Валерий Смекалов', 'Сновидения Ехо 5. Сундук мертвеца'),
+                 ('Макс Фрай_Мертвый ноль_Гмыза Игорь', 'Мертвый ноль 7. Мертвый ноль')]
+        rows = [file_row(parent + folder + '\\%02d.m4a' % n, title='%02d' % n, artist='Макс Фрай', album=album, track='%d/-1' % n) for folder, album in books for n in (1, 2)]
+        catalog = self.catalog(rows)
+        zero = catalog[ROOT + '\\' + parent + 'Макс Фрай_Мертвый ноль_Гмыза Игорь']
+        result = self.lookup(zero)
+        self.assertEqual((result['reasons'], result['review']['title'], result['review']['series'], result['review']['number']), ([], 'Мертвый ноль', 'Сновидения Ехо', '7'))
+        self.assertEqual(self.goes_to(zero, result), SORTED + '\\Фрай Макс\\Сновидения Ехо\\Сновидения Ехо - 7 - Мертвый ноль - Фрай Макс.m4b')
+        two = catalog[ROOT + '\\' + parent + 'Frai_Maks_Slishkom_mnogo_koshmarov (Ovuor)']
+        result = self.lookup(two)
+        self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), ('Слишком много кошмаров', 'Сновидения Ехо', '2'), 'one spelling')
+        # Controls: alone, the name decides (no sibling says otherwise); a sibling already holding the number is another series.
+        alone = self.catalog([file_row(parent + 'Макс Фрай_Мертвый ноль_Гмыза Игорь\\%02d.m4a' % n, title='%02d' % n, artist='Макс Фрай', album='Мертвый ноль 7. Мертвый ноль', track='%d/-1' % n) for n in (1, 2)])
+        self.assertEqual(self.lookup(next(iter(alone.values())))['review']['series'], 'Мертвый ноль')
+        other = 'Иванов Петр\\Разное\\'
+        rows = [file_row(other + folder + '\\%02d.mp3' % n, title='%02d' % n, artist='Петр Иванов', album=album, track='%d' % n)
+                for folder, album in (('a', 'Серия А 1. Первая'), ('b', 'Серия А 2. Вторая'), ('c', 'Серия Б 1. Третья')) for n in (1, 2)]
+        catalog = self.catalog(rows)
+        self.assertEqual(self.lookup(catalog[ROOT + '\\' + other + 'c'])['review']['series'], 'Серия Б', 'Серия А already has a book 1: not this series')
+
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
         # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before (since

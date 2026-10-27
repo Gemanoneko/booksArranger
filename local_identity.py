@@ -902,6 +902,7 @@ def catalog_index(database, root):
         readers = set()
         uses = set()
         tagged = set()
+        albums = {}
         root_key = norm(str(Path(root)))
         for path, metadata in db.execute("SELECT path,metadata FROM files WHERE root=? AND kind='audiobook'", (root,)):
             try:
@@ -911,6 +912,8 @@ def catalog_index(database, root):
             readers.update(text(tags[k]) for k in NARRATOR_TAGS if text(tags.get(k)))
             readers.update(text(n) for n in narrator_names([tags.get(k, '') for k in FREE_TEXT_TAGS]))
             folder = str(Path(path).parent)
+            if text(tags.get('album')):
+                albums.setdefault(folder, Counter())[text(tags.get('album'))] += 1
             credits = [text(tags.get(k)) for k in AUTHOR_TAGS]
             tagged.update(unicodedata.normalize('NFC', c) for c in credits if _person_like(c))
             for level in Path(path).parents:
@@ -930,7 +933,11 @@ def catalog_index(database, root):
     for spelling in tagged:
         for k in _spelling_keys(spelling):
             tag_keys.setdefault(k, []).append(spelling)
-    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys}
+    # Ruling 45: the book folders beside each other under one parent folder, each with the album most of its files carry.
+    sibling_albums = {}
+    for folder, counts in albums.items():
+        sibling_albums.setdefault(str(Path(folder).parent), {})[folder] = counts.most_common(1)[0][0]
+    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys, 'sibling_albums': sibling_albums}
     if revision:
         _INDEX.clear()
         _INDEX[key] = index
@@ -2586,6 +2593,12 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     # same way keeps its source; one that names another series leaves the title as it is (its own names disagree).
     found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
     if found:
+        # Ruling 45 (Sergei 2026-10-27): the series its sibling book folders carry decides it when the name only repeats
+        # the title («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца») or names another series.
+        # A sibling that already holds this number in that series shows it is another series: the name stands.
+        carried, taken = sibling_series(row, root, index, author['name'] if author else '')
+        if carried and found['number'] not in taken and (series_key(found['series']) == series_key(found['title']) or series_key(found['series']) != series_key(carried)):
+            found = dict(found, series=carried)
         named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
         whole = fields['title']['value']
         if not named:
@@ -2595,6 +2608,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
             fields['title'] = dict(fields['title'], value=found['title'], how=fields['title'].get('how', '') + '; the title after the series and number (ruling 41)',
                                    aliases=list(fields['title'].get('aliases') or []) + [whole])
+    if fields['series']['state'] == 'green' and series_spelling(fields['series']['value']) != fields['series']['value']:
+        # Ruling 46: one series, one spelling, whichever name its files use.
+        fields['series'] = dict(fields['series'], value=series_spelling(fields['series']['value']), how=fields['series'].get('how', '') + '; spelled as Sergei ruled (ruling 46)')
     series = {'name': fields['series']['value'], 'number': fields['number']['value']} if fields['series']['state'] == 'green' and fields['number']['state'] == 'green' else {}
     if series and from_folders:
         series['folder'] = True
@@ -2801,6 +2817,50 @@ def series_title_parts(title, author=''):
     number = found['number'].replace(',', '.')
     number = str(int(number)) if number.isdigit() else number
     return {'series': series, 'number': number, 'title': rest}
+
+
+# Ruling 46 (Sergei 2026-10-27, "2. Yes. Сновидения Ехо"): series names that are one series, by their key, and the one
+# spelling they are filed under. The key folds case, "ё" and punctuation (norm); add a pair when Sergei rules one.
+SERIES_SPELLINGS = {'сновиденияэхо': 'Сновидения Ехо', 'сновиденияехо': 'Сновидения Ехо'}
+
+
+def series_spelling(name):
+    """The spelling a series is filed under: Sergei's ruled one, else the name as written."""
+    return SERIES_SPELLINGS.get(norm(name), text(name))
+
+
+def series_key(name):
+    """One key per series however it is spelled (ruling 46)."""
+    return norm(series_spelling(name))
+
+
+def sibling_series(row, root, index, author=''):
+    """Ruling 45: the series the other book folders under this book's parent folder carry in their albums ("Series N.
+    Title"), when at least two of them name it and no other series is named as often, with the numbers they hold in it;
+    ('', set()) otherwise. Only a book in one folder that is not directly under the library root; read from the catalog
+    index (no file is opened)."""
+    albums = (index or {}).get('sibling_albums') or {}
+    folders = {str(Path(m['path']).parent) for m in row.get('members', [])}
+    if len(folders) != 1:
+        return '', set()
+    own = next(iter(folders))
+    parent = str(Path(own).parent)
+    if not root or norm(parent) == norm(str(Path(root))):
+        return '', set()
+    counts, spellings, numbers = Counter(), {}, {}
+    for folder, album in (albums.get(parent) or {}).items():
+        if folder == own:
+            continue
+        parts = series_title_parts(album, author)
+        if parts:
+            key = series_key(parts['series'])
+            counts[key] += 1
+            spellings.setdefault(key, Counter())[series_spelling(parts['series'])] += 1
+            numbers.setdefault(key, set()).add(parts['number'])
+    ranked = counts.most_common(2)
+    if not ranked or ranked[0][1] < 2 or len(ranked) > 1 and ranked[1][1] == ranked[0][1]:
+        return '', set()
+    return spellings[ranked[0][0]].most_common(1)[0][0], numbers[ranked[0][0]]
 
 
 def _same_number(left, right):
