@@ -207,6 +207,23 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(answers(),[('same_as','Koontz Dean')],'the accepted Approve keeps his answer')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['manifest']['metadata']['canonical_author'],'Koontz Dean')
 
+    def test_m1_an_error_after_the_job_is_queued_keeps_the_answer_and_the_approve(self):
+        # Senua's 0.22.3 review, m1: an error in the answer's extras (the list row) after the job was queued reported the
+        # Approve as failed and took the Same author? answer back, while the book was filed.
+        from unittest import mock
+        import author_rules
+        self.two_files('Часы','Dean Koonts')
+        row=self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Koontz Dean',actor='user',source='test')
+        result=self.research(row);self.service.automatic._record(row,'Held',dict(result,until_change=True),None)
+        with mock.patch.object(self.service,'restart_row',side_effect=RuntimeError('fixture: the list row is unavailable')):
+            approved=self.service.approve_book(row['id'],row['revision'],choice='same')
+        self.wait()
+        self.assertTrue(approved['job_id']);self.assertNotIn('list_row',approved,'the extras are left out, the Approve stands')
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean','his answer is kept')
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
+
     def test_m4_closing_the_app_stops_an_approve_in_progress(self):
         from unittest import mock
         import audio_pipeline

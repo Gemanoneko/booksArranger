@@ -2770,7 +2770,12 @@ class MergeService:
     def _press_after(self,id,revision,destination=True):
         """0.22.3 (Judy 2.2 and 2.3): what a Save or Approve answer adds for the page: the book's list row now ('list_row', its
         status the page names when the book leaves the list) and, for a Save, where it goes with the names now saved
-        ('destination', the planner's path; absent when it can't be planned, never guessed). Read-only; never fails the press."""
+        ('destination', the planner's path; absent when it can't be planned, never guessed). Read-only. It never fails the
+        press: any error leaves the extras out (Senua's 0.22.3 review, m1)."""
+        try:return self._press_extras(id,revision,destination)
+        except Exception:return {}
+
+    def _press_extras(self,id,revision,destination):
         extra={}
         row=self.restart_row(id)
         if row is not None:
@@ -2992,17 +2997,22 @@ class MergeService:
         # 0.22.3 (Sergei 2026-10-27; the m7 pattern): his Same author? answer is saved before the approval is built, because
         # the approval files the book by that rule, and taken back if this Approve is refused (the path changed, the name is
         # taken, a safety hold, closing); his other books are requeued only once it is accepted.
+        # Senua's 0.22.3 review, m1: the undo covers only the refusal; once approve_automatic has queued the job the press
+        # is accepted (press['accepted']), and nothing after it takes the answer back or reports a failure.
         press={}
         try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
         except BaseException:
-            if press.get('rule_id'):self._drop_answer_rule(press['rule_id'])
+            if press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'])
             raise
-        if press.get('rule_id'):self._continue_after_rule(skip=id)
+        if press.get('rule_id'):
+            try:self._continue_after_rule(skip=id)
+            except Exception:pass  # the next run's scan researches them; the Approve stands
         return answer
 
     def _drop_answer_rule(self,rule_id):
-        """The rules are append-only: the refused press's answer is retracted by the app (actor 'app'), so it decides nothing,
-        as before the press, and is never read as Sergei's Take back. A newer rule meanwhile keeps the newer rule."""
+        """The rules are append-only: the refused press's answer gets an app retraction (actor 'app'), and Rules drops the two
+        together, so the row in force before the press decides again (Senua's 0.22.3 review, M1). A newer rule meanwhile
+        stays in force."""
         import author_rules
         try:
             with connect(self.inventory.database) as db:author_rules.retract(db,rule_id,actor=author_rules.APP_RETRACTION,source='Approve refused; the answer it carried is not kept')
@@ -3056,6 +3066,7 @@ class MergeService:
         try:fresh,job=self.approve_automatic(row,result,stop,self.automatic.research.client,approved_by=approved_by,include=include)
         except InterruptedError:raise ValueError('Books Arranger is closing. The book was not approved.') from None
         finally:presses.discard(stop)
+        press['accepted']=True
         # The book is approved: his English-spelling answer becomes his rule for the author (m7). A failure to save it never
         # turns the accepted Approve into a refusal; the author's other books then ask again.
         try:self._answer_english_spelling(id,spelling)

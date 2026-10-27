@@ -353,6 +353,14 @@ class EditNamesTests(ApproveFixture):
         approved=self.service.approve_book(row['id'],row['revision']);self.wait()
         self.assertEqual(approved['list_row']['id'],row['id']);self.assertNotIn('destination',approved)
 
+    def test_m1_a_names_save_whose_extras_fail_still_reports_saved(self):
+        # Senua's 0.22.3 review, m1: _press_after "never fails the press", but a RuntimeError in the list row failed it.
+        from unittest import mock
+        self.scp();row=self.row('1')
+        with mock.patch.object(self.service,'restart_row',side_effect=RuntimeError('fixture: the list row is unavailable')):
+            saved=self.service.names_save(row['id'],row['revision'],{'title':'Протоколы SCP. Сейф №1'})
+        self.assertEqual(saved['outcome'],'saved');self.assertNotIn('list_row',saved)
+
 
 class ActionQueueTests(unittest.TestCase):
     def test_book_action_names_the_queued_or_running_action_for_a_book(self):
