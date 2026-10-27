@@ -7,8 +7,14 @@ number, universe and collection, and the correction lasts.
   author, the same folder): «Пртоколы» typed as «Протоколы» once fixes the other books of that folder. A title is never
   fixed across authors. A one-word spelling change inside a longer name is remembered as that word ("Пртоколы" ->
   "Протоколы"), anything else as the whole value. Authors keep their own rules (author_rules): an author is never a fix.
+- The same text means the same characters, digits included, ignoring only case and spacing (Senua's 0.22.2 review, M1):
+  a fix of King's «01» never reaches «1408», and «Книга 1» never «Книга 12». A word fix never changes a number.
 - Append-only, as the author rules: a newer entry wins (insertion order); Forget is a newer row that takes one back, and
   takes back the whole press it belongs to (the book's value and the fix saved with it).
+- A field set back to what the files say is no correction for this book (M2): a 'files' entry (kind book, scope
+  FILES) says so. It is newer than every earlier value of the field, so none comes back, and no fix reaches that field
+  of this book; it is never "Entered by you" and never listed. A fix saved from this book still reaches the others
+  (Forget takes it back from all of them).
 
 Values: title, author, series, number, universe (text) and collection (bool). Nothing here touches a file or a job.
 """
@@ -23,6 +29,7 @@ from scanner import connect
 
 FIELDS = ('title', 'author', 'series', 'number', 'universe', 'collection')
 FIXED = ('title', 'series', 'universe')  # the names a fix may reach other books with
+FILES = 'files'  # the scope of a book entry that sets a field back to what the files say (no correction)
 TABLE = ('CREATE TABLE IF NOT EXISTS names_entries(entry_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN (\'book\',\'fix\',\'forget\')), '
          'book_key TEXT NOT NULL DEFAULT \'\', field TEXT NOT NULL DEFAULT \'\', value TEXT NOT NULL DEFAULT \'\', source TEXT NOT NULL DEFAULT \'\', '
          'scope TEXT NOT NULL DEFAULT \'\', candidate_id TEXT NOT NULL DEFAULT \'\', retracts TEXT NOT NULL DEFAULT \'\', press TEXT NOT NULL DEFAULT \'\', '
@@ -53,9 +60,15 @@ def book_key(row):
     return hashlib.sha256(json.dumps(paths, ensure_ascii=False).encode('utf-8')).hexdigest()
 
 
-def _norm(value):
-    import local_identity
-    return ' '.join(local_identity.words(value))
+def _same(value):
+    """The text a whole-value fix compares: case and spacing ignored, every other character kept (digits too). Empty
+    for an empty value, which never matches (Senua's 0.22.2 review, M1: local_identity.words() drops digits, so "01"
+    matched «1408» and "Книга 1" matched "Книга 12")."""
+    return _text(value).casefold()
+
+
+def _files(entry):
+    return entry['kind'] == 'book' and entry.get('scope') == FILES
 
 
 def scope_of(row, author, collection=False):
@@ -82,7 +95,7 @@ def _live(rows):
     for r in rows:
         if r['kind'] == 'forget' or r['entry_id'] in gone:
             continue
-        slot = ('book', r['book_key'], r['field']) if r['kind'] == 'book' else ('fix', r['field'], _norm(r['source']), r['scope'])
+        slot = ('book', r['book_key'], r['field']) if r['kind'] == 'book' else ('fix', r['field'], _same(r['source']), r['scope'])
         newest.pop(slot, None)
         newest[slot] = r
     return list(newest.values())
@@ -92,7 +105,7 @@ def _fix_applies(fix, field, value, scope):
     """The value a fix turns this read value into, else None."""
     if fix['field'] != field or fix['scope'] != scope or not value:
         return None
-    if _norm(value) == _norm(fix['source']):
+    if _same(value) and _same(value) == _same(fix['source']):
         return fix['value']
     # A word fix: the misspelled word replaced wherever it stands as a whole word ("Пртоколы SCP. Сейф №1").
     if len(fix['source'].split()) == 1 and len(fix['value'].split()) == 1:
@@ -107,13 +120,16 @@ def effective(database, row, read, scope, rows=None):
     else what a fix makes of the values read (read: {field: text}). scope: scope_of() for the book."""
     live = _live(_rows(database) if rows is None else rows)
     key = book_key(row)
-    found = {}
+    found, files = {}, set()
     for r in live:
         if r['kind'] == 'book' and r['book_key'] == key and r['field'] in FIELDS:
+            if _files(r):
+                files.add(r['field'])  # set back to what the files say: no correction, no fix (M2)
+                continue
             value = r['value'] == 'true' if r['field'] == 'collection' else r['value']
             found[r['field']] = {'value': value, 'entry': r['entry_id'], 'source': r['source'], 'saved': r['saved_utc']}
     for r in live:
-        if r['kind'] != 'fix' or r['field'] in found:
+        if r['kind'] != 'fix' or r['field'] in found or r['field'] in files:
             continue
         fixed = _fix_applies(r, r['field'], read.get(r['field'], ''), scope)
         if fixed is not None:
@@ -169,7 +185,7 @@ def book_values(database, row, rows=None):
     key = book_key(row)
     found = {}
     for r in _live(_rows(database) if rows is None else rows):
-        if r['kind'] == 'book' and r['book_key'] == key and r['field'] in FIELDS:
+        if r['kind'] == 'book' and r['book_key'] == key and r['field'] in FIELDS and not _files(r):
             found[r['field']] = r['value'] == 'true' if r['field'] == 'collection' else r['value']
     return found
 
@@ -181,7 +197,7 @@ def entered(values):
 
 def in_use(database, field):
     """Values of series or universe Sergei has entered (one source of the editor's pick-lists)."""
-    return sorted({r['value'] for r in _live(_rows(database)) if r['field'] == field and r['kind'] in ('book', 'fix') and r['value']}, key=str.casefold)
+    return sorted({r['value'] for r in _live(_rows(database)) if r['field'] == field and r['kind'] in ('book', 'fix') and r['value'] and not _files(r)}, key=str.casefold)
 
 
 def remembered(database, row, read, scope):
@@ -203,6 +219,8 @@ def _word_fix(old, new):
     import local_identity
     if not x or not y or len(x) < 4 or local_identity._edits(x.casefold(), y.casefold(), 3) > 2:
         return None
+    if re.findall(r'\d+', x) != re.findall(r'\d+', y):
+        return None  # M1: another number is no spelling fix ("Том1" -> "Том2" stays this book's whole value)
     return x, y
 
 
@@ -230,7 +248,8 @@ def check(values):
 def plan(row, values, read, scope, now=None):
     """The entries a Save would write: [(kind, field, value, source, scope, retracts)]. values: the editor's values; read:
     what the files say (before any correction); now: effective() for the book, so an unchanged field writes nothing and
-    a field set back to what the files say takes its own entry back (a fix reaching it is overridden for this book only).
+    a field set back to what the files say writes a 'files' entry: no correction for this book, none of its earlier
+    values comes back and no fix reaches it (Senua's 0.22.2 review, M2; a fix saved from it still reaches the others).
     Authors never become fixes (they keep their own rules)."""
     now = now or {}
     entries = []
@@ -244,8 +263,9 @@ def plan(row, values, read, scope, now=None):
         if new == current:
             continue
         stored = ('true' if new else 'false') if field == 'collection' else new
-        if new == old and field in now and not now[field].get('fix'):
-            entries.append(('forget', field, '', '', '', now[field]['entry']))
+        if new == old:
+            # Typed back to the files' own text (M2): it used to forget only the newest entry, so an older one came back.
+            entries.append(('book', field, stored, '' if field == 'collection' else old, FILES, ''))
             continue
         entries.append(('book', field, stored, '' if field == 'collection' else old, '', ''))
         if field in FIXED and old and new and new != old:

@@ -57,10 +57,65 @@ class StoreTests(unittest.TestCase):
         now=entered_names.effective(self.db,self.safe[0],self.read(1),self.scope)
         self.assertEqual(entered_names.entered(entered_names.book_values(self.db,self.safe[0])),['series','number'])
         entries=entered_names.plan(self.safe[0],{'series':'','number':''},self.read(1),self.scope,now)
-        self.assertEqual([e[0] for e in entries],['forget','forget'])
+        # M2 (Senua 0.22.2): a 'files' entry per field (no correction), never a forget of the newest entry only.
+        self.assertEqual([(e[0],e[1],e[4]) for e in entries],[('book','series',entered_names.FILES),('book','number',entered_names.FILES)])
         entered_names.save(self.db,self.safe[0],entries)
         self.assertEqual(entered_names.book_values(self.db,self.safe[0]),{},'nothing stays "Entered by you"')
+        self.assertEqual(entered_names.effective(self.db,self.safe[0],self.read(1),self.scope),{},'the files\' values are in force')
         self.assertEqual(entered_names.plan(self.safe[0],{'series':'','title':'Пртоколы SCP. Сейф №1'},self.read(1),self.scope),[],'unchanged values write nothing')
+
+    def test_m2_typing_the_files_own_title_after_two_corrections_brings_no_older_one_back(self):
+        # Senua's 0.22.2 review, M2: titles "A", then "B", then the files' own "Orig" left "A" in force.
+        books=[book('Z:\\Иван Петров\\%s\\Orig.m4b'%folder,clue='Orig') for folder in ('one','two')]
+        scope=entered_names.scope_of(books[0],'Петров Иван')
+        read={'title':'Orig','author':'Петров Иван','series':'','number':'','universe':'','collection':False}
+        def press(title):
+            now=entered_names.effective(self.db,books[0],read,scope)
+            entries=entered_names.plan(books[0],{'title':title},read,scope,now)
+            entered_names.save(self.db,books[0],entries)
+            return entries
+        press('A');press('B')
+        self.assertEqual(entered_names.effective(self.db,books[0],read,scope)['title']['value'],'B','positive control: the newer correction wins')
+        press('Orig')
+        self.assertNotIn('title',entered_names.effective(self.db,books[0],read,scope),'no correction for this book: neither A nor B')
+        self.assertEqual(entered_names.book_values(self.db,books[0]),{},'nothing "Entered by you"')
+        self.assertEqual(entered_names.remembered(self.db,books[0],read,scope),[],'nothing listed to Forget')
+        self.assertEqual(entered_names.effective(self.db,books[1],read,scope)['title']['value'],'B','press B\'s fix still reaches the other book (Forget takes it back there)')
+        press('C')
+        self.assertEqual(entered_names.effective(self.db,books[0],read,scope)['title']['value'],'C','a new correction is in force again')
+        entered_names.forget(self.db,entered_names.remembered(self.db,books[0],read,scope)[0]['id'])
+        self.assertNotIn('title',entered_names.effective(self.db,books[0],read,scope),'Forget of C goes back to no correction, not to A or B')
+
+    def test_m1_a_whole_value_fix_reaches_only_the_same_text_with_the_same_digits(self):
+        # Senua's 0.22.2 review, M1: the comparison dropped digits, so correcting King's "01" also renamed «1408», and
+        # "Книга 1" also "Книга 12".
+        def case(author,folder,title):
+            row=book('Z:\\%s\\%s\\%s.m4b'%(author,folder,title),clue=title)
+            return row,{'title':title,'author':author,'series':'','number':'','universe':'','collection':False}
+        for author,source,fixed,others,reached in (('King Stephen','01','Misery',['1408','11.22.63'],['01']),
+                                                     ('Петров Иван','Книга 1','Первая книга',['Книга 12','Книга 2','Книга'],['книга  1'])):
+            with self.subTest(source=source):
+                first,read=case(author,'a',source)
+                scope=entered_names.scope_of(first,author)
+                entries=entered_names.plan(first,{'title':fixed},read,scope)
+                self.assertIn(('fix','title',fixed,source,scope,''),entries,'a whole-value fix')
+                rows=[case(author,'b%d'%n,title) for n,title in enumerate(others+reached)]
+                near=[(row,read,scope) for row,read in rows]
+                reach=entered_names.reach(entries,near)
+                self.assertEqual([r['title_clue'] for r in reach],reached,'"Applies to %d books": the same text only'%(1+len(reached)))
+                entered_names.save(self.db,first,entries)
+                for (row,read) in rows:
+                    value=entered_names.effective(self.db,row,read,scope).get('title',{}).get('value')
+                    self.assertEqual(value,fixed if read['title'] in reached else None,read['title'])
+        # Two fixes of two numbers under one author are two fixes (they shared one slot when the digits were dropped).
+        king=entered_names.scope_of(book('Z:\\King Stephen\\x.m4b'),'King Stephen')
+        room,read=case('King Stephen','c','1408')
+        entered_names.save(self.db,room,entered_names.plan(room,{'title':'1408 (Комната)'},read,king))
+        other,read01=case('King Stephen','d','01')
+        self.assertEqual(entered_names.effective(self.db,other,read01,king)['title']['value'],'Misery','the "01" fix is still in force')
+        # A word fix never changes a number.
+        self.assertIsNone(entered_names._word_fix('Том1 Начало','Том2 Начало'))
+        self.assertEqual(entered_names._word_fix('Пртоколы SCP','Протоколы SCP'),('Пртоколы','Протоколы'),'control')
 
     def test_series_and_number_go_together_and_a_title_is_needed(self):
         for values,sentence in (({'series':'Протоколы SCP'},'Type the number in the series, or clear the series.'),({'number':'1'},'Type the series name, or clear the number.'),
@@ -188,6 +243,21 @@ class EditNamesTests(ApproveFixture):
         self.assertEqual(self.preview('2')['title'],'Протоколы SCP. Сейф №2','the fix reached the folder\'s other books')
         self.assertEqual(self.preview('3')['path'],str(Path('Сборники')/'Протоколы SCP. Сейф №3 - Разные авторы.m4b'))
         self.assertEqual(self.preview('control')['title'],'Пртоколы SCP. Сейф №1','a title is never fixed across authors')
+
+    def test_m1_applies_to_counts_only_the_books_with_the_same_digits(self):
+        # Senua's 0.22.2 review, M1, through the engine's own count (the editor's "Applies to n books"): «Рассказ 12» holds
+        # the text «Рассказ 1» (so the catalog prefilter keeps it) and the same letters, but it is another book.
+        for folder,title in (('Рассказ 1','Рассказ 1'),('Рассказ 12','Рассказ 12'),('Рассказ 1 (другое издание)','Рассказ 1')):
+            tone(self.audio/'Глуховский Дмитрий'/folder/(title+'.mp3'),self.cover,title=title,album=title,artist='Дмитрий Глуховский')
+        rows=self.start()
+        titles=lambda:{r['members'][0]['path'].split('\\')[-2]:self.service.approval_preview(r['id'],r['revision'])['title'] for r in self.service.reviews.page()['rows']}
+        self.assertEqual(titles(),{'Рассказ 1':'Рассказ 1','Рассказ 1 (другое издание)':'Рассказ 1','Рассказ 12':'Рассказ 12'},'positive control: the titles read')
+        first=next(r for r in rows if r['members'][0]['path'].endswith('Рассказ 1\\Рассказ 1.mp3'))
+        preview=self.service.approval_preview(first['id'],first['revision'],title='Первый рассказ',names={})
+        self.assertEqual(preview['applies'],2,'this book and the other edition of the same title, never «Рассказ 12»')
+        saved=self.service.names_save(first['id'],first['revision'],{'title':'Первый рассказ'})
+        self.assertEqual(saved['applies'],2)
+        self.assertEqual(titles(),{'Рассказ 1':'Первый рассказ','Рассказ 1 (другое издание)':'Первый рассказ','Рассказ 12':'Рассказ 12'})
 
     def test_save_records_and_never_converts_moves_or_queues(self):
         self.scp();row=self.row('1');sources=[m['path'] for r in self.rows.values() for m in r['members']];before=self.digest(sources)
