@@ -2755,8 +2755,15 @@ _BITRATE_TAIL = re.compile(r'(?:[\s_\-–—]+|(?<=[^\W\d_]))(?:64|96|112|128|16
 _SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P<hash>#\s*)?(?<!\d)(?P<number>\d{1,3}(?:[.,]5)?)\s*(?P<separator>[.:\-–—])\s+(?P<title>.*?[^\W\d_].*)$')
 # A word that numbers a part, never a series name ("Книга 1. Пробуждение", "Part 2. The Return").
 _NOT_A_SERIES = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|серия|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\W*$', re.I)
-# Senua's 0.22.3 review, m4: a "series" that ends in such a word numbers a part of one work («Война и мир. Том 1. Часть 2»).
-_PART_TAIL = re.compile(r'(?:^|[\s.,;:\-–—])(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\.?\s*$', re.I)
+# Senua's 0.22.3 review, m12 (it replaces m4's "a series ending in a part word is none"): a part word standing as its own
+# segment after the series numbers the book in that series and is dropped («Хроники Амбера. Книга 1. Девять принцев
+# Амбера» is «Хроники Амбера», book 1; «Сага о Копье. Т. 3. Драконы»). One written into the series name is part of it
+# («Черная книга 2. Возвращение», "Star Wars Episode 4. A New Hope").
+_PART_TAIL = re.compile(r'\s*[.,;:\-–—]\s*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\.?\s*$', re.I)
+# m4: a title that is itself a part word and a number makes the name a part of one work («Война и мир. Том 1. Часть 2»).
+_PART_TITLE = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\.?\s*\d', re.I)
+# m4: a number that is a title's own, never a position in a series (James Bond's code: «Агент 007 - Казино Рояль»).
+_TITLE_NUMBERS = {'007'}
 _PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
 _RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
 _TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
@@ -2810,19 +2817,29 @@ def series_title_parts(title, author=''):
     правда о нас»), else None. The author written before the series is not part of it ("Робин Хобб - Сага 2. X"); a
     word that only numbers a part ("Книга 1. X") or the author's own name is no series. The number is written as the
     folder structure writes it ("01" is "1", "1,5" is "1.5")."""
+    parts, verdict = _series_split(title, author)
+    return parts if verdict == 'split' else None
+
+
+def _series_split(title, author=''):
+    """(parts, verdict) for series_title_parts: 'split' when the name reads "Series N. Title"; 'ask' when it may as well
+    be a title with its own number and a subtitle (Senua's 0.22.3 review, m12: "Apollo 13: The Untold Story", a number
+    of two digits or more before ":"), which the odd-name check asks about (title_series); (None, None) otherwise."""
     found = _SERIES_PARTS.match(text(title))
     if not found:
-        return None
+        return None, None
     series = text(_series_name(text(found['series']).rstrip(' ,;-–—#'), author or ''))
+    series = text(_PART_TAIL.sub('', series))
     rest = text(found['title'])
-    if not series or not rest or not re.search(r'[^\W\d_]', series) or _NOT_A_SERIES.match(series) or _PART_TAIL.search(series) \
-            or (author and compare_names(series, author)):
-        return None
-    # m4: "Apollo 13: The Untold Story" is a title with a number and a subtitle, never series Apollo, book 13, and a code
-    # number like «Агент 007» is no position in a series. Neither is split; the odd-name check still asks when it should.
-    if found['separator'] == ':' or re.fullmatch(r'00\d', found['number']):
-        return None
-    return {'series': series, 'number': series_number(found['number']), 'title': rest}
+    if not series or not rest or not re.search(r'[^\W\d_]', series) or _NOT_A_SERIES.match(series) or _PART_TITLE.match(rest) \
+            or found['number'] in _TITLE_NUMBERS or (author and compare_names(series, author)):
+        return None, None
+    parts = {'series': series, 'number': series_number(found['number']), 'title': rest}
+    # m12: a one-digit position before ":" is a series book ("Гарри Поттер 1: Философский камень", "Dune 2: Dune
+    # Messiah"); a padded number is a series' numbering («Перри Родан 001. Звездная пыль», «Конан 005 - Час дракона»).
+    if found['separator'] == ':' and float(parts['number']) >= 10:
+        return parts, 'ask'
+    return parts, 'split'
 
 
 def series_number(value):
@@ -2891,7 +2908,7 @@ def odd_identity(title, author, local_author='', no_author='', ruled=False, fold
     title, author = text(title), text(author)
     if title and re.search(r'[^\W\d_]', _BITRATE_TAIL.sub('', title)) and _BITRATE_TAIL.search(title):
         return {'kind': 'title_author', 'why': 'title_bitrate'}
-    if title and _series_in_title(title, folders):
+    if title and (_series_in_title(title, folders) or _series_split(title, author)[1] == 'ask'):
         return {'kind': 'title_author', 'why': 'title_series'}
     if author and author != no_author and not ruled:
         if '_' in author:

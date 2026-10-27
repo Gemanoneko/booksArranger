@@ -610,6 +610,41 @@ class OddNameTests(Base):
         self.assertTrue(local_identity._same_number('01.5', '1.5'))
         self.assertEqual(local_identity.series_title_parts('Сновидения Ехо #3 - Вся правда о нас'), {'series': 'Сновидения Ехо', 'number': '3', 'title': 'Вся правда о нас'}, 'positive control')
 
+    def test_m12_a_colon_a_padded_number_or_a_part_word_still_split_and_the_misfires_do_not(self):
+        # Senua's 0.22.3 review, m12: the m4 fix also stopped "Series N: Title", "Series 00N. Title" and "Cycle. Книга N.
+        # Title": those books filed with the series inside the title, the shape ruling 41 removed.
+        splits = (('Гарри Поттер 1: Философский камень', ('Философский камень', 'Гарри Поттер', '1'), 'Иванов Петр\\Гарри Поттер\\Гарри Поттер - 1 - Философский камень - Иванов Петр.m4b'),
+                  ('Перри Родан 001. Звездная пыль', ('Звездная пыль', 'Перри Родан', '1'), 'Иванов Петр\\Перри Родан\\Перри Родан - 1 - Звездная пыль - Иванов Петр.m4b'),
+                  ('Хроники Амбера. Книга 1. Девять принцев Амбера', ('Девять принцев Амбера', 'Хроники Амбера', '1'), 'Иванов Петр\\Хроники Амбера\\Хроники Амбера - 1 - Девять принцев Амбера - Иванов Петр.m4b'),
+                  ('Ведьмак 3: Кровь эльфов', ('Кровь эльфов', 'Ведьмак', '3'), None),
+                  ('Конан 005 - Час дракона', ('Час дракона', 'Конан', '5'), None),
+                  ('Сага о Копье. Т. 3. Драконы', ('Драконы', 'Сага о Копье', '3'), None),
+                  ('Черная книга 2. Возвращение', ('Возвращение', 'Черная книга', '2'), None))
+        for album, (title, series, number), path in splits:
+            row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
+            result = self.lookup(row)
+            self.assertEqual((result['reasons'], result.get('ask')), ([], None), album)
+            self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number), album)
+            if path:
+                self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path, album)
+        for name, parts in (('Dune 2: Dune Messiah', {'series': 'Dune', 'number': '2', 'title': 'Dune Messiah'}),
+                            ('Star Wars Episode 4. A New Hope', {'series': 'Star Wars Episode', 'number': '4', 'title': 'A New Hope'})):
+            self.assertEqual(local_identity.series_title_parts(name), parts, name)
+        # The misfires m4 stopped stay unsplit: a code number files as it is, a part of one work is never a series book,
+        # and a two-digit number before ":" ("Apollo 13: The Untold Story") may be the title's own: it is asked.
+        for name in ('Война и мир. Том 1. Часть 2', 'Apollo 13: The Untold Story', 'Агент 007 - Казино Рояль'):
+            self.assertIsNone(local_identity.series_title_parts(name), name)
+        row = self.book('Unsorted\\Петр Иванов - Агент 007 - Казино Рояль', ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album='Агент 007 - Казино Рояль', track='%d')
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result['review']['title'], result['review']['series']), ([], 'Агент 007 - Казино Рояль', ''))
+        self.assertEqual(self.goes_to(row, result), SORTED + '\\Иванов Петр\\Агент 007 - Казино Рояль - Иванов Петр.m4b')
+        row = self.book('Unsorted\\Jim Lovell - Apollo 13_ The Untold Story', ['%02d.mp3' % n for n in (1, 2)], title='Chapter %d', artist='Jim Lovell', album='Apollo 13: The Untold Story', track='%d')
+        result = self.asked(row, 'title_author', 'title_series')
+        self.assertEqual(result['ask']['fields']['title']['proposal'], 'Apollo 13: The Untold Story', 'nothing renamed')
+        row = self.book('Unsorted\\Лев Толстой - Война и мир. Том 1. Часть 2', ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Лев Толстой', album='Война и мир. Том 1. Часть 2', track='%d')
+        result = self.lookup(row)
+        self.assertNotEqual(((result.get('review') or {}).get('series'), (result.get('review') or {}).get('title')), ('Война и мир', 'Часть 2'), 'never series «Война и мир», book 1')
+
     def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
         # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
         # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before (since
