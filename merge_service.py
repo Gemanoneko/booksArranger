@@ -2585,6 +2585,20 @@ class MergeService:
         path=preview.get('path') or ''
         return (os.path.relpath(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
+    def routing_preview(self,id,revision,review):
+        """The panel's "Unsaved destination preview" for a book (Senua's 0.22.3 review, m14). Ruling 40: a book's names are
+        edited on its row only, so the six name fields are the ones its Goes to line files with (research and Edit names),
+        never the panel's hidden inputs; the panel's other values are its own (one left empty keeps the row's), planned with
+        the row's metadata facts. Read-only; the planner's answer."""
+        try:row,result=self._approval_result(id,revision)
+        except ValueError as error:
+            if 'Candidate changed' in str(error):raise
+            return {'confidence':'Needs review','path':'','reason':str(error)}
+        names=result.get('review')
+        if not isinstance(names,dict):
+            return {'confidence':'Needs review','path':'','reason':'; '.join(dict.fromkeys(result.get('reasons') or []))[:300] or 'Confirm the book title'}
+        return self.reviews.routing_preview('Audiobooks',id,revision,review,names=names,facts=result.get('metadata_facts'))
+
     def approval_preview(self,id,revision,title=None,author=None,names=None):
         """Judy's "Goes to" line: what Approve would file this book as, with these values. {'path' relative to the output
         folder, 'absolute', 'taken' (a file already there: never overwritten), 'title', 'author', 'reason'}. Read-only.

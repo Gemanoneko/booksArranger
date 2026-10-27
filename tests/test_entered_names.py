@@ -305,6 +305,25 @@ class EditNamesTests(ApproveFixture):
         saved=self.service.names_save(current['id'],current['revision'],{'universe':'SCP Foundation'})
         self.assertEqual(saved['outcome'],'ready_only');self.assertEqual(hashlib.sha256(final.read_bytes()).hexdigest(),before,'the finished audiobook is untouched')
 
+    def test_m14_the_panels_unsaved_destination_preview_uses_the_rows_names(self):
+        # Senua's 0.22.3 review, m14: with the panel dirty, "Unsaved destination preview" was planned from the six hidden
+        # name inputs (ruling 40), so it showed names from before a row Edit names Save, never the names the row uses.
+        import os
+        self.scp();row=self.row('1')
+        self.service.names_save(row['id'],row['revision'],{'title':'Сейф №1','series':'Протоколы SCP','number':'1'})
+        row=self.row('1');goes=self.preview('1')['path']
+        self.assertEqual(goes,str(Path('Сборники')/'Протоколы SCP'/'Протоколы SCP - 1 - Сейф №1 - Разные авторы.m4b'),'positive control: the row\'s Goes to')
+        researched=self.service._approval_result(row['id'],row['revision'])[1]['review']
+        panel={field:researched.get(field,'') for field in ('original_language','canonical_author','narrator','genre','topic')}
+        panel.update(title='Пртоколы SCP. Сейф №1',author='Сборник',series='Старая серия',number='9',universe='',multi_author=False,anthology=False)  # the hidden inputs, stale
+        stale=self.service.reviews.routing_preview('Audiobooks',row['id'],row['revision'],panel)
+        self.assertNotEqual(os.path.relpath(stale['path'],self.sorted) if stale.get('path') else stale.get('reason'),goes,'positive control: the hidden inputs plan another path')
+        preview=self.service.routing_preview(row['id'],row['revision'],panel)
+        self.assertEqual(os.path.relpath(preview['path'],self.sorted),goes,'the row\'s names, the panel\'s other values')
+        never_saved=dict(panel,title='',author='',series='',number='',original_language='')
+        preview=self.service.routing_preview(row['id'],row['revision'],never_saved)
+        self.assertEqual(os.path.relpath(preview['path'],self.sorted),goes,'a book never saved: no "Confirm the book title"; an empty field keeps the row\'s')
+
     def test_a_refused_approve_takes_its_saved_names_back(self):
         self.scp();row=self.row('3')
         with self.assertRaisesRegex(ValueError,'Destination changed'):

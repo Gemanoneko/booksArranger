@@ -1227,7 +1227,8 @@ class Handler(BaseHTTPRequestHandler):
         else: self.shape(data,base)
         library,id,revision=self.candidate_identity(data)
         if path=='/api/candidate/routing-preview':
-            self.response(200,{'preview':reviews.routing_preview(library,id,revision,data['review'])});return
+            # Senua's 0.22.3 review, m14: a book's preview is planned with its row's names (ruling 40), not the hidden inputs.
+            self.response(200,{'preview':self.server.merge.routing_preview(id,revision,data['review'])});return
         if path=='/api/candidate/match':
             self.response(202,{'matching':reviews.match(library,id,revision)});return
         if path=='/api/candidate/covers':

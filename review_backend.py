@@ -529,7 +529,10 @@ class CandidateReviewService:
         if not isinstance(note,str) or len(note)>16000:raise ValueError('Evidence note exceeds bound')
         if actor=='assistant' and len(note.strip())<20:raise ValueError('Assistant review requires concrete supporting evidence')
 
-    def routing_preview(self,library,id,revision,review):
+    def routing_preview(self,library,id,revision,review,names=None,facts=None):
+        """The panel's unsaved destination preview. names (a book, Senua's 0.22.3 review, m14; MergeService.routing_preview):
+        the review its row's Goes to line files with; its six name fields replace the panel's hidden inputs (ruling 40), a
+        panel field left empty keeps the row's value, and facts (that review's metadata facts) plan it as the row does."""
         with self.lock:
             row=self._row(library,id,revision)
             if not isinstance(review,dict) or len(json.dumps(review))>16000:raise ValueError('Invalid preview metadata')
@@ -540,8 +543,12 @@ class CandidateReviewService:
                 if not isinstance(value,str) or len(value)>2000:raise ValueError('Preview fields must be bounded text')
             for field in ('multi_author','anthology'):
                 if type(draft.setdefault(field,False)) is not bool:raise ValueError('Routing choices must be explicit booleans')
+            if isinstance(names,dict):
+                for field in TEXT_FIELDS:
+                    if field in ROW_NAME_FIELDS or not draft[field].strip():draft[field]=names.get(field) if isinstance(names.get(field),str) else ''
+                draft['anthology']=names.get('anthology') is True
             draft['organization_policy']='books-hierarchy-v2'
-            return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=self._context(row).get('metadata_facts'))
+            return propose(row['members'][0]['path'],self._output_root(row,draft,library),'audiobook',row['metadata'],draft,automatic_facts=facts if isinstance(names,dict) else self._context(row).get('metadata_facts'))
 
     def save(self,library,id,revision,review,approve=False,manual_note='',proposal_id=None,cover_id=None,actor='user',evidence=None,automatic_pending=None,automatic_facts=None,capture_manual=True,manual_source_values=None,decision_record=None,user_approval=False,names_row_only=False):
         """user_approval: Sergei's Approve through the private admission (MergeService.approve_book, ruling 6b): the

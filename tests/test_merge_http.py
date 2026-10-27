@@ -176,6 +176,15 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertIs(self.reviews.save.call_args.kwargs['names_row_only'],True)
         self.assertEqual(self.call('/api/candidate/review',self.identity()|{'review':REVIEW,'approve':False,'names_row_only':'yes'})[0],400)
 
+    def test_m14_a_books_unsaved_destination_preview_is_planned_with_the_rows_names(self):
+        # Senua's 0.22.3 review, m14: the route planned the panel's hidden name inputs (reviews.routing_preview); a book's
+        # preview is the engine's, with the row's names, whatever the page sends.
+        self.reviews.routing_preview=Mock(return_value={'path':'stale'})
+        self.merge.routing_preview=Mock(return_value={'path':'the row\'s names'})
+        status,body,_=self.call('/api/candidate/routing-preview',self.identity()|{'review':REVIEW})
+        self.assertEqual((status,body),(200,{'preview':{'path':'the row\'s names'}}))
+        self.merge.routing_preview.assert_called_once_with(ID,1,REVIEW);self.reviews.routing_preview.assert_not_called()
+
     def test_existing_review_defaults_and_new_context(self):
         body=self.identity()|{'review':REVIEW,'approve':False}
         self.assertEqual(self.call('/api/candidate/review',body)[0],200)
