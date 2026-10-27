@@ -84,6 +84,29 @@ class Base(unittest.TestCase):
         """What Approve and the row show (rulings 6b and 11a)."""
         return self.research.approved(row, ROOT)['approval']
 
+    def approved_to(self, row):
+        """Where Sergei's Approve files the book, with what the row shows."""
+        return self.goes_to(row, self.research.approved(row, ROOT))
+
+    def in_sorted(self, series, author):
+        """Ruling 52: a book of this series already converted into Sorted under this author folder (a completed job)."""
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS audio_jobs(job_id TEXT PRIMARY KEY,state TEXT,manifest TEXT,updated TEXT)')
+            count = db.execute('SELECT count(*) FROM audio_jobs').fetchone()[0]
+            manifest = {'metadata': {'title': 'Другая книга', 'author': author, 'canonical_author': author, 'series': series, 'number': '9'}}
+            db.execute("INSERT INTO audio_jobs VALUES(?,'completed',?,?)", ('job-%d' % count, json.dumps(manifest, ensure_ascii=False), '2026-10-27T00:00:%02d' % count))
+            db.commit()
+
+    def split_asked(self, row, series, number, title):
+        """Ruling 52: asked (title_series) with the split filled in; returns the lookup."""
+        result = self.lookup(row)
+        ask = result.get('ask') or {}
+        self.assertEqual((ask.get('kind'), ask.get('why')), ('title_author', 'title_series'), (result['reasons'], ask))
+        self.assertEqual(ask.get('split'), {'series': series, 'number': number, 'title': title})
+        self.assertEqual(ask['fields']['title']['proposal'], title, 'the Title field shows the split title')
+        self.assertEqual((ask['fields']['series']['proposal'], ask['fields']['number']['proposal']), (series, number))
+        return result
+
 
 def map_of_bones():
     # 240 files in perfect sequence; most track tags "N/-1"; the 20 files re-tagged on 2020-03-07 carry a plain "N".
@@ -539,10 +562,11 @@ class OddNameTests(Base):
             db.commit()
         self.assertEqual(self.goes_to(row, self.research.approved(row, ROOT, author='Ричард Форд')), SORTED + '\\Ford Richard\\Лабиринт - Ford Richard.m4b')
 
-    def test_a_series_and_number_in_the_name_are_split_and_filed_without_a_question(self):
-        # Ruling 41 (Sergei 2026-10-27, "2. Yes"; it replaces the 0.22.1 question): "Series N. Title" fills Series, Number
-        # and Title, and the book files by itself; the series never stays in the title. The ":" Windows refuses in a folder
-        # or file name is the path's "_" (metadata.safe_name), the tags keep it.
+    def test_a_series_and_number_in_the_name_are_split_asked_filled_in_and_filed_once_confirmed(self):
+        # Ruling 41 (Sergei 2026-10-27, "2. Yes"): "Series N. Title" fills Series, Number and Title; the series never stays
+        # in the title. Ruling 52 (Sergei 2026-10-27, "a") narrows it: the book files by itself only when something confirms
+        # the series; until then the row asks with the split filled in, and Approve files it. The ":" Windows refuses in a
+        # folder or file name is the path's "_" (metadata.safe_name), the tags keep it.
         cases = (('Unsorted\\Джеймс Герберт - Крысы 1. Крысы', ['%02d.mp3' % n for n in (1, 2)], dict(title='Глава %d', artist='Джеймс Герберт', album='Крысы 1. Крысы', track='%d'),
                   ('Крысы', 'Крысы', '1'), 'Герберт Джеймс\\Крысы\\Крысы - 1 - Крысы - Герберт Джеймс.m4b'),
                  ('Unsorted\\Дивов Олег\\Профессия_ инквизитор 1. Леди не движется', ['%02d.mp3' % n for n in (1, 2)], dict(title='Глава %d', artist='Олег Дивов', album='Профессия: инквизитор 1. Леди не движется', track='%d'),
@@ -556,13 +580,19 @@ class OddNameTests(Base):
                  ('Unsorted\\Шваб Виктория - Сотворение света (Иванов_С)', ['01_Razrushennyy mir.mp3', '02_Razrushennyy mir.mp3'],
                   dict(title='Глава %d', artist='Виктория Шваб', album='Оттенки магии 03. Сотворение света', track='%d'), ('Сотворение света', 'Оттенки магии', '3'), None))
         for folder, names, tags, (title, series, number), path in cases:
-            row = self.book(folder, names, **tags)
-            result = self.lookup(row)
-            self.assertEqual((result['reasons'], result.get('ask')), ([], None), folder)
-            self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number), folder)
-            if path:
-                self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path, folder)
-            self.assertEqual(self.approved(row)['title'], title, 'the row and Approve show the split title')
+            with self.subTest(folder=folder):
+                row = self.book(folder, names, **tags)
+                self.split_asked(row, series, number, title)
+                self.assertEqual(self.approved(row)['title'], title, 'the row and Approve show the split title')
+                if path:
+                    self.assertEqual(self.approved_to(row), SORTED + '\\' + path, 'Approve files the split')
+                # Confirmed: a book of the series already in Sorted under this author files it by itself.
+                self.in_sorted(series, self.research.approved(row, ROOT)['review']['author'])
+                result = self.lookup(row)
+                self.assertEqual((result['reasons'], result.get('ask')), ([], None))
+                self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number))
+                if path:
+                    self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path)
         # Controls: a word that only numbers a part is no series; a name without the pattern is untouched.
         self.assertIsNone(local_identity.series_title_parts('Книга 1. Начало'))
         self.assertIsNone(local_identity.series_title_parts('Warhammer 40000. Месть Гоббо'))
@@ -588,21 +618,21 @@ class OddNameTests(Base):
         two = catalog[ROOT + '\\' + parent + 'Frai_Maks_Slishkom_mnogo_koshmarov (Ovuor)']
         result = self.lookup(two)
         self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), ('Слишком много кошмаров', 'Сновидения Ехо', '2'), 'one spelling')
-        # Controls: alone, the name decides (no sibling says otherwise); a sibling already holding the number is another series.
+        # Controls: alone, the name decides (no sibling says otherwise), asked filled in until confirmed (ruling 52); a
+        # sibling already holding the number is another series.
         alone = self.catalog([file_row(parent + 'Макс Фрай_Мертвый ноль_Гмыза Игорь\\%02d.m4a' % n, title='%02d' % n, artist='Макс Фрай', album='Мертвый ноль 7. Мертвый ноль', track='%d/-1' % n) for n in (1, 2)])
-        self.assertEqual(self.lookup(next(iter(alone.values())))['review']['series'], 'Мертвый ноль')
+        self.split_asked(next(iter(alone.values())), 'Мертвый ноль', '7', 'Мертвый ноль')
         other = 'Иванов Петр\\Разное\\'
         rows = [file_row(other + folder + '\\%02d.mp3' % n, title='%02d' % n, artist='Петр Иванов', album=album, track='%d' % n)
                 for folder, album in (('a', 'Серия А 1. Первая'), ('b', 'Серия А 2. Вторая'), ('c', 'Серия Б 1. Третья')) for n in (1, 2)]
         catalog = self.catalog(rows)
-        self.assertEqual(self.lookup(catalog[ROOT + '\\' + other + 'c'])['review']['series'], 'Серия Б', 'Серия А already has a book 1: not this series')
+        self.split_asked(catalog[ROOT + '\\' + other + 'c'], 'Серия Б', '1', 'Третья')  # Серия А already has a book 1: not this series
         # Senua's 0.22.3 review, M2 (ruling 45 as worded): a name that names another series keeps it, number free or not.
         rows = [file_row(other + folder + '\\%02d.mp3' % n, title='%02d' % n, artist='Петр Иванов', album=album, track='%d' % n)
                 for folder, album in (('a', 'Серия А 1. Первая'), ('b', 'Серия А 2. Вторая'), ('d', 'Серия Б 3. Третья')) for n in (1, 2)]
         catalog = self.catalog(rows)
-        result = self.lookup(catalog[ROOT + '\\' + other + 'd'])
-        self.assertEqual((result['reasons'], result['review']['series'], result['review']['number']), ([], 'Серия Б', '3'))
-        self.assertEqual(self.goes_to(catalog[ROOT + '\\' + other + 'd'], result), SORTED + '\\Иванов Петр\\Серия Б\\Серия Б - 3 - Третья - Иванов Петр.m4b')
+        self.split_asked(catalog[ROOT + '\\' + other + 'd'], 'Серия Б', '3', 'Третья')
+        self.assertEqual(self.approved_to(catalog[ROOT + '\\' + other + 'd']), SORTED + '\\Иванов Петр\\Серия Б\\Серия Б - 3 - Третья - Иванов Петр.m4b')
         # Senua's 0.22.3 review, m4: the split's misfires are not split; a padded half number is the folder's form.
         for name in ('Война и мир. Том 1. Часть 2', 'Apollo 13: The Untold Story', 'Агент 007 - Казино Рояль'):
             self.assertIsNone(local_identity.series_title_parts(name), name)
@@ -619,12 +649,16 @@ class OddNameTests(Base):
                   ('Ведьмак 3: Кровь эльфов', ('Кровь эльфов', 'Ведьмак', '3'), None),
                   ('Конан 005 - Час дракона', ('Час дракона', 'Конан', '5'), None))
         for album, (title, series, number), path in splits:
-            row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
-            result = self.lookup(row)
-            self.assertEqual((result['reasons'], result.get('ask')), ([], None), album)
-            self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number), album)
-            if path:
-                self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path, album)
+            with self.subTest(album=album):
+                # Ruling 52: asked with the split filled in, and filed by itself once Sorted holds the series.
+                row = self.book('Unsorted\\Петр Иванов - ' + album.replace(':', '_'), ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=album, track='%d')
+                self.split_asked(row, series, number, title)
+                self.in_sorted(series, 'Иванов Петр')
+                result = self.lookup(row)
+                self.assertEqual((result['reasons'], result.get('ask')), ([], None))
+                self.assertEqual((result['review']['title'], result['review']['series'], result['review']['number']), (title, series, number))
+                if path:
+                    self.assertEqual(self.goes_to(row, result), SORTED + '\\' + path)
         self.assertEqual(local_identity.series_title_parts('Dune 2: Dune Messiah'), {'series': 'Dune', 'number': '2', 'title': 'Dune Messiah'})
         # Ruling 51: «Черная книга 2» and "Star Wars Episode 4" end their series name in a marker word: asked (M6 test).
         # The misfires m4 stopped stay unsplit: a code number files as it is, a part of one work is never a series book,
@@ -682,12 +716,18 @@ class OddNameTests(Base):
         self.assertEqual(local_identity.series_title_parts('Ересь Хоруса. Книга 2. Лживые боги'), {'series': 'Ересь Хоруса', 'number': '2', 'title': 'Лживые боги'})
         self.assertEqual(local_identity.series_title_parts('The Wheel of Time, Book 3: The Dragon Reborn'), {'series': 'The Wheel of Time', 'number': '3', 'title': 'The Dragon Reborn'})
 
-    def outcome(self, n, album, author=''):
-        """How one name files end to end: ('split', series, number, title), ('whole', title), ('ask', why) or ('held', reasons)."""
+    def outcome(self, n, album, author='', filled=False, confirm=False):
+        """How one name files end to end: ('split', series, number, title), ('whole', title), ('ask', why) or ('held', reasons).
+        filled: an ask also gives the split it fills in; confirm: a split asked is looked up again once Sorted holds its
+        series for the author Approve would file it under (ruling 52)."""
         row = self.book('Unsorted\\%03d' % n, ['%02d.mp3' % k for k in (1, 2)], title='Глава %d', artist=author or 'Петр Иванов', album=album, track='%d')
         result = self.lookup(row); ask = result.get('ask') or {}; review = result.get('review') or {}
+        if confirm and ask.get('split'):
+            self.in_sorted(ask['split']['series'], self.research.approved(row, ROOT)['review']['author'])
+            result = self.lookup(row); ask = result.get('ask') or {}; review = result.get('review') or {}
         if ask:
-            return ('ask', ask.get('why') or ask.get('kind'))
+            split = ask.get('split') or {}
+            return ('ask', ask.get('why') or ask.get('kind')) + (((split.get('series'), split.get('number'), split.get('title')),) if filled else ())
         if review.get('series'):
             return ('split', review['series'], review.get('number'), review.get('title'))
         return ('whole', review.get('title')) if review else ('held', '; '.join(result.get('reasons') or []))
@@ -706,27 +746,126 @@ class OddNameTests(Base):
         self.assertEqual(local_identity._skeleton('\u0421D'), local_identity._skeleton('CD'), 'look-alike letters are one letter')
 
     def test_ruling_51_every_other_name_keeps_how_it_filed_before(self):
-        # Senua's pass-4 name hunt, rebuilt (98 names, end to end on 92376c7): every split stays the same split, every
-        # name kept whole stays whole, and every question stays a question.
+        # Senua's pass-4 name hunt, rebuilt (98 names, end to end on 92376c7): every name kept whole stays whole, every
+        # question stays a question, and every split stays the same split. Ruling 52: a split is asked with exactly those
+        # values filled in until Sorted holds its series, then files by itself as before. m18: a title the split leaves
+        # that starts with a number is asked either way.
         for n, (album, author, expected) in enumerate(RULING_51_KEPT, 100):
             with self.subTest(album=album):
-                self.assertEqual(self.outcome(n, album, author), expected)
+                if album in RULING_52_M18:
+                    self.assertEqual(self.outcome(n, album, author, confirm=True), ('ask', 'title_series'))
+                elif expected[0] == 'split':
+                    self.assertEqual(self.outcome(n, album, author, filled=True), ('ask', 'title_series', expected[1:]))
+                    self.assertEqual(self.outcome(n, album, author, confirm=True), expected)
+                else:
+                    self.assertEqual(self.outcome(n, album, author), expected)
 
-    def test_a_series_named_the_same_way_everywhere_is_still_filed_by_itself(self):
-        # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь». When
-        # the files and folders all carry the name the same way, nothing disagrees, so the app files it as before (since
-        # ruling 41 with the series and number split out of the title).
-        for folder, names, tags in (('Червь', ['Червь 1. Созревание.m4b'], dict(title='Червь 1. Созревание', artist='Джон МакКрэй', album='Червь 1. Созревание')),
-                                    ('Wheel of Time\\Колесо времени - 01. Око мира', ['Джордан Роберт (2013) - Колесо времени - 01. Око мира.m4b'],
-                                     dict(title='Колесо времени - 01. Око мира', artist='Джордан Роберт', album='Колесо времени - 01. Око мира')),
-                                    ('Terry Pratchet\\Discworld\\City Watch', ['Discworld 19. Feet of Clay.m4b'], dict(title='Discworld 19. Feet of Clay', artist='Terry Pratchett', album='Discworld 19. Feet of Clay')),
-                                    # "40000" is no series 40 and book 000, though the folder names the story (live).
-                                    ('Unsorted\\WH40K\\Брукс Майк-Месть Гоббо+Агрессивное вождение+Самые сообразительные и выдающиеся(Casper Valter)', ['Warhammer 40000. Месть Гоббо.m4b'],
-                                     dict(title='Warhammer 40000. Месть Гоббо', artist='Майк Брукс', album='Warhammer 40000. Месть Гоббо'))):
-            books = self.catalog([file_row(folder + '\\' + name, **tags) for name in names])
-            self.assertEqual(len(books), 1, 'positive control: one book')
-            result = self.lookup(next(iter(books.values())))
-            self.assertNotEqual((result.get('ask') or {}).get('why'), 'title_series', (folder, result.get('ask'), result['reasons']))
+    def test_a_series_its_sibling_books_carry_files_by_itself_a_name_alone_is_asked_filled_in(self):
+        # Measured on the live copy: the plain "<Series> N. Title" pattern alone asked 91 books, 31 of them «Червь», one-file
+        # books side by side in one folder. Ruling 52: the books beside it carry the series, which confirms it, so «Червь»
+        # files by itself; a name alone is asked with the split filled in.
+        worm = [('Червь %d. %s' % (n, t), 'Червь %d. %s.m4b' % (n, t)) for n, t in ((1, 'Созревание'), (2, 'Насекомые'), (3, 'Порка'))]
+        books = self.catalog([file_row('Червь\\' + name, title=album, artist='Джон МакКрэй', album=album) for album, name in worm])
+        self.assertEqual(len(books), 3, 'positive control: three books')
+        result = self.lookup(books[ROOT + '\\Червь\\Червь 1. Созревание.m4b'])
+        self.assertEqual((result['reasons'], result.get('ask'), result['review']['series'], result['review']['number'], result['review']['title']), ([], None, 'Червь', '1', 'Созревание'))
+        alone = self.catalog([file_row('Червь\\Червь 1. Созревание.m4b', title='Червь 1. Созревание', artist='Джон МакКрэй', album='Червь 1. Созревание')])
+        self.split_asked(next(iter(alone.values())), 'Червь', '1', 'Созревание')
+        for folder, name, tags, split in (('Wheel of Time\\Колесо времени - 01. Око мира', 'Джордан Роберт (2013) - Колесо времени - 01. Око мира.m4b',
+                                           dict(title='Колесо времени - 01. Око мира', artist='Джордан Роберт', album='Колесо времени - 01. Око мира'), ('Колесо времени', '1', 'Око мира')),
+                                          ('Terry Pratchet\\Discworld\\City Watch', 'Discworld 19. Feet of Clay.m4b', dict(title='Discworld 19. Feet of Clay', artist='Terry Pratchett', album='Discworld 19. Feet of Clay'),
+                                           ('Discworld', '19', 'Feet of Clay'))):
+            self.split_asked(next(iter(self.catalog([file_row(folder + '\\' + name, **tags)]).values())), *split)
+        # "40000" is no series 40 and book 000, though the folder names the story (live).
+        books = self.catalog([file_row('Unsorted\\WH40K\\Брукс Майк-Месть Гоббо+Агрессивное вождение+Самые сообразительные и выдающиеся(Casper Valter)\\Warhammer 40000. Месть Гоббо.m4b',
+                                       title='Warhammer 40000. Месть Гоббо', artist='Майк Брукс', album='Warhammer 40000. Месть Гоббо')])
+        result = self.lookup(next(iter(books.values())))
+        self.assertNotEqual((result.get('ask') or {}).get('why'), 'title_series', (result.get('ask'), result['reasons']))
+
+    def test_ruling_52_a_split_files_by_itself_only_when_its_series_is_confirmed(self):
+        # Ruling 52 (Sergei 2026-10-27, "a"): «Профессия: инквизитор 1. Леди не движется» with no series folder in Sorted and
+        # no siblings is asked with Series, Number and Title filled in, and Approve files them; with «Профессия: инквизитор»
+        # in Sorted under Дивов Олег, or with sibling books carrying it, it files by itself. It filed by itself before.
+        album = 'Профессия: инквизитор 1. Леди не движется'
+        path = SORTED + '\\Дивов Олег\\Профессия_ инквизитор\\Профессия_ инквизитор - 1 - Леди не движется - Дивов Олег.m4b'
+        tags = dict(title='Глава %d', artist='Олег Дивов', album=album, track='%d')
+        row = self.book('Unsorted\\Дивов Олег\\Профессия_ инквизитор 1. Леди не движется', ['%02d.mp3' % n for n in (1, 2)], **tags)
+        self.split_asked(row, 'Профессия: инквизитор', '1', 'Леди не движется')
+        self.assertEqual(self.approved_to(row), path, 'Approve once files the values filled in')
+        self.in_sorted('Профессия: инквизитор', 'Петров Иван')
+        self.split_asked(row, 'Профессия: инквизитор', '1', 'Леди не движется')  # another author's folder confirms nothing
+        self.in_sorted('Профессия: инквизитор', 'Дивов Олег')
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result.get('ask'), self.goes_to(row, result)), ([], None, path), 'Sorted holds the series')
+        parent = 'Unsorted\\Дивов Олег\\'
+        rows = [file_row(parent + folder + '\\%02d.mp3' % n, title='Глава %d' % n, artist='Олег Дивов', album=name, track='%d' % n)
+                for folder, name in (('1', album), ('2', 'Профессия: инквизитор 2. Живые и мертвые'), ('3', 'Профессия: инквизитор 3. Вниз по кроличьей норе')) for n in (1, 2)]
+        catalog = self.catalog(rows)
+        first = catalog[ROOT + '\\' + parent + '1']
+        result = self.lookup(first)
+        self.assertEqual((result['reasons'], result.get('ask'), self.goes_to(first, result)), ([], None, path), 'its siblings carry the series')
+        # The guards still ask when the series is confirmed: an unclear marker (ruling 51) or no title of its own (m18).
+        for name, series in (('Ведьмак №1. Последнее желание', 'Ведьмак №'), ('Ведьмак 1 - 2. Последнее желание. Меч предназначения', 'Ведьмак')):
+            with self.subTest(name=name):
+                row = self.book('Unsorted\\Петр Иванов - ' + name, ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=name, track='%d')
+                self.in_sorted('Ведьмак', 'Иванов Петр')
+                result = self.lookup(row)
+                self.assertEqual(((result.get('ask') or {}).get('why'), (result.get('ask') or {}).get('split')), ('title_series', None), 'asked about the name, nothing filled in')
+
+    def test_m7_an_upper_case_cyrillic_look_alike_in_a_latin_series_folder_is_read_as_latin(self):
+        # Senua's 0.22.3 review, M7: ruling 51's fold was bound as _LOOKALIKE, the name of latin_lookalikes' table, so «Аnita
+        # Blake» (a Cyrillic А) filed under a second folder that looks the same as "Anita Blake".
+        for value, latin in (('Аnita Blake', 'Anita Blake'), ('Тhe Expanse', 'The Expanse'), ('Сlive Barker', 'Clive Barker'), ('Sigmа Force', 'Sigma Force')):
+            self.assertEqual(local_identity.latin_lookalikes(value), latin, value)
+        books = self.catalog([file_row('Laurell K Hamilton\\Аnita Blake\\1. Guilty Pleasures\\%02d.mp3' % n, title='Глава %d' % n, artist='Laurell K. Hamilton', album='Guilty Pleasures', track='%d' % n) for n in (1, 2)])
+        row = next(iter(books.values()))
+        result = self.lookup(row)
+        self.assertEqual((result['review']['series'], result['review']['number']), ('Anita Blake', '1'), result['reasons'])
+        self.assertIn('\\Anita Blake\\Anita Blake - 1 - ', self.goes_to(row, result))
+
+    def test_m8_the_live_names_are_asked_or_filed_into_their_confirmed_series_never_a_junk_folder(self):
+        # Senua's 0.22.3 review, M8: «Отряд Сигма_01. Песчанный дьявол» (Rollins James) filed as `Отряд Сигма_\…`, and «Карр
+        # Д Д - ШХ 06. Тайна закрытой комнаты» as `Карр Д Д - ШХ\…`, silently.
+        sigma = 'Отряд Сигма_01. Песчанный дьявол'
+        row = self.book('James Rollins\\Отряд Сигма_01. Песчанный дьявол', ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Джеймс Роллинс', album=sigma, track='%d')
+        self.split_asked(row, 'Отряд Сигма', '1', 'Песчанный дьявол')
+        folder = self.research.approved(row, ROOT)['review']['author']
+        self.in_sorted('Отряд Сигма', folder)
+        result = self.lookup(row)
+        self.assertEqual((result['reasons'], result['review']['series'], result['review']['number']), ([], 'Отряд Сигма', '1'), 'its series in Sorted')
+        self.assertIn('\\Отряд Сигма\\Отряд Сигма - 1 - Песчанный дьявол - ', self.goes_to(row, result))
+        carr = 'Карр Д Д - ШХ 06. Тайна закрытой комнаты'
+        row = self.book('Unsorted\\Карр Д Д - ШХ 06. Тайна закрытой комнаты', ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Артур Конан Дойл', album=carr, track='%d')
+        result = self.lookup(row)
+        self.assertEqual((result.get('ask') or {}).get('why'), 'title_series', ('asked, never filed under a junk series', result['reasons'], (result.get('review') or {}).get('series')))
+
+    def test_m18_a_title_left_that_starts_with_a_number_or_a_part_word_is_asked(self):
+        # Senua's 0.22.3 review, m18: the title after the split was not checked: «Ведьмак 1 - 2. …» filed as book 1 titled
+        # «2. Последнее желание. …», «Хроники Амбера 1. Гл. 2» as book 1 titled «Гл. 2».
+        for name in ('Ведьмак 1 - 2. Последнее желание. Меч предназначения', 'Гарри Поттер 1 - 3. Сборник', 'Хроники Амбера 2. 1. Карты судьбы',
+                     'Хроники Амбера 1. Гл. 2', 'Хроники Амбера 1. Ch. 2', 'Хроники Амбера 1. Вып. 2', 'Хроники Амбера 1. Части 1-2'):
+            with self.subTest(name=name):
+                self.assertEqual(local_identity._series_split(name)[1], 'ask')
+                row = self.book('Unsorted\\Петр Иванов - ' + name, ['%02d.mp3' % n for n in (1, 2)], title='Глава %d', artist='Петр Иванов', album=name, track='%d')
+                self.in_sorted(local_identity._series_split(name)[0]['series'], 'Иванов Петр')
+                result = self.lookup(row)
+                self.assertNotEqual((result.get('review') or {}).get('series'), local_identity._series_split(name)[0]['series'], 'never filed as a series book')
+
+    def test_m19_siblings_asked_about_still_name_the_series_ruling_45_picks(self):
+        # Senua's 0.22.3 review, m19: siblings whose names ruling 51 asks about no longer voted, so «Мертвый ноль 7. Мертвый
+        # ноль» beside «Сновидения Ехо №4 - …» and «… №5. …» filed as series «Мертвый ноль»; add two «Лабиринты Ехо» books
+        # and it filed into «Лабиринты Ехо», a series it is not in.
+        parent = 'Max Fray\\Сновидения Эхо\\'
+        siblings = [('a', 'Сновидения Ехо №4 - Я иду искать'), ('b', 'Сновидения Ехо №5. Сундук мертвеца'), ('z', 'Мертвый ноль 7. Мертвый ноль')]
+        def catalog(books):
+            return self.catalog([file_row(parent + folder + '\\%02d.m4a' % n, title='%02d' % n, artist='Макс Фрай', album=album, track='%d/-1' % n) for folder, album in books for n in (1, 2)])
+        zero = catalog(siblings)[ROOT + '\\' + parent + 'z']
+        result = self.lookup(zero)
+        self.assertEqual((result['reasons'], result['review']['series'], result['review']['number']), ([], 'Сновидения Ехо', '7'))
+        tie = catalog(siblings + [('c', 'Лабиринты Ехо 1. Лабиринт Менина'), ('d', 'Лабиринты Ехо 2. Волонтеры вечности')])[ROOT + '\\' + parent + 'z']
+        result = self.lookup(tie)
+        self.assertNotEqual((result.get('review') or {}).get('series'), 'Лабиринты Ехо')
+        self.split_asked(tie, 'Мертвый ноль', '7', 'Мертвый ноль')  # the siblings disagree: nothing confirms the series
 
     def test_russian_written_in_latin_letters_as_the_title_is_asked(self):
         row = self.book('Max Fray\\Сновидения Эхо\\Frai_Maks_Master_vetrov_i_zakatov (Ovuor)', ['Maks Frai - Master vetrov i zakatov - 00 - %03d Snovideniya Eho 1 (Ovuor).m4a' % n for n in (1, 2)],
@@ -863,6 +1002,8 @@ RULING_51_M6 = (
     'Мастер и Маргарита. \u0421D 1. Главы 1-10',  # «СD» typed with a Cyrillic С
 )
 RULING_51_MARKER_IN_NAME = ('Черная книга 2. Возвращение', 'Star Wars Episode 4. A New Hope')
+# m18: the title left starts with a number ("1. Зона"): asked, whether or not the series is confirmed.
+RULING_52_M18 = {'S.T.A.L.K.E.R. 2 - 1. Зона'}
 
 
 def setUpModule():

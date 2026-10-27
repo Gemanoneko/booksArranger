@@ -49,6 +49,10 @@ class Catalog:
         research=PublicResearch(Offline(str(self.database)),leads=[])
         return research.lookup(dict(row,_manual_metadata_sources=[]),ROOT,threading.Event())
 
+    def approved(self,row):
+        """What Sergei's Approve files (rulings 6b and 11a)."""
+        return PublicResearch(Offline(str(self.database)),leads=[]).approved(row,ROOT)
+
 
 def book(*members,identity='book-1'):
     return {'id':identity,'revision':1,'fingerprint':'fp-'+identity,'source_root':ROOT,'members':list(members)}
@@ -96,10 +100,13 @@ class ReaderIsNeverAnAuthor(unittest.TestCase):
     def test_bracketed_reader_in_the_artist_tag_gives_way_to_the_file_name_author_sanderson(self):
         row=book(member('Brandon Sanderson/Stormlight/Брендон Сандерсон - Архив Буресвета 4 - Ритм войны (Дружинин Степан).m4b',
                         album='Архив Буресвета 4 - Ритм войны',artist='Степан Дружинин'))
-        result=Catalog(self,[row]).lookup(row)
-        self.assertEqual(result['reasons'],[],result.get('reasons'))
+        catalog=Catalog(self,[row]);result=catalog.lookup(row)
+        # Ruling 52: «Архив Буресвета 4 - …» is a series split nothing confirms, so the row asks with it filled in.
+        self.assertEqual((result['ask']['why'],result['ask']['split']['series']),('title_series','Архив Буресвета'),result.get('reasons'))
+        self.assertNotIn('Дружинин',result['ask']['fields']['author']['proposal'])
         # Ruling 3 (2026-10-13): the folder's English spelling is the canonical one.
-        self.assertNotIn('Дружинин',result['review']['canonical_author']);self.assertEqual(result['review']['canonical_author'],'Sanderson Brandon')
+        review=catalog.approved(row)['review']
+        self.assertNotIn('Дружинин',review['canonical_author']);self.assertEqual(review['canonical_author'],'Sanderson Brandon')
 
     def test_reader_of_other_books_in_the_album_artist_tag_is_not_the_author_shrayber(self):
         row=book(member('Star Wars/Пухов Сергей - Джо Шрайбер - Солдаты смерти.m4b',album='Солдаты смерти',album_artist='Пухов Сергей',artist='Джо Шрайбер'))
@@ -202,8 +209,10 @@ class QuestionsForSergei(unittest.TestCase):
 
     def test_a_series_name_in_the_author_slot_never_contradicts_the_tags_wheel_of_time(self):
         row=book(member('Wheel of Time/Колесо времени - 01. Око мира/Око мира.m4b',album='Колесо времени - 01. Око мира',album_artist='Джордан Роберт'))
-        result=Catalog(self,[row]).lookup(row)
-        self.assertEqual(result['reasons'],[],result.get('reasons'));self.assertEqual(result['review']['canonical_author'],'Джордан Роберт')
+        catalog=Catalog(self,[row]);result=catalog.lookup(row)
+        # Ruling 52: the series split is asked, filled in (nothing confirms «Колесо времени»); the author is the tags'.
+        self.assertEqual((result['ask']['why'],result['ask']['fields']['author']['proposal']),('title_series','Джордан Роберт'),result.get('reasons'))
+        self.assertEqual(catalog.approved(row)['review']['canonical_author'],'Джордан Роберт')
 
     def test_the_same_surname_written_with_initials_is_not_a_contradiction_tolkien(self):
         row=book(member('J. R. R. Tolkien/Дж. Р.Р. Толкин - Хоббит, или Туда и обратно.m4b',album='Хоббит, или Туда и обратно',album_artist='Джон Рональд Руэл Толкин'))

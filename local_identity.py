@@ -898,7 +898,7 @@ def catalog_index(database, root):
         revision = db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() if has else None
         key = (str(Path(database).resolve()), root, revision[0] if revision else None)
         if revision and key in _INDEX:
-            return dict(_INDEX[key], confirmed=confirmed_spellings(database))
+            return dict(_INDEX[key], confirmed=confirmed_spellings(database), sorted_series=sorted_series(database))
         readers = set()
         uses = set()
         tagged = set()
@@ -937,11 +937,14 @@ def catalog_index(database, root):
     sibling_albums = {}
     for folder, counts in albums.items():
         sibling_albums.setdefault(str(Path(folder).parent), {})[folder] = counts.most_common(1)[0][0]
-    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys, 'sibling_albums': sibling_albums}
+    # Ruling 52: every album each folder's files carry (a one-file book's siblings are the other books in its folder).
+    folder_albums = {folder: dict(counts) for folder, counts in albums.items()}
+    index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys, 'sibling_albums': sibling_albums,
+             'folder_albums': folder_albums}
     if revision:
         _INDEX.clear()
         _INDEX[key] = index
-    return dict(index, confirmed=confirmed_spellings(database))
+    return dict(index, confirmed=confirmed_spellings(database), sorted_series=sorted_series(database))
 
 
 _CONFIRMED = {}
@@ -2589,9 +2592,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                             'sources': [{'kind': 'folder structure', 'value': structure['book_name']}]}
         from_folders = True
     # Ruling 41 (Sergei 2026-10-27, "2. Yes"): a name that reads "Series N. Title" fills Series, Number and Title itself and
-    # the book files without a question; the series never stays inside the title. A series the files already name the
+    # the series never stays inside the title; the book files without a question once its series is confirmed (ruling 52,
+    # below), else the row asks with the split filled in. A series the files already name the
     # same way keeps its source; one that names another series leaves the title as it is (its own names disagree).
     found = series_title_parts(fields['title']['value'], author['name'] if author else '') if fields['title']['value'] and not part else None
+    unconfirmed = False
     if found:
         # Ruling 45 (Sergei 2026-10-27): the series its sibling book folders carry decides it when the name only repeats
         # its own title as the series («Мертвый ноль 7. Мертвый ноль» beside «Сновидения Ехо 5. Сундук мертвеца»). A name
@@ -2601,6 +2606,16 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         if carried and found['number'] not in taken and series_key(found['series']) == series_key(found['title']):
             found = dict(found, series=carried)
         named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
+        # Ruling 52 (Sergei 2026-10-27, "a"; it narrows ruling 41): the split files by itself only when something confirms
+        # its series: the files' own series (a tag or the series folder), the series its siblings carry, or a series
+        # folder Sorted already holds for this author (the book files into that folder, in its spelling). Otherwise the
+        # row asks with Series, Number and Title filled in from the split, and Sergei's Approve files them
+        # (series_unconfirmed; public_research asks it as title_series).
+        filed = sorted_spelling(found['series'], author['name'] if author else '', index, rules)
+        if filed:
+            found = dict(found, series=filed)
+        unconfirmed = not (named or filed or (carried and series_key(carried) == series_key(found['series']))
+                           or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
         if not named:
             source = [{'kind': 'the title (%s)' % (fields['title'].get('basis') or 'name'), 'value': whole}]
@@ -2649,6 +2664,8 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                  'requires_own_chapters': True} if part and not part['blocked'] else None
     return {'version': IDENTITY_VERSION, 'accepted': accepted, 'route': route if accepted else None, 'part_book': part_book, 'fields': fields,
             'series': series, 'gaps': gaps, 'ignored': ignored, 'conflicts': conflicts, 'ask': ask,
+            # Ruling 52: the series and number came from the name's split and nothing confirms the series.
+            'series_unconfirmed': bool(unconfirmed and series),
             # Rulings 30 and 37: the universe the book's folders name («Вселенная Дозоров»), else ''.
             'universe': (structure or {}).get('universe') or book_universe(row, root),
             'held': piece['detail'] if piece and not ask else '',
@@ -2758,8 +2775,9 @@ _SERIES_PARTS = re.compile(r'^(?P<series>.*?[^\W\d_].*?)\s*(?:[\-–—]\s*)?(?P
 # A word that numbers a part, never a series name ("Книга 1. Пробуждение", "Part 2. The Return").
 _NOT_A_SERIES = re.compile(r'^\W*(?:книга|кн|том|т|часть|ч|глава|выпуск|сезон|серия|эпизод|диск|book|volume|vol|part|pt|chapter|episode|season|issue|disc|disk|cd)\W*$', re.I)
 # Senua's 0.22.3 review, m12 and m16: a word that numbers a book, standing as its own segment after the series, is
-# dropped («Хроники Амбера. Книга 1. Девять принцев Амбера» is «Хроники Амбера», book 1). One written into the series name
-# is part of it («Черная книга 2. Возвращение», "Star Wars Episode 4. A New Hope").
+# dropped («Хроники Амбера. Книга 1. Девять принцев Амбера» is «Хроники Амбера», book 1). One written into the series
+# name is not dropped, and the name is asked (ruling 51, _unsure_series: «Черная книга 2. Возвращение», "Star Wars
+# Episode 4. A New Hope").
 _BOOK_TAIL = re.compile(r'\s*[.,;:\-–—]\s*(?:книга|кн|book)\.?\s*$', re.I)
 # Ruling 50 (Sergei 2026-10-27, "A"): a disc, a volume, a part or a chapter is one part of one book, never a number in a
 # series («Мастер и Маргарита. CD 1. Главы 1-10», «Граф Монте-Кристо. Том 2. …», «Отцы и дети. Глава 1. Приезд»); nor
@@ -2775,9 +2793,11 @@ _TITLE_NUMBERS = {'007'}
 # whose last word is any marker the split knows (or an abbreviation of one), a number sign, a short abbreviation with a
 # dot, or a word mixing Latin and Cyrillic letters is asked. Look-alike letters are read as one (С and C, Т and T …), so
 # «СD» typed with a Cyrillic С is the marker CD.
-_LOOKALIKE = str.maketrans('авекмнорстухіј', 'abekmhopctyxij')
+# Senua's 0.22.3 review, M7: its own name. Bound as _LOOKALIKE it replaced latin_lookalikes' table, so an upper-case
+# Cyrillic look-alike in a Latin series folder («Аnita Blake») was no longer read as Latin.
+_MARKER_FOLD = str.maketrans('авекмнорстухіј', 'abekmhopctyxij')
 def _skeleton(word):
-    return text(word).casefold().replace('ё', 'е').translate(_LOOKALIKE)
+    return text(word).casefold().replace('ё', 'е').translate(_MARKER_FOLD)
 _MARKERS = {_skeleton(w) for w in ('книга', 'кн', 'том', 'т', 'часть', 'ч', 'глава', 'главы', 'гл', 'диск', 'выпуск', 'вып', 'сезон',
                                    'эпизод', 'серия', 'book', 'bk', 'volume', 'vol', 'part', 'pt', 'chapter', 'ch', 'episode', 'season',
                                    'issue', 'disc', 'disk', 'cd', 'series', 'number', 'no', 'nr')}
@@ -2786,15 +2806,25 @@ _MARKERS = {_skeleton(w) for w in ('книга', 'кн', 'том', 'т', 'час
 def _unsure_series(series):
     """Ruling 51: True when the series name the split read may not be filed by itself ("Harry Potter Book", «Хроники
     Амбера №», «Отцы и дети. Гл.», "Discworld No.", «Мастер и Маргарита. СD», «Черная книга»)."""
-    token = (re.findall(r'\S+', text(series)) or [''])[-1]
+    tokens = re.findall(r'\S+', text(series)) or ['']
+    token = tokens[-1]
     word = token.strip('.,;:-–—#()[]«»"\'')
     if not word or '№' in token:
         return True
-    if re.search(r'[A-Za-z]', word) and re.search(r'[А-Яа-яЁё]', word):
+    # A word mixing Latin and Cyrillic letters anywhere in the name ("Sigmа Force" with a Cyrillic а; M8).
+    if any(re.search(r'[A-Za-z]', t) and re.search(r'[А-Яа-яЁё]', t) for t in tokens):
         return True
     if _skeleton(word) in _MARKERS:
         return True
     return token.endswith('.') and word.isalpha() and len(word) <= 4
+
+
+def _unsure_title(title):
+    """Senua's 0.22.3 review, m18: the title the split leaves starts with a number («2. Последнее желание» from «Ведьмак
+    1 - 2. …») or with a marker or a word and a number («Гл. 2», «Части 1-2», "Track 2"): it is no title of its own."""
+    title = text(title)
+    first = (re.findall(r'\S+', title) or [''])[0].strip('.,;:-–—#()[]«»"\'')
+    return bool(re.match(r'^\W*\d', title) or _skeleton(first) in _MARKERS or re.match(r'^\W*[^\W\d_]+\.?\s*\d', title))
 _PEOPLE_JOIN = re.compile(r'\s*(?:[,;&/]|\s+и\s+|\s+and\s+)\s*', re.I)
 _RUSSIAN_WORDS = {'i', 'v', 'na', 'iz', 'ot', 'dlya', 'bez', 'ili', 'pro', 'pod', 'nad'}
 _TRANSLIT = re.compile(r'zh|kh|shch|yy|iy$|yu|ya|ov$|ogo$|ykh$|aya$|oye$|iye$')
@@ -2856,12 +2886,15 @@ def _series_split(title, author=''):
     """(parts, verdict) for series_title_parts: 'split' when the name reads "Series N. Title"; 'ask' when it may as well
     be something else (Senua's 0.22.3 review: m12, a title with its own number and a subtitle, "Apollo 13: The Untold
     Story", a number of two digits or more before ":"; M5, a position 0 or a series name holding a number itself,
-    «Warhammer 40 000: Ересь Хоруса. Книга 1. …»; M6 and ruling 51, a series name that is not clean, _unsure_series),
-    which the odd-name check asks about (title_series); (None, None) otherwise, a part of one book included (ruling 50)."""
+    «Warhammer 40 000: Ересь Хоруса. Книга 1. …»; M6 and ruling 51, a series name that is not clean, _unsure_series;
+    m18, a title left that is no title of its own, _unsure_title), which the odd-name check asks about (title_series);
+    (None, None) otherwise, a part of one book included (ruling 50). A 'split' still files by itself only when something
+    confirms its series (ruling 52, identify)."""
     found = _SERIES_PARTS.match(text(title))
     if not found:
         return None, None
-    series = text(_series_name(text(found['series']).rstrip(' ,;-–—#'), author or ''))
+    # M8: "_" before the number joins the series to it in a file name («Отряд Сигма_01. Песчанный дьявол»).
+    series = text(_series_name(text(found['series']).rstrip(' ,;-–—#_'), author or ''))
     if _PART_TAIL.search(series):
         return None, None
     series = text(_BOOK_TAIL.sub('', series))
@@ -2870,8 +2903,8 @@ def _series_split(title, author=''):
             or found['number'] in _TITLE_NUMBERS or (author and compare_names(series, author)):
         return None, None
     parts = {'series': series, 'number': series_number(found['number']), 'title': rest}
-    if _unsure_series(series):
-        return parts, 'ask'  # ruling 51
+    if _unsure_series(series) or _unsure_title(rest):
+        return parts, 'ask'  # rulings 51 and 52 (m18)
     # m12: a one-digit position before ":" is a series book ("Гарри Поттер 1: Философский камень", "Dune 2: Dune
     # Messiah"); a padded number is a series' numbering («Перри Родан 001. Звездная пыль», «Конан 005 - Час дракона»).
     if found['separator'] == ':' and float(parts['number']) >= 10:
@@ -2910,29 +2943,82 @@ def sibling_series(row, root, index, author=''):
     """Ruling 45: the series the other book folders under this book's parent folder carry in their albums ("Series N.
     Title"), when at least two of them name it and no other series is named as often, with the numbers they hold in it;
     ('', set()) otherwise. Only a book in one folder that is not directly under the library root; read from the catalog
-    index (no file is opened)."""
+    index (no file is opened). Ruling 52: a one-file book's siblings are also the other books in its own folder (the
+    albums its folder's files carry: «Червь 1. …» beside «Червь 2. …»). Senua's 0.22.3 review, m19: a sibling whose
+    name is asked (ruling 51) still names its series here; the spelling carried is a clean one, else nothing is."""
     albums = (index or {}).get('sibling_albums') or {}
     folders = {str(Path(m['path']).parent) for m in row.get('members', [])}
     if len(folders) != 1:
         return '', set()
     own = next(iter(folders))
     parent = str(Path(own).parent)
-    if not root or norm(parent) == norm(str(Path(root))):
-        return '', set()
-    counts, spellings, numbers = Counter(), {}, {}
-    for folder, album in (albums.get(parent) or {}).items():
-        if folder == own:
-            continue
-        parts = series_title_parts(album, author)
-        if parts:
+    names = []
+    if root and norm(parent) != norm(str(Path(root))):
+        names += [album for folder, album in (albums.get(parent) or {}).items() if folder != own]
+    if len(row.get('members') or []) == 1:
+        tags = {str(k).casefold(): v for k, v in ((row['members'][0].get('metadata') or {}).get('tags') or {}).items()}
+        here = Counter((index or {}).get('folder_albums', {}).get(own) or {})
+        here[text(tags.get('album'))] -= 1
+        names += [album for album, count in here.items() for _ in range(max(count, 0)) if album]
+    counts, spellings, clean, numbers = Counter(), {}, {}, {}
+    for album in names:
+        parts, verdict = _series_split(album, author)
+        if parts and verdict in ('split', 'ask'):
             key = series_key(parts['series'])
             counts[key] += 1
             spellings.setdefault(key, Counter())[series_spelling(parts['series'])] += 1
+            if verdict == 'split':
+                clean.setdefault(key, Counter())[series_spelling(parts['series'])] += 1
             numbers.setdefault(key, set()).add(parts['number'])
     ranked = counts.most_common(2)
     if not ranked or ranked[0][1] < 2 or len(ranked) > 1 and ranked[1][1] == ranked[0][1]:
         return '', set()
-    return spellings[ranked[0][0]].most_common(1)[0][0], numbers[ranked[0][0]]
+    spelling = (clean.get(ranked[0][0]) or spellings[ranked[0][0]]).most_common(1)[0][0]
+    return ('', set()) if _unsure_series(spelling) else (spelling, numbers[ranked[0][0]])
+
+
+_SORTED = {}
+
+
+def sorted_series(database):
+    """Ruling 52: the series folders Sorted already holds, {series key: [(series as filed, author folder), …]}, from the
+    completed jobs' manifests. Read-only; {} when there are none or they can't be read."""
+    import contextlib
+    import sqlite3
+    try:
+        with contextlib.closing(sqlite3.connect(Path(database).resolve().as_uri() + '?mode=ro', uri=True, timeout=5)) as db:
+            db.execute('PRAGMA query_only=ON')
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():
+                return {}
+            key = (str(Path(database).resolve()), tuple(db.execute("SELECT count(*),coalesce(sum(state='completed'),0) FROM audio_jobs").fetchone()))
+            if key in _SORTED:
+                return _SORTED[key]
+            found = {}
+            for series, author in db.execute("SELECT json_extract(manifest,'$.metadata.series'),json_extract(manifest,'$.metadata.author') "
+                                             "FROM audio_jobs WHERE state='completed' AND json_valid(manifest)"):
+                if isinstance(series, str) and text(series) and isinstance(author, str) and text(author):
+                    found.setdefault(series_key(series), []).append((text(series), text(author)))
+    except (sqlite3.Error, OSError, ValueError):
+        return {}
+    _SORTED.clear()
+    _SORTED[key] = found
+    return found
+
+
+def sorted_spelling(series, author, index, rules=None):
+    """Ruling 52: the spelling of this series' folder in Sorted for this author ('' when Sorted has none): the folder
+    the book files into when a name's split matches it («Отряд Сигма_01. …» into «Отряд Сигма»)."""
+    filed = ((index or {}).get('sorted_series') or {}).get(series_key(series)) or []
+    if not filed or not text(author):
+        return ''
+    folders = {text(author)}
+    target = rules.same_as(text(author)) if rules is not None else ''
+    if target:
+        folders.add(text(target))
+    for name, folder in filed:
+        if any(folder == f or same_person(folder, f) for f in folders):
+            return name
+    return ''
 
 
 def _same_number(left, right):
