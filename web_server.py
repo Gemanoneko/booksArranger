@@ -431,7 +431,8 @@ class BrowserServer(ThreadingHTTPServer):
                 extra = {'names': args['names']} if args.get('names') is not None else {}
                 result = merge.approve_book(book, args['revision'], args.get('title'), args.get('author'), without_missing=action == 'convert',
                                             choice=args.get('choice'), path=args.get('path'), **extra)
-                return {'result': 'done', 'answer': {'job_id': result['job_id']}}
+                # Futaba's 0.22.3 QA, m-1: the book's list row too, so the strip names its status when it leaves the list.
+                return {'result': 'done', 'answer': {'job_id': result['job_id'], **({'list_row': result['list_row']} if result.get('list_row') else {})}}
             if action == 'separate':
                 return {'result': 'done', 'answer': merge.keep_separate(book, args['revision'])}
             if action == 'scan_again':

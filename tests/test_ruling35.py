@@ -111,6 +111,13 @@ class QueuedPressTests(unittest.TestCase):
         self.assertEqual(args, (self.book, 3, None, 'King Stephen and King Owen'))
         self.assertEqual(kwargs, {'without_missing': False, 'choice': None, 'path': 'King Stephen\\Book.m4b', 'names': {'series': 'S', 'number': '1'}}, 'exactly what was pressed')
 
+    def test_a_queued_approves_outcome_carries_the_books_list_row(self):
+        # Futaba's 0.22.3 QA, m-1: the queued Approve's outcome kept only job_id, so the strip read "It left this list. Find
+        # it under All." without the book's status (Judy 2.3).
+        self.server.merge.answers['approve'] = {'job_id': 'job-1', 'row': {}, 'list_row': {'id': self.book, 'status': 'Queued'}}
+        self.approve()
+        self.assertEqual(self.outcomes()[0]['answer'], {'job_id': 'job-1', 'list_row': {'id': self.book, 'status': 'Queued'}})
+
     def test_approve_pressed_during_a_scan_waits_and_runs_when_the_scan_ends(self):
         self.server.merge.answers['approve'] = {'job_id': 'job-2'}
         self.server.scanning = True
