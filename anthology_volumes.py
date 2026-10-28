@@ -1,16 +1,22 @@
-"""Sergei's named Калейдоскоп family (ruling64): one numbered anthology volume, containing story credits.
+"""Sergei's confirmed anthology books: numbered Калейдоскоп volumes and annual Самая страшная книга.
 No general mixed-author grouping or inferred order; every membership/identity is re-derived from current members.
 """
 import re
 from pathlib import Path
-VERSION='named-anthology-volume-v1'
+VERSION='named-anthology-volume-v2'
 FAMILY='Калейдоскоп'
 _PATTERN=re.compile(r'^Калейдоскоп\s+0*([1-9]\d{0,2})$',re.I)
+_ANNUAL=re.compile(r'^(?:Сборник\s*-\s*)?Самая\s+страшная\s+книга\s+((?:19|20)\d{2})(?:\s*\[[^\[\]]+\])?$',re.I)
 
 def tags(member):return {str(k).casefold():str(v) for k,v in member.get('metadata',{}).get('tags',{}).items()}
 def folder(member):
     parent=Path(member['path']).parent;match=_PATTERN.fullmatch(' '.join(parent.name.split()))
-    return {'family':FAMILY,'number':str(int(match[1])),'title':FAMILY+' '+str(int(match[1])),'folder':str(parent)} if match else None
+    if match:return {'family':FAMILY,'number':str(int(match[1])),'title':FAMILY+' '+str(int(match[1])),'folder':str(parent)}
+    annual=_ANNUAL.fullmatch(' '.join(parent.name.split()))
+    if annual and ' '.join(parent.parent.name.casefold().split())=='самая страшная книга':
+        # The year identifies this confirmed anthology book, not an invented position in a narrative series.
+        return {'family':'','number':'','title':'Самая страшная книга '+annual[1],'folder':str(parent)}
+    return None
 
 def marker(members):
     if not members or len(members)>500:return None
@@ -19,7 +25,9 @@ def marker(members):
     value=values[0]
     for member in members:
         album=' '.join(tags(member).get('album','').split());match=_PATTERN.fullmatch(album)
-        if not match or str(int(match[1]))!=value['number']:return None
+        if value['family']==FAMILY:
+            if not match or str(int(match[1]))!=value['number']:return None
+        elif album.casefold()!=value['title'].casefold():return None
     return dict(value,version=VERSION,paths=sorted(m['path'] for m in members))
 
 def identity(row):

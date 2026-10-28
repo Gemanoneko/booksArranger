@@ -15,11 +15,48 @@ def row(volume,author,title,track=None,family='Калейдоскоп'):
     return {'root':ROOT,'path':path,'kind':'audiobook','size':10,'modified':10,'metadata':json.dumps(metadata),'error':'','missing':0}
 def stories(volume=4,tracks=False,family='Калейдоскоп'):
     return [row(volume,'Виктор Глебов','Первый рассказ',1 if tracks else None,family),row(volume,'Юрий Молчан','Второй рассказ',2 if tracks else None,family)]
+
+def annual_stories(year=2025,numbered=False,reader='Илья Дементьев'):
+    files=stories(year,family='Самая страшная книга')
+    for i,file in enumerate(files,1):
+        file['path']=str(Path(ROOT)/'Самая Страшная Книга'/('Сборник - Самая страшная книга '+str(year)+' ['+reader+']')/(('%02d.mp3'%i) if numbered else Path(file['path']).name))
+    return files
+
 def work(group):
     return {'policy_version':'standing-17-v1','identity_basis':'local_agreement','identity_rule':local_identity.IDENTITY_VERSION,
             'titles':[group['title_clue']],'author_aliases':['Разные авторы'],'full_author_verified':True}
 
 class AnthologyVolumeTests(unittest.TestCase):
+
+    def test_annual_anthology_with_numbered_filenames_is_one_book_not_a_series_year(self):
+        group=next(iter(groups.build(annual_stories(numbered=True)).values()))
+        self.assertEqual(len(group['members']),2);self.assertTrue(anthology_volumes.identity(group))
+        self.assertEqual(source_gate(group,work(group)),[],'existing clean filename numbering proves playback order')
+        self.assertEqual(set(chapter_plan.names(group['members'])),{'Виктор Глебов. Первый рассказ','Юрий Молчан. Второй рассказ'})
+        group=dict(group,fingerprint='annual-private-fingerprint');local=local_identity.identify(group,ROOT)
+        result=PublicResearch(SimpleNamespace(database='unused-private.sqlite'),leads=[])._local_collection(group,local,{'sources':[],'evidence':[]})
+        self.assertEqual(result['review']['title'],'Самая страшная книга 2025');self.assertTrue(result['review']['anthology'])
+        self.assertEqual((result['review']['series'],result['review']['number']),('',''),'calendar year is not a guessed narrative series position')
+    def test_annual_membership_does_not_guess_an_unnumbered_order(self):
+        group=next(iter(groups.build(annual_stories()).values()));self.assertEqual(len(group['members']),2)
+        self.assertIn('Playback order uncertain',source_gate(group,work(group)))
+    def test_annual_years_and_recording_folders_remain_separate(self):
+        built=groups.build(annual_stories(2024)+annual_stories(2025)+annual_stories(2025,reader='Другой чтец'))
+        self.assertEqual(len(built),3);self.assertEqual(sorted(len(g['members']) for g in built.values()),[2,2,2])
+    def test_annual_name_alone_or_contradictory_album_cannot_grant_membership(self):
+        files=annual_stories()
+        wrong=copy.deepcopy(files)
+        for file in wrong:file['path']=file['path'].replace('Самая Страшная Книга','Other shelf')
+        self.assertEqual(len(groups.build(wrong)),2,'generic same-title mixed authors do not gain a named exception')
+        bad=copy.deepcopy(files);metadata=json.loads(bad[0]['metadata']);metadata['tags']['album']='Самая страшная книга 2024';bad[0]['metadata']=json.dumps(metadata)
+        built=groups.build(bad);self.assertFalse(any(g.get('anthology_volume') for g in built.values()))
+        self.assertTrue(all(g.get('anthology_ownership_conflict') for g in built.values()),'known folder with contradictory membership stays held in full')
+    def test_annual_protected_missing_story_reserves_entire_known_book(self):
+        files=annual_stories();old=next(iter(groups._legacy_build([files[0]]).values()));old['scope']='old-completed-story'
+        built=groups.build(files[1:],protected={old['scope']:old})
+        self.assertFalse(any(g.get('anthology_volume') for g in built.values()))
+        self.assertTrue(all(g.get('anthology_ownership_conflict') for g in built.values()))
+
     def test_named_mixed_authors_are_one_book_with_original_member_credits(self):
         built=groups.build(stories());self.assertEqual(len(built),1);group=next(iter(built.values()))
         self.assertEqual(group['anthology_volume']['number'],'4');self.assertEqual(len(group['members']),2)
@@ -137,5 +174,22 @@ class AnthologyVolumeMediaTests(ApproveFixture):
         chapters=job['manifest']['chapters'];labels=[c['title'] if isinstance(c,dict) else c for c in chapters]
         self.assertIn('Юрий Молчан',labels[0]);self.assertIn('Второй рассказ',labels[0]);self.assertIn('Виктор Глебов',labels[1]);self.assertIn('Первый рассказ',labels[1])
         self.assertEqual((job['manifest']['metadata']['anthology'],job['manifest']['metadata']['series'],job['manifest']['metadata']['number']),(True,'Калейдоскоп','4'))
+
+
+    def test_numbered_annual_anthology_queues_until_start_and_keeps_story_credits(self):
+        folder=self.audio/'Самая Страшная Книга'/'Сборник - Самая страшная книга 2025 [Илья Дементьев]'
+        sources=[]
+        for index,(author,title) in enumerate([('Виктор Глебов','Первый рассказ'),('Юрий Молчан','Второй рассказ')],1):
+            sources.append(tone(folder/('%02d.mp3'%index),self.cover,album='Самая страшная книга 2025',title=title,artist=author))
+        rows=self.start();self.assertEqual(len(rows),1);row=rows[0]
+        preview=self.service.approval_preview(row['id'],row['revision']);self.assertTrue(preview['path'],ascii(preview))
+        self.service.approve_book(row['id'],row['revision'],path=preview['path'])
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending');self.assertTrue(all(p.exists() for p in sources))
+        self.start_and_wait();job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'completed',ascii(job));self.assertEqual(Path(job['output']['final_path']),self.sorted/preview['path'])
+        labels=[c['title'] if isinstance(c,dict) else c for c in job['manifest']['chapters']]
+        self.assertEqual(labels,['Виктор Глебов. Первый рассказ','Юрий Молчан. Второй рассказ'])
+        self.assertEqual(job['manifest']['metadata']['title'],'Самая страшная книга 2025');self.assertTrue(job['manifest']['metadata']['anthology'])
+        self.assertEqual((job['manifest']['metadata']['series'],job['manifest']['metadata']['number']),('',''))
 
 if __name__=='__main__':unittest.main()

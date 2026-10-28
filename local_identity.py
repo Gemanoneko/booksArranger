@@ -2639,17 +2639,17 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
     if fields['series']['state'] == 'green' and series_spelling(fields['series']['value']) != fields['series']['value']:
         # Ruling 46: one series, one spelling, whichever name its files use.
         fields['series'] = dict(fields['series'], value=series_spelling(fields['series']['value']), how=fields['series'].get('how', '') + '; spelled as Sergei ruled (ruling 46)')
-    # Ruling64 explicitly identifies this named family/volume as one anthology book, with separate story credits.
+    # Sergei explicitly identifies these named anthology books, with separate story credits.
     # Re-prove current complete group membership; stale or arbitrary flags cannot override an author question.
     import anthology_volumes
     volume=anthology_volumes.identity(row)
     if volume:
-        explanation='Sergei confirmed the Калейдоскоп anthology series and its numbered volumes (ruling64)'
+        explanation='Sergei confirmed these sources are one anthology book; individual story credits remain in its chapters'
         for name,value in (('title',volume['title']),('series',volume['family']),('number',volume['number'])):
             fields[name]={'state':'green','value':value,'basis':'folder_name','how':explanation,
                           'sources':[{'kind':'confirmed anthology volume','value':volume['title']}],'partial':False}
         fields['author']={'state':'grey','value':'','basis':'','how':'The anthology has individual story credits, retained in its chapters','sources':fields['author'].get('sources') or [],'partial':False}
-        route={'kind':'narrator_collection','narrators':own_readers[:4],'signals':['confirmed numbered anthology volume'],
+        route={'kind':'narrator_collection','narrators':own_readers[:4],'signals':['confirmed anthology book'],
                'credit':COLLECTION_LABEL,'credit_basis':explanation}
         title=fields['title'];author=None;ask=None;piece=None;part=None;unconfirmed=False;from_folders=True
     series = {'name': fields['series']['value'], 'number': fields['number']['value']} if fields['series']['state'] == 'green' and fields['number']['state'] == 'green' else {}
