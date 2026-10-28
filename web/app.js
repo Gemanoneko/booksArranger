@@ -2979,7 +2979,10 @@ function buildNamesBlock(row,td){
   const box=node('div','','names-editor');box.id='names-editor-'+id;entry.box=box;
   if(!namesData(id)){box.append(node('p','Loading these names…','field-help'));insert(box);updateNamesRow(row);return;}
   const grid=node('div','','ask-grid'),data=namesData(id);
-  if(inlineNames(row))for(const field of ['series','number'])entry.inputs[field]=ask.controls.find(control=>control.dataset.name===field);
+  if(inlineNames(row)){
+    for(const field of ['series','number'])entry.inputs[field]=ask.controls.find(control=>control.dataset.name===field);
+    entry.inputs.series?.setAttribute('list',`names-series-${id}`);
+  }
   if(!ask){
     for(const field of ['title','author']){const {wrap,input}=namesInput(row,field);entry.inputs[field]=input;const cell=node('div');cell.append(wrap);grid.append(cell);}
   }else entry.inputs.title=ask.controls.find(control=>control.dataset.name==='title') || null;
