@@ -1,4 +1,4 @@
-// Pure plan/accounting for seven isolated workers inside the canonical owner Job.
+// Pure plan/accounting for isolated workers inside the canonical owner Job.
 const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py','test_web.py','test_merge_http.py','test_blocked_retry.py','test_status_snapshot.py','test_status_read_contention.py','test_startup_published_check.py','test_producer_recovery_http.py','test_attention_repair.py']);
 // 0.21.1: two workers no longer fit the 540 s deadline (2026-10-23, both concurrent: 499 s and 601 s, the real MP3
 // fixture case not included). A third worker gets the same isolated copy, cwd and TEMP as the others. Modules are
@@ -60,7 +60,9 @@ const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePa
 // 0.22.3: with test_inplace_m4b.py split, a ninth worker lowers every worker (8: 385-387 s, 9: 342-344 s projected, 64 % of
 // the deadline); before the split no count went under its 389 s. The weights are eight-worker seconds: the entry check's
 // printed seconds re-measure them.
-export const PYTHON_WORKERS=9;
+// 0.23.0 capacity proposal: 13 workers on the 24-core/32-thread QA host. The unchanged 540/580/600 s
+// bounds still apply; existing weights are historical proxies, never a real-wall-time guarantee.
+export const PYTHON_WORKERS=13;
 // 0.22.3 (the 0.22.2 gates: workers at 81-88 % of the deadline, and one run lost two workers because copying the sources
 // took 170 s of it): every Python worker has its own 540 s, counted from its own start, so copies taking up to 40 s before
 // it leave its time whole; past that the gate total binds first (workerDeadline). The gate as a whole still ends inside the
@@ -103,7 +105,8 @@ export function pythonBatches(patterns){
   // 119.9 s (weight 18), working_lifecycle at 71.1 s and source_proofs at 40.8 s. These five whole modules move;
   // discovery, the two complementary in-place halves, server serialization and declared order are unchanged.
   // Only the complete production inventory has this group; smaller diagnostic inventories retain normal placement.
-  const rebalance=new Map([['test_original_title_wait.py',1],['test_review_backend.py',4],
+  // 0.23.0: move this whole module off book_delete's worker to new worker 12; the other four pins stay.
+  const rebalance=new Map([['test_original_title_wait.py',12],['test_review_backend.py',4],
     ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4]]);
   if([...rebalance.keys()].every(pattern=>worker.has(pattern)))for(const [pattern,target] of rebalance)worker.set(pattern,target);
   const batches=Array.from({length:PYTHON_WORKERS},()=>[]);

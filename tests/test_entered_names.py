@@ -306,6 +306,8 @@ class EditNamesTests(ApproveFixture):
         self.assertEqual(saved['outcome'],'ready_only');self.assertEqual(hashlib.sha256(final.read_bytes()).hexdigest(),before,'the finished audiobook is untouched')
 
     def test_inline_author_title_series_are_one_book_local_press_waiting_for_start(self):
+        # Keep the real long coauthor/series names below the unchanged240-character policy in the deep gate fixture.
+        self.sorted=self.base/'S';self.sorted.mkdir()
         title='Мистер Вечный Канун. Уэлихолн'
         for key in ('one','sibling'):
             tone(self.audio/'Unsorted'/key/'01.mp3',self.cover,title=title,album=title,artist='Олег Яковлев; Владимир Торин')
