@@ -98,6 +98,14 @@ export function pythonBatches(patterns){
   for(const pattern of patterns)if(serialServerModules.has(pattern)){worker.set(pattern,0);load[0]+=weight(pattern);}
   const rest=patterns.filter(pattern=>!serialServerModules.has(pattern)).sort((a,b)=>weight(b)-weight(a)||patterns.indexOf(a)-patterns.indexOf(b));
   for(const pattern of rest){const least=load.indexOf(Math.min(...load));worker.set(pattern,least);load[least]+=weight(pattern);}
+  // 2026-10-28, 8b24ce8: workers 4 and 6 reached 540 s; worker 2 had only 1.2 s left. Reuse the measured spare
+  // capacity without more workers or longer deadlines. The prior complete run measured original_title_wait at
+  // 119.9 s (weight 18), working_lifecycle at 71.1 s and source_proofs at 40.8 s. These five whole modules move;
+  // discovery, the two complementary in-place halves, server serialization and declared order are unchanged.
+  // Only the complete production inventory has this group; smaller diagnostic inventories retain normal placement.
+  const rebalance=new Map([['test_original_title_wait.py',1],['test_review_backend.py',4],
+    ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4]]);
+  if([...rebalance.keys()].every(pattern=>worker.has(pattern)))for(const [pattern,target] of rebalance)worker.set(pattern,target);
   const batches=Array.from({length:PYTHON_WORKERS},()=>[]);
   for(const pattern of patterns)batches[worker.get(pattern)].push(pattern);
   if(batches.some(b=>!b.length))throw Error('Empty Python batch');

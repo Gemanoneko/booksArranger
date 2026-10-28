@@ -38,6 +38,22 @@ test('the real inventory projects every worker under the deadline from its measu
  // projected seconds stay at or under 80 % of the deadline (432 s), the room left for the copies and a machine that isn't quiet.
  const loads=projectedSeconds(b);assert.equal(loads.length,PYTHON_WORKERS);assert(Math.max(...loads)<=0.8*540,'projected worker seconds '+loads.join(', '));
 });
+test('the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits',()=>{
+ const source=readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
+ const real=new Function(source.split(/\r?\n/).filter(l=>/^(const patterns=|patterns\.push\()/.test(l)).join('\n')+'\nreturn patterns;')();
+ const b=pythonBatches(real);
+ assert.equal(b.length,9);assert.deepEqual(b.flat().sort(),[...real].sort());assert.equal(new Set(b.flat()).size,real.length);
+ for(const [pattern,target] of [['test_original_title_wait.py',1],['test_review_backend.py',4],
+   ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4]])assert(b[target].includes(pattern),pattern);
+ for(const pattern of ['test_desktop_host.py','test_desktop_quit.py','test_web.py','test_merge_http.py','test_blocked_retry.py',
+   'test_status_snapshot.py','test_status_read_contention.py','test_startup_published_check.py','test_producer_recovery_http.py','test_attention_repair.py'])assert(b[0].includes(pattern),pattern);
+ for(const batch of b)assert.deepEqual(batch,real.filter(pattern=>batch.includes(pattern)),'declared order is unchanged');
+ const r=b.map((p,batch)=>({batch,patterns:p,ids:p.map(pattern=>'occurrence.'+pattern),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
+ assert.equal(validatePythonReports(real,b,r).count,real.length);
+ const missing=structuredClone(r);missing[4].completed--;assert.throws(()=>validatePythonReports(real,b,missing));
+ assert.equal(PYTHON_WORKER_DEADLINE_SECONDS,540);assert.equal(GATE_TOTAL_SECONDS,580);
+ assert.deepEqual(workerDeadline(0,0),{at:540000,kind:'worker'});
+});
 test('the gate prints every worker\'s real seconds beside its projection (Senua 0.22.0 early review, m5)',async()=>{
  const b=pythonBatches(patterns),report=workerSecondsReport(b,[431.24,402.5,388,12.04,7,3.96,5,6.04,9]);
  assert.deepEqual(report.real,[431.2,402.5,388,12,7,4,5,6,9]);assert.deepEqual(report.projected,projectedSeconds(b));
