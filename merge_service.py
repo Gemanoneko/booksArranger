@@ -2579,6 +2579,11 @@ class MergeService:
 
     def _approval_destination(self,row,result):
         """(path relative to the output folder, absolute path, reason when there is none) Approve files this result as."""
+        if not isinstance(result.get('review'),dict):
+            # An unresolved English author has no destination yet (ruling 59). The existing Goes to fallback names
+            # the hold; listing a question must not crash or invent a Cyrillic destination.
+            reason="Enter the author's English name, then approve." if (result.get('ask') or {}).get('why')=='english_spelling' else '; '.join(dict.fromkeys(result.get('reasons') or []))[:300]
+            return '', '', reason or 'Confirm the book title and author.'
         review=dict(result['review'],organization_policy='books-hierarchy-v2')
         output_root=self.reviews._output_root(row,review)
         preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=result.get('metadata_facts'))

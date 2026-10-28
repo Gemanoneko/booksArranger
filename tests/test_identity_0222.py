@@ -295,13 +295,14 @@ class ForeignCyrillicAuthorTests(Base):
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Перумов Ник\\Эльфийская стража - Перумов Ник.m4b')
         self.assertEqual(self.rules(), [('keep', author_rules.key('Ник Перумов'), '', 'assistant')], 'never asked or looked up again')
 
-    def test_sergeis_approve_never_looks_up_and_his_typed_name_decides(self):
+    def test_ruling_59_approve_keeps_the_english_question_without_lookup_and_typed_english_decides(self):
         row = next(iter(self.catalog([self.GOLIATH]).values()))
         online, asked = self.online({'Голиаф': self.ENTRY})
         with online:
             shown = self.research.approved(row, ROOT)
             typed = self.research.approved(row, ROOT, author='Scott Westerfeld')
-        self.assertEqual(asked, [], 'Approve files what the row shows, with no request (rulings 6b and 39)')
-        self.assertEqual(shown['reasons'], [])
-        self.assertEqual(self.goes_to(row, shown), SORTED + '\\Вестерфельд Скотт\\Голиаф - Вестерфельд Скотт.m4b')
+        self.assertEqual(asked, [], 'Approve makes no request (rulings 39 and 59)')
+        self.assertEqual(shown['ask']['why'], 'english_spelling')
+        self.assertIsNone(shown['review'], 'unresolved English spelling cannot plan a Cyrillic filing')
+        self.assertEqual(typed['reasons'], [])
         self.assertEqual(self.goes_to(row, typed), SORTED + '\\Westerfeld Scott\\Голиаф - Westerfeld Scott.m4b')

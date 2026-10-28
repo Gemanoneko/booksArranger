@@ -58,6 +58,36 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         self.assertIs(odd[0].get('odd_name'),True)
         self.assertIs(rows['Утро снайпера']['ask'].get('odd_name'),False)
 
+    def test_ruling_59_english_hold_lists_without_a_cyrillic_destination_and_english_submission_clears_it(self):
+        import author_rules
+        from scanner import connect
+        from unittest.mock import patch
+        for n in (1,2):
+            tone(self.audio/'Unsorted'/'Тихая река'/('%02d.mp3'%n),self.cover,album='Тихая река',title='Глава %d'%n,artist='Кевин Андерсон',track='%d/2'%n)
+        row=self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Кевин Андерсон',actor='user',source='old answer')
+        with patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.research_all()
+        with patch.object(self.service.automatic.research,'_author_latin',side_effect=AssertionError('Preview must never look up')):
+            rows,total=self.listed('author_unclear')
+            self.assertEqual(total,1)
+            ask=next(iter(rows.values()))['ask']
+            self.assertEqual(ask['why'],'english_spelling')
+            self.assertEqual((ask['destination']['path'],ask['destination']['absolute']),('',''))
+            self.assertIn('English',ask['destination']['reason'])
+            with self.assertRaisesRegex(ValueError,'English name'):
+                self.service.approve_book(row['id'],row['revision'])
+            self.assertEqual(self.service.jobs.status()['jobs'],[])
+            preview=self.service.approval_preview(row['id'],row['revision'],author='Kevin Anderson')
+            self.assertEqual(Path(preview['path']).parts[0],'Anderson Kevin')
+            self.service.approve_book(row['id'],row['revision'],author='Kevin Anderson',path=preview['path'])
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending','English answer waits for explicit Start')
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Кевин Андерсон'),'Anderson Kevin')
+        self.start_and_wait()
+        job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'completed')
+        self.assertEqual(Path(job['output']['final_path']),Path(preview['absolute']))
+
     def test_a_suspected_reader_is_never_the_proposed_author_on_the_row(self):
         # Ruling 14: the only credit is a person named in brackets (a reader or uploader). The row asks; its Author
         # field starts empty and Goes to shows Без автора, so "Approve as is" (single or bulk) never files a reader.

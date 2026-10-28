@@ -1324,7 +1324,10 @@ class PublicResearch:
             # lookup. Inconclusive (nothing matched, a source closed, the budget spent): Sergei is asked once per author
             # (Author unclear); only that author's books wait for his answer, which becomes his rule. Never transliterated.
             # 0.22.3 (Judy's question 1, its default): a learned rule Sergei took back is never looked up again; he is asked.
-            found=None if rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result)
+            # Approve/preview is read-only and never looks up an unresolved name; it keeps the English question.
+            # A normal research pass still looks up after unrelated entered fields (M15).
+            approving=any(fields[field].get('state')=='approved' for field in ('title','author'))
+            found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result)
             if found and found['state']=='found':
                 latin=_latin_surname_first(found['name'],names[0])
                 self._learn_author('same_as',names[0],latin,found['source_url'],preferred)
