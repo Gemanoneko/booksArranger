@@ -1117,8 +1117,8 @@ def setUpModule():
 class KeepLanguageTests(Base):
     def test_ruling_58_correct_cyrillic_keep_uses_surname_first_on_both_paths(self):
         row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Тихий Дон',title='Тихий Дон',artist='Иван Петров')]).values()))
-        with sqlite3.connect(self.research.client.database) as db:
-            author_rules.append(db,'keep','Иван Петров',actor='user',source='test')
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            author_rules.append(db,'keep','Иван Петров',actor='user',source='test');db.commit()
         result=self.lookup(row)
         self.assertEqual(result['reasons'],[])
         self.assertEqual(result['review']['canonical_author'],'Петров Иван')
@@ -1126,9 +1126,9 @@ class KeepLanguageTests(Base):
 
     def test_ruling_58_foreign_canonical_english_target_wins(self):
         row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
-        with sqlite3.connect(self.research.client.database) as db:
-            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer')
-            author_rules.append(db,'same_as','Джеймс Роллинс',target='Rollins James',actor='user',source='English answer')
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer');db.commit()
+            author_rules.append(db,'same_as','Джеймс Роллинс',target='Rollins James',actor='user',source='English answer');db.commit()
         result=self.lookup(row)
         self.assertEqual(result['reasons'],[])
         self.assertEqual(result['review']['canonical_author'],'Rollins James')
@@ -1137,8 +1137,8 @@ class KeepLanguageTests(Base):
     def test_ruling_59_foreign_keep_lookup_can_learn_english(self):
         from unittest import mock
         row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
-        with sqlite3.connect(self.research.client.database) as db:
-            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer')
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer');db.commit()
         with mock.patch.object(self.research,'_author_latin',return_value={'state':'found','name':'James Rollins','source_url':'https://www.wikidata.org/wiki/Q315705'}) as lookup:
             result=self.lookup(row)
         lookup.assert_called_once()

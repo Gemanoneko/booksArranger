@@ -2710,8 +2710,6 @@ class MergeService:
         root=self.reviews._source_root(row)
         read,scope,now,_=self._names_state(row,root,research)
         entries=entered_names.plan(row,values,read,scope,now)
-        # Ruling 57: an Approve's corrected series belongs to this book, never the author's other books (M12).
-        entries=[entry for entry in entries if not (entry[0]=='fix' and entry[1]=='series')]
         if not any(kind=='fix' for kind,*_ in entries):return 1
         key=(row['id'],row['revision'],json.dumps(entries,ensure_ascii=False),self._approval_stamp())
         cache=self.__dict__.setdefault('_names_reach',{})
@@ -3001,6 +2999,8 @@ class MergeService:
         row,root,research=self._names_book(id,revision)
         read,scope,now,_=self._names_state(row,root,research)
         entries=entered_names.plan(row,values,read,scope,now)
+        # Ruling 57: an Approve's corrected series belongs to this book, never the author's other books (M12).
+        entries=[entry for entry in entries if not (entry[0]=='fix' and entry[1]=='series')]
         press=entered_names.save(self.inventory.database,row,entries) if entries else ''
         approval={}
         try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values,press=approval)

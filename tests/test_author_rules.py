@@ -173,7 +173,7 @@ class RulesInIdentityTests(unittest.TestCase):
     def test_a_kept_reader_is_the_author_only_in_his_own_folder_volkov(self):
         readers=('Роман Волков',)
         kept=identify(book(member('Волков Роман/Легенды школы №4 г. Пензы/Военрук.m4b',album='Военрук',artist='Роман Волков')),ROOT,[],readers,None,self.rules)
-        self.assertTrue(kept['accepted'],kept);self.assertEqual(kept['fields']['author']['value'],'Роман Волков')
+        self.assertTrue(kept['accepted'],kept);self.assertEqual(kept['fields']['author']['value'],'Волков Роман')
         elsewhere=identify(book(member('Unsorted/Другая книга.m4b',album='Другая книга',artist='Роман Волков')),ROOT,[],readers,None,self.rules)
         self.assertFalse(elsewhere['accepted']);self.assertEqual(elsewhere['ask']['why'],'reader')
 

@@ -63,7 +63,9 @@ class SetReleaseTests(ApproveFixture):
     def test_m12_discworld_correction_does_not_rename_other_folders(self):
         rows=self.books('Terry Pratchett',[('set/19','Discworld 19. Feet of Clay'),('elsewhere/20','Discworld 20. Hogfather'),('elsewhere/21','Discworld 21. Jingo')])
         self.held(rows)
+        self.assertEqual([self.ask(rows[k]).get('why') for k in ('19','20','21')],['title_series']*3)
         self.service.approve_book(rows['19']['id'],rows['19']['revision'],names={'series':'City Watch','number':'19'});self.wait()
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['manifest']['metadata']['series'],'City Watch','positive control: book19 actually changed')
         for k,title in [('20','Hogfather'),('21','Jingo')]:
             result=self.research(rows[k])
             self.assertEqual(result['ask']['split'],{'series':'Discworld','number':k,'title':title})
