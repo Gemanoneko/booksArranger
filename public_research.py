@@ -1287,12 +1287,6 @@ class PublicResearch:
         sergei=fields['title'].get('state') in ('entered','approved') or fields['author'].get('state') in ('entered','approved')
         folders={name for member in row.get('members') or [] for name in (ntpath.basename(ntpath.dirname(member['path'])),ntpath.basename(ntpath.dirname(ntpath.dirname(member['path']))))}
         odd=None if not one_source or reasons or sergei or part else local_identity.odd_identity(preferred,names[0],author,NO_AUTHOR,ruled=bool(fields['author'].get('rule')),folders=sorted(folders))
-        # Ruling 52 (Sergei 2026-10-27): a "Series N. Title" split nothing confirms is asked, with Series, Number and Title
-        # filled in from the split (the row's Title, its Goes to line and the names editor); his Approve files them. Names
-        # he saved (Edit names) are his answer: not asked again.
-        unconfirmed=local.get('series_unconfirmed') and not ({'title','series','number'}&set(local.get('names_entered') or []))
-        if odd is None and unconfirmed and one_source and not reasons and not sergei and not part:
-            odd={'kind':'title_author','why':'title_series','split':{'series':series.get('name',''),'number':series.get('number',''),'title':preferred}}
         if odd:
             # 0.22.1: a name the app should not file without asking (local_identity.odd_identity): a question on the to-do
             # list with the existing rows; the row shows what the app read, nothing is renamed, Approve files what it shows.
@@ -1302,10 +1296,6 @@ class PublicResearch:
             if odd.get('candidates'):
                 ask['candidates']=[{'name':name,'source':'author tag','reader_count':0} for name in odd['candidates']]
                 ask['fields']['author']['proposal']=odd['candidates'][0]
-            if odd.get('split'):
-                # Ruling 52: the split, filled in (the Title is already its title; Approve files this series and number).
-                ask['split']=dict(odd['split'])
-                ask['fields'].update(series={'proposal':odd['split']['series'],'basis':'title'},number={'proposal':odd['split']['number'],'basis':'title'})
             return result|{'reasons':[local_identity.ASK_REASONS[odd['kind']]],'ask':ask,'identity_hold':{'kind':odd['kind'],'detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
         spellings=[] if not one_source or reasons or sergei or part or language or fields['author'].get('rule') else local_identity.name_language(names[0])
@@ -1349,6 +1339,20 @@ class PublicResearch:
                      'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')}}}
                 return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                                'rules_generation':rules.generation if rules else ''}
+        # Ruling 52 (Sergei 2026-10-27): a "Series N. Title" split nothing confirms is asked, with Series, Number and Title
+        # filled in from the split (the row's Title, its Goes to line and the names editor); his Approve files them. Asked
+        # only now (Senua's 0.22.3 review, M9): ruling 33's spelling question and ruling 39's lookup come first, so the
+        # author is settled (a rule learned) before the row asks, and Approve files under it. Not asked when he approved
+        # the book (Approve settles it) or saved its series or number (Edit names); a title or author he entered alone does
+        # not answer it (m21).
+        his=any(fields[name].get('state')=='approved' for name in ('title','author')) or bool({'series','number'}&set(local.get('names_entered') or []))
+        if local.get('series_unconfirmed') and not his and one_source and not reasons and not part:
+            split={'series':series.get('name',''),'number':series.get('number',''),'title':preferred}
+            ask={'kind':'title_author','why':'title_series','odd_name':True,'split':split,
+                 'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')},
+                           'series':{'proposal':split['series'],'basis':'title'},'number':{'proposal':split['number'],'basis':'title'}}}
+            return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
+                           'rules_generation':rules.generation if rules else ''}
         original=None
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and language!='ru':
             # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait): a translation is filed under the English original

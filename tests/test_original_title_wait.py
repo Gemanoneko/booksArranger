@@ -3,6 +3,7 @@ title never waits for its English original title. Automatic processing converts 
 in the English author folder, and it is never listed under Held. Ruling 39: a foreign author credited only in Cyrillic
 whose English spelling research doesn't find is asked once; Sergei's answer is a lasting rule for that author. Real
 private audio, offline research, a separate Sorted folder."""
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -57,6 +58,31 @@ class CachedSpellingConvertsTests(ApproveFixture):
         self.assertEqual(len(jobs), 1, ('converted by itself', held))
         self.assertEqual(jobs[0]['state'], 'completed', jobs[0])
         self.assertEqual(Path(jobs[0]['output']['final_path']).parent, self.sorted / 'Grossman Lev', 'ruling 39: the English folder')
+
+
+class SeriesQuestionAfterTheAuthorTests(ApproveFixture):
+    def test_m9_a_foreign_author_in_cyrillic_is_looked_up_before_the_series_question_and_files_under_his_latin_name(self):
+        # Senua's 0.22.3 review, M9: the ruling-52 series question came before ruling 39's lookup, and Approve then settled
+        # the author: «Отряд Сигма 2. Карта костей» by «Джеймс Роллинс» filed under `Роллинс Джеймс\`, no rule learned.
+        from unittest.mock import patch
+        import author_rules
+        for n in (1, 2):
+            tone(self.audio / 'Unsorted' / 'Отряд Сигма 2' / ('%02d.mp3' % n), self.cover, album='Отряд Сигма 2. Карта костей', title='Глава %d' % n, artist='Джеймс Роллинс', track='%d/2' % n)
+        row = self.start()[0]
+        research = self.service.automatic.research; calls = []
+        def latin(title, name, *args, **kwargs):
+            calls.append((title, name))
+            return {'state': 'found', 'name': 'James Rollins', 'source_url': 'https://fantlab.ru/autor1', 'title': ''}
+        with patch.object(research, '_author_latin', side_effect=latin):
+            result = research.lookup(dict(row, _manual_metadata_sources=[]), str(self.audio), threading.Event())
+        self.assertEqual([title for title, _ in calls], ['Карта костей'], 'ruling 39 looks the author up first, once')
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'), 'Rollins James', 'and learns his name')
+        self.assertEqual((result['ask']['why'], result['ask']['fields']['author']['proposal']), ('title_series', 'Rollins James'), 'then the series is asked')
+        self.service.automatic._record(row, 'Held', dict(result, until_change=True), None)
+        approved = self.service.approve_book(row['id'], row['revision']); self.wait()
+        job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
+        self.assertEqual(job['state'], 'completed', job)
+        self.assertEqual(Path(job['output']['final_path']), self.sorted / 'Rollins James' / 'Отряд Сигма' / 'Отряд Сигма - 2 - Карта костей - Rollins James.m4b')
 
 
 class Ruling49Tests(ApproveFixture):

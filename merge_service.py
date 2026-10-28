@@ -3100,7 +3100,35 @@ class MergeService:
         except Exception:pass
         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
+        # Ruling 53: the series this Approve files answers the rest of its set; a failure never refuses the accepted Approve.
+        try:self._continue_after_series(id,(result.get('review') or {}).get('series'))
+        except Exception:pass
         return {'row':fresh,'job_id':job}|self._press_after(id,None,destination=False)
+
+    def _continue_after_series(self,skip,series):
+        """Ruling 53 (Sergei 2026-10-28): a numbered set that only confirms itself is asked, and his Approve of one of its
+        books answers the rest. Every other current book without a job whose research asked about the same series (the
+        ruling-52 question, ask.split) is put back on the run, where his approved job now confirms the series
+        (local_identity.sorted_series) and the book files by itself. Returns the ids put back."""
+        import local_identity
+        key=local_identity.series_key(series or '')
+        automatic=getattr(self,'automatic',None)
+        if not key or automatic is None or not hasattr(automatic,'requeue'):return []
+        with connect(self.inventory.database) as db:
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'automatic_candidates' not in have or 'book_groups' not in have:return []
+            current={r[0] for r in db.execute('SELECT id FROM book_groups WHERE superseded=0')}
+            jobs={r[0] for r in db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs")} if 'audio_jobs' in have else set()
+            records=db.execute("SELECT id,result FROM automatic_candidates WHERE state IN ('Held','Waiting for source')").fetchall()
+        back=[]
+        for record in records:
+            if record['id']==skip or record['id'] not in current or record['id'] in jobs:continue
+            try:split=((json.loads(record['result']) or {}).get('ask') or {}).get('split')
+            except (TypeError,ValueError,AttributeError):continue
+            if isinstance(split,dict) and local_identity.series_key(split.get('series') or '')==key:
+                automatic.requeue(record['id']);back.append(record['id'])
+        self.__dict__.pop('_needs_cache',None)
+        return back
 
     def _queued_row(self,id):
         """The queued book's row for the Approve's answer (M4); None when it can't be read (the answer leaves it out)."""

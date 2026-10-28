@@ -224,6 +224,38 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean','his answer is kept')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
 
+    def test_ruling_53_approving_the_first_book_of_a_set_files_the_rest(self):
+        # Ruling 53 (Sergei 2026-10-28, "a"): a numbered set that only confirms itself is asked; his Approve of its first
+        # book answers the rest, which go back on the run and file by themselves while his job still waits in the queue.
+        for n, name in ((1, 'Греция'), (2, 'Рим'), (3, 'Египет')):
+            for k in (1, 2):
+                tone(self.audio / 'Иван Петров' / 'Курс истории' / str(n) / ('%02d.mp3' % k), self.cover, album='Курс истории. Лекция %d. %s' % (n, name), title='Глава %d' % k, artist='Иван Петров', track='%d/2' % k)
+        rows = self.start()
+        by = {Path(r['members'][0]['path']).parent.name: r for r in rows}
+        for row in rows:
+            result = self.research(row)
+            self.assertEqual(((result.get('ask') or {}).get('why'), (result.get('ask') or {}).get('split', {}).get('series')), ('title_series', 'Курс истории. Лекция'), 'the set is asked')
+            self.service.automatic._record(row, 'Held', dict(result, until_change=True), None)
+        calls = []; self.service.automatic.requeue = lambda identity: calls.append(identity) or 'this_run'
+        hold = threading.Event(); self.addCleanup(hold.set)
+        parked = threading.Thread(target=hold.wait, daemon=True); parked.start(); self.service.jobs._thread = parked  # the job stays queued
+        self.service.approve_book(by['1']['id'], by['1']['revision'])
+        self.assertEqual(sorted(calls), sorted([by['2']['id'], by['3']['id']]), 'the rest of the set goes back on the run')
+        self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']], ['pending'], 'positive control: his job still waits')
+        result = self.research(by['3'])
+        self.assertEqual((result['reasons'], result.get('ask'), result['review']['series'], result['review']['number']), ([], None, 'Курс истории. Лекция', '3'))
+
+    def test_m21_an_author_he_entered_alone_does_not_answer_the_series_question(self):
+        # Senua's 0.22.3 review, m21: an "Entered by you" title or author (a 0.22.2 panel record) skipped the ruling-52
+        # question, so «Курс истории. Лекция 3. Греция» filed silently under the split's junk series.
+        self.two_files('Курс истории. Лекция 3. Греция', 'Иван Петров')
+        row = self.start()[0]
+        with connect(self.inv.database) as db:manual_metadata.append(db, manual_metadata.capture(row, {'canonical_author': 'Иван Петров'}, ''))
+        with connect(self.inv.database) as db:sources = manual_metadata.records(db, row)
+        result = self.service.automatic.research.lookup(dict(row, _manual_metadata_sources=sources), str(self.audio), threading.Event())
+        self.assertEqual(result['local_agreement']['author']['state'], 'entered', 'positive control: his entered author')
+        self.assertEqual(((result.get('ask') or {}).get('why'), (result.get('review') or {}).get('series')), ('title_series', None), result['reasons'])
+
     def test_m15_a_book_researched_under_a_refused_answer_is_put_back_on_the_run(self):
         # Senua's 0.22.3 review, m15: after m13 changed_for marks the book the run researched while the refused press's
         # answer was in force, but the undo put nothing back on the run: it sat in "Still checking" until a new scan.

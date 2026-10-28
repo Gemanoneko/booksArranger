@@ -903,6 +903,7 @@ def catalog_index(database, root):
         uses = set()
         tagged = set()
         albums = {}
+        books = {}
         root_key = norm(str(Path(root)))
         for path, metadata in db.execute("SELECT path,metadata FROM files WHERE root=? AND kind='audiobook'", (root,)):
             try:
@@ -912,9 +913,11 @@ def catalog_index(database, root):
             readers.update(text(tags[k]) for k in NARRATOR_TAGS if text(tags.get(k)))
             readers.update(text(n) for n in narrator_names([tags.get(k, '') for k in FREE_TEXT_TAGS]))
             folder = str(Path(path).parent)
+            credits = [text(tags.get(k)) for k in AUTHOR_TAGS]
             if text(tags.get('album')):
                 albums.setdefault(folder, Counter())[text(tags.get('album'))] += 1
-            credits = [text(tags.get(k)) for k in AUTHOR_TAGS]
+                # Rulings 45 and 54: who each book beside another is credited to (only the same author's books count).
+                books.setdefault(folder, {}).setdefault(text(tags.get('album')), set()).update(c for c in credits if _person_like(c))
             tagged.update(unicodedata.normalize('NFC', c) for c in credits if _person_like(c))
             for level in Path(path).parents:
                 if len(norm(str(level))) <= len(root_key):
@@ -937,10 +940,11 @@ def catalog_index(database, root):
     sibling_albums = {}
     for folder, counts in albums.items():
         sibling_albums.setdefault(str(Path(folder).parent), {})[folder] = counts.most_common(1)[0][0]
-    # Ruling 52: every album each folder's files carry (a one-file book's siblings are the other books in its folder).
-    folder_albums = {folder: dict(counts) for folder, counts in albums.items()}
+    # Ruling 54: the books in each folder, one per album (a one-file book's siblings are the other books in its folder;
+    # Senua's 0.22.3 review, m20: a book, never a file, is one vote), with the authors their files credit.
+    folder_books = {folder: {album: sorted(credits) for album, credits in found.items()} for folder, found in books.items()}
     index = {'readers': readers, 'spellings': dict(spellings), 'keys': keys, 'tag_keys': tag_keys, 'sibling_albums': sibling_albums,
-             'folder_albums': folder_albums}
+             'folder_books': folder_books}
     if revision:
         _INDEX.clear()
         _INDEX[key] = index
@@ -2603,18 +2607,25 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         # that names another series keeps it (Senua's 0.22.3 review, M2: one parent folder often holds several series).
         # A sibling that already holds this number in that series shows it is another series: the name stands.
         carried, taken = sibling_series(row, root, index, author['name'] if author else '')
-        if carried and found['number'] not in taken and series_key(found['series']) == series_key(found['title']):
+        overridden = False
+        if carried and found['number'] not in taken and series_key(found['series']) == series_key(found['title']) \
+                and series_key(carried) != series_key(found['series']):
             found = dict(found, series=carried)
+            overridden = True
         named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
         # Ruling 52 (Sergei 2026-10-27, "a"; it narrows ruling 41): the split files by itself only when something confirms
-        # its series: the files' own series (a tag or the series folder), the series its siblings carry, or a series
-        # folder Sorted already holds for this author (the book files into that folder, in its spelling). Otherwise the
-        # row asks with Series, Number and Title filled in from the split, and Sergei's Approve files them
-        # (series_unconfirmed; public_research asks it as title_series).
+        # its series: the files' own series (a tag or the series folder), or a series folder Sorted already holds for this
+        # author (the book files into that folder, in its spelling; a book Sergei approved counts at once, ruling 53).
+        # Ruling 53 (Sergei 2026-10-28): siblings carrying the same name pattern confirm nothing (a set only confirms
+        # itself: «Шерлок Холмс. Аудиоспектакль 1, 2, 3», «Курс истории. Лекция 1, 2»); the set is asked, and his Approve
+        # of its first book files the rest. Ruling 45's siblings carrying another, real series do confirm (overridden).
+        # Otherwise the row asks with Series, Number and Title filled in from the split, and his Approve files them
+        # (series_unconfirmed; public_research asks it as title_series). Ruling 55: a source folder merely named like the
+        # series is no confirmation.
         filed = sorted_spelling(found['series'], author['name'] if author else '', index, rules)
         if filed:
             found = dict(found, series=filed)
-        unconfirmed = not (named or filed or (carried and series_key(carried) == series_key(found['series']))
+        unconfirmed = not (named or filed or overridden
                            or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
         if not named:
@@ -2943,23 +2954,28 @@ def sibling_series(row, root, index, author=''):
     """Ruling 45: the series the other book folders under this book's parent folder carry in their albums ("Series N.
     Title"), when at least two of them name it and no other series is named as often, with the numbers they hold in it;
     ('', set()) otherwise. Only a book in one folder that is not directly under the library root; read from the catalog
-    index (no file is opened). Ruling 52: a one-file book's siblings are also the other books in its own folder (the
-    albums its folder's files carry: «Червь 1. …» beside «Червь 2. …»). Senua's 0.22.3 review, m19: a sibling whose
-    name is asked (ruling 51) still names its series here; the spelling carried is a clean one, else nothing is."""
+    index (no file is opened). Ruling 54: a one-file book's siblings are also the other books in its own folder (the
+    albums its folder's files carry: «Червь 1. …» beside «Червь 2. …»), one vote per book (Senua's 0.22.3 review, m20),
+    never in the library root itself. Only books credited to this author vote (m20; a sibling with no author credit
+    still does). Senua's 0.22.3 review, m19: a sibling whose name is asked (ruling 51) still names its series here; the
+    spelling carried is a clean one, else nothing is."""
     albums = (index or {}).get('sibling_albums') or {}
+    books = (index or {}).get('folder_books') or {}
     folders = {str(Path(m['path']).parent) for m in row.get('members', [])}
     if len(folders) != 1:
         return '', set()
     own = next(iter(folders))
     parent = str(Path(own).parent)
+    root_key = norm(str(Path(root))) if root else ''
+    def same_author(folder, album):
+        credits = (books.get(folder) or {}).get(album) or []
+        return not credits or not text(author) or any(same_person(c, author) for c in credits)
     names = []
-    if root and norm(parent) != norm(str(Path(root))):
-        names += [album for folder, album in (albums.get(parent) or {}).items() if folder != own]
-    if len(row.get('members') or []) == 1:
+    if root and norm(parent) != root_key:
+        names += [album for folder, album in (albums.get(parent) or {}).items() if folder != own and same_author(folder, album)]
+    if len(row.get('members') or []) == 1 and root and norm(own) != root_key:
         tags = {str(k).casefold(): v for k, v in ((row['members'][0].get('metadata') or {}).get('tags') or {}).items()}
-        here = Counter((index or {}).get('folder_albums', {}).get(own) or {})
-        here[text(tags.get('album'))] -= 1
-        names += [album for album, count in here.items() for _ in range(max(count, 0)) if album]
+        names += [album for album in (books.get(own) or {}) if album and album != text(tags.get('album')) and same_author(own, album)]
     counts, spellings, clean, numbers = Counter(), {}, {}, {}
     for album in names:
         parts, verdict = _series_split(album, author)
@@ -2982,7 +2998,9 @@ _SORTED = {}
 
 def sorted_series(database):
     """Ruling 52: the series folders Sorted already holds, {series key: [(series as filed, author folder), …]}, from the
-    completed jobs' manifests. Read-only; {} when there are none or they can't be read."""
+    completed jobs' manifests, and (ruling 53) from the jobs Sergei approved that are still queued or converting: his
+    Approve of a set's first book files the set's series, and the rest of the set follows it. Read-only; {} when there
+    are none or they can't be read."""
     import contextlib
     import sqlite3
     try:
@@ -2990,12 +3008,14 @@ def sorted_series(database):
             db.execute('PRAGMA query_only=ON')
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():
                 return {}
-            key = (str(Path(database).resolve()), tuple(db.execute("SELECT count(*),coalesce(sum(state='completed'),0) FROM audio_jobs").fetchone()))
+            key = (str(Path(database).resolve()), tuple(db.execute("SELECT count(*),coalesce(sum(state='completed'),0),"
+                                                                    "coalesce(sum(state IN ('pending','running')),0) FROM audio_jobs").fetchone()))
             if key in _SORTED:
                 return _SORTED[key]
             found = {}
             for series, author in db.execute("SELECT json_extract(manifest,'$.metadata.series'),json_extract(manifest,'$.metadata.author') "
-                                             "FROM audio_jobs WHERE state='completed' AND json_valid(manifest)"):
+                                             "FROM audio_jobs WHERE json_valid(manifest) AND (state='completed' OR state IN ('pending','running') "
+                                             "AND json_extract(manifest,'$.evidence.metadata_actor')='user')"):
                 if isinstance(series, str) and text(series) and isinstance(author, str) and text(author):
                     found.setdefault(series_key(series), []).append((text(series), text(author)))
     except (sqlite3.Error, OSError, ValueError):
