@@ -1,121 +1,149 @@
-"""Ruling 53 end to end with the real automatic run (Futaba's 0.22.3 QA, M-1; Senua's 0.22.3 review, M10): a numbered set
-that only confirms itself is asked; Sergei's Approve of its first book through the series question releases the rest,
-which file by themselves under the series he chose, after the run has ended, after a rescan and from a paused run. An
-Approve that answered another question ("Same author?", the English spelling) is no answer to the series question.
-Real private audio, offline research, a separate Sorted folder."""
+"""Rulings 56/57 and Senua M11/M12: approvals stay per book and never start an automatic run.
+Private audio, offline research, separate Sorted; the entry check runs this module once."""
 import json
 import time
 import unittest
 from pathlib import Path
-
+from unittest import mock
 from scanner import connect
-from scan_wait import finish_scan
 from test_approve_as_is import ApproveFixture, tone
 
 
 class SetReleaseTests(ApproveFixture):
-    LECTURES = ((1, 'Греция'), (2, 'Рим'), (3, 'Египет'))
-
-    def lecture_set(self, artist='Иван Петров', count=3):
-        """«Курс истории. Лекция N. …»: a numbered set that only confirms itself (ruling 53), two files per book."""
-        for n, name in self.LECTURES[:count]:
-            for k in (1, 2):
-                tone(self.audio / artist / 'Курс истории' / str(n) / ('%02d.mp3' % k), self.cover, album='Курс истории. Лекция %d. %s' % (n, name), title='Глава %d' % k, artist=artist, track='%d/2' % k)
-        return {Path(r['members'][0]['path']).parent.name: r for r in self.start()}
+    def books(self, artist='Иван Петров', albums=None):
+        albums=albums or [('1','Курс истории. Лекция 1. Греция'),('2','Курс истории. Лекция 2. Рим')]
+        for folder,album in albums:
+            for k in (1,2):
+                tone(self.audio/'Unsorted'/folder/('%02d.mp3'%k),self.cover,album=album,title='Глава %d'%k,artist=artist,track='%d/2'%k)
+        rows=self.start()
+        return {Path(r['members'][0]['path']).parent.name:r for r in rows}
 
     def finish_run(self):
-        """The real automatic run (started by the test, or by a release) to its end, then the queue."""
-        limit = time.monotonic() + 120
-        while (self.service.automatic.thread and self.service.automatic.thread.is_alive()) or self.service.automatic.status()['state'] in ('Running', 'Stopping'):
-            if time.monotonic() > limit:self.fail('automatic processing did not finish: %r' % self.service.automatic.status())
+        limit=time.monotonic()+120
+        while (self.service.automatic.thread and self.service.automatic.thread.is_alive()) or self.service.automatic.status()['state'] in ('Running','Stopping'):
+            if time.monotonic()>limit:self.fail('automatic run did not finish')
             time.sleep(.1)
         self.wait()
 
-    def asked_now(self, row):
-        current = self.service.reviews._row('Audiobooks', row['id'])
+    def held(self,rows):
+        for row in rows.values():
+            result=self.research(row)
+            self.service.automatic._record(row,'Held',result)
+
+    def ask(self,row):
+        current=self.service.reviews._row('Audiobooks',row['id'])
         return (self.service.automatic.candidate(current) or {}).get('ask') or {}
 
-    def filed(self):
-        return sorted(str(Path(j['output']['final_path']).relative_to(self.sorted)) for j in self.service.jobs.status()['jobs'] if j['state'] == 'completed')
+    def test_ruling_57_approve_one_does_not_release_the_other_even_after_start(self):
+        rows=self.books()
+        self.service.automatic.start();self.finish_run()
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            self.service.approve_book(rows['1']['id'],rows['1']['revision']);self.wait()
+        start.assert_not_called()
+        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
+        self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
+        self.service.automatic.start();self.finish_run()
+        self.assertEqual(len(self.service.jobs.status()['jobs']),1,'Start must not answer an already-held sibling')
+        self.service.approve_book(rows['2']['id'],rows['2']['revision']);self.wait()
+        self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']],['completed']*2)
 
-    def lectures(self, folder, series, count=3):
-        return sorted(str(Path(folder) / series / ('%s - %d - %s - %s.m4b' % (series, n, name, folder))) for n, name in self.LECTURES[:count])
-
-    def test_m1_ruling_53_the_first_approved_book_releases_the_rest_after_the_run_has_ended(self):
-        # Futaba's 0.22.3 QA, M-1: the run had ended with the set asked; his Approve of book 1 only called requeue, which a
-        # finished run ignores, and the next run skipped the held books (an approved job is no rule change).
-        by = self.lecture_set()
-        self.service.automatic.start(); self.finish_run()
-        self.assertEqual([self.asked_now(by[k]).get('why') for k in '123'], ['title_series'] * 3, 'the set is asked; the run has ended')
-        self.assertEqual(self.service.jobs.status()['jobs'], [])
-        self.service.approve_book(by['1']['id'], by['1']['revision']); self.finish_run()
-        self.assertEqual(self.filed(), self.lectures('Петров Иван', 'Курс истории. Лекция'), 'the rest followed his answer')
-
-    def test_m1_ruling_53_after_a_rescan_the_next_run_files_the_rest(self):
-        from unittest import mock
-        by = self.lecture_set(count=2)
-        self.service.automatic.start(); self.finish_run()
-        with mock.patch.object(self.service.automatic, 'request_start', return_value={'action': 'blocked'}):  # nothing starts now
-            self.service.approve_book(by['1']['id'], by['1']['revision'])
-        self.wait()
-        self.assertEqual(self.asked_now(by['2']).get('why'), 'title_series', 'positive control: not researched yet')
-        self.inv.launch('Audiobooks'); finish_scan(self.inv)
-        self.service.automatic.start(); self.finish_run()
-        self.assertEqual(self.filed(), self.lectures('Петров Иван', 'Курс истории. Лекция', 2))
-
-    def test_m1_ruling_53_a_paused_run_continues_with_the_rest(self):
-        by = self.lecture_set(count=2)
-        self.service.automatic.start(); self.finish_run()
-        run = self.service.automatic._run_row()
+    def test_ruling_56_a_paused_run_stays_paused(self):
+        rows=self.books();self.service.automatic.start();self.finish_run()
+        run=self.service.automatic._run_row()
         with connect(self.inv.database) as db:
-            db.execute("UPDATE automatic_runs SET state='Paused',phase='research',checkpoint=? WHERE id=?", (json.dumps({'pending': [], 'done': [by['1']['id'], by['2']['id']]}), run['id']))
-        self.assertEqual(self.service.automatic.status()['state'], 'Paused', 'positive control: a saved, paused run')
-        self.service.approve_book(by['1']['id'], by['1']['revision']); self.finish_run()
-        self.assertEqual(self.filed(), self.lectures('Петров Иван', 'Курс истории. Лекция', 2))
+            db.execute("UPDATE automatic_runs SET state='Paused',phase='research',checkpoint=? WHERE id=?",(json.dumps({'pending':[],'done':[r['id'] for r in rows.values()]}),run['id']))
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            self.service.approve_book(rows['1']['id'],rows['1']['revision']);self.wait()
+        start.assert_not_called()
+        self.assertEqual(self.service.automatic.status()['state'],'Paused')
+        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
+        self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
 
-    def test_ruling_53_the_rest_of_the_set_takes_the_series_he_corrected(self):
-        # Ruling 53, "the rest follow that answer" (Futaba's 0.22.3 QA): «Курс истории» set on book 1 at its Approve.
-        by = self.lecture_set()
-        self.service.automatic.start(); self.finish_run()
-        self.service.approve_book(by['1']['id'], by['1']['revision'], names={'series': 'Курс истории', 'number': '1'}); self.finish_run()
-        self.assertEqual(self.filed(), self.lectures('Петров Иван', 'Курс истории'))
+    def test_m12_discworld_correction_does_not_rename_other_folders(self):
+        rows=self.books('Terry Pratchett',[('set/19','Discworld 19. Feet of Clay'),('elsewhere/20','Discworld 20. Hogfather'),('elsewhere/21','Discworld 21. Jingo')])
+        self.held(rows)
+        self.service.approve_book(rows['19']['id'],rows['19']['revision'],names={'series':'City Watch','number':'19'});self.wait()
+        for k,title in [('20','Hogfather'),('21','Jingo')]:
+            result=self.research(rows[k])
+            self.assertEqual(result['ask']['split'],{'series':'Discworld','number':k,'title':title})
+            self.assertEqual(self.service.automatic.research.approved(rows[k],str(self.audio))['review']['series'],'Discworld')
+        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
 
-    def test_m10_an_approve_that_answered_same_author_is_no_answer_to_the_series_question(self):
-        # Senua's 0.22.3 review, M10: the Same author? Approve filed book 1's unconfirmed split, and «Курс истории. Лекция 2.
-        # Рим» then filed by itself into `Koontz Dean\Курс истории. Лекция\`, the series never asked.
+    def answer_author_as_shown(self,artist):
+        rows=self.books(artist)
+        self.held(rows);row=rows['1']
+        first=self.ask(row)
+        self.assertNotEqual(first.get('why'),'title_series','author question comes first')
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            with self.assertRaisesRegex(ValueError,'series is asked next'):
+                self.service.approve_book(row['id'],row['revision'])
+        start.assert_not_called()
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.service.automatic.start();self.finish_run()
+        fresh=self.service.reviews._row('Audiobooks',row['id'])
+        self.assertEqual(self.ask(fresh).get('why'),'title_series','the author answer must not loop')
+        self.service.approve_book(fresh['id'],fresh['revision']);self.wait()
+        self.assertEqual(len(self.service.jobs.status()['jobs']),1)
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
+
+    def test_m11_ruling_33_approve_as_shown(self):
+        self.answer_author_as_shown('Ilya Marchenko')
+
+    def test_m11_no_author_approve_as_shown(self):
+        self.answer_author_as_shown('')
+        self.assertIn('Без автора',self.service.jobs.status()['jobs'][0]['output']['final_path'])
+
+    def test_m11_two_people_approve_as_shown(self):
+        self.answer_author_as_shown('Иван Петров - Антон Чехов')
+
+    def test_ruling_59_english_question_needs_an_english_answer(self):
         import author_rules
-        by = self.lecture_set(artist='Dean Koonts', count=2)
+        rows=self.books('Джеймс Роллинс')
         with connect(self.inv.database) as db:
-            author_rules.setup(db); author_rules.append(db, 'keep', 'Koontz Dean', actor='user', source='test')
-        self.service.automatic.start(); self.finish_run()
-        self.assertEqual(self.asked_now(by['1']).get('kind'), 'same_author', 'positive control: the author is asked first')
-        with self.assertRaisesRegex(ValueError, 'series is asked next'):
-            self.service.approve_book(by['1']['id'], by['1']['revision'], choice='same')
-        self.finish_run()
-        self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'), 'Koontz Dean', 'his answer is kept')
-        self.assertEqual(self.service.jobs.status()['jobs'], [], 'nothing filed under Koontz Dean\\Курс истории. Лекция')
-        for k in '12':
-            ask = self.asked_now(by[k])
-            self.assertEqual((ask.get('why'), (ask.get('split') or {}).get('series'), ask['fields']['author']['proposal']), ('title_series', 'Курс истории. Лекция', 'Koontz Dean'), k)
-        self.service.approve_book(by['1']['id'], by['1']['revision']); self.finish_run()  # his answer to the series question
-        self.assertEqual(self.filed(), self.lectures('Koontz Dean', 'Курс истории. Лекция', 2))
+            author_rules.setup(db);author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer')
+        with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None) as lookup:
+            self.held(rows)
+        self.assertGreater(lookup.call_count,0,'the old keep cannot suppress the lookup')
+        row=rows['1'];self.assertEqual(self.ask(row)['why'],'english_spelling')
+        for author in (None,'','Джеймс Роллинс'):
+            with self.subTest(author=author),self.assertRaisesRegex(ValueError,'English name'):
+                self.service.approve_book(row['id'],row['revision'],author=author)
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.assertEqual(self.ask(row)['why'],'english_spelling')
+        with self.assertRaisesRegex(ValueError,'series is asked next'):
+            self.service.approve_book(row['id'],row['revision'],author='James Rollins')
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
 
-    def test_m10_an_approve_that_answered_the_english_spelling_is_no_answer_to_the_series_question(self):
-        from unittest import mock
+    def test_m10_same_author_answer_waits_for_start_then_asks_series(self):
         import author_rules
-        by = self.lecture_set(artist='Джеймс Роллинс', count=2)
-        with mock.patch.object(self.service.automatic.research, '_author_latin', return_value=None):  # the lookup finds nothing
-            self.service.automatic.start(); self.finish_run()
-            self.assertEqual(self.asked_now(by['1']).get('why'), 'english_spelling', 'positive control: the spelling is asked first')
-            with self.assertRaisesRegex(ValueError, 'series is asked next'):
-                self.service.approve_book(by['1']['id'], by['1']['revision'], author='James Rollins')
-            self.finish_run()
-        self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'), 'Rollins James', 'his spelling is kept')
-        self.assertEqual(self.service.jobs.status()['jobs'], [], 'nothing filed')
-        for k in '12':
-            ask = self.asked_now(by[k])
-            self.assertEqual((ask.get('why'), ask['fields']['author']['proposal']), ('title_series', 'Rollins James'), k)
+        rows=self.books('Dean Koonts')
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'keep','Koontz Dean',actor='user',source='test')
+        self.held(rows);row=rows['1']
+        self.assertEqual(self.ask(row)['kind'],'same_author')
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            with self.assertRaisesRegex(ValueError,'series is asked next'):
+                self.service.approve_book(row['id'],row['revision'],choice='same')
+        start.assert_not_called()
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean')
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.service.automatic.start();self.finish_run()
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
+
+    def test_m10_english_spelling_answer_waits_for_start(self):
+        import author_rules
+        rows=self.books('Джеймс Роллинс')
+        with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.held(rows)
+        row=rows['1'];self.assertEqual(self.ask(row)['why'],'english_spelling')
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            with self.assertRaisesRegex(ValueError,'series is asked next'):
+                self.service.approve_book(row['id'],row['revision'],author='James Rollins')
+        start.assert_not_called()
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        self.service.automatic.start();self.finish_run()
+        self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__=='__main__':unittest.main()

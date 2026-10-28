@@ -159,17 +159,14 @@ class EnglishSpellingAnswerTests(ApproveFixture):
         self.assertEqual(other['reasons'], [], 'the other book is not asked again')
         self.assertEqual(other['review']['canonical_author'], 'Westerfeld Scott')
 
-    def test_approving_the_name_as_shown_keeps_it_for_the_author(self):
+    def test_ruling_59_approving_a_foreign_cyrillic_name_as_shown_asks_for_english(self):
         books = self.books()
         row = books['Голиаф']
-        approved = self.service.approve_book(row['id'], row['revision']); self.wait()
-        job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
-        self.assertEqual(Path(job['output']['final_path']), self.sorted / 'Вестерфельд Скотт' / 'Голиаф - Вестерфельд Скотт.m4b')
-        self.assertEqual(self.rules(), [('keep', '', 'user')])
-        other = self.research(books['Левиафан'])
-        self.assertEqual(other['reasons'], [], 'never asked again')
-        preview = self.service.approval_preview(books['Левиафан']['id'], books['Левиафан']['revision'])
-        self.assertEqual(Path(preview['path']).parts[0], 'Вестерфельд Скотт', 'the same folder')
+        with self.assertRaisesRegex(ValueError, 'English name'):
+            self.service.approve_book(row['id'], row['revision'])
+        self.assertEqual(self.service.jobs.status()['jobs'], [])
+        self.assertEqual(self.rules(), [], 'no lasting Cyrillic keep rule')
+        self.assertEqual(self.research(books['Левиафан'])['ask']['why'], 'english_spelling')
 
     def test_a_refused_approve_saves_no_spelling_rule(self):
         # Senua's 0.22.2 review, m7: the rule was saved (and his other books requeued) before the Approve could be refused.

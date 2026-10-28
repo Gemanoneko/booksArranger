@@ -2337,8 +2337,9 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                     candidates.append({'name': target, 'source': source, 'basis': basis, 'kind': kind, 'rule': rules.rule_id(name, folder_text), 'as_seen': name})
                 return
             if rules.keep(name, folder_text):
-                if not any(same_person(name, c['name']) for c in candidates if c['kind'] == kind):
-                    candidates.append({'name': name, 'source': source, 'basis': basis, 'kind': kind, 'rule': rules.rule_id(name, folder_text)})
+                kept = surname_first(name)[0] if script(name) == 'cyrillic' else name
+                if not any(same_person(kept, c['name']) for c in candidates if c['kind'] == kind):
+                    candidates.append({'name': kept, 'source': source, 'basis': basis, 'kind': kind, 'rule': rules.rule_id(name, folder_text), 'as_seen': name})
                 return
         if kind == 'tag' and not garbled(name):
             name, dropped = _clean_credit(name, title['value'] if title else '', who)
@@ -3003,12 +3004,9 @@ _SORTED = {}
 
 
 def sorted_series(database):
-    """Ruling 52: the series folders Sorted already holds, {series key: [(series as filed, author folder), …]}, from the
-    completed jobs' manifests, and (ruling 53) from the jobs Sergei approved through the series question that are still
-    queued or converting: his Approve of a set's first book files the set's series, and the rest of the set follows it.
-    An Approve that answered another question (Senua's 0.22.3 review, M10) is no such job. A series he corrected at that
-    Approve also answers the name the set asked under (metadata_facts.series_answer.asked: «Курс истории. Лекция» files
-    as «Курс истории»). Read-only; {} when there are none or they can't be read."""
+    """Ruling 52: completed jobs confirm the series folders Sorted already holds for each author.
+    Ruling 57: an approval never aliases another series name or confirms a queued job for the rest of a set.
+    Read-only; {} when there are none or they cannot be read."""
     import contextlib
     import sqlite3
     try:
@@ -3021,30 +3019,16 @@ def sorted_series(database):
             if key in _SORTED:
                 return _SORTED[key]
             found = {}
-            for series, author, asked in db.execute(
-                    "SELECT json_extract(manifest,'$.metadata.series'),json_extract(manifest,'$.metadata.author'),"
-                    "json_extract(manifest,'$.metadata_facts.series_answer.asked') FROM audio_jobs WHERE json_valid(manifest) AND "
-                    "(state='completed' OR state IN ('pending','running') AND json_extract(manifest,'$.evidence.metadata_actor')='user' "
-                    "AND json_type(manifest,'$.metadata_facts.series_answer')='object')"):
+            for series, author in db.execute(
+                    "SELECT json_extract(manifest,'$.metadata.series'),json_extract(manifest,'$.metadata.author') "
+                    "FROM audio_jobs WHERE json_valid(manifest) AND state='completed'"):
                 if isinstance(series, str) and text(series) and isinstance(author, str) and text(author):
-                    for name in {series_key(series), series_key(asked) if isinstance(asked, str) else ''} - {''}:
-                        found.setdefault(name, []).append((text(series), text(author)))
+                    found.setdefault(series_key(series), []).append((text(series), text(author)))
     except (sqlite3.Error, OSError, ValueError):
         return {}
     _SORTED.clear()
     _SORTED[key] = found
     return found
-
-
-def series_answered(record, index, rules=None):
-    """Ruling 53: True when a held research record's series question (ask.split) is answered by a series Sergei filed
-    for the same author (sorted_series in index: his approved or completed job, or the name it answered)."""
-    ask = (record or {}).get('ask') or {}
-    split = ask.get('split')
-    if not isinstance(split, dict) or not text(split.get('series')):
-        return False
-    author = ((ask.get('fields') or {}).get('author') or {}).get('proposal') or ''
-    return bool(sorted_spelling(split['series'], author, index, rules))
 
 
 def sorted_spelling(series, author, index, rules=None):

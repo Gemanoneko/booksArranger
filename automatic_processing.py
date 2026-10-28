@@ -193,15 +193,6 @@ class AutomaticProcessing:
         rules=getattr(self.research,'rules',None)
         try:return rules() if callable(rules) else None
         except Exception:return None
-    def series_answered(self,record):
-        """Ruling 53 (Futaba's 0.22.3 QA, M-1): True when this held book's series question (ask.split) is answered by a
-        series Sergei filed through the series question of another book of its set (his approved job, queued or done, for
-        the same author: local_identity.sorted_series). The book is then researched again, by this run or any later one
-        after a rescan, and files by itself; an approved job is no rule change, so rules_changed_for never saw it."""
-        import local_identity
-        if not isinstance(((record or {}).get('ask') or {}).get('split'),dict):return False
-        try:return local_identity.series_answered(record,{'sorted_series':local_identity.sorted_series(self.database)},self._rules())
-        except Exception:return False
     def rules_changed_for(self,record):
         """Senua's 0.22.0 review, G6: True when a rule saved since this research decides a credit or folder it saw."""
         rules=self._rules();generation=rules.generation if rules is not None else ''
@@ -636,7 +627,7 @@ class AutomaticProcessing:
                       self._update(id,checkpoint=json.dumps(checkpoint));continue
                   previous=self._refresh_wait(row,self.candidate(row))
                   if previous and previous['state']=='Held' and previous.get('until_change') and previous.get('research_version')==RESEARCH_VERSION \
-                          and not self.rules_changed_for(previous) and not self.series_answered(previous):
+                          and not self.rules_changed_for(previous):
                       # Sergei 2026-10-24, ruling 5 (option B): researched again only when something about it changes. A
                       # changed file list, size, time or tag, a renamed folder or a value Sergei saves gives the book a
                       # new revision or fingerprint (candidate() then reads nothing); new rules a new research version.

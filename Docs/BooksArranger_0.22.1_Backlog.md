@@ -155,3 +155,10 @@ Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 i
 - **m21, the second half (Senua's pass 6):** an entered title that differs from the title the split left keeps the split's series beside it («Отряд Сигма - 1 - Отряд Сигма_01. Песчанный дьявол»). The first half is done in 0.22.3: a title or author he entered alone no longer skips the series question, so the row asks and the Goes to line shows the series. Fix: drop the split's series and number when the entered title differs from the split title (or split the entered title).
 - **m17 (Ender's noted gap; Senua's pass 3 confirmed it, Minor):** if the list-row read fails right after an Approve's job is queued, the Approve stands but the queue doesn't start until the next Start, and the state reads "Paused" meanwhile. Rare; nothing is lost.
 - **Ruling 49 note (Senua's pass 3, no finding):** Edit names can't keep a Russian title for a foreign book. Its editor reads the files' title, so a Save of «Волшебники» is "unchanged", and the next Approve files "The Magicians". Typing the title on the row at Approve does keep it.
+
+
+### 0.22.3 final batch (2026-10-28; rulings 56–59)
+
+Implemented for the next candidate, pending its entry check and delta QA/review: M11 saves an unchanged author/no-author answer before asking series; M12 removes set-wide release and corrected-series aliases (including an Approve series fix reaching other books); M13 leaves automatic runs stopped; M14 uses surname-first Cyrillic only in the correct language and preserves canonical English routing. Foreign Cyrillic keep is researched/asked for English again; unchanged Cyrillic approval cannot save another keep.
+
+Deferred to 0.22.4: Senua m23 (no-author split name loses series/number), m9 (gate worker at 84% deadline), Judy series-question copy/layout notes, and optional set-wide answers (ruling57).

@@ -595,7 +595,7 @@ class PublicResearch:
         collection=bool(values['collection']) if 'collection' in values else read['collection']
         title=local_identity.text(values.get('title',read['title']));author=local_identity.text(values.get('author',read['author']))
         if collection and author==local_identity.COLLECTION_LABEL:author=''
-        changed={field for field in ('title','author') if field in values and local_identity.text(values[field])!=local_identity.text(read[field])}
+        changed={field for field in ('title','author') if field in values and (field in found or local_identity.text(values[field])!=local_identity.text(read[field]))}
         if title and (changed or collection!=read['collection']):
             record=local_identity.settled(local,title,author or ('' if collection else NO_AUTHOR),'entered',changed,collection=collection,rules=self.rules(),
                                           folder='\\'.join(reversed(local_identity._ancestors(row,root))))
@@ -1192,6 +1192,11 @@ class PublicResearch:
             titles.append(part['set_title'])
         authors=local_identity.author_forms(local)
         local_script=local_identity.script(author)
+        rules=self.rules()
+        if language!='ru' and local_script=='cyrillic' and local_identity.foreign_given(author) and rules is not None and rules.keep(author):
+            # Rulings 58/59: an old keep is not permission to file a foreign author in Cyrillic.
+            # A Russian original still keeps Cyrillic; otherwise the existing English lookup/question runs below.
+            fields=dict(fields,author=dict(fields['author'],rule=''))
         names=[author]
         name_source=''
         # Futaba's 0.22.2 QA, M-1 (rulings 6a and 33): an author Sergei typed or picked on the row ("Entered by you",

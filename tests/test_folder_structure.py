@@ -1114,6 +1114,38 @@ def setUpModule():
     _no_original_title_wait = no_wait()
 
 
+class KeepLanguageTests(Base):
+    def test_ruling_58_correct_cyrillic_keep_uses_surname_first_on_both_paths(self):
+        row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Тихий Дон',title='Тихий Дон',artist='Иван Петров')]).values()))
+        with sqlite3.connect(self.research.client.database) as db:
+            author_rules.append(db,'keep','Иван Петров',actor='user',source='test')
+        result=self.lookup(row)
+        self.assertEqual(result['reasons'],[])
+        self.assertEqual(result['review']['canonical_author'],'Петров Иван')
+        self.assertEqual(self.approved(row)['author'],'Петров Иван')
+
+    def test_ruling_58_foreign_canonical_english_target_wins(self):
+        row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
+        with sqlite3.connect(self.research.client.database) as db:
+            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer')
+            author_rules.append(db,'same_as','Джеймс Роллинс',target='Rollins James',actor='user',source='English answer')
+        result=self.lookup(row)
+        self.assertEqual(result['reasons'],[])
+        self.assertEqual(result['review']['canonical_author'],'Rollins James')
+        self.assertEqual(self.approved(row)['author'],'Rollins James')
+
+    def test_ruling_59_foreign_keep_lookup_can_learn_english(self):
+        from unittest import mock
+        row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
+        with sqlite3.connect(self.research.client.database) as db:
+            author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer')
+        with mock.patch.object(self.research,'_author_latin',return_value={'state':'found','name':'James Rollins','source_url':'https://www.wikidata.org/wiki/Q315705'}) as lookup:
+            result=self.lookup(row)
+        lookup.assert_called_once()
+        self.assertEqual(result['review']['canonical_author'],'Rollins James')
+        self.assertEqual(author_rules.load(self.research.client.database).same_as('Джеймс Роллинс'),'Rollins James')
+
+
 def tearDownModule():
     _no_original_title_wait.stop()
 
