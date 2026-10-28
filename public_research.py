@@ -1315,7 +1315,8 @@ class PublicResearch:
                            'rules_generation':rules.generation if rules else ''}
         english_title=False
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
-                and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or rules is not None and rules.taken_back(names[0])):
+                and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or rules is not None and
+                    (rules.taken_back(names[0]) or rules.keep(names[0]) and local_identity.foreign_given(names[0]))):
             # Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic (a foreign first name, no Latin
             # spelling in the library, the cache or a rule). The author's original-language name is looked up now, in the
             # work's catalog records (FantLab, Wikidata, Goodreads; the client's cache, per-site bounds and research lane),
