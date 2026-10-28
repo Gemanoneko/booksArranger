@@ -41,6 +41,7 @@ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py'
 // 18.9 s of 215.8 s for the first half), scaled to the module's 389 s.
 const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests':189,
   'test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests':201,'test_book_delete.py':285,'test_lock_timing.py':187,'test_approve_as_is.py':173,
+  'test_set_release.py':200,  // 0.22.3: six real automatic runs with conversions, 150 s alone (2026-10-28), scaled for the workers at once
   'test_part_sets.py':163,'test_automatic_media.py':118,'test_series_backfill.py':110,'test_iron_skazka.py':107,'test_destination_admission.py':85,
   'test_split_books.py':78,'test_migration_planning.py':70,'test_automatic_media_policy.py':67,'test_m4b_join.py':62,'test_retry_intent.py':62,
   'test_todo_holds.py':58,'test_attention_list.py':56,'test_working_lifecycle.py':54,'test_standing_admission.py':54,'test_entered_names.py':48,

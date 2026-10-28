@@ -2247,9 +2247,9 @@ class MergeService:
             if 'catalog_group_members' in have:
                 gone={r[0] for r in db.execute('SELECT DISTINCT m.group_id FROM catalog_group_members m JOIN files f ON f.root=m.root AND f.path=m.path WHERE f.missing=1')}
             records={r['id']:r for r in db.execute('SELECT id,revision,fingerprint,state,result FROM automatic_candidates')}
-        import todo_causes
+        import todo_causes,local_identity
         from public_research import RESEARCH_VERSION
-        found={};coverage=dict(self.NO_COVERAGE)
+        found={};coverage=dict(self.NO_COVERAGE);filed=None
         for identity,(revision,fingerprint) in current.items():
             if identity in jobs:coverage['with_job']+=1;continue  # queued, converting, converted or a stopped job (listed as Stopped)
             record=records.get(identity)
@@ -2285,6 +2285,10 @@ class MergeService:
             if version and version!=RESEARCH_VERSION:coverage['still_checking']+=1;continue
             if 'rules_generation' in result and (result.get('rules_generation') or '')!=generation and (rules is None or not hasattr(rules,'changed_for') or rules.changed_for(result)):
                 coverage['still_checking']+=1;continue
+            if isinstance((result.get('ask') or {}).get('split'),dict):
+                if filed is None:filed={'sorted_series':local_identity.sorted_series(database)}
+                if local_identity.series_answered(result,filed,rules):
+                    coverage['still_checking']+=1;continue  # ruling 53: his answer for its set released it; it is researched again first
             if result.get('ask'):
                 # A question needs the exact revision: a value Sergei saved since (6a) is researched again first.
                 if not ask or ask.get('kind')=='same_author' and rules is not None and (rules.same_as(ask.get('new','')) or rules.keep(ask.get('new',''))):
@@ -3002,7 +3006,7 @@ class MergeService:
         approval={}
         try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values,press=approval)
         except BaseException as error:
-            if approval.get('accepted'):raise  # queued (M4): the job carries his names; they stay
+            if approval.get('accepted') or approval.get('answered'):raise  # queued (M4), or answered with the series next (M10): his names stay
             if press and (self.draining or self.__dict__.get('_closing')):
                 # Ruling 35: closing is no reason to lose his input; the names stay saved for the next session.
                 raise ValueError('Books Arranger is closing. Your names are saved; approve again after it restarts.') from error
@@ -3020,7 +3024,11 @@ class MergeService:
         press={} if press is None else press
         try:answer=self._approve_once(id,revision,title,author,without_missing,choice,path,names,press)
         except BaseException:
-            if press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'],skip=id)
+            if press.get('rule_id') and press.get('answered'):
+                # M10: the press answered his Same author? question and the series is asked next: the rule stays.
+                try:self._continue_after_rule(skip=id)
+                except Exception:pass
+            elif press.get('rule_id') and not press.get('accepted'):self._drop_answer_rule(press['rule_id'],skip=id)
             raise
         if press.get('rule_id'):
             try:self._continue_after_rule(skip=id)
@@ -3065,6 +3073,18 @@ class MergeService:
         if not result.get('work') or not result.get('review'):
             # «Спящие красавицы» (2026-10-26): never the bare sentence; the reason the research gave, else the identity.
             raise ValueError("Approve was not accepted: the app couldn't read this book's identity from its files"+(' ('+'; '.join(dict.fromkeys(result.get('reasons') or []))[:300]+')' if result.get('reasons') else '')+'. Type its title and author, then approve. Nothing was changed.')
+        # Senua's 0.22.3 review, M10 (rulings 52 and 53): an Approve that answered another question ("Same author?", the
+        # English spelling, an author choice, a hold) is no answer to the series question. While the book's series is still
+        # unconfirmed and not his, his answer is kept, the book is checked again with the author settled, and its series
+        # question comes next: nothing is filed, and its set is not answered.
+        automatic=getattr(self,'automatic',None)
+        held=((automatic.candidate(row) or {}).get('ask') if automatic is not None and hasattr(automatic,'candidate') else None) or {}
+        series_answered=held.get('why')=='title_series' and isinstance(held.get('split'),dict)
+        if (result.get('approval') or {}).get('series_question') and not series_answered:
+            self._answer_then_ask_series(row,title,author,names,spelling,press)
+        if series_answered and (result.get('review') or {}).get('series') and isinstance(result.get('metadata_facts'),dict):
+            # Ruling 53: the name the set asked under, and the series he filed it as («Курс истории. Лекция» → «Курс истории»).
+            result['metadata_facts']['series_answer']={'asked':str(held['split'].get('series') or ''),'series':result['review']['series']}
         # Futaba's 0.22.0 QA, m-9: a name taken since the row was shown refused only in build_manifest, after the approval
         # (the review, "Approved by you", the track order) was written, so the row said "Nothing was changed" while the book
         # left the to-do list until the next Start. The destination is checked before anything is written; the late check
@@ -3100,20 +3120,25 @@ class MergeService:
         except Exception:pass
         try:self.automatic._record(fresh,'Queued',dict(result,user_approval=approved_by))
         except Exception:pass  # the job is queued; the automatic record only drives the list's status line
-        # Ruling 53: the series this Approve files answers the rest of its set; a failure never refuses the accepted Approve.
-        try:self._continue_after_series(id,(result.get('review') or {}).get('series'))
-        except Exception:pass
+        # Ruling 53: the series this Approve answered answers the rest of its set; a failure never refuses the accepted Approve.
+        answer=(result.get('metadata_facts') or {}).get('series_answer')
+        if isinstance(answer,dict):
+            try:self._continue_after_series(id,answer.get('series'),answer.get('asked'))
+            except Exception:pass
         return {'row':fresh,'job_id':job}|self._press_after(id,None,destination=False)
 
-    def _continue_after_series(self,skip,series):
+    def _continue_after_series(self,skip,series,asked=None):
         """Ruling 53 (Sergei 2026-10-28): a numbered set that only confirms itself is asked, and his Approve of one of its
-        books answers the rest. Every other current book without a job whose research asked about the same series (the
-        ruling-52 question, ask.split) is put back on the run, where his approved job now confirms the series
-        (local_identity.sorted_series) and the book files by itself. Returns the ids put back."""
+        books through its series question answers the rest (an Approve that answered another question does not, Senua's
+        0.22.3 review, M10). Every other current book without a job whose research asked the same series question (the
+        ruling-52 question, ask.split: the series he filed, or the name it asked under when he corrected it) is released:
+        put back on the run, which is started or continued if it is not running (Futaba's 0.22.3 QA, M-1: after the run
+        has ended too). His approved job then confirms the series (local_identity.sorted_series) and the book files by
+        itself, under the series he chose. Returns the ids released."""
         import local_identity
-        key=local_identity.series_key(series or '')
+        keys={local_identity.series_key(series or ''),local_identity.series_key(asked or '')}-{''}
         automatic=getattr(self,'automatic',None)
-        if not key or automatic is None or not hasattr(automatic,'requeue'):return []
+        if not keys or automatic is None or not hasattr(automatic,'requeue'):return []
         with connect(self.inventory.database) as db:
             have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if 'automatic_candidates' not in have or 'book_groups' not in have:return []
@@ -3125,10 +3150,46 @@ class MergeService:
             if record['id']==skip or record['id'] not in current or record['id'] in jobs:continue
             try:split=((json.loads(record['result']) or {}).get('ask') or {}).get('split')
             except (TypeError,ValueError,AttributeError):continue
-            if isinstance(split,dict) and local_identity.series_key(split.get('series') or '')==key:
-                automatic.requeue(record['id']);back.append(record['id'])
-        self.__dict__.pop('_needs_cache',None)
+            if isinstance(split,dict) and local_identity.series_key(split.get('series') or '') in keys:back.append(record['id'])
+        self._release(back)
         return back
+
+    def _release(self,ids):
+        """Put these books back on the automatic run and start it, or continue a saved run, when it is not running (the
+        Start over / release path, O9 and O12), so they are researched now, not at some later Start."""
+        automatic=getattr(self,'automatic',None)
+        self.__dict__.pop('_needs_cache',None)
+        if not ids or automatic is None or not hasattr(automatic,'requeue'):return
+        for identity in ids:automatic.requeue(identity)
+        if hasattr(automatic,'request_start'):
+            try:automatic.request_start()
+            except Exception:pass  # a blocked start leaves them released: the next run takes them (series_answered)
+
+    class SeriesAsked(ValueError):
+        """M10: his Approve answered another question; the answer is kept and the book's series question comes next."""
+
+    SERIES_ASKED='Your answer is saved. The book is checked again with it, and its series is asked next: check Series, Number and Title, then approve. Nothing was filed yet.'
+
+    def _answer_then_ask_series(self,row,title,author,names,spelling,press):
+        """Senua's 0.22.3 review, M10: keeps what this Approve answered (his Same author? rule, recorded in press; his
+        English spelling, saved now; a title or author he typed, saved as his names unless the names editor saved them
+        already), releases the book so its research runs again with the author settled and asks its series, and raises
+        SeriesAsked. Nothing is filed."""
+        import entered_names
+        press['answered']=True
+        if spelling:
+            try:self._answer_english_spelling(row['id'],spelling)
+            except Exception:pass
+        values={field:value for field,value in (('title',title),('author',None if spelling else author)) if value is not None and str(value).strip()}
+        if values and names is None:
+            try:
+                book,root,research=self._names_book(row['id'],row['revision'])
+                read,scope,now,_=self._names_state(book,root,research)
+                entries=entered_names.plan(book,values,read,scope,now)
+                if entries:entered_names.save(self.inventory.database,book,entries)
+            except (ValueError,OSError,sqlite3.Error):pass
+        self._release([row['id']])
+        raise self.SeriesAsked(self.SERIES_ASKED)
 
     def _queued_row(self,id):
         """The queued book's row for the Approve's answer (M4); None when it can't be read (the answer leaves it out)."""

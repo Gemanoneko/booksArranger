@@ -82,6 +82,7 @@ patterns.push('test_start_while_converting.py');  // 0.22.2: ruling 34, Start wo
 patterns.push('test_original_title_wait.py');  // 0.22.2: ruling 38, a translation converts at once (it replaced ruling 29's wait)
 patterns.push('test_entered_names.py','test_live_cases_0222.py');  // 0.22.2: Edit names (lasting corrections, no job under old names); «1408», «11.22.63», «Голиаф»
 patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (no evidence asked for), ruling 35 (every press queues)
+patterns.push('test_set_release.py');  // 0.22.3: ruling 53 through the real automatic run (Futaba M-1, Senua M10)
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 owner={}

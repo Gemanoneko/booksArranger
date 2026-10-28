@@ -651,7 +651,9 @@ class PublicResearch:
         result['local_agreement']=local_identity.summary(settled)
         result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
-                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or [])}
+                            'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),
+                            # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
+                            'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
         return result
     def _english_original(self,record,title):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
