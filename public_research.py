@@ -1314,7 +1314,7 @@ class PublicResearch:
             return result|{'reasons':[local_identity.ASK_REASONS['author_unclear']],'ask':ask,'identity_hold':{'kind':'author_unclear','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
         english_title=False
-        if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
+        if one_source and not reasons and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
                 and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or rules is not None and
                     (rules.taken_back(names[0]) or rules.keep(names[0]) and local_identity.foreign_given(names[0]))):
             # Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic (a foreign first name, no Latin
@@ -1331,7 +1331,8 @@ class PublicResearch:
                 result['author_learned']={'credit':names[0],'name':latin,'source_url':found['source_url']}
                 if latin not in authors:authors.append(latin)
                 names=[latin];name_source=found['source_url'];work['author_aliases']=author_variants(authors)
-                if found.get('title'):
+                title_entered='title' in set(local.get('names_entered') or []) or any(s.get('kind')=='entered by you' for s in fields['title'].get('sources') or [])
+                if found.get('title') and not title_entered:
                     # The same record names the English original title: ruling 38 files the book under it.
                     russian=preferred;preferred=found['title'];english_title=True
                     if russian not in titles:titles.append(russian)

@@ -39,13 +39,15 @@ class SetReleaseTests(ApproveFixture):
         self.service.automatic.start();self.finish_run()
         self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            self.service.approve_book(rows['1']['id'],rows['1']['revision']);self.wait()
+            self.service.approve_book(rows['1']['id'],rows['1']['revision'])
         start.assert_not_called()
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending','Approve waits for conversion Start')
+        self.start_and_wait()
         self.assertEqual(len(self.service.jobs.status()['jobs']),1)
         self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
         self.service.automatic.start();self.finish_run()
         self.assertEqual(len(self.service.jobs.status()['jobs']),1,'Start must not answer an already-held sibling')
-        self.service.approve_book(rows['2']['id'],rows['2']['revision']);self.wait()
+        self.service.approve_book(rows['2']['id'],rows['2']['revision']);self.start_and_wait()
         self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']],['completed']*2)
 
     def test_ruling_56_a_paused_run_stays_paused(self):
@@ -54,17 +56,33 @@ class SetReleaseTests(ApproveFixture):
         with connect(self.inv.database) as db:
             db.execute("UPDATE automatic_runs SET state='Paused',phase='research',checkpoint=? WHERE id=?",(json.dumps({'pending':[],'done':[r['id'] for r in rows.values()]}),run['id']))
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            self.service.approve_book(rows['1']['id'],rows['1']['revision']);self.wait()
+            self.service.approve_book(rows['1']['id'],rows['1']['revision'])
         start.assert_not_called()
+        self.assertEqual(self.service.automatic.status()['state'],'Paused')
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending')
+        self.start_and_wait()
         self.assertEqual(self.service.automatic.status()['state'],'Paused')
         self.assertEqual(len(self.service.jobs.status()['jobs']),1)
         self.assertEqual(self.ask(rows['2']).get('why'),'title_series')
+
+    def test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start(self):
+        rows=self.books();self.held(rows)
+        one=self.service.approve_book(rows['1']['id'],rows['1']['revision'])
+        self.service.pause()
+        with mock.patch.object(self.service,'resume',wraps=self.service.resume) as resume:
+            two=self.service.approve_book(rows['2']['id'],rows['2']['revision'])
+        resume.assert_not_called()
+        self.assertEqual({j['job_id']:j['state'] for j in self.service.jobs.status()['jobs']},{one['job_id']:'pending',two['job_id']:'pending'})
+        self.assertTrue(all(Path(m['path']).is_file() for row in rows.values() for m in row['members']),'both source books stay untouched')
+        self.assertEqual(self.service.automatic.status()['state'],'Idle')
+        self.start_and_wait()
+        self.assertEqual([j['state'] for j in self.service.jobs.status()['jobs']],['completed']*2,'explicit Start converts both')
 
     def test_m12_discworld_correction_does_not_rename_other_folders(self):
         rows=self.books('Terry Pratchett',[('set/19','Discworld 19. Feet of Clay'),('elsewhere/20','Discworld 20. Hogfather'),('elsewhere/21','Discworld 21. Jingo')])
         self.held(rows)
         self.assertEqual([self.ask(rows[k]).get('why') for k in ('19','20','21')],['title_series']*3)
-        self.service.approve_book(rows['19']['id'],rows['19']['revision'],names={'series':'City Watch','number':'19'});self.wait()
+        self.service.approve_book(rows['19']['id'],rows['19']['revision'],names={'series':'City Watch','number':'19'});self.start_and_wait()
         self.assertEqual(self.service.jobs.status()['jobs'][0]['manifest']['metadata']['series'],'City Watch','positive control: book19 actually changed')
         for k,title in [('20','Hogfather'),('21','Jingo')]:
             result=self.research(rows[k])
@@ -74,8 +92,10 @@ class SetReleaseTests(ApproveFixture):
 
     def answer_author_as_shown(self,artist):
         rows=self.books(artist)
-        self.held(rows);row=rows['1']
+        self.service.automatic.start();self.finish_run();row=rows['1']
+        self.assertTrue(self.service.automatic.candidate(row).get('until_change'),'positive control: actual automatic hold')
         first=self.ask(row)
+        sibling_question=(self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why'))
         self.assertNotEqual(first.get('why'),'title_series','author question comes first')
         with mock.patch.object(self.service.automatic,'request_start') as start:
             with self.assertRaisesRegex(ValueError,'series is asked next'):
@@ -85,7 +105,9 @@ class SetReleaseTests(ApproveFixture):
         self.service.automatic.start();self.finish_run()
         fresh=self.service.reviews._row('Audiobooks',row['id'])
         self.assertEqual(self.ask(fresh).get('why'),'title_series','the author answer must not loop')
-        self.service.approve_book(fresh['id'],fresh['revision']);self.wait()
+        self.assertEqual((self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why')),sibling_question,'only the clicked book was invalidated')
+        self.assertEqual(self.service.jobs.status()['jobs'],[],'the saved author answer released no sibling book')
+        self.service.approve_book(fresh['id'],fresh['revision']);self.start_and_wait()
         self.assertEqual(len(self.service.jobs.status()['jobs']),1)
         self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
 

@@ -130,7 +130,7 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
         with self.assertRaisesRegex(ValueError, 'Assistant review requires concrete supporting evidence'):
             self.service.reviews.tracks('Audiobooks', saved['id'], saved['revision'], keys, keys, True, True, True, actor='assistant')
         row = self.listed('order_unclear')['Око мира']
-        self.service.approve_book(row['id'], row['revision']); self.wait()
+        self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         self.assertEqual([Path(s['path']).name for s in job['manifest']['sources']], [m['filename'] for m in reversed(row['members'])], 'the saved order')
 

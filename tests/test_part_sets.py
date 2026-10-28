@@ -226,7 +226,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
         self.assertEqual([(r['ask']['cause'], r['ask']['file_count']) for r in listed], [('set_seasons', 2)])
         self.assertEqual([f['name'] for f in listed[0]['ask']['files']], ['Black Star Season 1.m4b', 'Black Star Season 2.m4b'], 'the proposed order')
-        self.service.approve_book(row['id'], row['revision']); self.wait()
+        self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         self.assertEqual([c['title'] for c in job['output']['validation']['chapters']], ['s01e01', 's01e02', 's02e01', 's02e02'])
 
@@ -393,7 +393,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         listed = self.service.reviews.page(status='output_attention', group='files_missing')['rows']
         self.assertEqual(len(listed), 1); missing = listed[0]['ask']['missing']
         self.assertEqual(([Path(f).name for f in missing['files']], missing['present'], missing['total']), (['Part 3 of 3'], 2, 3))
-        self.service.approve_book(row['id'], row['revision'], without_missing=True); self.wait()
+        self.service.approve_book(row['id'], row['revision'], without_missing=True); self.start_and_wait()
         job = self.service.jobs.status()['jobs'][0]; self.assertEqual(job['state'], 'completed', job)
         self.assertEqual(len(job['manifest']['sources']), 2)
 

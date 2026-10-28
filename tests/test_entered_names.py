@@ -295,7 +295,7 @@ class EditNamesTests(ApproveFixture):
         self.scp();row=self.row('2');names={'series':'Протоколы SCP','number':'2'}
         preview=self.service.approval_preview(row['id'],row['revision'],title='Сейф №2',names=names)
         self.assertEqual(preview['place'],{'universe':'','series':'Протоколы SCP','number':'2','collection':True})
-        approved=self.service.approve_book(row['id'],row['revision'],title='Сейф №2',path=preview['path'],names=names);self.wait()
+        approved=self.service.approve_book(row['id'],row['revision'],title='Сейф №2',path=preview['path'],names=names);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual(Path(job['output']['final_path']),self.sorted/'Сборники'/'Протоколы SCP'/'Протоколы SCP - 2 - Сейф №2 - Разные авторы.m4b')
         current=self.service.reviews._row('Audiobooks',approved['row']['id'])
@@ -369,7 +369,7 @@ class EditNamesTests(ApproveFixture):
 
     def test_an_approve_answer_carries_the_books_row(self):
         self.scp();row=self.row('control')
-        approved=self.service.approve_book(row['id'],row['revision']);self.wait()
+        approved=self.service.approve_book(row['id'],row['revision']);self.start_and_wait()
         self.assertEqual(approved['list_row']['id'],row['id']);self.assertNotIn('destination',approved)
 
     def test_m1_a_names_save_whose_extras_fail_still_reports_saved(self):

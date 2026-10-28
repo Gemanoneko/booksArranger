@@ -638,3 +638,15 @@ The protected QA startup/admission candidate remains separate reviewed infrastru
 This supersedes the earlier ruling-53 set-release implementation. Each already-held book keeps its own series question; approving a book never releases the set, aliases a corrected series across the author, or starts/resumes automatic processing. An author answer is retained for the next Start, then that book asks its series (M10/M11); accepting an unchanged proposal and an explicit no-author proposal both persist. Completed Sorted series still confirm new ordinary lookups (ruling 52). Approve series edits remain book-local (M12).
 
 Cyrillic keep names use surname-first only when Cyrillic is the correct language (ruling 58); canonical English author rules still win. A foreign Cyrillic keep no longer suppresses the English lookup/question, and an English-spelling question requires an English answer (ruling 59). Russian-original catalog evidence preserves Cyrillic; no transliteration. M9, m20 and m22 remain intact. Senua m23/m9 and Judy notes remain in 0.22.4. One full entry-check run certifies the clean candidate; QA/review compare hashes and check the delta only.
+
+
+### Ruling 60 — bounded gate redistribution (2026-10-28)
+
+Completed: five whole test modules redistributed across the existing nine workers; every case, serial-server grouping and the 540 s worker / 580 s gate / 600 s owned-entry limits remain unchanged. Candidate 3545d17 passed the canonical entry check: 1,916 Python cases and 143 Node cases, zero failures/errors/skips; slowest worker 516.8 s. Broader m9 weight/performance retuning stays deferred to 0.22.4. The preceding 30 s media-test timing failure and its 5/5 isolated checks are retained in the candidate handoff evidence.
+
+
+### 0.22.3 corrective delta after packaged QA/review (2026-10-28)
+
+M11: after an author answer, reset only the clicked book’s cached automatic hold to Pending; its unchanged file revision no longer makes Start skip the saved answer. Real automatic Held (until_change) regressions cover no author, ruling-33 spelling and two credits, including an unchanged sibling question. M13/ruling 56: human Approve saves/queues only and never resumes the audiobook conversion/cleanup queue; an unrelated paused job stays pending until explicit Start. Automatic processing inside an authorized Start still admits and converts books. Conversion fixtures now press Start explicitly; passive waits stay passive.
+
+M15/ruling 59: a title, series, number or Cyrillic-author entry does not settle a foreign author’s English spelling requirement. Author lookup preserves a title Sergei actually entered; an author-only entry still permits a researched English original title. Ruling-57 comments now describe completed-Sorted confirmation and individual approvals, with no queued-job/global-alias/set-release claims. No deadlines or case coverage are reduced.

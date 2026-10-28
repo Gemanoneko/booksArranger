@@ -45,7 +45,7 @@ class LockTimingTests(ApproveFixture):
         for row in self.service.reviews.page()['rows']:
             if all(Path(m['path']).parent.name == folder for m in row['members']):
                 self.service.approve_book(row['id'], row['revision'])
-        self.wait()
+        self.start_and_wait()
         jobs = self.service.jobs.status()['jobs']
         self.assertTrue(jobs and all(job['state'] == 'completed' for job in jobs), jobs)
         return jobs
@@ -133,11 +133,11 @@ class LockTimingTests(ApproveFixture):
 
 
 class ApprovalStartTests(ApproveFixture):
-    def test_an_approval_starts_its_book_without_the_recheck_of_every_finished_book(self):
+    def test_an_approval_queues_without_start_or_finished_recheck_then_start_converts(self):
         for title in ('Ясно', 'Тихо'):
             tone(self.audio / 'Unsorted' / title / (title + '.mp3'), self.cover, album=title, artist='Иван Петров')
         rows = self.start()
-        self.service.approve_book(rows[0]['id'], rows[0]['revision']); self.wait()
+        self.service.approve_book(rows[0]['id'], rows[0]['revision']); self.start_and_wait()
         self.assertEqual(self.service.jobs.status()['jobs'][0]['state'], 'completed', 'positive control: one finished book')
         checked = []
         real = MergeService._prune_completed
@@ -151,11 +151,12 @@ class ApprovalStartTests(ApproveFixture):
         second = next(row for row in fresh if row['id'] == rows[1]['id'])
         with patch.object(MergeService, '_prune_completed', recheck), patch.object(type(self.service.jobs), '_settle', settle), \
                 patch.object(MergeService, 'state', side_effect=AssertionError('no status computation on the approval path')):
-            self.service.approve_book(second['id'], second['revision'])
-        self.wait()
+            queued=self.service.approve_book(second['id'], second['revision'])
+        self.assertEqual(next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==queued['job_id'])['state'],'pending','Approve waits for Start')
         self.assertEqual(checked, [], 'the approval re-checked the finished books')
         self.assertEqual(settled, [], 'the approval re-checked the published outputs')
-        self.assertEqual([job['state'] for job in self.service.jobs.status()['jobs']], ['completed', 'completed'], 'and the book still converted')
+        self.start_and_wait()
+        self.assertEqual([job['state'] for job in self.service.jobs.status()['jobs']], ['completed', 'completed'], 'Start converts the queued book')
         # Positive control: Start still re-checks every finished book.
         self.service.pause()
         with patch.object(MergeService, '_prune_completed', recheck):self.service.resume()
@@ -166,7 +167,7 @@ class ApprovalStartTests(ApproveFixture):
             tone(self.audio / 'Unsorted' / title / (title + '.mp3'), self.cover, album=title, artist='Иван Петров')
         for row in self.start():
             self.service.approve_book(row['id'], row['revision'])
-        self.wait(); self.service.pause()
+        self.start_and_wait(); self.service.pause()
         inside, releases, pressed = threading.Event(), [threading.Event(), threading.Event()], []
         real = MergeService._prune_completed
         def slow(service, job_id, *args, **kwargs):
@@ -254,7 +255,7 @@ class ListReadLimitTests(ApproveFixture):
     def test_the_book_list_answers_within_its_limit_on_a_live_sized_catalog_even_during_a_status_computation(self):
         import live_sized
         tone(self.audio / 'Unsorted' / 'Ясно' / 'Ясно.mp3', self.cover, album='Ясно', artist='Иван Петров')
-        row = self.start()[0]; self.service.approve_book(row['id'], row['revision']); self.wait()
+        row = self.start()[0]; self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
         live_sized.grow(self.inv)
         reviews = self.service.reviews
         self.assertEqual(reviews.page(100, 0, '', 'all')['total'], live_sized.LIVE['books'] + 1, 'positive control: a live-sized catalog')

@@ -162,3 +162,15 @@ Source: `Docs/BooksArranger_CodeReview_v0.22.3_2026-10-27.md`. Fixed in 0.22.3 i
 Implemented for the next candidate, pending its entry check and delta QA/review: M11 saves an unchanged author/no-author answer before asking series; M12 removes set-wide release and corrected-series aliases (including an Approve series fix reaching other books); M13 leaves automatic runs stopped; M14 uses surname-first Cyrillic only in the correct language and preserves canonical English routing. Foreign Cyrillic keep is researched/asked for English again; unchanged Cyrillic approval cannot save another keep.
 
 Deferred to 0.22.4: Senua m23 (no-author split name loses series/number), m9 (gate worker at 84% deadline), Judy series-question copy/layout notes, and optional set-wide answers (ruling57).
+
+
+### Ruling 60 — bounded gate redistribution (2026-10-28)
+
+Completed: five whole test modules redistributed across the existing nine workers; every case, serial-server grouping and the 540 s worker / 580 s gate / 600 s owned-entry limits remain unchanged. Candidate 3545d17 passed the canonical entry check: 1,916 Python cases and 143 Node cases, zero failures/errors/skips; slowest worker 516.8 s. Broader m9 weight/performance retuning stays deferred to 0.22.4. The preceding 30 s media-test timing failure and its 5/5 isolated checks are retained in the candidate handoff evidence.
+
+
+### 0.22.3 corrective delta after packaged QA/review (2026-10-28)
+
+M11: after an author answer, reset only the clicked book’s cached automatic hold to Pending; its unchanged file revision no longer makes Start skip the saved answer. Real automatic Held (until_change) regressions cover no author, ruling-33 spelling and two credits, including an unchanged sibling question. M13/ruling 56: human Approve saves/queues only and never resumes the audiobook conversion/cleanup queue; an unrelated paused job stays pending until explicit Start. Automatic processing inside an authorized Start still admits and converts books. Conversion fixtures now press Start explicitly; passive waits stay passive.
+
+M15/ruling 59: a title, series, number or Cyrillic-author entry does not settle a foreign author’s English spelling requirement. Author lookup preserves a title Sergei actually entered; an author-only entry still permits a researched English original title. Ruling-57 comments now describe completed-Sorted confirmation and individual approvals, with no queued-job/global-alias/set-release claims. No deadlines or case coverage are reduced.

@@ -3145,6 +3145,11 @@ class MergeService:
         if entries:entered_names.save(self.inventory.database,book,entries)
         if spelling:self._answer_english_spelling(row['id'],spelling)
         press['answered']=True
+        # A real automatic hold has until_change=True. Saving the shown answer does not change the file revision;
+        # invalidate only this book's cached hold so Start actually researches its saved answer (M11).
+        import book_restart
+        with connect(self.inventory.database) as db:
+            book_restart.reset_automatic(db,row['id'],row['revision'],row['fingerprint'])
         self.__dict__.pop('_needs_cache',None)
         self.automatic.requeue(row['id'])
         raise self.SeriesAsked(self.SERIES_ASKED)
@@ -3393,8 +3398,9 @@ class MergeService:
                                         if facts['links']==1 and facts['size']==pin['size'] and file.sha256()==pin['sha256']:file.dispose()
                                 except (ValueError,OSError):pass
         if stop.is_set():raise InterruptedError()
-        # 0.22.1: the queued book starts at once; Start's re-check of every finished book is not on the approval path.
-        self.resume(recheck=False)
+        # Ruling 56: Sergei's Approve saves/queues only; it never starts or resumes the conversion/cleanup queue.
+        # Automatic research runs inside an authorized Start and may keep that run's conversion queue moving.
+        if approved_by is None:self.resume(recheck=False)
         return fresh,job
 
     def _request_m4b_readmission(self,job_id,kind,origin=None):

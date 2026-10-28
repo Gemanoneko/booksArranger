@@ -2614,11 +2614,11 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         named = fields['series']['state'] == 'green' and fields['number']['state'] == 'green'
         # Ruling 52 (Sergei 2026-10-27, "a"; it narrows ruling 41): the split files by itself only when something confirms
         # its series: the files' own series (a tag or the series folder), or a series folder Sorted already holds for this
-        # author (the book files into that folder, in its spelling; a book Sergei approved through its series question
-        # counts at once, and a series he corrected there answers the set's own name, ruling 53).
+        # author (the book files into that folder, in its spelling). Only completed jobs confirm Sorted; a queued
+        # approval never confirms or aliases another book's series (ruling 57).
         # Ruling 53 (Sergei 2026-10-28): siblings carrying the same name pattern confirm nothing (a set only confirms
-        # itself: «Шерлок Холмс. Аудиоспектакль 1, 2, 3», «Курс истории. Лекция 1, 2»); the set is asked, and his Approve
-        # of its first book files the rest. Ruling 45's override fills in the series its siblings carry, which confirms
+        # itself: «Шерлок Холмс. Аудиоспектакль 1, 2, 3», «Курс истории. Лекция 1, 2»); each held book is asked and
+        # approved separately (ruling 57). Ruling 45's override fills in the series its siblings carry, which confirms
         # it only when Sorted or a tag confirms that series too (Senua's 0.22.3 review, m22: «Финал 3. Финал» beside an
         # asked «Шерлок Холмс. Аудиоспектакль» set). Otherwise the row asks with Series, Number and Title filled in, and his
         # Approve files them (series_unconfirmed; public_research asks it as title_series). Ruling 55: a source folder

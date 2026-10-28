@@ -79,7 +79,7 @@ class SeriesQuestionAfterTheAuthorTests(ApproveFixture):
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'), 'Rollins James', 'and learns his name')
         self.assertEqual((result['ask']['why'], result['ask']['fields']['author']['proposal']), ('title_series', 'Rollins James'), 'then the series is asked')
         self.service.automatic._record(row, 'Held', dict(result, until_change=True), None)
-        approved = self.service.approve_book(row['id'], row['revision']); self.wait()
+        approved = self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
         job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
         self.assertEqual(job['state'], 'completed', job)
         self.assertEqual(Path(job['output']['final_path']), self.sorted / 'Rollins James' / 'Отряд Сигма' / 'Отряд Сигма - 2 - Карта костей - Rollins James.m4b')
@@ -107,7 +107,7 @@ class Ruling49Tests(ApproveFixture):
             self.assertEqual(typed['path'], str(Path('Grossman Lev') / 'Волшебники (аудиокнига) - Grossman Lev.m4b'), 'a title he types wins')
             preview = self.service.approval_preview(row['id'], row['revision'])
             self.assertEqual(preview['path'], expected, 'Approve: the original English title')
-            approved = self.service.approve_book(row['id'], row['revision'], path=preview['path']); self.wait()
+            approved = self.service.approve_book(row['id'], row['revision'], path=preview['path']); self.start_and_wait()
         job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
         self.assertEqual(job['state'], 'completed', job)
         self.assertEqual(Path(job['output']['final_path']), self.sorted / expected)
@@ -150,7 +150,7 @@ class EnglishSpellingAnswerTests(ApproveFixture):
     def test_his_typed_english_spelling_files_this_book_and_becomes_the_rule_for_the_other(self):
         books = self.books()
         row = books['Голиаф']
-        approved = self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld'); self.wait()
+        approved = self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld'); self.start_and_wait()
         job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
         self.assertEqual(job['state'], 'completed', job)
         self.assertEqual(Path(job['output']['final_path']), self.sorted / 'Westerfeld Scott' / 'Голиаф - Westerfeld Scott.m4b')
@@ -177,7 +177,7 @@ class EnglishSpellingAnswerTests(ApproveFixture):
         self.assertEqual(self.rules(), [], 'no rule from a refused Approve')
         self.assertEqual(self.research(books['Левиафан'])['ask']['why'], 'english_spelling', 'the other book is still asked')
         # Positive control: the same answer on an accepted Approve is his rule.
-        self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld'); self.wait()
+        self.service.approve_book(row['id'], row['revision'], author='Scott Westerfeld'); self.start_and_wait()
         self.assertEqual(self.rules(), [('same_as', 'Westerfeld Scott', 'user')])
 
 

@@ -298,7 +298,7 @@ class DriveAwayTests(test_approve_as_is.ApproveFixture):
             nas.rename(away)  # the drive goes while the book converts
             return real(*args,**kwargs)
         with patch.object(merge_service,'publish',dropped):
-            job_id=self.service.approve_book(row['id'],row['revision'])['job_id'];self.wait()
+            job_id=self.service.approve_book(row['id'],row['revision'])['job_id'];self.start_and_wait()
         job=lambda:next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==job_id)
         self.assertEqual((job()['state'],job()['reason']),('needs attention','An inspected destination ancestor is unavailable'))
         attention=self.service.attention_summary([job_id])[job_id]

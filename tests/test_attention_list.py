@@ -103,7 +103,7 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         import json,time,uuid
         from scanner import connect
         tone(self.audio/'Koontz Dean'/'Watchers'/'01.mp3',self.cover,album='Watchers',artist='Koontz Dean')
-        known=self.start()[0];self.service.approve_book(known['id'],known['revision']);self.wait()
+        known=self.start()[0];self.service.approve_book(known['id'],known['revision']);self.start_and_wait()
         for name in ('Ticktock','Intensity'):tone(self.audio/'Unsorted'/name/'01.mp3',self.cover,album=name,artist='Dean Koonts')
         self.inv.launch('Audiobooks');finish_scan(self.inv);self.research_all()
         rows,_=self.listed('same_author');self.assertEqual(sorted(rows),['Intensity','Ticktock'],'positive control: both asked')
@@ -111,7 +111,7 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         with connect(self.inv.database) as db:
             db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(str(uuid.uuid4()),'Paused','research',json.dumps({'pending':[],'done':[r['id'] for r in rows.values()],'deferred':[]}),'','t','t'))
         one=rows['Ticktock']
-        self.service.approve_book(one['id'],one['revision'],choice='same');self.wait()
+        self.service.approve_book(one['id'],one['revision'],choice='same');self.start_and_wait()
         self.service.automatic.start()
         limit=time.monotonic()+90
         while self.service.automatic.status()['state'] not in ('Completed','Needs attention','Idle'):

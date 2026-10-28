@@ -731,7 +731,7 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         for s in sources:
             shutil.copy2(s, kept / s.name)
         row = self.start()[0]
-        approved = self.service.approve_book(row['id'], row['revision']); self.wait()
+        approved = self.service.approve_book(row['id'], row['revision']); self.start_and_wait()
         job = next(j for j in self.service.jobs.status()['jobs'] if j['job_id'] == approved['job_id'])
         self.assertEqual(job['state'], 'completed', 'positive control: arranged')
         self.assertFalse(any(s.exists() for s in sources), 'positive control: the app removed the originals')

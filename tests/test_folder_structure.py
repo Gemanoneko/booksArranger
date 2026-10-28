@@ -1146,6 +1146,37 @@ class KeepLanguageTests(Base):
         self.assertEqual(author_rules.load(self.research.client.database).same_as('Джеймс Роллинс'),'Rollins James')
 
 
+    def test_m15_unrelated_entered_fields_never_answer_foreign_english_requirement(self):
+        from unittest import mock
+        import entered_names
+        for values in ({'title':'My chosen title'},{'series':'Private series','number':'2'},{'author':'Роллинс Джеймс'}):
+            with self.subTest(values=values):
+                row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
+                with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+                    author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer');db.commit()
+                entered_names.save(self.research.client.database,row,[('book',field,value,'','','') for field,value in values.items()])
+                with mock.patch.object(self.research,'_author_latin',return_value=None) as lookup:
+                    result=self.lookup(row)
+                lookup.assert_called_once()
+                self.assertEqual(result['ask']['why'],'english_spelling')
+                approved=self.research.approved(row,ROOT,author='James Rollins')
+                self.assertEqual(approved['review']['canonical_author'],'Rollins James','an actual English answer is the positive control')
+
+    def test_m15_english_author_lookup_preserves_only_an_explicit_entered_title(self):
+        from unittest import mock
+        import entered_names
+        for values,expected in (({'title':'My chosen title'},'My chosen title'),({'author':'Роллинс Джеймс'},'Map of Bones')):
+            with self.subTest(values=values):
+                row=next(iter(self.catalog([file_row('Unsorted\\Книга\\01.mp3',album='Карта костей',title='Карта костей',artist='Джеймс Роллинс')]).values()))
+                with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+                    author_rules.append(db,'keep','Джеймс Роллинс',actor='user',source='old answer');db.commit()
+                entered_names.save(self.research.client.database,row,[('book',field,value,'','','') for field,value in values.items()])
+                with mock.patch.object(self.research,'_author_latin',return_value={'state':'found','name':'James Rollins','title':'Map of Bones','source_url':'https://www.wikidata.org/wiki/Q315705'}) as lookup:
+                    result=self.lookup(row)
+                lookup.assert_called_once()
+                self.assertEqual((result['review']['canonical_author'],result['review']['title']),('Rollins James',expected))
+
+
 def tearDownModule():
     _no_original_title_wait.stop()
 

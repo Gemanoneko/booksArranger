@@ -43,6 +43,11 @@ class ApproveFixture(unittest.TestCase):
             if time.monotonic()>limit:self.fail('Private Approve job exceeded 60 s')
             time.sleep(.05)
 
+    def start_and_wait(self):
+        """An explicit conversion Start after a human Approve (ruling 56); wait() itself never starts work."""
+        self.service.resume_press()
+        self.wait()
+
     def research(self,row):
         return self.service.automatic.research.lookup(dict(row,_manual_metadata_sources=[]),str(self.audio),threading.Event())
 
@@ -54,7 +59,7 @@ class ApproveAsIsTests(ApproveFixture):
         self.assertEqual(self.research(row)['ask']['kind'],'title_author','positive control: the files name no author')
         preview=self.service.approval_preview(row['id'],row['revision'])
         self.assertEqual(preview['path'],str(Path('Без автора')/'Утро снайпера.m4b'));self.assertFalse(preview['taken'])
-        approved=self.service.approve_book(row['id'],row['revision']);self.wait()
+        approved=self.service.approve_book(row['id'],row['revision']);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['job_id'],approved['job_id']);self.assertEqual(job['state'],'completed',job)
         final=Path(job['output']['final_path']);self.assertEqual(final,self.sorted/'Без автора'/'Утро снайпера.m4b');self.assertTrue(final.is_file())
         self.assertEqual(job['manifest']['evidence']['metadata_actor'],'user','recorded as Sergei\'s approval')
@@ -67,7 +72,7 @@ class ApproveAsIsTests(ApproveFixture):
         row=self.start()[0]
         self.assertEqual(self.research(row)['ask']['kind'],'author_unclear','positive control: two people credited')
         preview=self.service.approval_preview(row['id'],row['revision'],title='Тайна дома',author='Антон Чехов')
-        approved=self.service.approve_book(row['id'],row['revision'],title='Тайна дома',author='Антон Чехов');self.wait()
+        approved=self.service.approve_book(row['id'],row['revision'],title='Тайна дома',author='Антон Чехов');self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual(Path(job['output']['final_path']),Path(preview['absolute']))
         self.assertEqual((job['manifest']['metadata']['title'],job['manifest']['metadata']['canonical_author']),('Тайна дома','Чехов Антон'))
@@ -84,7 +89,7 @@ class ApproveAsIsTests(ApproveFixture):
         with self.assertRaisesRegex(ValueError,'already exists'):self.service.approve_book(row['id'],row['revision'])
         self.assertEqual(taken.read_bytes(),b'PREEXISTING');self.assertEqual(self.service.jobs.status()['jobs'],[])
         taken.unlink();fresh=self.service.reviews.page()['rows'][0]
-        self.service.approve_book(fresh['id'],fresh['revision']);self.wait()
+        self.service.approve_book(fresh['id'],fresh['revision']);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
 
     def stored(self,identity):
@@ -109,7 +114,7 @@ class ApproveAsIsTests(ApproveFixture):
         self.assertEqual(self.stored(row['id']),before,'refused: nothing was changed, as the row says')
         self.assertEqual((taken.read_bytes(),self.service.jobs.status()['jobs']),(b'PREEXISTING',[]))
         # Control: the same row, at the same revision, approves once the name is free.
-        taken.unlink();self.service.approve_book(row['id'],row['revision'],path=preview['path']);self.wait()
+        taken.unlink();self.service.approve_book(row['id'],row['revision'],path=preview['path']);self.start_and_wait()
         self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
 
     def test_convert_whats_there_leaves_out_the_missing_file(self):
@@ -118,7 +123,7 @@ class ApproveAsIsTests(ApproveFixture):
         self.inv.launch('Audiobooks');finish_scan(self.inv)
         row=self.service.reviews.page()['rows'][0];self.assertTrue(any(m.get('missing') for m in row['members']),'positive control: a member is gone')
         with self.assertRaisesRegex(ValueError,'unavailable'):self.service.approve_book(row['id'],row['revision'])
-        self.service.approve_book(row['id'],row['revision'],without_missing=True);self.wait()
+        self.service.approve_book(row['id'],row['revision'],without_missing=True);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual([Path(s['path']).name for s in job['manifest']['sources']],['01.mp3','02.mp3'])
 
@@ -157,7 +162,7 @@ class ReviewFindingsTests(ApproveFixture):
         with self.assertRaisesRegex(ValueError,'Destination changed'):self.service.approve_book(row['id'],row['revision'],path=shown)
         self.assertEqual(self.service.jobs.status()['jobs'],[],'nothing queued')
         now=self.service.approval_preview(row['id'],row['revision'])['path'];self.assertEqual(Path(now).parts[0],'Petrov Ivan')
-        self.service.approve_book(row['id'],row['revision'],path=now);self.wait()
+        self.service.approve_book(row['id'],row['revision'],path=now);self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual(Path(job['output']['final_path']),self.sorted/now,'the path shown is the path used')
 
@@ -177,7 +182,7 @@ class ReviewFindingsTests(ApproveFixture):
         row=self.start()[0]
         with mock.patch.object(self.service,'answer_same_author',return_value='Koontz Dean'):
             approved=self.service.approve_book(row['id'],row['revision'],choice='same')
-        self.wait()
+        self.start_and_wait()
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
         self.assertEqual(job['manifest']['metadata']['canonical_author'],'Koontz Dean')
         with connect(self.inv.database) as db:entered=manual_metadata.records(db,approved['row'])
@@ -203,7 +208,7 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(answers(),[],'no rule from a refused Approve')
         self.assertFalse(author_rules.load(self.inv.database).taken_back('Dean Koonts'),'the undo by the app is no Take back of his')
         self.assertEqual(self.research(row)['ask']['kind'],'same_author','still asked')
-        self.service.approve_book(row['id'],row['revision'],choice='same');self.wait()
+        self.service.approve_book(row['id'],row['revision'],choice='same');self.start_and_wait()
         self.assertEqual(answers(),[('same_as','Koontz Dean')],'the accepted Approve keeps his answer')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['manifest']['metadata']['canonical_author'],'Koontz Dean')
 
@@ -219,7 +224,7 @@ class ReviewFindingsTests(ApproveFixture):
         result=self.research(row);self.service.automatic._record(row,'Held',dict(result,until_change=True),None)
         with mock.patch.object(self.service,'restart_row',side_effect=RuntimeError('fixture: the list row is unavailable')):
             approved=self.service.approve_book(row['id'],row['revision'],choice='same')
-        self.wait()
+        self.start_and_wait()
         self.assertTrue(approved['job_id']);self.assertNotIn('list_row',approved,'the extras are left out, the Approve stands')
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean','his answer is kept')
         job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',job)
