@@ -201,3 +201,44 @@ The exact Ужасы и трэшатинка. Сборник рассказов 
 ### 0.23.0 — final saved-answer and naming delta (2026-10-28)
 
 SeriesAsked is now a typed saved/pending receipt rather than a cancelled approval. Title-series questions expose the same paired inline Series/Number draft; untouched Title remains absent from pair-only submissions. Missing-row queue outcomes acknowledge safely; unrelated refusals retain their semantics. R56 queue-only, R57 book-local confirmation and R59 English-author requirements are unchanged. Sergei’s exact four book titles/cycle/positions and approved concise Сборники/Ужасы и трэшатинка filenames are implemented with a family-only exact-title exception; other cycles/custom titles keep their existing format. All source files/credits and the first-volume pending-story ownership hold remain. Focused backend/UI/path checks and two accepted headless captures are retained; full entry and build remain pending a fresh source/context and quiet window.
+
+## Open reports after 0.23.0 — log only (2026-10-28)
+
+Sergei explicitly requested logging only: no investigation, implementation, tests or fixes now. The following are screenshot observations and questions for the next funded session, not diagnosed causes. The older implementation-progress notes above are historical; 0.23.0 is released. All five original screenshots are preserved in `Docs/BugEvidence/2026-10-28-post-0230/` under their original filenames; the Temp paths below identify their supplied provenance, not the only remaining copies.
+
+### POST-023-01 — foreign-author language, missing cycle and questionable book identity
+
+- Gene Wolfe rows preview a Cyrillic author folder/credit `Джин Вулф`, contrary to the canonical-English, surname-first author rule. Shown books: `Меч и Цитадель - Цитадель Автарха` (40 files) and `Солнце и Замок (Книга Нового Солнца #3)` (70 files); clue column shows `Антон Ческидов`. Do not confuse that clue with the actual writer without checking its role.
+- Both destination previews omit cycle/position, despite explicit cycle evidence in the second title clue. Verify the correct book/edition and ordinal rather than blindly accepting `#3`. Also check the original-English-title rule and any explicit saved title override before deciding the correct filename.
+- Both rows show only “Order unclear.” First visible sources start `04-39.mp3`; the second starts `05-01.mp3`. Verify grouping/completeness and interpretation of book/disc prefixes. The screenshot alone does not prove missing files. Order approval must not bypass unresolved author/title/cycle checks.
+- Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-b014e7ee-e415-430d-bc7a-b83e66d2c88e.png`.
+
+### POST-023-02 — Abnett candidate may be only a fragment; series/universe unresolved
+
+- `Дэн Абнетт - Первый и Единственный [Casper Valter]` has only three sources: `05_Часть Пятая - Эмпирей.mp3`, `06_Часть Пятая - Эмпирей.mp3`, `07_Часть Пятая - Эмпирей.mp3`. UI says no track numbers; order comes from filenames.
+- Sergei asks why the group starts at 05, whether these are middle-of-book files, and whether the work belongs to a series or is short stories; he notes Abnett’s usual Warhammer association. Verify the actual work, complete source membership and correct cycle/universe; do not infer anthology status or missing earlier files from this row alone.
+- Preview is a standalone `Abnett Dan/Первый и Единственный - Abnett Dan.m4b`, without cycle/universe. Author clue itself includes a quoted book title. Verify title/author/narrator separation and original-title authority when investigation resumes.
+- Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-394f8e5a-51cf-4b3a-bdac-e0cb94ef8d9f.png`.
+
+### POST-023-03 — always offer Open source folder; narrator used as title
+
+- Explicit Sergei requirement: **always add an “Open source folder” button on every book review row**, including order problems. The existing “Source folders” action does not give him the usable folder-opening access he needs to inspect these cases. Multiple source folders must remain accessible.
+- Screenshot: 105-file Pratchett candidate uses `исп. Капитан Абр и Nelly` as its title clue and destination title, while the adjacent clue contains `Терри Пратчетт. Шляпа полная небес`. Destination author is `Pratchett Terry`, but the title is evidently narrator credit rather than the displayed book name.
+- Prior private-catalog audit already noted a possible `Шляпа полная небес` split of 118 files into 105 + 13 readable/mojibake groups; it was outside that anthology fix. Cross-check this existing observation rather than assuming the displayed 105 files form the complete book. No new investigation performed.
+- Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-5945e15d-f715-4d4c-b457-beef0907137e.png`.
+
+### POST-023-04 — mojibake identity, inconsistent preview and gapped 13-file group
+
+- Follow-up to POST-023-03: a 13-file row has unreadable mojibake in both title and author/reader clues, while its destination shows readable `Pratchett Terry/Т. Пратчетт. Шляпа полная небес - Pratchett Terry.m4b`. A readable destination is not proof that source encoding, identity or grouping has been repaired. Sergei should be able to identify the book from a clear main title, without deciphering “Goes to.”
+- Together with the preceding 105-file row, this matches the previously observed 118 → 105 + 13 readable/mojibake split. Investigate whether one book was partitioned by differently decoded metadata; do not silently file two incomplete outputs or assume the preview corrected the split. Cause remains uninvestigated.
+- Visible order is `004-01.MP3`, `005-01.MP3`, `006-01.MP3`, `008-01.MP3`, `017-02.MP3`, plus eight more. This is ascending with gaps, not evidence of a numeric-sort inversion. Determine whether intervening files belong to the other candidate, are absent, or reflect a different numbering scheme. Explain the reason to Sergei; never infer missing files solely from this row or approve incomplete membership as an ordering-only issue.
+- Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-330ddca3-28ec-4c85-bffb-e35e0a22fbd4.png`. Logged only; no investigation, tests or fixes.
+
+### POST-023-05 — keep a source folder together, including novel plus stories
+
+- New explicit Sergei ruling: **“Never divide the files that were in 1 folder into different books.”** A folder may contain a large novel and additional short stories belonging to the same book/compilation. Different track titles, story authors or encodings must not automatically partition that source folder. This is a recorded requirement, not an implemented fix; see ruling 68.
+- Screenshot source folder: `Z:/Audiobooks/Unsorted/WH40K/Стив Лайонс - Криг + рассказы (Casper Valter)/`. The app shows `Криг` as 34 files and separate one-file candidates `36. Исход.mp3`, `37. Сильные среди нас.mp3`, `38. Среди мертвецов.mp3`.
+- Each fragment is then called incomplete against the shared 38-track total. Group the source folder correctly before deciding whether files really are missing. The screenshot does not show every row, so do not claim track 35 is actually absent or all 38 files are present.
+- Preserve chapter/story names and individual credits inside the combined book. A novel plus bonus stories does not automatically require a multi-author book credit. Do not silently rewrite or steal existing approved/job-owned/completed bindings while applying the new policy.
+- Future investigation must reconcile this new folder-unit instruction with older multi-book/single-file sibling assumptions; do not invent exceptions or merge separate source folders silently.
+- Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-cc884e85-dc30-4f45-9c16-c26338e15161.png`. Logged only; no source-folder access or fixes.
