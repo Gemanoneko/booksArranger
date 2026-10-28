@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.22.3] - 2026-10-28
+
+### Added
+
+- One names editor on the book's row. View metadata shows the saved names and links to that editor.
+- Learned author rules can be searched and taken back. A taken-back match asks you again instead of learning the same match online.
+- Save and Approve show their progress, destination and outcome beside the action; blocked actions show their reason and a way to resolve it.
+
+### Changed
+
+- Clear "Series N. Title" names fill Series, Number and Title. Unconfirmed or ambiguous series ask first; each held book in a numbered set needs its own approval.
+- Approve saves the answer and queues the book until Start. It never starts or resumes a stopped research or conversion queue, including unrelated queued books.
+- Correcting a series while approving a book applies only to that book.
+- Author names use surname first in the correct language. Foreign authors use their English name; an old Cyrillic "keep" answer asks for English again when lookup cannot find it. Approve cannot bypass that question.
+
+### Fixed
+
+- Accepting an author proposal as shown, including no author or two credits, keeps the answer and reaches the series question on the next Start instead of asking the author again.
+- Saving a title, series or number cannot bypass the English-author question. An English-author lookup preserves a title you entered explicitly.
+- An unresolved English-author question has no destination yet; its preview stays read-only and no longer crashes the book list.
+- A refused approval leaves no new author rule; an accepted queued approval stays accepted if a later list refresh fails.
+- Russian editions use a known original English title. Part markers, Warhammer numbers and uncertain mixed-script names no longer silently create incorrect series folders.
+- Sibling series evidence counts each book once, respects author boundaries and never treats a source folder's name alone as confirmation.
+- Quit waits for its own engine host to exit and handles a busy engine without a bare timeout.
+- The test gate redistributes five existing modules across the same nine workers, keeping all cases and deadlines unchanged.
+
 ## [v0.22.2] - 2026-10-26
 
 ### Added

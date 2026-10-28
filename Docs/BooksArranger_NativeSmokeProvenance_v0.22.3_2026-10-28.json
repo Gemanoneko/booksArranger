@@ -1,0 +1,173 @@
+{
+  "schema": "books-arranger-native-smoke-provenance-v1",
+  "purpose": "Historical exact executed helper sources and compact proof; not installed tooling. Private registry exports and profile/payload copies are disposable and are not archived.",
+  "sourceHead": "943998edbd00d8676b00d95a3311e26b7c79ae36",
+  "version": "0.22.3",
+  "buildId": "7645da69-bb47-497e-8754-ab7f90d70995",
+  "artifact": {
+    "installer": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/cand-0223j/dist/builds/7645da69-bb47-497e-8754-ab7f90d70995/Books-Arranger-Setup-0.22.3.exe",
+      "sha256": "9babdb6d9cf00af0c283f12fdd978a04b13a6fc8d8fcf3b8b5c347ca01dcb53d",
+      "size": 174244357
+    },
+    "manifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/cand-0223j/dist/release-artifacts.json",
+      "sha256": "7b8468a5e8608d4ecd910ac2c20c7f4b899ea60cfa07fefba40819ac17c9b4d9"
+    }
+  },
+  "entry": {
+    "source": "943998edbd00d8676b00d95a3311e26b7c79ae36",
+    "python": 1920,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "node": [
+      "# tests 143",
+      "# pass 143",
+      "# fail 0"
+    ],
+    "elapsedMs": 511172.7153,
+    "closed": true,
+    "receipt": "Entry-check receipt v2: books-arranger v0.22.3 @ 943998edbd00d8676b00d95a3311e26b7c79ae36 (dirty: N) [source:bdf838e278b8152ab6131ef30068904f6b76decc20012f74f83a699d1741e23f; harness:c1ca100354d22501175d0edf2947685c41ceec13cd6331bb1859b05f12e75960; runtime:e3925548d1915af5e8582c47b627025256b7f565adb3a989012d662c818efb70; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a"
+  },
+  "entryContext": {
+    "path": "C:/Antigravity Projects/Worktrees/Books Arranger/q23j/context/context.json",
+    "sha256": "05b87ad3c5ebbf8efbc9dcd5ffd094674f1aa7fe51602a8503814bcd93f3b270"
+  },
+  "canonicalOwner": {
+    "files": [
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+        "sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs",
+        "sha256": "eb8952ee91f42db2b44e9ee476af7b33d6d3dd45212a912426de9febd51a706d"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-identity.mjs",
+        "sha256": "c0493782c8cd89244dfa67a2a141a2f9db89fe3383c5f585c4a257183fa3c63d"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+        "sha256": "45510f11a011b617b4831994bd40aa87763d4195cd06c97ee6489af45f91bce6"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs",
+        "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42"
+      }
+    ],
+    "ownershipRoot": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\q23j\\ownership",
+    "ownershipManifest": {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\q23j\\context\\runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    "ownershipFiles": 92,
+    "verifiedEveryFile": true,
+    "node": {
+      "name": "node",
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "sha256": "1c63f1417e2e26d83ca9a9ec1d548524ab1305bc7209d90ebca56257ff0d84ed"
+    }
+  },
+  "hiddenHelper": {
+    "file": "BooksArranger_HiddenPackageSmoke_v0.22.3_2026-10-28.mjs",
+    "sha256": "eff639068f219b3a7cc0ef95cd95df72b4b469c75d2f4cade81d076b2ea48d6e",
+    "executedPlanSha256": "41223690a874342e8637eed12d6051a6771b080e6adbe0ce0cb491b1824bcb6c",
+    "functional": {
+      "displayedVersion": "0.22.3",
+      "engineVersion": "0.22.3",
+      "windowClose": "hidden; shell and engine remain running",
+      "closedByQuit": true,
+      "payloadUnchanged": true,
+      "intrusion": null,
+      "visiblePositiveControl": {
+        "visibleCount": 32,
+        "matchedPid": 22088
+      }
+    },
+    "compositeGuard": {
+      "ok": false,
+      "code": 1,
+      "cause": "Failed closed after successful normal Quit: Windows prepended the private tray ID to shared UIOrderList. No initial cleanup write occurred."
+    },
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 18,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 429,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 6635.8421,
+    "rawProofSha256": "0f7df71b6a78b81eaa65c7815c6a99a101462ada8167cd30ed24edbdc8812f3d"
+  },
+  "cleanup": {
+    "file": "BooksArranger_OwnedTrayLeafCleanup_v0.22.3_2026-10-28.mjs",
+    "sha256": "3327b6cae94f64af3058d764ed57e30739b242c85855409c5371bac9a46e5e38",
+    "executedPlanSha256": "44b4fe04b234b63d18192dfe46c8fdcdf95af2a7f9dfb48b149cc5b51a9176d8",
+    "authorization": {
+      "approvedBy": "Sergei",
+      "quote": "Yes—leave OS history and finish release",
+      "scope": "Delete only the temporary private EXE tray leaf; preserve shared Windows history including the one eight-byte numeric reference, containing no name/path."
+    },
+    "proof": {
+      "mode": "--delete",
+      "ownId": "8953604142261800089",
+      "deleted": true,
+      "rootWritten": false,
+      "uiOrderWritten": false,
+      "uiOrderSha256": "50680e5a2cbd419706aa9ac3e506421dcce0f835dc4d9b063a16aac13c4d07b3",
+      "uiOrderBytes": 1864,
+      "ownIdOffset": 0,
+      "sameHandleExactExe": true,
+      "leafHasNoSubkeys": true,
+      "ntDeleteKeyResolved": true,
+      "currentUiOrderUntouched": true,
+      "ownLeafAbsent": true,
+      "numericHistoryReferenceLeft": true,
+      "allPreexistingRecordsUntouched": true,
+      "readOnly": false
+    },
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 8,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 76,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 1172.6249,
+    "rawProofSha256": "df809c65d6ba51431e6da2df8f971937aad28aa00ca600abbbbbcd28927e1c74"
+  },
+  "priorStoppedProbes": [
+    {
+      "helperSha256": "8187c310a1727a27ec005711f068a3eaf973c33b5bb079895e6b28fef294453d",
+      "planSha256": "8523a319c9fdb0d8ba5cb6d7dd9616054bcc08a49b995fbc46103001a84d32a2",
+      "cause": "Initial complete reg query exceeded unchanged5000ms cap before app launch; owner closed/native zero."
+    },
+    {
+      "helperSha256": "d719d6351d7aa9a17b73092fd4f513ff04f1760d24469b268f2757d09381a983",
+      "cause": "Read-only TxR availability returned ERROR_RM_NOT_ACTIVE6801; rollback/close succeeded, no write API reached, owner closed/native zero."
+    }
+  ],
+  "result": "Functional packaged smoke PASS plus separately authorized own-leaf cleanup PASS; no app rerun, shared root/history untouched by cleanup."
+}

@@ -1,6 +1,104 @@
 # Code Review — Books Arranger v0.22.3
 
-## Header
+## Final re-review at 943998e (2026-10-28)
+
+Release source commit: 943998edbd00d8676b00d95a3311e26b7c79ae36
+Release artifact manifest SHA256: 7b8468a5e8608d4ecd910ac2c20c7f4b899ea60cfa07fefba40819ac17c9b4d9
+
+This closes the corrective range `3545d178d6315cff8c8acb383a590081d7627dd1..943998edbd00d8676b00d95a3311e26b7c79ae36`; combined with pass 9 below, reviewed coverage is continuous from v0.22.2. The final clean candidate is `cand-0223j` at 943998e. Installer `dist/builds/7645da69-bb47-497e-8754-ab7f90d70995/Books-Arranger-Setup-0.22.3.exe`: **174244357 bytes**, SHA256 `9babdb6d9cf00af0c283f12fdd978a04b13a6fc8d8fcf3b8b5c347ca01dcb53d`. I independently hashed the installer, artifact manifest and frozen smoke inputs.
+
+### Corrective findings closed
+
+| Finding | Final result and evidence |
+|---|---|
+| M11 | **Fixed.** `_answer_then_ask_series` saves the proposal/no-author answer, then resets **only that book's** cached automatic row to Pending through `book_restart.reset_automatic`. The production `Held/until_change` skip cannot retain the old author question; siblings remain held. The three regressions now begin with an actual automatic run and assert its `until_change` positive control before approving as shown. |
+| M13 | **Fixed.** `approve_automatic` calls `resume(recheck=False)` only for non-human automatic admission (`approved_by is None`). Human Approve queues without starting either queue. The unrelated-pending-job regression asserts no resume call, both jobs pending and sources intact, then an explicit Start completes both. The sole production non-human caller is the authorized automatic run. |
+| M15 | **Fixed.** English-author checking no longer depends on an unrelated entered title/author flag. Title-only, series/number-only and Cyrillic-author entries still ask for English; an actual English answer is the positive control. A fetched English title cannot replace an explicit entered title. Approve/preview suppress live author lookup, retaining the question without planning a Cyrillic destination. |
+| Preview hold | **Fixed in the final delta.** `_approval_destination` accepts a missing review and returns an empty destination with the existing hold reason, instead of `dict(None)`. `routing_preview` already guards missing reviews; `approved()` still provides its separate approval metadata for the row. The new real attention-list test proves no destination, no lookup, refused blank Approve, then an English submission queued until Start and filed correctly. |
+| m11 | **Fixed.** The stale queued-job/global-alias/first-book-releases-set comments now describe per-book approval and completed-only Sorted confirmation. |
+
+I read the tiny product diff, test retargets and both ends of the names/approval callers. No final full suite or broad scan was repeated by this reviewer. Tests which previously relied on implicit conversion now explicitly call Start; the shared `wait()` remains a wait and never starts work. Assertions and time limits remain in force.
+
+Futaba's independent final packaged-engine pass reports **10/10 intended flows passing**, including all three actual Held-cache answers, a paused queue with two jobs, the entered-field English-author controls and Russian/English author-order controls. Its **11 outputs decode with zero errors**. This corroborates the construction review; her behavior verdict remains separate.
+
+Actual final entry: **1920/1920 Python, 143/143 Node, zero failures/errors/skips**, 511.2 s owned wall time, slowest worker **500.6/540 s**, native owned closure zero. The real receipt in `q23j/logs/ender-entry.log` binds 943998e, dirty N, source `bdf838e278b8152ab6131ef30068904f6b76decc20012f74f83a699d1741e23f`, harness `c1ca100354d22501175d0edf2947685c41ceec13cd6331bb1859b05f12e75960`, runtime `e3925548d1915af5e8582c47b627025256b7f565adb3a989012d662c818efb70` and checker `a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf`, with `check pass` and entry exit 0. The earlier failed entries remain historical failures; none is reclassified as a pass.
+
+### Nine dimensions (corrective delta)
+
+Security **Pass**: no new executable input, shell-out, Electron/IPC or credential surface. Correctness & logic **Pass**: the three reproduced obligations are corrected and represented by production-flow regressions. Crash/stability **Pass**: the missing-review preview now uses a bounded fallback. Performance **Concerns**: broader m9 headroom work remains deferred; final slowest worker uses 92.7% of its unchanged deadline. State/data safety **Pass**: per-book Held invalidation and human no-resume retain unrelated state; existing verified-publication-before-source-removal checks remain. Input handling **Pass**: required English answers cannot be replaced by unrelated name edits or a guessed destination. Maintainability **Pass**: no new orchestration layer; existing reset/admission boundaries are reused. Doc/code drift **Pass**: m11 corrected. Build/release hygiene **Pass for construction and artifact identity**: final entry and exact built payload are bound; Futaba's actual hidden packaged launch/Quit evidence is a separate release prerequisite.
+
+### Hidden packaged route approval
+
+Current approved route: exact helper SHA256 `eff639068f219b3a7cc0ef95cd95df72b4b469c75d2f4cade81d076b2ea48d6e` and fresh plan `q23j/hidden-smoke-plan-943998e-export.json`, SHA256 `41223690a874342e8637eed12d6051a6771b080e6adbe0ce0cb491b1824bcb6c`. Independent read-only verification matched final source/manifest/installer, passing context SHA256 `05b87ad3c5ebbf8efbc9dcd5ffd094674f1aa7fe51602a8503814bcd93f3b270`, Node SHA256 `1c63f1417e2e26d83ca9a9ec1d548524ab1305bc7209d90ebca56257ff0d84ed`, **all five canonical owner files and all 92 ownership/Koffi files**, with no extra files or links. The exact private work directory and generic result-output path did not yet exist. Only the outer helper invocation is approved; its worker must be created by canonical ownership, never invoked directly.
+
+The route uses a pinned private payload, profile, roots, environment and distinct ports. Read-only Win32 image matching covers private-payload window owners, with an existing-window PID positive control and fail-closed image reads. Preexisting tray key IDs/raw values must remain unchanged; cleanup can remove only new IDs matching the copied EXE after it exits. Unknown image/shared-key changes, pin drift, timeouts or unproved native closure must stop and be reported, never weakened. Senua did **not** execute the app; Futaba owns the single native smoke and behavior verdict.
+
+Futaba's first exact invocation (helper `8187c310...`, plan `8523a319...`) failed closed **before app launch** at the tray snapshot's registry query (archived `q23j/logs/hidden-package-smoke-result-v1-registry-preflight.json`: code 1, owned closure zero, no force/owner timeout, 8.2 s, `closedByQuit:false`). This is not passing packaged-smoke evidence. Ender's read-only diagnosis found complete `reg query /s` exceeded its 5000 ms child limit after 491298 stdout bytes; the key existed and was readable. A full same-subtree `reg export` completed in 49 ms, 1755088 UTF-16LE bytes, root plus 160 IDs. The replacement keeps **5000 ms / 16 MiB**, compares complete raw sections including types/multiline/escapes and retains the preexisting-ID/value and new-exact-EXE-only cleanup guards. The instrumented parser checks passed 17 assertions; both diagnostic/parser owned receipts are successful with native zero. Raw registry exports remain private disposable evidence and must never be committed. I reviewed the actual source delta and independently rebound the new plan and unchanged artifact/owner pins before authorizing Futaba's fresh attempt. Publication still requires the actual packaged-smoke result below.
+
+The replacement's actual app flow completed: hidden renderer ready, displayed and engine versions **0.22.3**, window-close hid while the engine stayed alive, normal `--quit` with `closedByQuit:true`, unchanged payload, no detected intrusion and native owned closure zero. Its **original overall result was a failure** (`q23j/logs/hidden-package-smoke-result.json`, code 1, 6.6 s), because the final tray-state comparison detected a preexisting root change and failed closed. That historical result remains a failure; the separate cleanup below resolves its remaining obligation without another app launch.
+
+Read-only classification proved the sole root delta was `UIOrderList` REG_BINARY **1856 → 1864 bytes**: exactly one aligned 8-byte reference for the new own leaf `8953604142261800089`. All preexisting child IDs/raw values were unchanged; the new leaf's `ExecutablePath` matched the unique pinned private EXE. A proposed atomic root-plus-leaf transaction was **not used**: its read-only availability probe failed at the first transacted open with **6801 / ERROR_RM_NOT_ACTIVE**, rolled back and closed successfully, reached no write API and had native closure zero. No transaction-manager repair, alternate namespace retry, root rewrite or registry import was attempted.
+
+Sergei explicitly approved the bounded alternative: **"Yes—leave OS history and finish release"**, authorizing deletion of only the own temporary leaf while leaving its single numeric 8-byte Windows history reference, with no name/path record. Reviewed leaf helper SHA256 `3327b6cae94f64af3058d764ed57e30739b242c85855409c5371bac9a46e5e38` has no root/value write API: the root opens KEY_READ only, the exact leaf opens KEY_READ|DELETE, current private EXE/no-subkeys ownership is checked through that **same handle**, and only that handle is passed to `NtDeleteKey`. This handle-based API is documented for user mode by [Microsoft](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwdeletekey); it avoids reopening a different key generation by path. Shared root data is never rewritten. The authorized plan SHA256 `44b4fe04b234b63d18192dfe46c8fdcdf95af2a7f9dfb48b149cc5b51a9176d8` changed only the three approved authorization fields from the reviewed fresh default-deny plan; all source/proof/owner pins and unused nonce/output targets were reverified before Futaba's single outer invocation.
+
+**Actual authorized cleanup passed** (`q23j/logs/owned-tray-leaf-delete.json`): exit 0, `ok:true`, `closed:true`, native zero; same-handle exact-EXE/no-subkeys checks passed, own leaf deleted and ordinary-read absence confirmed. `rootWritten:false`, `uiOrderWritten:false`, current UIOrderList and every other current/preexisting record unchanged. Only the explicitly accepted numeric history reference remains. This successful separate owned cleanup plus the actual hidden normal-Quit/payload-unchanged evidence completes the packaged launch/Quit prerequisite. No app relaunch, product rebuild or guard weakening was used. Raw registry exports remain private disposable evidence; the durable record contains only the executed helper identities, compact proof and this precise user exception.
+
+Durable compact evidence: `Docs/BooksArranger_NativeSmokeProvenance_v0.22.3_2026-10-28.json`, SHA256 `6e30aeb731bc8b3316fba3393b6100fc80f516ddee1cfc5aff21012aa05d6279`, alongside Ender's exact executed-helper copies. It records the original composite guard failure and separate authorized cleanup success without private registry values; disposable `q23j` paths above are historical reproduction/evidence locations, not files to retain after release.
+
+### Final construction verdict
+
+**Critical: 0. Open Major: 0.** All 15 tracked Major findings are fixed or superseded as recorded across the continuous review. The 23 tracked Minor findings retain their earlier dispositions, with m11 closed again; m23, broader m9, Judy's notes and other deferred minors remain backlog work. No new Critical/Major/Minor in the corrective range. Safety floor intact. The final source/artifact construction is clear and the packaged launch/Quit prerequisite is complete as documented above; Futaba's final behavior GO remains its independent report.
+
+**Verdict:** RELEASE CLEAR
+
+## Previous re-review at 3545d17 (2026-10-28; superseded)
+
+Historical source commit: 3545d178d6315cff8c8acb383a590081d7627dd1
+Historical artifact manifest SHA256: 43dfc69c2358c4840ec912c36c76dbf9c0c273091613dad073263eaccb9e1aa4
+
+Reviewed range: `cf166bfa7cab8c1381a14c82b7409fbc75b91139..3545d178d6315cff8c8acb383a590081d7627dd1` (five commits, including the report-only d0f7121). Candidate: `C:/Antigravity Projects/Worktrees/Books Arranger/cand-0223j`, clean. Four product Python modules, the two runner files, four Python test modules and two docs changed; the range also adds the previous reports. Full diff: 14 files, +1806 / -223. No desktop or page code changed. The installer is build `b631e687-8fc0-46be-aad0-3b8daa5813e1`, SHA256 `6019c49ac6b4357325cff7ab3f17e31e9c481233d4d20011d1045653193e7c6d` (identity supplied by Ender; no shell launch in this pass).
+
+### Method and evidence
+
+Lean delta review: read the changed code and both ends of its approval/names/rule paths. No full suite repeated. Ender's actual passing entry is `q23j/logs/ender-entry.log`: 1,916/1,916 Python and 143/143 Node cases, no failures/errors/skips, 527.5 s owned wall time, slowest worker 516.8/540 s, owned closure zero. One earlier identical-source entry failed the existing media case's 30 s wait; that case then passed 5/5 isolated in 15.20–16.66 s and the official retry passed. The cause of the original wait is unproven; this review does not assert CPU contention caused it.
+
+Two finding-specific probes used a private copy of the candidate's root Python files, with the four changed product files checked byte-for-byte, pinned QA Python/FFmpeg, and canonical `bounded-check.runOwned` (600000 ms private kill-on-close Job). Both final probe results are `ok:true`, `closed:true`, `forced:false`, native zero. No real library or catalog was read or written. The catalog-only probe uses synthetic `Z:` path strings, never filesystem access to that drive.
+
+- `q23j/senua/r56-result.json` (17.7 s): queue initially **Paused**, one unrelated approved job **pending** with `resume` intercepted only to seed that pending job. Approve a second book with the real queue resume. It calls `resume(recheck=False)` once; **both jobs complete and both source files are removed after verified publication**, without a Start. The automatic research run stays **Idle**, so checking its status alone misses this effect. The initial probe printed non-ASCII paths and its supervisor refused the streamed/final-output mismatch; it did not certify a result. The final ASCII-escaped run has a successful owned receipt.
+- `q23j/senua/r59-result.json` (0.55 s): old `keep` on «Джеймс Роллинс». Positive control: one English-name lookup and an `english_spelling` question. Save **only the title** as `Map of Bones` with `entered_names.save`, then research again with the same inconclusive lookup stub. Result: **zero lookups, no ask, no reasons, canonical author «Роллинс Джеймс»**, with only `title` in `entered_names` fields. This is an automatic-filing plan under a Cyrillic foreign-author folder, contrary to ruling 59.
+
+### Findings and prior obligations
+
+- **M11 [Major]: answer saving is fixed, but the real Held-cache loop remains open (Futaba's packaged finding).** `automatic_processing.py:629` skips an unchanged `Held` record with `until_change=True` when author rules did not change; a book-local `entered_names` answer does not change those rules. Requeue alone does not invalidate this cached answer. Futaba's actual automatic run creates that flag; Approve says saved/Press Start, but the next actual Start still asks `author_missing`, `name_language` or `two_people`, with zero jobs. Her formal no-author repetition is `q23j/futaba/m11-confirm-owned.json` (`ok:true`, code 0, native zero, 3.3 s) and `m11-confirm-results.json`; the other two shapes are in her delta results. The new `test_set_release` helpers inject Held via `_record` without `until_change`, so they miss the production path. Preserve saved answers but invalidate/research this book on the next Start; regressions must begin with an actual automatic run's Held record.
+- **M12: fixed by reading**: no `series_answer` aliases, no `_continue_after_series`, no queued-job confirmation, and Approve filters author-wide `fix/series` entries at the actual save. Its book-local series entry remains. The corrected Discworld test has positive controls that book 19 actually becomes City Watch and books 20/21 remain Discworld.
+- **M13 [Major]: partially fixed, still open for the conversion queue.** `merge_service.py:3397`, `approve_book` → `_approve_once` → `approve_automatic` → unconditional `self.resume(recheck=False)`. Removing `_release` fixes the automatic research run's restart, but an already-settled conversion Pause is still undone, including unrelated pending jobs and cleanup. `resume` captures the current generation, so the Pause's generation is treated as permission to start again. The real two-book probe above confirms the effect. Ruling 56 and the handoff explicitly require no `request_start` **or** `resume` from an Approve. Keep a user-approved job pending until Start; automatic-run admission needs its separate existing start path. Add a regression with a paused conversion queue and a different pending job; mocking only `automatic.request_start` is insufficient.
+- **M14: original order mismatch fixed by reading**: Cyrillic `keep` now passes through the same surname-first step as Approve; canonical English `same_as` still wins. The broadened language requirement has the separate M15 gap below.
+- **M15 [Major]: new review finding; ruling 59 remains bypassable by a title-only saved value.** `public_research.py:1300` sets `sergei` when **either title or author** is entered; `:1317` gates the English lookup with `not sergei`. Clearing the old keep's `rule` field at `:1198` does not clear this unrelated title flag. Thus a title correction prevents the author's required English lookup/question, and the automatic path can file the foreign author in Cyrillic. The new manual-Approve guard does not protect automatic `approve_automatic`. Require the English-author check independently of title/series corrections and prove the title-only control above still asks; preserve Russian-writing authors and canonical English answers. This is a newly explicit requirement in rulings 58/59; the older title-entered bypass predates the new guard.
+- **m11 [Minor], reopened doc drift**: `local_identity.py:2610-2623` still says a queued approval confirms the set, a corrected series aliases the old name, and the first approval files the rest. That mechanism has been removed under ruling 57. Update these comments in the same corrective batch. Existing m23, Judy's notes and broader m9 tuning remain deferred.
+
+### Nine dimensions (delta only)
+
+| Dimension | Status | Result |
+|---|---|---|
+| Security | Pass | No new shell-out, executable input, Electron/IPC surface or credential handling. |
+| Correctness & logic | Concerns | M11 still loops through the real Held cache; M12/original M14 corrected; M15 leaves a foreign-author automatic-filing bypass. |
+| Crash / stability | Pass | New writes use existing catalog transactions; no new long-lived worker. |
+| Performance | Concerns | Five whole-module moves preserve every test and all nine workers/deadlines; actual slowest remains 95.7% of 540 s. Broader m9 is deferred. |
+| State & data safety | Concerns | Residual M13 resumes a stopped conversion queue and its unrelated pending jobs. Publication verification still precedes source removal. |
+| Input handling | Concerns | English-question non-Latin answers are refused, but a saved unrelated title skips the question (M15). |
+| Maintainability | Pass | Set-wide continuation/alias machinery removed; runner placement overrides are bounded. |
+| Doc/code drift | Concerns | m11 stale set-release comments; Brief/backlog describe the new per-book policy. |
+| Build & release hygiene | Concerns | Official passing receipt exists; no packaged-shell smoke executed or certified yet. |
+
+Critical: **0**. Tracked Majors: **15**, with **M11, M13 and M15 open**; M1–M10, M12 and M14 are fixed or superseded as described above. Tracked Minors: **23**, m11 reopened; all other prior dispositions carry. Safety floor intact. This advisory severity verdict does **not** mean the requested fix batch is complete: Iris is holding release for these three demonstrated requirements and final candidate QA/review.
+
+Hidden-package helper `q23j/hidden-package-smoke.mjs`, SHA256 `343f67fac8201a32268f7a8a0bcd7ee732c04b2a0156598b38efeed7e5d437e1`, was read but **not approved or executed**. It uses private paths and native ownership, but its tray cleanup must distinguish genuinely new registry key IDs from preexisting IDs whose path changed; its visibility/focus PID set omits descendants, and the detector needs a PID-matching positive control. Require distinct engine/CDP ports. Ender has the precise correction requests; final helper bytes and final artifact plan need separate vetting before native execution.
+
+The revised helper, exact SHA256 `8187c310a1727a27ec005711f068a3eaf973c33b5bb079895e6b28fef294453d`, is **structurally approved by static review**, not executed. It snapshots all existing tray key IDs/raw values, refuses any preexisting change and deletes only new IDs matching the fresh copied EXE after exit. Read-only Win32 image queries cover window owners anywhere under the unique byte-pinned private payload; a real existing-window PID positive control exercises matching without displaying or focusing anything. Failed image queries/callbacks fail closed, engine/CDP ports differ, and canonical native Job closure must be zero. This constrained private-payload route does not need the worker to hold the parent's Job handle. **Execution still requires the final accepted artifact plan/pins**, plus the canonical owner/Koffi identities verified against the passing entry context. A shared-key or image-query failure must stop and be reported, never softened or restored over unrelated user activity.
+
+Verdict of that superseded candidate (3545d17): RELEASE CLEAR, with the three Major obligations above still open at that time.
+
+## Historical header (through cf166bf)
 
 ```
 Reviewer: Senua (Code Reviewer)
@@ -203,7 +301,7 @@ Each fix does what its commit says for the cases its tests name. M10's answers a
 
 This certifies the range v0.22.2..cf166bf. No Critical finding: nothing is lost (M12 misfiles, M11 blocks a flow, M13 does unasked work), and the safety floor is intact. Pass 8 adds no shell-out, kill, route, file write or network request; the release calls the existing requeue and `request_start`. But cf166bf is worse to ship than 51caef1 in one respect: M11 stops a common Approve from working at all, and M12 is a new silent misfile. I would fix M11 and M12 before shipping, and ask Sergei about M13.
 
-**Verdict:** RELEASE CLEAR
+Verdict of that pass (cf166bf, superseded): RELEASE CLEAR.
 
 ---
 
@@ -285,7 +383,7 @@ Every fix does what its commit says for the cases it names. M8's sets now ask: 8
 
 This certifies the range v0.22.2..51caef1. No Critical finding: M10 misfiles, but nothing is lost; the audio is intact in Sorted. The safety floor is intact. Pass 7 adds one read-only query clause, one requeue loop over the catalog's own records, and no shell-out, kill, file write, route or network request. M10 is the one to fix before shipping if Sergei wants 0.22.3 free of the regressions this review knows about.
 
-**Verdict:** RELEASE CLEAR
+Verdict of that pass (51caef1, superseded): RELEASE CLEAR.
 
 ---
 
@@ -1267,4 +1365,4 @@ On Ender's two readings: one-file books in one folder must count, or the live «
 | m22 | Minor | 2 Correctness | `local_identity.py:2611-2614` | New in 0.22.3 (rulings 45 and 53), not in this delta: ruling 45's override confirms whatever series two siblings carry, which ruling 53 does not confirm for the set itself. «Финал 3. Финал» beside two «Шерлок Холмс. Аудиоспектакль» books files into that folder while they ask. | **Fixed** (798001a), verified: asks with the siblings' series filled in. A corrected fill-in feeds M12. |
 | m23 | Minor | 6 Input | split of a book with no author (pass 8) | New in 0.22.3 (ruling 41), not in this delta: «Курс истории. Лекция 1. Греция» with no author files `Без автора\Греция.m4b`; the series and number leave the name (51caef1; by reading cf166bf). | Open. Keep the whole name, or put the series into the file name. |
 
-**Verdict:** RELEASE CLEAR
+Verdict of the historical review (through cf166bf, superseded): RELEASE CLEAR.

@@ -1,11 +1,129 @@
-# Books Arranger 0.22.3 - delta QA on candidate cf166bf (Futaba)
+# Books Arranger 0.22.3 — corrective delta QA on candidate 943998e (Futaba)
+
+Pass run 2026-10-28 on the final packaged candidate, checking only the three residual fixes, the unresolved-English preview boundary, the original language/order checks, and one held-cache control. The Discworld correction carries from the previous pass. No full entry check was repeated by QA.
+
+Release source commit: 943998edbd00d8676b00d95a3311e26b7c79ae36
+Release artifact manifest SHA256: 7b8468a5e8608d4ecd910ac2c20c7f4b899ea60cfa07fefba40819ac17c9b4d9
+
+## Identity and entry receipt
+
+- Installer `cand-0223j/dist/builds/7645da69-bb47-497e-8754-ab7f90d70995/Books-Arranger-Setup-0.22.3.exe`: 174,244,357 bytes, SHA-256 `9babdb6d9cf00af0c283f12fdd978a04b13a6fc8d8fcf3b8b5c347ca01dcb53d`. Installer and manifest hashes match the handoff. The manifest names source 943998e and version 0.22.3.
+- My preflight also checked 218 actual packaged backend/Python/FFmpeg input files against the accepted payload manifest, the passing context's Node pin, all five canonical ownership-helper files, and its ownership/Koffi manifest files. The engine runs the final build's backend with its packaged Python and FFmpeg, not the mutable main checkout.
+- Actual builder receipt, compared from `q23j/logs/ender-entry.log`:
+
+```text
+Entry-check receipt v2: books-arranger v0.22.3 @ 943998edbd00d8676b00d95a3311e26b7c79ae36 (dirty: N) [source:bdf838e278b8152ab6131ef30068904f6b76decc20012f74f83a699d1741e23f; harness:c1ca100354d22501175d0edf2947685c41ceec13cd6331bb1859b05f12e75960; runtime:e3925548d1915af5e8582c47b627025256b7f565adb3a989012d662c818efb70; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a
+```
+
+Builder result: 1,920 Python and 143 Node cases pass, zero failures/errors/skips and proven native zero. Earlier failure/debug history remains below; it is not counted as a passing receipt.
+
+## Packaged engine checks
+
+Ten intended real workflows pass. Private tagged audio (two 0.4-second MP3s per book, embedded artwork), fresh private catalogs and Sorted folders; real production scan, automatic holds, Approve, Edit names, attention-list payload, explicit Start and publication. Fetches use the existing offline HTTP-503 seam. A socket guard refuses outbound traffic: its deliberate positive control was logged once, and the workflows made no outbound attempts. The only name-lookup stub is an inconclusive public-author response, so the English-question and entered-field boundaries can be checked deterministically.
+
+| Changed behavior | Result and evidence |
+|---|---|
+| **M11: a real held author question advances after the saved answer and Start** | **Pass, all three.** No author, ruling-33 spelling (`Ilya Marchenko`), and two credits. Each first real automatic run holds the author question; Approve as shown saves it and files nothing. The next real Start asks `title_series`, not the same author question. Series Approve queues the book; explicit Start then files it. The no-author output goes to `Без автора`. |
+| **M13 / ruling 56: Approve cannot resume a stopped conversion queue** | **Pass.** Real stopped queue before the second Approve: Paused, one pending, zero completed. After approving another book: still Paused, two pending, zero completed, all four sources intact. Only explicit Start processes both books. |
+| **M15 / ruling 59: entered fields cannot bypass a foreign author's English question** | **Pass, three variants.** An old Cyrillic keep rule plus an entered title, series/number, or Cyrillic author still makes one author lookup and asks `english_spelling`. Blank Approve is refused and creates no job. Typing `James Rollins`, then explicit Start, files under `Rollins James`; the entered title and series remain intact. |
+| **Unresolved-English attention row and preview** | **Pass.** The actual `needs_you` entry and `ask_payload` remain usable; no crash and no extra author lookup. Destination path/absolute are empty, with `Enter the author's English name, then approve.` No Cyrillic destination is offered. The English answer then succeeds, retaining `Entered Map`. |
+| **M14 / ruling 58: surname order and language agree** | **Pass.** Correct Cyrillic keep credit `Иван Петров` resolves to `Петров Иван` in both the real automatic output and Approve preview. A canonical English `Rollins James` rule wins over the old Cyrillic keep: automatic output and Approve preview both use `Rollins James`. The foreign-author variants above also exercise actual English Approve/conversion. |
+| **Ruling 57: changing the held cache stays book-local** | **Pass.** After approving and explicitly processing book 1 of the asked lecture set, rescan and another Start leave book 2 asked `title_series`, its two sources intact, and exactly one completed job/output. |
+
+All 11 created audio outputs decode with zero errors. Counts come from the ten scenario records and actual Sorted output files, not the full suite. The first main driver completed nine valid workflows; my series fixture initially omitted its required number and was correctly refused before the behavior check. I supplied number 1 and repeated only that single scenario, which passed. No product, assertion or time limit changed. Main-driver owned closure is native zero; its exit 1 is solely that invalid fixture. The focused series correction has `ok:true`, exit 0, native zero.
+
+The Discworld → City Watch correction carries from the accepted first-candidate behavior check below: 19 changes only itself; Hogfather 20 and Jingo 21 elsewhere keep Discworld. The corrective code did not change that save path. The existing m23 no-author filename limitation remains deferred: its series is absent from the filename. No new product findings; M11, M13 and M15 are closed by the measured corrective checks. Pattern alert “answer saved but the same question returns” is closed for the three real-held author flows; disposition **fixed**.
+
+## Packaged hidden launch / Quit
+
+**Functional packaged launch/close/Quit passed on the same accepted artifact.** Senua reviewed the exact helper and final source/artifact/Node/ownership binding before execution. The real packaged app used a fresh private payload/profile, roots, environment and ports, with its window hidden. The rendered and engine versions both read **0.22.3**. The hidden renderer reached its private HTTP origin. A visible-window positive control confirmed the observer could detect windows; no owned window became visible and no intrusion was reported.
+
+`--close-window` followed this tray tool's normal close path: hidden, shell and engine still running. The same private profile's normal `--quit` then exited the shell and engine (`closedByQuit:true`); the payload remained unchanged. The private Job closed normally with zero remaining native members. No physical input or focus was taken.
+
+The safety/cleanup history is explicit, not converted into a fictitious passing command:
+
+1. Helper `8187c310…` stopped **before app launch** because its full registry query exceeded the existing 5,000 ms bound. No bound was increased. That result is archived in `logs/hidden-package-smoke-result-v1-registry-preflight.json`.
+2. Senua approved replacement helper `eff639068f219b3a7cc0ef95cd95df72b4b469c75d2f4cade81d076b2ea48d6e` with exact plan SHA-256 `41223690a874342e8637eed12d6051a6771b080e6adbe0ce0cb491b1824bcb6c`. Its complete registry export retained all values/types and the same time/output caps. The functional app flow above passed, but that helper's overall exit was **1** because its strict guard detected Windows adding one 8-byte numeric own-ID reference to `UIOrderList`. It correctly stopped and preserved the evidence; that invocation is not claimed as an overall pass. See `logs/hidden-package-smoke-result.json` and the preserved tray classification evidence.
+3. Sergei explicitly approved **“Yes—leave OS history and finish release”**: delete only this temporary app's own tray record and leave the path-free, numeric 8-byte OS history reference. Senua then verified the exact same-handle leaf-deletion helper `3327b6cae94f64af3058d764ed57e30739b242c85855409c5371bac9a46e5e38` and authorized plan SHA-256 `44b4fe04b234b63d18192dfe46c8fdcdf95af2a7f9dfb48b149cc5b51a9176d8`.
+4. I executed that approved outer cleanup **once**. `logs/owned-tray-leaf-delete.json` records exit 0, `ok:true`, normal closure and native zero. The handle still named the exact private executable; the leaf had no subkeys, and afterward the own leaf was absent. All other current/preexisting records were untouched. Neither root nor `UIOrderList` was written. The current 1,864-byte `UIOrderList` remained unchanged (SHA-256 `50680e5a2cbd419706aa9ac3e506421dcce0f835dc4d9b063a16aac13c4d07b3`), retaining only the expressly authorized 8-byte numeric reference to the deleted own ID, with no name/path. No root rewrite, transaction-history repair or additional app launch occurred.
+
+The accepted exception plus the successful narrow cleanup closes the packaged-smoke prerequisite. It does not waive a product failure or turn either earlier failed helper result into a pass.
+
+## Limits and disposal
+
+No installer was run. No Z: or live `data/` writes, profile install, mouse/keyboard/tray click, focus change or visible test window. The page/HTTP rendering, real X/tray gestures, updater, other themes/viewports and unchanged historical cases were not repeated. The hidden shell check is the packaged launch evidence; it does not claim real-input coverage of every page.
+
+Evidence: `q23j/futaba/c/results.json` and `owned.json`, focused series records under `q23j/futaba/s`, the pinned driver, and the reviewed native helper's logs. All engine owned jobs closed with native zero. Preserve these through release, then the parent removes the complete candidate and run folders via `studio-sweep`; retain only the accepted current installer/build in the main checkout. This report is my only repository edit; no staging, commits or pushes.
+
+Blockers: 0. Open QA Majors: 0. New Minors: 0. No loss of the last audio copy found. M11, M13 and M15 are verified closed; the language/order checks and held-cache control pass. The authorized numeric OS history exception is recorded above.
+
+**Verdict:** GO
+
+---
+
+
+# Previous pass: candidate 3545d17 (superseded by the 943998e corrective pass above)
+
+Pass run 2026-10-28 against the accepted packaged backend at `cand-0223j`, checking the changes since cf166bf. **NO-GO: two Major behavior failures remain (M11 and M13).** Ruling 57 and the Discworld correction pass. Senua independently found the additional foreign-author/title-only bypass M15; it joins the same corrective batch. This section supersedes the cf166bf pass below.
+
+Historical source commit: 3545d178d6315cff8c8acb383a590081d7627dd1
+Historical artifact manifest SHA256: 43dfc69c2358c4840ec912c36c76dbf9c0c273091613dad073263eaccb9e1aa4
+
+## Build identity
+
+- Installer: `cand-0223j/dist/builds/b631e687-8fc0-46be-aad0-3b8daa5813e1/Books-Arranger-Setup-0.22.3.exe`, SHA-256 `6019c49ac6b4357325cff7ab3f17e31e9c481233d4d20011d1045653193e7c6d`. My driver hashes the actual installer and manifest and refuses a mismatch. Both match Ender's handoff. The manifest names version 0.22.3 and the source above.
+- Backend driven: the actual build's `win-unpacked/resources/backend`, with its packaged Python and FFmpeg. No installer was run. The full entry check was not repeated.
+- Actual builder receipt, from `q23j/logs/entry-passed-summary.json` and the entry log:
+
+```text
+Entry-check receipt v2: books-arranger v0.22.3 @ 3545d178d6315cff8c8acb383a590081d7627dd1 (dirty: N) [source:310bf1c80efacab1438bd7648fdbf52e692dc0588b72f062f0647046505efdc4; harness:0c5ae643596e17aeca3aaac22c8b946006bd789bc53f31a55ada42e96a5d8912; runtime:e3925548d1915af5e8582c47b627025256b7f565adb3a989012d662c818efb70; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a
+```
+
+Ender measured 1,916/1,916 Python and 143/143 Node cases passing, no failures/errors/skips, the slowest worker at 516.8/540 seconds and proven zero owned processes after closure. The preceding official run had one 30-second media-test timeout. That exact case passed 5/5 in isolation (15.20–16.66 seconds), then the unchanged official retry passed. The original timeout's precise cause is unproven; the failed receipt is not treated as a pass.
+
+## Method and measured behavior
+
+Private real tagged audio (two 0.4-second MP3s per book, embedded artwork), private catalogs and Sorted folders under `q23j/futaba`; production Inventory, MergeService, automatic Start/Stop, Approve, preview and research. Public fetches answer HTTP 503 through the existing fetch seam. No live catalog or library was opened, and no SQLite backup API was used. The actual workflows below use no mocked `resume` or `request_start`.
+
+| Item | Result | Measured behavior |
+|---|---|---|
+| **M13 / ruling 56: a stopped conversion queue stays stopped after Approve** | **FAIL, Major** | First approve `A Quiet Morning`, then real `pause()`: queue `Paused`, one queued job, zero completed. Approve unrelated `The Quiet Road`: immediately `Running`, first job starts again and second is pending. Both later complete and both sources are removed. The two outputs exist in private Sorted. An Approve resumed work Sergei stopped; observing the automatic-run state alone misses this queue boundary. |
+| **Ruling 57: every held set member asks individually** | **PASS** | Real automatic run holds both «Курс истории. Лекция 1. Греция» and «… 2. Рим». Approve book 1, let it finish, rescan, then real Start: exactly one job/output; book 2 remains `title_series`, with its two sources still present. The output decodes with zero errors. |
+| **M12: correcting one book never renames the author's other series** | **PASS** | Three Terry Pratchett books are really held by the automatic run: Discworld 19, 20 and 21, with 20/21 in another parent folder. Approve 19 as City Watch: one output, `Pratchett Terry/City Watch/City Watch - 19 - Feet of Clay - Pratchett Terry.m4b`, decodes cleanly. Fresh research of Hogfather 20 and Jingo 21 still asks the original Discworld split. |
+| **M11: approve as shown on the author question, then Start** | **FAIL, Major** | Real automatic run first creates a held no-author book. Approve as shown says the answer is saved and to press Start. A real next Start leaves exactly the same `author_missing` question, zero jobs and zero outputs. This narrow repro was independently repeated once with a successful owned receipt (`ok:true`, code 0, native zero). The first broader driver also observed the same loop for ruling 33 (`name_language`) and two credits (`two_people`); see the ownership qualification below. |
+
+The important distinction for M11 is **a real automatic hold**: production stores `until_change=True`. The new regression fixtures insert a Held result without that flag. Saving an entered author does not change the author-rule generation, so the real held record is skipped again on Start. Ender and Senua received this evidence before the corrective rebuild.
+
+## Findings and remaining scope
+
+- **Major M13 remains open:** Stop is undone by Approve at the conversion queue, even though set-wide automatic starts were removed. Fix disposition: Ender's same corrective batch.
+- **Major M11 remains open:** the saved author answer still loops when the question came from a real held run. Fix disposition: same batch; the no-author, spelling and two-credit cases must use real held semantics.
+- **Senua M15, construction finding:** with an old foreign Cyrillic keep rule, saving only the title can suppress the English-name question. Not duplicated by QA; Senua's evidence is `q23j/senua/r59-result.json`. Included in the same batch before the next candidate.
+- Pattern alert: **an answer is reported saved, but the book still asks the same question after Start**. Reopened by the real-held M11 flow; disposition **fix** in this batch.
+- Blockers: 0. QA Majors: 2 open. New Minors: 0. No loss of the last audio copy was found; M13 removed originals only after their verified private Sorted outputs existed, but still violated Stop.
+
+## Ownership, limitations and disposal
+
+The first broad private driver completed its observations and wrote UTF-8 `delta-results.json`, but its stdout used the Windows encoding while the owner's wire expected UTF-8. The owner rejected the final streamed-byte comparison (`Final supervisor output differs from streamed bytes`); **that invocation is not claimed as a successful command**. It nevertheless closed the exact private job with zero remaining owned processes. The local evidence and actual output files remain for review. I corrected only my logger to emit ASCII JSON, then repeated just the no-author M11 case: `m11-confirm-owned.json` has `ok:true`, exit 0, closed true and native zero. No product files or test assertions were changed by me.
+
+Two earlier probe setup attempts failed before the behavior check (an ESM import URL, then my scan/empty-queue wait assumptions). They are probe mistakes, not product findings. Their owned jobs closed; no retry of the full entry check occurred.
+
+Not run on this superseded candidate: the remaining language variants and m20/m22 controls; the HTTP/page layer; actual hidden packaged-shell launch/Quit; real mouse/keyboard/tray clicks, window X or focus; installer/updater; other viewports/themes. No file under `web/` or `desktop/` changed in this delta, so no screenshot is claimed. The hidden shell check is deferred to the corrective candidate after Senua approves its exact helper. Ruling 57 and Discworld evidence above can carry; the three residual fixes get a narrow recheck after rebuild.
+
+Evidence lives only in `C:/Antigravity Projects/Worktrees/Books Arranger/q23j/futaba`: `delta-results.json`, `delta-owned.json`, `m11-confirm-results.json`, `m11-confirm-owned.json`, my driver and private labs. Preserved until the corrective candidate and reports close these findings, then removed with the parent `q23j` by the studio sweep. No process of mine remains alive. No Z: or live `data/` writes, profile install, desktop interaction, or change to any other tool occurred. This report is my only repository edit; I did not stage, commit or push it.
+
+Verdict of the previous 3545d17 pass (superseded): NO-GO.
+
+---
+
+# Previous pass: candidate cf166bf (superseded by the 3545d17 pass above)
 
 Pass run 2026-10-28 on candidate cf166bf (the rebuild of 0.22.3 that replaces 51caef1, where I gave NO-GO on M-1; code in 798001a), checking only the delta since 51caef1 plus a short smoke. Tester: Futaba. Behavior only; construction is Senua's. Lean verification (ProcessRules, Lean verification): I did not re-run the entry check or the full suite; I compared hashes, then checked each changed behavior once. Sergei was at the machine: no mouse, keyboard, tray click or focus, and no window of mine was ever shown. Everything ran headless from the payload extracted from the installer, with a private profile and private LOCALAPPDATA, APPDATA, TEMP and USERPROFILE. No port was opened. Sergei's profile, live data, Z:, port 5210 and his running app were not touched; no process was killed.
 
 This section replaces the pass on candidate 51caef1 (NO-GO), kept below as a superseded section together with the ddfbfa7 pass.
 
-Release source commit: cf166bfa7cab8c1381a14c82b7409fbc75b91139
-Release artifact manifest SHA256: 516d559f0901be12ba3fecdcab4b6b7bee31fdeb0ea79702817cce525367f17a
+Historical source commit: cf166bfa7cab8c1381a14c82b7409fbc75b91139
+Historical artifact manifest SHA256: 516d559f0901be12ba3fecdcab4b6b7bee31fdeb0ea79702817cce525367f17a
 
 ## Result in plain words
 
@@ -90,7 +208,7 @@ Pattern alerts: none open. Pattern alert 1 from the 51caef1 pass ("an answer fro
 
 GO: the Major from the 51caef1 pass is fixed in the packaged build, the four other changes pass, the smoke is clean, nothing was lost and every output decodes. The open questions are for the page (how the kept-answer message reads), not for the engine.
 
-**Verdict:** GO
+Verdict of the previous cf166bf pass (superseded): GO.
 
 ---
 
