@@ -22,11 +22,71 @@ def annual_stories(year=2025,numbered=False,reader='Илья Дементьев'
         file['path']=str(Path(ROOT)/'Самая Страшная Книга'/('Сборник - Самая страшная книга '+str(year)+' ['+reader+']')/(('%02d.mp3'%i) if numbered else Path(file['path']).name))
     return files
 
+
+def horror_stories(volume=1,author=None):
+    files=stories(volume,family=anthology_volumes.STORY_FAMILY)
+    for file in files:
+        file['path']=str(Path(ROOT)/anthology_volumes.STORY_FAMILY/('Сборник' if volume==1 else 'Сборник '+str(volume))/Path(file['path']).name)
+        metadata=json.loads(file['metadata']);metadata['tags'].pop('album');metadata['tags']['artist']=author if author is not None else '';metadata['artist']=metadata['author']=metadata['tags']['artist'];file['metadata']=json.dumps(metadata)
+    return files
+
 def work(group):
     return {'policy_version':'standing-17-v1','identity_basis':'local_agreement','identity_rule':local_identity.IDENTITY_VERSION,
             'titles':[group['title_clue']],'author_aliases':['Разные авторы'],'full_author_verified':True}
 
 class AnthologyVolumeTests(unittest.TestCase):
+
+
+    def test_confirmed_horror_four_blank_album_volumes_are_separate_complete_books(self):
+        built=groups.build(sum((horror_stories(n) for n in range(1,5)),[]))
+        self.assertEqual(len(built),4);self.assertEqual({g['anthology_volume']['number'] for g in built.values()},{'1','2','3','4'})
+        destinations=[]
+        for group in built.values():
+            self.assertEqual(len(group['members']),2);self.assertTrue(anthology_volumes.identity(group));self.assertIn('Playback order uncertain',source_gate(group,work(group)))
+            self.assertNotIn('Mixed recordings in this group',source_gate(group,work(group)))
+            from metadata import propose
+            group=dict(group,fingerprint='private-four-volumes');local=local_identity.identify(group,ROOT)
+            result=PublicResearch(SimpleNamespace(database='unused-private.sqlite'),leads=[])._local_collection(group,local,{'sources':[],'evidence':[]})
+            destinations.append(propose(group['members'][0]['path'],ROOT,'audiobook',group['metadata'],result['review'],automatic_facts=result['metadata_facts'])['path'])
+        self.assertTrue(all(destinations));self.assertEqual(len(set(destinations)),4,'four anthology volumes never claim one destination')
+    def test_horror_family_requires_exact_parent_and_confirmed_volume_boundary(self):
+        files=horror_stories(2)
+        for file in files:file['path']=file['path'].replace(anthology_volumes.STORY_FAMILY,'Other collection')
+        self.assertEqual(len(groups.build(files)),2)
+        files=horror_stories(5);self.assertEqual(len(groups.build(files)),2,'unconfirmed child5 receives no named exception')
+        files=horror_stories(2);meta=json.loads(files[0]['metadata']);meta['tags']['album']='Other book';files[0]['metadata']=json.dumps(meta)
+        self.assertTrue(all(g.get('anthology_ownership_conflict') for g in groups.build(files).values()))
+    def test_horror_uploader_is_not_writer_and_placeholder_titles_keep_actual_story_names(self):
+        files=horror_stories(2,author='home2');meta=json.loads(files[0]['metadata']);meta['track_title']='Без имени 2';files[0]['metadata']=json.dumps(meta)
+        group=next(iter(groups.build(files).values()));labels=chapter_plan.names(group['members'])
+        self.assertTrue(all('home2' not in label for label in labels));self.assertIn(Path(files[0]['path']).stem,labels)
+        self.assertEqual(group['members'][0]['metadata']['tags']['artist'],'home2','raw uploader evidence remains untouched')
+        files=horror_stories(2,author='Виктор Глебов');group=next(iter(groups.build(files).values()))
+        self.assertTrue(all(label.startswith('Виктор Глебов. ') for label in chapter_plan.names(group['members'])))
+    def test_horror_owned_or_retired_story_blocks_entire_volume_with_other_volumes_unaffected(self):
+        files=horror_stories();old=next(iter(groups._legacy_build([files[0]]).values()));old['scope']='existing-owned-story'
+        for active,blocked in ((files,[]),(files[1:],[]),(files[1:],[groups.member(files[0])])):
+            with self.subTest(active=len(active),frozen=bool(blocked)):
+                built=groups.build(active+horror_stories(2),protected={old['scope']:old} if not blocked else {},blocked_members=blocked)
+                named=[g for g in built.values() if g.get('anthology_volume')]
+                self.assertEqual(len(named),1);self.assertEqual(named[0]['anthology_volume']['number'],'2')
+                self.assertTrue(any(g.get('anthology_ownership_conflict') for g in built.values()))
+
+
+    def test_horror_regroup_supersedes_fragment_ids_and_rejects_stale_candidate_lookup(self):
+        from scanner import Inventory
+        db=sqlite3.connect(':memory:');self.addCleanup(db.close);db.row_factory=sqlite3.Row
+        db.execute('CREATE TABLE files(root TEXT,path TEXT,size INTEGER,modified INTEGER,kind TEXT,metadata TEXT,error TEXT,missing INTEGER)');groups.setup(db)
+        files=horror_stories(2);old={}
+        for index,file in enumerate(files):
+            group=next(iter(groups._legacy_build([file]).values()));group['scope']='fragment-'+str(index);old[group['scope']]=group
+        inputs={'retired':{},'archived':set(),'frozen':{},'protected':{}};groups._sync_write(db,ROOT,1,old,inputs)
+        prior=[r[0] for r in db.execute('SELECT id FROM book_groups')];groups._sync_write(db,ROOT,2,groups.build(files),inputs)
+        for identity in prior:
+            with self.assertRaisesRegex(ValueError,'Candidate no longer current'):Inventory._candidate_row(db,ROOT,identity)
+        current=db.execute('SELECT * FROM book_groups WHERE superseded=0').fetchall();self.assertEqual(len(current),1)
+        self.assertEqual(current[0]['approved'],0);self.assertNotIn(current[0]['id'],prior)
+        self.assertEqual(set(m['path'] for m in json.loads(current[0]['evidence'])['members']),set(f['path'] for f in files))
 
     def test_annual_anthology_with_numbered_filenames_is_one_book_not_a_series_year(self):
         group=next(iter(groups.build(annual_stories(numbered=True)).values()))
@@ -37,6 +97,13 @@ class AnthologyVolumeTests(unittest.TestCase):
         result=PublicResearch(SimpleNamespace(database='unused-private.sqlite'),leads=[])._local_collection(group,local,{'sources':[],'evidence':[]})
         self.assertEqual(result['review']['title'],'Самая страшная книга 2025');self.assertTrue(result['review']['anthology'])
         self.assertEqual((result['review']['series'],result['review']['number']),('',''),'calendar year is not a guessed narrative series position')
+
+    def test_confirmed_annual_collection_suffix_retains_one_book_context(self):
+        files=annual_stories(2021)
+        for file in files:file['path']=str(Path(ROOT)/'Самая Страшная Книга'/'Самая страшная книга 2021 (Сборник)'/Path(file['path']).name)
+        group=next(iter(groups.build(files).values()));self.assertTrue(anthology_volumes.identity(group));self.assertEqual(len(group['members']),2)
+        self.assertEqual(source_gate(group,work(group)),['Playback order uncertain'])
+
     def test_annual_membership_does_not_guess_an_unnumbered_order(self):
         group=next(iter(groups.build(annual_stories()).values()));self.assertEqual(len(group['members']),2)
         self.assertIn('Playback order uncertain',source_gate(group,work(group)))
@@ -191,5 +258,27 @@ class AnthologyVolumeMediaTests(ApproveFixture):
         self.assertEqual(labels,['Виктор Глебов. Первый рассказ','Юрий Молчан. Второй рассказ'])
         self.assertEqual(job['manifest']['metadata']['title'],'Самая страшная книга 2025');self.assertTrue(job['manifest']['metadata']['anthology'])
         self.assertEqual((job['manifest']['metadata']['series'],job['manifest']['metadata']['number']),('',''))
+
+
+    def test_horror_blank_tags_require_explicit_order_then_convert_without_uploader_writer(self):
+        # A short private destination leaves room for the real long anthology/volume names under the unchanged240 limit.
+        self.sorted=self.base/'S';self.sorted.mkdir()
+        from review_backend import member_key
+        import test_set_release
+        folder=self.audio/anthology_volumes.STORY_FAMILY/'Сборник 2';sources=[]
+        for name,title in [('Первый рассказ','Без имени'),('Второй рассказ','Второй рассказ')]:
+            sources.append(tone(folder/(name+'.mp3'),self.cover,title=title,artist='home2'))
+        rows=self.start();self.assertEqual(len(rows),1);row=rows[0]
+        self.service.automatic.start();test_set_release.SetReleaseTests.finish_run(self)
+        self.assertEqual(self.service.jobs.status()['jobs'],[]);current=self.service.reviews._row('Audiobooks',row['id'])
+        self.assertEqual(self.service.needs_you()[row['id']]['group'],'order_unclear')
+        ordered=list(reversed(current['members']));keys=[member_key(m['path']) for m in ordered]
+        self.service.reviews.tracks('Audiobooks',current['id'],current['revision'],keys,keys,True,True,True);current=self.service.reviews._row('Audiobooks',row['id'])
+        preview=self.service.approval_preview(current['id'],current['revision']);self.assertTrue(preview['path'],ascii(preview))
+        self.service.approve_book(current['id'],current['revision'],path=preview['path']);self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending');self.assertTrue(all(p.exists() for p in sources))
+        self.start_and_wait();job=self.service.jobs.status()['jobs'][0];self.assertEqual(job['state'],'completed',ascii(job))
+        labels=[c['title'] if isinstance(c,dict) else c for c in job['manifest']['chapters']]
+        self.assertEqual(labels,[Path(m['path']).stem for m in ordered]);self.assertTrue(all('home2' not in label for label in labels))
+        self.assertEqual(Path(job['output']['final_path']),self.sorted/preview['path']);self.assertTrue(job['manifest']['metadata']['anthology'])
 
 if __name__=='__main__':unittest.main()

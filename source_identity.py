@@ -138,6 +138,9 @@ def source_gate(row,work):
     folder_context=bool(common_folder and (title_matches(folder_title,aliases,work.get('author_aliases',[])) or local and same_title(Path(members[0]['path']).parent.name)))
     # A numbered set grouped by its shared file names (groups.py, guard 2) is one folder's book.
     if one_source and common_folder and row.get('numbered_set'):folder_context=True
+    # Confirmed anthology binding re-proves this exact folder and every source, including explicitly blank-tag books.
+    # This supplies book context only; recording, source availability and playback-order checks still run.
+    if known_anthology:folder_context=True
     for m in members:
         tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
         album=norm(tags.get('album'))
