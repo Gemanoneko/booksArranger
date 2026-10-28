@@ -1,0 +1,281 @@
+{
+  "schema": "books-arranger-native-smoke-provenance-v1",
+  "purpose": "Exact executed historical sources and compact proof, not installed tooling. Private registry exports/catalogs/profiles are disposable and are not archived.",
+  "version": "0.23.0",
+  "sourceHead": "d115eeda816d275a22b57616e955850443ea06e0",
+  "buildId": "1d72e68b-d159-4439-ae75-3c6592d48419",
+  "artifact": {
+    "installer": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/cand-0230/dist/builds/1d72e68b-d159-4439-ae75-3c6592d48419/Books-Arranger-Setup-0.23.0.exe",
+      "sha256": "d2559b462ac705c01dd438f96c7533218220232faff0979f1c2bb3595958f4e9",
+      "size": 174263993
+    },
+    "manifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/cand-0230/dist/release-artifacts.json",
+      "sha256": "36d601be44289817ca2fe8082087d5e2ae6f9165cc3804851ee21630b4e54f9c"
+    },
+    "productDigest": "a110e75ec3034070d8951cb718c39e315c25b32a324ecd8c65ff6644f3b5b6ff",
+    "payload": {
+      "fileCount": 296,
+      "manifest_sha256": "ffa23c062cf078677cb2368afc7c15aa99882f22142fbe584df86e55b6488c3e",
+      "fullPinsLocation": "dist/release-artifacts.json payload.files",
+      "verified": true,
+      "installerEquivalent": true,
+      "shellVersion": "0.23.0",
+      "backendVersion": "0.23.0"
+    }
+  },
+  "entry": {
+    "receipt": "Entry-check receipt v2: books-arranger v0.23.0 @ d115eeda816d275a22b57616e955850443ea06e0 (dirty: N) [source:430c044ed7e26c426b838ad3797ce2c5d431280dcbe689cfdf153c8ec49260f1; harness:c142849d105605b4fc367fa265a4c8e0792ef81324eb6f7f187110aed49612d0; runtime:a005490667c9d44b4d427866bee52fe314bbd1fd4e69a99b4a82f0d41ba39e50; checker:a448c08c150e63019cfd6e49ceed5ec5b8652a97078abde197e7a50882b759cf] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a",
+    "context": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/q230/r5/context/context.json",
+      "sha256": "2adeccebe0d604bb51f5682a5057ef03c76b10bea328208de773a9940f156789"
+    },
+    "wrapperSHA256": "19fe5ad2b397cd6fcba6d11063cb7710ad9e7000515d29422341358cd783b58c",
+    "python": 1959,
+    "node": 143,
+    "frontendScripts": 34,
+    "syntaxFiles": 10,
+    "workers": 13,
+    "workerDeadlineSeconds": 540,
+    "innerDeadlineSeconds": 580,
+    "ownerDeadlineMs": 600000,
+    "slowestWorkerSeconds": 484.8,
+    "elapsedMs": 498315.2864,
+    "closed": true,
+    "nativeZero": true
+  },
+  "build": {
+    "receiptSha256": "f8b5db8c3cb4fcee55779dc06909d7f4ce986e235f1d90b481fa93b508a9da51",
+    "elapsedMs": 76932.51980000001,
+    "closed": true,
+    "nativeZero": true,
+    "nativeReceiptSha256": "9ec18ee0c724865e3b7a398b70a53200bf0ddadd25a6d93d37be9872c055fa2e",
+    "innerExitCode": 0,
+    "innerNativeJobClosed": true,
+    "innerActiveAfter": 0
+  },
+  "canonicalOwner": {
+    "files": [
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+        "sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs",
+        "sha256": "eb8952ee91f42db2b44e9ee476af7b33d6d3dd45212a912426de9febd51a706d"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-identity.mjs",
+        "sha256": "c0493782c8cd89244dfa67a2a141a2f9db89fe3383c5f585c4a257183fa3c63d"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+        "sha256": "45510f11a011b617b4831994bd40aa87763d4195cd06c97ee6489af45f91bce6"
+      },
+      {
+        "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs",
+        "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42"
+      }
+    ],
+    "ownershipRoot": "C:/Antigravity Projects/Worktrees/Books Arranger/q230/ownership",
+    "ownershipManifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/q230/r5/context/runtime-ownership.json",
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    "ownershipFiles": 92,
+    "verifiedEveryFile": true,
+    "node": {
+      "name": "node",
+      "path": "C:\\Program Files\\nodejs\\node.exe",
+      "sha256": "1c63f1417e2e26d83ca9a9ec1d548524ab1305bc7209d90ebca56257ff0d84ed"
+    },
+    "koffi": {
+      "version": "3.3.2",
+      "nativeNodeSHA256": "dcb3048bba5cf115aa19172f091cf005f8be9d39fd42dfb5ea25103318784a44"
+    },
+    "qualifiedContextRuntimeCounts": {
+      "dependencies": 7589,
+      "ownership": 92,
+      "bundledMedia": 47,
+      "goldenFixture": 1,
+      "nodeInstallation": 1936
+    }
+  },
+  "packagedRuntime": {
+    "qualifiedFiles": 47,
+    "allQualifiedBytesUnchanged": true,
+    "additionalDataFiles": [
+      {
+        "path": "resources/ffmpeg/BUILD.txt",
+        "sha256": "feda03f314046e9c4cfe658097cdd6223e216ac457b21f34c06d79f1698f6633",
+        "size": 3761
+      }
+    ],
+    "additionalFileMeaning": "Existing build_phase.prepare generates BUILD.txt from pinned configuration and actual version/license output; data only."
+  },
+  "sourceProvenance": {
+    "smoke": {
+      "historicalFile": "BooksArranger_HiddenPackageSmoke_v0.22.3_2026-10-28.mjs",
+      "historicalNormalizedExecutedSHA256": "eff639068f219b3a7cc0ef95cd95df72b4b469c75d2f4cade81d076b2ea48d6e",
+      "QOnlyAncestorSHA256": "39bf28788b733dcd476692e2efbfdb312cb5deabb64521ac1d946b844eb1c67b",
+      "QOnlyByteDiff": {
+        "offset": 796,
+        "fromHex": "6a",
+        "toHex": "30",
+        "meaning": "Q assignment q23j→q230 only; historical error text unchanged"
+      },
+      "executedSHA256": "1274717e378060fb8fc79892893f3547090f78062f5eda2ac26d8088f3ae0297",
+      "safetyChanges": {
+        "consentInsertion": {
+          "after": "need(p.schema==='books-hidden-package-smoke-v1'&&/^[a-f0-9]{40}$/.test(p.sourceHead)&&/^\\d+\\.\\d+\\.\\d+$/.test(p.version),'Bad plan identity');",
+          "line": "need(p.authorization?.nativeLaunchApproved===true&&p.authorization?.approvedBy==='Sergei','Explicit user native-launch authorization absent; deny activity');"
+        },
+        "removedInlineBlock": "    const after=traySnapshot();existingTrayUnchanged(beforeTray,after);\n    const keys=trayKeys(exe,after);for(const key of keys){\n     need(!Object.hasOwn(beforeTray,key),'Refuse to delete any preexisting tray ID');\n     need(/^HKEY_CURRENT_USER\\\\Control Panel\\\\NotifyIconSettings\\\\\\d+$/.test(key),'Tray key scope differs');\n     const r=spawnSync(REG,['delete',key,'/f'],{windowsHide:true,encoding:'utf8',timeout:5000});need(!r.error&&r.status===0,'Owned new tray-key cleanup failed');\n    }\n    report.removedOwnTrayKeys=keys.length;const final=traySnapshot();existingTrayUnchanged(beforeTray,final);need(trayKeys(exe,final).length===0,'Owned tray record remains');",
+        "replacementBlock": "    const after=traySnapshot(),keys=trayKeys(exe,after);\n    report.ownTrayKeysPending=keys;report.trayCleanup='Pending separately reviewed same-handle cleanup; no registry mutation';\n    existingTrayUnchanged(beforeTray,after);\n    for(const key of keys){\n     need(!Object.hasOwn(beforeTray,key),'Refuse to adopt any preexisting tray ID');\n     need(/^HKEY_CURRENT_USER\\\\Control Panel\\\\NotifyIconSettings\\\\\\d+$/.test(key),'Tray key scope differs');\n    }\n    report.removedOwnTrayKeys=0;const final=traySnapshot();existingTrayUnchanged(beforeTray,final);\n    need(JSON.stringify(trayKeys(exe,final))===JSON.stringify(keys),'Pending own tray key set changed; preserve and STOP');",
+        "commentReplacement": {
+          "from": "Delete only records created for this fresh copied EXE, after its process exited. Shared/preexisting records stay.",
+          "to": "Preserve new records for separate same-handle cleanup after normal Quit; never mutate registry here."
+        },
+        "allOtherBytesReproduceQOnlyAncestor": true,
+        "preexistingRawRootGuardUnchanged": true
+      }
+    },
+    "leaf": {
+      "historicalFile": "BooksArranger_OwnedTrayLeafCleanup_v0.22.3_2026-10-28.mjs",
+      "historicalNormalizedExecutedSHA256": "3327b6cae94f64af3058d764ed57e30739b242c85855409c5371bac9a46e5e38",
+      "QOnlyByteDiff": {
+        "offset": 590,
+        "fromHex": "6a",
+        "toHex": "30",
+        "meaning": "Q assignment q23j→q230 only"
+      },
+      "executedSHA256": "29395c329ff1a2be16190fb706f0cfa2512e2d0207b9cecede00cfbc640ee5d5"
+    },
+    "checkoutEncoding": "These files were copied from exact executed LF bytes. If Git converts checkout to CRLF, normalization CRLF→LF must reproduce executed SHA256."
+  },
+  "hiddenHelper": {
+    "file": "BooksArranger_HiddenPackageSmoke_v0.23.0_2026-10-28.mjs",
+    "sha256": "1274717e378060fb8fc79892893f3547090f78062f5eda2ac26d8088f3ae0297",
+    "executedPlanSha256": "e048d26cd812b3cad5499b042b7ed64da29fabd323f825bc693355be82a80499",
+    "rawProofSha256": "05f4f2378e9b35a6cb1df4776c7a5a165aab841b265002b44ad54141296cc258",
+    "functional": {
+      "displayedVersion": "0.23.0",
+      "engineVersion": "0.23.0",
+      "rendererOrigin": "http://127.0.0.1:58582",
+      "windowClose": "hidden; shell and engine remain running",
+      "closedByQuit": true,
+      "payloadUnchanged": true,
+      "intrusion": null,
+      "visiblePositiveControl": {
+        "visibleCount": 28,
+        "matchedPid": 22088
+      }
+    },
+    "rawStrictGuard": {
+      "ok": false,
+      "code": 1,
+      "cause": "After successful normal Quit Windows prepended this private tray ID to shared UIOrderList. The unchanged strict preexisting-root comparison failed closed; no registry mutation by smoke helper."
+    },
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 18,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 431,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 6671.5547
+  },
+  "registryClassification": {
+    "scope": "NotifyIconSettings subtree only; no claim about unrelated OS caches",
+    "ownId": "15104638555172490743",
+    "baselineProofSha256": "4724aa8b7fc3b57a50d5a1e05810f0345923a80a3a78d718be2acef552bf8057",
+    "currentSnapshotSha256": "8c09b3f1a053490d53a5486226661c5d70230acdfad1a45f3ea775dbe019de2b",
+    "ownLeafAbsentFromBaseline": true,
+    "ownIdAbsentFromBaselineOrder": true,
+    "newKeysOnlyOwnLeaf": true,
+    "ownLeafExactCopiedExe": true,
+    "ownLeafNoSubkeysInSnapshot": true,
+    "preexistingChildRecordsUnchanged": true,
+    "rootChangedOnly": [
+      "UIOrderList"
+    ],
+    "UIOrderList": {
+      "type": "REG_BINARY",
+      "beforeBytes": 1904,
+      "afterBytes": 1912,
+      "ownUint64LE": "15104638555172490743",
+      "own8ByteHex": "f7cdb9f5bc749ed1",
+      "ownOffset": 0,
+      "occurrences": 1,
+      "removingOnlyOwn8BytesRestoresExactPriorBytesAndOrder": true,
+      "beforeSha256": "1adeb9105559f53762e2ca8fe1a221ba62e9ba2c3d2d5a14e6f665dd99f15955",
+      "afterSha256": "b8ce14ccb88029714ec36a6bc18b1d21ced48a743355b118fbd7227c6babb65e"
+    }
+  },
+  "cleanup": {
+    "file": "BooksArranger_OwnedTrayLeafCleanup_v0.23.0_2026-10-28.mjs",
+    "sha256": "29395c329ff1a2be16190fb706f0cfa2512e2d0207b9cecede00cfbc640ee5d5",
+    "executedPlanSha256": "2dedeb9c6691f8ea12e8ce50784efa5f4d1a55de3cf7db1b6d1974a0fc7d0bfc",
+    "rawProofSha256": "78ff88145fcab7b254c05c718529bf0f69ad010ac0323409e0ce72f448bd1af9",
+    "authorization": {
+      "approvedBy": "Sergei",
+      "ownId": "15104638555172490743",
+      "allowSingleNumericHistoryReference": true,
+      "allowOwnLeafDelete": true,
+      "humanQuote": "Yes—use the same cleanup for0.23.0",
+      "questionId": "call_934943a029bf4048869be615ba6cb613",
+      "versionScope": "0.23.0 only"
+    },
+    "proof": {
+      "mode": "--delete",
+      "ownId": "15104638555172490743",
+      "deleted": true,
+      "rootWritten": false,
+      "uiOrderWritten": false,
+      "uiOrderSha256": "b8ce14ccb88029714ec36a6bc18b1d21ced48a743355b118fbd7227c6babb65e",
+      "uiOrderBytes": 1912,
+      "ownIdOffset": 0,
+      "sameHandleExactExe": true,
+      "leafHasNoSubkeys": true,
+      "ntDeleteKeyResolved": true,
+      "currentUiOrderUntouched": true,
+      "ownLeafAbsent": true,
+      "numericHistoryReferenceLeft": true,
+      "allPreexistingRecordsUntouched": true,
+      "readOnly": false
+    },
+    "ok": true,
+    "code": 0,
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 8,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 67,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    },
+    "elapsedMs": 1027.7788
+  },
+  "result": "Functional packaged smoke PASS plus separately authorized same-open-handle own-leaf cleanup PASS. Raw strict smoke remains FAIL. Within audited NotifyIconSettings, only the approved 8-byte numeric history reference remains; the own name/path leaf is gone and shared root/current history were never written by cleanup.",
+  "appLaunches": 1,
+  "cleanupRuns": 1,
+  "privateRegistryValuesArchived": false
+}

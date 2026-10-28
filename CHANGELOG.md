@@ -1,5 +1,25 @@
 # Changelog
 
+## [v0.23.0] - 2026-10-28
+
+### Added
+
+- Title, Series and Number can be entered directly alongside an author answer or a series question. Preview, Approve and Edit names share one draft, with the existing series suggestions available in the expanded editor.
+- Litres is an optional metadata source through public canonical book and audiobook pages. Matching uses the complete author list and an explicit series position; existing source priority, cache, pacing and pauses still apply.
+- Confirmed Калейдоскоп volumes, annual Самая страшная книга books and the four Ужасы и трэшатинка volumes stay complete books with individual stories and author credits in their chapters. Unknown playback order still asks; existing reviewed or job-owned stories prevent incomplete regrouping.
+
+### Changed
+
+- A saved author answer that still needs series confirmation shows a neutral saved receipt in the same row, retains the draft and accepts the series answer without a Start step. Final Approve still queues the book until Start.
+- The four Ужасы и трэшатинка books use their approved numbered titles and concise filenames inside their existing collection cycle.
+- The full test gate uses thirteen workers under the unchanged worker, checker and owned-process deadlines. All declared tests remain included.
+
+### Fixed
+
+- Editing only Series or Number preserves an untouched displayed title and a previously researched English original title.
+- Queued saved-answer feedback works even when the book's row is absent from the current page.
+- Confirmed blank-tag anthology folders retain complete membership and distinct volume destinations. Uploader credits are preserved as evidence without becoming chapter writers.
+
 ## [v0.22.3] - 2026-10-28
 
 ### Added
