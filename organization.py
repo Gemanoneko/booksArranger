@@ -34,7 +34,11 @@ def plan(output_root,review,*,collection_fallback='legacy',facts=None):
         # 0.22.2 (Sergei 2026-10-26, «Протоколы SCP»; Brief: "Сборники/Series for a series of collections"): a collection
         # with its series and position files under Сборники\<Series>\ with the series naming of every book,
         # "<Series> - <N> - <Title> - <Author>". Without a position it files as before.
-        destination=append_recording_suffix(os.path.join(output_root,'Сборники',safe_name(cycle),' - '.join(safe_name(v) for v in (cycle,number,title,author))+'.m4b'),review,facts)
+        from anthology_volumes import STORY_FAMILY
+        parts=(cycle,number,title,author)
+        # Sergei explicitly approved concise filenames only for these four confirmed, already-numbered anthology titles.
+        if cycle==STORY_FAMILY and number in {'1','2','3','4'} and title==cycle+' '+number:parts=(title,author)
+        destination=append_recording_suffix(os.path.join(output_root,'Сборники',safe_name(cycle),' - '.join(safe_name(v) for v in parts)+'.m4b'),review,facts)
         if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
         return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
                 'accepted_routing':{'author':author,'cycle':cycle,'universe':'','number':number,'collection':True,'multi_author_cycle':False}}

@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from catalog_owner import BASE, catalog_lock
-from merge_service import QUIET_MAX_AGE, StatusUnavailable
+from merge_service import QUIET_MAX_AGE, StatusUnavailable, MergeService
 from review_backend import ATTENTION_GROUPS
 from metadata import GENRES
 from scanner import DEFAULT_ROOTS, Inventory, connect
@@ -469,6 +469,8 @@ class BrowserServer(ThreadingHTTPServer):
                     self.inventory.launch(library, resume=action == 'scan_resume')
                     self.active_library = library
                 return {'result': 'done', 'answer': {'library': library}}
+        except MergeService.SeriesAsked as answer:
+            return {'result':'saved','code':answer.code,'answer':answer.payload()}
         except ValueError as error:
             text = str(error)
             if self.actions.blocker(action, book, held=1):
@@ -1208,6 +1210,8 @@ class Handler(BaseHTTPRequestHandler):
             if type(without) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
             if choice not in (None,'same','different'): raise ValueError('Same author? takes same or different')
             try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice,path=shown,**({'names':names} if names is not None else {}))
+            except MergeService.SeriesAsked as answer:
+                self.response(200,answer.payload());return
             except ValueError as error:
                 text=str(error)
                 # Judy 2026-10-24 (0.22.0 review B5.4): a safety gate is named in the row's refusal line.

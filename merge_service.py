@@ -3131,12 +3131,14 @@ class MergeService:
         return {'row':fresh,'job_id':job}|self._press_after(id,None,destination=False)
 
     class SeriesAsked(ValueError):
-        """M10: his Approve answered another question; the answer is kept and the book's series question comes next."""
+        """His answer is saved; this book still needs its explicit series answer, with no queued job."""
+        code='series_needed'
+        def payload(self):return {'saved':True,'code':self.code,'message':str(self)}
 
-    SERIES_ASKED='Your answer is saved. Press Start to check the book with it; its series is asked next. Nothing was filed yet.'
+    SERIES_ASKED='Answer saved. This book still needs its series confirmed. Enter Series and Number, then press Approve. This book has not been queued or filed.'
 
     def _answer_then_ask_series(self,row,title,author,names,spelling,press,held):
-        """Keep the author answer, including an unchanged proposal, then ask this book's series on the next Start.
+        """Keep the author answer, including an unchanged proposal, then wait for this book's explicit Series/Number and Approve.
         Rulings 56 and 57: never start or resume a run, and never answer another book's series question."""
         import entered_names
         values={field:value for field,value in (('title',title),('author',None if spelling else author)) if value is not None}

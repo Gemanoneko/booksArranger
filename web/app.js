@@ -2507,10 +2507,10 @@ function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'
 function askProposal(ask,name){const value=ask?.fields?.[name]?.proposal;return typeof value==='string'?value:'';}
 function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 // Which fields the row shows: Title when it is missing or a guess, Author when it is missing or unclear (section 3).
-function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && !!askFieldPlanOf(ask).author);}
+function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && (!!askFieldPlanOf(ask).author || ask.why==='title_series'));}
 function askFieldPlan(ask,row=null){
   const plan=askFieldPlanOf(ask);
-  if(row && inlineNames(row))return {...plan,title:true};
+  if(row && inlineNames(row))return {...plan,title:true,author:namesOpen(row.id)?plan.author || 'input':plan.author};
   // Edit names open (Judy 1.1, item 2): Title and Author are the editor's, the same inputs and draft as the ask fields.
   if(row && namesOpen(row.id) && !(ask.kind==='files_missing' && !(ask.missing?.present>0)))return {title:true,author:plan.author || 'input'};
   return plan;
@@ -2763,7 +2763,7 @@ function updateAskRow(entry){
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
   if(done){status=ASK_DONE[done]?.[0] || status;hint=ASK_DONE[done]?.[1] || hint;}
   else if(pending)hint=clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
-  else if(result){hint=result.text;warn=true;}
+  else if(result){hint=result.text;warn=result.warn!==false;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
   const deleted=deleteNotes.get(row.id);if(deleted && !done){hint=deleted.text;warn=deleted.warn;clause='';lines=deleted.lines;}  // Delete book's outcome (ruling 23)
@@ -3580,7 +3580,8 @@ function applyQueueOutcome(outcome){
   const asked=Object.keys(ASK_QUEUE).find(kind=>ASK_QUEUE[kind]===outcome.action);
   if(asked){
     // Ruling 35: a queued Approve, Keep, Scan again or Remove from list ended; the row shows it as its press would have.
-    const entry=askRows.get(id) || {id,row};
+    const entry=askRows.get(id) || {id,row,title};
+    if(outcome.result==='saved' && outcome.code==='series_needed' && outcome.answer?.saved===true && outcome.answer?.code==='series_needed'){askSettled(entry,asked,outcome.answer,null);queueAck(outcome.id);return;}
     if(outcome.result==='done'){askSettled(entry,asked,outcome.answer || {},null);queueStripOutcome=outcome.id;queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);return;}
     const text=queueAskText(outcome,asked);askResults.set(id,{text});queueAnnounce(`${title}: ${text}`);queueAck(outcome.id);return;
   }
@@ -3979,6 +3980,7 @@ const ASK_QUEUE_ACTIONS=Object.values(ASK_QUEUE);
 function askSettled(entry,kind,result,values){
   const row=entry?.row,id=row?.id ?? entry?.id,ask=row?askOf(row):null;
   if(kind==='approve' || kind==='convert'){
+    if(result?.saved===true && result?.code==='series_needed'){askResults.set(id,{text:result.message,warn:false,code:result.code});queueAnnounce(`${row?askName(row):entry?.title || 'Book'}: ${result.message}`);return;}
     askDone.set(id,kind);askDrafts.delete(id);selectedBooks.delete(id);namesDropped(id);
     const settled=Math.max(1,Number(ask?.same_author?.count) || 1);
     askNote(values?.choice?`Remembered. ${plural(settled,'book continues','books continue')}.`:kind==='convert'?'Approved 1 book without its missing files. Track it under Queued / creating.':'Approved 1 book. Track it under Queued / creating.');

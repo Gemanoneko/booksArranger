@@ -98,7 +98,7 @@ class SetReleaseTests(ApproveFixture):
         sibling_question=(self.ask(rows['2']).get('kind'),self.ask(rows['2']).get('why'))
         self.assertNotEqual(first.get('why'),'title_series','author question comes first')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(ValueError,'series is asked next'):
+            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
                 self.service.approve_book(row['id'],row['revision'])
         start.assert_not_called()
         self.assertEqual(self.service.jobs.status()['jobs'],[])
@@ -135,7 +135,7 @@ class SetReleaseTests(ApproveFixture):
                 self.service.approve_book(row['id'],row['revision'],author=author)
         self.assertEqual(self.service.jobs.status()['jobs'],[])
         self.assertEqual(self.ask(row)['why'],'english_spelling')
-        with self.assertRaisesRegex(ValueError,'series is asked next'):
+        with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
             self.service.approve_book(row['id'],row['revision'],author='James Rollins')
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
 
@@ -147,7 +147,7 @@ class SetReleaseTests(ApproveFixture):
         self.held(rows);row=rows['1']
         self.assertEqual(self.ask(row)['kind'],'same_author')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(ValueError,'series is asked next'):
+            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
                 self.service.approve_book(row['id'],row['revision'],choice='same')
         start.assert_not_called()
         self.assertEqual(author_rules.load(self.inv.database).same_as('Dean Koonts'),'Koontz Dean')
@@ -161,7 +161,7 @@ class SetReleaseTests(ApproveFixture):
         with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.held(rows)
         row=rows['1'];self.assertEqual(self.ask(row)['why'],'english_spelling')
         with mock.patch.object(self.service.automatic,'request_start') as start:
-            with self.assertRaisesRegex(ValueError,'series is asked next'):
+            with self.assertRaisesRegex(self.service.SeriesAsked,'Answer saved'):
                 self.service.approve_book(row['id'],row['revision'],author='James Rollins')
         start.assert_not_called()
         self.assertEqual(author_rules.load(self.inv.database).same_as('Джеймс Роллинс'),'Rollins James')
@@ -169,5 +169,40 @@ class SetReleaseTests(ApproveFixture):
         self.service.automatic.start();self.finish_run()
         self.assertEqual([self.ask(rows[k]).get('why') for k in '12'],['title_series']*2)
 
+
+
+class SavedSeriesReceiptTests(ApproveFixture):
+    def test_saved_answer_then_same_press_title_series_queues_only_until_explicit_start(self):
+        from unittest.mock import patch
+        for index in (1,2):tone(self.audio/'Unsorted'/'one'/('%02d.mp3'%index),self.cover,album='Оттенки магии01. Темный оттенок магии',title='Глава %d'%index,track='%d/2'%index)
+        row=self.start()[0];self.service.automatic.start();SetReleaseTests.finish_run(self)
+        with patch.object(self.service.automatic,'request_start') as auto,patch.object(self.service,'resume') as resume:
+            with self.assertRaises(self.service.SeriesAsked) as caught:self.service.approve_book(row['id'],row['revision'],title='Темный оттенок магии',author='Schwab Victoria')
+            self.assertEqual(caught.exception.payload(),{'saved':True,'code':'series_needed','message':self.service.SERIES_ASKED});auto.assert_not_called();resume.assert_not_called()
+        self.assertEqual(self.service.jobs.status()['jobs'],[])
+        current=self.service.reviews._row('Audiobooks',row['id']);names={'series':'Оттенки магии','number':'1'}
+        preview=self.service.approval_preview(current['id'],current['revision'],title='Темный оттенок магии',names=names);self.assertTrue(preview['path'],ascii(preview))
+        with patch.object(self.service.automatic,'request_start') as auto,patch.object(self.service,'resume') as resume:
+            self.service.approve_book(current['id'],current['revision'],title='Темный оттенок магии',names=names,path=preview['path']);auto.assert_not_called();resume.assert_not_called()
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending');self.start_and_wait();job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'completed',ascii(job));self.assertEqual(Path(job['output']['final_path']),self.sorted/preview['path'])
+        self.assertEqual(job['manifest']['metadata']['title'],'Темный оттенок магии');self.assertEqual(job['manifest']['metadata']['canonical_author'],'Schwab Victoria')
+
+class SavedSeriesTransportTests(unittest.TestCase):
+    def test_direct_and_queued_saved_outcomes_are_typed_while_other_failures_stay_failures(self):
+        from types import SimpleNamespace
+        from merge_service import MergeService
+        from web_server import BrowserServer,Handler
+        answer=MergeService.SeriesAsked(MergeService.SERIES_ASKED)
+        merge=SimpleNamespace(approve_book=mock.Mock(side_effect=answer),reviews=SimpleNamespace(enrich=lambda r:r,_row=lambda *_:{'id':'one'}))
+        server=SimpleNamespace(merge=merge,actions=SimpleNamespace(blocker=lambda *_args,**_kw:False))
+        item={'action':'approve','book_id':'one','args':{'revision':1}}
+        queued=BrowserServer.run_queued(server,item);self.assertEqual(queued,{'result':'saved','code':'series_needed','answer':answer.payload()})
+        handler=Handler.__new__(Handler);handler.server=server;handler.candidate_identity=mock.Mock(return_value=('Audiobooks','one',1));handler.response=mock.Mock()
+        handler.merge_request('/api/candidate/approve',{'library':'Audiobooks','id':'one','revision':1});handler.response.assert_called_once_with(200,answer.payload())
+        merge.approve_book.side_effect=ValueError('Unexpected fixture refusal');self.assertEqual(BrowserServer.run_queued(server,item)['result'],'refused')
+        handler.response.reset_mock();handler.merge_request('/api/candidate/approve',{'library':'Audiobooks','id':'one','revision':1});self.assertEqual(handler.response.call_args.args[0],409)
+        merge.approve_book.side_effect=RuntimeError('Unexpected fixture failure')
+        with self.assertRaisesRegex(RuntimeError,'Unexpected fixture failure'):BrowserServer.run_queued(server,item)
 
 if __name__=='__main__':unittest.main()

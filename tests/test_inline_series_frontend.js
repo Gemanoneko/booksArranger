@@ -34,6 +34,34 @@ const call=route=>posts.filter(p=>p.route===route).at(-1)?.data;
  const sent=call('/api/candidate/approve');assert.equal(sent.author,'Олег Яковлев, Владимир Торин');assert.equal(sent.title,'Уэлихолн');assert.deepEqual(sent.names,{series:'Мистер Вечный Канун',number:'1'});assert.equal(sent.path,'Мистер Вечный Канун\\1 - Уэлихолн.m4b');assert.equal(posts.filter(p=>p.route==='/api/candidate/names-save').length,0,'one Approve, no earlier Save');
  run('askDone.clear();queueState.queued=[];queueState.running=null;askPendings.clear()');
  type('series','');type('number','');assert.deepEqual(JSON.parse(run('JSON.stringify(namesFor(rows[0]))')),{series:'',number:''},'intentional clearing is explicit');assert.equal(input('title').value,'Уэлихолн');assert.equal(run('askValues(rows[0]).author'),'Олег Яковлев, Владимир Торин');
+
+ // Title-unclear/title_series reuses the exact inline pair without adding an author or a second Title.
+ Object.assign(row,{title_clue:'Оттенки магии01. Темный оттенок магии',place:{series:'',number:''},ask:{kind:'title_author',why:'title_series',fields:{title:{proposal:'Темный оттенок магии',basis:'tag'},author:{proposal:'Schwab Victoria',basis:'tag'}},split:{series:'Оттенки магии',number:'1',title:'Темный оттенок магии'},destination:{path:'preview.m4b'}}});
+ run('askDrafts.clear();namesState.clear();askDone.clear();askResults.clear();queueState.queued=[];queueState.running=null');paint();
+ for(const name of ['title','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1);
+ assert.equal(controls().filter(e=>e.dataset.name==='author').length,0,'Title question gains no author field');
+ type('series','Оттенки магии');type('number','1');input('number').handlers.blur();await tick();
+ assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'title'),false,'pair-only Title-row edit preserves R49 untouched title authority');
+ assert.equal(Object.hasOwn(call('/api/candidate/approve-preview'),'author'),false,'pair-only never reanswers English author');
+ answers['/api/candidate/names']=()=>ok({editor:{fields:{title:{proposal:'Темный оттенок магии'},author:{proposal:'Schwab Victoria'},series:{proposal:''},number:{proposal:''},universe:{proposal:''},collection:{proposal:false}},universes:[],series:[],remembered:[],entered:[],job:'none'}});
+ await run('namesToggle("cand-inline")');for(const name of ['title','author','series','number'])assert.equal(controls().filter(e=>e.dataset.name===name).length,1,'full editor retains one '+name);assert.equal(input('series').value,'Оттенки магии');run('namesClose("cand-inline",true)');assert.equal(input('number').value,'1');assert.equal(controls().filter(e=>e.dataset.name==='author').length,0,'collapse restores title-only inline author plan');
+ const receipt='Answer saved. This book still needs its series confirmed. Enter Series and Number, then press Approve. This book has not been queued or filed.';
+ answers['/api/candidate/approve']=()=>ok({saved:true,code:'series_needed',message:receipt});
+ const focus=input('number');context.document.activeElement=focus;await run('askPress(askRows.get("cand-inline"),"approve")');paint();
+ assert.equal(run('askResults.get("cand-inline").text'),receipt);assert.equal(run('askResults.get("cand-inline").warn'),false);assert.equal(run('askDone.has("cand-inline")'),false);
+ assert.equal(input('series').value,'Оттенки магии');assert.equal(input('number').value,'1');assert.equal(context.document.activeElement,focus,'saved receipt never moves focus');
+ run('applyQueueOutcome({id:"saved-q",action:"approve",book_id:"cand-inline",result:"saved",code:"series_needed",answer:{saved:true,code:"series_needed",message:'+JSON.stringify(receipt)+'}})');
+ assert.equal(run('askResults.get("cand-inline").text'),receipt);assert.equal(run('askResults.get("cand-inline").warn'),false);assert.equal(run('askDone.has("cand-inline")'),false);
+ run('applyQueueOutcome({id:"failed-q",action:"approve",book_id:"cand-inline",result:"refused",code:"refused",error:"Unexpected fixture refusal"})');
+ assert.ok(run('askResults.get("cand-inline").text').includes('Approve cancelled: unexpected fixture refusal'),'unrelated failures retain the existing refusal path');
+
+ answers['/api/queue/ack']=()=>ok({acked:true});run('rows=[];askRows.clear()');
+ run('applyQueueOutcome({id:"saved-absent",action:"approve",book_id:"absent-book",title:"Hidden book",result:"saved",code:"series_needed",answer:{saved:true,code:"series_needed",message:'+JSON.stringify(receipt)+'}})');await tick();
+ assert.equal(run('askResults.get("absent-book").text'),receipt,'saved receipt retained when row is filtered/paged away');assert.equal(run('askResults.get("absent-book").warn'),false);assert.ok(posts.filter(p=>p.route==='/api/queue/ack').some(p=>p.data.ids.includes('saved-absent')),'missing-row saved outcome acknowledged without a throw');paint();
+
+ type('title','My explicit title');type('series','My series');type('number','2');await run('askPreview(askRows.get("cand-inline"),0)');answers['/api/candidate/approve']=data=>ok({queued:true,id:'q-title',position:1,blocker:{kind:'scan'}});await run('askPress(askRows.get("cand-inline"),"approve")');
+ assert.equal(call('/api/candidate/approve').title,'My explicit title');assert.deepEqual(call('/api/candidate/approve').names,{series:'My series',number:'2'});
+
  console.log('inline author/title/series draft, preview, approval and editor reuse: passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

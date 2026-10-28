@@ -53,7 +53,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     ['cand-la','The title looks like Russian written in Latin letters.','Master vetrov i zakatov']]){
     const tr=trOf(id);
     assert.equal(statusCell(tr).textContent,'Title unclear',id);assert.equal(statusCell(tr).children[0].textContent,hint,id);
-    const fields=inputs(tr);assert.equal(fields.length,1,id+': the title only; the author has a proposal');assert.equal(fields[0].value,value,id);
+    const fields=inputs(tr);assert.deepEqual(fields.map(e=>e.dataset.name),id==='cand-se'?['title','series','number']:['title'],id+': one title, the series pair only for title_series, no author field');assert.equal(fields[0].value,value,id);
   }
   // A folder name as the author: "Author unclear", the reason, and the Author field prefilled with the cleaned name.
   let tr=trOf('cand-fo');

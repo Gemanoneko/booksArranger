@@ -5,7 +5,8 @@ import re
 from pathlib import Path
 VERSION='named-anthology-volume-v3'
 FAMILY='Калейдоскоп'
-STORY_FAMILY='Ужасы и трэшатинка. Сборник рассказов'
+STORY_FOLDER='Ужасы и трэшатинка. Сборник рассказов'
+STORY_FAMILY='Ужасы и трэшатинка'
 _PATTERN=re.compile(r'^Калейдоскоп\s+0*([1-9]\d{0,2})$',re.I)
 _ANNUAL=re.compile(r'^(?:Сборник\s*-\s*)?Самая\s+страшная\s+книга\s+((?:19|20)\d{2})(?:\s*\(Сборник\))?(?:\s*\[[^\[\]]+\])?$',re.I)
 
@@ -14,7 +15,7 @@ def folder(member):
     parent=Path(member['path']).parent;match=_PATTERN.fullmatch(' '.join(parent.name.split()))
     if match:return {'family':FAMILY,'number':str(int(match[1])),'title':FAMILY+' '+str(int(match[1])),'folder':str(parent)}
     volume=re.fullmatch(r'Сборник(?:\s*([234]))?',' '.join(parent.name.split()),re.I)
-    if volume and ' '.join(parent.parent.name.casefold().split())==STORY_FAMILY.casefold():
+    if volume and ' '.join(parent.parent.name.casefold().split())==STORY_FOLDER.casefold():
         number=volume[1] or '1'
         return {'family':STORY_FAMILY,'number':number,'title':STORY_FAMILY+' '+number,'folder':str(parent)}
     annual=_ANNUAL.fullmatch(' '.join(parent.name.split()))

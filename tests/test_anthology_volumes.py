@@ -26,7 +26,7 @@ def annual_stories(year=2025,numbered=False,reader='Илья Дементьев'
 def horror_stories(volume=1,author=None):
     files=stories(volume,family=anthology_volumes.STORY_FAMILY)
     for file in files:
-        file['path']=str(Path(ROOT)/anthology_volumes.STORY_FAMILY/('Сборник' if volume==1 else 'Сборник '+str(volume))/Path(file['path']).name)
+        file['path']=str(Path(ROOT)/anthology_volumes.STORY_FOLDER/('Сборник' if volume==1 else 'Сборник '+str(volume))/Path(file['path']).name)
         metadata=json.loads(file['metadata']);metadata['tags'].pop('album');metadata['tags']['artist']=author if author is not None else '';metadata['artist']=metadata['author']=metadata['tags']['artist'];file['metadata']=json.dumps(metadata)
     return files
 
@@ -47,11 +47,22 @@ class AnthologyVolumeTests(unittest.TestCase):
             from metadata import propose
             group=dict(group,fingerprint='private-four-volumes');local=local_identity.identify(group,ROOT)
             result=PublicResearch(SimpleNamespace(database='unused-private.sqlite'),leads=[])._local_collection(group,local,{'sources':[],'evidence':[]})
-            destinations.append(propose(group['members'][0]['path'],ROOT,'audiobook',group['metadata'],result['review'],automatic_facts=result['metadata_facts'])['path'])
+            destination=propose(group['members'][0]['path'],ROOT,'audiobook',group['metadata'],dict(result['review'],organization_policy='books-hierarchy-v2'),automatic_facts=result['metadata_facts'])['path'];destinations.append(destination)
+            number=group['anthology_volume']['number'];title=anthology_volumes.STORY_FAMILY+' '+number
+            self.assertEqual((result['review']['title'],result['review']['series'],result['review']['number']),(title,anthology_volumes.STORY_FAMILY,number))
+            self.assertEqual(Path(destination),Path(ROOT)/'Сборники'/anthology_volumes.STORY_FAMILY/(title+' - Разные авторы.m4b'))
         self.assertTrue(all(destinations));self.assertEqual(len(set(destinations)),4,'four anthology volumes never claim one destination')
+
+    def test_concise_horror_filename_is_exact_family_only_and_keeps_explicit_title(self):
+        from organization import plan
+        review={'title':'Other cycle 2','series':'Other cycle','number':'2','author':'Разные авторы','anthology':True}
+        self.assertEqual(Path(plan(ROOT,review)['path']).name,'Other cycle - 2 - Other cycle 2 - Разные авторы.m4b')
+        review.update(title='My explicit anthology title',series=anthology_volumes.STORY_FAMILY)
+        self.assertEqual(Path(plan(ROOT,review)['path']).name,anthology_volumes.STORY_FAMILY+' - 2 - My explicit anthology title - Разные авторы.m4b')
+
     def test_horror_family_requires_exact_parent_and_confirmed_volume_boundary(self):
         files=horror_stories(2)
-        for file in files:file['path']=file['path'].replace(anthology_volumes.STORY_FAMILY,'Other collection')
+        for file in files:file['path']=file['path'].replace(anthology_volumes.STORY_FOLDER,'Other collection')
         self.assertEqual(len(groups.build(files)),2)
         files=horror_stories(5);self.assertEqual(len(groups.build(files)),2,'unconfirmed child5 receives no named exception')
         files=horror_stories(2);meta=json.loads(files[0]['metadata']);meta['tags']['album']='Other book';files[0]['metadata']=json.dumps(meta)
@@ -265,7 +276,7 @@ class AnthologyVolumeMediaTests(ApproveFixture):
         self.sorted=self.base/'S';self.sorted.mkdir()
         from review_backend import member_key
         import test_set_release
-        folder=self.audio/anthology_volumes.STORY_FAMILY/'Сборник 2';sources=[]
+        folder=self.audio/anthology_volumes.STORY_FOLDER/'Сборник 2';sources=[]
         for name,title in [('Первый рассказ','Без имени'),('Второй рассказ','Второй рассказ')]:
             sources.append(tone(folder/(name+'.mp3'),self.cover,title=title,artist='home2'))
         rows=self.start();self.assertEqual(len(rows),1);row=rows[0]
