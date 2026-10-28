@@ -51,6 +51,8 @@ def prepare(members):
             number,unique=from_name,True  # "Пастушья корона 02": the file's own number names its chapter
         else:
             unique=number is not None and counts[number]==1
+        from anthology_volumes import chapter_credit
+        title=chapter_credit(member,title)
         member.update(chapter_name=title,chapter_name_source='source' if title else 'generated',
                       chapter_number=number if unique else None)
     return members

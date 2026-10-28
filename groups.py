@@ -11,6 +11,7 @@ from collections import Counter
 from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 import track_order
+import anthology_volumes
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
 SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check); v4: N10 (chapter names are no works)
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
@@ -19,7 +20,7 @@ SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (th
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
 M4B_PARTS_VERSION = 'm4b-parts-v2'
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION + '+' + anthology_volumes.VERSION
 DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
 def setup(connection):
@@ -485,11 +486,41 @@ def shown_grouping(text):
     match=_OLD_GROUPING.match(text)
     return 'One book: files of one folder with the '+match[1]+'.' if match else text
 
-def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset()):
+def _anthology_group(items,companions,scope,volume):
+    group=next(iter(_legacy_build(items+companions).values()))
+    group.update(scope=scope,anthology_volume=volume,title_clue=volume['title'],
+                 grouping='One anthology volume: its stories keep their source credits. Playback order is checked separately.')
+    group['metadata'].update(title=volume['title'],author='Разные авторы',artist='Разные авторы',series=volume['family'],number=volume['number'])
+    group['conflicts']=[r for r in group['conflicts'] if r!='Different author / reader clues; recording unverified']
+    for item in group['members']:
+        if Path(item['path']).suffix.lower()!='.m4b':item['anthology_story']=True
+    return group
+
+def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset(),blocked_members=()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     members={row['path']:member(row) for row in audio}
     scopes={path:assigned.get(path) or partition(item) for path,item in members.items()}
+    # Ruling64 is a named family, not a relaxation of the mixed-author guard. Reserve whole known volumes before any
+    # other join planner. One owned/reviewed/frozen story prevents a partial volume from masquerading as the whole book.
+    families={}
+    for item in members.values():
+        value=anthology_volumes.folder(item)
+        if value:families.setdefault(value['folder'],[]).append(item)
+    owned_folders={value['folder'].casefold() for item in list(blocked_members)+[m for group in protected.values() for m in group['members']]
+                   if (value:=anthology_volumes.folder(item))}
+    anthology={};blocked=set();reserved=set(assigned)
+    for folder,items in families.items():
+        volume=anthology_volumes.marker(items)
+        conflict=folder.casefold() in owned_folders or not volume or any(m['path'] in chaptered for m in items) or len(items)>1 and any(Path(m['path']).suffix.lower()=='.m4b' for m in items)
+        if conflict:
+            for item in items:
+                if item['path'] in assigned:continue
+                blocked.add(item['path']);reserved.add(item['path']);scopes[item['path']]=item['path']+'\x1fAnthology membership conflict'
+            continue
+        scope=folder+'\x1fNamed anthology volume '+volume['title']
+        anthology[scope]=volume
+        for item in items:scopes[item['path']]=scope;reserved.add(item['path'])
     # Only whole .m4b files (always single-file candidates by partition) are re-filed as their own
     # books; an .m4a may sit in a multi-file group and would be re-encoded (Senua R2-M1).
     # Rulings 19 and 19a (Sergei 2026-10-24): a whole .m4b part with its own chapters stays in its set; the set's chapters
@@ -500,22 +531,22 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
         if path in scopes and path not in assigned:scopes[path]=str(Path(path))+'\x1fVolume of a series'
     split={}
     taken=set(scopes.values())
-    for found in _split_plan(members,scopes,assigned,chaptered):
+    for found in _split_plan(members,scopes,reserved,chaptered):
         # Senua M7: a plan whose scope is already used (a reviewed split book retagged beside new
         # files with its old title) is not grouped; its files keep their own held candidates.
         if found['scope'] in taken:continue
         for item in found['members']:scopes[item['path']]=found['scope']
         split[found['scope']]=found
     sets={}
-    for found in _same_title_sets(members,scopes,assigned,chaptered,taken|set(split)):
+    for found in _same_title_sets(members,scopes,reserved,chaptered,taken|set(split)):
         for item in found['members']:scopes[item['path']]=found['scope']
         sets[found['scope']]=found
     joined={}
-    for found in _same_album_parts(members,scopes,assigned,chaptered,taken|set(split)|set(sets)):
+    for found in _same_album_parts(members,scopes,reserved,chaptered,taken|set(split)|set(sets)):
         for item in found['members']:scopes[item['path']]=found['scope']
         joined[found['scope']]=found
     part_sets={}
-    for found in _part_sets(members,scopes,assigned,chaptered,taken|set(split)|set(sets)|set(joined)):
+    for found in _part_sets(members,scopes,reserved,chaptered,taken|set(split)|set(sets)|set(joined)):
         for item in found['members']:scopes[item['path']]=found['scope']
         part_sets[found['scope']]=found
     for row in audio:
@@ -529,6 +560,18 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
         for path,item in members.items():
             neighbours.setdefault((split_books.unit(path)[::2],split_books.book_key(item)),[]).append(item)
     for scope,items in buckets.items():
+        if scope in anthology:
+            output[scope]=_anthology_group(items,companions,scope,anthology[scope]);continue
+        if scope in protected and protected[scope].get('anthology_volume'):
+            old=protected[scope];current=[member(r) for r in items];volume=anthology_volumes.marker(current)
+            if volume==old['anthology_volume']:
+                found=_anthology_group(items,companions,scope,volume)
+                output[scope]=old if found['members']==old['members'] and found['companions']==old['companions'] else found
+            else:
+                found=dict(old);found['members']=current;found['source_partition_uncertain']=True
+                for position,item in enumerate(found['members'],1):item['order']=position
+                found['anthology_ownership_conflict']=True;found['conflicts']=list(old['conflicts'])+['Anthology volume membership changed; existing reviewed sources were preserved.'];output[scope]=found
+            continue
         if scope in part_sets and {r['path'] for r in items}=={m['path'] for m in part_sets[scope]['members']}:
             group=_split_group(items,companions,scope,part_sets[scope]);parts=group.pop('split_book')
             group['part_set']={'version':M4B_PARTS_VERSION,'parts':parts['parts'],'order_basis':parts['order_basis']}
@@ -596,6 +639,10 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
                     from source_identity import filename_identity
                     group['title_clue']=filename_identity(group['members'][0]['filename'])['title']
                 output[selected_scope]=group
+    for group in output.values():
+        if any(m['path'] in blocked for m in group['members']):
+            group['anthology_ownership_conflict']=True;group['source_partition_uncertain']=True
+            group['conflicts'].append('Anthology volume membership conflicts with existing reviewed or queued stories; no partial volume was joined.')
     for scope,found in sets.items():
         if scope in output:
             output[scope]['numbered_set']={'version':SAME_TITLE_VERSION,'name':found['name'],'basis':found['basis']}
@@ -664,7 +711,7 @@ def _sync_build(connection,root,inputs):
     frozen=inputs['frozen']
     frozen_paths={member['path'] for item in frozen.values() for member in item['members']}
     rows=[row for row in rows if row['path'] not in frozen_paths]
-    groups=build(rows,inputs['protected'],*inputs['parts'])
+    groups=build(rows,inputs['protected'],*inputs['parts'],blocked_members=[m for item in frozen.values() for m in item['members']])
     for scope,item in frozen.items():groups[scope]=json.loads(item['group']['evidence'])
     return groups
 

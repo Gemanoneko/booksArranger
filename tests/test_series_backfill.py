@@ -78,7 +78,7 @@ class Library:
 
     def backfill(self,merge=None,found=('Нормальное аномальное','10')):
         research=SimpleNamespace(_series_goodreads=lambda *a:{'provider':'goodreads','name':found[0],'number':found[1],'source_url':'https://www.goodreads.com/book/show/55108791'} if found else None,
-                                 _series_fantlab=lambda *a:None,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
+                                 _series_fantlab=lambda *a:None,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None,_series_litres=lambda *a:None)
         return SeriesBackfill(merge or self.merge(),research=research,stage=self.base/'proof-stage')
 
     def row(self):
@@ -380,7 +380,7 @@ class SchedulingTests(unittest.TestCase):
             return {'provider':'goodreads','name':'Verified series','number':'10','source_url':'https://www.goodreads.com/series/1'} if title.startswith('Later') else None
         def fantlab(title,*args):
             calls.append(('fantlab',title));raise ResearchWait('api.fantlab.ru','Hourly allowance reached',1600,'app_limit','host')
-        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None,_series_litres=lambda *a:None)
         applied=[]
         self.backfill.apply=lambda job,found:(applied.append((job,found)),self.backfill._set(job,'done'))
         self.backfill.run_pass()
@@ -442,7 +442,7 @@ class SchedulingTests(unittest.TestCase):
         def fantlab(title,author,partial,stop,budget,result):
             self.assertEqual(budget['remaining'],0)
             raise ResearchWait('api.fantlab.ru','Candidate request bound reached',1600,'app_limit','candidate')
-        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None)
+        self.backfill.research=SimpleNamespace(_series_goodreads=goodreads,_series_fantlab=fantlab,_series_wikidata=lambda *a:None,_series_publisher=lambda *a:None,_series_litres=lambda *a:None)
         self.backfill.apply=lambda job,value:self.backfill._set(job,'done',record={'found':value})
         self.backfill.run_pass()
         self.assertEqual(self.backfill.entry('0')['state'],'deferred');self.assertEqual(self.backfill.entry('1')['state'],'done')

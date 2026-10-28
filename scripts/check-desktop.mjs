@@ -50,7 +50,7 @@ patterns.push('test_progress_rows.py','test_progress.py');
 patterns.push('test_reacquire_sources.py','test_mp3_tag_repair.py','test_library_settings.py','test_multisource.py','test_local_gate_consistency.py','test_publication_locations.py','test_publication_binding.py','test_publication_consumers.py','test_directory_flush.py','test_relocation_progress.py','test_output_migration.py','test_migration_operation.py','test_migration_planning.py','test_derived_migration.py','test_relocated_replacement.py','test_relocated_chapter_repair.py','test_metadata_choices.py','test_attention_audio_admission.py','test_manual_research.py','test_manual_metadata.py','test_organization.py','test_attention_actions.py','test_review_backend.py','test_attention_repair.py','test_quiet_status.py','test_status_under_load.py','test_backup_rule.py');
 patterns.push('test_manifest_compatibility.py','test_producer_recovery.py','test_producer_recovery_http.py','test_retry_intent.py','test_merge_http.py');
 patterns.push('test_recovery_retention.py');  // the recovery-purge module's own suite (Senua v0.16.8 F3)
-patterns.push('test_series_research.py','test_local_identity.py');  // v0.16.11 series research
+patterns.push('test_series_research.py','test_litres_research.py','test_anthology_volumes.py','test_local_identity.py');  // v0.16.11 series research
 patterns.push('test_series_backfill.py','test_quicktime_chapters.py','test_inventory.py');  // v0.16.12 series backfill, list reads
 patterns.push('test_series_fallbacks.py','test_openlibrary_index.py','test_public_work_identity.py');  // v0.18 source/ordinal, shared quotas, authenticated sparse imports
 patterns.push('test_bulk_retry_receipts.py','test_catalog_contention.py');

@@ -218,6 +218,16 @@ class TranslationNoWaitTests(Base):
         self.assertEqual(self.goes_to(row, result), SORTED + '\\Zelazny Roger\\Jack of Shadows - Zelazny Roger.m4b')
         self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Jack of Shadows'})
 
+    def test_series_only_approval_retains_cached_english_title_but_explicit_title_wins(self):
+        row=next(iter(self.catalog(self.JACK).values()))
+        catalog=dict(self.CATALOG,work_id='fantlab:1')
+        with patch.object(self.research,'_gap_fill',return_value={'catalog':catalog,'closed':[],'unfilled':[]}):
+            series_only=self.research.approved(row,ROOT,names={'series':'Chronicles','number':'2'})
+            explicit=self.research.approved(row,ROOT,title='Джек из Тени (аудиокнига)',names={'series':'Chronicles','number':'2'})
+        self.assertEqual(series_only['review']['title'],'Jack of Shadows','displaying Title is not a typed-title override (ruling49)')
+        self.assertEqual((series_only['review']['series'],series_only['review']['number']),('Chronicles','2'))
+        self.assertEqual(explicit['review']['title'],'Джек из Тени (аудиокнига)','actual edited Title remains authoritative')
+
     def test_sergeis_approve_files_it_as_shown_and_a_russian_author_converts_with_no_lookup_fact(self):
         row = next(iter(self.catalog(self.JACK).values()))
         approved = self.research.approved(row, ROOT)

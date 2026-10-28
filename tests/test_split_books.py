@@ -124,7 +124,7 @@ class HoldTests(unittest.TestCase):
                for n,reader in ((1,'Игорь Князев'),(2,'Олег Булдаков'))]
         self.held(files,'mixed composer tags')
     def test_mixed_authors(self):
-        files=[row('Калейдоскоп 4/%s-Рассказ.mp3'%a,{'album':'Калейдоскоп 4','artist':a,'track':str(n)},('mp3','44100',1)) for n,a in enumerate(('Виктор Глебов','Юрий Молчан'),1)]
+        files=[row('Other mixed anthology/%s-Рассказ.mp3'%a,{'album':'Other mixed anthology','artist':a,'track':str(n)},('mp3','44100',1)) for n,a in enumerate(('Виктор Глебов','Юрий Молчан'),1)]
         built=groups.build(files)
         self.assertFalse(split_scopes(built))
     def test_mixed_recordings(self):

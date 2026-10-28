@@ -78,9 +78,9 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 #approve-selected{min-width:96px}
 #approve-selected[aria-disabled=true],#approve-selected[aria-disabled=true]:hover,#approve-confirm[aria-disabled=true],#approve-confirm[aria-disabled=true]:hover{background:var(--disabled);color:var(--disabled-text);border-color:var(--border);cursor:default}
 .table-scroll.tall{max-height:max(430px,calc(100vh - 160px))}
-.ask-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:6px}
+.ask-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:8px;margin-top:6px}
 .ask-field{display:flex;flex-direction:column;gap:2px;min-width:0;color:var(--text)}
-.ask-field input,.ask-other{min-height:32px;min-width:160px;width:100%;max-width:420px;box-sizing:border-box}
+.ask-field input,.ask-other{min-height:32px;min-width:0;width:100%;max-width:420px;box-sizing:border-box}
 .ask-basis{margin:2px 0 0}
 .ask-choice{border:0;padding:0;margin:6px 0 0;min-width:0}
 .ask-choice legend{padding:0;color:var(--text)}
@@ -159,3 +159,5 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 .author-rule:first-child{border-top:none}.author-rule-text{flex:1 1 300px;min-width:0;overflow-wrap:anywhere}
 .author-rule-text p{margin:0}.author-rule-confirm{flex-basis:100%}.author-rule-confirm p{margin:0 0 6px}
 .author-rule-confirm button{margin-right:8px}.author-rule .rule-error{flex-basis:100%;color:var(--warning);margin:0}
+
+.ask-inline-names{margin-top:6px;min-width:0}

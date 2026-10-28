@@ -67,11 +67,17 @@ def series_positions(tags):
 
 def source_gate(row,work):
     """Observed-source scope only; does not claim commercial recording completeness."""
-    members=row['members'];reasons=[]
+    members=row['members'];reasons=[];known_anthology=None
     standing=work.get('policy_version')=='standing-17-v1'
     formats={'.mp3','.m4a','.m4b','.aac','.flac','.ogg','.opus','.wav','.wma'} if standing else {'.mp3'}
     if not members or len(members)>500:return ['Source membership uncertain']
     if row.get('source_partition_uncertain'):reasons.append('Source membership uncertain')
+    if row.get('anthology_ownership_conflict'):
+        reasons.append('Collection source/component binding changed')
+    if row.get('anthology_volume'):
+        import anthology_volumes
+        known_anthology=anthology_volumes.identity(row)
+        if not known_anthology:reasons.append('Collection source/component binding changed')
     if any(m.get('missing') or m.get('error') for m in members):reasons.append('Source files unavailable or unreadable')
     if any(Path(m['path']).suffix.lower() not in formats for m in members):reasons.append('Audio format needs an encoding decision')
     if work.get('collection'):
@@ -197,6 +203,7 @@ def source_gate(row,work):
     if len(members)>1:
         tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in members]
         albums={norm(t.get('album')) for t in tags};artists={norm(t.get('artist')) for t in tags}
+        if known_anthology:artists={'confirmed anthology story credits'}
         if len(artists)>1 and local:
             # Ruling 19 (joined parts): one person spelled two ways ("Иван Петров" / "Петров Иван") is one artist.
             from local_identity import same_person,compare_names

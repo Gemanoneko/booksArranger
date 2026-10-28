@@ -66,7 +66,8 @@ PAUSE_REASONS=(SOURCE_PAUSE_REASON,CHALLENGE_REASON)
 CHALLENGE_MARKERS=(b'anomaly.js',b'bots use duckduckgo',b'verify you are human',b'cf-chl-',b'challenge-platform')
 PRIMARY_HOSTS={'ast.ru','www.oupjapan.co.jp','magazines.gorky.media','www.kodansha.co.jp','www.penguinrandomhouse.com','www.harpercollins.com','www.simonandschuster.com','www.hachettebookgroup.com','us.macmillan.com'}
 RECORDING_HOSTS={'akniga.org','booklis.com','livelib.ru','av3715.ru','t.me'}
-CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS
+RETAIL_HOSTS={'www.litres.ru'}
+CREDIT_HOSTS=PRIMARY_HOSTS|RECORDING_HOSTS|RETAIL_HOSTS
 HOSTS=CREDIT_HOSTS|{'www.wikidata.org','html.duckduckgo.com','api.fantlab.ru','fantlab.ru','openlibrary.org','covers.openlibrary.org','en.wikipedia.org','ru.wikipedia.org','ja.wikipedia.org','www.googleapis.com','itunes.apple.com','www.goodreads.com','archive.org'}
 # Research stages: a candidate can progress only when every stage it needs has an open source.
 STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.googleapis.com','itunes.apple.com'},
@@ -114,6 +115,9 @@ def allowed_url(url):
         p=urllib.parse.urlsplit(url)
         if p.scheme!='https' or p.hostname not in HOSTS or p.username or p.password or p.port not in (None,443) or p.fragment:raise ValueError()
     except ValueError:raise ValueError('Unsupported public evidence URL') from None
+    if p.hostname in RETAIL_HOSTS:
+        from litres_evidence import book_url
+        if book_url(url)!=url:raise ValueError('Only query-free canonical Litres book pages are admitted')
     if p.hostname=='t.me' and not p.path.startswith('/s/'):raise ValueError('Only public creator post pages are admitted')
     if p.hostname=='archive.org':
         match=re.fullmatch(r'/metadata/ol_dump_(20\d{2}-\d{2}-\d{2})',p.path)
@@ -964,7 +968,7 @@ class PublicResearch:
                     except (ValueError,TypeError):pass
                     for url in leads:
                         raw=self.client.read(url,stop,budget);page=parse_page(raw)
-                        pair=credited_pair(page,[title],[author]) if author else None
+                        pair=_page_credit(url,raw,page,[title],[author]) if author else None
                         result['sources'].append(_page_record(url,raw,pair))
                 except ResearchWait as wait:waits.append(wait)
             reason='Sources disagree on the title or author' if len(works)>1 else 'Book identity uncertain'
@@ -1013,7 +1017,7 @@ class PublicResearch:
                     except ResearchWait as wait:waits.append(wait)
                     except (ValueError,TypeError):pass
                 for url in leads[:4]:
-                    raw=self.client.read(url,stop,budget);page=parse_page(raw);pair=credited_pair(page,work['titles'],work['author_aliases'])
+                    raw=self.client.read(url,stop,budget);page=parse_page(raw);pair=_page_credit(url,raw,page,work['titles'],work['author_aliases'])
                     if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS:
                         from standing_metadata import russian_source_title
                         alias=russian_source_title(row)
@@ -1152,7 +1156,7 @@ class PublicResearch:
         summary=local_identity.summary(local)
         saved_names=local.get('names') or {}
         # Edit names (0.22.2; Sergei, «Протоколы SCP»): a collection in a series, with its position, files under Сборники/<Series>.
-        review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary,series=(local.get('series') or {}).get('name','') if ('series' in saved_names or 'number' in saved_names) else '',number=(local.get('series') or {}).get('number','') if ('series' in saved_names or 'number' in saved_names) else '')
+        review,facts,reasons=build_policy(row,work,title,[route['credit']],collection=collection,local=summary,series=(local.get('series') or {}).get('name','') if ('series' in saved_names or 'number' in saved_names or row.get('anthology_volume')) else '',number=(local.get('series') or {}).get('number','') if ('series' in saved_names or 'number' in saved_names or row.get('anthology_volume')) else '')
         review['narrator']='; '.join(route['narrators'])
         if 'universe' in saved_names and saved_names['universe'] is not None:review['universe']=saved_names['universe']
         elif local.get('universe'):review['universe']=local['universe']  # rulings 30 and 37
@@ -1475,6 +1479,9 @@ class PublicResearch:
             if not series:
                 series=attempt('publisher',lambda:self._series_publisher(title,author,stop,budget,result))
                 if series:found['series']=series
+            if not series:
+                series=attempt('litres',lambda:self._series_litres(title,author,stop,budget,result))
+                if series:found['series']=series
         if 'author_full' in gaps and not found.get('catalog'):
             for source,function in (('openlibrary',self._gap_openlibrary),('googlebooks',self._gap_googlebooks),('itunes',self._gap_itunes)):
                 progress({'openlibrary':'Open Library','googlebooks':'Google Books','itunes':'iTunes'}[source],'Filling missing full author name')
@@ -1484,7 +1491,7 @@ class PublicResearch:
         if 'original_title' in gaps and not found.get('catalog'):unfilled.append('original_title')
         if 'series' in gaps and not found.get('series'):unfilled.append('series')
         if 'author_full' in gaps and not (found.get('author_full') or found.get('catalog')):unfilled.append('author_full')
-        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'publisher':{'series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'}}
+        serves={'fantlab':{'original_title','author_full','series'},'wikidata':{'original_title','series'},'publisher':{'series'},'goodreads':{'series'},'openlibrary':{'author_full'},'googlebooks':{'author_full'},'itunes':{'author_full'},'litres':{'series'}}
         goodreads_waited='goodreads' in found['closed']
         found['closed']=[source for source in found['closed'] if serves[source]&set(unfilled)]
         # Goodreads decides the series: a fallback answer still waits a little for it (gap deferral).
@@ -1567,6 +1574,30 @@ class PublicResearch:
                 if local_match:found['local_identity']={'work':local_match,'index_sha256':local['receipt']['sha256'],'source_manifest':local['receipt']['source_manifest']}
                 return found
         return None
+
+    def _series_litres(self,title,author,stop,budget,result):
+        """Last optional fallback: indexed discovery leads to query-free Litres pages, never its blocked search route.
+        The canonical main record must match this exact title and ALL authors; a book-specific explicit ordinal decides.
+        Edition metadata does not assert the original-work language, and never overrides entered names.
+        """
+        from litres_evidence import book_url,book
+        from local_identity import title_key
+        from public_work_identity import EvidenceConflict
+        urls=[]
+        for lead in self.leads:
+            if not isinstance(lead,dict) or title_key(lead.get('title',''))!=title_key(title) or not _same_people(author,lead.get('authors') or []):continue
+            urls.extend(lead.get('series_urls') or []);urls.extend(lead.get('publisher_urls') or [])
+        urls=list(dict.fromkeys(url for value in urls if (url:=book_url(value))))
+        if not urls:urls=list(dict.fromkeys(url for value in self.client.discover('site:litres.ru "'+title+'" '+author,stop,budget) if (url:=book_url(value))))
+        matches=[]
+        for url in urls[:2]:
+            raw=self.client.read(url,stop,budget);record=book(raw,url)
+            if not record or title_key(record['title'])!=title_key(title) or not _exact_people(author,record['authors']):continue
+            self._gap_receipt(url,result,url,['title','authors']+(['series','number'] if record['series'] else []))
+            result['sources'][-1].update(provider='Litres',identity_basis='Canonical Litres main book record: exact title and complete author list; readBy and related products excluded')
+            if record['series']:matches.append(record['series'])
+        if len({(v['name'],v['number']) for v in matches})>1:raise EvidenceConflict('Litres editions disagree on series or position')
+        return matches[0] if matches else None
 
     def _series_goodreads(self,title,author,stop,budget,result):
         """Series name and number from the Goodreads book page, or None. The search page is a lead only: a
@@ -1819,6 +1850,7 @@ class PublicResearch:
         return found
 
 SERIES_WHY={
+    'litres':'Series and explicit position on the canonical Litres book page matching the exact title and all credited authors; not the series total or retailer card order.',
     'goodreads':'Series and position from the Goodreads book record or explicit series entry, joined to the exact book id, title and all locally agreed authors (Sergei 2026-10-18: Goodreads is the series source).',
     'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).'}
 
@@ -1933,7 +1965,23 @@ def _credit_matches(a,b):
     at=[norm(t) for t in re.split(r'[\s,;]+',str(a)) if norm(t)];bt=[norm(t) for t in re.split(r'[\s,;]+',str(b)) if norm(t)]
     return len(at)>=2 and all(len(t)>1 for t in at) and sorted(at)==sorted(bt)
 def _stamp():return dt.datetime.now(dt.timezone.utc).isoformat().replace('+00:00','Z')
-def _page_record(url,raw,pair):return {'url':url,'kind':'recording_credit' if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS else 'publisher_or_journal','sha256':hashlib.sha256(raw).hexdigest(),'retrieved_utc':_stamp(),'credit':pair,'verified_identity':bool(pair)}
+def _exact_people(author,names):
+    return bool(names) and len(_people(author))==len(names) and _same_people(author,names) and _same_people(', '.join(names),_people(author))
+
+def _page_credit(url,raw,page,titles,authors):
+    if urllib.parse.urlsplit(url).hostname not in RETAIL_HOSTS:return credited_pair(page,titles,authors)
+    from litres_evidence import book
+    from local_identity import title_key
+    record=book(raw,url)
+    people=[]
+    for alias in authors:
+        for name in _people(alias):
+            if not any(_name_matches(name,known) and _name_matches(known,name) for known in people):people.append(name)
+    if record and title_key(record['title']) in {title_key(t) for t in titles} and _exact_people(', '.join(people),record['authors']):
+        return {'title':record['title'],'author':', '.join(record['authors']),'excerpt':'Litres main Book/Audiobook author relationship; narrator/related products excluded'}
+    return None
+
+def _page_record(url,raw,pair):return {'url':url,'kind':'recording_credit' if urllib.parse.urlsplit(url).hostname in RECORDING_HOSTS else 'publisher_or_journal','sha256':hashlib.sha256(raw).hexdigest(),'retrieved_utc':_stamp(),'credit':pair,'verified_identity':bool(pair)}|({'provider':'Litres'} if urllib.parse.urlsplit(url).hostname in RETAIL_HOSTS else {})
 def _wait(waits,answered=()):
     """Retry when the candidate can actually progress, not when any one source reopens.
 

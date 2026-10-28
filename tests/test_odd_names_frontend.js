@@ -60,7 +60,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   assert.equal(statusCell(tr).textContent,'Author unclear');
   assert.equal(statusCell(tr).children[0].textContent,"The author's name has underscores and may include more than a name.");
   assert.ok(!statusCell(tr).textContent.includes('Check it'),'one sentence, no instruction (section 11.2)');
-  let fields=inputs(tr);assert.equal(fields.length,1,'the author only; the title came from a tag');assert.equal(fields[0].value,'Ричард Форд');
+  let fields=inputs(tr);assert.deepEqual(fields.map(e=>e.dataset.name),['author','title','series','number'],'author question exposes Title and paired Series/Number (ruling62)');assert.equal(fields[0].value,'Ричард Форд');
   // Two people in one author: the existing Author unclear row, one radio per person.
   tr=trOf('cand-pe');assert.equal(statusCell(tr).textContent,'Author unclear');
   assert.equal(statusCell(tr).children[0].textContent,"Two people are credited. The app can't tell who wrote it.");

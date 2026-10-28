@@ -74,12 +74,12 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   paint([noAuthor,both,unclear,reader,taken,someGone,allGone,same]);
   let tr=trOf('cand-a');
   assert.equal(statusCell(tr).textContent,'Author missing');assert.equal(statusCell(tr).children[0].textContent,'No author in the tags, file name or folder name.');
-  let [title,author]=inputs(tr);assert.equal(title.value,'Шестёрка воронов 1');assert.equal(author.value,'');assert.equal(author.placeholder,'Empty files it under Без автора.');
+  let title=inputs(tr).find(e=>e.dataset.name==='title'),author=inputs(tr).find(e=>e.dataset.name==='author');assert.equal(title.value,'Шестёрка воронов 1');assert.equal(author.value,'');assert.equal(author.placeholder,'Empty files it under Без автора.');
   assert.equal(title.getAttribute('aria-label'),'Title: Title a');assert.equal(author.title,'The author this book is filed under. Leave empty to use Без автора.');
   assert.ok(walk(statusCell(tr)).some(e=>e.textContent==='Set name + part number.'),'basis line under a guessed title');
   assert.equal(goesTo(tr),'Goes to Audiobooks Sorted\\Без автора\\Шестёрка воронов 1.m4b');
   assert.equal(buttonsOf(tr)[0].textContent,'Approve');assert.equal(buttonsOf(tr)[0].getAttribute('aria-label'),'Approve: Title a');assert.ok(buttonsOf(tr)[0].className.includes('quiet'));
-  assert.equal(inputs(trOf('cand-b')).length,2);assert.ok(walk(statusCell(trOf('cand-b'))).some(e=>e.textContent==='Title from the folder name.'));
+  assert.deepEqual(inputs(trOf('cand-b')).map(e=>e.dataset.name),['author','title','series','number']);assert.ok(walk(statusCell(trOf('cand-b'))).some(e=>e.textContent==='Title from the folder name.'));
   assert.equal(statusCell(trOf('cand-b')).textContent,'Title and author missing');
   // A space typed in a field never reaches the row; Enter refreshes Goes to and never approves.
   let stopped=false;title.handlers.keydown(key(' ',{stopPropagation(){stopped=true;}}));assert.ok(stopped,'the row never sees keys typed in a field');
@@ -97,9 +97,9 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   title.value='';title.handlers.input();assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[0].title,'Type a title first.');
   assert.equal(goesTo(tr),'Goes to Audiobooks Sorted\\Лей Бардуго\\x.m4b');
   title.value='Шестёрка воронов 1';title.handlers.input();assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);
-  assert.equal(buttonsOf(tr)[0].title,'Approve with the values shown: convert if needed, rename, move to Audiobooks Sorted. Ctrl+Enter in a field does the same.');
+  assert.equal(buttonsOf(tr)[0].title,'Approve this book with the author, title, series and number shown. Queued work waits for Start. Ctrl+Enter in a field does the same.');
   // Drafts survive a poll that rebuilds the list (and a chip change): the typed author is still there.
-  paint([noAuthor,both,unclear,reader,taken,someGone,allGone,same]);tr=trOf('cand-a');[title,author]=inputs(tr);assert.equal(author.value,'Лей Бардуго');
+  paint([noAuthor,both,unclear,reader,taken,someGone,allGone,same]);tr=trOf('cand-a');title=inputs(tr).find(e=>e.dataset.name==='title');author=inputs(tr).find(e=>e.dataset.name==='author');assert.equal(author.value,'Лей Бардуго');
   // Ctrl+Enter approves with exactly what is shown: the typed author, not the untouched title.
   buttonsOf(tr)[0].focus();document.activeElement=author;
   await author.handlers.keydown(key('Enter',{ctrlKey:true}));await tick();

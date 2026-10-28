@@ -305,6 +305,29 @@ class EditNamesTests(ApproveFixture):
         saved=self.service.names_save(current['id'],current['revision'],{'universe':'SCP Foundation'})
         self.assertEqual(saved['outcome'],'ready_only');self.assertEqual(hashlib.sha256(final.read_bytes()).hexdigest(),before,'the finished audiobook is untouched')
 
+    def test_inline_author_title_series_are_one_book_local_press_waiting_for_start(self):
+        title='Мистер Вечный Канун. Уэлихолн'
+        for key in ('one','sibling'):
+            tone(self.audio/'Unsorted'/key/'01.mp3',self.cover,title=title,album=title,artist='Олег Яковлев; Владимир Торин')
+        rows=self.start();row=next(r for r in rows if Path(r['members'][0]['path']).parent.name=='one')
+        sibling=next(r for r in rows if Path(r['members'][0]['path']).parent.name=='sibling')
+        values={'title':'Уэлихолн','author':'Олег Яковлев, Владимир Торин','names':{'series':'Мистер Вечный Канун','number':'1'}}
+        preview=self.service.approval_preview(row['id'],row['revision'],**values)
+        self.assertTrue(preview['path'],ascii(preview))
+        self.assertIn('Мистер Вечный Канун',preview['path']);self.assertIn(' - 1 - Уэлихолн',preview['path'])
+        approved=self.service.approve_book(row['id'],row['revision'],path=preview['path'],**values)
+        job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'pending','one Approve saves and queues; it never resumes the queue')
+        self.assertTrue(Path(row['members'][0]['path']).exists())
+        remembered=entered_names.book_values(self.inv.database,row)
+        self.assertTrue({'title','author','series','number'}.issubset(remembered),'combined answer persists before Start')
+        self.assertNotIn('series',entered_names.book_values(self.inv.database,sibling),'the sibling is not answered')
+        self.start_and_wait();job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'completed',job)
+        self.assertEqual(Path(job['output']['final_path']),self.sorted/preview['path'])
+        meta=job['manifest']['metadata'];self.assertEqual((meta['title'],meta['series'],meta['number']),('Уэлихолн','Мистер Вечный Канун','1'))
+        self.assertIn('Яковлев',meta['canonical_author']);self.assertIn('Торин',meta['canonical_author'])
+
     def test_m14_the_panels_unsaved_destination_preview_uses_the_rows_names(self):
         # Senua's 0.22.3 review, m14: with the panel dirty, "Unsaved destination preview" was planned from the six hidden
         # name inputs (ruling 40), so it showed names from before a row Edit names Save, never the names the row uses.

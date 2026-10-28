@@ -342,7 +342,8 @@ class SeriesBackfill:
         for provider, args in (('_series_goodreads', (review['title'], review['canonical_author'], self.stop, budget, result)),
                                ('_series_fantlab', (review['title'], review['canonical_author'], False, self.stop, budget, result)),
                                ('_series_wikidata', (review['title'], review['canonical_author'], self.stop, budget, result)),
-                               ('_series_publisher', (review['title'], review['canonical_author'], self.stop, budget, result))):
+                               ('_series_publisher', (review['title'], review['canonical_author'], self.stop, budget, result)),
+                               ('_series_litres', (review['title'], review['canonical_author'], self.stop, budget, result))):
             try:
                 found = getattr(self.research, provider)(*args)
                 if found:

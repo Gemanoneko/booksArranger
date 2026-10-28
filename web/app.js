@@ -2379,7 +2379,7 @@ function renderAutomaticResult(row){
   for(const [label,value] of Object.entries(values))if(value!==undefined && value!==null && value!=='')facts.append(node('dt',label),node('dd',value));
   const included=new Set(row.included || row.members?.map(member=>member.member_key || member.path) || []),members=new Map((row.members || []).map(member=>[member.member_key || member.path,member]));
   $('automatic-tracks').replaceChildren();for(const key of row.track_order || members.keys())if(included.has(key) && members.has(key))$('automatic-tracks').append(node('li',[members.get(key).path,...memberComponents(members.get(key),row),members.get(key).missing?'Not found':''].filter(Boolean).join('\n')));
-  const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(source.kind==='manual_metadata'?node('span','Entered by you'):sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
+  const sources=$('automatic-sources');sources.replaceChildren();if(automatic?.sources?.length){sources.append(node('h3','Research sources'));for(const source of automatic.sources){const line=node('p');let label=source.provider || source.kind || 'Public source';try{label+=' — '+new URL(source.url).hostname;}catch{}line.append(source.kind==='manual_metadata'?node('span','Entered by you'):sourceLink(source.url,label));const facts=[source.verified_identity===true?'Identity verified':source.verified_identity===false?'Identity unverified':'',typeof source.credit==='object' && source.credit!==null?[source.credit.author,source.credit.title].filter(Boolean).join(' — '):source.credit,source.retrieved_utc?'Retrieved '+recoveryDate(source.retrieved_utc):''].filter(Boolean);if(facts.length)line.append(node('span',' · '+facts.join(' · ')));sources.append(line);}}
   const accepted={metadata:context.metadata_evidence || [],recording:context.track_evidence || '',metadata_provenance:row.metadata_facts || null,recording_review:row.duplicate_review || null};
   $('automatic-accepted-evidence').textContent=plainEvidence(JSON.stringify(accepted,null,2));$('automatic-accepted').hidden=!accepted.metadata.length && !accepted.recording && !accepted.metadata_provenance && !accepted.recording_review;
 }
@@ -2494,7 +2494,7 @@ function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind=
 // A set of .m4b parts (cause set_*): the join always re-encodes once (ruling 19a, method A), so the tooltip says so (N3).
 const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
-function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:ASK_TIPS[kind];}
+function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:kind==='approve' && inlineNames(entry.row)?'Approve this book with the author, title, series and number shown. Queued work waits for Start. Ctrl+Enter in a field does the same.':ASK_TIPS[kind];}
 const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],copy:['Checking...','Checking the audiobook in {sorted}...'],approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
@@ -2507,8 +2507,10 @@ function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'
 function askProposal(ask,name){const value=ask?.fields?.[name]?.proposal;return typeof value==='string'?value:'';}
 function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 // Which fields the row shows: Title when it is missing or a guess, Author when it is missing or unclear (section 3).
+function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && !!askFieldPlanOf(ask).author);}
 function askFieldPlan(ask,row=null){
   const plan=askFieldPlanOf(ask);
+  if(row && inlineNames(row))return {...plan,title:true};
   // Edit names open (Judy 1.1, item 2): Title and Author are the editor's, the same inputs and draft as the ask fields.
   if(row && namesOpen(row.id) && !(ask.kind==='files_missing' && !(ask.missing?.present>0)))return {title:true,author:plan.author || 'input'};
   return plan;
@@ -2605,7 +2607,7 @@ function guardAskControl(entry,element,keys=false){
 }
 function askInput(entry,name,label,value,placeholder,tip){
   const wrap=node('label','','ask-field'),input=node('input');input.type='text';input.maxLength=1000;input.setAttribute('maxlength','1000');input.setAttribute('autocomplete','off');input.setAttribute('spellcheck','false');
-  input.value=value;input.title=tip;if(placeholder)input.placeholder=placeholder;input.setAttribute('aria-label',label+': '+askName(entry.row));
+  input.dataset.name=name;input.value=value;input.title=tip;if(placeholder)input.placeholder=placeholder;input.setAttribute('aria-label',label+': '+askName(entry.row));
   wrap.append(node('span',label),input);guardAskControl(entry,wrap);guardAskControl(entry,input,true);
   input.addEventListener('input',()=>{askDraft(entry.row.id)[name]=input.value;askChanged(entry,500);});
   input.addEventListener('blur',()=>askPreview(entry,0));
@@ -2619,10 +2621,10 @@ function askRadio(entry,group,value,label,tip,extra=''){
   entry.controls.push(input);return wrap;
 }
 function buildAskFields(entry){
-  const row=entry.row,ask=askOf(row),plan=askFieldPlan(ask,row),d=askDraft(row.id),box=entry.fields;
-  if(plan.title || plan.author==='input'){
+  const row=entry.row,ask=askOf(row),plan=askFieldPlan(ask,row),d=askDraft(row.id),box=entry.fields,inline=inlineNames(row);
+  if(plan.title && !inline || plan.author==='input'){
     const grid=node('div','','ask-grid');
-    if(plan.title){const cell=node('div');cell.append(askInput(entry,'title','Title',typeof d.title==='string'?d.title:askProposal(ask,'title'),'','The title this book is filed under.'));const basis=BASIS_LINES[ask.fields?.title?.basis];if(basis)cell.append(node('p',basis,'field-help ask-basis'));grid.append(cell);}
+    if(plan.title && !inline){const cell=node('div');cell.append(askInput(entry,'title','Title',typeof d.title==='string'?d.title:askProposal(ask,'title'),'','The title this book is filed under.'));const basis=BASIS_LINES[ask.fields?.title?.basis];if(basis)cell.append(node('p',basis,'field-help ask-basis'));grid.append(cell);}
     if(plan.author==='input'){const cell=node('div');cell.append(askInput(entry,'author','Author',typeof d.author==='string'?d.author:askProposal(ask,'author'),'Empty files it under Без автора.','The author this book is filed under. Leave empty to use Без автора.'));if(ask.fields?.author?.basis==='folder_name' && askProposal(ask,'author'))cell.append(node('p','Author from the folder name.','field-help ask-basis'));grid.append(cell);}
     box.append(grid);
   }
@@ -2680,12 +2682,21 @@ function buildHoldList(entry){
   if(ask.cause==='mixed' || ask.cause==='works')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists],['Books',ask.facts?.works]])if(Array.isArray(items) && items.length)
     box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name==='(none)'?(label==='Albums'?'No album':'No artist'):item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
 }
+function buildInlineNames(entry){
+  const row=entry.row;if(!inlineNames(row))return;
+  const block=node('div','','ask-inline-names');
+  block.append(askInput(entry,'title','Title',namesValue(row,'title'),'','The title this book is filed under.'));
+  const basis=BASIS_LINES[askOf(row).fields?.title?.basis];if(basis)block.append(node('p',basis,'field-help ask-basis'));
+  const pair=node('div','','ask-grid');
+  for(const field of ['series','number']){const {wrap,input}=namesInput(row,field);entry.controls.push(input);pair.append(wrap);}
+  block.append(pair);entry.fields.append(block);
+}
 function buildAskCell(row,td){
   const entry={row,cell:td,controls:[]};askRows.set(row.id,entry);
   entry.hint=node('p','','field-help attention-hint');entry.hint.id='attention-hint-'+row.id;
   entry.also=node('p','','field-help attention-also');entry.why=node('p','','field-help ask-why');entry.fields=node('div','','ask-fields');entry.missing=node('div','','ask-missing');entry.dest=node('p','','goes-to');
   td.append(entry.hint,entry.also,entry.why,entry.fields,entry.missing,entry.dest);
-  buildAskFields(entry);buildAskMissing(entry);buildHoldList(entry);
+  buildAskFields(entry);buildInlineNames(entry);buildAskMissing(entry);buildHoldList(entry);
   if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
   updateAskRow(entry);
 }
@@ -2783,7 +2794,7 @@ function askPreview(entry,delay){
   if(names && (names.series && !names.number || names.number && !names.series))return;  // Series and Number go together (Judy 1.3)
   const send=async()=>{
     d.timer=null;d.previewKey=key;const seq=++d.seq;
-    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string' && p.path)d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true};
+    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string')d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || ''};
       const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,applies:p.applies,path:p.path,absolute:p.absolute};}
     catch(error){if(seq===d.seq)d.previewKey=null;}
     finally{const fresh=askRows.get(id);if(fresh && seq===d.seq)updateAskRow(fresh);batchCounts();}
@@ -2851,17 +2862,26 @@ function namesOpen(id){return !!namesState.get(id)?.open;}
 function namesAny(){for(const value of namesState.values())if(value.open)return true;return false;}
 function namesDropped(id){namesState.delete(id);namesRows.delete(id);}
 function namesData(id){return namesState.get(id)?.data || null;}
-function namesProposal(id,field){const value=namesData(id)?.fields?.[field]?.proposal;return field==='collection'?value===true:typeof value==='string'?value:'';}
+function namesProposal(id,field){const row=rows.find(row=>row.id===id),value=namesData(id)?.fields?.[field]?.proposal ?? (['series','number'].includes(field)?(row?.ask?.fields?.[field]?.proposal ?? row?.place?.[field]):undefined);return field==='collection'?value===true:typeof value==='string'?value:'';}
 // The values shown: the draft over what the editor read; Title and Author of a question row are its ask draft (one draft).
 function namesValue(row,field){
   const state=namesState.get(row.id),draft=state?.draft || {};
-  if((field==='title' || field==='author') && askOf(row)){const d=askDrafts.get(row.id) || {};if(typeof d[field]==='string')return d[field];const proposal=askProposal(askOf(row),field);return proposal || namesProposal(row.id,field);}
+  if((field==='title' || field==='author') && askOf(row)){const d=askDrafts.get(row.id) || {};if(field==='author'){const chosen=askValues(row,true).author;if(typeof chosen==='string')return chosen;}if(typeof d[field]==='string')return d[field];const proposal=askProposal(askOf(row),field);return proposal || namesProposal(row.id,field);}
+  if(inlineNames(row) && ['series','number'].includes(field)){const value=askDrafts.get(row.id)?.[field];if(typeof value==='string')return value;}
   if(Object.hasOwn(draft,field))return draft[field];
   return namesProposal(row.id,field);
 }
 function namesValues(row){const values={};for(const field of NAMES_FIELDS)values[field]=field==='collection'?namesValue(row,field)===true:String(namesValue(row,field) ?? '').trim();return values;}
 // What Approve and its preview carry while the editor is open (the four fields beside Title and Author).
-function namesFor(row){if(!row || !namesOpen(row.id) || !namesData(row.id))return null;const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection};}
+function namesFor(row){
+  if(!row)return null;
+  if(inlineNames(row) && (!namesOpen(row.id) || !namesData(row.id))){
+    const d=askDrafts.get(row.id) || {},series=String(namesValue(row,'series') || '').trim(),number=String(namesValue(row,'number') || '').trim();
+    return series || number || typeof d.series==='string' || typeof d.number==='string'?{series,number}:null;
+  }
+  if(!namesOpen(row.id) || !namesData(row.id))return null;
+  const v=namesValues(row);return {series:v.series,number:v.number,universe:v.universe,collection:v.collection};
+}
 function namesChanged(row){if(!namesData(row.id))return false;const v=namesValues(row);return NAMES_FIELDS.some(field=>field==='collection'?v[field]!==namesProposal(row.id,field):v[field]!==String(namesProposal(row.id,field)).trim());}
 // Why Save does nothing yet ('' when it works), Judy 1.6.
 function namesInert(row){return saveBlock(row).text;}  // 0.22.3: the cause the line under Save shows (Judy 3)
@@ -2924,13 +2944,13 @@ function namesGuard(row,element){
     else namesPreview(row.id,0);});
 }
 function namesChangedField(row,field,value){
-  if((field==='title' || field==='author') && askOf(row)){askDraft(row.id)[field]=value;const entry=askRows.get(row.id);if(entry){askChanged(entry,500);}}
+  if(askOf(row) && (field==='title' || field==='author' || inlineNames(row) && ['series','number'].includes(field))){askDraft(row.id)[field]=value;const entry=askRows.get(row.id);if(entry){askChanged(entry,500);}}
   else{const state=namesState.get(row.id);state.draft[field]=value;namesPreview(row.id,500);}
   namesNotes.delete(row.id);updateNamesRows();
 }
 function namesInput(row,field,list){
   const wrap=node('label','','ask-field'),input=node('input');input.type='text';input.maxLength=1000;input.setAttribute('maxlength','1000');input.setAttribute('autocomplete','off');input.setAttribute('spellcheck','false');
-  input.value=String(namesValue(row,field) ?? '');input.title=NAMES_TIPS[field];input.setAttribute('aria-label',NAMES_LABELS[field]+': '+askName(row));
+  input.dataset.name=field;input.value=String(namesValue(row,field) ?? '');input.title=NAMES_TIPS[field];input.setAttribute('aria-label',NAMES_LABELS[field]+': '+askName(row));
   if(field==='series' || field==='universe')input.placeholder='None';
   if(list){input.setAttribute('list',list);}
   wrap.append(node('span',NAMES_LABELS[field]),input);namesGuard(row,wrap);namesGuard(row,input);
@@ -2959,10 +2979,11 @@ function buildNamesBlock(row,td){
   const box=node('div','','names-editor');box.id='names-editor-'+id;entry.box=box;
   if(!namesData(id)){box.append(node('p','Loading these names…','field-help'));insert(box);updateNamesRow(row);return;}
   const grid=node('div','','ask-grid'),data=namesData(id);
+  if(inlineNames(row))for(const field of ['series','number'])entry.inputs[field]=ask.controls.find(control=>control.dataset.name===field);
   if(!ask){
     for(const field of ['title','author']){const {wrap,input}=namesInput(row,field);entry.inputs[field]=input;const cell=node('div');cell.append(wrap);grid.append(cell);}
-  }else entry.inputs.title=ask.controls.find(control=>control.type==='text') || null;
-  for(const field of ['series','number','universe']){
+  }else entry.inputs.title=ask.controls.find(control=>control.dataset.name==='title') || null;
+  for(const field of (inlineNames(row)?['universe']:['series','number','universe'])){
     const list=field==='number'?null:`names-${field==='series'?'series':'universes'}-${id}`;
     const {wrap,input}=namesInput(row,field,list);entry.inputs[field]=input;const cell=node('div');cell.append(wrap);
     if(field!=='number'){const line=node('p','','field-help ask-basis');entry[field+'Line']=line;cell.append(line);}
@@ -3028,8 +3049,9 @@ function updateNamesRow(row){
 function updateNamesRows(){for(const entry of namesRows.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh){entry.row=fresh;updateNamesRow(fresh);}}}
 // The Goes to line, the Place line and "Applies to" follow the draft: 500 ms after typing stops, on blur, on Enter.
 function namesPreview(id,delay){
-  const row=rows.find(item=>item.id===id),state=namesState.get(id);if(!row || !state?.open || !state.data)return;
-  if(askOf(row)){const entry=askRows.get(id);if(entry){askDraft(id).previewKey=null;askPreview(entry,delay);}return;}
+  const row=rows.find(item=>item.id===id),state=namesState.get(id);if(!row)return;
+  if(askOf(row) && (inlineNames(row) || state?.open && state.data)){const entry=askRows.get(id);if(entry){askDraft(id).previewKey=null;return askPreview(entry,delay);}return;}
+  if(!state?.open || !state.data)return;
   const v=namesValues(row),key=JSON.stringify(v);if(state.timer){clearTimeout(state.timer);state.timer=null;}
   if(key===state.previewKey || !v.title || (v.series && !v.number) || (v.number && !v.series))return;
   const send=async()=>{state.timer=null;state.previewKey=key;const seq=++state.seq;
@@ -3169,8 +3191,8 @@ function approveBlock(row){
 }
 // Sets one names field as if typed (Restore title, Clear series, Clear number), then the line re-renders.
 function namesSetField(row,field,value){
-  const entry=namesRows.get(row.id),ask=askRows.get(row.id),input=field==='title' && askOf(row)?ask?.controls?.find(control=>control.type==='text'):entry?.inputs?.[field];
-  if(field!=='title' && !namesState.get(row.id))return;
+  const entry=namesRows.get(row.id),ask=askRows.get(row.id),input=askOf(row)?ask?.controls?.find(control=>control.dataset.name===field) || entry?.inputs?.[field]:entry?.inputs?.[field];
+  if(field!=='title' && !namesState.get(row.id) && !inlineNames(row))return;
   if(input)input.value=value;
   namesChangedField(row,field,value);namesPreview(row.id,0);controls();
   (input || entry?.save)?.focus?.({preventScroll:true});
@@ -4031,7 +4053,7 @@ function readerRisk(row){const ask=askOf(row),author=askProposal(ask,'author');r
 function approveSelectable(){
   if(!bulkChip())return {items:[],selected:0};
   const selected=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));
-  const items=selected.filter(row=>{const ask=askOf(row);return ask && ask.kind===attentionGroup && !oddName(row) && !askDone.has(row.id) && !askPendings.has(row.id) && !namesOpen(row.id) && !deleteQueued(row) && !askInert(row) && !Object.keys(askValues(row)).length && !readerRisk(row) && !!askDestination(row)?.path;});
+  const items=selected.filter(row=>{const ask=askOf(row);return ask && ask.kind===attentionGroup && !oddName(row) && !askDone.has(row.id) && !askPendings.has(row.id) && !namesOpen(row.id) && !deleteQueued(row) && !askInert(row) && !Object.keys(askValues(row)).length && !(inlineNames(row) && ['series','number'].some(field=>typeof askDrafts.get(row.id)?.[field]==='string')) && !readerRisk(row) && !!askDestination(row)?.path;});
   return {items,selected:selected.length};
 }
 function renderApproveSelected(){
