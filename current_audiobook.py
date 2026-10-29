@@ -19,6 +19,9 @@ class CurrentAudiobooks:
         # file identity is unchanged; remember(record) records a new full hash; pace(n, stop) limits reads.
         self.bindings=bindings
         self.verified=verified;self.remember=remember;self.pace=pace
+        # Rulings 69 and 71h: folders Sergei chose (outside the configured roots too) where a moved book now lives;
+        # MergeService supplies them (a callable returning paths). The file must still sit directly in such a folder.
+        self.chosen_roots=None
         self._lock=threading.RLock();self._cache={};self._pending=set();self._work=queue.Queue(maxsize=32)
         self._stop=threading.Event();self._thread=None
 
@@ -140,7 +143,7 @@ class CurrentAudiobooks:
     def _protected_record(self,publication,record):
         path=ordinary(record['final_path'])
         root=ordinary(record['root'])
-        if root not in self.libraries or not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
+        if root not in self.libraries and not self._chosen(root,path) or not path.is_relative_to(root) or path.suffix.lower()!='.m4b':raise BoundaryError('Current publication is outside its library')
         with contextlib.ExitStack() as stack:
             if publication.get('parent_location') is not None:
                 if self.bindings is None:raise BoundaryError('Relocated repair parent lease unavailable')
@@ -161,6 +164,12 @@ class CurrentAudiobooks:
             key=digest({'id':publication['id'],'kind':publication['kind'],'record':record,'facts':facts,'ancestry':boundary.identities,
                         'journal':journal_key,'relation':publication.get('relation'),'manifest':publication['parent']['manifest'],'location':publication.get('location_envelope')})
             yield file,key
+
+    def _chosen(self,root,path):
+        """True for a book moved into a folder Sergei chose: that folder is its root and holds it directly."""
+        if self.chosen_roots is None or path.parent!=root:return False
+        try:return any(ordinary(folder)==root for folder in self.chosen_roots())
+        except (ValueError,OSError):return False
 
     def _enqueue(self,publication,key):
         with self._lock:

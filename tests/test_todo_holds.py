@@ -87,10 +87,24 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
         page = self.service.reviews.page(status='output_attention', group=group)
         return {row['title_clue']: row for row in page['rows']}
 
-    def order_book(self):
-        # Three chapters of one book with no track numbers: the order comes only from the file names.
-        return [tone(self.audio / 'Unsorted' / 'Око мира' / name, self.cover, album='Око мира', artist='Роберт Джордан', title=name[:-4])
+    def order_book(self, artist='Сергей Лукьяненко'):
+        # Three chapters of one book with no track numbers: the order comes only from the file names. 0.24.0: a Russian
+        # writer, so these order checks do not meet ruling 59 (a foreign author in Cyrillic asks his English name first;
+        # test_approve_this_order_keeps_ruling_59 below).
+        return [tone(self.audio / 'Unsorted' / 'Око мира' / name, self.cover, album='Око мира', artist=artist, title=name[:-4])
                 for name in ('Пролог.mp3', 'Глава 1.mp3', 'Глава 2.mp3')]
+
+    def test_approve_this_order_keeps_ruling_59(self):
+        # POST-023-01 (0.24.0): "Approve this order" on a foreign author credited only in Cyrillic files nothing until his
+        # English name is entered, rule or no rule (it filed «Джин Вулф» in Cyrillic).
+        self.order_book(artist='Роберт Джордан')
+        self.start(); self.research_all()
+        row = self.listed('order_unclear')['Око мира']
+        with self.assertRaisesRegex(ValueError, "Enter the author's English name"):
+            self.service.approve_book(row['id'], row['revision'])
+        self.assertEqual(self.service.jobs.status()['jobs'], [], 'nothing queued')
+        self.service.approve_book(row['id'], row['revision'], author='Jordan Robert')
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['manifest']['metadata']['author'], 'Jordan Robert')
 
     def test_order_unclear_is_its_own_row_with_the_order_approve_uses(self):
         self.order_book()
@@ -155,8 +169,12 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
         tone(self.audio / 'Unsorted' / 'Тихий ветер' / '01.mp3', self.cover, album='Тихий ветер', artist='Иван Петров', track='1/2')
         tone(self.audio / 'Unsorted' / 'Тихий ветер' / '02.mp3', self.cover, album='Тихий ветер', artist='Анна Смирнова', track='2/2')  # another author: never joined (ruling 19)
         self.start(); self.research_all()
-        causes = sorted((row['ask']['cause'], row['ask']['facts']) for row in self.service.reviews.page(status='output_attention', group='part_of_book')['rows'])
-        self.assertEqual(causes, [('chapter', {}), ('siblings', {'beside': 1})])
+        # Ruling 68 (0.24.0): the two files of one folder, numbered 1/2 and 2/2, are one book whatever their credits (the
+        # credits stay story credits); no file of it is "one part of a bigger book".
+        rows = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
+        self.assertEqual(rows, [])
+        books = [row for row in self.service.reviews.page()['rows'] if row['title_clue'] == 'Тихий ветер']
+        self.assertEqual([len(row['members']) for row in books], [2])
 
     def test_every_current_book_is_listed_or_accounted_for(self):
         tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера')  # a question
@@ -193,7 +211,7 @@ class HoldRowTests(test_approve_as_is.ApproveFixture):
     def test_g6_a_new_author_rule_keeps_the_list_and_checks_again_only_the_books_it_names(self):
         # Senua's 0.22.0 early review, G6: one unrelated Same author? answer emptied the whole list until a full pass.
         import author_rules
-        self.order_book()  # Око мира, Роберт Джордан: Order unclear
+        self.order_book(artist='Роберт Джордан')  # Око мира, Роберт Джордан: Order unclear
         tone(self.audio / 'Unsorted' / 'Утро снайпера' / '01.mp3', self.cover, album='Утро снайпера')  # a question
         for n in (1, 2):
             tone(self.audio / 'Unsorted' / 'Дюна' / ('%02d.mp3' % n), self.cover, album='Дюна', artist='Фрэнк Герберт', track='%d/12' % n)

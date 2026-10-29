@@ -473,6 +473,22 @@ class BrowserTests(unittest.TestCase):
             self.assertEqual(status,409);self.assertEqual(rejected['error'],value['automatic_processing']['start_block_reason'])
         finally:self.server.closing=False
 
+    def test_destination_route_answers_typed_refusals_and_saves_through_the_engine(self):
+        # Rulings 69 and 71h: Choose folder / Use computed folder go through one route; a folder is never typed by the page
+        # and the engine is the only validator. A refusal carries its typed cause; nothing on disk changes here.
+        identity = '00000000-0000-4000-8000-000000000001'
+        code, body = self.json_call('/api/candidate/destination', {'library': 'Audiobooks', 'id': identity, 'revision': 1, 'folder': str(self.base)})
+        self.assertEqual((code, body['cause']), (409, 'changed'), body)
+        code, body = self.json_call('/api/candidate/destination', {'library': 'Audiobooks', 'id': identity, 'revision': 1, 'folder': 7})
+        self.assertEqual(code, 400, body)
+        code, body = self.json_call('/api/candidate/destination', {'library': 'Audiobooks', 'id': identity, 'revision': 1})
+        self.assertEqual(code, 400, body)
+        with patch.object(self.server.merge, 'destination_choose', return_value={'outcome': 'saved', 'destination_override': None, 'preview': None, 'move': None}) as choose:
+            code, body = self.json_call('/api/candidate/destination', {'library': 'Audiobooks', 'id': identity, 'revision': 1, 'folder': None, 'queue': True, 'title': 'Book'})
+        self.assertEqual((code, body['outcome']), (200, 'saved'), body)
+        choose.assert_called_once_with(identity, 1, None)
+
+
 class WindowlessMainTests(unittest.TestCase):
     def test_readiness_runs_before_serving_with_no_standard_streams(self):
         import web_server

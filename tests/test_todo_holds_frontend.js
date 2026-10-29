@@ -52,7 +52,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const order=[hold('o1','order_unclear','no_tracks',{missing:12,total:12}),hold('o2','order_unclear','some_missing',{missing:3,total:12}),hold('o3','order_unclear','some_missing',{missing:1,total:12}),
     hold('o4','order_unclear','tied'),hold('o5','order_unclear','gaps'),hold('o6','order_unclear','unknown'),hold('o7','order_unclear','conflict'),hold('o8','order_unclear','odd_tracks')];
   paint(order);
-  assert.deepEqual(order.map(r=>hint(trOf(r.id))),['No file has a track number. The order comes from the file names.','3 of 12 files have no track number.','1 of 12 files has no track number.',
+  assert.deepEqual(order.map(r=>hint(trOf(r.id))),['The tags have no track numbers. The file names set the order.','3 of 12 files have no track number.','1 of 12 files has no track number.',
     'Some files share a track number.',"Track numbers skip or don't start at 1.","The app can't be sure of the playback order.",
     'The file names and the track tags number the files differently.',"Some track tags aren't plain numbers."]);
   let tr=trOf('cand-o1');
@@ -150,7 +150,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   for(const r of sets){const b=buttonsOf(trOf(r.id));assert.deepEqual(b.slice(0,3).map(x=>x.textContent),['Approve as one book','Keep as separate books','Scan again'],r.id);}
   {const keep=buttonsOf(tr)[1];assert.equal(keep.title,'Make each file shown its own book. Nothing is joined. Each book is checked again.');
    assert.equal(keep.getAttribute('aria-label'),'Keep as separate books: Title s1');assert.ok(keep.className.includes('ask-convert'));}
-  assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-label').textContent,'As one book');
+  assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-to').children[0].textContent,'As one book');
   // An unsaved panel edit makes Keep inert; a missing title (the join's test) does not.
   run('trackDirty=true;manualTrackTouched=true;trackDraft={id:"cand-s1"};controls()');
   assert.equal(buttonsOf(tr)[1].getAttribute('aria-disabled'),'true');assert.equal(buttonsOf(tr)[1].title,'The details panel has unsaved edits for this book: the track order or included files. Save them there, or discard them.');

@@ -216,9 +216,11 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         self.assertEqual([r.get('volume_of_set') for r in self.rows()], [{'kept': False}] * 2)
 
     def test_a_set_the_chapters_do_not_settle_is_asked_and_approved_as_one_book(self):
+        # 0.24.0: the author is credited in Latin letters here; «Еспер Эрсгорд» in Cyrillic now asks its English spelling first
+        # (ruling 39 for a first name the app does not know), before the set question this suite checks.
         for n in (1, 2):
             part(self.folder('Чёрная звезда') / ('Black Star Season %d.m4b' % n), 'Чёрная звезда', n, [(0, 500, 's0%de01' % n), (500, 1000, 's0%de02' % n)],
-                 album='Чёрная звезда', artist='Еспер Эрсгорд', total=2)
+                 album='Чёрная звезда', artist='Jesper Ersgård', total=2)
         row = self.start()[0]
         result = self.research(row)
         self.assertIn('One part of a bigger book', result['reasons']); self.assertEqual(result['part_set']['basis'], 'seasons')
@@ -233,7 +235,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
     def seasons(self, names=('Black Star Season 1', 'Black Star Season 2')):
         folder = self.folder('Чёрная звезда')
         return [part(folder / (name + '.m4b'), 'Чёрная звезда', n, [(0, 500, 's0%de01' % n), (500, 1000, 's0%de02' % n)], album='Чёрная звезда',
-                     artist='Еспер Эрсгорд', total=len(names)) for n, name in enumerate(names, 1)]
+                     artist='Jesper Ersgård', total=len(names)) for n, name in enumerate(names, 1)]
 
     def asked(self):
         row = self.start()[0]
@@ -270,7 +272,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         # answered {'kept': 2} and changed nothing; the set was asked again at the next research, and again after each Keep.
         self.seasons()
         row = self.asked()
-        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Еспер Эрсгорд'}, False, 'Panel Save')
+        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Jesper Ersgård'}, False, 'Panel Save')
         listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
         self.assertEqual([r['id'] for r in listed], [row['id']], 'positive control: still asked after the Save')
         self.assertTrue(listed[0]['review'], 'positive control: the panel values are saved on the set')
@@ -317,7 +319,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         from scanner import connect
         self.seasons()
         row = self.asked()
-        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Еспер Эрсгорд'}, False, 'Panel Save')
+        self.service.reviews.save('Audiobooks', row['id'], row['revision'], {'title': 'Чёрная звезда', 'canonical_author': 'Jesper Ersgård'}, False, 'Panel Save')
         listed = self.service.reviews.page(status='output_attention', group='part_of_book')['rows']
         self.assertTrue(listed[0]['review'], 'positive control: the panel values are saved on the set')
 
@@ -349,8 +351,8 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         # One kept file carries a single chapter: as one part of a set it would be refused ("one part is not the whole
         # book"); kept by Sergei it is a book of its own and converts like any other.
         folder = self.folder('Чёрная звезда')
-        part(folder / 'Black Star Season 1.m4b', 'Чёрная звезда', 1, [(0, 500, 's01e01'), (500, 1000, 's01e02')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=2)
-        second = part(folder / 'Black Star Season 2.m4b', 'Чёрная звезда', 2, [(0, 1000, 's02e01')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=2)
+        part(folder / 'Black Star Season 1.m4b', 'Чёрная звезда', 1, [(0, 500, 's01e01'), (500, 1000, 's01e02')], album='Чёрная звезда', artist='Jesper Ersgård', total=2)
+        second = part(folder / 'Black Star Season 2.m4b', 'Чёрная звезда', 2, [(0, 1000, 's02e01')], album='Чёрная звезда', artist='Jesper Ersgård', total=2)
         row = self.asked()
         self.service.keep_separate(row['id'], row['revision'])
         new = next(r for r in self.rows() if r['members'][0]['path'] == str(second))
@@ -363,7 +365,7 @@ class ResearchTests(test_approve_as_is.ApproveFixture):
         sources = self.seasons(names=('Black Star Season 1', 'Black Star Season 2', 'Black Star Season 3'))
         row = self.asked()
         self.service.keep_separate(row['id'], row['revision'])
-        sources[0].unlink(); part(sources[0], 'Чёрная звезда', 1, [(0, 400, 's01e01'), (400, 1000, 's01e02')], album='Чёрная звезда', artist='Еспер Эрсгорд', total=3, seconds=2)
+        sources[0].unlink(); part(sources[0], 'Чёрная звезда', 1, [(0, 400, 's01e01'), (400, 1000, 's01e02')], album='Чёрная звезда', artist='Jesper Ersgård', total=3, seconds=2)
         self.inv.launch('Audiobooks'); finish_scan(self.inv)
         self.assertEqual(sorted(len(r['members']) for r in self.rows()), [1, 1, 1], 'one changed file alone forms no set')
 

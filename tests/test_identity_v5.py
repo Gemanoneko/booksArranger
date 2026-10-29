@@ -168,10 +168,18 @@ class CollectionsAndGarbledTags(unittest.TestCase):
             with self.subTest(value=value):self.assertFalse(garbled(value))
 
     def test_garbled_tags_are_not_used_and_the_folder_name_is(self):
+        # POST-023-04 (0.24.0): cp1251 read as Latin-1 is read repaired (tag_text); the repaired tags name the book.
         row=book(member('Брукс Макс - Мировая война Z/01.mp3',album='ÌÈÐÎÂÀß ÂÎÉÍÀ Z',artist='Ìàêñ Áðóêñ'),
                  member('Брукс Макс - Мировая война Z/02.mp3',album='ÌÈÐÎÂÀß ÂÎÉÍÀ Z',artist='Ìàêñ Áðóêñ'))
         record=identify(row,ROOT,[],())
         self.assertTrue(record['accepted'],record)
+        self.assertEqual(local_identity.title_key(record['fields']['title']['value']),local_identity.title_key('Мировая война Z'))
+        self.assertTrue(local_identity.compare_names(record['fields']['author']['value'],'Брукс Макс'),record['fields']['author'])
+        self.assertFalse(any('garbled' in i['why'] for i in record['ignored']))
+        # Bytes that are lost (replacement characters) stay unused: the folder names the book.
+        row=book(member('Брукс Макс - Мировая война Z/01.mp3',album='��� Z',artist='���'),
+                 member('Брукс Макс - Мировая война Z/02.mp3',album='��� Z',artist='���'))
+        record=identify(row,ROOT,[],())
         self.assertEqual((record['fields']['title']['value'],record['fields']['author']['value']),('Мировая война Z','Брукс Макс'))
         self.assertTrue(any('garbled' in i['why'] for i in record['ignored']))
 
@@ -285,7 +293,9 @@ class PartsStayTogether(unittest.TestCase):
 
     def test_files_with_different_title_tags_stay_separate(self):
         files=[('Сборник/%s.mp3'%name,{'title':'Рассказ %s'%name,'artist':'Автор Один'}) for name in ('Альфа','Бета')]
-        self.assertEqual(len(groups.build(self.rows(files))),2)
+        # Ruling 68 (0.24.0): never divided, never joined silently: one candidate, held as a folder question.
+        built=groups.build(self.rows(files));self.assertEqual(len(built),1)
+        group=next(iter(built.values()));self.assertEqual(group['folder_unit']['kind'],'ask');self.assertTrue(group['source_partition_uncertain'])
 
     # Senua's early 0.22.0 review (2026-10-24), G1-G3: three ways two books became one group that converts on its own.
     def test_g1_numbered_books_under_a_bare_surname_stay_separate_books(self):
@@ -298,21 +308,27 @@ class PartsStayTogether(unittest.TestCase):
         built=groups.build(self.rows(files))
         self.assertEqual([len(g['members']) for g in built.values()],[2],'positive control: with no credit elsewhere the shared start names the book')
         files.append(('Other/Черновик/01.mp3',{'artist':'Сергей Лукьяненко','album':'Черновик'}))
-        self.assertEqual(sorted(len(g['members']) for g in groups.build(self.rows(files)).values()),[1,1,1])
+        # Ruling 68 (0.24.0) with rulings 19c and 50: «Часть 1», «Часть 2» of one folder are one book whoever the start names.
+        self.assertEqual(sorted(len(g['members']) for g in groups.build(self.rows(files)).values()),[1,2])
 
     def test_g1_numbered_files_with_different_titles_join_only_when_their_folder_names_another_author(self):
         names=('Вступление от переводчика','Буфет Хитаги','Песня Цубасы')
         files=[('Unsorted/Сборник/%02d Моногатари короткие истории - %s.mp3'%(n,name),{}) for n,name in enumerate(names,1)]
-        self.assertEqual(len(groups.build(self.rows(files))),3,'no folder names the author: the shared start may be one')
+        # Ruling 68 (0.24.0): a numbered collection folder is one book (its file names number the whole folder).
+        self.assertEqual(len(groups.build(self.rows(files))),1,'one collection folder, numbered 01-03')
         files=[('Unsorted/Сапковский Анджей - Ведьмак/%02d Сапковский - %s.mp3'%(n,name),{}) for n,name in enumerate(names,1)]
-        self.assertEqual(len(groups.build(self.rows(files))),3,'the folder names the shared start as the author')
+        # Ruling 68 (0.24.0): "Вступление от переводчика" is a chapter label, so no file names a work of its own: the folder
+        # numbered 01-03 is one book.
+        self.assertEqual(len(groups.build(self.rows(files))),1,'one numbered folder')
 
     def test_g2_a_junk_title_tag_never_joins_books(self):
         files=[('Unsorted/Кинг/Кинг - %s.mp3'%name,{'title':'Аудиокнига','artist':'Стивен Кинг','track':str(n)}) for n,name in enumerate(('Оно','Мизери'),1)]
         self.assertEqual(len(groups.build(self.rows(files))),2)
         # Live catalog 2026-10-24: 5 Сборник folders of stories each tagged "Без имени".
         files=[('Unsorted/Ужасы. Сборник рассказов/Сборник/%s.mp3'%name,{'title':'Без имени'}) for name in ('Бритва','Сепсис','Оплата')]
-        self.assertEqual(len(groups.build(self.rows(files))),3)
+        # Ruling 68 (0.24.0): one folder of stories is one candidate, held as a folder question; the junk tag names nothing.
+        built=groups.build(self.rows(files));self.assertEqual(len(built),1)
+        group=next(iter(built.values()));self.assertEqual(group['folder_unit']['kind'],'ask');self.assertNotEqual(local_identity.norm(group['title_clue']),'безимени')
 
     def test_g2_a_junk_set_name_is_never_the_title(self):
         members=[member('Unsorted/Кинг/Кинг - %s.mp3'%name,title='Аудиокнига',artist='Стивен Кинг') for name in ('Оно','Мизери')]
@@ -397,7 +413,9 @@ class PartsStayTogether(unittest.TestCase):
         self.assertEqual(next(iter(built.values()))['numbered_set']['basis'],'same title tag')
         # Two other works by their file names (no "Пастушья корона NN" start, no chapter label) still refuse the set.
         built=groups.build(self.rows(self.pastushya(extra=('Шляпа, полная неба','Зимних дел мастер'))))
-        self.assertEqual({len(g['members']) for g in built.values()},{1},'not joined: the file names name two more works')
+        # Ruling 68 (0.24.0): one folder is never divided; two more works make it a held folder question, never one book.
+        self.assertEqual([len(g['members']) for g in built.values()],[79],'one folder, one held question')
+        group=next(iter(built.values()));self.assertEqual(group['folder_unit']['kind'],'ask');self.assertTrue(group['source_partition_uncertain'])
         # The tag's own title and a number is a chapter only in a set that shows chapters ("Пастушья корона 02", a "Глава"):
         # two books of a series under one series tag stay two books.
         files=[('Unsorted/Ведьмак/Ведьмак %d. %s.mp3'%(n,name),{'title':'Ведьмак','artist':'Анджей Сапковский'}) for n,name in ((1,'Последнее желание'),(2,'Меч предназначения'))]

@@ -348,7 +348,7 @@ function gate(element,sentence){
   }
 }
 // The read-only row and details controls work once the books are on screen; everything else in them changes something.
-function lookingOnly(element){return /^(View metadata|Open folder|Source folders)\b/.test(element.getAttribute?.('aria-label') || element.textContent || '');}
+function lookingOnly(element){return /^(View metadata|Open folder|Open source folder|Open book folder|Source folders)\b/.test(element.getAttribute?.('aria-label') || element.textContent || '');}
 function gateLoading(){
   if(!LS || !loadingActive)return;
   const books=booksOnScreen();
@@ -418,7 +418,7 @@ function controls() {
     $('resume-jobs').disabled=ended || recoveryDisconnected || !waiting && (!(jobs?.queued || jobs?.retry_checks?.waiting) || ['Running','running'].includes(jobs?.state));
     startWaitTip($('resume-jobs'),waiting);
   }
-  renderMetaSave();updateNamesRows();renderLaterButtons();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
+  renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
   if(metaQueued && !busy && !metaSave)saveMetadata();  // a Save pressed during another press runs now (ruling 35)
@@ -528,12 +528,15 @@ function renderRows(force=false) {
     // The to-do rows take fresh data in place too; a row Sergei settled (approved, removed, found) leaves at this
     // refresh unless it holds focus.
     for(const entry of askRows.values()){const fresh=rows.find(row=>row.id===entry.row.id);if(fresh)entry.row=fresh;}
+    // The folder list, the identity lines and the destination block take fresh data in place too (0.23.1).
+    for(const map of [folderRows,bookCells,destRows])for(const entry of map.values()){const fresh=rows.find(row=>row.id===entry.row?.id);if(fresh)entry.row=fresh;}
+    updateFolderRows();updateDestinations();
     updateNamesRows();  // Edit names takes fresh data in place too (its draft stays)
     for(const tr of [...($('inventory').children || [])]){const id=tr.dataset?.path;if(askDone.has(id) && !rows.some(row=>row.path===id) && (!tr.contains?.(focused) || deletedBooks.has(id))){$('inventory').removeChild?.(tr);askRows.delete(id);askDone.delete(id);}}
     updateAskRows();
     const selected=rows.find(row=>row.path===selectedPath);if(selected)select(selected,false);return;}
   const listFocus=!!document.activeElement && !!$('inventory').contains?.(document.activeElement);  // m-10: focus the rebuild drops
-  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();
+  const body=$('inventory'); body.replaceChildren();askRows.clear();deleteButtons.clear();namesRows.clear();folderRows.clear();bookCells.clear();destRows.clear();
   for(const outcomes of [askDone,askResults,askChecked])for(const id of [...outcomes.keys()])if(!rows.some(row=>row.id===id))outcomes.delete(id);
   const attentionList=view==='candidates' && filters[view]==='output_attention';
   // In this filter the list window grows with the viewport: rows with fields are 150-230 px tall (section 9).
@@ -543,25 +546,30 @@ function renderRows(force=false) {
   // The narrow table (follow-up 3, section 5): the bands come from CSS; explicit roles keep the table's meaning when a
   // narrow band shows each row as a block.
   $('inventory-table')?.classList?.toggle('candidates',view==='candidates');$('inventory-table')?.classList?.toggle('files',view!=='candidates');
-  for(const label of view==='candidates'?['Select','Title clue','Author / reader clues','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;th.setAttribute('role','columnheader');heading.append(th);}$('inventory-head').append(heading);
+  for(const label of view==='candidates'?['Select','Book','Author / reader','Audio files','Review status','Actions']:['Type','Arrival','Existing title / filename clue','Existing author / artist clue','Preview status','Proposed destination','Actions']){const th=document.createElement('th');th.textContent=label;th.setAttribute('role','columnheader');heading.append(th);}$('inventory-head').append(heading);
   for (const row of rows) {
     const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;tr.setAttribute('role','row');
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
     if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');td.setAttribute('role','cell');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
     const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',readError(row) ? `Read error · ${readError(row).split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
     for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;td.setAttribute('role','cell');
+      // A question row's Book and Author / reader columns are labelled lines (Judy 0.23.1 section 4); other rows keep the clue.
+      if(row.kind==='candidate' && askOf(row) && index===0)buildBookCell(row,td);
+      if(row.kind==='candidate' && askOf(row) && index===1)buildAuthorCell(row,td);
       // Medium and compact bands fold the two clue columns into a second line of the title cell (follow-up 3, section 5).
-      if(row.kind==='candidate' && index===0)td.append(node('p',titleFacts(row),'field-help title-facts'));
+      if(row.kind==='candidate' && index===0){const facts=node('p',titleFacts(row),'field-help title-facts');td.append(facts);const cell=bookCells.get(row.id);if(cell){cell.facts=facts;td.append(cell.narrowFlag);}}
       if(row.kind==='candidate' && index===3){
         // One honest state per row: attention, a queued-next press, the Started over marker, or a saved-review hold.
         // (A book waiting its turn after Retry keeps its disabled "Queued" button, v0.16.12.)
         if(askOf(row))buildAskCell(row,td);  // a book only Sergei can move on: its sentence, fields, Goes to (Judy 2026-10-24)
         else{
         const shown=rowState(row);
-        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);stoppedGoesTo(row,td);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
+        if(shown){const hint=node('p','','field-help attention-hint');setHint(hint,shown.hint,shown.clause,shown.warn);td.append(hint);if(attentionOf(row))td.title=cellTip(row);rowRetries.set(row.path,{row,hint,button:null,clear:null,cell:td});}
         else if(repairedText(row.creation?.job?.repaired))td.append(node('p',repairedText(row.creation.job.repaired),'field-help attention-hint'));
         else if(row.creation?.job?.kept===true)td.append(node('p',KEPT_HINT,'field-help attention-hint'));
         if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
+        // Where the files are, then where the book goes or is (Judy 0.23.1 sections 3.4, 15 and 16): every candidate row.
+        buildSourceLine(row,td);buildDestination(row,td);
         }
         buildNamesBlock(row,td);  // Edit names (Judy 0.22.2 section 1): Place, Entered by you, the editor when open
       }
@@ -586,8 +594,9 @@ function renderRows(force=false) {
     if(askOf(row))buildAskActions(row,buttons);
     if(row.kind==='candidate')buildNamesButton(row,buttons);  // after the row's own buttons, before View metadata (Judy 1.1)
     const inspect=node('button','View metadata','quiet');inspect.type='button';inspect.title='Show metadata, artwork and the file location.';inspect.setAttribute('aria-label','View metadata: '+name);inspect.setAttribute('aria-describedby','inspect-help');inspect.disabled=!recordIdentity(row).id;inspect.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row);});inspect.addEventListener('keydown',event=>event.stopPropagation());buttons.append(inspect);
-    if(row.kind==='candidate' && row.source_directory_count!==1){const folders=node('button','Source folders','quiet');folders.type='button';folders.title="Show the folders containing this candidate's source tracks.";folders.setAttribute('aria-label','Source folders: '+name);folders.setAttribute('aria-describedby','folder-help');folders.addEventListener('click',event=>{event.stopPropagation();viewMetadata(row,true);});folders.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folders);}
-    else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title=row.kind==='candidate'?"Open this book's source folder in File Explorer.":"Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
+    // One "Open source folder" on every book row (Judy 0.23.1 section 3; ruling 70: "Open book folder" once the originals are gone).
+    if(row.kind==='candidate')buildFolderButton(row,buttons);
+    else{const folder=node('button','Open folder','quiet');folder.type='button';folder.title="Open this source file's folder in File Explorer.";folder.setAttribute('aria-label','Open folder: '+name);folder.setAttribute('aria-describedby','folder-help');folder.disabled=!recordIdentity(row).id;const status=node('span','','folder-message');status.setAttribute('role','status');folderState(row,folder,status);folder.addEventListener('click',event=>{event.stopPropagation();select(row,selectedPath!==row.path);openFolder(row,folder,status);});folder.addEventListener('keydown',event=>event.stopPropagation());buttons.append(folder,status);}
     if(row.kind==='candidate' && deleteOffer(row))buildDeleteButton(row,buttons);  // ruling 23: last, on its own line
     else if(row.kind==='candidate' && copyOffer(row))buildDeleteButton(row,buttons,'copy');  // ruling 25: the same slot
     actions.append(buttons);
@@ -863,7 +872,8 @@ function renderInspector(inspector,row,sequence){closeRecoveryDialog(false);reco
     if(section.raw_tags){const raw=node('details');const summary=node('summary','All source tags');summary.title='Inspect all original source tags without changing them.';summary.setAttribute('aria-describedby','inspect-help');raw.append(summary,node('pre',JSON.stringify(section.raw_tags,null,2)));panel.append(raw);}
     if(section.alternatives?.length){const alternatives=node('details');const summary=node('summary','Other source artwork');summary.title='Inspect alternative artwork from source files.';summary.setAttribute('aria-describedby','inspect-help');alternatives.append(summary);for(const cover of section.alternatives){const holder=node('div','','inspector-artwork');alternatives.append(holder);inspectorCover(cover,holder,sequence);}panel.append(alternatives);}$('inspector-sections').append(panel);
   }
-  const directories=inspector.source_directories || [];$('source-folders').hidden=!directories.length;for(const directory of directories){const line=node('div','','source-directory');line.append(node('p',directory.path,'path'));const button=node('button','Open folder','quiet'),status=node('span','','folder-message');button.type='button';button.title="Open this source file's folder in File Explorer.";button.setAttribute('aria-label','Open folder: '+directory.path);button.setAttribute('aria-describedby','folder-help');status.setAttribute('role','status');folderState(row,button,status,'source',directory.id);button.addEventListener('click',()=>openFolder(row,button,status,'source',directory.id));line.append(button,status);$('folder-list').append(line);}
+  // One builder for the details panel's folders and the row's list (Judy 0.23.1, checklist 3).
+  const directories=(inspector.source_directories || []).filter(directory=>typeof directory?.path==='string');$('source-folders').hidden=!directories.length;directories.forEach((directory,i)=>$('folder-list').append(folderLine(row,directory,i+1,directories.length).line));
 }
 async function inspectorCover(cover,holder,sequence){const caption=node('p',cover.label || 'Source artwork'),status=node('p',cover.error || cover.status || 'Loading artwork…');holder.append(caption,status);if(!cover.thumbnail_url){status.textContent=cover.error || cover.status || 'Cover not found';return;}try{const url=new URL(cover.thumbnail_url,location.origin);if(url.origin!==location.origin)throw Error('Cover preview unavailable');const response=await fetch(url.href,{headers:{'X-Books-Token':token},credentials:'same-origin',cache:'no-store'});if(!response.ok)throw Error('Cover could not be read');const blob=await response.blob();if(sequence!==inspectSequence)return;const object=URL.createObjectURL(blob);inspectorObjects.push(object);const image=node('img');image.alt=cover.label || 'Source artwork';image.src=object;image.addEventListener('error',()=>{image.hidden=true;status.textContent='Cover could not be read';});holder.append(image);status.textContent=cover.status || '';}catch(error){if(sequence===inspectSequence)status.textContent=cover.error || error.message || 'Cover preview unavailable';}}
 function sourceLink(url,label){const link=node('a',label);try{const parsed=new URL(url,location.origin);if(!['http:','https:'].includes(parsed.protocol))throw Error();link.href=parsed.href;link.target='_blank';link.rel='noopener noreferrer';}catch{link.removeAttribute('href');link.textContent=label+' (source unavailable)';}return link;}
@@ -2242,7 +2252,12 @@ function rowState(row){
   return restartText(row) || releaseText(row);
 }
 // The two folded columns, as the second line of the title cell (medium and compact bands).
-function titleFacts(row){const count=Array.isArray(row.members)?row.members.length:0;return `${(row.artists || []).join('; ') || 'Unknown'} · ${count.toLocaleString()} audio ${count===1?'file':'files'}`;}
+function titleFacts(row){
+  const count=Array.isArray(row.members)?row.members.length:0,files=`${count.toLocaleString()} audio ${count===1?'file':'files'}`,ask=askOf(row);
+  // A question row folds its Author and Reader lines here (Judy 0.23.1 section 4.3): the author Approve uses, the reader.
+  if(ask){const reader=typeof ask.reader==='string'?ask.reader.trim():'';return [bookAuthor(row) || 'Unknown',reader?'Reader: '+reader:'',files].filter(Boolean).join(' · ');}
+  return `${(row.artists || []).join('; ') || 'Unknown'} · ${files}`;
+}
 // The Started over summary line (follow-up 3, section 2.3; follow-up 4, section 1.3): global counts, live pass state.
 function renderRestartSummary(){
   const line=$('restart-summary');if(!line)return;
@@ -2449,13 +2464,14 @@ const ODD_TITLE=['title_bitrate','title_series','title_latin'];
 const HOLD_STATUS={part_of_book:'Part of a bigger book',files_unclear:'Files unclear',order_unclear:'Order unclear'};
 function holdSentence(kind,cause,f={}){
   const n=value=>Number.isInteger(value)?value:Number(value) || 0;
-  if(kind==='order_unclear')return {no_tracks:'No file has a track number. The order comes from the file names.',
+  if(kind==='order_unclear')return {no_tracks:'The tags have no track numbers. The file names set the order.',
     some_missing:`${n(f.missing)} of ${n(f.total)} files ${n(f.missing)===1?'has':'have'} no track number.`,tied:'Some files share a track number.',
     gaps:"Track numbers skip or don't start at 1.",
     conflict:'The file names and the track tags number the files differently.',odd_tracks:"Some track tags aren't plain numbers."}[cause] || "The app can't be sure of the playback order.";
   if(kind==='files_unclear')return {track_total:`The tags say ${n(f.tags_say)} tracks, but ${n(f.here)} ${n(f.here)===1?'file is':'files are'} here.`,
     disc_total:`The tags say ${n(f.tags_say)} discs, but ${n(f.here)} ${n(f.here)===1?'is':'are'} here.`,
-    one_of_many:`This file is tagged as track ${n(f.index)} of ${n(f.total)}. The other tracks aren't here.`,
+    one_of_many:f.membership==='checking'?`This file is tagged as track ${n(f.index)} of ${n(f.total)}.`:`This file is tagged as track ${n(f.index)} of ${n(f.total)}. The other tracks aren't here.`,
+    folder_books:'This folder may hold more than one book.',
     lack_title:n(f.missing)===1?`1 of ${n(f.total)} files doesn't mention this book's title.`:`${n(f.missing)} of ${n(f.total)} files don't mention this book's title.`,
     mixed:'The files carry different albums or artists. They may be more than one book.',works:'The title tags name more than one book.',
     parts:"The parts of this set don't number cleanly."}[cause] || "The app can't be sure which files belong to this book.";
@@ -2490,11 +2506,12 @@ const ASK_TIPS={approve:'Approve with the values shown: convert if needed, renam
 const HOLD_SCAN_TIP="Check this book's folders again, for example after you rename or add files. Nothing is changed or deleted.";
 function holdKind(ask){return Object.hasOwn(HOLD_STATUS,ask?.kind || '')?ask.kind:'';}
 // The face and tooltip follow the chip, so the press says what is confirmed (B4 Buttons).
-function askLabel(entry,kind){const hold=holdKind(askOf(entry.row));return kind==='approve' && hold?HOLD_APPROVE[hold][0]:ASK_LABELS[kind];}
+function askLabel(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && folderQuestion(ask))return FOLDER_QUESTION.approve[0];if(kind==='approve' && gapRow(ask))return GAP_APPROVE[0];return kind==='approve' && hold?HOLD_APPROVE[hold][0]:ASK_LABELS[kind];}
 // A set of .m4b parts (cause set_*): the join always re-encodes once (ruling 19a, method A), so the tooltip says so (N3).
 const SET_APPROVE_TIP='Join the files shown, in this order, into one book: re-encode the audio once, rename, move to Audiobooks Sorted.';
 function setCause(ask){return holdKind(ask)==='part_of_book' && String(ask?.cause || '').startsWith('set_');}
-function askTip(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:kind==='approve' && inlineNames(entry.row)?'Approve this book with the author, title, series and number shown. Queued work waits for Start. Ctrl+Enter in a field does the same.':ASK_TIPS[kind];}
+function askTip(entry,kind){return chosenCopy(entry.row,askTipOf(entry,kind));}
+function askTipOf(entry,kind){const ask=askOf(entry.row),hold=holdKind(ask);if(kind==='approve' && setCause(ask))return SET_APPROVE_TIP;if(kind==='approve' && ask?.membership==='checking')return CHECKING_TIP;if(folderQuestion(ask) && (kind==='approve' || kind==='separate'))return kind==='approve'?FOLDER_QUESTION.approve[1]:FOLDER_QUESTION.separate;if(kind==='approve' && gapRow(ask))return GAP_APPROVE[1];return kind==='approve' && hold?HOLD_APPROVE[hold][1]:kind==='scan' && hold?HOLD_SCAN_TIP:kind==='approve' && inlineNames(entry.row)?'Approve this book with the author, title, series and number shown. Queued work waits for Start. Ctrl+Enter in a field does the same.':ASK_TIPS[kind];}
 const ASK_PENDING={delete:['Checking...',"Checking this book's files..."],copy:['Checking...','Checking the audiobook in {sorted}...'],approve:['Approving...','Approving this book...'],separate:['Keeping...','Keeping these files separate...'],convert:['Queuing...','Queuing this book...'],scan:['Scanning...',"Scanning this book's folders..."],remove:['Removing...','Removing this book from the list...']};
 const ASK_DONE={approve:['Queued','Approved. Converts if needed, then renames and moves it to Audiobooks Sorted.'],convert:['Queued','Approved without the missing files. Converts, renames and moves it to Audiobooks Sorted.'],
   found:[null,'Files found. The book is checked again.'],separate:[null,'Kept as separate books. Each is checked again.'],removed:[null,'Removed from the list. No files were touched.'],
@@ -2524,7 +2541,7 @@ function askFieldPlanOf(ask){
   else if(kind==='name_taken')plan={title:true,author:'input'};
   // Part of a bigger book always shows Title (the question is "is it a whole book, and what is it called?", B4).
   else if(kind==='part_of_book')plan={title:true,author:!askProposal(ask,'author')?'input':null};
-  plan.title=plan.title || !askProposal(ask,'title');
+  plan.title=plan.title || !askProposal(ask,'title') || Object.hasOwn(TITLE_FLAGS,ask.fields?.title?.flag || '');
   return plan;
 }
 // What Approve sends: only what Sergei changed. forPreview turns a same-author choice into the name it files under.
@@ -2545,7 +2562,7 @@ function askInert(row){
   const names=namesFor(row);  // Edit names open (Judy 1.3): Series and Number go together
   if(names?.series && !names.number)return 'Type the number in the series, or clear the series.';
   if(names?.number && !names.series)return 'Type the series name, or clear the number.';
-  if(askDestination(row)?.taken===true)return 'That name is already in Audiobooks Sorted. Change the title or author.';
+  if(askDestination(row)?.taken===true)return chosenCopy(row,'That name is already in Audiobooks Sorted. Change the title or author.');
   return askPanelEdits(row);
 }
 // Unsaved metadata, order or file edits in the panel for this book (Judy 2026-10-24, 0.22.0 review A5: trackDirty too). The
@@ -2569,7 +2586,7 @@ function askText(row){
   // A verified duplicate with the server's Remove this copy offer: the row says what it is (Judy's update spec 3.1).
   if(copyOffer(row))return {status:ASK_COPY.other[0],hint:sortedText(COPY_HINT)};
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
-  if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,ask.facts || {})};
+  if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,{...(ask.facts || {}),membership:ask.membership})};
   const copy=ASK_COPY[['title_author','author_unclear'].includes(ask.kind)?ask.why:ask.kind] || ASK_COPY[{title_author:'both_missing',author_unclear:'two_people'}[ask.kind] || 'other'];
   return {status:copy[0],hint:copy[1]};
 }
@@ -2679,7 +2696,7 @@ function buildHoldList(entry){
     for(const f of shown.filter(item=>(item.folder || '')===folder))box.append(node('p',f.name,'path'));
   }
   more(shown.length);
-  if(ask.cause==='mixed' || ask.cause==='works')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists],['Books',ask.facts?.works]])if(Array.isArray(items) && items.length)
+  if(ask.cause==='mixed' || ask.cause==='works' || ask.cause==='folder_books')for(const [label,items] of [['Albums',ask.facts?.albums],['Artists',ask.facts?.artists],['Books',ask.facts?.works]])if(Array.isArray(items) && items.length)
     box.append(node('p',`${label}: `+items.slice(0,3).map(item=>`${item.name==='(none)'?(label==='Albums'?'No album':'No artist'):item.name} (${plural(Number(item.files) || 0,'file','files')})`).join(' · ')+(items.length>3?` + ${(items.length-3).toLocaleString()} more`:''),'field-help'));
 }
 function buildInlineNames(entry){
@@ -2695,8 +2712,12 @@ function buildAskCell(row,td){
   const entry={row,cell:td,controls:[]};askRows.set(row.id,entry);
   entry.hint=node('p','','field-help attention-hint');entry.hint.id='attention-hint-'+row.id;
   entry.also=node('p','','field-help attention-also');entry.why=node('p','','field-help ask-why');entry.fields=node('div','','ask-fields');entry.missing=node('div','','ask-missing');entry.dest=node('p','','goes-to');
-  td.append(entry.hint,entry.also,entry.why,entry.fields,entry.missing,entry.dest);
+  // Judy 0.23.1 section 5.1: status, sentence, Also, why, fields, Numbers, membership, the file list, source line, Edit
+  // names, Goes to with the folder controls.
+  entry.numbers=node('p','','field-help ask-numbers');entry.membership=node('p','','field-help ask-membership');
+  td.append(entry.hint,entry.also,entry.why,entry.fields,entry.numbers,entry.membership,entry.missing);
   buildAskFields(entry);buildInlineNames(entry);buildAskMissing(entry);buildHoldList(entry);
+  buildSourceLine(row,td);entry.destEntry=buildDestination(row,td,entry.dest);entry.destBox=entry.destEntry.box;
   if(recordingMarker(row))td.append(node('p',recordingMarker(row),'field-help'));
   updateAskRow(entry);
 }
@@ -2707,7 +2728,7 @@ function buildAskActions(row,buttons){
   const hold=holdKind(ask),wide=hold || ask.kind==='files_missing'?' ask-convert':'';
   // A duplicate-recording row has no Approve (Futaba's 0.22.0 QA, m-3: it was inert there, its tooltip saying the name is
   // taken); a verified one gets Remove this copy in the Delete book slot. ask.duplicate is the server's, never read from copy.
-  const kinds=ask.duplicate?[]:ask.kind==='files_missing'?['scan',ask.missing?.present>0?'convert':'remove']:setCause(ask)?['approve','separate','scan']:hold?['approve',...({order_unclear:['order'],files_unclear:['choose']}[hold] || []),'scan']:['approve'];
+  const kinds=ask.duplicate?[]:ask.kind==='files_missing'?['scan',ask.missing?.present>0?'convert':'remove']:setCause(ask) || folderQuestion(ask)?['approve','separate','scan']:hold?['approve',...({order_unclear:['order'],files_unclear:['choose']}[hold] || []),'scan']:['approve'];
   entry.buttons=kinds.map(kind=>{const button=node('button',askLabel(entry,kind),'quiet row-retry'+(kind==='convert'?' ask-convert':wide));button.type='button';button.setAttribute('aria-describedby',entry.hint.id);
     button.addEventListener('click',event=>{event.stopPropagation();askPress(entry,kind);});button.addEventListener('keydown',event=>event.stopPropagation());buttons.append(button);return {kind,button};});
   entry.primaryKind=kinds[0];entry.primary=entry.buttons[0]?.button;entry.secondKind=kinds[1];entry.second=entry.buttons[1]?.button;
@@ -2737,31 +2758,22 @@ function updateAskButton(entry,button,kind){
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
   const label=mode==='done' && queued?'Queued':mode==='waiting'?'Queued':mode==='pending'?ASK_PENDING[kind][0]:askLabel(entry,kind);
   const sibling=queuedFor(row) || (queueState.running?.book_id===row.id?queueState.running:null),siblingTip=sibling?`${queueWord(sibling.action)} is queued for this book. Cancel it to use this.`:(ASK_PENDING[askPendings.get(row.id)?.kind]?.[1] || '');
-  const title={done:ASK_DONE[done]?.[1] || '',offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
+  const title={done:chosenCopy(row,ASK_DONE[done]?.[1] || ''),offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
   if(['pending','inert','queued','waiting','sibling'].includes(mode))button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
   button.disabled=!['ready','pending','inert','queued','waiting','sibling'].includes(mode);
 }
-// Every Stopped row shows where its book goes (Judy's to-do spec 1.6 and section 4; Futaba's m-3): its job's own destination.
-function stoppedGoesTo(row,td){
-  const job=row.creation?.job,dest=job?.destination;if(job?.state!=='Output needs attention' || typeof dest?.path!=='string' || !dest.path)return;
-  const line=node('p','','goes-to');line.append(node('span','Goes to','goes-label'),node('span',outputName()+'\\'+dest.path,'path'));line.title=dest.absolute || dest.path;td.append(line);
-}
-function renderGoesTo(entry){
-  const dest=askDestination(entry.row),line=entry.dest,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
-  line.hidden=!path;if(!path)return;
-  // On a set row the path is true only for Approve as one book (Keep is the other answer): "As one book" (Judy 2026-10-25).
-  const taken=dest.taken===true && !askDone.has(entry.row.id),label=taken?'Already there':setCause(askOf(entry.row))?'As one book':'Goes to',key=JSON.stringify([label,path]);
-  if(line.dataset.key!==key){line.replaceChildren();line.append(node('span',label,'goes-label'),node('span',path,'path'));line.dataset.key=key;}
-  line.title=dest.absolute || path;line.classList?.toggle?.('taken',taken);
-}
+// Every row's Goes to line is the destination block (Judy 0.23.1 section 15.1, destPlan): a Stopped row shows its job's own
+// destination (Judy's to-do spec 1.6; Futaba's m-3); a set row or a raised folder question says "As one book" (the path is
+// true only for that answer).
+function renderGoesTo(entry){const dest=destRows.get(entry.row.id);if(dest){dest.row=entry.row;updateDestination(dest);}}
 function updateAskRow(entry){
   const row=entry.row,ask=askOf(row);if(!ask)return;
   const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPendings.get(row.id)?.kind || null;
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
-  if(done){status=ASK_DONE[done]?.[0] || status;hint=ASK_DONE[done]?.[1] || hint;}
+  if(done){status=ASK_DONE[done]?.[0] || status;hint=chosenCopy(row,ASK_DONE[done]?.[1] || hint);}
   else if(pending)hint=clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
   else if(result){hint=result.text;warn=result.warn!==false;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
@@ -2774,6 +2786,10 @@ function updateAskRow(entry){
   if(entry.why.textContent!==why)entry.why.textContent=why;entry.why.hidden=!why;
   entry.fields.hidden=!!done;entry.missing.hidden=!!done;
   if(entry.nochoice)entry.nochoice.hidden=!!askDraft(row.id).choice;
+  // Judy 0.23.1 section 5: what the numbers do and what is known about which files belong (facts only, from the engine).
+  if(entry.numbers)setLine(entry.numbers,done?'':numbersLine(ask));if(entry.membership)setLine(entry.membership,done?'':membershipLine(row));
+  updateBookCell(row);const cell=bookCells.get(row.id);if(cell?.facts){const facts=titleFacts(row);if(cell.facts.textContent!==facts)cell.facts.textContent=facts;}
+  const folders=folderRows.get(row.id);if(folders){folders.row=row;updateFolderRow(folders);}
   renderGoesTo(entry);
   for(const {kind,button} of entry.buttons || [])updateAskButton(entry,button,kind);
   if(entry.cancel)updateQueueCancel(entry.cancel,row,ASK_QUEUE_ACTIONS);
@@ -2789,12 +2805,12 @@ function askPreview(entry,delay){
   const row=entry.row,id=row.id,d=askDraft(id),names=namesFor(row),values={...askValues(row,true),...(names?{names}:{})},key=JSON.stringify(values);
   if(d.timer!==null){clearTimeout(d.timer);d.timer=null;}
   if(key===d.previewKey)return;
-  if(key==='{}'){d.previewKey=key;d.preview=null;++d.seq;updateAskRow(entry);return;}
+  if(key==='{}'){d.previewKey=key;d.preview=null;d.shownTitle=undefined;++d.seq;updateAskRow(entry);return;}
   if(values.title!==undefined && !values.title)return;  // an empty title: Approve is inert; the last good path stays
   if(names && (names.series && !names.number || names.number && !names.series))return;  // Series and Number go together (Judy 1.3)
   const send=async()=>{
     d.timer=null;d.previewKey=key;const seq=++d.seq;
-    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string')d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || ''};
+    try{const result=await request('/api/candidate/approve-preview',{library:'Audiobooks',id,revision:row.revision,...values});const p=result?.preview;if(seq===d.seq && typeof p?.path==='string'){d.preview={path:p.path,absolute:p.absolute || '',taken:p.taken===true,reason:p.reason || ''};d.shownTitle=typeof values.title==='string'?values.title:undefined;}
       const state=namesState.get(id);if(seq===d.seq && names && state && p)state.preview={...(state.preview || {}),place:p.place,applies:p.applies,path:p.path,absolute:p.absolute};}
     catch(error){if(seq===d.seq)d.previewKey=null;}
     finally{const fresh=askRows.get(id);if(fresh && seq===d.seq)updateAskRow(fresh);batchCounts();}
@@ -2843,6 +2859,356 @@ function askLeave(entry){
   }
   $('filter').focus?.({preventScroll:true});
 }
+// ---------------------------------------------------------------- 0.23.1 review rows (Judy 2026-10-29; rulings 68-71)
+// Open source folder on every row, the "In" source line, the Book and Author / reader columns of a question row, the
+// Numbers and membership lines, Includes, the raised folder question, and the destination block: Choose folder…, Use
+// computed folder and the move of a finished book (rulings 69 and 70). Every line hides when the engine sends no data for
+// it; the page never infers a role, a flag, a number or a folder state from text.
+const folderRows=new Map(),folderOpen=new Set(),bookCells=new Map(),destRows=new Map(),destNotes=new Map(),destPending=new Map(),destConfirm=new Set(),moveSeen=new Map();
+let lastChosenFolder='';
+const FOLDER_TIPS={one:"Open this book's source folder in File Explorer.",closed:"This book's files are in {n} folders. Show them and open any one.",open:'Hide the list of source folders.',
+  none:'This book has no source files to open a folder for.',item:'Open this folder in File Explorer.',book:'The original files are gone. Open the folder that holds the converted audiobook.'};
+const CLUE_ROLES={narrator:'narrator credit',garbled:'garbled',author_and_title:'author and title together',uploader:'uploader tag',generic:'generic name'};
+const TITLE_FLAGS={narrator:'Check this title: it looks like a narrator credit.',garbled:'Check this title: it looks garbled.',author_in_title:"Check this title: it starts with the author's name."};
+const AUTHOR_FLAGS={garbled:'Check this author: it looks garbled.'};
+const CHECKING_TIP='The app is still checking which other files belong to this book. This approves only the files shown.';
+const GAP_APPROVE=['Approve these files','Approve the files shown as one book, gaps included: convert if needed, rename, move to Audiobooks Sorted.'];
+const FOLDER_QUESTION={approve:['Approve as one book','File everything in this folder as one book: convert if needed, rename, move to Audiobooks Sorted.'],
+  separate:'Keep each book on the Books line as its own book. Nothing is joined. Each is checked again.'};
+const DEST_TIPS={choose:'Choose the folder this book is filed in. Your choice replaces the folder the app computed. The file goes straight into it.',
+  chooseDone:'Choose a new folder for this audiobook. The file is moved there. Nothing is converted again.',picking:'Waiting for the folder picker.',
+  moving:'Moving the audiobook. Choose another folder when it finishes.',nobridge:'Choosing a folder works in the desktop app.',
+  reset:'Stop using your folder. The book goes to the folder the app computes.',resetDone:'Move the audiobook back to the folder the app computes. Nothing is converted again. You confirm first.',
+  move:'Move the audiobook to the folder shown now. Nothing is converted again.',keep:'Leave the audiobook where it is and keep your folder.'};
+const MOVE_FAILURES={target_exists:'A file named {name} is already in {folder}. Nothing was moved.',unavailable:"{folder} isn't available. Connect the drive or choose another folder. Nothing was moved.",
+  not_writable:"The app can't write to {folder}. Choose another folder. Nothing was moved.",no_space:"There isn't enough free space on that drive. Nothing was moved.",
+  in_use:'The audiobook is open in another program. Close it and try again. Nothing was moved.',source_missing:"The audiobook isn't where the app expects it. Nothing was moved.",
+  unsafe:"That folder holds this book's original files. Choose another folder.",partial:"Moved to {folder}. The old file in {old folder} couldn't be removed. Delete it yourself.",
+  changed:'This book changed. Review its details and try again.',refused:'Move was not accepted. Nothing was moved.',closing:'Books Arranger is closing. Nothing was moved.'};
+function isAbsolutePath(path){return /^[A-Za-z]:[\\/]|^\\\\/.test(String(path || ''));}
+// A destination as the row prints it: relative paths sit under Audiobooks Sorted (as today); a chosen folder is in full.
+function shownPath(path){return !path?'':isAbsolutePath(path)?String(path):outputName()+'\\'+path;}
+function folderOf(path){const text=String(path || '');return text.slice(0,Math.max(text.lastIndexOf('\\'),text.lastIndexOf('/'))+1);}
+function baseName(path){const text=String(path || '');return text.slice(Math.max(text.lastIndexOf('\\'),text.lastIndexOf('/'))+1);}
+// The planner's own paths may be absolute: inside Audiobooks Sorted they read as every other Goes to line; a folder Sergei
+// chose is printed in full (Judy 15.1).
+function sortedPath(raw,row){
+  const root=typeof state?.audiobook_output_root==='string'?state.audiobook_output_root.replace(/[\\/]+$/,''):'';
+  const inside=!overrideOf(row) && root && isAbsolutePath(raw) && String(raw).toLowerCase().startsWith(root.toLowerCase()+'\\');
+  return inside?shownPath(String(raw).slice(root.length+1)):shownPath(raw);
+}
+function shownFolder(path){const text=shownPath(path);return text && !/[\\/]$/.test(text)?text+'\\':text;}
+// The desktop shell's folder picker (main window bridge), read at the press: the browser launch has none.
+function pickerBridge(){const api=globalThis.window?.booksDesktop || shellApi;return typeof api?.chooseFolder==='function'?api:null;}
+function rowFinished(row){return row?.kind==='candidate' && row.audiobook_ready===true;}
+function overrideOf(row){const value=row?.destination_override;return value && typeof value==='object' && typeof value.folder==='string' && value.folder?value:null;}
+function moveOf(row){const value=row?.move;return value && typeof value==='object' && ['queued','moving','moved','failed'].includes(value.state)?value:null;}
+// Rulings 19.2: while a folder is chosen, copy that promises Audiobooks Sorted names the chosen folder instead.
+function chosenCopy(row,text){
+  if(!overrideOf(row) || typeof text!=='string')return text;
+  return text.replace('move to Audiobooks Sorted.','move to the folder you chose.').replace('moves it to Audiobooks Sorted.','moves it to the folder you chose.')
+    .replace('That name is already in Audiobooks Sorted. Change the title or author.','That name is already in the folder you chose. Change the title, the author or the folder.');
+}
+// ---- Open source folder (section 3) and Open book folder (section 17)
+function rowFolders(row){
+  const listed=Array.isArray(row?.source_directories)?row.source_directories.filter(item=>item && typeof item.path==='string' && item.path):null;
+  if(listed && listed.length){const count=Number.isInteger(row.source_directory_count) && row.source_directory_count>=listed.length?row.source_directory_count:listed.length;return {list:listed,count};}
+  // An engine that sends no list: the members' folders (one folder opens without an id).
+  const members=Array.isArray(row?.members)?row.members:[],parent=path=>path.slice(0,Math.max(path.lastIndexOf('\\'),path.lastIndexOf('/')));
+  const paths=[...new Set(members.map(m=>typeof m?.path==='string'?parent(m.path):'').filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  return {list:paths.map(path=>({id:null,path,files:members.filter(m=>typeof m?.path==='string' && parent(m.path)===path).length})),count:paths.length};
+}
+function bookFolderMode(row){return rowFinished(row) && row.source_state==='gone' && !!row.output;}
+function missingFolders(row){const folders=askOf(row)?.missing?.folders;return Array.isArray(folders)?folders.filter(f=>typeof f==='string' && f):[];}
+// The row's own list already prints an "In {folder}" line (Missing files, Files unclear and part lists): no second one.
+function rowPrintsIn(row){
+  const ask=askOf(row);if(!ask)return false;
+  if(Array.isArray(ask.missing?.files) && ask.missing.files.some(f=>typeof f==='string'))return true;
+  const kind=holdKind(ask),files=(Array.isArray(ask.files)?ask.files:[]).filter(f=>typeof f?.name==='string');
+  return !!kind && files.length>0 && kind!=='order_unclear' && !setCause(ask);
+}
+// One builder for a folder in the row's list and in the details panel (checklist 3).
+function folderLine(row,directory,index,count,onEscape=null){
+  const line=node('div','','source-directory');line.append(node('p',directory.path,'path'));
+  if(Number.isInteger(directory.files) && directory.files>0)line.append(node('span',plural(directory.files,'file','files'),'field-help'));
+  const button=node('button','Open folder','quiet'),status=node('span','','folder-message');button.type='button';button.title=FOLDER_TIPS.item;
+  button.setAttribute('aria-label',`Open folder ${index} of ${count}: ${directory.path}`);button.setAttribute('aria-describedby','folder-help');status.setAttribute('role','status');
+  const id=directory.id || null;folderState(row,button,status,'source',id);
+  button.addEventListener('click',event=>{event?.stopPropagation?.();return openFolder(row,button,status,'source',id);});
+  button.addEventListener('keydown',event=>{event?.stopPropagation?.();if(event?.key==='Escape' && onEscape){event.preventDefault?.();onEscape();}});
+  line.append(button,status);return {line,button,status};
+}
+// The source line above Goes to and, with several folders, the in-flow folder list under it (3.3, 3.4).
+function buildSourceLine(row,td){
+  const entry=folderRows.get(row.id) || {row};entry.row=row;folderRows.set(row.id,entry);
+  const box=node('div','','source-box'),line=node('p','','goes-to source-line'),list=node('div','','folder-list-box');
+  list.id='source-list-'+row.id;list.setAttribute('role','group');list.setAttribute('aria-label','Source folders');list.tabIndex=0;list.hidden=true;
+  list.addEventListener('click',event=>event?.stopPropagation?.());
+  list.addEventListener('keydown',event=>{event?.stopPropagation?.();if(event?.key==='Escape'){event.preventDefault?.();closeFolderList(row.id);}});
+  const {list:folders,count}=rowFolders(row);entry.items=[];
+  if(count>1)folders.forEach((directory,i)=>{const item=folderLine(row,directory,i+1,count,()=>closeFolderList(row.id));entry.items.push({...item,directory});list.append(item.line);});
+  box.append(line,list);entry.box=box;entry.line=line;entry.list=list;td.append(box);updateFolderRow(entry);
+}
+function buildFolderButton(row,buttons){
+  const entry=folderRows.get(row.id) || {row};entry.row=row;folderRows.set(row.id,entry);
+  const button=node('button','Open source folder','quiet'),status=node('span','','folder-message');button.type='button';button.setAttribute('aria-describedby','folder-help');status.setAttribute('role','status');
+  button.addEventListener('click',event=>{event?.stopPropagation?.();return folderPress(row.id);});
+  button.addEventListener('keydown',event=>event?.stopPropagation?.());
+  entry.button=button;entry.status=status;buttons.append(button,status);updateFolderRow(entry);
+}
+function updateFolderRow(entry){
+  const row=entry.row,book=bookFolderMode(row),{list,count}=rowFolders(row),many=!book && count>1,open=many && folderOpen.has(row.id);
+  if(entry.line){
+    // On a finished book whose originals are gone the "Now in" line replaces it (section 17); a row's own list wins (3.4).
+    const shown=!book && count>0 && !rowPrintsIn(row),key=JSON.stringify([shown,count,list[0]?.path]);
+    if(entry.line.dataset.key!==key){entry.line.replaceChildren();if(shown){entry.line.append(node('span','In','goes-label'));if(count===1)entry.line.append(node('span',list[0].path,'path'));else entry.line.append(node('span',`${count.toLocaleString()} folders`));}entry.line.dataset.key=key;}
+    entry.line.hidden=!shown;entry.line.title=shown && count===1?list[0].path:'';
+  }
+  if(entry.list){entry.list.hidden=!open;for(const item of entry.items || [])folderState(row,item.button,item.status,'source',item.directory.id || null);}
+  const button=entry.button;if(!button)return;
+  const none=!book && !count && !missingFolders(row).length,face=book?'Open book folder':'Open source folder';
+  if(button.textContent!==face)button.textContent=face;button.setAttribute('aria-label',`${face}: ${askName(row)}`);
+  const tip=book?FOLDER_TIPS.book:none?FOLDER_TIPS.none:many?(open?FOLDER_TIPS.open:FOLDER_TIPS.closed.replace('{n}',count.toLocaleString())):FOLDER_TIPS.one;if(button.title!==tip)button.title=tip;
+  if(none)button.setAttribute('aria-disabled','true');else button.removeAttribute('aria-disabled');
+  if(many){button.setAttribute('aria-expanded',String(open));button.setAttribute('aria-controls','source-list-'+row.id);}else{button.removeAttribute('aria-expanded');button.removeAttribute('aria-controls');}
+  if(many){button.disabled=ended || !recordIdentity(row).id;entry.status.textContent='';}
+  else folderState(row,button,entry.status,book?'output':'source',book?null:list[0]?.id || null);
+}
+function updateFolderRows(){for(const entry of folderRows.values())updateFolderRow(entry);}
+// One folder: open it (no scroll, no panel, no selection, focus stays). Several: show or hide the list. Book folder: the
+// folder that holds the converted audiobook (ruling 70).
+function folderPress(id){
+  const entry=folderRows.get(id),row=entry?.row,button=entry?.button;
+  if(!row || !button || button.getAttribute('aria-disabled')==='true')return;
+  if(bookFolderMode(row))return openFolder(row,button,entry.status,'output');
+  const {list,count}=rowFolders(row);
+  if(count>1){
+    if(folderOpen.has(id)){closeFolderList(id);return;}
+    folderOpen.add(id);updateFolderRow(entry);entry.items?.[0]?.button?.focus?.({preventScroll:true});return;
+  }
+  return openFolder(row,button,entry.status,'source',list[0]?.id || null);
+}
+function closeFolderList(id){folderOpen.delete(id);const entry=folderRows.get(id);if(!entry)return;updateFolderRow(entry);entry.button?.focus?.({preventScroll:true});}
+// ---- Book identity on a question row (section 4)
+function bookTitleText(row){
+  const ask=askOf(row);if(recordedApproval(row) && row.review?.title)return 'Canonical title: '+row.review.title;
+  const d=askDrafts.get(row.id),shown=typeof d?.shownTitle==='string' && d.shownTitle.trim()?d.shownTitle.trim():'';
+  return shown || askProposal(ask,'title') || candidateTitle(row);
+}
+function clueText(clue,fallback){const text=typeof clue?.text==='string'?clue.text:typeof fallback==='string'?fallback:'';const role=CLUE_ROLES[clue?.role];return {text:text.trim(),role:role || ''};}
+function seriesLine(row){
+  const ask=askOf(row),series=ask?.series;
+  if(series && typeof series.name==='string' && series.name.trim()){
+    const place=row.place && typeof row.place==='object'?row.place:{},text=placeText({universe:place.universe,collection:place.collection,series:series.name.trim(),number:String(series.number ?? '').trim()}) || `Series: ${series.name.trim()}`;
+    // The Place line in the status cell already says it: once is enough.
+    return text===placeText(row.place)?'':text;
+  }
+  const clue=typeof ask?.series_clue==='string'?ask.series_clue.trim():'';
+  return clue?`The title mentions a series: ${clue}. Not used in the file name.`:'';
+}
+function includesLines(ask){
+  const stories=(Array.isArray(ask?.contents?.stories)?ask.contents.stories:[]).filter(story=>typeof story?.title==='string' && story.title.trim());if(!stories.length)return ['',''];
+  const k=stories.length,more=k>3?` + ${(k-3).toLocaleString()} more`:'',m=Number(ask.contents.other_authors) || 0;
+  return [`Includes ${plural(k,'story','stories')}: ${stories.slice(0,3).map(story=>story.title.trim()).join(', ')}${more}.`,m>0?(m===1?'1 of them credits another author.':`${m.toLocaleString()} of them credit another author.`):''];
+}
+function buildBookCell(row,td){
+  const cell={row,title:node('p','','book-title activity-label'),flag:node('p','','field-help attention-hint retry-refused book-flag'),series:node('p','','field-help book-series'),
+    clue:node('p','','field-help book-clue'),includes:node('p','','field-help book-includes'),others:node('p','','field-help book-includes'),
+    // Column 2 is never hidden, so in the narrow bands it carries the author flag too (4.2; shown only where column 3 folds).
+    narrowFlag:node('p','','field-help title-facts attention-hint retry-refused author-flag-folded')};
+  td.textContent='';td.append(cell.title,cell.flag,cell.series,cell.clue,cell.includes,cell.others);bookCells.set(row.id,cell);
+}
+function idLine(label){const line=node('p','','goes-to id-line'),value=node('span');line.append(node('span',label,'goes-label'),value);line.value=value;return line;}
+function buildAuthorCell(row,td){
+  const cell=bookCells.get(row.id);if(!cell)return;
+  cell.author=idLine('Author');cell.authorFlag=node('p','','field-help attention-hint retry-refused author-flag');cell.reader=idLine('Reader');cell.authorClue=idLine('Clue');
+  td.textContent='';td.append(cell.author,cell.authorFlag,cell.reader,cell.authorClue);
+}
+function setLine(element,text){if(!element)return;if(element.textContent!==text)element.textContent=text;element.hidden=!text;}
+function setValue(line,text){if(!line)return;if(line.value.textContent!==text)line.value.textContent=text;line.hidden=!text;}
+function bookAuthor(row){const ask=askOf(row),d=askDrafts.get(row.id),chosen=d?askValues(row,true).author:undefined;return typeof chosen==='string'?chosen.trim():askProposal(ask,'author');}
+function updateBookCell(row){
+  const cell=bookCells.get(row.id),ask=askOf(row);if(!cell || !ask)return;cell.row=row;
+  const title=bookTitleText(row),flag=TITLE_FLAGS[ask.fields?.title?.flag] || '',clue=clueText(ask.fields?.title?.clue,row.title_clue);
+  setLine(cell.title,title);setLine(cell.flag,flag);setLine(cell.series,seriesLine(row));
+  const raw=clue.text && clue.text!==title.trim() && 'Title clue: '+clue.text!==title.trim()?`Title clue: ${clue.text}`+(clue.role?` · ${clue.role}`:''):'';setLine(cell.clue,raw);
+  const [includes,others]=includesLines(ask);setLine(cell.includes,includes);setLine(cell.others,others);
+  const author=bookAuthor(row) || 'Unknown',reader=typeof ask.reader==='string'?ask.reader.trim():'',credit=clueText(ask.fields?.author?.clue,(row.artists || []).join('; '));
+  setValue(cell.author,author);setLine(cell.authorFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setLine(cell.narrowFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setValue(cell.reader,reader);
+  setValue(cell.authorClue,credit.text && credit.text!==author && credit.text!==reader?credit.text+(credit.role?` · ${credit.role}`:''):'');
+}
+// ---- Numbers and membership (section 5)
+function firstNumber(token){const match=String(token ?? '').match(/\d+/);return match?Number(match[0]):null;}
+function numbersLine(ask){
+  const n=ask?.numbers,given=value=>value!==undefined && value!==null && String(value)!=='';if(!n || typeof n!=='object' || !given(n.first) || !given(n.last))return '';
+  const skipped=(Array.isArray(n.skipped)?n.skipped:[]).filter(token=>token!==null && token!==undefined && String(token)!=='').map(String),first=firstNumber(n.first);
+  if(!skipped.length && (first===0 || first===1))return '';  // contiguous from 1: no line
+  const head=`${n.source==='tags'?'Tags':'File names'} run from ${n.first} to ${n.last}.`;if(!skipped.length)return head;
+  const total=Math.max(skipped.length,Number(n.skipped_total) || 0);
+  return `${head} Skipped: ${skipped.slice(0,6).join(', ')}${total>6?` + ${(total-6).toLocaleString()} more`:''}.`;
+}
+function numbersStartLate(ask){const first=firstNumber(ask?.numbers?.first);return Number.isInteger(first) && first>1;}
+// The face follows the cause, not the chip: "this order" is never pressed on an incomplete set (R16).
+function gapRow(ask){return holdKind(ask)==='order_unclear' && (ask.cause==='gaps' || numbersStartLate(ask) || Array.isArray(ask.numbers?.skipped) && ask.numbers.skipped.length>0);}
+function folderQuestion(ask){return holdKind(ask)==='files_unclear' && ask?.cause==='folder_books';}
+function membershipLine(row){
+  const ask=askOf(row),state=ask?.membership;
+  if(state==='checking')return 'Still checking which other files belong to this book.';
+  if(state!=='established')return '';
+  const n=Array.isArray(row.members) && row.members.length?row.members.length:Number(ask.file_count) || 0;if(n<1)return '';
+  return rowFolders(row).count>1?`The source folders hold only these ${n.toLocaleString()} files.`:`The source folder holds only these ${n.toLocaleString()} files.`;
+}
+// ---- The destination block (sections 14-18): Goes to / Now in, the chosen folder, Choose folder…, a move's states.
+function destPlan(row){
+  const finished=rowFinished(row),move=moveOf(row),output=finished && typeof row.output?.path==='string' && row.output.path?row.output:null;
+  if(finished){
+    if(!output)return null;
+    if(move?.state==='queued' && move.target)return {label:'Moves to',path:sortedPath(move.target,null),absolute:move.target,finished:true};
+    if(move?.state==='moving' && move.target)return {label:'Moving to',path:sortedPath(move.target,null),absolute:move.target,finished:true};
+    return {label:'Now in',path:sortedPath(output.path,row),absolute:output.absolute || (isAbsolutePath(output.path)?output.path:shownPath(output.path)),finished:true};
+  }
+  const ask=askOf(row),members=Array.isArray(row.members)?row.members:[];
+  if(ask?.kind==='files_missing' && !(Number(ask.missing?.present)>0))return null;  // nothing will be written and nothing exists to move
+  if(members.length && members.every(member=>member?.missing))return null;
+  let dest=null,label='Goes to',taken=false;const job=row.creation?.job;
+  if(ask){dest=askDestination(row);taken=dest?.taken===true && !askDone.has(row.id);label=taken?'Already there':setCause(ask) || folderQuestion(ask)?'As one book':'Goes to';}
+  else if(namesOpen(row.id) && (namesState.get(row.id)?.preview || namesData(row.id)?.destination))dest=namesState.get(row.id)?.preview || namesData(row.id)?.destination;
+  else if(job && typeof job==='object')dest=job.state==='Output needs attention'?job.destination:null;
+  else if(typeof row.preview?.path==='string' && row.preview.path)dest=row.preview;
+  const raw=typeof dest?.path==='string'?dest.path:'',path=raw?sortedPath(raw,row):'';
+  // A book with a job whose destination the engine did not send: no line (the job's own destination is the engine's).
+  if(!path && !ask && job && typeof job==='object')return null;
+  return {label,path,absolute:dest?.absolute || (isAbsolutePath(raw)?raw:path),taken,finished:false,undecided:!path};
+}
+function buildDestination(row,td,line=null){
+  const entry={row,box:node('div','','goes-to-block'),line:line || node('p','','goes-to'),chosen:node('p','','field-help dest-chosen'),controls:node('div','','row-actions dest-controls'),
+    confirm:node('div','','dest-confirm'),state:node('p','','field-help attention-hint dest-state')};
+  destRows.set(row.id,entry);
+  const choose=node('button','Choose folder…','quiet row-retry'),reset=node('button','Use computed folder','quiet row-retry');choose.type='button';reset.type='button';
+  for(const [button,press] of [[choose,()=>chooseFolderPress(row.id)],[reset,()=>resetFolderPress(row.id)]]){
+    button.addEventListener('click',event=>{event?.stopPropagation?.();return press();});button.addEventListener('keydown',event=>event?.stopPropagation?.());
+  }
+  entry.choose=choose;entry.reset=reset;entry.cancel=queueCancelButton(row,'move');entry.controls.append(choose,reset,entry.cancel);
+  const ask=node('p','','field-help dest-confirm-text'),confirmButtons=node('div','','row-actions'),moveButton=node('button','Move book','quiet row-retry'),keep=node('button','Keep it here','quiet row-retry');
+  moveButton.type='button';keep.type='button';moveButton.title=DEST_TIPS.move;keep.title=DEST_TIPS.keep;
+  moveButton.addEventListener('click',event=>{event?.stopPropagation?.();return confirmMoveBack(row.id);});keep.addEventListener('click',event=>{event?.stopPropagation?.();keepHere(row.id);});
+  for(const button of [moveButton,keep])button.addEventListener('keydown',event=>{event?.stopPropagation?.();if(event?.key==='Escape'){event.preventDefault?.();keepHere(row.id);}});
+  confirmButtons.append(moveButton,keep);entry.confirm.append(ask,confirmButtons);entry.confirm.hidden=true;entry.confirmText=ask;entry.moveButton=moveButton;entry.keep=keep;
+  entry.state.id='dest-state-'+row.id;entry.state.hidden=true;choose.setAttribute('aria-describedby',entry.state.id);
+  entry.box.append(entry.line,entry.chosen,entry.controls,entry.confirm,entry.state);
+  // A row with neither a destination nor a converted file has no block (Judy section 14); a question row keeps its line.
+  if(line || destPlan(row))td.append(entry.box);
+  updateDestination(entry);return entry;
+}
+function chooseMode(row){
+  if(ended || recoveryDisconnected)return 'offline';
+  const move=moveOf(row);
+  if(destPending.has(row.id))return 'picking';
+  if(move?.state==='moving' || queueRunning(row,'move'))return 'moving';
+  if(move?.state==='queued' || queuedFor(row,'move'))return 'queued';
+  return pickerBridge()?'ready':'nobridge';
+}
+function moveFailure(row,move,cause){
+  const output=row.output || {},text=MOVE_FAILURES[cause] || MOVE_FAILURES.refused,folder=shownFolder(move?.folder || folderOf(move?.target)),old=shownFolder(move?.old_folder || folderOf(output.absolute || output.path));
+  return text.replace('{name}',move?.name || baseName(move?.target || output.path)).replace('{folder}',folder.replace(/[\\/]$/,'') || folder).replace('{old folder}',old.replace(/[\\/]$/,'') || old);
+}
+// The line under the controls: the latest of this page's own answer and the engine's move state (lines stay until the next press).
+function destStateLine(row){
+  const note=destNotes.get(row.id),move=moveOf(row),seen=moveSeen.get(row.id);
+  if(destPending.get(row.id)?.kind==='pick')return null;
+  const fromMove=()=>{
+    if(!move || !rowFinished(row))return null;
+    if(move.state==='queued')return {text:'Move queued. It runs when the app is free.',warn:false};
+    if(move.state==='moving'){const progress=Number.isFinite(Number(move.progress)) && move.progress!==null && move.progress!==''?` · ${Math.round(Number(move.progress))}%`:'',base='Moving the audiobook…',since=seen?.state==='moving'?seen.at:NaN;
+      const text=clockNote(base,since);return {text:progress?text.replace(/^(Moving the audiobook…(?: \d+:\d\d)?)/,'$1'+progress):text,warn:false};}
+    if(move.state==='moved')return {text:`Moved. The audiobook is now in ${shownFolder(move.folder || folderOf(move.target || row.output?.path)).replace(/[\\/]$/,'')}.`,warn:false};
+    return {text:moveFailure(row,move,move.cause),warn:true,alert:true};
+  };
+  if(note && (!seen || note.at>=seen.at))return note;
+  return fromMove() || note || null;
+}
+function updateDestination(entry){
+  const row=entry.row,plan=destPlan(row);entry.box.hidden=!plan;entry.line.hidden=!plan;if(!plan)return;
+  const move=moveOf(row),seen=moveSeen.get(row.id);
+  if(move && (!seen || seen.state!==move.state))moveSeen.set(row.id,{state:move.state,at:Date.now()});else if(!move && seen)moveSeen.delete(row.id);
+  const path=plan.undecided?'Not decided yet.':plan.path,key=JSON.stringify([plan.label,path,!!plan.undecided]);
+  if(entry.line.dataset.key!==key){entry.line.replaceChildren();entry.line.append(node('span',plan.label,'goes-label'),node('span',path,plan.undecided?'':'path'));entry.line.dataset.key=key;}
+  entry.line.hidden=false;entry.line.title=plan.undecided?'':plan.absolute || path;entry.line.classList?.toggle?.('taken',!!plan.taken);
+  const override=overrideOf(row),computed=override?sortedPath(override.computed_folder || folderOf(override.computed_path),null).replace(/([^\\/])$/,'$1\\'):'';
+  setLine(entry.chosen,override?`Folder chosen by you. The app would use ${computed}`:'');
+  const mode=chooseMode(row),finished=plan.finished,confirming=finished && !!override && destConfirm.has(row.id),name=askName(row);
+  if(!override || !finished)destConfirm.delete(row.id);
+  entry.controls.hidden=confirming;entry.confirm.hidden=!confirming;
+  const face={picking:'Choosing…',queued:'Queued',moving:'Moving…'}[mode] || 'Choose folder…';
+  const tip={picking:DEST_TIPS.picking,queued:`${queueWord('move')} is queued for this book. Cancel it to use this.`,moving:DEST_TIPS.moving,nobridge:DEST_TIPS.nobridge,offline:'Local server unavailable.'}[mode] || (finished?DEST_TIPS.chooseDone:DEST_TIPS.choose);
+  if(entry.choose.textContent!==face)entry.choose.textContent=face;if(entry.choose.title!==tip)entry.choose.title=tip;entry.choose.setAttribute('aria-label','Choose folder: '+name);
+  if(mode==='ready')entry.choose.removeAttribute('aria-disabled');else entry.choose.setAttribute('aria-disabled','true');
+  entry.reset.hidden=!override;const resetTip=finished?DEST_TIPS.resetDone:DEST_TIPS.reset;if(entry.reset.title!==resetTip)entry.reset.title=resetTip;entry.reset.setAttribute('aria-label','Use computed folder: '+name);
+  if(['ready','nobridge'].includes(mode))entry.reset.removeAttribute('aria-disabled');else entry.reset.setAttribute('aria-disabled','true');
+  updateQueueCancel(entry.cancel,row,['move','destination']);
+  if(confirming){const text=`Move the audiobook back to ${sortedPath(override.computed_path || override.computed_folder,null)}? Nothing is converted again.`;if(entry.confirmText.textContent!==text)entry.confirmText.textContent=text;
+    entry.moveButton.setAttribute('aria-label','Move book: '+name);entry.keep.setAttribute('aria-label','Keep it here: '+name);}
+  const line=destStateLine(row);setLine(entry.state,line?.text || '');entry.state.classList?.toggle?.('retry-refused',!!line?.warn);
+  if(line?.alert || line?.warn)entry.state.setAttribute('role','alert');else entry.state.setAttribute('role','status');
+}
+function updateDestinations(){for(const entry of destRows.values())updateDestination(entry);}
+function destTitle(row){const ask=askOf(row);return askProposal(ask,'title') || row.review?.title || row.title_clue || 'this book';}
+function pickerStart(row){
+  const override=overrideOf(row);if(override?.folder)return override.folder;if(lastChosenFolder)return lastChosenFolder;
+  const plan=destPlan(row),absolute=plan?.absolute;if(absolute && isAbsolutePath(absolute))return folderOf(absolute).replace(/[\\/]$/,'');
+  const root=state?.audiobook_output_root;return typeof root==='string'?root:'';
+}
+function hasApprove(row){const entry=askRows.get(row.id);return !!entry?.buttons?.some(item=>item.kind==='approve');}
+async function chooseFolderPress(id){
+  const entry=destRows.get(id),row=entry?.row,button=entry?.choose;
+  if(!row || !button || button.getAttribute('aria-disabled')==='true')return;
+  const api=pickerBridge();if(!api)return;
+  const finished=rowFinished(row);
+  destPending.set(id,{kind:'pick',at:Date.now()});destNotes.delete(id);updateDestination(entry);
+  let folder=null;
+  try{folder=await api.chooseFolder({title:`Choose a folder for ${destTitle(row)}`,defaultPath:pickerStart(row),buttonLabel:finished?'Move here':'Select folder'});}catch{folder=null;}
+  if(typeof folder!=='string' || !folder.trim()){destPending.delete(id);const fresh=destRows.get(id) || entry;updateDestination(fresh);fresh.choose?.focus?.({preventScroll:true});return;}
+  lastChosenFolder=folder;await sendDestination(id,folder);
+}
+async function sendDestination(id,folder){
+  const entry=destRows.get(id),row=entry?.row;if(!row)return;
+  const finished=rowFinished(row),hadFocus=!!entry.box?.contains?.(document.activeElement);
+  destPending.set(id,{kind:'send',at:Date.now()});destNotes.delete(id);updateDestination(entry);
+  try{
+    const answer=await request('/api/candidate/destination',{library:'Audiobooks',id,revision:row.revision,folder},PRESS_TIMEOUT);
+    if(answer?.queued===true && typeof answer.id==='string')queueAccepted(row,'move',answer);
+    else applyDestination(row,answer,folder);
+  }catch(error){
+    const cause=error.body?.cause || error.body?.code,known=Object.hasOwn(MOVE_FAILURES,cause || '');
+    const text=!error.httpStatus?lostLine():known?moveFailure(row,{folder:error.body?.folder || folder,name:error.body?.name || baseName(destPlan(row)?.path),target:folder},cause):
+      finished?serverSentence(error,MOVE_FAILURES.refused):serverSentence(error,MOVE_FAILURES.refused);
+    destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});if(!error.httpStatus)refreshFailed(error);
+  }finally{destPending.delete(id);}
+  lastKey=null;
+  const fresh=destRows.get(id) || entry;fresh.row=rows.find(item=>item.id===id) || fresh.row;updateDestination(fresh);
+  if(askRows.get(id))updateAskRow(askRows.get(id));
+  if(hadFocus || document.activeElement===null)fresh.choose?.focus?.({preventScroll:true});
+}
+function applyDestination(row,answer,folder){
+  const id=row.id,outcome=answer?.outcome,preview=answer?.preview && typeof answer.preview==='object'?answer.preview:null;
+  if(Object.hasOwn(answer || {},'destination_override'))row.destination_override=answer.destination_override || null;
+  if(preview && typeof preview.path==='string'){
+    row.preview={...(row.preview || {}),path:preview.path,absolute:preview.absolute || ''};
+    if(askOf(row)){row.ask.destination={...(row.ask.destination || {}),path:preview.path,absolute:preview.absolute || '',taken:preview.taken===true,reason:''};const d=askDrafts.get(id);if(d){d.preview=null;d.previewKey=null;const entry=askRows.get(id);if(entry)askPreview(entry,0);}}
+  }
+  if(answer?.move && typeof answer.move==='object')row.move=answer.move;
+  const path=shownPath(preview?.path || destPlan(row)?.path || '');
+  if(outcome==='saved')destNotes.set(id,{text:hasApprove(row)?'Folder saved. Approve converts the book and files it there.':`Folder saved. This book goes to ${path}.`,warn:false,at:Date.now()});
+  else if(outcome==='cleared')destNotes.set(id,{text:`Folder reset. This book goes to ${path}.`,warn:false,at:Date.now()});
+  else if(outcome==='move_queued'){if(!moveOf(row))row.move={state:'queued',target:answer?.move?.target || (folder?folder.replace(/[\\/]+$/,'')+'\\'+baseName(row.output?.path):''),folder:folder || ''};}
+}
+function resetFolderPress(id){
+  const entry=destRows.get(id),row=entry?.row;if(!row || entry.reset.hidden || entry.reset.getAttribute('aria-disabled')==='true')return;
+  if(rowFinished(row)){destConfirm.add(id);updateDestination(entry);entry.keep?.focus?.({preventScroll:true});return;}  // it moves the file back: confirmed in flow first
+  return sendDestination(id,null).then(()=>{const fresh=destRows.get(id);fresh?.choose?.focus?.({preventScroll:true});});
+}
+function keepHere(id){destConfirm.delete(id);const entry=destRows.get(id);if(!entry)return;updateDestination(entry);(entry.reset && !entry.reset.hidden?entry.reset:entry.choose)?.focus?.({preventScroll:true});}
+function confirmMoveBack(id){destConfirm.delete(id);const entry=destRows.get(id);if(!entry)return;updateDestination(entry);entry.choose?.focus?.({preventScroll:true});return sendDestination(id,null);}
 // ---------------------------------------------------------------- Edit names (Sergei 2026-10-26; Judy 0.22.2 section 1)
 // "Edit names" on every book row opens an editor in the row: Title, Author (the ask fields when the row asks), Series,
 // Number, Universe and Collection. Save records his values (lasting, "Entered by you") and touches no file; Approve records
@@ -2891,7 +3257,7 @@ function placeText(place){
   const series=place.series && place.number?[`Series: ${place.series}`,`No. ${place.number}`]:[];
   if(place.universe)return [`Universe: ${place.universe}`,...series].join(' · ');
   if(place.collection===true && series.length)return ['Collection',...series].join(' · ');
-  return '';
+  return series.join(' · ');  // Judy 0.23.1 section 4.2, line 3: a plain series prints too
 }
 function enteredText(fields){const list=(Array.isArray(fields)?fields:[]).filter(field=>Object.hasOwn(NAMES_LABELS,field));return list.length?`Entered by you: ${list.map(field=>field==='collection'?'collection':field).join(', ')}.`:'';}
 // Edit names on the row (Judy 1.6): inert only while a retry, repair or delete is queued for it (one queued action per
@@ -2972,10 +3338,13 @@ function namesFieldLine(row,field){
 // Goes to line; the editor adds the rest around them. Any other row gets the whole editor.
 function buildNamesBlock(row,td){
   const id=row.id,open=namesOpen(id),entry=namesRows.get(id) || {};entry.row=row;entry.inputs={};namesRows.set(id,entry);
-  const ask=askRows.get(id),before=ask?.dest || [...(td.children || [])].find(child=>String(child.className || '').includes('goes-to')) || null;
+  // 0.23.1: the destination block (with its folder controls) follows the names; the Place line stays in the status cell,
+  // directly above the source line (Judy's checklist 10, fallback).
+  const ask=askRows.get(id),before=ask?.destBox || [...(td.children || [])].find(child=>String(child.className || '').includes('goes-to')) || null;
+  const above=[...(td.children || [])].find(child=>child.className==='source-box') || before;
   const place=node('p','','field-help book-place'),entered=node('p','','field-help names-entered');entry.place=place;entry.entered=entered;
-  const insert=element=>{if(before && before.parentElement===td)td.insertBefore(element,before);else td.append(element);};
-  if(!open){insert(place);insert(entered);updateNamesRow(row);return;}
+  const insert=(element,at=before)=>{if(at && at.parentElement===td)td.insertBefore(element,at);else td.append(element);};
+  if(!open){insert(place,above);insert(entered);updateNamesRow(row);return;}
   const box=node('div','','names-editor');box.id='names-editor-'+id;entry.box=box;
   if(!namesData(id)){box.append(node('p','Loading these names…','field-help'));insert(box);updateNamesRow(row);return;}
   const grid=node('div','','ask-grid'),data=namesData(id);
@@ -2997,7 +3366,6 @@ function buildNamesBlock(row,td){
   box2.addEventListener('change',()=>namesChangedField(row,'collection',box2.checked));grid.append(check);
   box.append(grid,namesList(id,'series',data.series),namesList(id,'universes',data.universes));
   entry.scope=node('p','','field-help names-scope');box.append(entry.scope,place,entered);
-  if(!ask){entry.dest=node('p','','goes-to');box.append(entry.dest);}
   insert(box);
   // After the Goes to line: Save and Discard, then what is remembered (Judy 1.2).
   const after=node('div','','names-after'),actions=node('div','','row-actions');
@@ -3018,7 +3386,7 @@ function buildNamesBlock(row,td){
       line.append(forget);after.append(line);(entry.forgets=entry.forgets || []).push(forget);
     }
   }
-  if(ask?.dest?.nextSibling)td.insertBefore(after,ask.dest.nextSibling);else td.append(after);
+  if(ask?.destBox?.nextSibling)td.insertBefore(after,ask.destBox.nextSibling);else td.append(after);
   updateNamesRow(row);
 }
 function updateNamesRow(row){
@@ -3029,10 +3397,8 @@ function updateNamesRow(row){
   if(entry.entered){if(entry.entered.textContent!==entered)entry.entered.textContent=entered;entry.entered.hidden=!entered;}
   if(open && entry.scope){const n=Number(state?.preview?.applies || namesData(row.id)?.applies) || 1,text=NAMES_SCOPE+(n>1?` Applies to ${n.toLocaleString()} books.`:'');if(entry.scope.textContent!==text)entry.scope.textContent=text;}
   for(const field of ['series','universe']){const line=entry[field+'Line'];if(line){const text=namesFieldLine(row,field);if(line.textContent!==text)line.textContent=text;line.hidden=!text;}}
-  if(open && entry.dest){
-    const dest=state?.preview || namesData(row.id)?.destination,path=typeof dest?.path==='string' && dest.path?outputName()+'\\'+dest.path:'';
-    entry.dest.hidden=!path;if(path){const key=JSON.stringify(path);if(entry.dest.dataset.key!==key){entry.dest.replaceChildren(node('span','Goes to','goes-label'),node('span',path,'path'));entry.dest.dataset.key=key;}entry.dest.title=dest.absolute || path;}
-  }
+  // The editor's Goes to is the row's destination block (Judy 0.23.1 checklist 18): it follows the draft's preview.
+  if(!askOf(row)){const dest=destRows.get(row.id);if(dest){dest.row=row;updateDestination(dest);}}
   if(entry.save){
     const pending=state?.pending,queued=queuedFor(row,'names') || queueRunning(row,'names'),inert=pending || queued?'':namesInert(row);
     const face=pending || queued?'Saving…':'Save',tip=pending?'Saving these names…':queued?(queueHint(row) || 'Saving these names…'):inert || NAMES_SAVE_TIP;
@@ -3137,6 +3503,7 @@ function clockSince(){
   const since=[];for(const state of namesState.values()){if(state.pending)since.push(state.pending.at);if(state.forgetting)since.push(state.forgetting.at);}
   for(const pending of [trackSave,choiceSave])if(pending)since.push(pending.at);
   for(const rule of rulesView.pending.values())since.push(rule.at);
+  for(const seen of moveSeen.values())if(seen.state==='moving')since.push(seen.at);
   return since;
 }
 // ---- Section 3: a blocked Save or Approve says why, under the control, with a one-click fix where one exists.
@@ -3218,7 +3585,7 @@ function renderBlock(element,block,row,withFix,button){
 // ---- Section 2.2 and 2.3: the strip says what a Save did and, when the list reload takes the book away, where it went.
 const leavers=new Map();  // id -> {at, base, row, title}
 let stripShow=null,listWait=null;  // stripShow: {id, title} for "Show it"; listWait: {id, at} while a Save's list reload runs
-function savedPath(answer){const path=answer?.destination?.path;return typeof path==='string' && path?outputName()+'\\'+path:'';}
+function savedPath(answer){const path=answer?.destination?.path;return typeof path==='string' && path?shownPath(path):'';}
 function namesSavedStrip(row,answer){
   const title=askName(row),n=Number(answer?.applies) || 1,applies=n>1?` Applies to ${n.toLocaleString()} books.`:'';
   if(answer?.outcome==='ready_only')return `Saved names for ${title}. The finished audiobook in Audiobooks Sorted keeps its name.`;
@@ -3417,7 +3784,7 @@ const QUEUE_WORDS={operation:['The app is working on another action','the curren
   loading:['Books Arranger is still loading','loading'],jobs:['Audiobook conversion is running','the conversion'],automatic:['Automatic processing is running','automatic processing']};
 // The word of each queued action (ruling 35), for its queued line, Cancel and outcome.
 const QUEUE_ACTION_WORDS={retry:'Retry',repair:'Repair',delete:'Delete',approve:'Approve',convert:"Convert what's there",separate:'Keep as separate books',
-  scan_again:'Scan again',dismiss:'Remove from list',copy:'Remove this copy',names:'Save',names_forget:'Forget',scan_start:'Start scanning',scan_resume:'Resume scanning'};
+  scan_again:'Scan again',dismiss:'Remove from list',move:'Move',destination:'Move',copy:'Remove this copy',names:'Save',names_forget:'Forget',scan_start:'Start scanning',scan_resume:'Resume scanning'};
 function queueWord(action){return QUEUE_ACTION_WORDS[action] || 'An action';}
 // The kind's words (1.2). An unknown kind reads as operation; the bulk approval runs in this page, so the page names it.
 function queueKind(kind){const known=Object.hasOwn(QUEUE_WORDS,kind || '')?kind:'operation';return known==='operation' && askBulk?'approve_run':known;}
@@ -3589,6 +3956,14 @@ function applyQueueOutcome(outcome){
     const text=queueAskText(outcome,asked);askResults.set(id,{text});queueAnnounce(`${title}: ${text}`);queueAck(outcome.id);return;
   }
   if(outcome.action==='names' || outcome.action==='names_forget'){namesQueued(outcome);return;}
+  if(outcome.action==='move' || outcome.action==='destination'){
+    // Judy 0.23.1 section 18: a queued folder choice or move ended. The row takes the engine's own move state at the next
+    // list read; a refusal says why on the row (18.2) and leaves the audiobook where it was.
+    if(outcome.result==='done'){if(row && outcome.answer && typeof outcome.answer==='object')applyDestination(row,outcome.answer,outcome.answer.folder ?? null);queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);}
+    else{const cause=outcome.cause || outcome.code,text=Object.hasOwn(MOVE_FAILURES,cause || '')?moveFailure(row || {},{folder:outcome.folder,name:outcome.name,target:outcome.target,old_folder:outcome.old_folder},cause):serverSentence({body:{error:outcome.error}},MOVE_FAILURES.refused);
+      destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});queueAnnounce(`${title}: ${text}`);}
+    queueAck(outcome.id);const entry=destRows.get(id);if(entry)updateDestination(entry);return;
+  }
   if(outcome.result==='done'){
     // The press ran as today (1.6): the row shows the server's queued state; the existing strip line names the book.
     const key=row?retryKey(row):null;if(key)remember(key,'queued',outcome.action,outcome.answer?.position);
@@ -4071,7 +4446,7 @@ function openApproveDialog(){
   const {items,selected}=approveSelectable();if(!items.length || approveConfirm)return;
   approveConfirm={items,paths:new Map(items.map(row=>[row.id,askDestination(row)?.path]))};const n=items.length,left=selected-n;
   setText('approve-dialog-title',`Approve ${plural(n,'book','books')} as is?`);
-  $('approve-dialog-list').replaceChildren(...items.map(row=>{const dest=askDestination(row),line=node('p',outputName()+'\\'+dest.path);line.title=dest.absolute || '';return line;}));
+  $('approve-dialog-list').replaceChildren(...items.map(row=>{const dest=askDestination(row),line=node('p',shownPath(dest.path));line.title=dest.absolute || '';return line;}));
   setText('approve-dialog-left',left>0?`${plural(left,'selected book is','selected books are')} left out. ${left===1?'It needs':'They need'} a different action.`:'');$('approve-dialog-left').hidden=!(left>0);
   setText('approve-confirm',`Approve ${plural(n,'book','books')}`);$('approve-confirm').title=`Approve these ${plural(n,'book','books')}.`;$('approve-confirm').removeAttribute('aria-disabled');
   $('approve-dialog').showModal?.();$('approve-cancel').focus?.();controls();

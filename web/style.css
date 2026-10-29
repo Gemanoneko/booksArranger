@@ -161,3 +161,5 @@ button.danger.solid[aria-disabled=true]{background:var(--disabled);color:var(--d
 .author-rule-confirm button{margin-right:8px}.author-rule .rule-error{flex-basis:100%;color:var(--warning);margin:0}
 
 .ask-inline-names{margin-top:6px;min-width:0}
+/* Judy 0.23.1 section 3.3: a book's source folders, in flow under its "In {n} folders" line; above six it scrolls inside itself. */
+.folder-list-box{max-height:232px;overflow-y:auto;margin:4px 0 0}

@@ -4,6 +4,7 @@ import contextlib
 import copy
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
 import threading
@@ -232,6 +233,9 @@ class MergeService:
         # waited for it (_post_current), up to the engine's 150 s bound at 8,000 books.
         self._update_hold=threading.Event()
         self.cleanup.on_completed=lambda job_id:self._prune_completed(job_id,source_completed=True)
+        # Rulings 69 and 71h: folders Sergei chose hold books directly; they count as Sorted for those books.
+        self.publications.chosen_roots=self._chosen_folders;self.cleanup.chosen_folders=self._chosen_folders
+        self._start_move_recovery()
         self.reviews.set_jobs(self)
         from automatic_processing import AutomaticProcessing
         self.automatic=AutomaticProcessing(self)
@@ -315,9 +319,11 @@ class MergeService:
         return getattr(inventory,'output_root',None),tuple(sources)
 
     def _require_sorted(self,path):
-        """ValueError unless path is in the configured output folder, which is set and outside every source."""
+        """ValueError unless path is in the configured output folder, which is set and outside every source (or directly
+        in a folder Sergei chose for it, ruling 71h)."""
         from source_config import require_sorted
-        require_sorted(str(path),*self.output_policy())
+        chosen=getattr(self,'_chosen_folders',None)
+        require_sorted(str(path),*self.output_policy(),chosen() if callable(chosen) else ())
 
     def _finish_recovery_child(self,job_id):
         """Ruling 5, in the worker right after the child's lease on the old files ends: remove them, then the child's
@@ -1048,8 +1054,13 @@ class MergeService:
             return True
 
     def start_published_check(self):
-        """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover)."""
+        """After construction: re-verify published audiobooks off the startup path (AudioJobs._recover). The existing-data
+        pass of ruling 71d starts beside it (regroup_partial_jobs)."""
         self.jobs.start_published_check()
+        def regroup():
+            try:self.regroup_partial_jobs()
+            except Exception:pass  # each job stays as it was; the claim check still sets a pending one aside before it runs
+        threading.Thread(target=regroup,name='books-folder-regroup',daemon=True).start()
 
     def start_retention(self,admission):
         from recovery_retention import kept_reason
@@ -1228,6 +1239,10 @@ class MergeService:
         posting=self.__dict__.setdefault('_post_jobs',set());posting.add(job_id)
         try:self._after_completed_work(job_id)
         finally:posting.discard(job_id)
+        # Rulings 69 and 71h: a book whose chosen folder it was not converted into (outside Sorted, chosen while it ran)
+        # is moved there now, after its sources were handled; never converted again.
+        try:self._move_to_chosen(job_id)
+        except Exception:pass  # the book stays where it was published; its row offers Choose folder again
 
     def _after_completed_work(self,job_id):
         # Durable audio success already exists. Cleanup failure must not reset it.
@@ -2291,6 +2306,13 @@ class MergeService:
                     coverage['still_checking']+=1;continue
                 if ask.get('kind') in self.ASK_GROUPS:found[identity]={'group':ask['kind'],'reasons':reasons,'ask':ask};continue
             kinds=todo_causes.holds(result)
+            if kinds==['order_unclear']:
+                # Ruling 71m: a numbering gap in a folder settled as the whole book is listed under Missing files.
+                gap=self._established_gap(identity)
+                if gap:
+                    if (identity,fingerprint) in dismissed:coverage['removed']+=1
+                    else:found[identity]={'group':'files_missing','reasons':reasons,'ask':None,'hold':gap}
+                    continue
             if kinds:
                 # The same files: an order or file choice he saved in the panel (a new revision) keeps the row listed.
                 found[identity]={'group':kinds[0],'also':kinds[1] if len(kinds)>1 else None,'reasons':reasons,'ask':None,'hold':result.get('identity_hold')}
@@ -2342,10 +2364,12 @@ class MergeService:
             full=[m['path'] if not root or os.path.isabs(m['path']) else os.path.join(root,m['path']) for m in gone]
             payload['missing']={'folders':sorted({os.path.dirname(p) for p in full}),'files':full,
                                 'present':sum(1 for m in members if not m.get('missing')),'total':len(members)}
+        shown_series=None
         if entry['group']!='files_missing' or payload['missing']['present']:
             try:
                 preview=self.approval_preview(row['id'],row['revision'])
                 payload['destination']={'path':preview['path'],'absolute':preview['absolute'],'taken':preview['taken'],'reason':preview['reason']}
+                shown_series=preview.get('series')
                 # The proposals are the values Approve uses (local_identity.shown): a suspected reader is never proposed
                 # as the author (ruling 14), and an empty author files the book under Без автора.
                 from organization import NO_AUTHOR
@@ -2360,7 +2384,137 @@ class MergeService:
         # wrong "name taken" tooltip) without reading copy. 'verified' or 'possible'; Remove this copy is ask.copy.
         import book_delete
         payload['duplicate']=book_delete.duplicate(entry)
+        try:self._identity_lines(row,payload)
+        except (ValueError,KeyError,TypeError,OSError,sqlite3.Error):pass
+        # The series Approve uses, when the question itself carries none (section 8.4): a found series, never a guess.
+        if 'series' not in payload and isinstance(shown_series,dict) and shown_series.get('name'):
+            payload['series']=dict(shown_series,basis='research');payload.pop('series_clue',None)
+        try:self._membership_lines(row,entry,payload)
+        except (ValueError,KeyError,TypeError,OSError,sqlite3.Error):pass
         return payload
+
+    # ---------------------------------------------------------------- Judy's 0.23.1 spec, sections 4-6 (POST-023)
+    _GENERIC_CLUES={'mp3','m4a','m4b','audio','аудио','аудиокнига','audiobook','книга','book','cd','disc','диск','track','трек'}
+
+    def _identity_lines(self,row,payload):
+        """Section 4: the facts behind the Book and Author / reader lines, from the row's own tags and folders (the page
+        never infers them): a flag on the shown title or author, the raw clue with its role when it differs, the reader,
+        the series the title mentions."""
+        import local_identity
+        from local_identity import NARRATOR_MARKER,garbled,author_prefix,quoted_title,narrator_names,NARRATOR_TAGS,clean_title,norm
+        fields=payload.setdefault('fields',{});members=row.get('members') or []
+        title=fields.get('title') or {};author=fields.get('author') or {}
+        shown=str(title.get('proposal') or '')
+        ancestors=[Path(members[0]['path']).parent.name,Path(members[0]['path']).parent.parent.name] if members else []
+        flag=''
+        if shown and NARRATOR_MARKER.search(shown):flag='narrator'
+        elif shown and garbled(shown):flag='garbled'
+        elif shown and author_prefix(shown,members,ancestors):flag='author_in_title'
+        if flag:fields['title']=dict(title,flag=flag)
+        def role(value,kind):
+            value=str(value or '')
+            if garbled(value):return 'garbled'
+            if NARRATOR_MARKER.search(value):return 'narrator'
+            if quoted_title(value) or kind=='author' and re.match(r'^\s*[^.\d]{3,60}?\.\s+\S',value) or kind=='title' and author_prefix(value,members,ancestors):return 'author_and_title'
+            if re.search(r'\[[^\]]{2,60}\]\s*$',value):return 'uploader'
+            if norm(clean_title(value)) in self._GENERIC_CLUES or re.fullmatch(r'\s*(?:cd|disc|диск)\s*\d*\s*',value,re.I):return 'generic'
+            return ''
+        clue=str(row.get('title_clue') or '')
+        if clue and clean_title(clue)!=clean_title(shown):
+            fields['title']=dict(fields.get('title') or {},clue={'text':clue,'role':role(clue,'title')})
+        credits=[str(a) for a in row.get('artists') or [] if a]
+        shown_author=str(author.get('proposal') or '')
+        if shown_author and garbled(shown_author):fields['author']=dict(author,flag='garbled')
+        raw='; '.join(credits)
+        readers=[]
+        for member in members[:50]:
+            tags=local_identity._tags(member)
+            readers+=[local_identity.text(tags.get(key)) for key in NARRATOR_TAGS if tags.get(key)]
+        readers+=narrator_names([clue]+credits+ancestors+[local_identity.text(local_identity._tags(m).get('album')) for m in members[:3]])
+        readers=[r for r in dict.fromkeys(readers) if r and not local_identity.compare_names(r,shown_author or '-')]
+        if readers:payload['reader']=', '.join(readers[:3])
+        if raw and norm(raw)!=norm(shown_author) and not (readers and norm(raw)==norm(readers[0])):
+            fields['author']=dict(fields.get('author') or author,clue={'text':raw[:300],'role':role(raw,'author')})
+        series=fields.get('series') or {};number=fields.get('number') or {}
+        if series.get('proposal'):
+            payload['series']={'name':series['proposal'],'number':str(number.get('proposal') or ''),'basis':series.get('basis','')}
+        else:
+            mention=re.search(r'\(([^()]{3,80}?#\s*\d{1,3})\)',clue) or re.search(r'\(([^()]*(?:книга|book|том)\s*\d{1,3}[^()]*)\)',clue,re.I)
+            if mention and mention[1] not in shown:payload['series_clue']=mention[1].strip()
+
+    def _established_gap(self,identity):
+        """Ruling 71m: {'kind': 'missing_parts', 'missing', 'total'} when this book is its whole source folder (no other
+        current book holds a file of it; not a raised folder question) and its numbering (file names, else track tags)
+        skips numbers or starts after 1. None otherwise. Read-only."""
+        import folder_unit
+        with connect(self.inventory.database) as db:
+            found=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
+            if found is None:return None
+            evidence=json.loads(found['evidence']);members=evidence.get('members') or []
+            if len(members)<2 or (evidence.get('folder_unit') or {}).get('kind') in ('ask','remainder') or evidence.get('source_partition_uncertain'):return None
+            if any(Path(m['path']).suffix.lower()=='.m4b' for m in members):return None
+            if self._unit_siblings(db,{'members':members,'source_root':found['root']}):return None
+        numbers=folder_unit.numbers(members)
+        if not numbers:return None
+        missing=list(range(1,numbers['start'])) if numbers['start']>1 else []
+        missing+=numbers['missing']
+        if not missing:return None
+        return {'kind':'missing_parts','missing':missing[:500],'total':numbers['end'],'numbers':{k:numbers[k] for k in ('source','first','last','skipped','skipped_total')}}
+
+    def _unit_siblings(self,db,row):
+        """The catalog's present audio files of this book's source folder that another current book holds: [(path, group
+        id)]. Disc and part folders of one book count as its folder (folder_unit.unit_of)."""
+        import folder_unit
+        members=row.get('members') or []
+        if not members:return []
+        units={folder_unit.unit_of(m['path']) for m in members}
+        if len(units)!=1:return []
+        folder,kind=next(iter(units));prefix=folder.rstrip('\\/')+os.sep
+        own={m['path'] for m in members}
+        found=[]
+        for path,group in db.execute("""SELECT f.path,c.group_id FROM files f LEFT JOIN catalog_group_members c ON c.root=f.root AND c.path=f.path
+                AND c.group_id IN (SELECT id FROM book_groups WHERE superseded=0) WHERE f.root=? AND f.kind='audiobook' AND f.missing=0
+                AND substr(f.path,1,?)=?""",(row.get('source_root') or '',len(prefix),prefix)):
+            if path in own or folder_unit.unit_of(path)!=(folder,kind):continue
+            found.append((path,group))
+        return found
+
+    def _membership_lines(self,row,entry,payload):
+        """Sections 5 and 6: the Numbers line (what the present numbering does), whether membership is settled
+        ('established': no other current book holds a file of this folder and the scan is complete; 'checking'
+        otherwise), the stories a one-folder book includes, and the raised folder question (cause folder_books)."""
+        import folder_unit
+        members=[m for m in row.get('members') or [] if not m.get('intentionally_retired')]
+        unit=row.get('folder_unit') or {}
+        if unit.get('kind')=='ask' and payload.get('kind')=='files_unclear':
+            payload['cause']='folder_books';payload['facts']={'works':[{'name':b['name'],'files':b['files']} for b in unit.get('books') or []][:200]}
+        if payload.get('kind') in ('order_unclear','files_unclear','part_of_book','files_missing') and len(members)>1:
+            numbers=folder_unit.numbers(members)
+            if numbers:payload['numbers']={k:numbers[k] for k in ('source','first','last','skipped','skipped_total')}
+        if payload.get('kind') in ('order_unclear','files_unclear','part_of_book'):
+            with connect(self.inventory.database) as db:siblings=self._unit_siblings(db,row)
+            complete=str(row.get('coverage') or '').startswith('Scanned scope complete')
+            if unit.get('kind') in ('ask','remainder'):pass
+            elif siblings or not complete:payload['membership']='checking'
+            else:payload['membership']='established'
+        if unit.get('kind')=='one' or len({str((m.get('metadata') or {}).get('tags',{}).get('album','')).strip() for m in members})>1:
+            found=folder_unit.contents(members)
+            if found:payload['contents']=found
+
+    def folder_view(self,rows):
+        """Judy's section 3 (rulings 68 and 70) for every shown row: its source folders with the ids open_folder takes,
+        the number of the book's files in each, and whether its originals are gone (every file gone from the catalog or
+        removed by the app after conversion). Catalog facts only; the press checks the folder live."""
+        for row in rows:
+            members=row.get('members') or []
+            counts={}
+            for member in members:
+                folder=str(Path(member['path']).parent)
+                counts[folder]=counts.get(folder,0)+1
+            directories=sorted(counts,key=str.casefold)
+            row['source_directories']=[{'id':str(uuid.uuid5(uuid.NAMESPACE_URL,'Audiobooks\x1f'+p)),'path':p,'files':counts[p]} for p in directories[:50]]
+            row['source_directory_count']=len(directories)
+            row['source_state']='gone' if members and all(m.get('missing') or m.get('intentionally_retired') for m in members) else 'present'
 
     def _hold_payload(self,row,entry,payload):
         """The three hold rows (Judy 2026-10-24, 0.22.0 review B4): the typed cause and the numbers its sentence needs
@@ -2472,7 +2626,10 @@ class MergeService:
         members=row.get('members') or []
         entry=self.needs_you().get(id) or {}
         hold=(entry.get('hold') or {}).get('piece') or {}
-        if entry.get('group')!='part_of_book' or hold.get('piece')!='set' or len(members)<2 or not (row.get('part_set') or row.get('split_book')):
+        # Ruling 68 (Judy 6.3): "Keep as separate books" also answers a raised folder question: the books its Books line
+        # named are kept apart (folder_unit.verdict reads the recorded answer), each checked again on its own.
+        folder_question=entry.get('group')=='files_unclear' and (row.get('folder_unit') or {}).get('kind')=='ask' and len(members)>1
+        if not folder_question and (entry.get('group')!='part_of_book' or hold.get('piece')!='set' or len(members)<2 or not (row.get('part_set') or row.get('split_book'))):
             raise ValueError('These files are not a set of parts asked about. Nothing was changed.')
         root=self.reviews._source_root(row)
         refused='Keep as separate books was not accepted. Nothing was changed.'
@@ -2487,8 +2644,13 @@ class MergeService:
             groups.record_volumes(db,root,members,groups.KEPT_BASIS+' on '+datetime.date.today().isoformat())
             db.execute("UPDATE book_groups SET review='',approved=0 WHERE id=?",(id,))
             groups.sync(db,root)
-            kept=groups.separate_books(db,root,[m['path'] for m in members])
-            if kept!=len(members):raise ValueError(refused)
+            if folder_question:
+                kept=len({r[0] for path in [m['path'] for m in members] for r in db.execute(
+                    'SELECT c.group_id FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE c.root=? AND c.path=? AND g.superseded=0',(root,path))})
+                if kept<2:raise ValueError(refused)
+            else:
+                kept=groups.separate_books(db,root,[m['path'] for m in members])
+                if kept!=len(members):raise ValueError(refused)
         self.__dict__.pop('_needs_cache',None)
         return {'kept':kept}
 
@@ -2586,9 +2748,10 @@ class MergeService:
             return '', '', reason or 'Confirm the book title and author.'
         review=dict(result['review'],organization_policy='books-hierarchy-v2')
         output_root=self.reviews._output_root(row,review)
-        preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=result.get('metadata_facts'))
-        path=preview.get('path') or ''
-        return (os.path.relpath(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
+        # Rulings 69 and 71i: the folder Sergei chose for this book replaces the computed folder (organization.plan).
+        preview=propose(row['members'][0]['path'],output_root,'audiobook',row['metadata'],review,automatic_facts=self._with_override(row,result.get('metadata_facts')))
+        path=self._chosen_display(row,preview.get('path') or '')
+        return (self._shown_path(path,output_root) if path else ''),path,('' if path else preview.get('reason',''))
 
     def routing_preview(self,id,revision,review):
         """The panel's "Unsaved destination preview" for a book (Senua's 0.22.3 review, m14). Ruling 40: a book's names are
@@ -2602,7 +2765,9 @@ class MergeService:
         names=result.get('review')
         if not isinstance(names,dict):
             return {'confidence':'Needs review','path':'','reason':'; '.join(dict.fromkeys(result.get('reasons') or []))[:300] or 'Confirm the book title'}
-        return self.reviews.routing_preview('Audiobooks',id,revision,review,names=names,facts=result.get('metadata_facts'))
+        answer=self.reviews.routing_preview('Audiobooks',id,revision,review,names=names,facts=self._with_override(row,result.get('metadata_facts')))
+        if isinstance(answer,dict) and answer.get('path'):answer=dict(answer,path=self._chosen_display(row,answer['path']))
+        return answer
 
     def approval_preview(self,id,revision,title=None,author=None,names=None):
         """Judy's "Goes to" line: what Approve would file this book as, with these values. {'path' relative to the output
@@ -2614,6 +2779,10 @@ class MergeService:
         approval=result['approval']
         answer={'path':relative,'absolute':path,'taken':bool(path and os.path.lexists(path)),
                 'title':approval['title'],'author':approval['author'],'collection':approval['collection'],'reason':reason}
+        # The series Approve files this book in (Judy 0.23.1 section 8.4; 2026-10-29, Tolkien: «Властелин Колец» 1).
+        review=result.get('review') or {}
+        if str(review.get('series') or '').strip() and str(review.get('number') or '').strip():
+            answer['series']={'name':str(review['series']).strip(),'number':str(review['number']).strip()}
         if names is not None:
             answer['place']=self._place(result.get('review') or {})
             values=dict(names)
@@ -2839,14 +3008,139 @@ class MergeService:
             except sqlite3.Error:pass
 
     def _names_stale(self,job):
-        """AudioJobs' claim check: True when this pending job was planned under other names than those now in force for its
-        book (entered_names.digest_for; the job's is in metadata_facts.entered_names). Reads only the store and the book."""
+        """AudioJobs' claim check: True when this pending job must not start as planned and goes back to research
+        (_names_replan): planned under other names than those now in force (Edit names), a job that converts only part of
+        one source folder (ruling 71d), a foreign author still in Cyrillic (ruling 71f) or a destination folder chosen
+        since it was planned (ruling 69). Each check reads only the catalog; an unreadable one never stops the queue."""
+        for check in (self._names_changed,getattr(self,'_replan_needed',None),getattr(self,'_override_stale',None)):
+            if check is None:continue
+            try:
+                if check(job):return True
+            except (ValueError,KeyError,TypeError,OSError,sqlite3.Error):continue
+        return False
+
+    def _names_changed(self,job):
+        """True when this pending job was planned under other names than those now in force for its book
+        (entered_names.digest_for; the job's is in metadata_facts.entered_names). Reads only the store and the book."""
         import entered_names
         manifest=json.loads(job['manifest'])
         planned=((manifest.get('metadata_facts') or {}).get('entered_names') or {}).get('digest') or entered_names.NONE
         try:row=self.reviews._row('Audiobooks',manifest['candidate_id'])
         except (ValueError,KeyError,TypeError):return False  # the book changed: the job's own revision checks refuse it
         return entered_names.digest_for(self.inventory.database,row)!=planned
+
+    REGROUP_REASON='Set aside: this job converted only part of one source folder. Nothing ran; the whole folder is checked again as one book.'
+    RECHECK_REASON='Set aside: the author is a foreign name in Cyrillic. Nothing ran; the book is checked again for the English spelling.'
+
+    def _replan_needed(self,job):
+        """Rulings 71d and 71f for a pending job about to start: it converts only part of one source folder (the whole
+        folder is regrouped as one book), or it files a foreign author in Cyrillic and was planned before the author's
+        English spelling was required (re-checked once: the book is researched again and Sergei is asked when no English
+        spelling is found). Records the reason for _names_replan. Catalog reads only."""
+        manifest=json.loads(job['manifest'])
+        with connect(self.inventory.database) as db:
+            partial=self._partial_folder_job(db,manifest)
+            recheck=not partial and self._foreign_cyrillic_job(db,manifest)
+        if partial or recheck:
+            self.__dict__.setdefault('_replan_reasons',{})[job['job_id']]=self.REGROUP_REASON if partial else self.RECHECK_REASON
+            return True
+        return False
+
+    def _partial_folder_job(self,db,manifest):
+        """True when a job's sources are only part of the audio files of their one source folder and ruling 68 makes that
+        folder one book (folder_unit.verdict is not 'separate'). Whole .m4b files, named anthology volumes (the «Ужасы и
+        трэшатинка» volume-1 claim) and folders of whole books or separately tagged novels are never partial."""
+        import folder_unit,anthology_volumes
+        sources=[s for s in manifest.get('sources') or [] if isinstance(s,dict) and s.get('path')]
+        root=manifest.get('root') or ''
+        if not sources or any(Path(s['path']).suffix.lower()=='.m4b' for s in sources):return False
+        units={folder_unit.unit_of(s['path']) for s in sources}
+        if len(units)!=1 or any(anthology_volumes.folder({'path':s['path']}) for s in sources):return False
+        folder,kind=next(iter(units))
+        prefix=folder.rstrip('\\/')+os.sep
+        rows=[r for r in db.execute("SELECT * FROM files WHERE root=? AND kind='audiobook' AND missing=0 AND substr(path,1,?)=?",(root,len(prefix),prefix))
+              if folder_unit.unit_of(r['path'])==(folder,kind) and Path(r['path']).suffix.lower()!='.m4b' and not json.loads(r['metadata'] or '{}').get('arranger_output')]
+        # The book the job was made from decides, not the files it converts: files Sergei left out of a whole-folder
+        # book ("Approve these files", a saved file choice) are his choice, never a partial folder.
+        group=db.execute('SELECT evidence FROM book_groups WHERE id=?',(manifest.get('candidate_id'),)).fetchone()
+        members=[m['path'] for m in json.loads(group[0]).get('members') or []] if group else []
+        own={os.path.normcase(p) for p in (members or [s['path'] for s in sources])}
+        if not any(os.path.normcase(r['path']) not in own for r in rows):return False
+        items=[groups.member(r) for r in rows]
+        scope_of={}
+        for item in items:
+            found=db.execute('SELECT g.scope FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE c.root=? AND c.path=? AND g.superseded=0 LIMIT 1',(root,item['path'])).fetchone()
+            scope_of[item['path']]=found[0] if found else item['path']
+        for item in items:
+            if os.path.normcase(item['path']) in own:scope_of[item['path']]='\x1fthis job'
+        return folder_unit.verdict(items,scope_of)['verdict']!='separate'
+
+    def _foreign_cyrillic_job(self,db,manifest):
+        """Ruling 71f: the job files its author in Cyrillic while the name is a foreign one or one the app does not know,
+        no Russian original is recorded, and the book was not re-checked yet (one re-check: its research then decides)."""
+        import local_identity
+        from public_research import RESEARCH_VERSION
+        if (manifest.get('metadata_facts') or {}).get('research_version')==RESEARCH_VERSION:return False  # planned under rulings 39/59
+        review=manifest.get('metadata') or {}
+        author=str(review.get('author') or '')
+        if local_identity.script(author)!='cyrillic' or review.get('original_language')=='Russian':return False
+        if not (local_identity.foreign_given(author) or local_identity.unknown_given(author)):return False
+        rules=self.automatic.research.rules() if getattr(self,'automatic',None) is not None else None
+        if not local_identity.foreign_given(author) and rules is not None and rules.keep(author):return False
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_job_set_aside'").fetchone() and \
+                db.execute("SELECT 1 FROM audio_job_set_aside WHERE candidate_id=? AND kind='recheck'",(manifest.get('candidate_id'),)).fetchone():return False
+        return True
+
+    def _release_for_regroup(self,db,identity):
+        """71d: the set-aside job's book stops holding its files (its approval and saved values describe one part of the
+        folder), and its root regroups at the next catalog read, so the whole folder becomes one book."""
+        row=db.execute('SELECT root FROM book_groups WHERE id=?',(identity,)).fetchone()
+        db.execute("UPDATE book_groups SET review='',approved=0,changed=0,revision=revision+1 WHERE id=?",(identity,))
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='candidate_context'").fetchone():
+            db.execute('DELETE FROM candidate_context WHERE id=?',(identity,))
+        if row is not None:db.execute('DELETE FROM book_group_sync WHERE root=?',(row[0],))
+
+    def regroup_partial_jobs(self):
+        """Ruling 71d, the existing-data pass (once per engine start, in the background): every unfinished job that converts
+        only part of one source folder (pending or stopped, never started publishing: no output, no publication intent,
+        not claimed) is set aside with REGROUP_REASON, and its folder regroups as one book. Completed books are never
+        touched. Returns the job ids set aside."""
+        import book_restart
+        from sqlite_retry import transaction
+        done=[]
+        with connect(self.inventory.database) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return done
+            book_restart.ensure(db)
+            rows=[dict(r) for r in db.execute("SELECT * FROM audio_jobs WHERE state IN ('pending','needs attention') AND output IS NULL AND job_id NOT IN (SELECT job_id FROM audio_job_set_aside)")]
+            chosen=[]
+            for row in rows:
+                try:
+                    manifest=json.loads(row['manifest']);journal=json.loads(row['journal'] or '{}')
+                    if isinstance(journal,dict) and 'publication_intent' in journal:continue
+                    if book_restart.current_job(db,manifest['candidate_id'])!=row['job_id']:continue
+                    if self._partial_folder_job(db,manifest):chosen.append((row,manifest))
+                except (ValueError,KeyError,TypeError,sqlite3.Error):continue
+        stamp=__import__('audio_jobs')._now()
+        for row,manifest in chosen:
+            identity=manifest['candidate_id']
+            def write(db,row=row,identity=identity):
+                current=db.execute('SELECT state,output,journal FROM audio_jobs WHERE job_id=?',(row['job_id'],)).fetchone()
+                if not current or current['state']!=row['state'] or current['output'] is not None or 'publication_intent' in json.loads(current['journal'] or '{}'):raise book_restart.Changed('Job changed')
+                if book_restart.current_job(db,identity)!=row['job_id']:raise book_restart.Changed('Newer work')
+                revision=(db.execute('SELECT revision FROM book_groups WHERE id=?',(identity,)).fetchone() or [0])[0]
+                db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state IN ('pending','needs attention')",(self.REGROUP_REASON,stamp,row['job_id']))
+                book_restart.set_aside(db,row['job_id'],identity,revision,kind='regroup')
+                self._release_for_regroup(db,identity)
+            try:
+                with self.jobs._lock:
+                    if self.jobs.claimed(row['job_id']):continue
+                    transaction(self.inventory.database,write)
+                done.append(row['job_id'])
+            except (book_restart.Changed,ValueError,sqlite3.Error):continue
+        if done:
+            self.__dict__.pop('_needs_cache',None)
+            self.invalidate_status()
+        return done
 
     def _names_replan(self,job):
         """A pending job planned under other names is set aside (its row, journal and working files are kept, as Start
@@ -2869,6 +3163,10 @@ class MergeService:
                     if entries:entered_names.save(self.inventory.database,row,entries)
                 except (ValueError,OSError,sqlite3.Error):pass
         stamp=__import__('audio_jobs')._now()
+        # Why the claim check set it aside (_names_stale): names, one part of a source folder (71d), a foreign author in
+        # Cyrillic (71f) or a folder chosen since (69). The set-aside kind keeps the reason on record.
+        reason=self.__dict__.setdefault('_replan_reasons',{}).pop(job['job_id'],self.NAMES_REPLANNED)
+        kind={self.REGROUP_REASON:'regroup',self.RECHECK_REASON:'recheck'}.get(reason,'names')
         def write(db):
             book_restart.ensure(db)
             current=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
@@ -2876,9 +3174,10 @@ class MergeService:
             if book_restart.current_job(db,identity)!=job['job_id']:raise book_restart.Changed('Newer work')
             facts=book_restart.book(db,identity)
             if not facts:raise book_restart.Changed('Book changed')
-            db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(self.NAMES_REPLANNED,stamp,job['job_id']))
-            book_restart.set_aside(db,job['job_id'],identity,facts['revision'],kind='names')
+            db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(reason,stamp,job['job_id']))
+            book_restart.set_aside(db,job['job_id'],identity,facts['revision'],kind=kind)
             book_restart.reset_automatic(db,identity,facts['revision'],facts['fingerprint'])
+            if kind=='regroup':self._release_for_regroup(db,identity)
         with self.jobs._lock:
             if self.jobs.claimed(job['job_id']):raise book_restart.Changed('Job claimed')
             transaction(self.inventory.database,write)
@@ -3065,10 +3364,16 @@ class MergeService:
         row,result=self._approval_result(id,revision,title,author,chosen,names=names)
         import local_identity
         approved_author=(result.get('approval') or {}).get('author') or ''
-        if local_identity.script(approved_author)=='cyrillic' and local_identity.foreign_given(approved_author) \
-                and (result.get('work') or {}).get('original_language')!='ru':
+        if local_identity.script(approved_author)=='cyrillic' and (result.get('work') or {}).get('original_language')!='ru' \
+                and (local_identity.foreign_given(approved_author) or local_identity.unknown_given(approved_author)):
+            # Ruling 59 for every Approve, "Approve this order" included (POST-023-01: «Джин Вулф» was filed in Cyrillic
+            # because the guard needed an old keep rule, and «джин» was no known first name). A foreign first name in
+            # Cyrillic never files without its English spelling, rule or no rule. A first name the app does not know
+            # («Наиль», «Цысинь»): a keep answer (research found Russian, or his own) or the name he typed in this
+            # Approve settles it; otherwise the English spelling is asked first.
             rules=self.automatic.research.rules()
-            if rules is not None and rules.keep(approved_author):
+            settled=not local_identity.foreign_given(approved_author) and (author is not None and str(author).strip() or rules is not None and rules.keep(approved_author))
+            if not settled:
                 raise ValueError('Enter the author\'s English name, then approve. Nothing was changed.')
         if path is not None and result.get('review'):
             relative,_,_=self._approval_destination(row,result)
@@ -3191,6 +3496,9 @@ class MergeService:
         from audio_pipeline import generated_artifacts,run_owned,probe
         from encoding_policy import choose_encoding,choose_automatic_encoding
         standing=bool(result.get('metadata_facts'))
+        # Rulings 69 and 71i: the folder Sergei chose is frozen with the book's facts, so the preview, the manifest, every
+        # rebuild of it and the queued-route check (organization.frozen_plan) all name the same destination.
+        if standing:result['metadata_facts']=self._with_override(row,result['metadata_facts'],strict=True)
         if standing:
             from standing_metadata import validate_policy
             validate_policy(row,result['review'],result['metadata_facts'])
@@ -4132,7 +4440,7 @@ class MergeService:
         """Full check: exact recorded bytes. A stop is raised, never reported as invalid."""
         try:
             root=ordinary(record['root']); final=ordinary(record['final_path'])
-            if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])}:return False
+            if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])} and not (hasattr(self,'_chosen_root') and self._chosen_root(root,final)):return False
             if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE,AUTOMATIC_PROFILE}:return False
             with DirectoryBoundary(root,final.parent) as boundary, VerifiedFile(final) as native:
                 if record.get('identity') is not None and native.facts()['identity']!=record['identity']:return False
@@ -4163,7 +4471,7 @@ class MergeService:
 
     def _identity_current_at(self, record):
         root=ordinary(record['root']); final=ordinary(record['final_path'])
-        if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])}:return False
+        if os.path.normcase(str(root)) not in {os.path.normcase(str(r)) for r in (tuple(self.inventory.source_roots('Audiobooks'))+((self.inventory.output_root,) if getattr(self.inventory,'output_root',None) else ()) if hasattr(self.inventory,'source_roots') else [self.inventory.roots['Audiobooks']])} and not (hasattr(self,'_chosen_root') and self._chosen_root(root,final)):return False
         if final.suffix.lower()!='.m4b' or record['validation'].get('profile') not in {PROFILE,LEGACY_PROFILE,AUTOMATIC_PROFILE}:return False
         known=self._known_identity(final,record['sha256'])
         if not known or known[2]!=record['size']:return False
@@ -4350,7 +4658,13 @@ class MergeService:
             'source_directory_count':len(directories),'output_folder_available':bool(view=='candidates' and current['state']=='verified'),'audiobook_ready':ready,
             'current_audiobook':self.current_audiobook(identity) if view=='candidates' else None}}
 
+    FOLDER_UNAVAILABLE='Folder unavailable. Connect the library drive and try again.'
+
     def open_folder(self,library,view,identity,folder_kind='source',directory_id=None):
+        """Open a book's source folder, or the folder that holds its converted file (folder_kind 'output'), in File
+        Explorer. Ruling 70 (Sergei 2026-10-29): when the source folder is gone and the book is finished, its converted
+        file's folder opens instead (that file is the book's current source). A folder that cannot be opened answers
+        Judy's one sentence, never the engine's error text."""
         root=self.inventory.roots[library]
         if folder_kind=='source':
             directories=self._source_directories(library,view,identity)
@@ -4361,19 +4675,26 @@ class MergeService:
                 item=next((d for d in directories if d['id']==directory_id),None)
                 if item is None:raise ValueError('Unknown source folder choice')
                 directory=item['path']
+            if view=='candidates' and not os.path.isdir(directory):
+                try:return dict(self.open_folder(library,view,identity,'output'),fallback='output')
+                except ValueError:raise ValueError(self.FOLDER_UNAVAILABLE) from None
         elif folder_kind=='output' and view=='candidates':
             self.reviews._row(library,identity)
-            jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
-            if current['state']!='verified':raise ValueError(current.get('reason','Current audiobook unavailable'))
-            publication=self.publications.publication(jobs,identity)
-            with self.publications.protected(publication) as (_,key):
-                if key!=current['identity']:raise ValueError('Current audiobook changed before folder opening')
-                directory=str(Path(current['path']).parent)
-                self.dispatch_folder(directory)
-                return {'opened':True,'directory':directory}
+            try:
+                jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
+                if current['state']!='verified':raise ValueError(current.get('reason','Current audiobook unavailable'))
+                publication=self.publications.publication(jobs,identity)
+                with self.publications.protected(publication) as (_,key):
+                    if key!=current['identity']:raise ValueError('Current audiobook changed before folder opening')
+                    directory=str(Path(current['path']).parent)
+                    self.dispatch_folder(directory)
+                    return {'opened':True,'directory':directory}
+            except (ValueError,OSError,KeyError):raise ValueError(self.FOLDER_UNAVAILABLE) from None
         else:raise ValueError('Unknown folder target')
         if hasattr(self.inventory,'source_root_for_path'):root=self.inventory.source_root_for_path(directory,library)
-        with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
+        try:
+            with DirectoryBoundary(root,directory):self.dispatch_folder(directory)
+        except (ValueError,OSError):raise ValueError(self.FOLDER_UNAVAILABLE) from None
         return {'opened':True}
 
     @staticmethod
@@ -4383,3 +4704,344 @@ class MergeService:
         buffer=ctypes.create_unicode_buffer(32768)
         if not ctypes.windll.kernel32.GetWindowsDirectoryW(buffer,len(buffer)):raise OSError('Windows folder launcher unavailable')
         subprocess.Popen([str(Path(buffer.value)/'explorer.exe'),str(directory)],shell=False)
+
+
+    # --- Rulings 69/70: destination override and moves ---
+    # Sergei 2026-10-29: on any row he chooses the folder a book goes to (the Windows folder picker); it outranks every
+    # computed folder, only the folder is his (71i), choosing never approves (71j), a folder outside Audiobooks Sorted is
+    # allowed and its book's originals are still removed after the verified result (71h). A finished book is moved, never
+    # converted again; its old folder goes when it is left empty (71k). destination_overrides keeps the choices, book_move
+    # the moves; PublicationBindings follows the moves, so every consumer of a book's location follows them too.
+    OVERRIDE_REPLANNED='Set aside: you chose another folder. Nothing ran; the book is checked again with your folder.'
+    OVERRIDE_UNAVAILABLE="The folder you chose isn't available (renamed, moved or disconnected). Choose the folder again or use the computed folder."
+    folder_probe=None      # tests: a seam for the writable probe (destination_overrides.validate)
+    move_same_volume=None  # tests: a seam for the move strategy (book_move.Mover)
+    move_fault=None        # tests: a hook raised at each move journal boundary
+    move_requester=None    # the server's action queue: (move, title) -> its queued answer; None runs the move at once
+
+    def _chosen_folders(self):
+        """Every folder Sergei ever chose and every folder a move put a book in (append-only records)."""
+        import destination_overrides,book_move
+        try:
+            with connect(self.inventory.database) as db:
+                found=set(destination_overrides.folders(db))
+                if book_move.have(db):
+                    found|={r[0] for r in db.execute("SELECT DISTINCT target_folder FROM book_moves WHERE state IN ('committed','old_removal_intent','complete','partial')")}
+        except sqlite3.Error:return ()
+        return tuple(sorted(found,key=str.casefold))
+
+    def _chosen_root(self,root,final):
+        """A book filed directly in a folder Sergei chose: that folder is its root (outside the configured roots too)."""
+        try:
+            if ordinary(final).parent!=ordinary(root):return False
+            return any(ordinary(folder)==ordinary(root) for folder in self._chosen_folders())
+        except (ValueError,OSError):return False
+
+    def _all_source_roots(self):
+        inventory=self.inventory
+        return tuple(inventory.all_source_roots() if hasattr(inventory,'all_source_roots') else getattr(inventory,'roots',{}).values())
+
+    def _override_rows(self):
+        """Every choice, read once and kept until this engine writes one (_destination_changed): the Goes to line and the
+        approval preview of every listed row read them, so a list read opens no extra connection per row."""
+        import destination_overrides
+        cached=self.__dict__.get('_override_cache')
+        if cached is not None:return cached
+        try:
+            with connect(self.inventory.database) as db:found=destination_overrides.rows(db)
+        except sqlite3.Error:return []
+        self.__dict__['_override_cache']=found
+        return found
+
+    def _live_override(self,row,job_id=None):
+        import destination_overrides,entered_names
+        return destination_overrides.live_in(self._override_rows(),book_key=entered_names.book_key(row),job_id=job_id)
+
+    def _with_override(self,row,facts,strict=False):
+        """These facts with the book's live chosen folder (organization.plan reads it), or without one. strict (an approval
+        that writes a job): a chosen folder that is no longer the same folder (renamed, replaced, gone) refuses, never
+        followed by name and never silently replaced by the computed folder."""
+        import destination_overrides
+        live=self._live_override(row)
+        value=destination_overrides.fact(live)
+        if value is None and not isinstance(facts,dict):return facts
+        facts=copy.deepcopy(facts) if isinstance(facts,dict) else {}
+        if value is None:
+            facts.pop('destination_override',None);return facts
+        if strict and not destination_overrides.same_identity(value['identity'],destination_overrides.current_identity(value['folder'])):
+            raise ValueError(self.OVERRIDE_UNAVAILABLE)
+        facts['destination_override']=value
+        return facts
+
+    def _chosen_display(self,row,path):
+        """A destination as Sergei will see it: a chosen folder outside the output root is reached by a move after the
+        conversion (organization.chosen_folder), so its preview names the chosen folder and the computed file name."""
+        import destination_overrides
+        if not path:return path
+        live=self._live_override(row)
+        if not live or not live.get('folder'):return path
+        output_root=getattr(self.inventory,'output_root',None)
+        if output_root and destination_overrides.inside(live['folder'],output_root):return path
+        return os.path.join(os.path.normpath(live['folder']),os.path.basename(path))
+
+    def _shown_path(self,path,output_root):
+        import destination_overrides
+        if path and output_root and destination_overrides.inside(path,output_root):return os.path.relpath(path,output_root)
+        return path
+
+    def _computed_destination(self,row,manifest=None):
+        """The planner's own destination for the book (absolute), ignoring any chosen folder; '' when it has none."""
+        try:
+            if manifest is not None:
+                facts=copy.deepcopy(manifest.get('metadata_facts')) if isinstance(manifest.get('metadata_facts'),dict) else None
+                if facts:facts.pop('destination_override',None)
+                root=getattr(self.inventory,'output_root',None) or manifest.get('output_root',manifest['root'])
+                review=dict(manifest['metadata'],organization_policy='books-hierarchy-v2')
+                first=row['members'][0]['path'] if row.get('members') else ''
+                return propose(first,root,'audiobook',row.get('metadata') or {},review,automatic_facts=facts).get('path') or ''
+            book,result=self._approval_result(row['id'],row['revision'])
+            if not isinstance(result.get('review'),dict):return ''
+            facts=copy.deepcopy(result.get('metadata_facts')) if isinstance(result.get('metadata_facts'),dict) else None
+            if facts:facts.pop('destination_override',None)
+            review=dict(result['review'],organization_policy='books-hierarchy-v2')
+            return propose(book['members'][0]['path'],self.reviews._output_root(book,review),'audiobook',book['metadata'],review,automatic_facts=facts).get('path') or ''
+        except (ValueError,KeyError,TypeError,OSError,IndexError):return ''
+
+    def _override_stale(self,job):
+        """AudioJobs' claim check (ruling 69): a pending job planned with another chosen folder than the book's now, or
+        whose chosen folder is no longer the same folder, never starts; it goes back to research (_names_replan)."""
+        import destination_overrides
+        manifest=json.loads(job['manifest'])
+        facts=manifest.get('metadata_facts') if isinstance(manifest.get('metadata_facts'),dict) else {}
+        frozen=facts.get('destination_override') or {}
+        try:row=self.reviews._row('Audiobooks',manifest['candidate_id'])
+        except (ValueError,KeyError,TypeError):return False  # the book changed: the job's own revision checks refuse it
+        live=self._live_override(row) or {}
+        frozen_folder=frozen.get('folder') or '';live_folder=live.get('folder') or ''
+        stale=destination_overrides.key(frozen_folder)!=destination_overrides.key(live_folder) if (frozen_folder or live_folder) else False
+        if not stale and frozen_folder:
+            stale=not destination_overrides.same_identity(frozen.get('identity'),destination_overrides.current_identity(frozen_folder))
+        if stale:self.__dict__.setdefault('_replan_reasons',{})[job['job_id']]=self.OVERRIDE_REPLANNED
+        return stale
+
+    def _finished(self,identity,jobs=None):
+        """(publication, binding kind, job id) of the book's current published audiobook, else None."""
+        jobs=jobs if jobs is not None else self.jobs.status()['jobs']
+        try:publication=self.publications.publication(jobs,identity)
+        except (ValueError,OSError,KeyError):return None
+        if not publication:return None
+        kind={'original':'base','replacement':'replacement'}.get(publication['kind'],publication['kind'])
+        return publication,kind,publication['parent']['job_id']
+
+    def _publication_location(self,job_id,kind):
+        """The book's effective location now (receipt, relocation and moves), through a generation lease."""
+        import book_move
+        with connect(self.inventory.database) as db:
+            row=db.execute('SELECT output FROM audio_jobs WHERE job_id=? AND state=?',(job_id,'completed')).fetchone()
+        if row is None or not row['output']:raise ValueError('The audiobook has no completed publication')
+        effective,_envelope=self.publication_bindings.current(json.loads(row['output']),kind)
+        return book_move.location(effective)
+
+    def _move_root(self,folder):
+        import destination_overrides
+        output_root=getattr(self.inventory,'output_root',None)
+        return output_root if output_root and destination_overrides.inside(folder,output_root) else folder
+
+    def destination_choose(self,id,revision,folder):
+        """Choose folder... (folder, from the picker) or Use computed folder (None) on one book. Not finished: the choice
+        is saved, nothing is approved or queued (71j). Finished: the choice is saved and the audiobook's move is queued
+        (never a conversion). Returns {'outcome': saved | cleared | move_queued | unchanged, 'destination_override',
+        'preview', 'move'}. Refusals: destination_overrides.Refused or book_move.Refused, with a typed cause."""
+        import destination_overrides,entered_names,book_move
+        if self.draining or self.__dict__.get('_closing'):raise destination_overrides.Refused('changed','Books Arranger is closing. Nothing was moved.')
+        try:row=self.reviews._row('Audiobooks',id,revision)
+        except ValueError:raise destination_overrides.Refused('changed','This book changed. Review its details and try again.') from None
+        book_key=entered_names.book_key(row)
+        finished=self._finished(id)
+        if finished and finished[1] not in book_move.KINDS:
+            raise destination_overrides.Refused('changed',"This audiobook can't be moved: it is a chapter update of another file.")
+        job_id=finished[2] if finished else None
+        try:start=self._publication_location(job_id,finished[1]) if finished else None
+        except (ValueError,OSError,KeyError):raise destination_overrides.Refused('source_missing',"The audiobook isn't where the app expects it. Nothing was moved.") from None
+        if folder is None:
+            with connect(self.inventory.database) as db:destination_overrides.retract(db,book_key=book_key,job_id=job_id)
+            self._destination_changed()
+            if not finished:return self._destination_answer(id,'cleared')
+            computed=self._computed_destination(row,self._job_manifest(job_id))
+            if not computed:raise destination_overrides.Refused('changed',"The app can't compute this book's folder now. Nothing was moved.")
+            return self._queue_move(row,finished,start,os.path.dirname(computed),None)
+        name=os.path.basename(start['final_path']) if finished else os.path.basename(self._computed_destination(row) or '')
+        data_dir=str(Path(self.inventory.database).parent)
+        chosen,identity=destination_overrides.validate(folder,sources=self._all_source_roots(),data_dir=data_dir,name=name,probe=self.folder_probe)
+        if destination_overrides.inside(chosen,str(self.cache_dir)):raise destination_overrides.Refused('unsafe','That folder belongs to the app. Choose another folder.')
+        with connect(self.inventory.database) as db:
+            saved=destination_overrides.choose(db,folder=chosen,identity=identity,book_key=book_key,candidate_id=id,job_id=job_id)
+        self._destination_changed()
+        if not finished:return self._destination_answer(id,'saved')
+        return self._queue_move(row,finished,start,chosen,saved['override_id'])
+
+    def _job_manifest(self,job_id):
+        with connect(self.inventory.database) as db:
+            found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+        return json.loads(found['manifest']) if found else None
+
+    def _destination_changed(self):
+        self.__dict__.pop('_override_cache',None)
+        self.__dict__.pop('_needs_cache',None)
+        self.invalidate_status()
+
+    def _destination_answer(self,id,outcome,move=None):
+        try:row=self.reviews._row('Audiobooks',id)
+        except ValueError:row=None
+        view={'destination_override':None,'preview':None,'move':move}
+        if row is not None:
+            shown=[copy.deepcopy(row)]
+            try:self.destination_view(shown)
+            except (ValueError,OSError,sqlite3.Error):pass
+            view['destination_override']=shown[0].get('destination_override')
+            preview=shown[0].get('preview') or {}
+            view['preview']={'path':preview.get('path',''),'absolute':preview.get('absolute',preview.get('path',''))}
+            if move is None:view['move']=shown[0].get('move')
+        return {'outcome':outcome,**view}
+
+    def _queue_move(self,row,finished,start,folder,override_id):
+        """Plan the finished book's move (book_move.plan) and queue it; 'unchanged' when it is already in that folder."""
+        import book_move,destination_overrides
+        publication,kind,job_id=finished
+        root=self._move_root(folder)
+        with connect(self.inventory.database) as db:
+            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id)
+        if move is None:return self._destination_answer(row['id'],'unchanged')
+        title=str(row.get('title_clue') or '')[:200]
+        if self.move_requester is not None:
+            try:queued=self.move_requester(move,title)
+            except Exception:
+                with connect(self.inventory.database) as db:book_move.cancel(db,move['move_id'])
+                raise destination_overrides.Refused('changed','Move was not accepted. Nothing was moved.') from None
+            return self._destination_answer(row['id'],'move_queued',dict(book_move.view(move),queue=queued))
+        done=self.run_move(move['move_id'])
+        return self._destination_answer(row['id'],'move_queued',done)
+
+    def cancel_move(self,move_id):
+        """The queued move's Cancel (ActionQueue): True when it had not started."""
+        import book_move
+        with connect(self.inventory.database) as db:return book_move.cancel(db,move_id)
+
+    def _mover(self):
+        import book_move,book_delete
+        configured=[*self._all_source_roots(),*([self.inventory.output_root] if getattr(self.inventory,'output_root',None) else [])]
+        progress=self.__dict__.setdefault('_move_progress',{})
+        def report(move_id,percent):progress[move_id]=percent
+        return book_move.Mover(lambda:connect(self.inventory.database),self._publication_location,sources=self._all_source_roots,
+                               output_root=getattr(self.inventory,'output_root',None),same_volume=self.move_same_volume or book_move.default_same_volume,
+                               fault=self.move_fault,progress=report,remove_folder=book_delete._remove_folder,protected_roots=lambda:configured)
+
+    @operation
+    def run_move(self,move_id):
+        """Run one queued move now (the action queue's runner). Returns the row's move line."""
+        import book_move
+        if self.draining or self.__dict__.get('_closing'):
+            with connect(self.inventory.database) as db:book_move.cancel(db,move_id)
+            raise ValueError('Books Arranger is closing. Nothing was moved.')
+        move=self._mover().run(move_id)
+        self._after_move(move)
+        return book_move.view(move)
+
+    def _after_move(self,move):
+        """A committed move: its new location is the book's owned output and its last full verification (the move hashed
+        every byte); the caches that showed the old location are dropped."""
+        import book_move
+        self.__dict__.get('_move_progress',{}).pop(move['move_id'],None)
+        if move['state'] in book_move.EFFECTIVE and isinstance(move.get('final'),dict):
+            final=move['final']
+            try:
+                with connect(self.inventory.database) as db:
+                    db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',(final['final_path'],move['job_id'],'output',final['sha256'],final['size']))
+            except sqlite3.Error:pass
+            self._publication_verified(dict(final,job_id=move['job_id']))
+            self._validated_outputs.pop(move['job_id'],None)
+        self._destination_changed()
+
+    def _start_move_recovery(self):
+        """In-engine reconciliation of moves a restart interrupted (no startup refusal); only when there are any."""
+        import book_move
+        try:
+            with connect(self.inventory.database) as db:open_moves=book_move.pending(db)
+        except sqlite3.Error:return
+        if not open_moves:return
+        def work():
+            try:
+                for move in self._mover().recover():self._after_move(move)
+            except Exception:pass  # each unreconciled move stays journaled; the next start tries again
+        self._move_recovery=threading.Thread(target=work,name='books-move-recovery',daemon=True)
+        self._move_recovery.start()
+
+    def _move_to_chosen(self,job_id):
+        """After a book is published: when the folder chosen for it is not where it was published (outside Sorted, or
+        chosen while it converted), its move is queued."""
+        import destination_overrides,book_move
+        job=next((j for j in self.jobs.status()['jobs'] if j['job_id']==job_id),None)
+        if not job or job['state']!='completed':return
+        identity=job['manifest']['candidate_id']
+        try:row=self.reviews._row('Audiobooks',identity)
+        except ValueError:return
+        finished=self._finished(identity)
+        if not finished or finished[2]!=job_id or finished[1] not in book_move.KINDS:return
+        live=self._live_override(row,job_id=job_id)
+        if not live or not live.get('folder'):return
+        start=self._publication_location(job_id,finished[1])
+        if destination_overrides.key(os.path.dirname(start['final_path']))==destination_overrides.key(live['folder']):return
+        if not destination_overrides.same_identity(live.get('identity'),destination_overrides.current_identity(live['folder'])):return  # fails closed
+        self._queue_move(row,finished,start,live['folder'],live['override_id'])
+
+    def destination_view(self,rows):
+        """Every shown list row: destination_override, output and move (Judy's 0.23.1 spec, sections 15-18). Catalog and
+        page facts only; no file is opened."""
+        import destination_overrides,entered_names,book_move
+        if not rows:return
+        ids=[r['id'] for r in rows if r.get('id')]
+        output_root=getattr(self.inventory,'output_root',None)
+        progress=self.__dict__.get('_move_progress',{})
+        try:
+            with connect(self.inventory.database) as db:
+                moves=book_move.latest(db,ids)
+                completed={}
+                if ids and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():
+                    marks=','.join('?' for _ in ids)
+                    aside=' AND job_id NOT IN (SELECT job_id FROM audio_job_set_aside)' if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_job_set_aside'").fetchone() else ''
+                    for job_id,candidate,manifest in db.execute("SELECT job_id,json_extract(manifest,'$.candidate_id'),manifest FROM audio_jobs WHERE state='completed' AND json_extract(manifest,'$.candidate_id') IN (%s)%s ORDER BY created,job_id"%(marks,aside),ids):
+                        completed[candidate]=(job_id,manifest)
+            records=self._override_rows()
+            lives={}
+            for row in rows:
+                job=completed.get(row.get('id'))
+                lives[row.get('id')]=destination_overrides.live_in(records,book_key=entered_names.book_key(row),job_id=job[0] if job else None)
+        except sqlite3.Error:
+            for row in rows:row.setdefault('destination_override',None);row.setdefault('move',None);row.setdefault('output',None)
+            return
+        for row in rows:
+            current=row.get('current_audiobook') or {}
+            output=None
+            if current.get('state')=='verified' and current.get('path'):
+                path=current['path'];output={'path':self._shown_path(path,output_root),'absolute':path,'folder':os.path.dirname(path)}
+            row['output']=output
+            move=book_move.view(moves.get(row.get('id')))
+            if move and move['state']=='moving' and move['move_id'] in progress:move['progress']=progress[move['move_id']]
+            row['move']=move
+            live=lives.get(row.get('id'))
+            if not live or not live.get('folder'):
+                row['destination_override']=None;continue
+            folder=live['folder'];job=completed.get(row.get('id'))
+            manifest=None
+            if job:
+                try:manifest=json.loads(job[1])
+                except (TypeError,ValueError):manifest=None
+            computed=self._computed_destination(row,manifest) if manifest is not None else self._computed_destination(row)
+            outside=not (output_root and destination_overrides.inside(folder,output_root))
+            row['destination_override']={'folder':folder,'computed_folder':self._shown_path(os.path.dirname(computed),output_root) if computed else '',
+                                         'computed_path':computed,'outside_sorted':bool(outside)}
+            if job:continue  # a finished book's file is where "Now in" says; a move takes it to the chosen folder
+            chosen=os.path.join(os.path.normpath(folder),os.path.basename(computed)) if computed else ''
+            # row.ask.destination already names the chosen folder (approval_preview plans with it): its path is the one an
+            # Approve sends back and compares, so it is left exactly as planned.
+            if chosen and isinstance(row.get('preview'),dict):row['preview']=dict(row['preview'],path=chosen,absolute=chosen)

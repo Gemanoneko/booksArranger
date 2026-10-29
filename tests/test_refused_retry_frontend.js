@@ -40,7 +40,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning, the existing refused mechanism');
   assert.ok(![...actionButtons(tr)].some(button=>/Retry|Repair/.test(button.textContent)),'no Retry, not even disabled');
   // Edit names (Judy 0.22.2 1.1) sits on every book row, before View metadata.
-  const left=[...actionButtons(tr)].filter(button=>button.type==='button' && !button.hidden).map(button=>button.textContent);assert.equal(left.length,3);assert.equal(left[0],'Edit names');assert.equal(left[1],'View metadata');assert.match(left[2],/^(Source folders|Open folder)$/);
+  const left=[...actionButtons(tr)].filter(button=>button.type==='button' && !button.hidden).map(button=>button.textContent);assert.equal(left.length,3);assert.equal(left[0],'Edit names');assert.equal(left[1],'View metadata');assert.equal(left[2],'Open source folder','one Open source folder on every row (Judy 0.23.1 section 3)');
   assert.equal(techOf(tr),'Technical detail: Failed M4B retained: Unsupported structural box; earlier failure: '+M4B_REASON);
   context.fixture=refused;run('select(fixture,true);controls()');
   assert.equal(get('retry-block').hidden,true,'the details panel has no Retry either');

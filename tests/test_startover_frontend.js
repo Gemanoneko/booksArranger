@@ -286,7 +286,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   const clear=actionButtons(tr)[1];
   assert.equal(clear.textContent,'Clear working files');assert.equal(clear.disabled,false);assert.equal(clear.getAttribute('aria-label'),'Clear working files: Title cw');
   assert.equal(clear.title,'Delete the working files an earlier attempt left behind. Originals are not touched. Frees about 637 MB.');
-  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','Edit names','View metadata','Source folders'],'Retry, Clear, then navigation');
+  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Retry','Clear working files','Edit names','View metadata','Open source folder',''],'Retry, Clear, then navigation (Open source folder and its status span, Judy 0.23.1 section 3)');
   assert.equal(techOf(tr),'Technical detail: Leftover working files from an earlier attempt; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   // Repair: the same rule with its own verb.
   const repairable=m4bRow('rw',{retry:undefined,repair:{allowed:true,reason:''},attention:{group:'repair',cause:null,originals_untouched:true,damage:[{kind:'dangling_chapter_reference'}],working:{state:'cleanable',bytes:10,reason:'r'}}});
@@ -358,7 +358,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   paint([blockedRow]);tr=rowOf('bw');
   assert.equal(statusCell(tr).textContent,"Stopped — can't clear working files");
   assert.equal(statusCell(tr).children[0].textContent,"Working files from an earlier attempt are still present, and the app can't clear them safely right now.");
-  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Edit names','View metadata','Source folders']);
+  assert.deepEqual([...actionButtons(tr)].map(button=>button.textContent),['Edit names','View metadata','Open source folder','']);
   assert.equal(techOf(tr),'Technical detail: A file the app did not record is in the working folder: x.wav; earlier failure: '+M4B_REASON+'; working folder: '+FOLDER);
   const unreachable={...blockedRow,creation:{...blockedRow.creation,job:{...blockedRow.creation.job,attention:{...blockedRow.creation.job.attention,working:{state:'blocked',stops:true,cause:'originals_unreachable',reason:'r'}}}}};
   assert.equal(text(unreachable).hint,"Working files from an earlier attempt are still present, and the app can't clear them while the original files can't be reached. Check that the library drive is connected.");

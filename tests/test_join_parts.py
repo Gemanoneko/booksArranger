@@ -54,7 +54,14 @@ class JoinPartsTests(test_approve_as_is.ApproveFixture):
         tone(self.audio / 'Unsorted' / 'A' / 'Книга.mp3', self.cover, album='Книга', artist='Анна Смирнова')
         tone(self.audio / 'Unsorted' / 'B' / 'Книга.mp3', self.cover, album='Книга', artist='Анна Смирнова')
         files = [files for _, files in self.books()]
-        self.assertEqual(sorted(files), sorted([['03.mp3'], ['04.mp3'], ['Книга.mp3'], ['Книга.mp3']]))
+        # Ruling 68 (0.24.0): one source folder is never divided; the two stories are one candidate, held as a folder
+        # question (no numbering settles it), never one author's book. The two folders stay two books.
+        self.assertEqual(sorted(files), sorted([['03.mp3', '04.mp3'], ['Книга.mp3'], ['Книга.mp3']]))
+        held = [row for row in self.service.reviews.page()['rows'] if len(row['members']) == 2]
+        self.assertEqual(len(held), 1)
+        self.assertEqual(held[0]['folder_unit']['kind'], 'ask')
+        self.assertTrue(held[0]['source_partition_uncertain'])
+        self.assertFalse(held[0]['metadata_approved'])
 
     def test_two_books_of_one_series_on_their_own_discs_are_held_as_files_unclear(self):
         # Senua's 0.22.0 early review, probe A / G3: this converted on its own into "Ведьмак" and removed all four originals.

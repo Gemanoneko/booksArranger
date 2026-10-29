@@ -390,6 +390,13 @@ class SeriesBackfill:
                   'research_receipts': found.get('receipts', []), 'deferred_sources': found.get('deferred_sources', []),
                   'series_proof': {key:copy.deepcopy(found[key]) for key in ('work_id','series_id','statement_id','work_revision','series_revision','references','numbering_scheme','isbn','series_url','local_identity') if key in found}}
         try:
+            # Rulings 69 and 71h: a book Sergei moved to a folder he chose lives where its move says, not at its receipt;
+            # its file is left as it is (never renamed from a stale path), fail closed.
+            import book_move
+            with connect(self.database) as db:
+                moved = book_move.have(db) and db.execute("SELECT 1 FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') LIMIT 1", (job_id,)).fetchone()
+            if moved:
+                raise Held('The audiobook was moved to a folder you chose; left as it is')
             # Audit m4: files change only in the sorted output folder, never inside a source folder (rulings 2 and 1a).
             if hasattr(self.merge, '_require_sorted'):
                 try:

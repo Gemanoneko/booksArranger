@@ -12,6 +12,11 @@ POLICY='books-hierarchy-v2'
 NO_AUTHOR='Без автора'
 
 def plan(output_root,review,*,collection_fallback='legacy',facts=None):
+    """The planner's destination; a folder Sergei chose (rulings 69 and 71i, frozen in the facts) replaces its folder."""
+    return chosen_folder(_plan(output_root,review,collection_fallback=collection_fallback,facts=facts),facts)
+
+
+def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
     if not isinstance(output_root,str) or not os.path.isabs(output_root):raise ValueError('Output root must be absolute')
     if collection_fallback!='legacy':raise ValueError('Collection fallback needs an accepted product decision')
     def text(field):
@@ -61,6 +66,23 @@ def plan(output_root,review,*,collection_fallback='legacy',facts=None):
     if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
     return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
             'accepted_routing':{'author':author,'cycle':cycle,'universe':universe,'number':number,'collection':collection,'multi_author_cycle':multi}}
+
+
+def chosen_folder(planned,facts):
+    """Rulings 69 and 71i (Sergei 2026-10-29): a folder Sergei chose outranks every computed folder (Без автора, Сборники,
+    universe, series, author, the English-author folder); the file name stays the planner's, recording suffix included,
+    and the file goes directly into the chosen folder. A conversion writes only inside the output root: a chosen folder
+    outside it (ruling 71h) is reached by publishing to the computed path, verifying it there and then moving the book
+    (book_move), so for such a folder this planner keeps the computed path and every frozen-plan caller agrees."""
+    import destination_overrides
+    chosen=destination_overrides.check_fact(facts.get('destination_override') if isinstance(facts,dict) else None)
+    if not chosen:return planned
+    root=planned['root']
+    if not destination_overrides.inside(chosen['folder'],root):return planned
+    destination=os.path.join(os.path.normpath(chosen['folder']),os.path.basename(planned['path']))
+    if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
+    routing=dict(planned['accepted_routing'],destination_folder=os.path.normpath(chosen['folder']))
+    return dict(planned,path=destination,relative_path=os.path.relpath(destination,root),accepted_routing=routing)
 
 
 def append_recording_suffix(destination,review,facts=None):

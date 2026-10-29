@@ -169,6 +169,19 @@ class BackfillTests(unittest.TestCase):
             self.assertEqual(lib.state(backfill),('held','The audiobook is not in the sorted output folder; left as it is'));self.assert_unchanged(backfill)
         with connect(lib.db) as db:db.execute('DROP TABLE IF EXISTS series_backfill')
         backfill=lib.backfill();backfill.run_pass();self.assertEqual(lib.state(backfill),('done',''),'positive control: the book is in the sorted folder')
+    def test_a_book_moved_to_a_folder_sergei_chose_is_left_as_it_is(self):
+        # Rulings 69 and 71h: a moved book lives where its move says, not at its receipt; the backfill never renames it from
+        # a stale path (fail closed). A move that failed or was cancelled moved nothing: the book is named as before.
+        import book_move
+        lib=self.lib
+        with connect(lib.db) as db:
+            book_move.setup(db)
+            db.execute("INSERT INTO book_moves(move_id,job_id,kind,candidate_id,generation,state,target_folder,target_root,target_path,from_json,created_utc,updated_utc) VALUES('m',?,'base','c',1,'complete','D:\\x','D:\\x','D:\\x\\b.m4b','{}','t','t')",(lib.job_id,))
+        backfill=lib.backfill();backfill.run_pass()
+        self.assertEqual(lib.state(backfill),('held','The audiobook was moved to a folder you chose; left as it is'));self.assert_unchanged(backfill)
+        with connect(lib.db) as db:
+            db.execute("DROP TRIGGER IF EXISTS book_move_events_no_update");db.execute("UPDATE book_moves SET state='failed'");db.execute('DROP TABLE IF EXISTS series_backfill')
+        backfill=lib.backfill();backfill.run_pass();self.assertEqual(lib.state(backfill),('done',''),'positive control: nothing was moved')
     def test_a_book_in_a_separate_sorted_folder_gets_its_series_name_there(self):
         # Senua 0.21.3 F5 / ruling 17: named relative to the source root, every Sorted book read as misnamed and was held.
         lib=Library(Path(self.temp.name)/'separate',separate_sorted=True)

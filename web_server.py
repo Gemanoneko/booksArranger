@@ -297,6 +297,10 @@ class BrowserServer(ThreadingHTTPServer):
         # A start that fires later (the O12 pending start) reads the server's closing flag at that moment, as the
         # control gate does for a press: nothing starts once Quit or shutdown has begun.
         if automatic is not None and hasattr(automatic,'server_closing'):automatic.server_closing=lambda:self.closing
+        # Rulings 69 and 71h: moving a finished book is always a queued action (Cancel while it waits; never stopped half
+        # way), whether Sergei pressed it or the book was published before reaching the folder he chose.
+        if hasattr(merge,'run_move'):
+            merge.move_requester=lambda move,title:self.actions.enqueue('move',move['candidate_id'],title,{'move_id':move['move_id']},always=True)
         return merge
 
     def _start_background(self):
@@ -453,6 +457,15 @@ class BrowserServer(ThreadingHTTPServer):
                     payload = refusal.payload()
                     return {'result': 'refused', 'code': payload.get('code', 'refused'), 'error': str(refusal)}
                 return {'result': 'done', 'answer': {k: result.get(k) for k in ('deleted', 'bytes', 'forgotten', 'folders')}}
+            if action == 'destination':
+                import destination_overrides, book_move
+                try:
+                    answer = merge.destination_choose(book, args['revision'], args.get('folder'))
+                except (destination_overrides.Refused, book_move.Refused) as refusal:
+                    return {'result': 'refused', 'code': refusal.cause, 'cause': refusal.cause, 'error': str(refusal)}
+                return {'result': 'done', 'answer': answer}
+            if action == 'move':
+                return {'result': 'done', 'answer': {'move': merge.run_move(args['move_id'])}}
             if action == 'cleanup':
                 return {'result': 'done', 'answer': merge.start_historical_cleanup(args['job_id'])}
             if action == 'restore':
@@ -554,6 +567,7 @@ QUEUED_ROUTES = frozenset({'/api/audiobook/retry', '/api/audiobook/repair', '/ap
 # Ruling 35 (Sergei 2026-10-26): these presses queue too, Approve always (Handler.queue_press, Server.run_queued).
 QUEUE_PRESSES = {'/api/candidate/approve': 'approve', '/api/candidate/keep-separate': 'separate', '/api/candidate/scan-again': 'scan_again',
                  '/api/candidate/dismiss': 'dismiss', '/api/candidate/names-save': 'names', '/api/candidate/names-forget': 'names_forget',
+                 '/api/candidate/destination': 'destination',
                  '/api/scan/start': 'scan_start', '/api/scan/resume': 'scan_resume'}
 
 
@@ -847,11 +861,22 @@ class Handler(BaseHTTPRequestHandler):
             self.shape(data,{'library','id','revision','names','queue'},{'title'})
             library,id,revision=self.candidate_identity(data)
             return self.server.actions.enqueue(action,id,title,{'revision':revision,'names':self.names_value(data['names'])},always=always)
+        if path=='/api/candidate/destination':
+            self.shape(data,{'library','id','revision','folder','queue'},{'title'})
+            library,id,revision=self.candidate_identity(data)
+            return self.server.actions.enqueue(action,id,title,{'revision':revision,'folder':self.folder_value(data['folder'])},always=always)
         if path=='/api/candidate/names-forget':
             self.shape(data,{'library','id','revision','entry_id','queue'},{'title'})
             library,id,revision=self.candidate_identity(data)
             return self.server.actions.enqueue(action,id,title,{'revision':revision,'entry_id':self.text_value(data['entry_id'],64)},always=always)
         raise ValueError('This press does not queue')
+
+    @staticmethod
+    def folder_value(value):
+        """Ruling 69: the folder the picker returned, or None for Use computed folder. The engine validates it."""
+        if value is None:return None
+        if not isinstance(value,str) or not 1<=len(value)<=1000 or '\x00' in value:raise ValueError('A folder is one absolute path')
+        return value
 
     @staticmethod
     def shape(data,required,optional=()):
@@ -1144,6 +1169,16 @@ class Handler(BaseHTTPRequestHandler):
             except book_delete.DeleteRefused as refusal:
                 self.response(409,{'error':str(refusal),**refusal.payload()});return
             self.response(200,result);return
+        if path=='/api/candidate/destination':
+            # Rulings 69, 71h-k: Choose folder (folder from the picker) or Use computed folder (folder null). A book not
+            # finished saves the folder and nothing else (71j); a finished book's move is queued, never a conversion.
+            import destination_overrides,book_move
+            self.shape(data,{'library','id','revision','folder'},{'title'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            try:result=self.server.merge.destination_choose(id,revision,self.folder_value(data['folder']))
+            except (destination_overrides.Refused,book_move.Refused) as refusal:
+                self.response(409,{'error':str(refusal),'cause':refusal.cause,'code':refusal.cause});return
+            self.response(200,result);return
         if path=='/api/candidate/keep-separate':
             # "Keep as separate books" (Judy 2026-10-25): records the set's files as separate books; touches no file.
             self.shape(data,{'library','id','revision'})
@@ -1281,6 +1316,7 @@ class Handler(BaseHTTPRequestHandler):
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
+                         '/api/candidate/destination',
                          '/api/candidate/delete-preview','/api/candidate/delete','/api/author-rules','/api/author-rule/retract','/api/queue/cancel','/api/queue/ack',*NAMES_ROUTES,
                          '/api/audiobook/resume-cancel','/api/audiobook/recovery/cancel'}
             with self.server.control_lock:

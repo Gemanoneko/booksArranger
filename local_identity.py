@@ -54,7 +54,7 @@ NOT_PEOPLE = {'сборник', 'сборники', 'антология', 'vario
               'коллективавторов', 'авторскийколлектив', 'неизвестен', 'неизвестныйавтор', 'unknown', 'unknownartist', 'аноним', 'народное', 'народные',
               'антологии', 'сборникрассказов', 'коллекция', 'collection', 'anthology', 'compilation', 'многоавторов'}
 # Reader/narrator markers: a credit or name carrying one is a recording credit, never the author.
-NARRATOR_MARKER = re.compile(r'(?<![^\W\d_])(?:читает|читают|читала|читал|чит\.|исполняет|исполняют|исполнил[аи]?|исп\.|озвучил[аи]?|озвучивает|озвучка|'
+NARRATOR_MARKER = re.compile(r'(?<![^\W\d_])(?:читает|читают|читала|читал|чит\.|чит(?=\s+[^\W\d_])|исполняет|исполняют|исполнил[аи]?|исп\.|озвучил[аи]?|озвучивает|озвучка|'
                              r'чтец|чтица|начитал[аи]?|начитывает|read\s+by|narrated\s+by|narrators?|readers?|performed\s+by)(?![^\W\d_])', re.I)
 # Collections need the collection research path, never a single local author.
 COLLECTION_FOLDER = re.compile(r'(?<![^\W\d_])(?:сборник\w*|антологи\w*|anthology|anthologies|collections?|компиляци\w*)(?![^\W\d_])', re.I)
@@ -91,6 +91,8 @@ ruth katherine samantha christine emma catherine rachel janet maria heather juli
 martha neal fritz grady thimoty colin josh simon tim algernon bentley craig isaac jesper jeff rick shaun stanley gordon mitchel michio kinoko
 andrzej guy nick andy ian nate gerald gemma jon todd barbara carlos catherine alex kristina hannu koji soji graham
 джастин джефф лорел лорелл laurell laurel йеспер
+джин туве альфред майк крис чайна артуро олдос ясунари дино цысинь эрих
+наиль карина
 роджер ширли shirley говард гарольд дональд кеннет кевин брайан рональд джейсон джеффри райан джейкоб гэри николас эрик джонатан ларри
 скотт бенджамин грегори сэмюэл сэмюель рэймонд реймонд патрик деннис джерри тайлер аарон натан уолтер джереми лоуренс шон кристиан альберт
 итан джесси брюс ральф юджин уэйн луис алан алистер винсент орсон теодор эрнест курт хью кларк брэм чак дейв дэйв джек джим стив тед вернор
@@ -119,8 +121,40 @@ RUSSIAN_GIVEN = frozenset('''
 марк михаил никита николай олег павел петр пётр роман руслан сергей станислав степан тимур федор фёдор юрий ярослав яков эдуард
 александра алена алёна алина алла анастасия анна валентина вера виктория галина дарья евгения екатерина елена ирина кира лариса любовь
 людмила марина мария наталья наталия наташа надежда ольга светлана софья татьяна юлия яна уна лена марта влад
+наиль карина
 '''.split())
 FOREIGN_CYRILLIC_GIVEN = frozenset(w for w in GIVEN_NAMES if re.fullmatch(r'[а-яё]+', w) and w not in RUSSIAN_GIVEN)
+
+
+def unknown_given(name):
+    """POST-023-01 (rulings 39 and 71f): a Cyrillic credit of two to four full words none of which is a first name the
+    app knows, Russian or foreign, and no patronymic or initial ("Вулф Джин" before «джин» was listed, "Лю Цысинь"). Its
+    writing language is unknown, so the ruling-39 lookup runs for it and Approve asks for the English spelling until a
+    source, a rule or Sergei settles it."""
+    if script(name) != 'cyrillic' or PEOPLE_SEPARATOR.search(str(name)):
+        return False
+    key = ''.join(words(name))
+    if key in NOT_PEOPLE or key in VARIOUS_AUTHORS or key in {'безавтора', 'неизвестныйавтор', 'автор'}:
+        return False
+    tokens = words(name)
+    if not 2 <= len(tokens) <= 4 or any(len(t) < 2 for t in tokens) or re.search(r'(?<![^\W\d_])[^\W\d_]\.', str(name)):
+        return False
+    if any(PATRONYMIC.fullmatch(t) for t in tokens):
+        return False
+    return not any(t in GIVEN_NAMES or t in RUSSIAN_GIVEN or t in OTHER_RUSSIAN_GIVEN for t in tokens)
+
+
+# Russian (and Tatar, Ukrainian, Caucasian) first names of Russian-writing authors, beyond RUSSIAN_GIVEN: they settle that
+# a Cyrillic credit is no unknown name (unknown_given) and nothing else; several are also title words, so they are kept out
+# of GIVEN_NAMES and person detection.
+OTHER_RUSSIAN_GIVEN = frozenset('''
+диана валерия вероника полина ксения оксана алиса ангелина арина варвара василиса елизавета злата зоя инна кристина лидия майя
+милана нина раиса регина римма роза снежана стефания таисия тамара ульяна эвелина эльвира эмилия юлиана ярослава жанна зинаида
+клавдия маргарита олеся агния дарина есения лиана любава милена мирослава пелагея серафима фаина анфиса евдокия антонина
+арсений богдан вениамин влас гавриил давид демид ефим захар игнат ильдар ильнар марат матвей мирон назар платон родион ростислав
+рустам савелий семен семён тарас тихон филипп эмиль юлиан ян ринат айдар азат салават рамиль тимофей святослав мстислав лука савва
+яромир елисей макар прохор остап трофим фома кузьма никифор ильяс шамиль руслана лев макс
+'''.split())
 
 
 def foreign_given(name):
@@ -304,6 +338,10 @@ def _letter_classes(letter):
 
 
 def _initial_fits(initial, word):
+    # «Дж.» is one initial, and it is J in Latin letters: "J. R. R. Tolkien" is «Джон Рональд Руэл Толкин» (Tolkien
+    # lookup, 2026-10-29); "Д." stays D.
+    if initial == 'дж' or initial == 'j' and script(word) == 'cyrillic':
+        return word.startswith('дж') if script(word) == 'cyrillic' else word.startswith('j')
     if script(initial) == script(word):
         return word.startswith(initial)
     return bool(_letter_classes(initial) & _letter_classes(word[:1]))
@@ -319,8 +357,10 @@ def _pair(a, b):
 
 def _parts(value):
     tokens = words(value)
-    full = [t for t in tokens if len(t) > 1]
-    initials = [t for t in tokens if len(t) == 1]
+    # «Дж. Р. Р. Толкин»: «Дж» written with a full stop is one initial (J), not a two-letter word.
+    initial_dzh = {'дж'} if re.search(r'(?<![^\W\d_])[Дд]ж\.', str(value or '')) else set()
+    full = [t for t in tokens if len(t) > 1 and t not in initial_dzh]
+    initials = [t for t in tokens if len(t) == 1 or t in initial_dzh]
     dropped = []
     # A patronymic is dropped only from a name of 3+ words that keeps 2+ other words;
     # -ович/-евич/-ич surnames (Гжендович, Костюкевич) are surnames otherwise.
@@ -472,9 +512,12 @@ def narrator_names(texts):
             # Only the leading name words: no web addresses, handles or numbers.
             name = []
             for token in tail.split():
-                if not re.fullmatch(r"[^\W\d_]+(?:[-'’][^\W\d_]+)*\.?", token):
+                closed = token.rstrip(')]}')  # «(чит Капитан Абр и Nelly)»: the bracket ends the name after its last word
+                if not re.fullmatch(r"[^\W\d_]+(?:[-'’][^\W\d_]+)*\.?", closed):
                     break
-                name.append(token)
+                name.append(closed)
+                if closed != token:
+                    break
             name = ' '.join(name[:4])
             if len(words(name)) >= 1:
                 found.append(name)
@@ -500,6 +543,8 @@ def clean_title(value, numbered=False):
                 value = value[:-1].rstrip()
             if value.startswith(opening) and value.count(closing if opening != closing else opening) < (1 if opening != closing else 2):
                 value = value[1:].lstrip()
+    # «Шляпа полная небес .(чит …)»: the full stop a removed bracket leaves behind, after a space, is no part of the title.
+    value = re.sub(r'\s+[.,;:]+$', '', text(value))
     return text(value)
 
 
@@ -550,7 +595,9 @@ def title_segments_match(value, titles):
 
 # ---------------------------------------------------------------- sources
 def _tags(member):
-    return {str(k).casefold(): v for k, v in member.get('metadata', {}).get('tags', {}).items()}
+    # POST-023-04: mis-encoded tags are read repaired (tag_text); the catalog keeps the raw values.
+    import tag_text
+    return tag_text.tags(member.get('metadata', {}))
 
 
 def _book_folder(row):
@@ -1612,6 +1659,63 @@ def _compiler_credit(members):
     return ''
 
 
+def _main_album(members):
+    """The album tag at least three quarters of a one-folder book's files carry, else ''."""
+    values = [text(_tags(m).get('album')) for m in members]
+    counted = {}
+    for value in values:
+        if value:
+            counted[value] = counted.get(value, 0) + 1
+    if not counted:
+        return ''
+    best = max(counted, key=counted.get)
+    return best if counted[best] * 4 >= len(members) * 3 else ''
+
+
+_AUTHOR_PREFIX = re.compile(r'^\s*((?:[^\W\d_]{1,2}\.\s*){1,3}[^\W\d_][^\W\d_\'’-]{1,40}|[^.\d]{3,60}?)\.\s+(\S.*\S|\S)\s*$')
+QUOTED_TITLE = re.compile(r'^(.*?)\s*[«“"„]([^«»“”"„]{2,200})[»”"“]\s*(.*)$')
+
+
+def author_prefix(value, members=(), ancestors=()):
+    """(person, title) when a title starts with an author's name and a full stop: «Т. Пратчетт. Шляпа полная небес»,
+    «Джастин Кронин. Перерождение». The person must be the person a credit of the book, its folders or its tags names
+    (initials pair with full names), so "Мистер. Х" or a title's own first sentence is never cut. None otherwise."""
+    match = _AUTHOR_PREFIX.match(str(value or ''))
+    if not match or not re.search(r'[^\W\d_]{2}', match[2]) or not 2 <= len(words(match[1])) <= 4:
+        return None
+    person = text(match[1])
+    if not looks_like_person(person):
+        return None  # "Firefly. Великолепная девятка": a series name before the title is no author
+    candidates = []
+    for member in members:
+        tags = _tags(member)
+        for key in AUTHOR_TAGS:
+            credit = text(tags.get(key))
+            if credit:
+                candidates.append(credit)
+                dotted = re.match(r'^\s*([^.\d]{3,60}?)\.\s+\S', credit)
+                if dotted:
+                    candidates.append(dotted[1])
+    for folder in ancestors:
+        candidates.append(folder)
+        parsed = filename_identity(folder + '.x')
+        if parsed.get('author'):
+            candidates.append(parsed['author'])
+    for candidate in dict.fromkeys(candidates):
+        if candidate and not garbled(candidate) and compare_names(person, candidate):
+            return person, match[2]
+    return None
+
+
+def quoted_title(credit):
+    """POST-023-02: an author credit that carries the book's title in quotes («Дэн Абнетт «Первый и Единственный»»):
+    (person, title), else None. Rules keep matching the whole credit as before."""
+    match = QUOTED_TITLE.match(str(credit or ''))
+    if not match or match[3].strip(' .,;:-–—') or not re.search(r'[^\W\d_]{2}', match[1]):
+        return None
+    return text(match[1]).strip(' ,;:-–—'), text(match[2])
+
+
 def _consistent(members, names):
     """The one non-empty value every member that carries the tag agrees on, else '' (and whether
     members disagree)."""
@@ -2199,9 +2303,24 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
             if len(titles) == 1 and '' not in titles:
                 field = 'title'
                 value = text(_tags(members[0]).get('title'))
+        if mixed and (row.get('folder_unit') or {}).get('kind') == 'one':
+            # Ruling 68: a novel plus its stories in one folder: the album most of the files carry names the book
+            # («Криг», 34 of 38); the other albums are its stories.
+            main = _main_album(members)
+            if main:
+                value, mixed = main, False
         if value and garbled(value):
             ignored.append({'field': field, 'value': value, 'why': 'garbled text is not used'})
             value = ''
+        if value and NARRATOR_MARKER.search(value):
+            # POST-023-03: «исп. Капитан Абр и Nelly» in the album tag names the readers, never the book.
+            ignored.append({'field': field, 'value': value, 'why': 'names the reader, not the book'})
+            value = ''
+        if not value and not mixed and len(members) > 1:
+            # POST-023-02: «Дэн Абнетт «Первый и Единственный»» in the artist tag: the quoted part is the book's title.
+            quoted = {q[1] for m in members for key in AUTHOR_TAGS for q in [quoted_title(text(_tags(m).get(key)))] if q}
+            if len(quoted) == 1:
+                field, value = 'artist (quoted title)', quoted.pop()
         if value and norm(value) in JUNK_TITLES:
             ignored.append({'field': field, 'value': value, 'why': 'names the format, not the book'})
             value = ''
@@ -2253,6 +2372,13 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
                 title = {'state': 'one', 'value': value, 'basis': 'folder_name', 'how': 'the folder name',
                          'sources': [{'kind': 'folder', 'value': component['value']}]}
                 break
+    if title is not None and title.get('basis') in ('tag', 'file_name', 'folder_name'):
+        # POST-023-04: «Т. Пратчетт. Шляпа полная небес» (a folder name): an author named before the title, initials and
+        # surname, is set aside; the destination title never carries it.
+        prefix = author_prefix(title['value'], members, ancestors)
+        if prefix:
+            title = dict(title, value=clean_title(prefix[1]), how=title['how'] + ' (the author named before the title is set aside)')
+            tag_title_author = tag_title_author or prefix[0]
     # 0.22.1, item 9 (Sergei 2026-10-25, ruling 6): the folder structure Author\Series\N. Title is a local source. It names the
     # series and the book's place in it, the author, and the title when the tags do not (or carry the translation of a
     # title the folder names in Latin letters, ruling 16).
@@ -2636,6 +2762,19 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         if not named or (norm(fields['series']['value']) == norm(found['series']) and _same_number(fields['number']['value'], found['number'])):
             fields['title'] = dict(fields['title'], value=found['title'], how=fields['title'].get('how', '') + '; the title after the series and number (ruling 41)',
                                    aliases=list(fields['title'].get('aliases') or []) + [whole])
+    if not found and fields['series']['state'] != 'green' and not part:
+        # POST-023-01 (rulings 51, 52, 71e): «Солнце и Замок (Книга Нового Солнца #3)» in the album tag or the folder name
+        # mentions the book's series and its number in this edition. Nothing confirms it, so it is asked with Series and
+        # Number filled in, never filed by itself.
+        texts = [text(_tags(m).get(key)) for m in members[:3] for key in ('album', 'title')] + [Path(members[0]['path']).parent.name if members else '']
+        for value in texts:
+            mention = re.search(r'\(\s*([^()#№]{3,80}?)\s*(?:#|№)\s*0*(\d{1,3})\s*\)', value or '')
+            if mention and re.search(r'[^\W\d_]{3}', mention[1]):
+                source = [{'kind': 'brackets in the name', 'value': value}]
+                fields['series'] = {'state': 'green', 'value': text(mention[1]), 'how': 'the series the name mentions in brackets', 'sources': source}
+                fields['number'] = {'state': 'green', 'value': mention[2], 'how': 'the number the name gives it in brackets', 'sources': source}
+                unconfirmed = True
+                break
     if fields['series']['state'] == 'green' and series_spelling(fields['series']['value']) != fields['series']['value']:
         # Ruling 46: one series, one spelling, whichever name its files use.
         fields['series'] = dict(fields['series'], value=series_spelling(fields['series']['value']), how=fields['series'].get('how', '') + '; spelled as Sergei ruled (ruling 46)')

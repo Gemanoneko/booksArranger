@@ -9,6 +9,7 @@ import json
 import sqlite3
 import threading
 import publication_locations as locations
+import book_move
 
 
 class PublicationBindings:
@@ -78,6 +79,10 @@ class PublicationBindings:
             kinds=[r[0] for r in db.execute("SELECT DISTINCT publication_kind FROM output_relocations WHERE job_id=? AND publication_kind IN ('base','replacement')",(original['job_id'],))] if exists else []
             if len(kinds)>1:raise ValueError('Publication binding is ambiguous')
             kind=kinds[0] if kinds else 'base'
+        # Rulings 69 and 71h: a book moved to a folder Sergei chose is a later generation of the same publication. The
+        # caller's lease names the last committed move it saw; any move committed since (or one it did not see) refuses.
+        moved,envelope=book_move.split(envelope)
+        if moved!=book_move.current(db,original['job_id'],kind):return False
         bound=exists and db.execute('SELECT 1 FROM output_relocations WHERE job_id=? AND publication_kind=?',(original['job_id'],kind)).fetchone()
         if not bound:return envelope is None
         if envelope is None:return False
@@ -103,6 +108,9 @@ class PublicationBindings:
         if 'output_relocations' in have:token.append(db.execute('SELECT max(rowid) FROM output_relocations').fetchone()[0])
         if 'migration_events' in have:token.append(db.execute('SELECT max(event_id) FROM migration_events').fetchone()[0])
         if 'series_backfill' in have:token.append(tuple(db.execute("SELECT count(*),group_concat(job_id) FROM (SELECT job_id FROM series_backfill WHERE state='done' ORDER BY job_id)").fetchone()))
+        # Rulings 69 and 71h: a move changes a book's location (book_move); its rows change state, never disappear.
+        moves=book_move.token(db)
+        if moves is not None:token.append(moves)
         return (tuple(sorted(have)),*token)
 
     @staticmethod
@@ -131,14 +139,15 @@ class PublicationBindings:
         exists=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone()
         if kind is None:kind=self._kind(db,original,exists)
         bound=exists and db.execute('SELECT 1 FROM output_relocations WHERE job_id=? AND publication_kind=?',(original['job_id'],kind)).fetchone()
-        if not bound:return copy.deepcopy(original),None
+        if not bound:return book_move.apply(db,original,kind,copy.deepcopy(original),None)
         durable=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(original['job_id'],)).fetchone()
         if durable is None:raise ValueError('Publication history unavailable')
         envelope=locations.resolve(db,dict(durable),kind,original)
         if kind in {'Chapters','Chaptersv2'}:
             accepted=json.loads(envelope['relocation']['accepted_routing_json'])
             if not repair_journal_sha256 or accepted.get('repair_journal_sha256')!=repair_journal_sha256:raise ValueError('Fresh authorized repair journal differs from relocation provenance')
-        return self._effective(original,envelope),envelope
+        # Rulings 69 and 71h: moves Sergei asked for are later generations on top of the receipt and relocation.
+        return book_move.apply(db,original,kind,self._effective(original,envelope),envelope)
 
     @contextlib.contextmanager
     def protect_parent(self,job_id,proof):

@@ -186,7 +186,9 @@ class CleanupJobs:
         set and outside every source. Read from the live configuration at each check."""
         from source_config import require_sorted
         output_root,sources=self.output_policy() if self.output_policy else (None,())
-        try:require_sorted(str(path),output_root,sources)
+        # Ruling 71h: a folder Sergei chose counts as Sorted for the book filed directly in it (MergeService supplies them).
+        chosen=getattr(self,'chosen_folders',None)
+        try:require_sorted(str(path),output_root,sources,chosen() if callable(chosen) else ())
         except ValueError as problem:raise error(str(problem)) from None
     def enroll(self,job,binding,historical=False):
         if job['state']!='completed':raise ValueError('Only a completed validated audiobook can remove its sources')

@@ -41,16 +41,21 @@ class GroupFilterTests(unittest.TestCase):
         self.assertEqual(len(rows),1)
         self.assertEqual([m['disc'] for m in rows[0]['members']],[1,2])
         self.catalog('audio/Book/Disc 3/1.mp3',{'album':'Other Book','track':'1'})
-        self.assertEqual(inventory.candidates('Audiobooks')['total'],2)
+        # Ruling 68 (0.24.0): disc folders of one folder are never divided; another album there makes it a held question.
+        rows=inventory.candidates('Audiobooks')['rows']
+        self.assertEqual(len(rows),1);self.assertEqual(len(rows[0]['members']),3)
+        self.assertEqual(rows[0]['folder_unit']['kind'],'ask');self.assertFalse(rows[0]['metadata_approved'])
 
     def test_mixed_works_or_recordings_split_before_any_approval(self):
         inventory=Inventory(self.database,self.roots,self.reader)
         self.catalog('audio/Mixed/1.mp3',{'album':'One','artist':'Reader One'})
         self.catalog('audio/Mixed/2.mp3',{'album':'Two','artist':'Reader Two'})
         rows=inventory.candidates('Audiobooks')['rows']
-        self.assertEqual(len(rows),2)
-        self.assertEqual(sorted(len(row['members']) for row in rows),[1,1])
-        self.assertTrue(all(not row['metadata_approved'] for row in rows))
+        # Ruling 68 (0.24.0): one folder, one candidate; two works in it are a held folder question, never approved.
+        self.assertEqual(len(rows),1)
+        self.assertEqual(sorted(len(row['members']) for row in rows),[2])
+        # The file names number the whole folder (1, 2): one book whose stories keep their own albums and credits.
+        self.assertTrue(all(not row['metadata_approved'] and row['folder_unit']['kind']=='one' for row in rows))
 
     def test_order_only_ambiguity_is_separate_from_metadata_approval(self):
         inventory=Inventory(self.database,self.roots,self.reader)

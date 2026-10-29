@@ -52,8 +52,12 @@ def sorted_problem(output_root, sources):
     return ''
 
 
-def require_sorted(path, output_root, sources):
-    """Raise ValueError unless path is inside the configured output folder and that folder is outside every source."""
+def require_sorted(path, output_root, sources, chosen=()):
+    """Raise ValueError unless path is inside the configured output folder and that folder is outside every source.
+
+    Ruling 71h (Sergei 2026-10-29): a folder Sergei chose counts as Audiobooks Sorted for the book filed directly in it,
+    so its originals are removed after the verified result there too. Such a folder is accepted only while it is not a
+    source folder or inside one (checked live, as the output folder is)."""
     problem = sorted_problem(output_root, sources)
     if problem:
         raise ValueError(problem + KEPT)
@@ -61,6 +65,14 @@ def require_sorted(path, output_root, sources):
         inside = contains(path, output_root)
     except OSError:
         raise ValueError(UNAVAILABLE + KEPT) from None
+    if not inside and chosen:
+        try:
+            parent = _key(os.path.dirname(os.path.abspath(path)))
+            for folder in chosen:
+                if folder and _key(folder) == parent and not any(contains(folder, source) for source in sources):
+                    return
+        except OSError:
+            raise ValueError(UNAVAILABLE + KEPT) from None
     if not inside:
         raise ValueError('The audiobook is not in the sorted output folder' + KEPT)
 

@@ -12,6 +12,8 @@ from source_identity import partition, clues, VERSION as SOURCE_VERSION
 import split_books
 import track_order
 import anthology_volumes
+import folder_unit
+import tag_text
 # Changing the grouping algorithm re-syncs every root once (split books, v0.15.0; same-title sets, v0.22.0).
 SAME_TITLE_VERSION = 'same-title-v4'  # v2: Senua's 0.22.0 review G1, G2; v3: N4 (generic titles, the file-name works check); v4: N10 (chapter names are no works)
 # Ruling 19 (Sergei 2026-10-24): the parts of one book in one folder are joined (same album, one author).
@@ -20,7 +22,12 @@ SAME_ALBUM_VERSION = 'same-album-v4'  # v2: Senua's 0.22.0 review G3; v3: N6 (th
 # other .m4b sets of one folder, album and artist are one candidate whose chapters decide (part_sets.decide).
 M4B_PARTS_VERSION = 'm4b-parts-v2'
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION + '+' + anthology_volumes.VERSION
+# Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
+TAG_REPAIR_VERSION = 'tag-repair-v1'
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION + '+' + anthology_volumes.VERSION + '+' + folder_unit.VERSION + '+' + TAG_REPAIR_VERSION
+FOLDER_GROUPING = {'one': 'One book: every audio file of its source folder.',
+                   'ask': 'One source folder that may hold more than one book: asked before anything is joined or split.',
+                   'remainder': 'The files of a source folder that are not in its existing book: held, never joined to it silently.'}
 DISC_SUFFIX = re.compile(r'[\s_.,:;-]*[\(\[]?(?:cd|disc|disk|диск)[\s_.-]*\d+[\)\]]?\s*$', re.I)
 
 def setup(connection):
@@ -174,8 +181,9 @@ def member(row):
       'disc':disc,'track':track if track is not None else filename_number,
       'duration':duration,'order_evidence':evidence,'order_conflict':conflict}
 
-def _legacy_build(rows,split=None):
-    """split: {path: (disc, position)} of one proven split book; all its files form one batch."""
+def _legacy_build(rows,split=None,single=None):
+    """split: {path: (disc, position)} of one proven split book; all its files form one batch. single: one scope for every
+    file (a ruling-68 source folder: its disc folders and differing albums are one book)."""
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
     companions=[row for row in rows if row['kind']=='companion']
     companions_by_folder={}
@@ -197,6 +205,12 @@ def _legacy_build(rows,split=None):
             item['order_evidence']='Split book part %d%s; %s'%(item['track'],'' if item['disc']==1 else ' of disc %d'%item['disc'],split[row['path']][2])
             item['order_conflict']=False
             grouping='Split book: the parts of one book, grouped by matching title, credits, audio profile and gap-free numbering'
+        elif single is not None:
+            scope=single
+            if disc_folder and item['disc'] is None:
+                item['disc']=int(disc_folder[1]);item['source_disc']='Folder '+disc_folder[1]
+                item['order_evidence']+=' · Disc folder number; unverified'
+            grouping=FOLDER_GROUPING['one']
         elif Path(row['path']).suffix.lower()=='.m4b':
             scope=str(Path(row['path']))+'\x1fSingle audiobook file'
             grouping='Existing single audiobook file; it is not a chapter merge candidate'
@@ -240,9 +254,10 @@ def _legacy_build(rows,split=None):
                 for item in tied:item['order_conflict']=True;item['order_evidence']+=' · Tied position; order unclear'
         titles=set();artists=set();languages=set();series=set();comments=[]
         for item in members:
-            metadata=item['metadata'];tags={key.casefold():value for key,value in metadata.get('tags',{}).items()}
+            # POST-023-04: clues read mis-encoded tags repaired (tag_text); the catalog keeps the raw values.
+            metadata=item['metadata'];tags=tag_text.tags(metadata)
             if tags.get('album'):titles.add(str(tags['album']))
-            artist=metadata.get('artist') or metadata.get('author')
+            artist=tag_text.text(metadata.get('artist') or metadata.get('author'))
             if artist:artists.add(str(artist))
             if metadata.get('edition_language'):languages.add(metadata['edition_language'])
             if metadata.get('series') or metadata.get('number'):series.add((metadata.get('series',''),metadata.get('number','')))
@@ -496,6 +511,33 @@ def _anthology_group(items,companions,scope,volume):
         if Path(item['path']).suffix.lower()!='.m4b':item['anthology_story']=True
     return group
 
+def _folder_units(members,scopes,assigned,reserved,kept,protected,roots):
+    """Ruling 68 with ruling 71a/71b (folder_unit.verdict): the files of one source folder that the per-file rules above
+    proposed as several books become one candidate scope ('one'), or one held question ('ask'). Whole .m4b files, named
+    anthology volumes and protected (approved, reviewed, queued, converted) files keep their own books: when part of a
+    folder is protected, its free files form one held remainder, never joined to the bound book and never a free partial
+    book. Changes scopes in place; returns {scope: decision with 'kind' one | ask | remainder and 'bound' titles}."""
+    from local_identity import CONTAINER_NAMES
+    units={}
+    for path,item in members.items():
+        if Path(path).suffix.lower()=='.m4b' or path in reserved and path not in assigned:continue
+        units.setdefault(folder_unit.unit_of(path),[]).append(item)
+    found={}
+    for (folder,kind),items in sorted(units.items(),key=lambda kv:repr(kv[0])):
+        if len({scopes[item['path']] for item in items})<2:continue
+        free=[item for item in items if item['path'] not in assigned]
+        if not free:continue
+        container=folder.casefold().rstrip('\\/') in roots or Path(folder).name.casefold() in CONTAINER_NAMES
+        decision=folder_unit.verdict(items,scopes,kept,container)
+        if decision['verdict']=='separate':continue
+        bound=list(dict.fromkeys(str((protected.get(assigned[item['path']]) or {}).get('title_clue') or Path(item['filename']).stem) for item in items if item['path'] in assigned))
+        kind_name='remainder' if bound else decision['verdict']
+        scope=folder+'\x1f'+('Folder remainder' if bound else 'Source folder')+('' if kind=='folder' else '\x1f'+kind)
+        if len({scopes[item['path']] for item in free})<2 and not bound:continue
+        for item in free:scopes[item['path']]=scope
+        found[scope]=dict(decision,kind=kind_name,bound=bound)
+    return found
+
 def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=frozenset(),blocked_members=()):
     protected=protected or {};assigned={m['path']:scope for scope,e in protected.items() for m in e['members']};buckets={}
     audio=[row for row in rows if row['kind']=='audiobook' and not json.loads(row['metadata']).get('arranger_output')]
@@ -549,6 +591,7 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
     for found in _part_sets(members,scopes,reserved,chaptered,taken|set(split)|set(sets)|set(joined)):
         for item in found['members']:scopes[item['path']]=found['scope']
         part_sets[found['scope']]=found
+    units=_folder_units(members,scopes,assigned,reserved,kept,protected,{str(row['root']).casefold().rstrip('\\/') for row in audio if 'root' in row.keys()})
     for row in audio:
         buckets.setdefault(scopes[row['path']],[]).append(row)
     output={};companions=[r for r in rows if r['kind']=='companion']
@@ -604,6 +647,24 @@ def build(rows,protected=None,chaptered=frozenset(),volumes=frozenset(),kept=fro
                 found['source_partition_uncertain']=True
                 found['conflicts']=list(old.get('conflicts',[]))+['Split book parts no longer prove one book: '+'; '.join(verdict['reasons'][:3])]
                 output[scope]=found
+            continue
+        if scope in units and scope not in protected:
+            # Ruling 68: the source folder's files, one candidate (a novel plus its stories, two halves of an omnibus,
+            # a mis-encoded subset); a folder the evidence cannot settle, or one part of which is already its own book,
+            # is held with the reason. Per-file album, title and artist tags stay in the members as story/chapter clues.
+            decision=units[scope]
+            group=next(iter(_legacy_build(items+companions,single=scope).values()))
+            group['scope']=scope;group['grouping']=FOLDER_GROUPING[decision['kind']]
+            group['folder_unit']={k:v for k,v in decision.items() if k!='kind'}|{'kind':decision['kind']}
+            group['local_clues']=[{'path':m['path'],'clues':clues(m)} for m in group['members']]
+            group['conflicts']=[c for c in group['conflicts'] if c not in ('Different book album/title clues may indicate mixed works','Different author / reader clues; recording unverified')]
+            if decision['kind']=='ask':
+                group['source_partition_uncertain']=True
+                group['conflicts'].append('This folder may hold more than one book: '+'; '.join(b['name'] for b in decision['books'][:4]))
+            elif decision['kind']=='remainder':
+                group['source_partition_uncertain']=True
+                group['conflicts'].append('Part of this folder is already its own book: '+'; '.join('«'+b+'»' for b in decision['bound'][:3])+'. These files were not joined to it.')
+            output[scope]=group
             continue
         legacy=_legacy_build(items+companions)
         if scope in protected:
@@ -698,7 +759,10 @@ def _sync_inputs(connection,root):
     protected={}
     jobs=set()
     if connection.execute("SELECT 1 FROM sqlite_master WHERE name='audio_jobs'").fetchone():
-        jobs={json.loads(r[0])['candidate_id'] for r in connection.execute('SELECT manifest FROM audio_jobs')}
+        # Ruling 71d: a job set aside because it converted only part of one source folder no longer holds its files.
+        regrouped=' WHERE job_id NOT IN (SELECT job_id FROM audio_job_set_aside WHERE kind=\'regroup\')' if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_job_set_aside'").fetchone() else ''
+        jobs={json.loads(r[0])['candidate_id'] for r in connection.execute('SELECT manifest FROM audio_jobs'+regrouped)}
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])

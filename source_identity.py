@@ -1,6 +1,7 @@
 """Local audiobook clues and conservative source partitioning; never canonical metadata."""
 import re
 from pathlib import Path
+import tag_text
 
 VERSION='public-auto-v1'
 LOCAL_SOURCE_GATE_VERSION='local-source-gate-v2'
@@ -21,7 +22,7 @@ def filename_identity(value):
     return {'title':text(value),'author':''}
 
 def clues(member,root=''):
-    metadata=member.get('metadata',{});tags={k.casefold():v for k,v in metadata.get('tags',{}).items()};result=[]
+    metadata=member.get('metadata',{});tags=tag_text.tags(metadata);result=[]
     def add(kind,field,value):
         value=text(value)
         if value:result.append({'kind':kind,'field':field,'value':value,'verified':False})
@@ -141,8 +142,12 @@ def source_gate(row,work):
     # Confirmed anthology binding re-proves this exact folder and every source, including explicitly blank-tag books.
     # This supplies book context only; recording, source availability and playback-order checks still run.
     if known_anthology:folder_context=True
+    # Ruling 68: a source-folder book (groups._folder_units) is its folder's files; its per-file albums and credits are
+    # its chapters' and stories' own (a novel plus stories, two halves of an omnibus), not mixed recordings.
+    folder_book=(row.get('folder_unit') or {}).get('kind')=='one' and common_folder_or_units(members)
+    if folder_book:folder_context=True
     for m in members:
-        tags={k.casefold():v for k,v in m['metadata'].get('tags',{}).items()}
+        tags=tag_text.tags(m['metadata'])
         album=norm(tags.get('album'))
         # A split part's own name adds its number and chapter label to the book name.
         named=filename_identity(split['book_name']+'.x') if split and split['ok'] and split['book_name'] else {'title':'','author':''} if split else filename_identity(m['filename'])
@@ -163,8 +168,8 @@ def source_gate(row,work):
                 if value and series.get('name') and series.get('number') and norm(value)!=norm(series['name'] if key=='series' else series['number']):
                     reasons.append('Source series or position conflicts with verified work')
             continue
-        if album and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
-        if named.get('author'):
+        if album and not folder_book and not (same_title(tags.get('album')) if local else title_matches(album,aliases,work.get('author_aliases',[]))):reasons.append('Sources disagree on the title or author')
+        if named.get('author') and not folder_book:
             filename_ok=(same_title(named['title']) if local else norm(named['title']) in aliases) and source_author(named['author'])
             if local:
                 from local_identity import NARRATOR_MARKER
@@ -184,7 +189,7 @@ def source_gate(row,work):
         source_title=album or norm(tags.get('title')) if len(members)==1 else album
         if standing and not source_title:
             source_title=norm(named['title']) if len(members)==1 else norm(folder_title) if folder_context else ''
-        if not source_title or not (title_matches(source_title,aliases,work.get('author_aliases',[])) or local and source_title in {norm(v) for v in (tags.get('album'),tags.get('title'),named.get('title'),Path(m['path']).parent.name) if v and same_title(v)}):reasons.append('Source membership uncertain')
+        if not folder_book and (not source_title or not (title_matches(source_title,aliases,work.get('author_aliases',[])) or local and source_title in {norm(v) for v in (tags.get('album'),tags.get('title'),named.get('title'),Path(m['path']).parent.name) if v and same_title(v)})):reasons.append('Source membership uncertain')
         if m.get('order_conflict') and len(members)>1 and not sequence:reasons.append('Playback order uncertain')
         # One part of a multi-part set filed as its own book (Sergei 2026-10-13): its set totals are
         # the set's, not this book's. Re-derived at admission (local_identity.revalidate) and
@@ -194,7 +199,7 @@ def source_gate(row,work):
             if denominator and int(denominator[1])>1:reasons.append('Source membership uncertain')
             disc_total=re.fullmatch(r'\d+/(\d+)',str(tags.get('disc') or tags.get('discnumber') or '').strip())
             if disc_total and int(disc_total[1])>1 and not series_disc(tags):reasons.append('Source membership uncertain')
-        if tags.get('author') and not source_author(tags['author']):reasons.append('Sources disagree on the title or author')
+        if tags.get('author') and not folder_book and not source_author(tags['author']):reasons.append('Sources disagree on the title or author')
         series=work.get('verified_series') or {}
         for key in ('series','series-part','series_part'):
             value=text(tags.get(key))
@@ -204,9 +209,9 @@ def source_gate(row,work):
                 expected=series['name'] if key=='series' else series['number']
                 if norm(value)!=norm(expected):reasons.append('Source series or position conflicts with verified work')
     if len(members)>1:
-        tags=[{k.casefold():v for k,v in m['metadata'].get('tags',{}).items()} for m in members]
+        tags=[tag_text.tags(m['metadata']) for m in members]
         albums={norm(t.get('album')) for t in tags};artists={norm(t.get('artist')) for t in tags}
-        if known_anthology:artists={'confirmed anthology story credits'}
+        if known_anthology or folder_book:artists={'confirmed anthology story credits' if known_anthology else 'one source folder'}
         if len(artists)>1 and local:
             # Ruling 19 (joined parts): one person spelled two ways ("Иван Петров" / "Петров Иван") is one artist.
             from local_identity import same_person,compare_names
@@ -245,6 +250,11 @@ def source_gate(row,work):
         if totals and any(n!=sum(p[0]==disc for p in positions) for n,disc in totals):
             reasons.append('Source membership uncertain')
     return list(dict.fromkeys(reasons))
+
+def common_folder_or_units(members):
+    """The members still form one source folder (disc/part folders of one book rolled up), as groups._folder_units made it."""
+    import folder_unit
+    return len({folder_unit.unit_of(m['path']) for m in members})==1
 
 def author_matches(value,aliases):
     # Token order varies across filename/publisher credits; initials alone cannot establish identity.

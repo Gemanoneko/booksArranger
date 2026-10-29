@@ -32,6 +32,14 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         (folder / 'cover.jpg').write_bytes(b'cover'); (folder / 'info.txt').write_text('info', encoding='utf-8')
         (self.sorted / 'Петров Иван').mkdir(); (self.sorted / 'Петров Иван' / 'Другая книга - Петров Иван.m4b').write_bytes(b'finished')
         self.start()
+        # Ruling 68 (0.24.0): one folder is one book unless Sergei keeps its books apart. Another author's file beside the
+        # parts makes the folder a question; his "Keep as separate books" answer is recorded here, so the sibling is its own
+        # book, the case rulings 23 and 24 protect.
+        import groups
+        with connect(self.inv.database) as db:
+            files = [dict(r) for r in db.execute("SELECT path,size,modified FROM files WHERE kind='audiobook'") if Path(r['path']).parent == folder]
+            groups.record_volumes(db, str(self.audio), files, groups.KEPT_BASIS + ' (test)')
+        self.assertEqual(sorted(len(r['members']) for r in self.service.reviews.page()['rows']), [1, 3], 'positive control: two books')
         self.kept = self.base / 'kept'; self.kept.mkdir()
         for part in self.parts:
             shutil.copy2(part, self.kept / part.name)
@@ -73,7 +81,10 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
             shutil.copy2(self.kept / part.name, part)
         self.inv.launch('Audiobooks'); finish_scan(self.inv)
         new = [r for r in self.service.reviews.page()['rows'] if r['title_clue'] == 'Новая плоть']
-        self.assertEqual([len(r['members']) for r in new], [3])
+        self.assertEqual(len(new), 1); self.assertTrue({p.name for p in self.parts} <= {m['filename'] for m in new[0]['members']})
+        # Ruling 68 (0.24.0): his "Keep as separate books" named the old files; new files beside the other book make the
+        # folder a question again (one held candidate, never joined silently).
+        self.assertEqual(new[0]['folder_unit']['kind'], 'ask')
         self.assertNotEqual(new[0]['id'], row['id'], 'a new identity')
         self.assertIsNone(self.service.automatic.candidate(new[0]), 'no research record carried')
         self.assertFalse(new[0].get('review'))

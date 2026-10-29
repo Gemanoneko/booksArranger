@@ -474,7 +474,10 @@ class SeriesFolderFileTests(Base):
             self.assertEqual(self.goes_to(row, result), SORTED + '\\Barker Clive\\Books of Blood\\Books of Blood - 3 - Сын целлулоида - Ревущий мясник - Barker Clive.m4b', tags)
         row = next(iter(self.catalog([file_row('Стефан Цвейг\\Биографии\\03 - Жозеф Фуше - Портрет политического деятеля.m4b', artist='Стефан Цвейг')]).values()))
         self.assertEqual(self.approved(row)['title'], 'Жозеф Фуше - Портрет политического деятеля')
-        self.assertEqual(self.lookup(row)['review']['title'], 'Жозеф Фуше - Портрет политического деятеля')
+        # 0.24.0: «Стефан Цвейг» (a first name the app does not know) is asked its English spelling first (ruling 39); the
+        # title the question proposes is the same.
+        result = self.lookup(row)
+        self.assertEqual((result.get('review') or {}).get('title') or result['ask']['fields']['title']['proposal'], 'Жозеф Фуше - Портрет политического деятеля')
         # The book's own author or a known reader before the title is still a credit (W1): the author tag, a slip in the
         # first name aside (live: "Марина Ясинская" tagged "Мария Ясинская"), the reader of this book, and with no author tag
         # the person the file name credits.
@@ -758,6 +761,11 @@ class OddNameTests(Base):
         # that starts with a number is asked either way.
         for n, (album, author, expected) in enumerate(RULING_51_KEPT, 100):
             with self.subTest(album=album):
+                if author and local_identity.unknown_given(author):
+                    # 0.24.0 (POST-023-01, rulings 39 and 59): a Cyrillic credit whose first name the app does not know
+                    # («Робин Хобб») is looked up first; offline nothing is found, so its English spelling is asked.
+                    self.assertEqual(self.outcome(n, album, author), ('ask', 'english_spelling'))
+                    continue
                 if album in RULING_52_M18:
                     self.assertEqual(self.outcome(n, album, author, confirm=True), ('ask', 'title_series'))
                 elif expected[0] == 'split':
@@ -1175,6 +1183,102 @@ class KeepLanguageTests(Base):
                     result=self.lookup(row)
                 lookup.assert_called_once()
                 self.assertEqual((result['review']['canonical_author'],result['review']['title']),('Rollins James',expected))
+
+
+class TolkienHeldTranslationTests(Base):
+    """2026-10-29 (BugEvidence/2026-10-29-tolkien-lookup): «Хранители. Летопись первая», «Две твердыни. Летопись вторая» and
+    «Возвращение государя. Летопись третья» by «Джон Рональд Руэл Толкин», each a folder of two .m4b halves under
+    `J. R. R. Tolkien\\Джон Рональд Руэл Толкин\\`, asked "no English spelling found". They file as Tolkien J. R. R. (the
+    library's own folder), in the series «Властелин Колец» 1, 2, 3, under their original English titles (ruling 49). The
+    private answers have the shape FantLab gave on 2026-10-29: the Russian edition titles are a work's Russian or other
+    name (one ";"-separated text), and the parent «Властелин Колец» is a novel-epic (work type 13) whose three novels are
+    its volumes. Real PublicClient (cache, pacing, pauses) on a private catalog; no network."""
+    VOLUMES=(('Хранители. Летопись первая',1,('Хранители. Книга первая','Хранители. Книга вторая'),'The Fellowship of the Ring'),
+             ('Две твердыни. Летопись вторая',2,('Две твердыни. Книга третья','Две твердыни. Книга четвёртая'),'The Two Towers'),
+             ('Возвращение государя. Летопись третья',3,('Возвращение государя. Книга пятая','Возвращение государя. Книга шестая'),'The Return of the King'))
+    SEARCH={'Хранители':{'work_id':1667,'name':'The Fellowship of the Ring','rusname':'Братство Кольца','altname':'Хранители кольца; Хранители; Дружество кольца'},
+            'Две твердыни':{'work_id':1668,'name':'The Two Towers','rusname':'Две твердыни','altname':'Две башни; Две крепости'},
+            'Возвращение государя':{'work_id':1669,'name':'The Return of the King','rusname':'Возвращение Короля','altname':'Возвращение Государя'}}
+
+    def setUp(self):
+        # These books are translations: the module's "no book is a translation" patch (setUpModule) is off for them.
+        _no_original_title_wait.stop();self.addCleanup(_no_original_title_wait.start)
+
+    def sources(self,closed=()):
+        import urllib.error,urllib.parse
+        calls=[]
+        works={record['work_id']:record for record in self.SEARCH.values()}
+        def fetch(url,*_):
+            calls.append(url);parts=urllib.parse.urlsplit(url)
+            if parts.hostname in closed:raise urllib.error.HTTPError(url,429,'private fixture',{'Retry-After':'999999999'},None)  # a pause the site asks for
+            if parts.hostname=='api.fantlab.ru' and parts.path=='/search-works':
+                q=urllib.parse.parse_qs(parts.query)['q'][0]
+                found=[dict(self.SEARCH[q],all_autor_name='J. R. R. Tolkien',all_autor_rusname='Дж. Р. Р. Толкин')] if q in self.SEARCH else []
+                return json.dumps(found,ensure_ascii=False).encode()
+            if parts.hostname=='api.fantlab.ru' and parts.path=='/work/1693/extended':
+                children=[{'work_id':505060,'work_type_id':11,'deep':1,'plus':1}]+[{'work_id':n,'work_type_id':1,'deep':1,'plus':None} for n in (1667,1668,1669)]+[{'work_id':183141,'work_type_id':7,'deep':1,'plus':1}]
+                return json.dumps({'work_id':1693,'work_name':'Властелин Колец','work_type_id':13,'children':children},ensure_ascii=False).encode()
+            if parts.hostname=='api.fantlab.ru' and parts.path.startswith('/work/'):
+                work=works[int(parts.path.split('/')[2])]
+                return json.dumps({'work_id':work['work_id'],'work_name':work['rusname'],'work_name_orig':work['name'],'work_type_id':1,'work_type_name':'novel','lang_code':'en',
+                                   'authors':[{'type':'autor','name':'Джон Рональд Руэл Толкин','name_orig':'John Ronald Reuel Tolkien'}],
+                                   'parents':{'cycles':[[{'work_id':29203,'work_name':'Легендариум Средиземья','work_type_id':4},{'work_id':1693,'work_name':'Властелин Колец','work_type_id':13}]]}},ensure_ascii=False).encode()
+            if parts.hostname=='www.goodreads.com':return b'<html><body><table class="tableList"></table></body></html>'
+            if parts.hostname=='www.wikidata.org':return json.dumps({'search':[],'entities':{}}).encode()
+            return b'{"items":[],"results":[],"docs":[]}'
+        return fetch,calls
+
+    def books(self,closed=()):
+        rows=[]
+        for album,disc,titles,_ in self.VOLUMES:
+            for index,title in enumerate(titles,1):
+                rows.append(file_row('J. R. R. Tolkien\\Джон Рональд Руэл Толкин\\%s\\%d-%02d %s.m4b'%(album,disc,index,title),title=title,artist='Джон Рональд Руэл Толкин',
+                                     album_artist='Джон Рональд Руэл Толкин',album=album,composer='Петр Маркин',genre='Фэнтези',track='%d/2'%index,disc='%d/3'%disc))
+        books=self.catalog(rows)
+        fetch,calls=self.sources(closed)
+        minutes=iter(range(10**6,10**9,60))  # each clock read a minute after the last: no pacing wait, the cache stays fresh
+        self.research=PublicResearch(PublicClient(self.research.client.database,fetch=fetch,clock=lambda:next(minutes)),leads=[])
+        return [books[key] for key in sorted(books,key=lambda key:[v[0] for v in self.VOLUMES].index(Path(key).name))],calls
+
+    def test_held_volumes_get_the_english_title_and_the_series_from_the_catalog(self):
+        books,calls=self.books()
+        for row,(album,number,_,english) in zip(books,self.VOLUMES):
+            with self.subTest(album=album):
+                result=self.lookup(row)
+                self.assertEqual(result['reasons'],[local_identity.PIECE_REASON],'held for Sergei: two halves of one volume')
+                approval=self.approved(row)
+                self.assertEqual((approval['title'],approval['author']),(english,'Tolkien J. R. R.'))
+                review=self.research.approved(row,ROOT)['review']
+                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Властелин Колец',str(number),'Tolkien J. R. R.'))
+                self.assertIn('\\Tolkien J. R. R\\Властелин Колец\\',self.approved_to(row))
+                self.assertIn(english,self.approved_to(row))
+        self.assertFalse(any('goodreads.com/book/show' in url for url in calls))
+        self.assertTrue(any('search-works?q=%D0%A5%D1%80%D0%B0%D0%BD%D0%B8%D1%82%D0%B5%D0%BB%D0%B8&' in url for url in calls),'the volume asked by its book title')
+
+    def test_a_closed_source_files_nothing_new_and_is_never_asked_again_during_its_pause(self):
+        books,calls=self.books(closed=('api.fantlab.ru',))
+        row=books[0];result=self.lookup(row)
+        self.assertEqual(result['reasons'],[local_identity.PIECE_REASON],'still held: Sergei decides')
+        approval=self.approved(row)
+        self.assertEqual(approval['title'],'Хранители. Летопись первая','nothing confirmed: the title the files give')
+        self.assertFalse(self.research.approved(row,ROOT)['review'].get('series'))
+        asked=sum('api.fantlab.ru' in url for url in calls);self.assertEqual(asked,1,'one request, then the pause it set')
+        self.lookup(books[1])
+        self.assertEqual(sum('api.fantlab.ru' in url for url in calls),asked,'no request while FantLab is paused (no bypass)')
+
+    def test_a_series_position_that_disagrees_with_the_volume_number_is_not_used(self):
+        self.SEARCH=dict(self.SEARCH,**{'Хранители':dict(self.SEARCH['Две твердыни'],altname='Хранители')})  # a wrong record: novel 2
+        books,_=self.books()
+        self.lookup(books[0])
+        self.assertFalse(self.research.approved(books[0],ROOT)['review'].get('series'),'«Летопись первая» is never filed as book 2')
+
+    def test_a_title_or_series_he_entered_is_never_looked_up(self):
+        import entered_names
+        books,calls=self.books()
+        entered_names.save(self.research.client.database,books[0],[('book','title','Хранители','','',''),('book','series','Властелин колец','','',''),('book','number','1','','','')])
+        self.lookup(books[0])
+        self.assertEqual([url for url in calls if 'api.fantlab.ru' in url or 'goodreads.com' in url],[],'nothing looked up')
+        self.assertEqual(self.approved(books[0])['title'],'Хранители','his title files the book')
 
 
 def tearDownModule():

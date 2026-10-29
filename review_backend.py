@@ -498,6 +498,10 @@ class CandidateReviewService:
                     try:row['ask']=self.jobs.ask_payload(row,needs[row['id']])
                     except (ValueError,OSError,sqlite3.Error) as error:row['ask']={'kind':needs[row['id']]['group'],'reasons':needs[row['id']]['reasons'],'fields':{},'candidates':[],'destination':{'path':'','taken':False,'reason':str(error)[:200]}}
             self._names_lines(rows)
+            # Rulings 68-70 (Judy's 0.23.1 spec, sections 3 and 15-17): where each shown book's files are, and where its
+            # converted file is or goes (the chosen folder, a move). Catalog facts only: no file access on a list read.
+            if self.jobs and hasattr(self.jobs,'folder_view'):self.jobs.folder_view(rows)
+            if self.jobs and hasattr(self.jobs,'destination_view'):self.jobs.destination_view(rows)
             import book_delete
             recheck=False
             for row in rows:

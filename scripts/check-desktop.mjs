@@ -4,6 +4,7 @@
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
+import {trackGateScratch} from './gate-scratch.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
 {const refusal=liveCatalogRefusal(root);if(refusal){fs.writeSync(2,refusal+'\n');process.exit(1);}}
@@ -15,7 +16,6 @@ if(runtimeRoot){if(!path.isAbsolute(runtimeRoot))throw Error('BOOKS_QA_RUNTIME_R
 const python=fixture.python.path,sha=fixture.python.sha256;
 for(const [name,expected] of Object.entries(fixture.ffmpeg.files)){const file=path.join(fixture.ffmpeg.root,name),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected.sha256)throw Error('Bundled QA media runtime differs');}
 if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)throw Error('QA Python runtime differs');
-fs.mkdirSync(path.join(root,'scratch','source-fallback-2026-10-11'),{recursive:true});
 const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate","test_series_backfill.AREA":"scratch/s"};
 // 0.22.3: the gate's start is the process's; each Python worker's own deadline counts from its own start (workerDeadline),
 // and the side chain and every worker stop at the gate's total, inside the entry check's 600 s.
@@ -26,7 +26,7 @@ const gateStart=performance.timeOrigin,deadline=gateStart+GATE_TOTAL_SECONDS*100
 // gate, but only after every Python worker and the chain have finished.
 const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
 function runAsync(exe,args){return new Promise(resolve=>{const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
-const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js'],nodeTests=['tests/release-contract.test.mjs','tests/release-flow.test.mjs','tests/update-controller.test.mjs','tests/engine-update.test.mjs','tests/launch-options.test.mjs','tests/release-leased-executables.test.mjs','tests/status-flight.test.mjs','tests/quit-watch.test.mjs','tests/python-check-batches.test.mjs','tests/gate-source-guard.test.mjs','tests/load-state.test.mjs','tests/startup.test.mjs','tests/desktop-loading.test.mjs','tests/main-startup.test.mjs','tests/qa-entry-context.test.mjs','tests/real-shell-update.test.mjs'];
+const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=['tests/release-contract.test.mjs','tests/release-flow.test.mjs','tests/update-controller.test.mjs','tests/engine-update.test.mjs','tests/launch-options.test.mjs','tests/release-leased-executables.test.mjs','tests/status-flight.test.mjs','tests/quit-watch.test.mjs','tests/python-check-batches.test.mjs','tests/gate-source-guard.test.mjs','tests/load-state.test.mjs','tests/startup.test.mjs','tests/desktop-loading.test.mjs','tests/main-startup.test.mjs','tests/qa-entry-context.test.mjs','tests/real-shell-update.test.mjs','tests/desktop-folder-picker.test.mjs'];
 const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
 function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
  const step=async(exe,args)=>{if(failure)return null;const r=await runAsync(exe,args);log.push(r.stdout,r.stderr);if(r.error||r.timedOut||r.status!==0)failure=(r.error||(r.timedOut?'deadline':'exit '+r.status))+': '+args.join(' ');return r;};
@@ -83,6 +83,8 @@ patterns.push('test_original_title_wait.py');  // 0.22.2: ruling 38, a translati
 patterns.push('test_entered_names.py','test_live_cases_0222.py');  // 0.22.2: Edit names (lasting corrections, no job under old names); «1408», «11.22.63», «Голиаф»
 patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (no evidence asked for), ruling 35 (every press queues)
 patterns.push('test_set_release.py');  // 0.22.3: ruling 53 through the real automatic run (Futaba M-1, Senua M10)
+patterns.push('test_destination_override.py','test_book_move.py');  // 0.24.0: rulings 69, 70 and 71h-k (chosen folder, moving a finished book)
+patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
 owner={}
@@ -138,15 +140,21 @@ function inventory(directory,relative=''){
  }
  return files;
 }
+// 2026-10-29: the gate removes the scratch it made when it ends, pass or fail (scripts/gate-scratch.mjs). A failure keeps
+// only the worker copies it names as its evidence and says so. Every run used to leave its 13 worker copies behind.
+const gateScratch=trackGateScratch(root);let gateError=null,passLine=null;
+nodeTests.push('tests/gate-scratch.test.mjs');  // its own suite, in the gate like every other node suite
+try{
+fs.mkdirSync(gateScratch.claim('scratch/source-fallback-2026-10-11'),{recursive:true});gateScratch.claim('scratch/f');  // the side chain's fixture root
 const inputs=inventory(root),batches=pythonBatches(patterns);
 const side=sideChecks();  // beside the Python workers (see sideChecks)
 const workers=batches.map((batch,i)=>{
- const layout=pythonWorkerLayout(i),directory=path.join(root,layout.relative);fs.mkdirSync(directory); // fresh or refuse
+ const layout=pythonWorkerLayout(i),directory=gateScratch.claim(layout.relative);fs.mkdirSync(directory); // fresh or refuse
  for(const [name,sha] of inputs){const destination=path.join(directory,name),bytes=fs.readFileSync(path.join(root,name));if(createHash('sha256').update(bytes).digest('hex')!==sha)throw Error('Python batch source changed during copy');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes,{flag:'wx'});}
- if(JSON.stringify(inventory(directory))!==JSON.stringify(inputs))throw Error('Python batch copy differs');
+ if(JSON.stringify(inventory(directory))!==JSON.stringify(inputs)){gateScratch.evidence(layout.relative,'its source copy differs from the gate inputs');throw Error('Python batch copy differs: '+layout.relative);}
  for(const relative of layout.requiredDirectories)fs.mkdirSync(path.join(directory,relative),{recursive:true});
  const temp=path.join(directory,'scratch','tmp');
- return {directory,temp,batch,i};
+ return {directory,temp,batch,i,relative:layout.relative};
 });
 let outputBytes=0,overflow=false;
 const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
@@ -165,7 +173,9 @@ const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
 for(let i=0;i<results.length;i++){process.stdout.write(results[i].out);process.stderr.write(results[i].err);}
 const sideResult=await side;process.stdout.write(sideResult.log.join(''));
 const workerSeconds=workerSecondsReport(batches,results.map(r=>r.seconds));for(const line of workerSeconds.lines)console.log(line);
-for(const worker of workers)if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))throw Error('Python batch source changed during tests');
+const changed=[];
+for(const worker of workers){let why=null;try{if(JSON.stringify(inventory(worker.directory))!==JSON.stringify(inputs))why='its source copy changed during the tests';}catch(error){why='its source copy changed during the tests: '+error.message;}if(why){gateScratch.evidence(worker.relative,why);changed.push(worker.relative);}}
+if(changed.length)throw Error('Python batch source changed during tests: '+changed.join(', '));
 const late=results.map((r,i)=>r.timedOut?'worker '+i+' ('+r.timedOut+' deadline, '+Math.round(r.seconds)+' s)':'').filter(Boolean);
 if(late.length)throw Error('Python worker deadline: '+late.join(', '));
 if(overflow||results.some(r=>r.error||r.status!==0))throw Error('Python batch failed or exceeded output cap');
@@ -188,4 +198,9 @@ const qaRuntime={root:usedRuntime,sha256:treeDigest(await manifestOf(usedRuntime
 // Senua's 0.22.1 review, W10: the whole runtime tree is pinned, not only its three executables.
 if(!fixture.tree||qaRuntime.sha256!==fixture.tree.sha256)throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+qaRuntime.sha256+')');
 const mp3Fixture={path:fixtureFile,sha256:fixtureFile?createHash('sha256').update(fs.readFileSync(fixtureFile)).digest('hex'):''};
-console.log('BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,python_workers:workerSeconds.workers,python_worker_deadline_seconds:workerSeconds.deadline,copy_seconds:copySeconds,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture}));
+passLine='BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,python_workers:workerSeconds.workers,python_worker_deadline_seconds:workerSeconds.deadline,copy_seconds:copySeconds,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture});
+}catch(error){gateError=error;}
+const tidy=gateScratch.finish(Boolean(gateError));
+for(const line of tidy.lines){if(gateError||tidy.left.length)console.error(line);else console.log(line);}
+if(gateError)throw gateError;  // the same error and exit code as before, after the cleanup
+console.log(passLine);

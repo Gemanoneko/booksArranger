@@ -81,7 +81,12 @@ STAGES={'catalog':{'api.fantlab.ru','www.wikidata.org','openlibrary.org','www.go
 # standing-22.2-v1 (0.22.2): co-authors and readers before a title (Senua W17, «Призрак дома на холме»), Ж as a Latin Z and
 # more first names («Джек из Тени»), the original title in the file name, Latin "Given Surname" names (ruling 33): every held
 # or waiting book is researched once more under them, locally.
-RESEARCH_VERSION='standing-22.2-v1'
+# standing-24-v1 (0.24.0, POST-023): rulings 39, 49, 52, 58 and 59 changed in 0.22.3 and 0.23.0 without a new version, so
+# 289 held books kept verdicts from before them («Джин Вулф» filed in Cyrillic). Every held or waiting book is researched
+# once more under: one source folder is one book (ruling 68), repaired tags, narrator credits never a title, the author
+# lookup for unknown first names, Wikidata person names and local Latin spellings, and edition volume titles
+# («Хранители. Летопись первая») looked up by their book title.
+RESEARCH_VERSION='standing-24-v1'
 
 class ChallengeDetected(ValueError):pass
 
@@ -648,6 +653,9 @@ class PublicResearch:
                                        folder='\\'.join(reversed(local_identity._ancestors(row,root))),answered=author is None and chosen is not None)
         for key in ('names','names_entered','names_digest'):
             if key in record:settled[key]=copy.deepcopy(record[key])
+        if english and english.get('series') and not settled.get('series') and not {'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)):
+            settled['series']=dict(english['series'])  # found with the Russian title (_english_original); never his own values
+            settled['gaps']=[gap for gap in settled.get('gaps') or [] if gap not in ('series','number')]
         if english:
             settled['fields']['title']=dict(settled['fields']['title'],how=settled['fields']['title']['how']+'; the original English title (ruling 49) of "%s"'%shown['title'],
                                             sources=list(settled['fields']['title']['sources'])+[{'kind':'catalog original title','value':english['original_title'],'url':english.get('source_url','')}])
@@ -668,12 +676,15 @@ class PublicResearch:
         if local_identity.script(title)=='latin':return None
         credit=text(((record.get('fields') or {}).get('author') or {}).get('value'))
         scratch={'sources':[],'evidence':[],'reasons':[]}
-        try:filled=self._gap_fill(dict(record,gaps=['original_title']),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
+        # 2026-10-29 (Tolkien): the series is asked with the same Russian title. Approve then files under the English
+        # title, which the catalogs know by another record; an edition volume's series is found only by its own title.
+        gaps=['original_title']+(['series'] if 'series' in (record.get('gaps') or ()) and not record.get('series') else [])
+        try:filled=self._gap_fill(dict(record,gaps=gaps),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
         except Exception:return None  # nothing known: the title shown is filed
         catalog=(filled or {}).get('catalog') or {}
         original=text(catalog.get('original_title'))
         if catalog.get('language')!='en' or not original or local_identity.script(original)!='latin':return None
-        return catalog
+        return dict(catalog,series=dict(filled['series'])) if isinstance(filled.get('series'),dict) and filled['series'].get('name') and filled['series'].get('number') else catalog
     def local_generation(self):
         from openlibrary_index import generation
         return generation(self.local_index)
@@ -811,6 +822,7 @@ class PublicResearch:
                 if hold.get('kind')=='piece':hold['piece']={'piece':'set','cause':decision['basis'],'parts':len(row.get('members') or []),
                                                             'hours':round(sum(float(m.get('duration') or 0) for m in row.get('members') or [])/3600,1)}
                 result['identity_hold']=hold;result['wait']=None
+        self._held_translation(row,root,result,stop or threading.Event())
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
@@ -828,6 +840,44 @@ class PublicResearch:
             result['metadata_holds']=[{'cause':'metadata_conflict','fields':sorted({c['field'] for c in conflicts}),
                                        'reason':'Saved manual metadata disagrees with researched identity'}]
         return result
+
+    HELD_TRANSLATION_BUDGET=12  # requests, as research and the background gap fill have per book
+
+    def _held_translation(self,row,root,result,stop):
+        """Ruling 49 and the series on a book held for Sergei (2026-10-29, Tolkien: «Хранители. Летопись первая» by
+        «Джон Рональд Руэл Толкин» needed «Властелин Колец» 1 and "The Fellowship of the Ring"). A held book's row and its
+        Approve read the original title and the series from the research cache only (approved(), _english_original), and
+        only the background pass after an approval used to ask the sources, so a held translation never had them. When the
+        book is held, its title is Cyrillic and the author it files under is in Latin letters (a foreign author), the
+        sources are asked once now for the gaps the cache does not answer, under the same title and author Approve uses (an
+        edition volume by its book title, as _gap_fill's second pass asks), through the client's cache, per-site bounds and
+        pauses (no bypass). Nothing is filed or changed here: the row's preview and Approve then read the answers from the
+        cache, and a series position must still agree with the volume number (_gap_fill). A title or series Sergei
+        entered is never looked up. Best effort: any failure leaves the book as it was."""
+        import local_identity
+        if not result.get('reasons') or result.get('wait') or not result.get('local_agreement') or stop.is_set():return
+        # Cheap first: what research read (its review, else the local agreement) must already look like a translation.
+        local=result['local_agreement'];review=result.get('review') or {}
+        read_title=text(review.get('title') or ((local.get('title') or {}).get('value') if isinstance(local.get('title'),dict) else ''))
+        read_author=text(review.get('canonical_author') or ((local.get('author') or {}).get('value') if isinstance(local.get('author'),dict) else ''))
+        if local_identity.script(read_title)!='cyrillic' or local_identity.script(read_author)!='latin':return
+        try:
+            preview=self.approved(row,root)
+            approval=preview.get('approval') or {};review=preview.get('review') or {}
+            title=text(approval.get('title'));author=text(approval.get('author'))
+            if not title or not author or approval.get('collection') or local_identity.script(title)!='cyrillic' or local_identity.script(author)!='latin':return
+            entered=set(approval.get('typed') or [])|set(approval.get('entered') or [])|set(approval.get('names') or {})
+            gaps=[]
+            if 'title' not in entered:gaps.append('original_title')
+            if not text(review.get('series')) and not {'series','number'}&entered:gaps.append('series')
+            if not gaps:return
+            base=edition_volume(title)[0]
+            scratch={'sources':[],'evidence':[],'reasons':[]};budget={'remaining':self.HELD_TRANSLATION_BUDGET}
+            self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':False}}},base,author,stop,budget,[],lambda *_:None,scratch)
+            result['translation_lookup']={'title':base,'author':author,'gaps':gaps,'requests':self.HELD_TRANSLATION_BUDGET-budget['remaining'],
+                                          'sources':[source.get('url','') for source in scratch['sources']][:8]}
+        except Exception:
+            return
 
     def _part_set(self,row,root,stop):
         """Rulings 19 and 19a (Sergei 2026-10-24): whole .m4b parts of one set: their chapters decide whether they are one
@@ -1319,8 +1369,8 @@ class PublicResearch:
                            'rules_generation':rules.generation if rules else ''}
         english_title=False
         if one_source and not reasons and not part and names[0]!=NO_AUTHOR and not fields['author'].get('rule') and language!='ru' \
-                and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or rules is not None and
-                    (rules.taken_back(names[0]) or rules.keep(names[0]) and local_identity.foreign_given(names[0]))):
+                and local_identity.script(names[0])=='cyrillic' and (original_titles.translation(preferred,names[0]) or local_identity.unknown_given(names[0])
+                    or rules is not None and (rules.taken_back(names[0]) or rules.keep(names[0]) and local_identity.foreign_given(names[0]))):
             # Ruling 39 (Sergei 2026-10-27): a foreign author credited only in Cyrillic (a foreign first name, no Latin
             # spelling in the library, the cache or a rule). The author's original-language name is looked up now, in the
             # work's catalog records (FantLab, Wikidata, Goodreads; the client's cache, per-site bounds and research lane),
@@ -1331,7 +1381,17 @@ class PublicResearch:
             # Approve/preview is read-only and never looks up an unresolved name; it keeps the English question.
             # A normal research pass still looks up after unrelated entered fields (M15).
             approving=any(fields[field].get('state')=='approved' for field in ('title','author'))
-            found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result)
+            # 2026-10-29 (Tolkien): the book's own folders and the authors the library already files are read first, and
+            # an edition's volume title («Хранители. Летопись первая») is also looked up by its book title.
+            ancestors=[]
+            for member in row.get('members') or []:
+                folder=ntpath.dirname(member['path'])
+                for _ in range(4):
+                    name=ntpath.basename(folder)
+                    if not name or name in ancestors:break
+                    ancestors.append(name);folder=ntpath.dirname(folder)
+            known=[spelling for spelling,_ in (rules.known_authors.values() if rules is not None else [])]
+            found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result,folders=ancestors,known=known)
             if found and found['state']=='found':
                 latin=_latin_surname_first(found['name'],names[0])
                 self._learn_author('same_as',names[0],latin,found['source_url'],preferred)
@@ -1384,6 +1444,7 @@ class PublicResearch:
         if original is not None:result['original_title']=original
         review,facts,policy_reasons=build_policy(row,work,preferred,names,series=series.get('name',''),number=series.get('number',''),local=local_identity.summary(local))
         facts['work_ids']=work_ids
+        facts['research_version']=RESEARCH_VERSION  # ruling 71f: a job planned under this research needs no re-check
         if 'names_digest' in local:facts['entered_names']={'digest':local['names_digest'],'fields':list(local.get('names_entered') or [])}  # Edit names: the job's names
         if result.get('original_title'):facts['original_title_lookup']=dict(result['original_title'])  # ruling 38: the details panel's fact
         if spelling:facts['author_spelling']=spelling
@@ -1442,7 +1503,24 @@ class PublicResearch:
         return found,result
 
     def _gap_fill(self,local,title,author,stop,budget,waits,progress,result):
-        """Ask only the sources that can answer a field missing locally; never block."""
+        """Ask only the sources that can answer a field missing locally; never block. An edition's volume title
+        («Хранители. Летопись первая») no catalog knows is asked again by its book title («Хранители») for the fields
+        the first pass left unfilled (2026-10-29, Tolkien); a series position found that way must agree with the volume
+        number the title gives, else the series stays unfilled and is asked (rulings 51 and 52)."""
+        found=self._gap_fill_once(local,title,author,stop,budget,waits,progress,result)
+        base,volume=edition_volume(title)
+        if base==text(title) or not found.get('unfilled') or stop.is_set():return found
+        again=self._gap_fill_once(dict(local,gaps=list(found['unfilled'])),base,author,stop,budget,waits,progress,result)
+        series=again.get('series')
+        if series and volume is not None and str((series or {}).get('number') or '').strip()!=str(volume):again.pop('series',None)
+        for key in ('catalog','series','author_full'):
+            if again.get(key) and not found.get(key):found[key]=again[key]
+        found['closed']=list(dict.fromkeys(list(found.get('closed') or [])+list(again.get('closed') or [])))
+        found['unfilled']=[field for field in found['unfilled'] if not (field=='original_title' and found.get('catalog') or field=='series' and found.get('series') or field=='author_full' and (found.get('author_full') or found.get('catalog')))]
+        found['closed']=[source for source in found['closed'] if found['unfilled']]
+        return found
+
+    def _gap_fill_once(self,local,title,author,stop,budget,waits,progress,result):
         gaps=set(local['gaps']);found={'closed':[]}
         partial=bool(local['fields']['author'].get('partial'))
         def attempt(source,function):
@@ -1661,14 +1739,16 @@ class PublicResearch:
             ids=[]
             for record in records[:5]:
                 if not isinstance(record,dict) or type(record.get('work_id')) is not int or not 0<record['work_id']<10**10:continue
-                if title_key(title) not in {title_key(v) for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v}:continue
+                if title_key(title) not in {title_key(v) for v in _fantlab_names(record)}:continue
                 if not _same_people(author,_people(record.get('all_autor_rusname'))+_people(record.get('all_autor_name')),partial):continue
                 if record['work_id'] not in ids:ids.append(record['work_id'])
             if len(ids)!=1:return None
             work=self.client.json('https://api.fantlab.ru/work/'+str(ids[0])+'/extended',stop,budget)
             if not isinstance(work,dict) or work.get('work_id')!=ids[0]:raise ValueError('Catalog work changed')
+        # The innermost parent that numbers its books: a cycle (work type 4) or a novel-epic (13: «Властелин Колец», whose
+        # three novels are its volumes; 2026-10-29, Tolkien). Its forewords and appendices are extras ("plus").
         chains=(work.get('parents') or {}).get('cycles') or []
-        cycles=[chain[-1] for chain in chains if isinstance(chain,list) and chain and isinstance(chain[-1],dict) and chain[-1].get('work_type_id')==4 and type(chain[-1].get('work_id')) is int]
+        cycles=[chain[-1] for chain in chains if isinstance(chain,list) and chain and isinstance(chain[-1],dict) and chain[-1].get('work_type_id') in (4,13) and type(chain[-1].get('work_id')) is int]
         if len(cycles)!=1:return None  # no cycle, or several unrelated ones
         api='https://api.fantlab.ru/work/'+str(cycles[0]['work_id'])+'/extended'
         cycle=self.client.json(api,stop,budget)
@@ -1692,7 +1772,7 @@ class PublicResearch:
         ids=[]
         for record in records[:5]:
             if not isinstance(record,dict) or type(record.get('work_id')) is not int or not 0<record['work_id']<10**10:continue
-            if title_key(title) not in {title_key(v) for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v}:continue
+            if title_key(title) not in {title_key(v) for v in _fantlab_names(record)}:continue
             if not any(isinstance(v,str) and _name_matches(author,v,partial) for v in (record.get('all_autor_name'),record.get('all_autor_rusname'))):continue
             if record['work_id'] not in ids:ids.append(record['work_id'])
         if len(ids)!=1:return None
@@ -1740,12 +1820,15 @@ class PublicResearch:
             'original_title':match['work_name_orig'],'title_native':match['work_name'],'author_native':text(author_names.get('name')),
             'author_latin':text(author_names.get('name_orig')),'series':match.get('verified_series') or None}
 
-    def _author_latin(self,title,author,stop,budget,result):
-        """Ruling 39: the original-language name of a foreign author credited only in Cyrillic, from this work's catalog
-        records: FantLab's original name, then Wikidata's, then a Goodreads search. Every request goes through the client
-        (its cache, per-site bounds and lane). {'state': 'found', 'name', 'source_url'}; {'state': 'russian',
-        'source_url'} when the work was written in Russian; None when inconclusive (nothing matched, a source closed,
-        the budget spent). A name a source gives, never a transliteration."""
+    def _author_latin(self,title,author,stop,budget,result,folders=(),known=()):
+        """Ruling 39: the original-language name of a foreign author credited only in Cyrillic. In order: the Latin name
+        the book's own folders or the library's filed authors give for a credit with a foreign first name (no request);
+        this work's catalog records (FantLab's original name, Wikidata's), looked up by the title and, for an edition's
+        volume title («Хранители. Летопись первая»), by its book title («Хранители»); the person's own Wikidata record
+        (its Russian label or alias is the credit, its writing language says which spelling is right); then a Goodreads
+        search. Every request goes through the client (its cache, per-site bounds and lane). {'state': 'found', 'name',
+        'source_url'}; {'state': 'russian', 'source_url'} when the work or person writes in Russian; None when
+        inconclusive (nothing matched, a source closed, the budget spent). A name a source gives, never a transliteration."""
         import local_identity
         def attempt(function):
             try:return function()
@@ -1754,9 +1837,19 @@ class PublicResearch:
                 if not catalog_busy(error):raise
                 return None
             except (ValueError,TypeError,KeyError,AttributeError):return None
-        for function in (lambda:self._gap_fantlab(title,author,False,stop,budget,result),lambda:self._gap_wikidata(title,author,False,stop,budget,result)):
+        local=_local_latin(author,folders,known)
+        if local:return local
+        titles=list(dict.fromkeys(t for t in (title,edition_volume(title)[0]) if t))
+        functions=[]
+        for value in titles:
+            functions.append(lambda value=value:self._gap_fantlab(value,author,False,stop,budget,result))
+        functions.append(lambda:self._author_wikidata(author,stop,budget,result))
+        for value in titles:
+            functions.append(lambda value=value:self._gap_wikidata(value,author,False,stop,budget,result))
+        for function in functions:
             entry=attempt(function)
             if not entry:continue
+            if entry.get('state') in ('found','russian'):return entry
             if entry.get('language')=='ru':return {'state':'russian','source_url':entry.get('source_url','')}
             latin=text(entry.get('author_latin'))
             # The record already matched this work's author by the Cyrillic name (its native name) or the Latin one.
@@ -1764,7 +1857,53 @@ class PublicResearch:
                 original=text(entry.get('original_title'))
                 english=original if entry.get('language')=='en' and original and local_identity.script(original)=='latin' else ''
                 return {'state':'found','name':latin,'source_url':entry.get('source_url',''),'title':english}
-        return attempt(lambda:self._author_goodreads(title,author,stop,budget))
+        for value in titles:
+            found=attempt(lambda value=value:self._author_goodreads(value,author,stop,budget))
+            if found:return found
+        return None
+    def _author_wikidata(self,author,stop,budget,result):
+        """Ruling 39 (2026-10-29, Tolkien): the person's own Wikidata record. Searched by the credit as written with the
+        first name first («Джон Рональд Руэл Толкин»), then by the surname; kept only when exactly one human's Russian
+        label or alias is this very name (the same words, any order; no initial standing for a word) and the record says
+        the language the person writes in (P6886, else P1412). Writes in Russian: 'russian'. Writes in another language:
+        its English label, which must be in Latin letters. Anything else: None (the question is asked, ruling 51)."""
+        import local_identity
+        from public_work_identity import ids
+        tokens=text(author).split()
+        if len(tokens)<2:return None
+        given_first=' '.join(tokens[1:]+tokens[:1]) if local_identity.surname_first(author)[1]=='already surname first' else text(author)
+        def search(value):
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbsearchentities','search':value,'language':'ru','uselang':'ru','type':'item','limit':7,'format':'json'})
+            data=self.client.json(url,stop,budget);hits=data.get('search') if isinstance(data,dict) else None
+            if not isinstance(hits,list):raise ValueError('Malformed Wikidata search evidence')
+            return list(dict.fromkeys(str(h.get('id')) for h in hits[:7] if isinstance(h,dict) and re.fullmatch(r'Q[1-9][0-9]{0,11}',str(h.get('id','')))))
+        def same(name):
+            match=local_identity.compare_names(author,name)
+            return bool(match and match['match']=='same' and not match['subset'] and match.get('exact'))
+        for value in dict.fromkeys((given_first,tokens[0] if local_identity.surname_first(author)[1]=='already surname first' else tokens[-1])):
+            found=search(value)
+            if not found:continue
+            url='https://www.wikidata.org/w/api.php?'+urllib.parse.urlencode({'action':'wbgetentities','ids':'|'.join(found),'props':'labels|aliases|claims','languages':'en|ru','format':'json'})
+            records=self.client.json(url,stop,budget).get('entities')
+            if not isinstance(records,dict):raise ValueError('Malformed Wikidata person evidence')
+            people=[]
+            for key in found:
+                entity=records.get(key)
+                if not isinstance(entity,dict) or entity.get('id')!=key or 'Q5' not in ids(entity,'P31'):continue
+                names=[text((entity.get('labels') or {}).get('ru',{}).get('value'))]+[text(a.get('value')) for a in (entity.get('aliases') or {}).get('ru',[]) if isinstance(a,dict)]
+                if any(n and same(n) for n in names):people.append(entity)
+            if len(people)>1:return None
+            if not people:continue
+            entity=people[0];languages=ids(entity,'P6886') or ids(entity,'P1412')
+            citation='https://www.wikidata.org/wiki/'+entity['id']
+            self._gap_receipt(url,result,citation,['author'])
+            if not languages:return None
+            if 'Q7737' in languages:return {'state':'russian','source_url':citation}
+            latin=text((entity.get('labels') or {}).get('en',{}).get('value'))
+            if latin and local_identity.script(latin)=='latin' and not re.search(r'[\d()]',latin):
+                return {'state':'found','name':latin,'source_url':citation,'title':''}
+            return None
+        return None
     def _author_goodreads(self,title,author,stop,budget):
         """Ruling 39: the Latin credit of this work's Goodreads search results: a result titled as this book whose one
         Latin-script author is the same person as the Cyrillic credit (compare_names). None unless exactly one."""
@@ -2001,6 +2140,62 @@ def _wait(waits,answered=()):
     wait=max(blocked,key=lambda w:w.retry_at) if blocked else min(waits,key=lambda w:w.retry_at)
     return {'source':wait.source,'reason':wait.reason,'retry_at':wait.retry_at,'kind':wait.kind,'scope':wait.scope}
 
+
+_ORDINALS={'перв':1,'втор':2,'трет':3,'четверт':4,'четвёрт':4,'пят':5,'шест':6,'седьм':7,'восьм':8,'девят':9,'десят':10}
+_VOLUME_WORDS=r'(?:летопись|хроника|книга|том|часть|volume|vol\.|book)'
+_VOLUME_NUMBER=r'(\d{1,3}|[ivx]{1,5}|(?:перв|втор|трет|четв[её]рт|пят|шест|седьм|восьм|девят|десят)[а-яё]{0,3})'
+_TRAILING_VOLUME=re.compile(r'^(.*?\S)\s*[.,:;–—-]\s*'+_VOLUME_WORDS+r'\s+'+_VOLUME_NUMBER+r'\s*\.?$',re.I)
+_LEADING_VOLUME=re.compile(r'^\s*'+_VOLUME_WORDS+r'\s+'+_VOLUME_NUMBER+r'\s*[.:–—-]\s*(\S.*)$',re.I)
+
+def _volume_number(value):
+    value=value.casefold()
+    if value.isdigit():return int(value)
+    roman={'i':1,'ii':2,'iii':3,'iv':4,'v':5,'vi':6,'vii':7,'viii':8,'ix':9,'x':10}
+    if value in roman:return roman[value]
+    return next((n for stem,n in _ORDINALS.items() if value.startswith(stem.replace('ё','е')) or value.startswith(stem)),None)
+
+def edition_volume(title):
+    """(book title, volume number or None) of an edition's volume title: «Хранители. Летопись первая» -> («Хранители», 1),
+    «Книга 2. Меч ликтора» -> («Меч ликтора», 2). The title as it is (None) when it names no volume. Used only to look a
+    book up by the title catalogs know it by; the volume number is evidence to check a found series position against,
+    never a series position by itself (rulings 50 and 52)."""
+    value=text(title)
+    match=_TRAILING_VOLUME.match(value)
+    if match and re.search(r'[^\W\d_]{2}',match[1]):return match[1].strip(' .,:;'),_volume_number(match[2])
+    match=_LEADING_VOLUME.match(value)
+    if match and re.search(r'[^\W\d_]{2}',match[2]):return match[2].strip(' .,:;'),_volume_number(match[1])
+    return value,None
+
+def _fantlab_names(record):
+    """A FantLab search record's names: its original and Russian names, and each of its other names, which come as one
+    text («Хранители кольца; Хранители; Дружество кольца», 2026-10-29, Tolkien)."""
+    names=[v for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v]
+    alt=record.get('altname') if isinstance(record.get('altname'),str) else ''
+    return names+[part for part in re.split(r'\s*;\s*|\s+/\s+',alt) if part]
+
+def _local_latin(author,folders=(),known=()):
+    """Ruling 39, 2026-10-29 (Tolkien): a foreign author's Latin spelling the library itself already holds, read before any
+    request: a folder of this book named for the person in Latin letters («J. R. R. Tolkien» above «Джон Рональд Руэл
+    Толкин»), else an author the library already files in Latin letters. The name must be the credit's person (the
+    surname in the other script and every first name or initial paired, compare_names), exactly one such spelling must
+    exist, and only a credit whose first name is a foreign one counts: a Russian or unknown first name says nothing about
+    the language the person writes in. None otherwise."""
+    import local_identity
+    if not local_identity.foreign_given(author):return None
+    for kind,values in (('folder',folders),('known',known)):
+        found={}
+        for value in values:
+            value=text(value)
+            if local_identity.script(value)!='latin' or not 2<=len(value.split())<=5:continue
+            if local_identity.garbled(value) or re.search(r'[\d\[\]()]',value):continue
+            match=local_identity.compare_names(author,value)
+            if match and not match['subset'] and match['match']=='cross':
+                found.setdefault(local_identity.norm(value),value)
+        if len(found)==1:
+            name=next(iter(found.values()))
+            return {'state':'found','name':name,'source_url':('library folder: ' if kind=='folder' else 'library author: ')+name,'title':''}
+        if len(found)>1:return None
+    return None
 
 def _latin_surname_first(latin,credit):
     """Ruling 33 for the Latin name a source gives a Cyrillic credit (ruling 39): surname first. A catalog writes it

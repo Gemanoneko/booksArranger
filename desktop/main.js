@@ -732,6 +732,8 @@ async function chooseCatalog(){
 }
 ipcMain.handle('books:setup',event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');return {defaultFolder:currentConfig.dataDir};});
 ipcMain.handle('books:browse',async event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');const result=await dialog.showOpenDialog(setupWindow,{title:'Choose data folder',properties:['openDirectory','createDirectory']});return result.canceled?null:result.filePaths[0];});
+// Rulings 69 and 70: Choose folder… on a book row, answered to the app window only (folder-picker.js).
+require('./folder-picker').register({ipcMain,dialog,sender:trustedSender,window:()=>state.win});
 ipcMain.handle('books:select',async(event,choice)=>{
   if(trustedSender(event)!=='setup'||state.backend)throw new Error('Catalog selection is unavailable');
   if(!choice||Object.keys(choice).sort().join(',')!=='folder,mode'||typeof choice.folder!=='string'||!path.isAbsolute(choice.folder)||!['existing','new'].includes(choice.mode))throw new Error('Choose an absolute data folder');

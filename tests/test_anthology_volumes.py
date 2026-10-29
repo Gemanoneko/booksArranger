@@ -63,8 +63,10 @@ class AnthologyVolumeTests(unittest.TestCase):
     def test_horror_family_requires_exact_parent_and_confirmed_volume_boundary(self):
         files=horror_stories(2)
         for file in files:file['path']=file['path'].replace(anthology_volumes.STORY_FOLDER,'Other collection')
-        self.assertEqual(len(groups.build(files)),2)
-        files=horror_stories(5);self.assertEqual(len(groups.build(files)),2,'unconfirmed child5 receives no named exception')
+        # Ruling 68 (0.24.0): outside the confirmed family a story folder is one held folder question, no named volume.
+        built=groups.build(files);self.assertEqual(len(built),1);self.assertTrue(all(not g.get('anthology_volume') and g['folder_unit']['kind']=='ask' for g in built.values()))
+        files=horror_stories(5);built=groups.build(files);self.assertEqual(len(built),1,'unconfirmed child5 receives no named exception')
+        self.assertTrue(all(not g.get('anthology_volume') and g['folder_unit']['kind']=='ask' for g in built.values()))
         files=horror_stories(2);meta=json.loads(files[0]['metadata']);meta['tags']['album']='Other book';files[0]['metadata']=json.dumps(meta)
         self.assertTrue(all(g.get('anthology_ownership_conflict') for g in groups.build(files).values()))
     def test_horror_uploader_is_not_writer_and_placeholder_titles_keep_actual_story_names(self):
@@ -125,7 +127,8 @@ class AnthologyVolumeTests(unittest.TestCase):
         files=annual_stories()
         wrong=copy.deepcopy(files)
         for file in wrong:file['path']=file['path'].replace('Самая Страшная Книга','Other shelf')
-        self.assertEqual(len(groups.build(wrong)),2,'generic same-title mixed authors do not gain a named exception')
+        built=groups.build(wrong)  # ruling 68 (0.24.0): one held folder question, no named exception
+        self.assertEqual(len(built),1);self.assertTrue(all(not g.get('anthology_volume') and g['folder_unit']['kind']=='ask' for g in built.values()),'generic same-title mixed authors do not gain a named exception')
         bad=copy.deepcopy(files);metadata=json.loads(bad[0]['metadata']);metadata['tags']['album']='Самая страшная книга 2024';bad[0]['metadata']=json.dumps(metadata)
         built=groups.build(bad);self.assertFalse(any(g.get('anthology_volume') for g in built.values()))
         self.assertTrue(all(g.get('anthology_ownership_conflict') for g in built.values()),'known folder with contradictory membership stays held in full')
@@ -142,8 +145,8 @@ class AnthologyVolumeTests(unittest.TestCase):
         self.assertTrue(anthology_volumes.identity(group));self.assertNotIn('Mixed recordings in this group',source_gate(group,work(group)))
         self.assertIn('Playback order uncertain',source_gate(group,work(group)))
     def test_other_mixed_author_folders_remain_separate(self):
-        built=groups.build(stories(family='Other anthology'));self.assertEqual(len(built),2)
-        self.assertTrue(all(len(g['members'])==1 and not g.get('anthology_volume') for g in built.values()))
+        built=groups.build(stories(family='Other anthology'));self.assertEqual(len(built),1)  # ruling 68 (0.24.0): held folder question
+        self.assertTrue(all(len(g['members'])==2 and not g.get('anthology_volume') and g['folder_unit']['kind']=='ask' and g['source_partition_uncertain'] for g in built.values()))
     def test_an_existing_whole_m4b_volume_is_classified_without_joining_or_replacing_its_chapters(self):
         file=stories()[0];file['path']=str(Path(ROOT)/'Калейдоскоп 4'/'whole-volume.m4b')
         group=next(iter(groups.build([file]).values()))

@@ -16,7 +16,7 @@ function sandbox(t){
 // script that gets past the guard stops at its first runtime read instead of running anything.
 function gateCopy(dir){
  fs.mkdirSync(path.join(dir,'scripts'));
- for(const name of ['check-desktop.mjs','python-check-batches.mjs','gate-source-guard.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(dir,'scripts',name));
+ for(const name of ['check-desktop.mjs','python-check-batches.mjs','gate-source-guard.mjs','gate-scratch.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(dir,'scripts',name));
 }
 function runGate(dir){
  const env={...process.env};delete env.BOOKS_QA_RUNTIME_ROOT;

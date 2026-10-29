@@ -22,15 +22,18 @@ ACTIONS = ('retry', 'repair', 'delete',
            # Ruling 35 (Sergei 2026-10-26): every press that acts on a book is accepted, queued when something else is happening.
            'approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume',
            # Ruling 37 (the rest of ruling 35): historical cleanup and restore, route-only, wait for a scan and for audiobook work.
-           'cleanup', 'restore')
+           'cleanup', 'restore',
+           # Rulings 69 and 71h (Sergei 2026-10-29): Choose folder / Use computed folder, and the move of a finished book.
+           'destination', 'move')
 KINDS = ('operation', 'scan', 'retry_run', 'approve_run', 'book', 'loading', 'jobs', 'automatic')
 # The presses a library scan holds back (their checks read the catalog the scan regroups), as their routes refused them.
 SCAN_WAITS = ('retry', 'repair', 'delete', 'approve', 'convert', 'separate', 'scan_again', 'copy')
 # Always queued, even with nothing in the way: their checks (every file probed and hashed) take the time a page must not
 # wait for; the row shows it running and its outcome (ruling 35).
-ALWAYS = ('approve', 'convert')
+ALWAYS = ('approve', 'convert', 'move')
 # Run by the server (run_queued): the same call the press makes, every check again at run time.
-SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume', 'cleanup', 'restore')
+SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy', 'names', 'names_forget', 'scan_start', 'scan_resume', 'cleanup', 'restore',
+              'destination', 'move')
 KEEP = 24 * 3600     # an outcome nobody acknowledged is forgotten after a day
 POLL = 0.5           # how often a blocked head is looked at again
 LIMIT = 1000         # queued actions; a press beyond it is refused, never dropped silently
@@ -110,6 +113,19 @@ class ActionQueue:
                 except Exception:
                     return 'jobs'  # unknown: it waits, never removes originals beside work it can't see
             return None
+        if action == 'move':
+            # A move (ruling 69) never runs beside its own book's conversion, a source cleanup or another operation; it
+            # changes where the audiobook is, which they read under their own leases.
+            import book_delete
+            if book_delete.processing(merge, book_id):
+                return 'book'
+            cleanup = getattr(merge, 'cleanup', None)
+            alive = lambda thread: thread is not None and thread.is_alive()
+            if cleanup is not None and (alive(getattr(cleanup, 'thread', None)) or getattr(cleanup, 'current', None)):
+                return 'jobs'
+            if not _free(getattr(merge, 'operation_lock', None)):
+                return 'operation'
+            return None
         if action in ('names', 'names_forget'):
             job = merge._names_job(book_id) if hasattr(merge, '_names_job') else {'state': 'none'}
             return 'book' if job.get('state') == 'running' else None
@@ -177,8 +193,20 @@ class ActionQueue:
                 if item['id'] == identity:
                     del self.items[index]
                     self.changed.notify_all()
+                    self._forget_move(item)
                     return {'cancelled': True}
         return None
+
+    def _forget_move(self, item):
+        """A queued move taken back (Cancel, Quit, an update): its journal says cancelled, so the row stops saying queued."""
+        if item.get('action') != 'move':
+            return
+        merge = getattr(self.server, 'merge', None)
+        try:
+            if merge is not None and hasattr(merge, 'cancel_move'):
+                merge.cancel_move(item['args'].get('move_id'))
+        except Exception:
+            pass  # the next start reconciles a queued move as cancelled (book_move.recover)
 
     def acknowledge(self, identities):
         with self.lock:
@@ -235,8 +263,11 @@ class ActionQueue:
         """Quit or Restart to update has begun: every waiting action is dropped without running (Q1; the update's
         confirm said so). The worker stays: a cancelled update keeps the app running with an empty queue."""
         with self.lock:
+            dropped = list(self.items)
             self.items.clear()
             self.changed.notify_all()
+        for item in dropped:
+            self._forget_move(item)
 
     def close(self):
         """Quit, update and shutdown: the waiting actions are dropped without running (Q1). One already running finishes

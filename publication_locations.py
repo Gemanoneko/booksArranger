@@ -260,6 +260,12 @@ def plan(db,job,kind,original_receipt,target_root,destination,accepted_routing):
     The stored parent job intent is provenance, not that chapter receipt.
     """
     receipt=_receipt(original_receipt);job,manifest,journal,lineage=_job(db,job,kind,receipt);pubid=publication_id(job['job_id'],kind,receipt)
+    # Rulings 69 and 71h: a book Sergei moved to a folder he chose is a later generation (book_move) a new offline plan,
+    # which starts from the receipt, cannot see; it is refused rather than planned from a stale location.
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='book_moves'").fetchone() and \
+            db.execute("SELECT 1 FROM book_moves WHERE job_id=? AND state NOT IN ('failed','cancelled') LIMIT 1",(job['job_id'],)).fetchone() and \
+            not (db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='output_relocations'").fetchone() and _load(db,pubid)):
+        raise PublicationRefused('moved_by_choice','This audiobook was moved to a folder you chose; it is not relocated offline')
     routing=_object(accepted_routing);version=routing.get('routing_policy_version')
     _need('completed_parent_lineage' not in routing or routing['completed_parent_lineage']==lineage,'Supplied parent lineage differs')
     if lineage is not None:routing['completed_parent_lineage']=lineage
