@@ -63,6 +63,30 @@ const measuredSeconds={'test_inplace_m4b.py':389,'test_inplace_m4b.py:EligiblePa
 // 0.23.0 capacity proposal: 13 workers on the 24-core/32-thread QA host. The unchanged 540/580/600 s
 // bounds still apply; existing weights are historical proxies, never a real-wall-time guarantee.
 export const PYTHON_WORKERS=13;
+// 0.24.0 (ruling 72f, 2026-10-29): the worker of every module but the serial servers (worker 0 by the rule below), placed
+// from the gate's own measured seconds under machine load, not from the weights above. Four entry checks (2d4a5b1,
+// 7030f4d, 006269f, b2cd07c) each stopped one worker at its 540 s deadline (6, 6, none, 12) while others had 150-200 s to
+// spare: the weights are times measured with fewer workers, and with 13 workers on a loaded machine each module ran
+// 1.7-3 times them, unevenly. Each module's seconds are its r4 time (r3 times 1.024, the r4/r3 ratio, for the worker
+// cut in r4); longest first, then moves and swaps that lower the busiest worker, with the five approved pins, the serial
+// servers on worker 0, the two test_inplace_m4b halves apart and each worker's weights at or under the 432 s the
+// projection test allows. Projected at r4 load: 451 s on twelve workers (84 %) and 471 s on worker 1, which holds
+// test_book_delete alone (one test class, so it cannot be split). Applied only to the complete production inventory; a
+// module added later is placed by the weights, and a removed one returns every module to them.
+const GATE_PLACEMENT={
+  'test_attempt_working_lifecycle.py':0,'test_automatic_record_retry.py':0,'test_candidate_source_refresh.py':0,'test_publication_locations.py':0,'test_publication_binding.py':0,'test_relocated_chapter_repair.py':0,'test_quicktime_chapters.py':0,'test_retry_start_fence.py':0,'test_todo_holds.py':0,'test_entered_names.py':0,
+  'test_book_delete.py':1,
+  'test_failed_m4b_retry.py':2,'test_progress_rows.py':2,'test_library_settings.py':2,'test_status_under_load.py':2,'test_backup_rule.py':2,'test_collection_identity.py':2,'test_set_release.py':2,
+  'test_publication_consumers.py':3,'test_migration_operation.py':3,'test_derived_migration.py':3,'test_local_identity.py':3,'test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests':3,'test_source_cleanup.py':3,'test_list_speed.py':3,'test_folder_unit_grouping.py':3,
+  'test_working_precision.py':4,'test_storage_cleanup.py':4,'test_automatic_media_policy.py':4,'test_standing_admission.py':4,'test_published_snapshot_lifecycle.py':4,'test_progress.py':4,'test_multisource.py':4,'test_review_backend.py':4,'test_source_proofs.py':4,'test_no_evidence.py':4,
+  'test_working_lifecycle.py':5,'test_attention_failure_policy.py':5,'test_destination_admission.py':5,'test_groups_filters.py':5,'test_anthology_volumes.py':5,'test_public_work_identity.py':5,'test_folder_structure.py':5,'test_catalog_busy.py':5,'test_destination_override.py':5,
+  'test_working_cleanup.py':6,'test_local_identity_fixes.py':6,'test_catalog_paging.py':6,'test_safety_boundaries.py':6,'test_approve_as_is.py':6,'test_join_parts.py':6,'test_ruling35.py':6,
+  'test_automatic_processing.py':7,'test_mp3_tag_repair.py':7,'test_relocated_replacement.py':7,'test_series_research.py':7,'test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests':7,'test_source_folders.py':7,'test_author_rules.py':7,'test_action_queue.py':7,
+  'test_build_guard.py':8,'test_attention_actions.py':8,'test_quiet_status.py':8,'test_retry_intent.py':8,'test_part_sets.py':8,'test_desktop_update.py':8,'test_startup_loading.py':8,'test_book_move.py':8,
+  'test_desktop_catalog.py':9,'test_sqlite_busy.py':9,'test_replacement_jobs.py':9,'test_metadata_choices.py':9,'test_m4b_join.py':9,'test_lock_timing.py':9,'test_gap_fill.py':9,'test_start_while_converting.py':9,
+  'test_automatic_media.py':10,'test_m4b_dispatch.py':10,'test_zone_identifier.py':10,'test_reacquire_sources.py':10,'test_local_gate_consistency.py':10,'test_directory_flush.py':10,'test_relocation_progress.py':10,'test_migration_planning.py':10,'test_organization.py':10,'test_manifest_compatibility.py':10,'test_producer_recovery.py':10,'test_recovery_retention.py':10,'test_litres_research.py':10,'test_series_fallbacks.py':10,'test_openlibrary_index.py':10,'test_bulk_retry_receipts.py':10,'test_local_admission.py':10,'test_cleanup_scope.py':10,'test_identity_v5.py':10,
+  'test_desktop_owner_recovery.py':11,'test_cleanup_resume.py':11,'test_output_migration.py':11,'test_manual_metadata.py':11,'test_series_backfill.py':11,'test_inventory.py':11,'test_iron_skazka.py':11,'test_folder_regroup.py':11,
+  'test_m4b_preservation.py':12,'test_attention_audio_admission.py':12,'test_manual_research.py':12,'test_catalog_contention.py':12,'test_sorted_wiring.py':12,'test_attention_list.py':12,'test_split_books.py':12,'test_identity_0222.py':12,'test_original_title_wait.py':12,'test_live_cases_0222.py':12};
 // 0.22.3 (the 0.22.2 gates: workers at 81-88 % of the deadline, and one run lost two workers because copying the sources
 // took 170 s of it): every Python worker has its own 540 s, counted from its own start, so copies taking up to 40 s before
 // it leave its time whole; past that the gate total binds first (workerDeadline). The gate as a whole still ends inside the
@@ -106,12 +130,9 @@ export function pythonBatches(patterns){
   // discovery, the two complementary in-place halves, server serialization and declared order are unchanged.
   // Only the complete production inventory has this group; smaller diagnostic inventories retain normal placement.
   // 0.23.0: move this whole module off book_delete's worker to new worker 12; the other four pins stay.
-  // 0.24.0 (ruling 72d): the entry checks at 2d4a5b1 and 7030f4d stopped worker 6 at its 540 s deadline twice. Its suites
-  // take the same time as at 0.23.0 (244.1 s and 245.0 s in one process, sibling worktrees); in the gate they ran about
-  // 2.2 times that under machine load. test_anthology_volumes (about 39 s alone) moves to worker 10 (342-344 s real);
-  // the other five pins stay.
-  const rebalance=new Map([['test_original_title_wait.py',12],['test_review_backend.py',4],
-    ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4],['test_anthology_volumes.py',10]]);
+  // 0.24.0 (ruling 72f): every worker is placed from the gate's own measured seconds (GATE_PLACEMENT, above); the five
+  // approved pins keep their workers inside it.
+  const rebalance=new Map(Object.entries(GATE_PLACEMENT));
   if([...rebalance.keys()].every(pattern=>worker.has(pattern)))for(const [pattern,target] of rebalance)worker.set(pattern,target);
   const batches=Array.from({length:PYTHON_WORKERS},()=>[]);
   for(const pattern of patterns)batches[worker.get(pattern)].push(pattern);
