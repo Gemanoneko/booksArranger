@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 const PYTHON='C:/Python314/python.exe';
-const PYTHON_SHA='e67f33a86fc64a07798a136af126f38a8e0d3c0a25787c635fb1678c2b66b12a';
+const PYTHON_SHA='d718435b892db4ad5b547d12fec61be7baa7faf7a58d857ea58053be24c7a000';  // Python 3.14.10 (ruling 72g, 2026-10-30); scripts/build_native.py pins the same
 function ordinary(file){const absolute=path.resolve(file);let current=absolute;while(true){const s=fs.lstatSync(current);if(s.isSymbolicLink())throw Error('Bootstrap reparse path refused');const parent=path.dirname(current);if(parent===current)break;current=parent;}return absolute;}
 function hash(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
 function invoke(root,args,input){ordinary(PYTHON);if(hash(PYTHON)!==PYTHON_SHA)throw Error('Bootstrap Python fingerprint changed');const helper=ordinary(path.join(root,'scripts/build_native.py'));const result=spawnSync(PYTHON,['-I','-B',helper,...args],{cwd:root,input:JSON.stringify(input),encoding:'utf8',windowsHide:true,timeout:600000,maxBuffer:16*1024*1024,env:{...process.env,PYTHONPATH:'',PYTHONHOME:'',NODE_OPTIONS:'',NODE_PATH:''}});if(result.error||result.status!==0)throw Error(result.error?.message||result.stderr||'Native guard refused');return result.stdout;}
