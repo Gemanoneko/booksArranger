@@ -106,8 +106,12 @@ export function pythonBatches(patterns){
   // discovery, the two complementary in-place halves, server serialization and declared order are unchanged.
   // Only the complete production inventory has this group; smaller diagnostic inventories retain normal placement.
   // 0.23.0: move this whole module off book_delete's worker to new worker 12; the other four pins stay.
+  // 0.24.0 (ruling 72d): the entry checks at 2d4a5b1 and 7030f4d stopped worker 6 at its 540 s deadline twice. Its suites
+  // take the same time as at 0.23.0 (244.1 s and 245.0 s in one process, sibling worktrees); in the gate they ran about
+  // 2.2 times that under machine load. test_anthology_volumes (about 39 s alone) moves to worker 10 (342-344 s real);
+  // the other five pins stay.
   const rebalance=new Map([['test_original_title_wait.py',12],['test_review_backend.py',4],
-    ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4]]);
+    ['test_published_snapshot_lifecycle.py',4],['test_working_lifecycle.py',5],['test_source_proofs.py',4],['test_anthology_volumes.py',10]]);
   if([...rebalance.keys()].every(pattern=>worker.has(pattern)))for(const [pattern,target] of rebalance)worker.set(pattern,target);
   const batches=Array.from({length:PYTHON_WORKERS},()=>[]);
   for(const pattern of patterns)batches[worker.get(pattern)].push(pattern);
