@@ -1189,7 +1189,8 @@ class TolkienHeldTranslationTests(Base):
     """2026-10-29 (BugEvidence/2026-10-29-tolkien-lookup): «Хранители. Летопись первая», «Две твердыни. Летопись вторая» and
     «Возвращение государя. Летопись третья» by «Джон Рональд Руэл Толкин», each a folder of two .m4b halves under
     `J. R. R. Tolkien\\Джон Рональд Руэл Толкин\\`, asked "no English spelling found". They file as Tolkien J. R. R. (the
-    library's own folder), in the series «Властелин Колец» 1, 2, 3, under their original English titles (ruling 49). The
+    library's own folder), in the series «Властелин колец» 1, 2, 3 (ruling 72b: his spelling, not the sources' «Властелин
+    Колец»), under their original English titles (ruling 49). The
     private answers have the shape FantLab gave on 2026-10-29: the Russian edition titles are a work's Russian or other
     name (one ";"-separated text), and the parent «Властелин Колец» is a novel-epic (work type 13) whose three novels are
     its volumes. Real PublicClient (cache, pacing, pauses) on a private catalog; no network."""
@@ -1249,11 +1250,27 @@ class TolkienHeldTranslationTests(Base):
                 approval=self.approved(row)
                 self.assertEqual((approval['title'],approval['author']),(english,'Tolkien J. R. R.'))
                 review=self.research.approved(row,ROOT)['review']
-                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Властелин Колец',str(number),'Tolkien J. R. R.'))
-                self.assertIn('\\Tolkien J. R. R\\Властелин Колец\\',self.approved_to(row))
+                self.assertEqual((review['series'],review['number'],review['canonical_author']),('Властелин колец',str(number),'Tolkien J. R. R.'))
+                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.approved_to(row))
                 self.assertIn(english,self.approved_to(row))
         self.assertFalse(any('goodreads.com/book/show' in url for url in calls))
         self.assertTrue(any('search-works?q=%D0%A5%D1%80%D0%B0%D0%BD%D0%B8%D1%82%D0%B5%D0%BB%D0%B8&' in url for url in calls),'the volume asked by its book title')
+
+    def test_ruling_72b_the_series_is_spelled_as_sergei_spells_it_whichever_source_names_it(self):
+        from public_research import series_spelling
+        self.assertEqual(series_spelling('Властелин Колец'),'Властелин колец','FantLab and Goodreads capitalise it')
+        self.assertEqual(series_spelling('ВЛАСТЕЛИН КОЛЕЦ'),'Властелин колец')
+        for kept in ('Гарри Поттер','Ведьмак','The Lord of the Rings',''):  # controls: every other name as the source gives it
+            self.assertEqual(series_spelling(kept),kept)
+        # The Goodreads provider (series backfill calls it directly, like FantLab's): «Властелин Колец, #2» files under his spelling.
+        from test_series_research import Sources,book_page,search_page
+        sources=Sources()
+        sources.goodreads_search=search_page(('166404','Две твердыни (Властелин Колец, #2)',['J.R.R. Tolkien','Дж.Р.Р. Толкин']))
+        sources.goodreads_books['166404']=book_page('166404','Две твердыни',['J.R.R. Tolkien','Дж.Р.Р. Толкин'],'Властелин Колец','2')
+        minutes=iter(range(10**6,10**9,60));self.catalog([])  # a private temp folder for the client's catalog
+        research=PublicResearch(PublicClient(str(Path(self.research.client.database).parent/'gr.sqlite3'),fetch=sources.fetch,clock=lambda:next(minutes)),leads=[])
+        found=research._series_goodreads('Две твердыни','Tolkien J. R. R.',threading.Event(),{'remaining':6},{'sources':[]})
+        self.assertEqual((found['name'],found['number']),('Властелин колец','2'))
 
     def test_a_closed_source_files_nothing_new_and_is_never_asked_again_during_its_pause(self):
         books,calls=self.books(closed=('api.fantlab.ru',))

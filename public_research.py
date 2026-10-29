@@ -1724,7 +1724,7 @@ class PublicResearch:
         name,position=series[0]
         if not name or not re.fullmatch(r'[1-9]\d{0,3}',position):return None
         self._gap_receipt(page,result,page,['series','number'])
-        return {'provider':'goodreads','name':name,'number':position,'source_url':page}
+        return {'provider':'goodreads','name':series_spelling(name),'number':position,'source_url':page}
 
     def _series_fantlab(self,title,author,partial,stop,budget,result,work=None):
         """Fallback: the innermost FantLab cycle holding the work, or None. FantLab gives no number, so the
@@ -1759,7 +1759,7 @@ class PublicResearch:
         if not position or not name:return None
         citation='https://fantlab.ru/work'+str(cycles[0]['work_id'])
         self._gap_receipt(api,result,citation,['series','number'])
-        return {'provider':'fantlab','name':name,'number':str(position),'source_url':citation}
+        return {'provider':'fantlab','name':series_spelling(name),'number':str(position),'source_url':citation}
 
     def _gap_receipt(self,url,result,citation,fields):
         result['sources'].append(self.client.receipt(url)|{'url':citation,'api_url':url,'kind':'catalog_gap','verified_identity':False,'fields':fields})
@@ -2165,6 +2165,14 @@ def edition_volume(title):
     match=_LEADING_VOLUME.match(value)
     if match and re.search(r'[^\W\d_]{2}',match[2]):return match[2].strip(' .,:;'),_volume_number(match[1])
     return value,None
+
+# Ruling 72b (Sergei 2026-10-29): a series name Sergei spells differently from the sources that capitalise it (FantLab and
+# Goodreads write «Властелин Колец»). Keys are the name casefolded, «ё» as «е»; any other name is kept as the source gives it.
+SERIES_SPELLINGS={'властелин колец':'Властелин колец'}
+
+def series_spelling(name):
+    value=text(name)
+    return SERIES_SPELLINGS.get(value.casefold().replace('ё','е'),value)
 
 def _fantlab_names(record):
     """A FantLab search record's names: its original and Russian names, and each of its other names, which come as one
