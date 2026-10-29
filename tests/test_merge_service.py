@@ -66,7 +66,9 @@ class MergeTests(unittest.TestCase):
         return r.tracks('Audiobooks',row['id'],row['revision'],row['track_order'],row['included'],True,True,True,evidence_note='All fixture sources have one recording, exact intended membership and track order')
 
     def wait(self):
-        deadline=time.monotonic()+30
+        # Ruling 72e (2026-10-29): 30 s became 90 s. Under machine load the 0.24.0 entry check (r3) stopped two
+        # test_destination_admission merges at 30 s; the loop returns as soon as the job worker ends.
+        deadline=time.monotonic()+90
         while self.service.jobs._thread and self.service.jobs._thread.is_alive():
             if time.monotonic()>deadline:self.fail('Private merge exceeded test deadline')
             time.sleep(.05)
