@@ -90,7 +90,10 @@ def inside(folder, root):
 
 NOT_FOUND = (2, 3)  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
 UNCHECKED_AWAY = "{place} isn't available, so the app can't tell whether that folder is inside it. Connect the drive and try again."
-UNCHECKED_INDEX = "The app can't check whether that folder is inside {place}: that drive doesn't report folder identities. Choose a folder on another drive."
+UNCHECKED_INDEX = "The app can't tell whether that folder is inside {place}, because both are on a drive that can't confirm which folder is which. Choose a folder on another drive."
+# Judy 2026-10-30: a place whose drive reports volume serial 0 matches no folder anywhere, so every choice is refused.
+UNCHECKED_NO_SERIAL = "No folder can be chosen while {place} is one of your source folders: its drive can't confirm which folder is which. Source folders can't be removed in the app."
+UNCHECKED_NO_SERIAL_APP = "The app's data folder is on a drive that can't confirm which folder is which, so no folder can be chosen."
 # Judy 2026-10-30: why an 'unsafe' folder was refused. The page shows these as sent.
 UNSAFE_SOURCE = 'That folder is inside {place}, one of your source folders. Choose another folder.'
 UNSAFE_APP = 'That folder belongs to the app. Choose another folder.'
@@ -147,8 +150,8 @@ def _absent(place, resolve):
 def _inside_by_identity(chain, places, resolve, data_dir=None):
     """Senua 0.24.0 M2: refuse when a folder of the chosen folder's chain (itself and every folder above it, opened without
     following links) is one of places (source folders, the data folder) by native identity. A place that can't be
-    resolved, or a match that can't be trusted (no file index on that volume), refuses with the reason. A match names
-    the source folder, or says the folder is the app's own when the place is data_dir."""
+    resolved, or a match that can't be trusted (no volume serial, or no file index on that volume), refuses with the
+    reason. A match names the source folder, or says the folder is the app's own when the place is data_dir."""
     held = [(item[1], item[2], item[3]) for item in chain]
     for place in places:
         if not place:
@@ -161,15 +164,19 @@ def _inside_by_identity(chain, places, resolve, data_dir=None):
             refuse('unchecked', UNCHECKED_AWAY.format(place=place))
         volume, high, low = found
         found = (volume, high, low)
-        if not volume or not (high or low):
-            # No usable identity for the place: only a folder on another volume is provably elsewhere.
-            if not volume or any(item[0] == volume for item in held):
+        if not volume:
+            # (a) No volume serial for the place: no folder on any drive is provably elsewhere.
+            refuse('unchecked', UNCHECKED_NO_SERIAL_APP if data_dir and place == data_dir else UNCHECKED_NO_SERIAL.format(place=place))
+        if not (high or low):
+            # (b) No file index for the place: only a folder on another volume is provably elsewhere.
+            if any(item[0] == volume for item in held):
                 refuse('unchecked', UNCHECKED_INDEX.format(place=place))
             continue
         for item in held:
             if item[0] != volume:
                 continue
             if not (item[1] or item[2]):
+                # (c) The chosen folder's chain gives no file index on the place's volume.
                 refuse('unchecked', UNCHECKED_INDEX.format(place=place))
             if item == found:
                 refuse('unsafe', UNSAFE_APP if data_dir and place == data_dir else UNSAFE_SOURCE.format(place=place))

@@ -136,16 +136,38 @@ class ValidationTests(unittest.TestCase):
                                probe=lambda folder: None, resolve=resolve)
         self.assertEqual(raised.exception.cause, 'unchecked')
         self.assertEqual(str(raised.exception), away + " isn't available, so the app can't tell whether that folder is inside it. Connect the drive and try again.")
-        # A share that gives no file index: only a folder on another volume is provably elsewhere.
+        # Judy 2026-10-30, each case its own sentence. (b) A place that gives no file index: only a folder on another volume
+        # is provably elsewhere. (a) A place whose drive reports volume serial 0: refused even for a folder on another drive.
         volume = overrides.resolved_identity(self.base)[0]
-        for found, cause in (((volume, 0, 0), 'unchecked'), ((volume + 1, 0, 0), None)):
-            with self.subTest(found=found):
-                options = dict(sources=(str(self.base / 'src'),), data_dir=str(self.base / 'data'), probe=lambda folder: None,
-                               resolve=lambda place, found=found: found if place == str(self.base / 'src') else overrides.resolved_identity(place))
-                if cause:
-                    self.assertEqual(self.cause(self.base / 'ok', **options), cause)
+        source, data = str(self.base / 'src'), str(self.base / 'data')
+        index_said = ("The app can't tell whether that folder is inside %s, because both are on a drive that can't confirm which "
+                      "folder is which. Choose a folder on another drive." % source)
+        serial_said = ("No folder can be chosen while %s is one of your source folders: its drive can't confirm which folder is "
+                       "which. Source folders can't be removed in the app." % source)
+        app_said = "The app's data folder is on a drive that can't confirm which folder is which, so no folder can be chosen."
+        for place, found, said in ((source, (volume, 0, 0), index_said),  # (b)
+                                   (source, (volume + 1, 0, 0), None),  # (b) control: on another volume, accepted
+                                   (source, (0, 1, 2), serial_said),  # (a) a source folder
+                                   (data, (0, 1, 2), app_said)):  # (a) the data folder
+            with self.subTest(place=place, found=found):
+                options = dict(sources=(source,), data_dir=data, probe=lambda folder: None,
+                               resolve=lambda path, place=place, found=found: found if path == place else overrides.resolved_identity(path))
+                if said:
+                    with self.assertRaises(overrides.Refused) as raised:
+                        overrides.validate(str(self.base / 'ok'), **options)
+                    self.assertEqual((raised.exception.cause, str(raised.exception)), ('unchecked', said))
                 else:
                     self.assertEqual(overrides.validate(str(self.base / 'ok'), **options)[0], str(self.base / 'ok'))
+
+        # (c) The chosen folder gives no file index on the source folder's volume: the same sentence as (b).
+        class NoIndex(overrides.DirectoryBoundary):
+            def __enter__(self):
+                held = super().__enter__()
+                held.identities[-1] = held.identities[-1][:2] + (0, 0)
+                return held
+        with self.assertRaises(overrides.Refused) as raised:
+            overrides.validate(str(self.base / 'ok'), sources=(source,), data_dir=data, probe=lambda folder: None, boundary=NoIndex)
+        self.assertEqual((raised.exception.cause, str(raised.exception)), ('unchecked', index_said))
         # A source folder that is simply not there (its parent opens) holds nothing: accepted, as before.
         folder, _ = overrides.validate(str(self.base / 'ok'), sources=(str(self.base / 'src'), str(self.base / 'gone' / 'deeper')),
                                        data_dir=str(self.base / 'data'), probe=lambda folder: None)
