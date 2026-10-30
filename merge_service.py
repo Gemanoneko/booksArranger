@@ -2446,7 +2446,8 @@ class MergeService:
         """Ruling 71m: {'kind': 'missing_parts', 'missing', 'total'} when this book is its whole source folder (no other
         current book holds a file of it; not a raised folder question) and its numbering (file names, else track tags)
         skips numbers or starts after 1. A year or an id in a file name is not a part number (ruling 73f,
-        folder_unit.numbers). None otherwise. Read-only."""
+        folder_unit.numbers); a numbering whose numbers are all 1000 or more starts at its first (ruling 73i: 1001-1012
+        without 1005 lists 1005, never 1-1000). None otherwise. Read-only."""
         import folder_unit,itertools
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
@@ -2459,7 +2460,8 @@ class MergeService:
         if not numbers:return None
         # The numbers before the first, then the skipped ones: the first 500, never the whole run built (Senua 0.24.0 M3:
         # a large number in a file name costs nothing more than a small one).
-        missing=list(itertools.islice(itertools.chain(range(1,max(numbers['start'],1)),numbers['missing']),folder_unit.MAX_LISTED))
+        before=range(1,max(numbers['start'],1)) if numbers.get('counts_from_one',True) else ()
+        missing=list(itertools.islice(itertools.chain(before,numbers['missing']),folder_unit.MAX_LISTED))
         if not missing:return None
         return {'kind':'missing_parts','missing':missing,'total':numbers['end'],'numbers':{k:numbers[k] for k in ('source','first','last','skipped','skipped_total')}}
 

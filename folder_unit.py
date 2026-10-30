@@ -287,16 +287,21 @@ def _token(name, value, width):
 # Ruling 73f (Sergei 2026-10-30, narrows 71m; Senua 0.24.0 d4): a number in a file name far larger than the folder's other
 # part numbers is a year or a download id ("01-03.mp3" beside "Интервью 2019.mp3"; "track_3000003.mp3"), not a part, and
 # makes no Missing files. Far larger: NOT_A_PART or more and more than FAR times the number below it.
+# Ruling 73i (Sergei 2026-10-30, narrows 73f; Senua 0.24.0 d6): 73f drops only an outlier next to smaller part numbers.
+# When no place in the names holds smaller part numbers, numbers that are all NOT_A_PART or more are the parts
+# ("1001…1012" without "1005" names 1005), counted from the first of them (nothing below it is missing).
 NOT_A_PART = 1000
 FAR = 2
 
 
-def _part_numbers(values):
+def _part_numbers(values, alone=False):
     """The part numbers among sorted, distinct file-name numbers: every value below the first one that is NOT_A_PART or
     more and more than FAR times the value before it (that one and every value above it are not parts). The smallest is
-    compared with 0, so names whose numbers are all NOT_A_PART or more hold no part numbers ([]). Values under NOT_A_PART,
-    however far apart, and a numbering that climbs past it (0998, 0999, 1000, 1002) are all kept."""
-    below = 0
+    compared with 0, so a place whose numbers are all NOT_A_PART or more holds no part numbers ([]) when another place may
+    hold smaller ones (73f: "3000001_01", "3000002_02" reads 01, 02). alone (73i: no place holds smaller part numbers)
+    keeps the smallest, so such a place is the numbering and only an outlier above its own numbers is left out. Values
+    under NOT_A_PART, however far apart, and a numbering that climbs past it (0998, 0999, 1000, 1002) are all kept."""
+    below = values[0] if alone and values else 0
     for index, value in enumerate(values):
         if value >= NOT_A_PART and value > FAR * below:
             return values[:index]
@@ -308,23 +313,33 @@ def numbers(members):
     """Judy 5.2, the Numbers line: what the present numbering does, from the file names, else the track tags. Printed
     tokens (zero-padded like the names), never 'missing'. None when the files are numbered 1..n without a skip, or when
     nothing numbers them. A year or an id in a name is left out of the numbering (ruling 73f, _part_numbers); a place in
-    the names that holds only those numbers numbers nothing, so the next place, else the track tags, is read."""
+    the names that holds only those numbers numbers nothing while the next place holds smaller part numbers. When no place
+    does, the first such place is the numbering (ruling 73i), read before the track tags and counted from its first
+    number: None without a skip. 'counts_from_one': whether the numbers below 'start' count as missing (False for 73i)."""
     names = track_order.member_names(members)
     digits = [re.findall(r'\d+', Path(str(n)).stem) for n in names]
     runs = [[int(v) for v in d] for d in digits]
     found = None
+    alone = False
     if runs and all(runs):
         shortest = min(len(r) for r in runs)
+        chosen = large = None
         for index in list(range(shortest)) + [-i for i in range(1, shortest + 1)]:
             values = [r[index] for r in runs]
             if len(set(values)) == len(values):
                 kept = _part_numbers(sorted(values))
-                if not kept:
-                    continue
-                # Zero-padded like the parts' own names, never like a year's or an id's.
-                width = max(len(d[index]) for d, value in zip(digits, values) if value <= kept[-1])
-                found = ('names', kept, width)
-                break
+                if kept:
+                    chosen = (index, values, kept)
+                    break
+                large = large or (index, values)  # every number here is NOT_A_PART or more
+        if chosen is None and large is not None:
+            alone = True  # 73i: no place holds smaller part numbers
+            chosen = (*large, _part_numbers(sorted(large[1]), alone=True))
+        if chosen is not None:
+            index, values, kept = chosen
+            # Zero-padded like the parts' own names, never like a year's or an id's.
+            width = max(len(d[index]) for d, value in zip(digits, values) if value <= kept[-1])
+            found = ('names', kept, width)
     disc = None
     if found is None:
         tracks = [_track(m)[0] for m in members]
@@ -338,13 +353,15 @@ def numbers(members):
     source, values, width = found
     first, last = values[0], values[-1]
     ranges = _ranges(values)  # values are sorted and distinct (checked above)
-    if not ranges and first in (0, 1) and disc is None:
+    if not ranges and (first in (0, 1) or alone) and disc is None:
         return None
     # 'missing': the first MAX_LISTED skipped numbers (every reader lists at most that many).
     if disc is not None:
         token = lambda value: '%02d-%02d' % (disc, value)
         return {'source': source, 'first': token(first), 'last': token(last), 'skipped': [token(a) if a == b else token(a) + '-' + token(b) for a, b in
-                ranges][:6], 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last, 'disc': disc}
+                ranges][:6], 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last, 'disc': disc,
+                'counts_from_one': True}
     tokens = [_token(source, a, width) if a == b else _token(source, a, width) + '-' + _token(source, b, width) for a, b in ranges[:6]]
     return {'source': source, 'first': _token(source, first, width), 'last': _token(source, last, width),
-            'skipped': tokens, 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last}
+            'skipped': tokens, 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last,
+            'counts_from_one': not alone}

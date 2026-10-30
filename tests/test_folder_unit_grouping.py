@@ -196,7 +196,8 @@ class Numbers(unittest.TestCase):
 class LargeNumbersAreNotParts(unittest.TestCase):
     """Ruling 73f (Sergei 2026-10-30, narrows 71m; Senua 0.24.0 d4): a number in a file name far larger than the folder's
     other part numbers (a year, a download id) is not a part number and never makes a false Missing files row. Far larger:
-    1000 or more and more than double the number below it; names whose numbers are all 1000 or more hold no part numbers."""
+    1000 or more and more than double the number below it. Ruling 73i (Senua d6): when no place in the names holds smaller
+    part numbers, numbers that are all 1000 or more are the parts, and a gap between them is named."""
 
     def member(self,name,**tags):
         return {'path':'x\\'+name,'filename':name,'metadata':{'tags':tags}}
@@ -223,17 +224,35 @@ class LargeNumbersAreNotParts(unittest.TestCase):
         self.assertEqual(found,self.numbers(['01.mp3','02.mp3','04.mp3']),'zero-padded like the parts, not like the year')
         self.assertEqual((found['first'],found['last'],found['skipped'],found['missing'],found['end']),('01','04',['03'],[3],4))
 
-    def test_names_holding_only_years_or_ids_number_nothing(self):
-        # Before: a numbering from 2015 or 3000003, so parts 1-500 were listed missing.
-        self.assertIsNone(self.numbers(['Лекция 2015.mp3','Лекция 2017.mp3','Лекция 2019.mp3']))
+    def test_names_holding_only_large_numbers_are_their_own_numbering_73i(self):
+        # Ruling 73i (narrows 73f): with every number 1000 or more these are part numbers, and a gap between them is named
+        # (73f had them number nothing). Nothing before the first is missing, so without a skip there is no Numbers line.
+        found=self.numbers(['Лекция 2015.mp3','Лекция 2017.mp3','Лекция 2019.mp3'])
+        self.assertEqual((found['source'],found['first'],found['last'],found['skipped'],found['missing']),('names','2015','2019',['2016','2018'],[2016,2018]))
         self.assertIsNone(self.numbers(['track_3000003.mp3','track_3000004.mp3']))
         self.assertIsNone(self.numbers(['Интервью 2019.mp3']),'a lone file')
-        # The track tags then number the files, as they do for names without numbers.
+        # The names are read before the track tags, as for any numbered names (73f read the tags here).
         found=folder_unit.numbers([self.member('Лекция %d.mp3'%year,track=str(n)) for year,n in ((2015,1),(2017,2),(2019,4))])
-        self.assertEqual((found['source'],found['first'],found['last'],found['skipped'],found['missing']),('tags','1','4',['3'],[3]))
-        # Or the next place in the names, when it numbers them.
+        self.assertEqual((found['source'],found['first'],found['last'],found['skipped']),('names','2015','2019',['2016','2018']))
+        # 73f still: beside a place with smaller part numbers, the large place is left out and the smaller one read.
         found=self.numbers(['2015 Лекция 01.mp3','2016 Лекция 02.mp3','2017 Лекция 04.mp3'])
         self.assertEqual((found['source'],found['first'],found['last'],found['skipped']),('names','01','04',['03']))
+        found=self.numbers(['%d_%02d.mp3'%(3000000+n,n) for n in (1,2,4)])  # an id before the part number
+        self.assertEqual((found['first'],found['last'],found['skipped']),('01','04',['03']))
+
+    def test_numbers_all_1000_or_more_name_their_gap_73i(self):
+        # Sergei's example: 1001-1012 without 1005 (before: no Numbers line, so no Missing files).
+        names=['%d.mp3'%n for n in range(1001,1013) if n!=1005]
+        found=self.numbers(names)
+        self.assertEqual((found['source'],found['first'],found['last'],found['skipped'],found['missing'],found['start'],found['end']),
+                         ('names','1001','1012',['1005'],[1005],1001,1012))
+        # A number every name shares (a book number) numbers nothing, so it is no smaller part number either.
+        found=self.numbers(['Книга 1 - %d.mp3'%n for n in range(1001,1013) if n!=1005])
+        self.assertEqual((found['first'],found['last'],found['skipped']),('1001','1012',['1005']))
+        # An outlier far above them is still left out (73f).
+        self.assertEqual(self.numbers(names+['track_3000003.mp3']),found)
+        # Whole, they need no Numbers line: nothing before 1001 is missing.
+        self.assertIsNone(self.numbers(['%d.mp3'%n for n in range(1001,1013)]))
 
     def test_a_lone_part_beside_a_year_reads_as_alone(self):
         self.assertIsNone(self.numbers(['01.mp3','Интервью 2019.mp3']))
@@ -299,6 +318,11 @@ class AttentionGap(unittest.TestCase):
         self.assertIsNone(found);self.assertLess(peak,2<<20)
         self.assertIsNone(self.gap(['01.mp3','02.mp3','03.mp3','Интервью 2019.mp3'])[0],'before: parts 4-503 of 2019')
         self.assertIsNone(self.gap(['%02d.mp3'%n for n in range(1,11)]+['track_3000003.mp3'])[0])
+
+    def test_numbers_all_1000_or_more_list_their_own_gap_73i(self):
+        found,_=self.gap(['%d.mp3'%n for n in range(1001,1013) if n!=1005])  # before: no Missing files row
+        self.assertEqual((found['kind'],found['missing'],found['total'],found['numbers']['skipped']),('missing_parts',[1005],1012,['1005']))
+        self.assertIsNone(self.gap(['%d.mp3'%n for n in range(1001,1013)])[0],'whole: nothing before 1001 is missing')
 
     def test_a_real_gap_beside_a_year_is_listed_without_it_73f(self):
         found,_=self.gap(['01.mp3','02.mp3','04.mp3','Послесловие 2005.mp3'])  # before: 3, 5, 6 .. of 2005
