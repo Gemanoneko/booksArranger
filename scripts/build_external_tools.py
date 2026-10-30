@@ -9,17 +9,20 @@ import os
 from pathlib import Path
 from native_io import BoundaryError,DirectoryBoundary,VerifiedFile,kernel,ordinary
 
-GIT_WRAPPER_SHA256='3b64043b9e4dc225225f43ff9c1173b57493ff72e5b729accfae051eb160cca3'
+# 2026-10-30 (ruling 73a): git.exe, ucrt64 git.exe and zlib1.dll re-pinned to the
+# installed Git for Windows 2.56.0.windows.4 (machine updated 2026-10-26). The
+# other three DLL pins and every alias/link profile are unchanged by that update.
+GIT_WRAPPER_SHA256='20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c'
 GIT=Path('C:/Program Files/Git/cmd/git.exe')
 GIT_ALIASES=(GIT,GIT.with_name('git-lfs.exe'))
 CORE=Path('C:/Program Files/Git/ucrt64/bin/git.exe')
-CORE_SHA256='9c131f3052b17c8bbd1bce7211414cf589b85cbdbd74d0b0aa40e0a602d47930'
+CORE_SHA256='9c75f3f41eb5686bacde4b7c4fdfcd7970e8b699ee05c8d7a0cc9c8a7ddaffe8'
 CORE_ALIASES=tuple(CORE.with_name(name) for name in ('git.exe','git-upload-pack.exe','git-upload-archive.exe','git-receive-pack.exe'))
 CORE_DLLS={
  'libiconv-2.dll':'94ec68fb8d342b6c91b6b48a8d95092819cdcd006a7166e0b68062f946afd08a',
  'libintl-8.dll':'0e5a178731e6be6d115442a6ade3df7f03265cd1fc4338f8b6f86a8001cbf582',
  'libpcre2-8-0.dll':'1f609cde2ce432efb7d2b0c7b84a14a6dbfc9622d1ac1a3cbadf51c5b0b4dada',
- 'zlib1.dll':'11cd91171765cd65f1c3362e3df67e5f5a618a6b88c8cdec899b802eaf1c7b0d',
+ 'zlib1.dll':'8ae7aeb0467763a1e271cd831ca8e2f7fd101602adb9923100ea26c6be2a559b',
 }
 # Git for Windows installs each backend DLL as one file with exactly two names:
 # the backend folder and libexec/git-core. Both literal folders are pinned here.
