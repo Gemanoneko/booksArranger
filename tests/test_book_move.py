@@ -14,6 +14,7 @@ import unittest
 import uuid
 from ctypes import wintypes
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import book_delete
@@ -444,6 +445,60 @@ class UnexpectedErrorTests(MoveFixture):
                 self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
                 self.assertEqual(self.effective()['final_path'], str(target))
                 self.assertTrue(any('unexpected error' in proof for proof in self.events(move['move_id'])), 'the error is on the move')
+
+    def test_a_placed_copy_still_unopenable_is_retried_after_a_pause_never_reported_as_nothing_moved(self):
+        """Senua 0.24.0 D1r: the re-open of the placed copy fails two or three times in a row (in use for longer than a
+        moment, the share dropped). The first settle attempt runs at once and meets the same error, so the move must be
+        retried after the 0.5 s and 2 s pauses (Mover.SETTLE_PAUSES; recorded here, not slept) and complete. Four in a row
+        outlast every pause: the move stays journaled at publish_intent with both files kept, and recovery at the next start
+        finishes it. Before: failed, "Nothing was moved", the verified copy left untracked and the catalog on the old file."""
+        real = book_move.VerifiedFile
+        failures = (lambda: native_io.FileInUse('Cannot protect exact file: in use'),
+                    lambda: native_io.BoundaryError('Cannot protect exact file: the network name is no longer available'))
+        fresh = False
+        for make in failures:
+            for times in (2, 3, 4):
+                with self.subTest(error=type(make()).__name__, failures=times):
+                    if fresh:
+                        self.setUp()  # a fresh library for each case
+                    fresh = True
+                    self.volume = lambda a, b: False  # the copy strategy (setUp resets the seam)
+                    target = self.other / self.old.name
+                    raised, slept = [], []
+
+                    def busy(path, *args, **kwargs):
+                        if len(raised) < times and Path(str(path)) == target and target.exists():
+                            raised.append(str(path))
+                            raise make()
+                        return real(path, *args, **kwargs)
+                    move = self.plan(self.other)
+                    with patch.object(book_move, 'VerifiedFile', busy), patch.object(book_move, 'time', SimpleNamespace(sleep=slept.append)):
+                        if times < 4:
+                            done = self.mover().run(move['move_id'])
+                        else:
+                            with self.assertRaises(native_io.BoundaryError):
+                                self.mover().run(move['move_id'])
+                    self.assertEqual(raised, [str(target)] * times, 'positive control: each re-open of the placed copy failed')
+                    # The pauses the injected failures need, in order (a real transient on a fresh file may add one more).
+                    self.assertEqual(slept[:times - 1], [0.5, 2][:times - 1], 'each retry came after its pause, never all at once')
+                    self.assertTrue(any('unexpected error' in proof for proof in self.events(move['move_id'])), 'the error is on the move')
+                    if times < 4:
+                        self.assertEqual((done['state'], done['strategy'], book_move.view(done)['state']), ('complete', 'copy', 'moved'))
+                    else:
+                        # Every pause outlasted: never "nothing moved". Both files kept, the catalog on the old file until
+                        # the placed copy is proven, and the journal left for recovery at the next start.
+                        with connect(self.db) as db:
+                            left = book_move.load(db, move['move_id'])
+                        self.assertEqual((left['state'], book_move.view(left)['state']), ('publish_intent', 'moving'))
+                        self.assertEqual(target.read_bytes(), self.payload)
+                        self.assertEqual(self.old.read_bytes(), self.payload)
+                        self.assertEqual(self.effective()['final_path'], str(self.old))
+                        done = {m['move_id']: m for m in self.mover().recover()}[move['move_id']]
+                        self.assertEqual((done['state'], done['strategy']), ('complete', 'copy'))
+                    self.assertEqual(target.read_bytes(), self.payload)
+                    self.assertFalse(self.old.exists())
+                    self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
+                    self.assertEqual(self.effective()['final_path'], str(target))
 
 
 class RenameAcrossSharesTests(MoveFixture):

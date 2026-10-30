@@ -23,11 +23,13 @@ reconciles in the engine (recover()), from what is on disk and the journal, neve
   queued                        -> cancelled (nothing ran)
   rename_intent                 -> renamed and verified: committed then complete; untouched: failed (nothing moved)
   copy_intent / copied          -> owned temporary removed; failed (nothing moved)
-  publish_intent                -> published and verified: committed, then the old removal below; else temporary removed
+  publish_intent                -> published and verified: committed, then the old removal below; published but not
+                                   openable now: left as it is (the error raised); absent or other bytes: temporary removed
   committed / old_removal_intent-> the old file removed once proven to be the same bytes, else 'partial' (both kept)
-An OS, catalog or boundary error a step did not type is reconciled the same way at once, in the session (Mover._settle),
-so a move never stays "moving" until the next start; so is any failure after a copy is placed in the target folder
-(Senua 0.24.0 D1), which is never reported as "nothing moved".
+An OS, catalog or boundary error a step did not type is reconciled the same way in the session (Mover._settle: at once,
+then after each pause); so is any failure after a copy is placed in the target folder (Senua 0.24.0 D1, D1r), reported as
+"nothing moved" only when the placed file is gone or is not the receipt's bytes. An error that outlasts every pause (the
+catalog unwritable, the placed copy still unopenable) leaves the move "moving", journaled, until recover() at next start.
 
 After a move the old folder is removed if its listing is empty (71k), then each empty parent up to, never including, the
 output folder; never a source or output root, never anything recursive."""
@@ -85,8 +87,10 @@ class Failed(Exception):
 
 class Placed(Exception):
     """Senua 0.24.0 D1: a copy move's file is already in the target folder under its final name, and a step after that
-    failed (its re-open was in use for a moment, the share dropped). Never "nothing moved": run() settles the move from
-    publish_intent as recovery would (Mover._settle), proving the placed file before the old one is removed."""
+    failed (its re-open was in use, the share dropped). run() settles the move from publish_intent as recovery would
+    (Mover._settle), proving the placed file before the old one is removed. While the placed file cannot be opened it is
+    tried again after each pause (D1r); if it still cannot, the move stays at publish_intent for recover() at the next
+    start, both files kept. "Nothing moved" only when the placed file is gone or is not the receipt's bytes."""
 
     def __init__(self, error):
         super().__init__(str(error) or type(error).__name__)
@@ -404,8 +408,8 @@ class Mover:
         would reconcile it (reconcile(): from the journal and what is on disk): a move that had not committed fails with
         nothing moved, its owned temporary removed and the old file untouched; a committed one finishes, the old file
         removed only once proven to be the published bytes, or both are kept ('partial'). The error is recorded on the
-        move. When the catalog stays unwritable through every attempt the error is raised and recover() at the next start
-        reconciles the journal, as before."""
+        move. When the catalog stays unwritable, or a copy placed in the target folder stays unopenable (D1r), through every
+        attempt the error is raised and recover() at the next start reconciles the journal, as before."""
         reason = ('The move stopped on an unexpected error: ' + (str(error) or type(error).__name__))[:500]
         for pause in self.SETTLE_PAUSES:
             if pause:
@@ -733,7 +737,10 @@ class Mover:
                 self._discard_temp(move['temp_path'])
             return self._fail(move, '', 'The move was interrupted before the file moved')
         if state == 'publish_intent':
-            final = self._prove(move, target) if os.path.lexists(target) else None
+            # Senua 0.24.0 D1r: a copy already in the target folder that cannot be opened or read now (in use, the share
+            # dropped) raises, so Mover._settle tries again after its pauses, or recover() at the next start; it is never
+            # failed as "nothing moved". The move fails only when the target is absent, or opens and is not the same bytes.
+            final = self._prove(move, target, placed=True) if os.path.lexists(target) else None
             if final is None:
                 if move.get('temp_path'):
                     self._discard_temp(move['temp_path'])
@@ -754,8 +761,10 @@ class Mover:
             return current
         return move
 
-    def _prove(self, move, path):
-        """The verified location of the moved file at path, or None: full hash and size equal to the receipt."""
+    def _prove(self, move, path, *, placed=False):
+        """The verified location of the moved file at path, or None when it is not the receipt's bytes (one link, size and
+        full hash equal to the receipt). An error opening or reading it is None too, unless placed (a copy publish_intent
+        already put there, Senua 0.24.0 D1r): then the error is raised, because the file is there but unproven yet."""
         try:
             target = ordinary(path)
             with DirectoryBoundary(ordinary(move['target_root']), target.parent) as boundary, VerifiedFile(target) as file:
@@ -765,6 +774,8 @@ class Mover:
                 return dict(move['from'], root=str(ordinary(move['target_root'])), final_path=str(target),
                             parent_identity=[list(i) for i in boundary.identities], identity=list(facts['identity']))
         except (BoundaryError, OSError, ValueError):
+            if placed:
+                raise
             return None
 
     def _remove_old(self, move):
