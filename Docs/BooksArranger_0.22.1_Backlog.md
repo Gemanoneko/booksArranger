@@ -242,3 +242,25 @@ Sergei explicitly requested logging only: no investigation, implementation, test
 - Preserve chapter/story names and individual credits inside the combined book. A novel plus bonus stories does not automatically require a multi-author book credit. Do not silently rewrite or steal existing approved/job-owned/completed bindings while applying the new policy.
 - Future investigation must reconcile this new folder-unit instruction with older multi-book/single-file sibling assumptions; do not invent exceptions or merge separate source folders silently.
 - Evidence: `C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-clipboard-cc884e85-dc30-4f45-9c16-c26338e15161.png`. Logged only; no source-folder access or fixes.
+
+## Backlog after 0.24.0 (Sergei, 2026-10-30)
+
+- **Add and remove library folders in the app.** Library folders are the root folders the app scans, such as `Z:\Audiobooks`; today they are listed only in `audiobook-sources.json`, which has no in-app editor. Sergei: useful, but not for 0.24.0 (ruling 73d, corrected). Judy's spec is ready: `Docs/BooksArranger_RemoveSource_UX_2026-10-30.md`. Its 6 open questions to Sergei are unanswered and must be asked again when this is picked up.
+- **Up-front warning on Choose folder** when a library folder's drive can't confirm folder identity (volume serial 0), so nothing can be chosen. Ruling 73g, moved here. Spec: section 6 of the same Judy doc. Ship it together with library-folder add/remove.
+- **Senua's 0.24.0 Minors d7–d10.** Details are in `Docs/BooksArranger_CodeReview_v0.24.0_2026-10-30.md`.
+  - d7: a move that runs out of retries while still queued shows "Move queued" and can't be cancelled.
+  - d8: numbering labels still hide or invent gaps in three cases (a missing first part such as `1002…`, tag gaps under download-id names, and a year next to an all-≥1000 numbering).
+  - d9: a `$&` in a name garbles the text.
+  - d10: start-up recovery can cancel a move that is running.
+  - Also still open: d2, d3, d5 and the first review's 16 Minors.
+- **While a renamed move waits for a restart** (Ender, after `78cdd80`): the engine's own "converted" set and the other finished-book actions still see the old, missing path. The list row is fixed.
+- **Move recovery edge cases from Senua's last 0.24.0 delta** (ruling 73m; details in the review doc):
+  - D1r4, Major: a network error on rename or publish is recorded as final "changed", so the file can end up moved without a record.
+  - d11: the "is in" line shows while the share is away and before the rename has run.
+  - d12: a copy on an unplugged USB drive counts as absent.
+  - d13: a crash after commit while the old share is away leaves a duplicate.
+  - d14: an error that never clears keeps the move unfinished forever, with no way out.
+  - The `$` pattern (d9) also applies to the `renamed` sentence.
+- **Rare copy mismatch** (`797cc95`): a rename recorded before the app closed, while the share is away, shows the `copy` line ("both files are kept"), but only the old file is known to exist. Judy should write a line for it.
+- **"Restart Books Arranger" button on an unfinished-move row** (Judy's offer, 2026-10-30). It would use `shellApi.restartEngine`, which also stops other books' work. Offered to Sergei; not approved.
+- **Sweep fails open on a `git grep` error** (studio tooling, not this tool): a grep error counts as "not cited", so the folder can be deleted. Offered to Sergei 2026-10-30, unanswered.
