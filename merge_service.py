@@ -2445,7 +2445,8 @@ class MergeService:
     def _established_gap(self,identity):
         """Ruling 71m: {'kind': 'missing_parts', 'missing', 'total'} when this book is its whole source folder (no other
         current book holds a file of it; not a raised folder question) and its numbering (file names, else track tags)
-        skips numbers or starts after 1. None otherwise. Read-only."""
+        skips numbers or starts after 1. A year or an id in a file name is not a part number (ruling 73f,
+        folder_unit.numbers). None otherwise. Read-only."""
         import folder_unit,itertools
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()

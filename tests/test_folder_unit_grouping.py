@@ -175,18 +175,91 @@ class Numbers(unittest.TestCase):
         self.assertEqual((found['first'],found['last'],found['skipped']),('05','07',[]))
 
     def test_a_large_number_in_a_name_costs_what_a_small_one_costs(self):
-        # Senua 0.24.0 M3: the skips are read from neighbouring numbers, never built over the span. 1, 2 and 3000000 first:
-        # before the fix that alone allocated about 100 MB, so the nine-digit id below is never reached unfixed.
-        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,3000000)]))
+        # Senua 0.24.0 M3: the skips are read from neighbouring numbers, never built over the span. Since ruling 73f a number
+        # far larger than the one below it is no part number (1, 2, 3000000 reads as 1, 2), so the span here is a numbering
+        # that climbs by doubling (600 .. 2457600) to 3000000, then to a nine-digit number: unfixed, every number up to the
+        # last was built (about 100 MB for 3000000).
+        climb=[1,2]+[600*2**k for k in range(13)]
+        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in climb+[3000000]]))
         self.assertLess(peak,1<<20,'memory follows the files, not the number')
-        self.assertEqual((found['first'],found['last'],found['skipped'],found['skipped_total']),('0000001','3000000',['0000003-2999999'],1))
+        self.assertEqual((found['first'],found['last'],found['skipped'][:2],found['skipped_total']),('0000001','3000000',['0000003-0000599','0000601-0001199'],14))
         self.assertEqual((found['missing'][:2],found['missing'][-1],len(found['missing'])),([3,4],502,folder_unit.MAX_LISTED))
-        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,123456789)]))
+        climb=[1,2]+[600*2**k for k in range(18)]  # .. 78643200, then a nine-digit number under twice that
+        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in climb+[123456789]]))
         self.assertLess(peak,1<<20)
-        self.assertEqual((found['skipped'],found['end'],len(found['missing'])),(['000000003-123456788'],123456789,folder_unit.MAX_LISTED))
+        self.assertEqual((found['skipped_total'],found['end'],len(found['missing'])),(19,123456789,folder_unit.MAX_LISTED))
         # The listed numbers are the same as before for an ordinary gap.
         found=folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,4,7,8)])
         self.assertEqual((found['missing'],found['skipped'],found['skipped_total']),([3,5,6],['03','05-06'],2))
+
+
+class LargeNumbersAreNotParts(unittest.TestCase):
+    """Ruling 73f (Sergei 2026-10-30, narrows 71m; Senua 0.24.0 d4): a number in a file name far larger than the folder's
+    other part numbers (a year, a download id) is not a part number and never makes a false Missing files row. Far larger:
+    1000 or more and more than double the number below it; names whose numbers are all 1000 or more hold no part numbers."""
+
+    def member(self,name,**tags):
+        return {'path':'x\\'+name,'filename':name,'metadata':{'tags':tags}}
+
+    def numbers(self,names):
+        return folder_unit.numbers([self.member(name) for name in names])
+
+    def test_a_year_beside_the_parts_is_not_a_part(self):
+        # Sergei's example: 01-03 and an interview of 2019 are parts 1-3, whole (before: 0004-2018 skipped).
+        self.assertIsNone(self.numbers(['01.mp3','02.mp3','03.mp3','Интервью 2019.mp3']))
+        self.assertIsNone(self.numbers(['%02d.mp3'%n for n in range(1,11)]+['Послесловие 2005.mp3']))
+
+    def test_a_download_id_beside_the_parts_is_not_a_part(self):
+        self.assertIsNone(self.numbers(['%02d.mp3'%n for n in range(1,11)]+['track_3000003.mp3']))
+        found,peak=measured(lambda:self.numbers(['%02d.mp3'%n for n in (1,2,123456789)]))
+        self.assertIsNone(found);self.assertLess(peak,1<<20)
+
+    def test_two_large_ids_beside_the_parts_are_both_left_out(self):
+        # The second id is under double the first, but it is above a number that is not a part, so it is none either.
+        self.assertIsNone(self.numbers(['%02d.mp3'%n for n in range(1,6)]+['track_3000003.mp3','track_3000007.mp3']))
+
+    def test_a_real_gap_beside_a_year_reads_as_without_the_year(self):
+        found=self.numbers(['01.mp3','02.mp3','04.mp3','Послесловие 2005.mp3'])
+        self.assertEqual(found,self.numbers(['01.mp3','02.mp3','04.mp3']),'zero-padded like the parts, not like the year')
+        self.assertEqual((found['first'],found['last'],found['skipped'],found['missing'],found['end']),('01','04',['03'],[3],4))
+
+    def test_names_holding_only_years_or_ids_number_nothing(self):
+        # Before: a numbering from 2015 or 3000003, so parts 1-500 were listed missing.
+        self.assertIsNone(self.numbers(['Лекция 2015.mp3','Лекция 2017.mp3','Лекция 2019.mp3']))
+        self.assertIsNone(self.numbers(['track_3000003.mp3','track_3000004.mp3']))
+        self.assertIsNone(self.numbers(['Интервью 2019.mp3']),'a lone file')
+        # The track tags then number the files, as they do for names without numbers.
+        found=folder_unit.numbers([self.member('Лекция %d.mp3'%year,track=str(n)) for year,n in ((2015,1),(2017,2),(2019,4))])
+        self.assertEqual((found['source'],found['first'],found['last'],found['skipped'],found['missing']),('tags','1','4',['3'],[3]))
+        # Or the next place in the names, when it numbers them.
+        found=self.numbers(['2015 Лекция 01.mp3','2016 Лекция 02.mp3','2017 Лекция 04.mp3'])
+        self.assertEqual((found['source'],found['first'],found['last'],found['skipped']),('names','01','04',['03']))
+
+    def test_a_lone_part_beside_a_year_reads_as_alone(self):
+        self.assertIsNone(self.numbers(['01.mp3','Интервью 2019.mp3']))
+        found=self.numbers(['05.mp3','Интервью 2019.mp3'])
+        self.assertEqual((found['first'],found['last'],found['skipped'],found['start']),('05','05',[],5))
+
+    def test_where_far_larger_starts(self):
+        self.assertIsNone(self.numbers(['01.mp3','02.mp3','1000.mp3']),'1000 and more than double 2')
+        found=self.numbers(['0599.mp3','1200.mp3'])
+        self.assertEqual((found['first'],found['last'],found['start']),('0599','0599',599),'1200 is more than double 599')
+
+    def test_ordinary_numbering_is_read_as_before(self):
+        # Controls, the same before and after: real gaps, numbers under 1000 however far apart, disc and track in one
+        # number, a numbering that climbs past 1000, and the two edges of far larger (999 is under 1000; 1200 is exactly
+        # double 600).
+        self.assertEqual(self.numbers(['01.mp3','02.mp3','999.mp3'])['skipped'],['003-998'])
+        self.assertEqual(self.numbers(['0600.mp3','1200.mp3'])['skipped'],['0601-1199'])
+        found=self.numbers(['01.mp3','02.mp3','04.mp3'])
+        self.assertEqual((found['skipped'],found['missing'],found['end']),(['03'],[3],4))
+        found=self.numbers(['01.mp3','02.mp3','30.mp3'])
+        self.assertEqual((found['skipped'],found['end']),(['03-29'],30))
+        found=self.numbers(['%d.mp3'%n for n in (101,102,201,202)])
+        self.assertEqual((found['first'],found['skipped']),('101',['103-200']))
+        found=self.numbers(['0998.mp3','0999.mp3','1000.mp3','1002.mp3'])
+        self.assertEqual((found['first'],found['last'],found['skipped'],found['start']),('0998','1002',['1001'],998))
+        self.assertIsNone(self.numbers(['%02d.mp3'%n for n in range(1,6)]))
 
 
 class AttentionGap(unittest.TestCase):
@@ -212,14 +285,26 @@ class AttentionGap(unittest.TestCase):
             return measured(lambda:service._established_gap('book'))
 
     def test_a_large_number_in_a_name_lists_the_first_parts_at_no_cost(self):
-        found,peak=self.gap(['%d.mp3'%n for n in (3000001,3000002,3000003)])
-        self.assertLess(peak,2<<20,'before the fix: about 120 MB for these three names')
-        self.assertEqual((found['kind'],found['missing'][:3],len(found['missing']),found['total']),('missing_parts',[1,2,3],500,3000003))
-        found,peak=self.gap(['%d.mp3'%n for n in (123456701,123456702,123456703)])  # a nine-digit download id
-        self.assertLess(peak,2<<20)
-        self.assertEqual((found['missing'][-1],found['total']),(500,123456703))
+        # A numbering that climbs by doubling to 3000000 (ruling 73f leaves a number far above the rest out entirely).
+        found,peak=self.gap(['%02d.mp3'%n for n in [1,2]+[600*2**k for k in range(13)]+[3000000]])
+        self.assertLess(peak,2<<20,'before the M3 fix: about 120 MB for a span of three million')
+        self.assertEqual((found['kind'],found['missing'][:3],len(found['missing']),found['total']),('missing_parts',[3,4,5],500,3000000))
         found,_=self.gap(['%02d.mp3'%n for n in (2,3,5)])  # an ordinary gap: listed as before
         self.assertEqual((found['missing'],found['total']),([1,4],5))
+
+    def test_a_year_or_an_id_in_a_name_makes_no_missing_files_73f(self):
+        found,peak=self.gap(['%d.mp3'%n for n in (3000001,3000002,3000003)])  # Senua's M3 names: before, parts 1-500 of 3000003
+        self.assertIsNone(found);self.assertLess(peak,2<<20)
+        found,peak=self.gap(['%d.mp3'%n for n in (123456701,123456702,123456703)])  # a nine-digit download id
+        self.assertIsNone(found);self.assertLess(peak,2<<20)
+        self.assertIsNone(self.gap(['01.mp3','02.mp3','03.mp3','Интервью 2019.mp3'])[0],'before: parts 4-503 of 2019')
+        self.assertIsNone(self.gap(['%02d.mp3'%n for n in range(1,11)]+['track_3000003.mp3'])[0])
+
+    def test_a_real_gap_beside_a_year_is_listed_without_it_73f(self):
+        found,_=self.gap(['01.mp3','02.mp3','04.mp3','Послесловие 2005.mp3'])  # before: 3, 5, 6 .. of 2005
+        self.assertEqual((found['missing'],found['total'],found['numbers']['skipped']),([3],4,['03']))
+        found,_=self.gap(['%02d.mp3'%n for n in (1,2,4)])  # control: the same gap without the year
+        self.assertEqual((found['missing'],found['total'],found['numbers']['skipped']),([3],4,['03']))
 
 
 class TagRepair(unittest.TestCase):
