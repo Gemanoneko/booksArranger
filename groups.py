@@ -511,13 +511,21 @@ def _anthology_group(items,companions,scope,volume):
         if Path(item['path']).suffix.lower()!='.m4b':item['anthology_story']=True
     return group
 
+def folder_verdict(items,scopes,kept,folder,roots):
+    """The one "is this source folder one book?" decision (folder_unit.verdict) that grouping (_folder_units) and the claim
+    check (MergeService._partial_folder_job) both read, with the same inputs (Senua 0.24.0 C1): Sergei's "Keep as separate
+    books" answers (kept_parts) and ruling 71a's container rule, a library root (roots: the source roots, casefolded,
+    without a trailing separator) or a folder named as a container (local_identity.CONTAINER_NAMES) holds whole books."""
+    from local_identity import CONTAINER_NAMES
+    container=folder.casefold().rstrip('\\/') in roots or Path(folder).name.casefold() in CONTAINER_NAMES
+    return folder_unit.verdict(items,scopes,kept,container)
+
 def _folder_units(members,scopes,assigned,reserved,kept,protected,roots):
-    """Ruling 68 with ruling 71a/71b (folder_unit.verdict): the files of one source folder that the per-file rules above
+    """Ruling 68 with ruling 71a/71b (folder_verdict): the files of one source folder that the per-file rules above
     proposed as several books become one candidate scope ('one'), or one held question ('ask'). Whole .m4b files, named
     anthology volumes and protected (approved, reviewed, queued, converted) files keep their own books: when part of a
     folder is protected, its free files form one held remainder, never joined to the bound book and never a free partial
     book. Changes scopes in place; returns {scope: decision with 'kind' one | ask | remainder and 'bound' titles}."""
-    from local_identity import CONTAINER_NAMES
     units={}
     for path,item in members.items():
         if Path(path).suffix.lower()=='.m4b' or path in reserved and path not in assigned:continue
@@ -527,8 +535,7 @@ def _folder_units(members,scopes,assigned,reserved,kept,protected,roots):
         if len({scopes[item['path']] for item in items})<2:continue
         free=[item for item in items if item['path'] not in assigned]
         if not free:continue
-        container=folder.casefold().rstrip('\\/') in roots or Path(folder).name.casefold() in CONTAINER_NAMES
-        decision=folder_unit.verdict(items,scopes,kept,container)
+        decision=folder_verdict(items,scopes,kept,folder,roots)
         if decision['verdict']=='separate':continue
         bound=list(dict.fromkeys(str((protected.get(assigned[item['path']]) or {}).get('title_clue') or Path(item['filename']).stem) for item in items if item['path'] in assigned))
         kind_name='remainder' if bound else decision['verdict']

@@ -21,6 +21,14 @@ class FileInUse(BoundaryError):
     so a caller may report "try again" rather than "can't confirm it is safe"."""
 SHARING_VIOLATION=32
 
+class RenameRefused(BoundaryError):
+    """Windows refused the handle-bound rename call itself: nothing was renamed and the held file is unchanged. Still a
+    BoundaryError (every caller refuses exactly as before); winerror says why. ERROR_NOT_SAME_DEVICE: the two folders
+    are on different volumes, or on two shares of one NAS volume that report the same volume serial (Senua 0.24.0 M4)."""
+    def __init__(self,message,winerror):
+        super().__init__(message);self.winerror=winerror
+NOT_SAME_DEVICE=17
+
 if os.name=='nt':
     kernel=ctypes.WinDLL('kernel32',use_last_error=True)
     kernel.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
@@ -237,7 +245,7 @@ def rename_no_replace(source,destination,source_boundary,destination_boundary,*,
     if not kernel.SetFileInformationByHandle(source.handle,3,ctypes.byref(rename),ctypes.sizeof(rename)):
         error=ctypes.get_last_error()
         if error in {80,183}:raise FileExistsError('Rename destination collision; existing file preserved')
-        raise BoundaryError(f'No-copy handle-bound rename refused (Windows error {error})')
+        raise RenameRefused(f'No-copy handle-bound rename refused (Windows error {error})',error)
     try:
         source.info,after=refresh(source.handle,destination);ordinary_unique(after)
         if after!=before:raise BoundaryError('Held source identity changed across rename')

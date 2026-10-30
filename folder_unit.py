@@ -259,13 +259,24 @@ def contents(members, title=''):
     return {'stories': stories[:50], 'other_authors': other}
 
 
-def _ranges(gaps):
+# The skipped part numbers a numbering lists: the Missing files row shows the first 500 (merge_service._established_gap).
+MAX_LISTED = 500
+
+
+def _ranges(values):
+    """[[a, b]]: the runs of numbers the sorted, distinct values skip between their first and last. Read from neighbouring
+    values, so time and memory follow the number of files, never the size of a number in a name (Senua 0.24.0 M3: three
+    files named 3000001..3000003, or one id of nine digits beside "01")."""
+    return [[a + 1, b - 1] for a, b in zip(values, values[1:]) if b > a + 1]
+
+
+def _listed(ranges, limit=MAX_LISTED):
+    """The first limit skipped numbers, in order, from their runs (never the whole run built)."""
     found = []
-    for n in gaps:
-        if found and found[-1][1] == n - 1:
-            found[-1][1] = n
-        else:
-            found.append([n, n])
+    for a, b in ranges:
+        found.extend(range(a, min(b, a + limit - len(found) - 1) + 1))
+        if len(found) >= limit:
+            break
     return found
 
 
@@ -300,20 +311,14 @@ def numbers(members):
         return None
     source, values, width = found
     first, last = values[0], values[-1]
-    present = set(values)
-    gaps = [n for n in range(first, last + 1) if n not in present]
-    if not gaps and first in (0, 1) and disc is None:
+    ranges = _ranges(values)  # values are sorted and distinct (checked above)
+    if not ranges and first in (0, 1) and disc is None:
         return None
+    # 'missing': the first MAX_LISTED skipped numbers (every reader lists at most that many).
     if disc is not None:
         token = lambda value: '%02d-%02d' % (disc, value)
         return {'source': source, 'first': token(first), 'last': token(last), 'skipped': [token(a) if a == b else token(a) + '-' + token(b) for a, b in
-                (lambda r: r)(_ranges(gaps))][:6], 'skipped_total': len(_ranges(gaps)), 'missing': gaps, 'start': first, 'end': last, 'disc': disc}
-    ranges = []
-    for n in gaps:
-        if ranges and ranges[-1][1] == n - 1:
-            ranges[-1][1] = n
-        else:
-            ranges.append([n, n])
-    tokens = [_token(source, a, width) if a == b else _token(source, a, width) + '-' + _token(source, b, width) for a, b in ranges]
+                ranges][:6], 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last, 'disc': disc}
+    tokens = [_token(source, a, width) if a == b else _token(source, a, width) + '-' + _token(source, b, width) for a, b in ranges[:6]]
     return {'source': source, 'first': _token(source, first, width), 'last': _token(source, last, width),
-            'skipped': tokens[:6], 'skipped_total': len(tokens), 'missing': gaps, 'start': first, 'end': last}
+            'skipped': tokens, 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last}

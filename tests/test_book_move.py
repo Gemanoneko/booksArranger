@@ -3,18 +3,22 @@
 Real files and a real catalog in a private temporary folder; the volume seam picks the strategy (one disk here), the fault
 hook stands for a crash at each journal boundary. Nothing converts: no job row is written and no encoder runs."""
 import copy
+import ctypes
 import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import unittest
 import uuid
+from ctypes import wintypes
 from pathlib import Path
 from unittest.mock import patch
 
 import book_delete
 import book_move
+import native_io
 import publication_locations as p
 from native_io import DirectoryBoundary, VerifiedFile
 from publication_binding import PublicationBindings
@@ -341,3 +345,107 @@ class ViewTests(MoveFixture):
         with connect(self.db) as db:
             with self.assertRaises(Exception):
                 db.execute('DELETE FROM book_move_events WHERE move_id=?', (move['move_id'],))
+
+
+class UnexpectedErrorTests(MoveFixture):
+    """Senua 0.24.0 M1: an OS or catalog error no step typed ends the move in the session (never "moving" until a restart),
+    from the journal and what is on disk, exactly as recovery at start would: the old file is kept until proven."""
+
+    def events(self, move_id):
+        with connect(self.db) as db:
+            return [r[0] or '' for r in db.execute('SELECT proof_json FROM book_move_events WHERE move_id=? ORDER BY event_id', (move_id,))]
+
+    def released(self):
+        """The book is free again at once: a new choice is accepted and moves it."""
+        again = self.mover().run(self.plan(self.other)['move_id'])
+        self.assertEqual(again['state'], 'complete')
+        self.assertEqual(self.effective()['final_path'], str(self.other / self.old.name))
+
+    def test_network_error_on_the_temporary_fails_the_move_now_and_keeps_the_old_file(self):
+        self.volume = lambda a, b: False
+        real = os.open
+
+        def lost(path, *args, **kwargs):
+            if book_move.TEMP_PREFIX in str(path):
+                raise ctypes.WinError(64)  # ERROR_NETNAME_DELETED: the share went away
+            return real(path, *args, **kwargs)
+        move = self.plan(self.other)
+        with patch.object(book_move.os, 'open', lost):
+            done = self.mover().run(move['move_id'])
+        self.assertEqual((done['state'], book_move.view(done)['state']), ('failed', 'failed'))
+        self.assertEqual(self.old.read_bytes(), self.payload)
+        self.assertEqual(list(self.other.iterdir()), [])
+        self.assertEqual(self.effective()['final_path'], str(self.old))
+        self.assertTrue(any('unexpected error' in proof for proof in self.events(move['move_id'])), 'the error is on the move')
+        self.released()
+
+    def test_catalog_error_mid_move_fails_or_finishes_it_now_from_what_is_on_disk(self):
+        real = book_move.Mover._write
+        for stage, ends in (('copied', 'failed'), ('old_removal_intent', 'complete')):
+            with self.subTest(stage=stage):
+                if not self.old.exists():
+                    self.setUp()
+                self.volume = lambda a, b: False  # the copy strategy (setUp resets the seam)
+                failed = []
+
+                def flaky(mover, move_id, state, **values):
+                    if state == stage and not failed:
+                        failed.append(state)
+                        raise sqlite3.OperationalError('disk I/O error')
+                    return real(mover, move_id, state, **values)
+                move = self.plan(self.other)
+                with patch.object(book_move.Mover, '_write', flaky):
+                    done = self.mover().run(move['move_id'])
+                self.assertEqual(failed, [stage], 'positive control: the catalog write failed')
+                self.assertEqual(done['state'], ends)
+                if ends == 'failed':
+                    # Not committed: nothing moved, the owned temporary is gone, the old file is untouched.
+                    self.assertEqual(self.old.read_bytes(), self.payload)
+                    self.assertEqual(list(self.other.iterdir()), [])
+                    self.released()
+                else:
+                    # Committed: the new file is the book; the old one is removed only after it was proven the same bytes.
+                    self.assertEqual((self.other / self.old.name).read_bytes(), self.payload)
+                    self.assertFalse(self.old.exists())
+                    self.assertEqual(self.effective()['final_path'], str(self.other / self.old.name))
+
+
+class RenameAcrossSharesTests(MoveFixture):
+    """Senua 0.24.0 M4: two shares of one NAS volume report one volume serial, so the strategy picks a rename that Windows
+    refuses as another device (ERROR_NOT_SAME_DEVICE). Nothing was renamed: the move goes on as a verified copy."""
+
+    def refuse_rename(self, code, calls):
+        kernel = native_io.kernel
+        real = kernel.SetFileInformationByHandle
+        real.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        real.restype = wintypes.BOOL
+
+        def refused(handle, kind, info, size):
+            if kind == 3:  # FileRenameInfo: refused as the SMB server refuses a rename to another share
+                calls.append(code)
+                ctypes.set_last_error(code)
+                return False
+            return real(handle, kind, info, size)  # the old file's delete disposition (kind 4) is the real one
+        return patch.object(kernel, 'SetFileInformationByHandle', refused)
+
+    def test_rename_refused_as_another_device_is_copied_verified_and_the_old_file_removed(self):
+        calls = []
+        # Control: any other refusal still moves nothing and copies nothing.
+        with self.refuse_rename(5, calls):
+            done = self.mover().run(self.plan(self.other)['move_id'])
+        self.assertEqual((calls, done['state'], done['strategy']), ([5], 'failed', 'rename'))
+        self.assertEqual(self.old.read_bytes(), self.payload)
+        self.assertEqual(list(self.other.iterdir()), [])
+        with self.refuse_rename(17, calls):  # ERROR_NOT_SAME_DEVICE (native_io.NOT_SAME_DEVICE)
+            move = self.plan(self.other)
+            done = self.mover().run(move['move_id'])
+        self.assertEqual(calls, [5, 17], 'positive control: the rename was tried and refused')
+        self.assertEqual((done['state'], done['strategy']), ('complete', 'copy'))
+        new = self.other / self.old.name
+        self.assertEqual(new.read_bytes(), self.payload)
+        self.assertFalse(self.old.exists())
+        self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # no temporary left
+        self.assertEqual(self.effective()['final_path'], str(new))
+        with connect(self.db) as db:
+            states = [r[0] for r in db.execute('SELECT to_state FROM book_move_events WHERE move_id=? ORDER BY event_id', (move['move_id'],))]
+        self.assertEqual(states[:3], ['queued', 'rename_intent', 'copy_intent'])

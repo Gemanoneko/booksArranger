@@ -2446,7 +2446,7 @@ class MergeService:
         """Ruling 71m: {'kind': 'missing_parts', 'missing', 'total'} when this book is its whole source folder (no other
         current book holds a file of it; not a raised folder question) and its numbering (file names, else track tags)
         skips numbers or starts after 1. None otherwise. Read-only."""
-        import folder_unit
+        import folder_unit,itertools
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()
             if found is None:return None
@@ -2456,10 +2456,11 @@ class MergeService:
             if self._unit_siblings(db,{'members':members,'source_root':found['root']}):return None
         numbers=folder_unit.numbers(members)
         if not numbers:return None
-        missing=list(range(1,numbers['start'])) if numbers['start']>1 else []
-        missing+=numbers['missing']
+        # The numbers before the first, then the skipped ones: the first 500, never the whole run built (Senua 0.24.0 M3:
+        # a large number in a file name costs nothing more than a small one).
+        missing=list(itertools.islice(itertools.chain(range(1,max(numbers['start'],1)),numbers['missing']),folder_unit.MAX_LISTED))
         if not missing:return None
-        return {'kind':'missing_parts','missing':missing[:500],'total':numbers['end'],'numbers':{k:numbers[k] for k in ('source','first','last','skipped','skipped_total')}}
+        return {'kind':'missing_parts','missing':missing,'total':numbers['end'],'numbers':{k:numbers[k] for k in ('source','first','last','skipped','skipped_total')}}
 
     def _unit_siblings(self,db,row):
         """The catalog's present audio files of this book's source folder that another current book holds: [(path, group
@@ -3048,8 +3049,11 @@ class MergeService:
 
     def _partial_folder_job(self,db,manifest):
         """True when a job's sources are only part of the audio files of their one source folder and ruling 68 makes that
-        folder one book (folder_unit.verdict is not 'separate'). Whole .m4b files, named anthology volumes (the «Ужасы и
-        трэшатинка» volume-1 claim) and folders of whole books or separately tagged novels are never partial."""
+        folder one book (groups.folder_verdict is not 'separate'). Whole .m4b files, named anthology volumes (the «Ужасы и
+        трэшатинка» volume-1 claim), books whose files Sergei kept separate ("Keep as separate books"), library roots and
+        container folders (71a) and folders of whole books or separately tagged novels are never partial. Senua 0.24.0 C1:
+        this check reads the same decision as grouping, with the same inputs, so a book grouping keeps apart is never set
+        aside here (once at Approve, then again at every engine start)."""
         import folder_unit,anthology_volumes
         sources=[s for s in manifest.get('sources') or [] if isinstance(s,dict) and s.get('path')]
         root=manifest.get('root') or ''
@@ -3066,6 +3070,10 @@ class MergeService:
         members=[m['path'] for m in json.loads(group[0]).get('members') or []] if group else []
         own={os.path.normcase(p) for p in (members or [s['path'] for s in sources])}
         if not any(os.path.normcase(r['path']) not in own for r in rows):return False
+        # His "Keep as separate books" answer settles it for the files he kept: this book is one of them, whatever else
+        # is in the folder now (a file added later is grouping's question, never a reason to take his answer back).
+        kept=groups.kept_parts(db,root)
+        if all(p in kept for p in (members or [s['path'] for s in sources])):return False
         items=[groups.member(r) for r in rows]
         scope_of={}
         for item in items:
@@ -3073,7 +3081,7 @@ class MergeService:
             scope_of[item['path']]=found[0] if found else item['path']
         for item in items:
             if os.path.normcase(item['path']) in own:scope_of[item['path']]='\x1fthis job'
-        return folder_unit.verdict(items,scope_of)['verdict']!='separate'
+        return groups.folder_verdict(items,scope_of,kept,folder,{str(root).casefold().rstrip('\\/')})['verdict']!='separate'
 
     def _foreign_cyrillic_job(self,db,manifest):
         """Ruling 71f: the job files its author in Cyrillic while the name is a foreign one or one the app does not know,

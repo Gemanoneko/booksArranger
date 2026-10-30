@@ -29,6 +29,16 @@ def sizes(built):
     return sorted(len(g['members']) for g in built.values())
 
 
+def measured(call):
+    """(result, peak bytes) of call under tracemalloc (Senua 0.24.0 M3)."""
+    import tracemalloc
+    tracemalloc.start()
+    try:
+        found=call();peak=tracemalloc.get_traced_memory()[1]
+    finally:tracemalloc.stop()
+    return found,peak
+
+
 LYONS='Unsorted/WH40K/Стив Лайонс - Криг + рассказы (Casper Valter)'
 
 
@@ -163,6 +173,53 @@ class Numbers(unittest.TestCase):
     def test_late_start_without_skips(self):
         found=folder_unit.numbers([self.member('%02d_Часть.mp3'%n) for n in (5,6,7)])
         self.assertEqual((found['first'],found['last'],found['skipped']),('05','07',[]))
+
+    def test_a_large_number_in_a_name_costs_what_a_small_one_costs(self):
+        # Senua 0.24.0 M3: the skips are read from neighbouring numbers, never built over the span. 1, 2 and 3000000 first:
+        # before the fix that alone allocated about 100 MB, so the nine-digit id below is never reached unfixed.
+        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,3000000)]))
+        self.assertLess(peak,1<<20,'memory follows the files, not the number')
+        self.assertEqual((found['first'],found['last'],found['skipped'],found['skipped_total']),('0000001','3000000',['0000003-2999999'],1))
+        self.assertEqual((found['missing'][:2],found['missing'][-1],len(found['missing'])),([3,4],502,folder_unit.MAX_LISTED))
+        found,peak=measured(lambda:folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,123456789)]))
+        self.assertLess(peak,1<<20)
+        self.assertEqual((found['skipped'],found['end'],len(found['missing'])),(['000000003-123456788'],123456789,folder_unit.MAX_LISTED))
+        # The listed numbers are the same as before for an ordinary gap.
+        found=folder_unit.numbers([self.member('%02d.mp3'%n) for n in (1,2,4,7,8)])
+        self.assertEqual((found['missing'],found['skipped'],found['skipped_total']),([3,5,6],['03','05-06'],2))
+
+
+class AttentionGap(unittest.TestCase):
+    """Senua 0.24.0 M3 on the attention list (MergeService._established_gap, ruling 71m), over an in-memory catalog."""
+
+    def gap(self,names):
+        import sqlite3
+        from unittest.mock import patch
+        import merge_service
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row;self.addCleanup(db.close)
+        db.execute('CREATE TABLE book_groups(id TEXT,root TEXT,evidence TEXT,superseded INTEGER)')
+        db.execute('CREATE TABLE files(root TEXT,path TEXT,kind TEXT,missing INTEGER)')
+        db.execute('CREATE TABLE catalog_group_members(root TEXT,path TEXT,group_id TEXT)')
+        folder=ROOT+'\\Unsorted\\Книга'
+        members=[{'path':folder+'\\'+name,'filename':name,'metadata':{'tags':{}}} for name in names]
+        db.execute('INSERT INTO book_groups VALUES(?,?,?,0)',('book',ROOT,json.dumps({'members':members},ensure_ascii=False)))
+        for m in members:
+            db.execute("INSERT INTO files VALUES(?,?,'audiobook',0)",(ROOT,m['path']))
+            db.execute('INSERT INTO catalog_group_members VALUES(?,?,?)',(ROOT,m['path'],'book'))
+        service=merge_service.MergeService.__new__(merge_service.MergeService)
+        service.inventory=SimpleNamespace(database=':memory:')
+        with patch.object(merge_service,'connect',lambda path:db):
+            return measured(lambda:service._established_gap('book'))
+
+    def test_a_large_number_in_a_name_lists_the_first_parts_at_no_cost(self):
+        found,peak=self.gap(['%d.mp3'%n for n in (3000001,3000002,3000003)])
+        self.assertLess(peak,2<<20,'before the fix: about 120 MB for these three names')
+        self.assertEqual((found['kind'],found['missing'][:3],len(found['missing']),found['total']),('missing_parts',[1,2,3],500,3000003))
+        found,peak=self.gap(['%d.mp3'%n for n in (123456701,123456702,123456703)])  # a nine-digit download id
+        self.assertLess(peak,2<<20)
+        self.assertEqual((found['missing'][-1],found['total']),(500,123456703))
+        found,_=self.gap(['%02d.mp3'%n for n in (2,3,5)])  # an ordinary gap: listed as before
+        self.assertEqual((found['missing'],found['total']),([1,4],5))
 
 
 class TagRepair(unittest.TestCase):

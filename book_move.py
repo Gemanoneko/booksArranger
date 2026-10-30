@@ -12,7 +12,8 @@ start differs from the location before it) is refused, never guessed: the book t
 
 Strategies (one per move, chosen by the native volume of the held file and of the target folder):
   - same volume: a handle-bound no-replace native rename of the exact held file (native_io.rename_no_replace) after a
-    full hash on that same deny-writer handle;
+    full hash on that same deny-writer handle; when Windows refuses that rename as another device (two shares of one NAS
+    volume report the same volume serial), nothing was renamed and the move goes on as a copy below;
   - another volume: a copy to an owned temporary in the target folder, flushed, its full SHA-256 and size equal to the
     receipt, a no-replace publication, the location commit, then exact-handle removal of the old file (held deny-writer
     since it was hashed). Any doubt keeps both files and reports 'partial'.
@@ -24,6 +25,8 @@ reconciles in the engine (recover()), from what is on disk and the journal, neve
   copy_intent / copied          -> owned temporary removed; failed (nothing moved)
   publish_intent                -> published and verified: committed, then the old removal below; else temporary removed
   committed / old_removal_intent-> the old file removed once proven to be the same bytes, else 'partial' (both kept)
+An OS, catalog or boundary error a step did not type is reconciled the same way at once, in the session (Mover._settle),
+so a move never stays "moving" until the next start.
 
 After a move the old folder is removed if its listing is empty (71k), then each empty parent up to, never including, the
 output folder; never a source or output root, never anything recursive."""
@@ -34,11 +37,12 @@ import ntpath
 import os
 import shutil
 import sqlite3
+import time
 import unicodedata
 import uuid
 
-from native_io import (AncestorUnavailable, BoundaryError, DirectoryBoundary, FileInUse, RenamePostconditionError, VerifiedFile,
-                       ordinary, publish_no_replace, rename_no_replace)
+from native_io import (NOT_SAME_DEVICE, AncestorUnavailable, BoundaryError, DirectoryBoundary, FileInUse, RenamePostconditionError,
+                       RenameRefused, VerifiedFile, ordinary, publish_no_replace, rename_no_replace)
 
 SCHEMA = 'books-book-move-v1'
 ENVELOPE = 'books-book-move-envelope-v1'
@@ -359,18 +363,53 @@ class Mover:
         if move['state'] != 'queued':
             return move
         try:
-            self._run(move)
-            return self._load(move_id)  # after the old handle and folder closed (a copy completes there)
-        except Unsettled:
-            return self.reconcile(self._load(move_id))
-        except Failed as failure:
-            current = self._load(move_id)
-            if current['state'] in ('queued', 'rename_intent', 'copy_intent', 'copied', 'publish_intent'):
-                return self._fail(current, failure.cause, failure.detail)
-            if current['state'] in ('committed', 'old_removal_intent'):
-                self._write(move_id, 'partial', cause='partial', detail={'reason': str(failure.detail or failure)[:500]})
-                return self._load(move_id)
-            return current
+            try:
+                self._run(move)
+                return self._load(move_id)  # after the old handle and folder closed (a copy completes there)
+            except Unsettled:
+                return self.reconcile(self._load(move_id))
+            except Failed as failure:
+                current = self._load(move_id)
+                if current['state'] in ('queued', 'rename_intent', 'copy_intent', 'copied', 'publish_intent'):
+                    return self._fail(current, failure.cause, failure.detail)
+                if current['state'] in ('committed', 'old_removal_intent'):
+                    self._write(move_id, 'partial', cause='partial', detail={'reason': str(failure.detail or failure)[:500]})
+                    return self._load(move_id)
+                return current
+        except (OSError, sqlite3.Error, ValueError) as error:
+            return self._settle(move_id, error)
+
+    # Pauses between attempts to end a move after an error (a catalog busy for a moment answers the next one).
+    SETTLE_PAUSES = (0, 0.5, 2)
+
+    def _settle(self, move_id, error):
+        """Senua 0.24.0 M1: an OS, catalog or boundary error that no step typed (a network error on the temporary, a
+        catalog write that failed) ends the move now, never "moving" until the next start. It is reconciled as a restart
+        would reconcile it (reconcile(): from the journal and what is on disk): a move that had not committed fails with
+        nothing moved, its owned temporary removed and the old file untouched; a committed one finishes, the old file
+        removed only once proven to be the published bytes, or both are kept ('partial'). The error is recorded on the
+        move. When the catalog stays unwritable through every attempt the error is raised and recover() at the next start
+        reconciles the journal, as before."""
+        reason = ('The move stopped on an unexpected error: ' + (str(error) or type(error).__name__))[:500]
+        for pause in self.SETTLE_PAUSES:
+            if pause:
+                if self.stop is not None and self.stop.is_set():
+                    break
+                time.sleep(pause)
+            try:
+                current = self._load(move_id)
+                if current is None:
+                    break
+                if current['state'] in TERMINAL:
+                    return current
+                with self.connect() as db:
+                    _event(db, move_id, current['state'], current['state'], {'error': reason})
+                if current['state'] == 'queued':
+                    return self._fail(current, '', reason)
+                return self.reconcile(current)
+            except (OSError, sqlite3.Error, ValueError, Failed):
+                continue
+        raise error
 
     def _run(self, move):
         start = move['from']
@@ -460,6 +499,7 @@ class Mover:
         self._write(move['move_id'], 'rename_intent', expected='queued', strategy='rename',
                     proof={'old': start, 'old_native': facts, 'target': str(target)})
         self.fault('rename_intent')
+        refused = None
         try:
             with DirectoryBoundary(target_root, target.parent, rename_destination=True) as destination:
                 try:
@@ -469,21 +509,31 @@ class Mover:
                     raise Failed('target_exists', str(error))
                 except RenamePostconditionError:
                     raise  # the OS accepted the rename: recovery proves what is on disk
+                except RenameRefused as error:
+                    if error.winerror != NOT_SAME_DEVICE:
+                        raise Failed('changed', str(error))
+                    refused = str(error)
                 except BoundaryError as error:
                     raise Failed('changed', str(error))
-                final = dict(start, root=str(target_root), final_path=str(target), parent_identity=[list(i) for i in destination.identities],
-                             identity=list(receipt['identity']))
+                if refused is None:
+                    final = dict(start, root=str(target_root), final_path=str(target), parent_identity=[list(i) for i in destination.identities],
+                                 identity=list(receipt['identity']))
         except RenamePostconditionError:
             raise Unsettled()
         except AncestorUnavailable as error:
             raise Failed('unavailable', str(error))
+        if refused is not None:
+            # Senua 0.24.0 M4: the same volume serial on two shares of one NAS volume is not one volume; Windows refused
+            # the rename as another device and nothing was renamed (the held file is unchanged). The move goes on as a
+            # copy: verified temporary, no-replace publication, location commit, then removal of the proven old file.
+            return self._copy(move, start, held, facts, old_boundary, target_root, expected='rename_intent', refused=refused)
         self.fault('renamed')
         self._write(move['move_id'], 'committed', expected='rename_intent', final=final, proof={'rename': receipt})
         self.fault('committed')
         self._write(move['move_id'], 'complete', expected='committed', proof={'outcome': 'moved'})
         return self._load(move['move_id'])
 
-    def _copy(self, move, start, held, facts, old_boundary, target_root):
+    def _copy(self, move, start, held, facts, old_boundary, target_root, expected='queued', refused=None):
         target = ordinary(move['target_path'])
         temp = target.parent / (TEMP_PREFIX + move['move_id'] + '.partial')
         try:
@@ -492,7 +542,10 @@ class Mover:
             raise Failed('unavailable', str(error))
         if free < start['size'] + 16 * 1024 * 1024:
             raise Failed('no_space', 'Not enough free space')
-        self._write(move['move_id'], 'copy_intent', expected='queued', strategy='copy', temp=str(temp), proof={'old': start, 'old_native': facts, 'temporary': str(temp)})
+        proof = {'old': start, 'old_native': facts, 'temporary': str(temp)}
+        if refused is not None:
+            proof['rename_refused'] = refused
+        self._write(move['move_id'], 'copy_intent', expected=expected, strategy='copy', temp=str(temp), proof=proof)
         self.fault('copy_intent')
         import hashlib
         try:

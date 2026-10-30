@@ -10,7 +10,14 @@ junction or symlink anywhere above it), writable (a zero-byte probe, through a s
 folder or the app's data folder, and its full output path stays within the 240-character limit. Its native identity is
 recorded so a folder renamed or replaced later is refused (fails closed), never followed by name.
 
+"Inside a source folder" is decided by where the folders really are, not by how their paths are spelled (Senua 0.24.0
+M2): a folder picked through Network under the NAS share's UNC name and the same folder under its mapped drive letter are
+one place. Every folder from the chosen one up to its drive or share is compared, by native identity (volume serial and
+file index), with each source folder and the data folder, opened with every link followed. When that cannot be told (a
+source folder that is away, or a share that gives no file index) the choice is refused with the reason, never allowed.
+
 Rows are append-only in spirit: a new choice retracts the older live ones; nothing is ever deleted."""
+import ctypes
 import datetime
 import json
 import ntpath
@@ -24,8 +31,9 @@ TABLE = ('CREATE TABLE IF NOT EXISTS destination_overrides(override_id TEXT PRIM
 INDEXES = ('CREATE INDEX IF NOT EXISTS destination_overrides_by_book ON destination_overrides(book_key)',
            'CREATE INDEX IF NOT EXISTS destination_overrides_by_job ON destination_overrides(job_id)')
 MAX_PATH = 240
-# Typed causes (Judy's 0.23.1 spec, section 18.2); the page maps each to its own sentence.
-CAUSES = ('target_exists', 'unavailable', 'not_writable', 'no_space', 'in_use', 'source_missing', 'unsafe', 'partial', 'changed')
+# Typed causes (Judy's 0.23.1 spec, section 18.2); the page maps each to its own sentence. 'unchecked' (M2: a source or
+# data folder whose place can't be told now) has none of its own: the page shows the engine's sentence, which names it.
+CAUSES = ('target_exists', 'unavailable', 'not_writable', 'no_space', 'in_use', 'source_missing', 'unsafe', 'partial', 'changed', 'unchecked')
 PROBE_PREFIX = '.books-arranger-probe-'
 
 
@@ -78,6 +86,88 @@ def inside(folder, root):
         return False
 
 
+NOT_FOUND = (2, 3)  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+UNCHECKED_AWAY = "The app can't check whether that folder is inside {place}: it isn't available now. Connect it and try again."
+UNCHECKED_INDEX = "The app can't check whether that folder is inside {place}: that drive doesn't report folder identities. Choose a folder on another drive."
+
+
+def resolved_identity(path):
+    """(volume serial, index high, index low) of the folder path names now, with every link and mapping followed: where
+    it really is, however its path is spelled. Opens it for attributes only (no sharing conflict, nothing written).
+    Raises OSError (winerror set) when it can't be opened."""
+    from native_io import FileInfo, kernel
+    handle = kernel.CreateFileW(str(path), 0x80, 7, None, 3, 0x02000000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = FileInfo()
+        if not kernel.GetFileInformationByHandle(handle, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return info.volume, info.index_high, info.index_low
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _network_drive(drive):
+    """A drive letter Windows knows as a network drive, connected or remembered while away."""
+    try:
+        if ctypes.windll.kernel32.GetDriveTypeW(drive + '\\') == 4:  # DRIVE_REMOTE
+            return True
+        size = ctypes.c_ulong(1024)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        return ctypes.windll.mpr.WNetGetConnectionW(drive, buffer, ctypes.byref(size)) in (0, 1201)  # connected, remembered
+    except (OSError, AttributeError):
+        return True  # unknown: treated as away, so the choice is refused rather than allowed
+
+
+def _absent(place, resolve):
+    """True when place provably does not exist, so nothing can be inside it: a folder above it opens and the rest is not
+    there, or it is on a drive letter that is not there and is no network drive (an away network drive is not absent)."""
+    current = ntpath.normpath(str(place))
+    while True:
+        parent = ntpath.dirname(current)
+        if parent == current:
+            drive = ntpath.splitdrive(current)[0]
+            return len(drive) == 2 and drive[1] == ':' and not _network_drive(drive)
+        try:
+            resolve(parent)
+            return True
+        except OSError as error:
+            if getattr(error, 'winerror', None) not in NOT_FOUND:
+                return False
+        current = parent
+
+
+def _inside_by_identity(chain, places, resolve):
+    """Senua 0.24.0 M2: refuse when a folder of the chosen folder's chain (itself and every folder above it, opened without
+    following links) is one of places (source folders, the data folder) by native identity. A place that can't be
+    resolved, or a match that can't be trusted (no file index on that volume), refuses with the reason."""
+    held = [(item[1], item[2], item[3]) for item in chain]
+    for place in places:
+        if not place:
+            continue
+        try:
+            found = resolve(place)
+        except OSError as error:
+            if getattr(error, 'winerror', None) in NOT_FOUND and _absent(place, resolve):
+                continue
+            refuse('unchecked', UNCHECKED_AWAY.format(place=place))
+        volume, high, low = found
+        found = (volume, high, low)
+        if not volume or not (high or low):
+            # No usable identity for the place: only a folder on another volume is provably elsewhere.
+            if not volume or any(item[0] == volume for item in held):
+                refuse('unchecked', UNCHECKED_INDEX.format(place=place))
+            continue
+        for item in held:
+            if item[0] != volume:
+                continue
+            if not (item[1] or item[2]):
+                refuse('unchecked', UNCHECKED_INDEX.format(place=place))
+            if item == found:
+                refuse('unsafe')
+
+
 def default_probe(folder):
     """Create and remove one uniquely named zero-byte file in folder (user-initiated at runtime; tests inject a seam)."""
     path = os.path.join(str(folder), PROBE_PREFIX + uuid.uuid4().hex + '.tmp')
@@ -88,8 +178,9 @@ def default_probe(folder):
         os.remove(path)
 
 
-def validate(folder, *, sources=(), data_dir=None, name='', probe=None, boundary=DirectoryBoundary):
-    """(folder as an ordinary absolute path string, identity {'volume', 'high', 'low', 'chain'}) or Refused."""
+def validate(folder, *, sources=(), data_dir=None, name='', probe=None, boundary=DirectoryBoundary, resolve=resolved_identity):
+    """(folder as an ordinary absolute path string, identity {'volume', 'high', 'low', 'chain'}) or Refused. resolve: where
+    a source or the data folder really is (resolved_identity; a seam in tests)."""
     if not isinstance(folder, str) or not folder or len(folder) > 1000 or '\x00' in folder:
         refuse('unavailable')
     try:
@@ -122,6 +213,8 @@ def validate(folder, *, sources=(), data_dir=None, name='', probe=None, boundary
         refuse('unsafe', 'That folder is a link or junction. Choose an ordinary folder.')
     except OSError:
         refuse('unavailable')
+    # Before the probe writes anything: a source or the data folder under another spelling (Senua 0.24.0 M2).
+    _inside_by_identity(chain, [*(sources or ()), data_dir], resolve)
     try:
         (probe or default_probe)(text)
     except PermissionError:

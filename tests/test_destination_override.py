@@ -78,6 +78,54 @@ class ValidationTests(unittest.TestCase):
         (self.base / 'ok').rmdir(); (self.base / 'ok').mkdir()  # replaced by a new folder of the same name
         self.assertFalse(overrides.same_identity(identity, overrides.current_identity(folder)))
 
+    def test_a_source_or_data_folder_under_another_spelling_is_refused_by_where_it_really_is(self):
+        # Senua 0.24.0 M2: on the NAS one share is both \\NAS\share and Z:; here a junction gives the second spelling. The
+        # text never matches, the folder is the same: refused before the probe writes anything.
+        import _winapi
+        real = self.base / 'real'
+        for name in ('src/inner', 'data', 'mine'):
+            (real / name).mkdir(parents=True)
+        _winapi.CreateJunction(str(real), str(self.base / 'alias'))
+        written = []
+        alias_src, alias_data = str(self.base / 'alias' / 'src'), str(self.base / 'alias' / 'data')
+        for chosen, sources, data in ((real / 'src' / 'inner', (alias_src,), str(self.base / 'data')),
+                                      (real / 'src', (alias_src,), str(self.base / 'data')),
+                                      (real / 'data', (str(self.base / 'src'),), alias_data)):
+            with self.subTest(chosen=chosen):
+                self.assertEqual(self.cause(chosen, sources=sources, data_dir=data, probe=written.append), 'unsafe')
+        self.assertEqual(written, [], 'refused before the probe writes')
+        # Positive control: a folder beside them, under the same spellings, is accepted.
+        folder, _ = overrides.validate(str(real / 'mine'), sources=(alias_src,), data_dir=alias_data, probe=written.append)
+        self.assertEqual((folder, written), (str(real / 'mine'), [str(real / 'mine')]))
+
+    def test_a_place_that_cannot_be_told_refuses_with_its_name_and_a_missing_one_holds_nothing(self):
+        import ctypes
+        away = 'Q:\\Away\\Audiobooks'
+
+        def resolve(place):
+            if str(place).startswith('Q:'):
+                raise ctypes.WinError(53)  # ERROR_BAD_NETPATH: the share is away
+            return overrides.resolved_identity(place)
+        with self.assertRaises(overrides.Refused) as raised:
+            overrides.validate(str(self.base / 'ok'), sources=(str(self.base / 'src'), away), data_dir=str(self.base / 'data'),
+                               probe=lambda folder: None, resolve=resolve)
+        self.assertEqual(raised.exception.cause, 'unchecked')
+        self.assertIn(away, str(raised.exception))
+        # A share that gives no file index: only a folder on another volume is provably elsewhere.
+        volume = overrides.resolved_identity(self.base)[0]
+        for found, cause in (((volume, 0, 0), 'unchecked'), ((volume + 1, 0, 0), None)):
+            with self.subTest(found=found):
+                options = dict(sources=(str(self.base / 'src'),), data_dir=str(self.base / 'data'), probe=lambda folder: None,
+                               resolve=lambda place, found=found: found if place == str(self.base / 'src') else overrides.resolved_identity(place))
+                if cause:
+                    self.assertEqual(self.cause(self.base / 'ok', **options), cause)
+                else:
+                    self.assertEqual(overrides.validate(str(self.base / 'ok'), **options)[0], str(self.base / 'ok'))
+        # A source folder that is simply not there (its parent opens) holds nothing: accepted, as before.
+        folder, _ = overrides.validate(str(self.base / 'ok'), sources=(str(self.base / 'src'), str(self.base / 'gone' / 'deeper')),
+                                       data_dir=str(self.base / 'data'), probe=lambda folder: None)
+        self.assertEqual(folder, str(self.base / 'ok'))
+
 
 class PrecedenceTests(unittest.TestCase):
     root = 'Z:\\Audiobooks Sorted'

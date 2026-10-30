@@ -414,4 +414,63 @@ class ActionQueueTests(unittest.TestCase):
         self.assertEqual((queue.book_action('a'),queue.book_action('b'),queue.book_action('c')),('retry','delete',None))
 
 
+class ClaimCheckFolderTests(ApproveFixture):
+    """Senua 0.24.0 C1: the claim check (_names_stale) and the startup pass (regroup_partial_jobs) judge "part of one
+    source folder" with the same decision as grouping (groups.folder_verdict): Sergei's "Keep as separate books" answer
+    and ruling 71a's library root and container folders. A book grouping keeps apart is approved, converts as planned and
+    is never set aside, at Approve or at any later engine start. (Here, not in test_folder_regroup: gate headroom.)"""
+
+    def rows(self):
+        return {row['title_clue']:row for row in self.service.reviews.page()['rows']}
+
+    def approved_and_never_set_aside(self,title):
+        """Approve the book titled title; its job starts as planned at every claim and the startup pass leaves it."""
+        row=self.rows()[title]
+        approved=self.service.approve_book(row['id'],row['revision'])
+        def book():
+            with connect(self.inv.database) as db:
+                group=tuple(db.execute('SELECT approved,review,revision FROM book_groups WHERE id=?',(row['id'],)).fetchone())
+                context=db.execute('SELECT * FROM candidate_context WHERE id=?',(row['id'],)).fetchone()
+                state=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(approved['job_id'],)).fetchone()[0]
+                aside=db.execute("SELECT count(*) FROM sqlite_master WHERE name='audio_job_set_aside'").fetchone()[0] and \
+                    db.execute('SELECT count(*) FROM audio_job_set_aside').fetchone()[0]
+            return group,tuple(context) if context else None,state,aside
+        before=book()
+        self.assertIn('user_approval',json.dumps([str(v) for v in before[1] or ()]),'positive control: his Approve is recorded')
+        with connect(self.inv.database) as db:raw=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(approved['job_id'],)).fetchone())
+        self.assertEqual((raw['state'],before[2],before[3]),('pending','pending',0))
+        self.assertFalse(self.service._names_stale(raw),'the claim check starts it as planned')
+        self.assertEqual(self.service.regroup_partial_jobs(),[],'the startup pass leaves it')
+        self.assertEqual(book(),before,'its approval and saved values stay; nothing is set aside')
+        self.assertFalse(self.service._names_stale(raw),'and again at the next claim (an engine restart)')
+        self.assertEqual(self.service.regroup_partial_jobs(),[])
+        self.assertEqual(book(),before)
+
+    def test_kept_separate_book_is_approved_and_never_set_aside(self):
+        # "Keep as separate books" on the raised folder question, then Approve one of them.
+        folder=self.audio/'Unsorted'/'Разное'
+        tone(folder/'Альфа.mp3',self.cover,album='Альфа',artist='Сергей Лукьяненко')
+        tone(folder/'Бета.mp3',self.cover,album='Бета',artist='Сергей Лукьяненко')
+        self.start()
+        for row in self.service.reviews.page()['rows']:
+            result=self.research(row)
+            state='Held' if result.get('reasons') and not result.get('wait') else 'Waiting for source' if result.get('wait') else 'Queued'
+            self.service.automatic._record(row,state,dict(result,until_change=state=='Held'),None)
+        row=self.service.reviews.page(status='output_attention')['rows'][0]
+        self.assertEqual((row['ask']['kind'],row['ask']['cause']),('files_unclear','folder_books'),'positive control: one folder question')
+        self.assertEqual(self.service.keep_separate(row['id'],row['revision']),{'kept':2})
+        self.approved_and_never_set_aside('Альфа')
+        self.assertEqual(sorted(len(r['members']) for r in self.service.reviews.page()['rows']),[1,1])
+
+    def test_loose_books_in_a_library_root_or_a_container_folder_are_never_set_aside(self):
+        # Ruling 71a: the library root and a container folder ("Unsorted") hold whole books, one per file. The same two
+        # files in an ordinary folder are one held question (the positive control in the test above).
+        for folder,names in ((self.audio,('Гамма','Дельта')),(self.audio/'Unsorted',('Альфа','Бета'))):
+            for name in names:tone(folder/(name+'.mp3'),self.cover,album=name,artist='Сергей Лукьяненко')
+        rows=self.start()
+        self.assertEqual(sorted(len(r['members']) for r in rows),[1,1,1,1],'one book per file')
+        for title in ('Гамма','Альфа'):
+            with self.subTest(title=title):self.approved_and_never_set_aside(title)
+
+
 if __name__=='__main__':unittest.main()
