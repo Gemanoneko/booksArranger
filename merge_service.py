@@ -4694,7 +4694,14 @@ class MergeService:
             self.reviews._row(library,identity)
             try:
                 jobs=self.jobs.status()['jobs'];current=self.publications.describe(jobs,identity)
-                if current['state']!='verified':raise ValueError(current.get('reason','Current audiobook unavailable'))
+                if current['state']!='verified':
+                    waiting=self._renamed_waiting(identity)
+                    if waiting is None:raise ValueError(current.get('reason','Current audiobook unavailable'))
+                    # Senua 0.24.0 D1r3 (Judy): a renamed move waiting for a restart. Its file is in the new folder; the
+                    # folder the catalog still names is empty, so the new one opens.
+                    directory=waiting['target_folder']
+                    with DirectoryBoundary(ordinary(waiting['target_root']),ordinary(directory)):self.dispatch_folder(directory)
+                    return {'opened':True,'directory':directory}
                 publication=self.publications.publication(jobs,identity)
                 with self.publications.protected(publication) as (_,key):
                     if key!=current['identity']:raise ValueError('Current audiobook changed before folder opening')
@@ -4973,6 +4980,16 @@ class MergeService:
         recovery=self.__dict__.get('_move_recovery')
         return move_id in self.__dict__.get('_moves_running',()) or bool(recovery is not None and recovery.is_alive())
 
+    def _renamed_waiting(self,identity):
+        """Senua 0.24.0 D1r3: the book's latest move when it is a same-volume rename that waits for a restart (unfinished,
+        cause 'renamed'), else None."""
+        import book_move
+        try:
+            with connect(self.inventory.database) as db:move=book_move.latest(db,[identity]).get(identity)
+        except sqlite3.Error:return None
+        why=self._unfinished_move(move)
+        return move if why and why.get('cause')=='renamed' else None
+
     def _unfinished_move(self,move):
         """Ruling 73k: {'cause','detail'} for a journaled move that nothing runs now (its retries ran out, or recovery at start
         could not finish it), else None. Why unknown (no record this session): 'catalog', the app couldn't save its progress."""
@@ -5066,6 +5083,12 @@ class MergeService:
             move=book_move.view(found,unfinished=self._unfinished_move(found))  # ruling 73k: not running is 'unfinished'
             if move and move['state']=='moving' and move['move_id'] in progress:move['progress']=progress[move['move_id']]
             row['move']=move
+            if move and move['state']=='unfinished' and move['cause']=='renamed':
+                # Senua 0.24.0 D1r3 (Judy): the renamed file is the only one, in the new folder; the catalog names the old
+                # path (gone) until recovery proves it, so the converted check and describe() read the book unavailable.
+                # The row stays a finished book, "Now in" the new place (catalog facts only: nothing is opened here).
+                target=move['target'];row['output']={'path':self._shown_path(target,output_root),'absolute':target,'folder':os.path.dirname(target)}
+                row['audiobook_ready']=True
             live=lives.get(row.get('id'))
             if not live or not live.get('folder'):
                 row['destination_override']=None;continue

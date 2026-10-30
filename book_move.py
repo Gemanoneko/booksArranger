@@ -21,7 +21,8 @@ Strategies (one per move, chosen by the native volume of the held file and of th
 Journal. Every state is written (and committed) before the side effect it announces; events are append-only. A restart
 reconciles in the engine (recover()), from what is on disk and the journal, never by refusing to start:
   queued                        -> cancelled (nothing ran)
-  rename_intent                 -> renamed and verified: committed then complete; untouched: failed (nothing moved)
+  rename_intent                 -> renamed and verified: committed then complete; untouched: failed (nothing moved);
+                                   renamed but not openable now: left as it is (Unopened raised); other bytes: 'changed'
   copy_intent / copied          -> owned temporary removed; failed (nothing moved)
   publish_intent                -> published and verified: committed, then the old removal below; published but not
                                    openable now: left as it is (Unopened raised); absent or other bytes: temporary removed
@@ -87,17 +88,20 @@ class Failed(Exception):
 
 
 class Unopened(ValueError):
-    """Ruling 73k: a copy publish_intent already placed in the target folder could not be opened or read to prove it (D1r).
-    A ValueError, so Mover._settle tries again and recover() leaves the move journaled, as for any other error."""
+    """Ruling 73k: a copy publish_intent already placed in the target folder could not be opened or read to prove it (D1r);
+    cause 'renamed' (D1r3): the file a same-volume rename put there. A ValueError, so Mover._settle tries again and
+    recover() leaves the move journaled, as for any other error."""
 
-    def __init__(self, error):
+    def __init__(self, error, cause='copy'):
         super().__init__(str(error) or type(error).__name__)
         self.error = error
+        self.cause = cause
 
 
 class Unfinished(Exception):
     """Ruling 73k: a move whose error outlasted every settle attempt. It stays journaled (both files kept) for recover() at
-    the next start. cause: 'copy' (the placed copy could not be opened) or 'catalog' (its progress could not be saved);
+    the next start. cause: 'copy' (the placed copy could not be opened), 'renamed' (D1r3: the renamed file, the only one,
+    could not be opened to confirm it) or 'catalog' (its progress could not be saved);
     detail: the last attempt's raw error (Technical details only); move: the journal row as last read, or None; error:
     the error that started the settling."""
 
@@ -128,7 +132,7 @@ def _absent(path):
 
 
 def _unfinished_cause(error):
-    return 'copy' if isinstance(error, Unopened) else 'catalog'
+    return getattr(error, 'cause', 'copy') if isinstance(error, Unopened) else 'catalog'
 
 
 def _raw(error):
@@ -360,8 +364,8 @@ def view(move, unfinished=None):
     """The row's move line (Judy 18.1): {state, target, folder, name, old_folder, progress, cause, message} or None.
     message: the engine's own sentence for a failure the page shows as sent ('unsafe' names the source folder).
     unfinished (ruling 73k): {'cause', 'detail'} for a journaled move that is not running (its retries ran out, or recovery
-    at start could not finish it). The line is then 'unfinished', its cause 'copy' or 'catalog' (what the page words) and
-    its detail the raw error (Technical details only). Without it a journaled move reads 'moving', as before."""
+    at start could not finish it). The line is then 'unfinished', its cause 'copy', 'renamed' or 'catalog' (what the page
+    words) and its detail the raw error (Technical details only). Without it a journaled move reads 'moving', as before."""
     if not move or move['state'] == 'cancelled':
         return None
     state = {'queued': 'queued', 'complete': 'moved', 'failed': 'failed', 'partial': 'failed'}.get(move['state'], 'moving')
@@ -370,7 +374,7 @@ def view(move, unfinished=None):
     start = move.get('from') or {}
     cause = (move.get('cause') or ('partial' if move['state'] == 'partial' else None)) if state == 'failed' else None
     if state == 'unfinished':
-        cause = 'copy' if unfinished.get('cause') == 'copy' else 'catalog'
+        cause = unfinished.get('cause') if unfinished.get('cause') in ('copy', 'renamed') else 'catalog'
     detail = move.get('detail') if isinstance(move.get('detail'), dict) else {}
     line = {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
             'old_folder': ntpath.dirname(start.get('final_path') or ''), 'progress': move.get('progress') if state == 'moving' else None,
@@ -793,9 +797,12 @@ class Mover:
             if old_there and not new_there:
                 return self._fail(move, '', 'The move was interrupted before the file moved')
             if not old_there and new_there:
-                final = self._prove(move, target)
+                # Senua 0.24.0 D1r3: the renamed file is the only one; the old name is gone. One that cannot be opened now
+                # raises Unopened('renamed'): retried after the settle pauses, then Unfinished, the journal left for recover()
+                # at the next start. One that opens with other bytes is 'changed'. Never 'partial': no old file is kept.
+                final = self._prove(move, target, placed='renamed')
                 if final is None:
-                    return self._fail(move, 'partial', 'The moved file could not be proven')
+                    return self._fail(move, 'changed', 'The renamed audiobook is not the bytes it was')
                 self._write(move_id, 'committed', expected='rename_intent', final=final, proof={'recovered': True})
                 self._write(move_id, 'complete', expected='committed', proof={'outcome': 'moved', 'recovered': True})
                 current = self._load(move_id)
@@ -813,7 +820,7 @@ class Mover:
             # dropped) raises, so Mover._settle tries again after its pauses, or recover() at the next start; it is never
             # failed as "nothing moved". The move fails only when the target is absent, or opens and is not the same bytes.
             # D1r2: absent means a definite "not found" with its folder answering (_absent); a share that is away raises.
-            final = None if _absent(target) else self._prove(move, target, placed=True)
+            final = None if _absent(target) else self._prove(move, target, placed='copy')
             if final is None:
                 if move.get('temp_path'):
                     self._discard_temp(move['temp_path'])
@@ -834,10 +841,11 @@ class Mover:
             return current
         return move
 
-    def _prove(self, move, path, *, placed=False):
+    def _prove(self, move, path, *, placed=None):
         """The verified location of the moved file at path, or None when it is not the receipt's bytes (one link, size and
-        full hash equal to the receipt). An error opening or reading it is None too, unless placed (a copy publish_intent
-        already put there, Senua 0.24.0 D1r): then Unopened is raised, because the file is there but unproven yet."""
+        full hash equal to the receipt). An error opening or reading it is None too, unless placed: 'copy' (a copy
+        publish_intent already put there, Senua 0.24.0 D1r) or 'renamed' (the file a same-volume rename put there, D1r3).
+        Then Unopened(placed) is raised, because the file is there but unproven yet."""
         try:
             target = ordinary(path)
             with DirectoryBoundary(ordinary(move['target_root']), target.parent) as boundary, VerifiedFile(target) as file:
@@ -848,7 +856,7 @@ class Mover:
                             parent_identity=[list(i) for i in boundary.identities], identity=list(facts['identity']))
         except (BoundaryError, OSError, ValueError) as error:
             if placed:
-                raise Unopened(error) from error
+                raise Unopened(error, placed) from error
             return None
 
     def _remove_old(self, move):

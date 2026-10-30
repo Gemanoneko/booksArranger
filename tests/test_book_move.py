@@ -352,7 +352,7 @@ class ViewTests(MoveFixture):
             book_move._set(db, move['move_id'], 'publish_intent', strategy='copy')
             journaled = book_move.load(db, move['move_id'])
         self.assertEqual(book_move.view(journaled)['state'], 'moving', 'running (or unknown): as before')
-        for cause in ('copy', 'catalog'):
+        for cause in ('copy', 'catalog', 'renamed'):  # D1r3: 'renamed', a renamed file that could not be checked
             line = book_move.view(journaled, unfinished={'cause': cause, 'detail': 'Cannot protect exact file: in use'})
             self.assertEqual((line['state'], line['cause'], line['folder'], line['old_folder'], line['detail'], line['progress']),
                              ('unfinished', cause, str(self.other), str(self.old.parent), 'Cannot protect exact file: in use', None))
@@ -610,6 +610,59 @@ class UnexpectedErrorTests(MoveFixture):
                 self.assertEqual(self.mover().recover()[0]['state'], 'complete', 'the share is back: recovery finishes it')
                 self.assertEqual(self.effective()['final_path'], str(target))
                 self.assertFalse(self.old.exists())
+
+    def test_a_renamed_file_that_cannot_be_checked_is_unfinished_never_partial_D1r3(self):
+        """Senua 0.24.0 D1r3: a same-volume rename the OS accepted, whose check of the renamed file is refused (in use). The
+        old file is gone, so the move is never 'partial' (the row would say to delete an old file that is not there): the
+        check is retried after the pauses; while it still fails the move ends Unfinished('renamed'), journaled for
+        recovery; a renamed file that opens with other bytes fails 'changed'. Before: failed 'partial' at once."""
+        real_rename, real_file, real_prove = book_move.rename_no_replace, book_move.VerifiedFile, book_move.Mover._prove
+        for case in (2, 'always', 'other bytes'):
+            with self.subTest(case=case):
+                if case != 2:
+                    self.setUp()
+                target = self.other / self.old.name
+                refused, slept = [], []
+
+                def accepted_unproven(*args, **kwargs):  # the OS renamed it; its re-open by name was refused
+                    real_rename(*args, **kwargs)
+                    raise native_io.RenamePostconditionError('Renamed audiobook could not be re-opened: in use')
+
+                def in_use(path, *args, **kwargs):
+                    if Path(str(path)) == target and (case == 'always' or len(refused) < 2):
+                        refused.append(str(path))
+                        raise native_io.FileInUse('Cannot protect exact file: in use')
+                    return real_file(path, *args, **kwargs)
+
+                def other_bytes(mover, move, path, placed=None):  # it opens, but is not the receipt's bytes
+                    return None if Path(str(path)) == target else real_prove(mover, move, path, placed=placed)
+                move = self.plan(self.other)
+                checks = patch.object(book_move.Mover, '_prove', other_bytes) if case == 'other bytes' else patch.object(book_move, 'VerifiedFile', in_use)
+                with patch.object(book_move, 'rename_no_replace', accepted_unproven), checks, patch.object(book_move, 'time', SimpleNamespace(sleep=slept.append)):
+                    if case == 'always':
+                        with self.assertRaises(book_move.Unfinished) as ran_out:
+                            self.mover().run(move['move_id'])
+                        self.assertEqual((ran_out.exception.cause, slept), ('renamed', [0.5, 2]))
+                        still = self.mover()
+                        self.assertEqual(still.recover(), [], 'recovery while it is in use finishes nothing')
+                        self.assertEqual(still.unfinished[move['move_id']]['cause'], 'renamed')
+                    else:
+                        done = self.mover().run(move['move_id'])
+                self.assertFalse(self.old.exists(), 'positive control: the OS renamed it')
+                self.assertEqual(target.read_bytes(), self.payload)
+                with connect(self.db) as db:
+                    line = book_move.load(db, move['move_id'])
+                self.assertNotEqual((line['state'], line['cause']), ('failed', 'partial'), 'never partial: there is no old file')
+                if case == 2:
+                    self.assertEqual((line['state'], line['strategy'], slept), ('complete', 'rename', [0.5]), 'the check retried after a pause')
+                    self.assertEqual(self.effective()['final_path'], str(target))
+                elif case == 'always':
+                    self.assertEqual(line['state'], 'rename_intent', 'journaled for recovery')
+                    self.assertEqual(self.effective()['final_path'], str(self.old), 'the catalog moves only once the file is proven')
+                    self.assertEqual(self.mover().recover()[0]['state'], 'complete', 'no longer in use: recovery finishes it')
+                    self.assertEqual(self.effective()['final_path'], str(target))
+                else:
+                    self.assertEqual((done['state'], done['cause'], book_move.view(done)['cause']), ('failed', 'changed', 'changed'))
 
     def test_a_catalog_that_stays_unwritable_ends_unfinished_catalog_73k(self):
         """Ruling 73k: the other way the retries run out. The copy is placed and opens, but the catalog refuses its commit on

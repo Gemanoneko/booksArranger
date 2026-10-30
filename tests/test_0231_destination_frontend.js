@@ -212,6 +212,25 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   assert.equal(stateLine(tr).textContent,COPY_LINE);assert.equal(goes(tr),'Now in Audiobooks Sorted\\Pratchett Terry\\Hat - Pratchett Terry.m4b');assert.equal(choose(tr).textContent,'Needs restart');
   assert.equal(get('queue-announce').textContent,'Title uq: move not finished. Both files are kept. Close and reopen Books Arranger to finish it.');
   assert.ok(calls.some(c=>c.route==='/api/queue/ack' && JSON.parse(c.options.body).ids[0]==='o-unf'),'acknowledged');
+  // Senua D1r3 (Judy): a same-volume rename the app couldn't check: one file, in the new folder. The row names it there
+  // ("Now in" the new place, even from an older read that still names the old path); the queue line says so too; the
+  // 73k face and tooltip stay; Open book folder asks the engine for the output folder (it opens the new one).
+  const NEW='D:\\Books\\Horror\\Hat - Pratchett Terry.m4b',NEW_OUTPUT={path:NEW,absolute:NEW,folder:'D:\\Books\\Horror'};
+  const RENAMED_LINE="Move not finished. The audiobook is in D:\\Books\\Horror, but the app couldn't open it to confirm the move. Close and reopen Books Arranger to finish it.";
+  run('moveSeen.clear();destNotes.clear()');
+  paint([finished('rn',{move:unfinished('renamed'),output:NEW_OUTPUT}),finished('ro',{move:unfinished('renamed')}),finished('rb',{source_state:'gone',move:unfinished('renamed'),output:NEW_OUTPUT})]);
+  for(const id of ['cand-rn','cand-ro']){
+    tr=trOf(id);assert.equal(stateLine(tr).textContent,RENAMED_LINE,id);assert.equal(stateLine(tr).getAttribute('role'),'status');assert.equal(stateLine(tr).classList.contains('retry-refused'),true);
+    assert.equal(goes(tr),'Now in '+NEW,id+': the new place, never the old path');assert.equal(choose(tr).textContent,'Needs restart');assert.equal(choose(tr).title,RESTART);
+  }
+  tr=trOf('cand-rb');const bookButton=buttonsOf(tr).find(b=>b.textContent==='Open book folder');assert.ok(bookButton,'Open book folder on the finished row');
+  await bookButton.handlers.click({stopPropagation(){}});assert.deepEqual(opened.at(-1),{library:'Audiobooks',view:'candidates',id:'cand-rb',folder_kind:'output'});
+  paint([finished('rq',{move:{state:'moving',target:NEW,folder:'D:\\Books\\Horror',progress:5}})]);tr=trOf('cand-rq');
+  context.outcomeFixture={queued_actions:[],queue_running:null,queue_outcomes:[{id:'o-ren',action:'move',book_id:'cand-rq',result:'refused',cause:'unfinished',code:'unfinished',
+    folder:'D:\\Books\\Horror',title:'Title rq',move:unfinished('renamed')}]};
+  run('syncQueue(outcomeFixture)');
+  assert.equal(get('queue-announce').textContent,'Title rq: move not finished. The audiobook is in the new folder. Close and reopen Books Arranger to finish it.');
+  assert.equal(stateLine(tr).textContent,RENAMED_LINE);assert.equal(goes(tr),'Now in '+NEW);
   // A choice the engine refused because another move of the book is unfinished: the same sentence as the tooltip.
   paint([finished('ur')]);tr=trOf('cand-ur');pickAnswer='D:\\Books\\Horror';
   destAnswer=()=>({ok:false,status:409,json:async()=>({cause:'unfinished',code:'unfinished',error:RESTART})});await press(choose(tr));

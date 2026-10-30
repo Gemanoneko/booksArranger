@@ -272,7 +272,7 @@ def merge_double(fix, finished=True, computed=None):
     names = ('destination_choose', '_queue_move', '_destination_answer', '_override_rows', '_live_override', '_with_override', '_chosen_display', '_shown_path',
              '_move_root', '_override_stale', 'destination_view', '_chosen_folders', '_chosen_root', '_job_manifest', '_mover', 'run_move',
              '_after_move', 'cancel_move', '_publication_location', '_all_source_roots', '_destination_changed', '_start_move_recovery',
-             '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
+             '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', '_renamed_waiting', 'open_folder', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
              'FOLDER_UNAVAILABLE')
     Double = type('Double', (), {name: MergeService.__dict__[name] for name in names})
     double = Double()
@@ -389,6 +389,49 @@ class ChooseTests(fixture.MoveFixture):
                 merge.destination_view([row])
                 self.assertEqual(row['move']['state'], 'moved')
                 self.assertEqual(self.effective()['final_path'], str(target))
+
+    def test_a_renamed_book_waiting_for_a_restart_stays_finished_and_opens_its_new_folder_D1r3(self):
+        """Senua 0.24.0 D1r3 and Judy's two checks, while the renamed file is in the new folder and the move is not
+        committed. The catalog still names the old path, which is gone, so describe() reads the book unavailable and the
+        converted check reads it not ready. (a) The row stays a finished book in the destination block, "Now in" the new
+        place. (b) Open book folder opens the new folder, never the old, empty one; with nothing waiting it opens nothing."""
+        import native_io
+        real_rename, real_file = book_move.rename_no_replace, book_move.VerifiedFile
+        merge = merge_double(self)  # one volume here: the rename strategy
+        target = self.other / self.old.name
+
+        def accepted_unproven(*args, **kwargs):
+            real_rename(*args, **kwargs)
+            raise native_io.RenamePostconditionError('Renamed audiobook could not be re-opened: in use')
+
+        def in_use(path, *args, **kwargs):
+            if Path(str(path)) == target:
+                raise native_io.FileInUse('Cannot protect exact file: in use')
+            return real_file(path, *args, **kwargs)
+        with patch.object(book_move, 'rename_no_replace', accepted_unproven), patch.object(book_move, 'VerifiedFile', in_use), \
+                patch.object(book_move, 'time', SimpleNamespace(sleep=lambda seconds: None)):
+            answer = merge.destination_choose(self.candidate, 1, str(self.other))
+        self.assertEqual((answer['move']['state'], answer['move']['cause'], answer['move']['folder']), ('unfinished', 'renamed', str(self.other)))
+        self.assertFalse(self.old.exists(), 'positive control: the old file is gone')
+        self.assertTrue(target.exists())
+        # (a) A list read as the engine makes it now.
+        row = dict(merge.row, audiobook_ready=False, current_audiobook={'state': 'unavailable', 'reason': 'Cannot protect exact file'})
+        merge.destination_view([row])
+        self.assertEqual((row['move']['state'], row['move']['cause']), ('unfinished', 'renamed'))
+        self.assertIs(row['audiobook_ready'], True, 'still a finished book')
+        self.assertEqual((row['output']['absolute'], row['output']['folder']), (str(target), str(self.other)), 'Now in the new place')
+        # (b) Open book folder.
+        opened = []
+        merge.inventory.roots = {'Audiobooks': str(self.library)}
+        merge.jobs = SimpleNamespace(status=lambda: {'jobs': []})
+        merge.publications = SimpleNamespace(describe=lambda jobs, identity: {'state': 'unavailable', 'reason': 'Cannot protect exact file'})
+        merge.dispatch_folder = opened.append
+        self.assertEqual(merge.open_folder('Audiobooks', 'candidates', self.candidate, 'output'), {'opened': True, 'directory': str(self.other)})
+        self.assertEqual(opened, [str(self.other)])
+        merge._move_unfinished.clear()  # control: nothing known to wait for a restart opens nothing
+        with self.assertRaises(ValueError) as refused:
+            merge.open_folder('Audiobooks', 'candidates', self.candidate, 'output')
+        self.assertEqual((str(refused.exception), opened), (MergeService.FOLDER_UNAVAILABLE, [str(self.other)]))
 
     def test_not_finished_saves_the_choice_and_approves_nothing(self):
         merge = merge_double(self, finished=False)
@@ -594,6 +637,7 @@ class OpenFolderTests(unittest.TestCase):
         state = {'state': 'verified', 'path': output, 'identity': 'k'} if output else {'state': 'none', 'reason': 'No verified audiobook created yet'}
         merge.publications = SimpleNamespace(describe=lambda jobs, identity: state, publication=lambda jobs, identity: {},
                                              protected=lambda publication: _held('k'))
+        merge._renamed_waiting = lambda identity: None  # no renamed move waits for a restart (D1r3)
         merge.open_folder = MergeService.open_folder.__get__(merge)
         return merge
 

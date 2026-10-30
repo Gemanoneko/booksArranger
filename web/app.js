@@ -2887,7 +2887,10 @@ const DEST_TIPS={choose:'Choose the folder this book is filed in. Your choice re
 // copy it placed in {folder}; 'catalog': it couldn't save its progress. The raw error is in Technical details only.
 const MOVE_UNFINISHED={copy:"Move not finished. The app couldn't open the copy in {folder}, so both files are kept. Close and reopen Books Arranger to finish it.",
   catalog:"Move not finished. The app couldn't save its progress. Close and reopen Books Arranger to finish it.",
-  queue:'{title}: move not finished. Both files are kept. Close and reopen Books Arranger to finish it.'};
+  queue:'{title}: move not finished. Both files are kept. Close and reopen Books Arranger to finish it.',
+  // Senua D1r3 (Judy): a same-volume rename the app couldn't check: one file, already in the new folder.
+  renamed:"Move not finished. The audiobook is in {folder}, but the app couldn't open it to confirm the move. Close and reopen Books Arranger to finish it.",
+  queueRenamed:'{title}: move not finished. The audiobook is in the new folder. Close and reopen Books Arranger to finish it.'};
 // unsafe: the engine words it (Judy 2026-10-30: the source folder it is inside, the app's own folder, or a link or
 // junction) and moveFailure shows that sentence as sent; with none, the refused sentence.
 const MOVE_FAILURES={target_exists:'A file named {name} is already in {folder}. Nothing was moved.',unavailable:"{folder} isn't available. Connect the drive or choose another folder. Nothing was moved.",
@@ -2915,8 +2918,9 @@ function rowFinished(row){return row?.kind==='candidate' && row.audiobook_ready=
 function overrideOf(row){const value=row?.destination_override;return value && typeof value==='object' && typeof value.folder==='string' && value.folder?value:null;}
 function moveOf(row){const value=row?.move;return value && typeof value==='object' && ['queued','moving','unfinished','moved','failed'].includes(value.state)?value:null;}
 function unfinishedLine(move){
-  const folder=shownFolder(move?.folder || folderOf(move?.target));
-  return move?.cause==='copy' && folder?MOVE_UNFINISHED.copy.replace('{folder}',folder.replace(/[\\/]$/,'') || folder):MOVE_UNFINISHED.catalog;
+  const folder=shownFolder(move?.folder || folderOf(move?.target)),named=folder.replace(/[\\/]$/,'') || folder;
+  if(['copy','renamed'].includes(move?.cause) && folder)return MOVE_UNFINISHED[move.cause].replace('{folder}',named);
+  return MOVE_UNFINISHED.catalog;
 }
 // Rulings 19.2: while a folder is chosen, copy that promises Audiobooks Sorted names the chosen folder instead.
 function chosenCopy(row,text){
@@ -3077,6 +3081,8 @@ function membershipLine(row){
 function destPlan(row){
   const finished=rowFinished(row),move=moveOf(row),output=finished && typeof row.output?.path==='string' && row.output.path?row.output:null;
   if(finished){
+    // Senua D1r3 (Judy): a renamed move waiting for a restart: its one file is already in the new place ('copy' keeps the old).
+    if(move?.state==='unfinished' && move.cause==='renamed' && move.target)return {label:'Now in',path:sortedPath(move.target,row),absolute:move.target,finished:true};
     if(!output)return null;
     if(move?.state==='queued' && move.target)return {label:'Moves to',path:sortedPath(move.target,null),absolute:move.target,finished:true};
     if(move?.state==='moving' && move.target)return {label:'Moving to',path:sortedPath(move.target,null),absolute:move.target,finished:true};
@@ -3981,7 +3987,7 @@ function applyQueueOutcome(outcome){
     else if(outcome.action==='move' && outcome.cause==='unfinished'){
       // Ruling 73k: its retries ran out. The row takes the engine's move line now (the next list read sends the same).
       if(row)row.move=outcome.move && typeof outcome.move==='object'?outcome.move:{...(row.move || {}),state:'unfinished',cause:'catalog',folder:outcome.folder || row.move?.folder || ''};
-      queueAnnounce(MOVE_UNFINISHED.queue.replace('{title}',title));
+      queueAnnounce((outcome.move?.cause==='renamed'?MOVE_UNFINISHED.queueRenamed:MOVE_UNFINISHED.queue).replace('{title}',title));
     }
     else{const cause=outcome.cause || outcome.code,text=Object.hasOwn(MOVE_FAILURES,cause || '')?moveFailure(row || {},{folder:outcome.folder,name:outcome.name,target:outcome.target,old_folder:outcome.old_folder,message:outcome.error},cause):serverSentence({body:{error:outcome.error}},MOVE_FAILURES.refused);
       destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});queueAnnounce(`${title}: ${text}`);}
