@@ -1,5 +1,34 @@
 # Changelog
 
+## [v0.24.0] - 2026-10-30
+
+### Added
+
+- Choose folder on any row: pick the destination folder in the regular Windows folder picker. The folder replaces only the computed folder; the file name still comes from the row, and choosing a folder does not approve the book.
+- A finished book moves to the chosen folder without reconverting. The old folder is removed if it is left empty, and an interrupted move recovers on the next start.
+- Open source folder on every row. If the source folder is gone, it opens the folder that holds the converted file.
+- A move that runs out of retries reads "Move not finished" with a clear next step instead of the raw error.
+- Missing files lists a numbering gap in a folder that is established as the whole book.
+
+### Changed
+
+- One source folder is one book. A novel plus its stories, two album halves or mis-encoded files no longer split into fragments that look incomplete. Folders where each file is already a whole book keep one book per file, and a folder of separately tagged novels stays one book per novel. Anything else is held with one question.
+- Unfinished jobs that convert only part of a folder are regrouped by the whole folder.
+- A year or a download id in a file name is not a part number. When every number is 1000 or more, they still count and a gap is named.
+- Foreign first names in Cyrillic are checked on Approve, and pending jobs with such authors are re-checked once.
+- The Tolkien series is filed as «Властелин колец».
+
+### Fixed
+
+- Tags in cp1251 read as Latin-1 (and UTF-8 read as cp1251) no longer split a book's files.
+- A narrator credit no longer becomes the title, and «Т. Пратчетт.» no longer stays in titles.
+- The English-spelling lookup finds authors and series such as Tolkien through the library's own folder, Wikidata and FantLab, and asks you when nothing is confirmed.
+- "Keep as separate books" is honoured by the partial-folder check, so the approved book converts.
+- A move no longer gets stuck after an unexpected error. A stray copy is no longer left after a failed re-open.
+- A rename or placed copy behind a dropped share waits and retries, and is never reported as "nothing moved". A rename the app could not check is unfinished, not partial.
+- A number in a file name no longer drives memory use.
+- Build pins updated to the installed Python 3.14.10 and Git for Windows 2.56.0.windows.4. The test gate is rebalanced across its 13 workers with longer internal waits.
+
 ## [v0.23.0] - 2026-10-28
 
 ### Added
