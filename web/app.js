@@ -2880,10 +2880,12 @@ const DEST_TIPS={choose:'Choose the folder this book is filed in. Your choice re
   moving:'Moving the audiobook. Choose another folder when it finishes.',nobridge:'Choosing a folder works in the desktop app.',
   reset:'Stop using your folder. The book goes to the folder the app computes.',resetDone:'Move the audiobook back to the folder the app computes. Nothing is converted again. You confirm first.',
   move:'Move the audiobook to the folder shown now. Nothing is converted again.',keep:'Leave the audiobook where it is and keep your folder.'};
+// unsafe: the engine words it (Judy 2026-10-30: the source folder it is inside, the app's own folder, or a link or
+// junction) and moveFailure shows that sentence as sent; with none, the refused sentence.
 const MOVE_FAILURES={target_exists:'A file named {name} is already in {folder}. Nothing was moved.',unavailable:"{folder} isn't available. Connect the drive or choose another folder. Nothing was moved.",
   not_writable:"The app can't write to {folder}. Choose another folder. Nothing was moved.",no_space:"There isn't enough free space on that drive. Nothing was moved.",
   in_use:'The audiobook is open in another program. Close it and try again. Nothing was moved.',source_missing:"The audiobook isn't where the app expects it. Nothing was moved.",
-  unsafe:"That folder holds this book's original files. Choose another folder.",partial:"Moved to {folder}. The old file in {old folder} couldn't be removed. Delete it yourself.",
+  unsafe:'',partial:"Moved to {folder}. The old file in {old folder} couldn't be removed. Delete it yourself.",
   changed:'This book changed. Review its details and try again.',refused:'Move was not accepted. Nothing was moved.',closing:'Books Arranger is closing. Nothing was moved.'};
 function isAbsolutePath(path){return /^[A-Za-z]:[\\/]|^\\\\/.test(String(path || ''));}
 // A destination as the row prints it: relative paths sit under Audiobooks Sorted (as today); a chosen folder is in full.
@@ -3109,6 +3111,7 @@ function chooseMode(row){
   return pickerBridge()?'ready':'nobridge';
 }
 function moveFailure(row,move,cause){
+  const said=cause==='unsafe' && typeof move?.message==='string'?move.message.trim():'';if(said)return said;
   const output=row.output || {},text=MOVE_FAILURES[cause] || MOVE_FAILURES.refused,folder=shownFolder(move?.folder || folderOf(move?.target)),old=shownFolder(move?.old_folder || folderOf(output.absolute || output.path));
   return text.replace('{name}',move?.name || baseName(move?.target || output.path)).replace('{folder}',folder.replace(/[\\/]$/,'') || folder).replace('{old folder}',old.replace(/[\\/]$/,'') || old);
 }
@@ -3180,7 +3183,7 @@ async function sendDestination(id,folder){
     else applyDestination(row,answer,folder);
   }catch(error){
     const cause=error.body?.cause || error.body?.code,known=Object.hasOwn(MOVE_FAILURES,cause || '');
-    const text=!error.httpStatus?lostLine():known?moveFailure(row,{folder:error.body?.folder || folder,name:error.body?.name || baseName(destPlan(row)?.path),target:folder},cause):
+    const text=!error.httpStatus?lostLine():known?moveFailure(row,{folder:error.body?.folder || folder,name:error.body?.name || baseName(destPlan(row)?.path),target:folder,message:error.body?.error},cause):
       finished?serverSentence(error,MOVE_FAILURES.refused):serverSentence(error,MOVE_FAILURES.refused);
     destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});if(!error.httpStatus)refreshFailed(error);
   }finally{destPending.delete(id);}
@@ -3960,7 +3963,7 @@ function applyQueueOutcome(outcome){
     // Judy 0.23.1 section 18: a queued folder choice or move ended. The row takes the engine's own move state at the next
     // list read; a refusal says why on the row (18.2) and leaves the audiobook where it was.
     if(outcome.result==='done'){if(row && outcome.answer && typeof outcome.answer==='object')applyDestination(row,outcome.answer,outcome.answer.folder ?? null);queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);}
-    else{const cause=outcome.cause || outcome.code,text=Object.hasOwn(MOVE_FAILURES,cause || '')?moveFailure(row || {},{folder:outcome.folder,name:outcome.name,target:outcome.target,old_folder:outcome.old_folder},cause):serverSentence({body:{error:outcome.error}},MOVE_FAILURES.refused);
+    else{const cause=outcome.cause || outcome.code,text=Object.hasOwn(MOVE_FAILURES,cause || '')?moveFailure(row || {},{folder:outcome.folder,name:outcome.name,target:outcome.target,old_folder:outcome.old_folder,message:outcome.error},cause):serverSentence({body:{error:outcome.error}},MOVE_FAILURES.refused);
       destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});queueAnnounce(`${title}: ${text}`);}
     queueAck(outcome.id);const entry=destRows.get(id);if(entry)updateDestination(entry);return;
   }

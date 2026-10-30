@@ -98,6 +98,31 @@ class ValidationTests(unittest.TestCase):
         folder, _ = overrides.validate(str(real / 'mine'), sources=(alias_src,), data_dir=alias_data, probe=written.append)
         self.assertEqual((folder, written), (str(real / 'mine'), [str(real / 'mine')]))
 
+    def test_an_unsafe_folder_says_which_folder_or_why(self):
+        """Judy 2026-10-30: the refusal names the source folder the chosen one is inside, or says it is the app's own, or a
+        link or junction; the page shows the sentence as sent. By path text and by where the folder really is (M2)."""
+        import _winapi
+        real = self.base / 'real'
+        for name in ('src/inner', 'data', 'ok/sub'):
+            (real / name).mkdir(parents=True)
+        _winapi.CreateJunction(str(real), str(self.base / 'alias'))
+        _winapi.CreateJunction(str(real / 'ok'), str(self.base / 'link'))
+        source, alias_src, alias_data = str(self.base / 'src'), str(self.base / 'alias' / 'src'), str(self.base / 'alias' / 'data')
+        inside = 'That folder is inside %s, one of your source folders. Choose another folder.'
+        app, link = 'That folder belongs to the app. Choose another folder.', 'That folder is a link or junction. Choose an ordinary folder.'
+        (self.base / 'src' / 'inner').mkdir()
+        for chosen, options, said in ((self.base / 'src' / 'inner', {}, inside % source),
+                                      (self.base / 'data', {}, app),
+                                      (self.base / 'link', {}, link),  # the folder itself is a junction
+                                      (self.base / 'link' / 'sub', {}, link),  # a junction above it
+                                      (real / 'src' / 'inner', {'sources': (alias_src,)}, inside % alias_src),
+                                      (real / 'data', {'data_dir': alias_data}, app)):
+            with self.subTest(chosen=chosen):
+                options = dict({'sources': (source,), 'data_dir': str(self.base / 'data'), 'probe': lambda folder: None}, **options)
+                with self.assertRaises(overrides.Refused) as raised:
+                    overrides.validate(str(chosen), **options)
+                self.assertEqual((raised.exception.cause, str(raised.exception)), ('unsafe', said))
+
     def test_a_place_that_cannot_be_told_refuses_with_its_name_and_a_missing_one_holds_nothing(self):
         import ctypes
         away = 'Q:\\Away\\Audiobooks'
@@ -110,7 +135,7 @@ class ValidationTests(unittest.TestCase):
             overrides.validate(str(self.base / 'ok'), sources=(str(self.base / 'src'), away), data_dir=str(self.base / 'data'),
                                probe=lambda folder: None, resolve=resolve)
         self.assertEqual(raised.exception.cause, 'unchecked')
-        self.assertIn(away, str(raised.exception))
+        self.assertEqual(str(raised.exception), away + " isn't available, so the app can't tell whether that folder is inside it. Connect the drive and try again.")
         # A share that gives no file index: only a folder on another volume is provably elsewhere.
         volume = overrides.resolved_identity(self.base)[0]
         for found, cause in (((volume, 0, 0), 'unchecked'), ((volume + 1, 0, 0), None)):
@@ -298,15 +323,20 @@ class ChooseTests(fixture.MoveFixture):
 
     def test_refusals_carry_their_cause_and_save_nothing(self):
         merge = merge_double(self, finished=False)
-        for folder, cause in ((str(self.base / 'missing'), 'unavailable'), (str(self.library), 'unsafe'), (str(self.base / 'data'), 'unsafe')):
+        app = 'That folder belongs to the app. Choose another folder.'  # Judy 2026-10-30: the page shows these as sent
+        for folder, cause, said in ((str(self.base / 'missing'), 'unavailable', None),
+                                    (str(self.library), 'unsafe', 'That folder is inside %s, one of your source folders. Choose another folder.' % self.library),
+                                    (str(self.base / 'data'), 'unsafe', app)):
             with self.subTest(folder):
                 with self.assertRaises(overrides.Refused) as raised:
                     merge.destination_choose(self.candidate, 1, folder)
                 self.assertEqual(raised.exception.cause, cause)
+                if said:
+                    self.assertEqual(str(raised.exception), said)
         merge.cache_dir.mkdir(parents=True)
         with self.assertRaises(overrides.Refused) as raised:
             merge.destination_choose(self.candidate, 1, str(merge.cache_dir))
-        self.assertEqual(raised.exception.cause, 'unsafe')
+        self.assertEqual((raised.exception.cause, str(raised.exception)), ('unsafe', app))
         with connect(self.db) as db:
             self.assertEqual(overrides.folders(db), ())
 

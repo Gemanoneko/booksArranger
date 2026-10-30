@@ -26,7 +26,8 @@ reconciles in the engine (recover()), from what is on disk and the journal, neve
   publish_intent                -> published and verified: committed, then the old removal below; else temporary removed
   committed / old_removal_intent-> the old file removed once proven to be the same bytes, else 'partial' (both kept)
 An OS, catalog or boundary error a step did not type is reconciled the same way at once, in the session (Mover._settle),
-so a move never stays "moving" until the next start.
+so a move never stays "moving" until the next start; so is any failure after a copy is placed in the target folder
+(Senua 0.24.0 D1), which is never reported as "nothing moved".
 
 After a move the old folder is removed if its listing is empty (71k), then each empty parent up to, never including, the
 output folder; never a source or output root, never anything recursive."""
@@ -80,6 +81,16 @@ class Failed(Exception):
         super().__init__(detail or cause or 'Move was not accepted')
         self.cause = cause
         self.detail = detail
+
+
+class Placed(Exception):
+    """Senua 0.24.0 D1: a copy move's file is already in the target folder under its final name, and a step after that
+    failed (its re-open was in use for a moment, the share dropped). Never "nothing moved": run() settles the move from
+    publish_intent as recovery would (Mover._settle), proving the placed file before the old one is removed."""
+
+    def __init__(self, error):
+        super().__init__(str(error) or type(error).__name__)
+        self.error = error
 
 
 def stamp():
@@ -288,14 +299,17 @@ def cancel(db, move_id):
 
 
 def view(move):
-    """The row's move line (Judy 18.1): {state, target, folder, name, old_folder, progress, cause} or None."""
+    """The row's move line (Judy 18.1): {state, target, folder, name, old_folder, progress, cause, message} or None.
+    message: the engine's own sentence for a failure the page shows as sent ('unsafe' names the source folder)."""
     if not move or move['state'] == 'cancelled':
         return None
     state = {'queued': 'queued', 'complete': 'moved', 'failed': 'failed', 'partial': 'failed'}.get(move['state'], 'moving')
     start = move.get('from') or {}
+    cause = (move.get('cause') or ('partial' if move['state'] == 'partial' else None)) if state == 'failed' else None
+    detail = move.get('detail') if isinstance(move.get('detail'), dict) else {}
     return {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
             'old_folder': ntpath.dirname(start.get('final_path') or ''), 'progress': move.get('progress') if state == 'moving' else None,
-            'cause': (move.get('cause') or ('partial' if move['state'] == 'partial' else None)) if state == 'failed' else None,
+            'cause': cause, 'message': str(detail.get('reason') or '') if cause == 'unsafe' else '',
             'move_id': move['move_id']}
 
 
@@ -378,6 +392,8 @@ class Mover:
                 return current
         except (OSError, sqlite3.Error, ValueError) as error:
             return self._settle(move_id, error)
+        except Placed as placed:
+            return self._settle(move_id, placed.error)
 
     # Pauses between attempts to end a move after an error (a catalog busy for a moment answers the next one).
     SETTLE_PAUSES = (0, 0.5, 2)
@@ -422,8 +438,9 @@ class Mover:
         if not same_location(now, start):
             raise Failed('changed', 'The audiobook is not where this move was planned from')
         import destination_overrides
-        if any(source and destination_overrides.inside(folder, source) for source in self.sources() or ()):
-            raise Failed('unsafe', 'The folder is inside a source folder')
+        holder = next((source for source in self.sources() or () if source and destination_overrides.inside(folder, source)), None)
+        if holder:
+            raise Failed('unsafe', destination_overrides.UNSAFE_SOURCE.format(place=holder))  # the row shows it (view)
         if not os.path.isdir(folder) and self.output_root and destination_overrides.inside(folder, self.output_root)                 and key(move['target_root']) == key(self.output_root) and key(folder) != key(self.output_root):
             # Use computed folder: the planner's folder inside the output folder is made as a conversion makes it.
             try:
@@ -587,10 +604,15 @@ class Mover:
                     raise Failed('target_exists', str(error))
                 except BoundaryError as error:
                     raise Failed('changed', str(error))
-                with VerifiedFile(target) as published:
-                    published_facts = published.facts()
-                final = dict(start, root=str(target_root), final_path=str(target), parent_identity=[list(i) for i in destination.identities],
-                             identity=list(published_facts['identity']))
+                # The copy is in the target folder now (publish_no_replace returns only after the rename). Any failure
+                # from here on is settled from publish_intent (D1), never turned into Failed below.
+                try:
+                    with VerifiedFile(target) as published:
+                        published_facts = published.facts()
+                    final = dict(start, root=str(target_root), final_path=str(target), parent_identity=[list(i) for i in destination.identities],
+                                 identity=list(published_facts['identity']))
+                except Exception as error:
+                    raise Placed(error) from error
         except Failed:
             self._discard_temp(temp)
             raise

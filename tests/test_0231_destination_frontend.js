@@ -136,13 +136,16 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   run('ladderClock=Date.now()+7000;updateDestinations();ladderClock=null');assert.match(stateLine(tr).textContent,/^Moving the audiobook… 0:0[67] · 41% The app is busy with background work, so this takes longer\.$/);
   tr=trOf('cand-md');assert.equal(goes(tr),'Now in D:\\Books\\Horror\\Hat - Pratchett Terry.m4b');assert.equal(stateLine(tr).textContent,'Moved. The audiobook is now in D:\\Books\\Horror.');
   assert.equal(choose(tr).textContent,'Choose folder…');assert.equal(reset(tr).hidden,false);
+  // Judy 2026-10-30: an unsafe folder is worded by the engine (the move's message) and shown as sent; every other cause
+  // keeps the page's own sentence even when the engine sends one.
+  const ENGINE='That folder is inside Z:\\Audiobooks, one of your source folders. Choose another folder.';
   const SENTENCES={target_exists:'A file named Hat.m4b is already in D:\\Books\\Horror. Nothing was moved.',unavailable:"D:\\Books\\Horror isn't available. Connect the drive or choose another folder. Nothing was moved.",
     not_writable:"The app can't write to D:\\Books\\Horror. Choose another folder. Nothing was moved.",no_space:"There isn't enough free space on that drive. Nothing was moved.",
     in_use:'The audiobook is open in another program. Close it and try again. Nothing was moved.',source_missing:"The audiobook isn't where the app expects it. Nothing was moved.",
-    unsafe:"That folder holds this book's original files. Choose another folder.",partial:"Moved to D:\\Books\\Horror. The old file in Z:\\Audiobooks Sorted\\Pratchett Terry couldn't be removed. Delete it yourself.",
+    unsafe:ENGINE,partial:"Moved to D:\\Books\\Horror. The old file in Z:\\Audiobooks Sorted\\Pratchett Terry couldn't be removed. Delete it yourself.",
     changed:'This book changed. Review its details and try again.',other:'Move was not accepted. Nothing was moved.'};
   for(const [cause,sentence] of Object.entries(SENTENCES)){
-    paint([finished('x',{move:{state:'failed',cause,target:'D:\\Books\\Horror\\Hat.m4b',folder:'D:\\Books\\Horror',name:'Hat.m4b',old_folder:ROOT+'\\Pratchett Terry'}})]);tr=trOf('cand-x');
+    paint([finished('x',{move:{state:'failed',cause,message:ENGINE,target:'D:\\Books\\Horror\\Hat.m4b',folder:'D:\\Books\\Horror',name:'Hat.m4b',old_folder:ROOT+'\\Pratchett Terry'}})]);tr=trOf('cand-x');
     assert.equal(stateLine(tr).textContent,sentence,cause);assert.equal(stateLine(tr).getAttribute('role'),'alert');assert.equal(goes(tr),'Now in Audiobooks Sorted\\Pratchett Terry\\Hat - Pratchett Terry.m4b',cause);
     assert.equal(choose(tr).textContent,'Choose folder…');assert.equal(choose(tr).getAttribute('aria-disabled'),null,'available again: '+cause);
   }
@@ -155,6 +158,21 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[{id:"o-move",action:"move",book_id:"cand-r",result:"refused",cause:"no_space",title:"Title r"}]})');
   assert.equal(stateLine(tr).textContent,"There isn't enough free space on that drive. Nothing was moved.");assert.equal(get('queue-announce').textContent,"Title r: There isn't enough free space on that drive. Nothing was moved.");
   assert.ok(calls.some(c=>c.route==='/api/queue/ack' && JSON.parse(c.options.body).ids[0]==='o-move'),'acknowledged');
+  // Judy 2026-10-30: a refused Choose folder… shows the engine's unsafe sentence as sent (which source folder, the app's own
+  // folder, a link or junction); with none, the refused sentence. 'unchecked' keeps the engine's sentence plus
+  // " Nothing was changed." (serverSentence, unchanged). A queued choice the engine refused shows its sentence too.
+  for(const sentence of [ENGINE,'That folder belongs to the app. Choose another folder.','That folder is a link or junction. Choose an ordinary folder.']){
+    destAnswer=()=>({ok:false,status:409,json:async()=>({cause:'unsafe',code:'unsafe',error:sentence})});await press(choose(tr));
+    assert.equal(stateLine(tr).textContent,sentence);
+  }
+  destAnswer=()=>({ok:false,status:409,json:async()=>({cause:'unsafe',code:'unsafe'})});await press(choose(tr));
+  assert.equal(stateLine(tr).textContent,'Move was not accepted. Nothing was moved.','no sentence from the engine');
+  const AWAY="Z:\\Audiobooks isn't available, so the app can't tell whether that folder is inside it. Connect the drive and try again.";
+  destAnswer=()=>({ok:false,status:409,json:async()=>({cause:'unchecked',code:'unchecked',error:AWAY})});await press(choose(tr));
+  assert.equal(stateLine(tr).textContent,AWAY+' Nothing was changed.');
+  run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[{id:"o-dest",action:"destination",book_id:"cand-r",result:"refused",cause:"unsafe",code:"unsafe",error:"That folder belongs to the app. Choose another folder.",title:"Title r"}]})');
+  assert.equal(stateLine(tr).textContent,'That folder belongs to the app. Choose another folder.');
+  assert.equal(get('queue-announce').textContent,'Title r: That folder belongs to the app. Choose another folder.');
   // Check 21: "Open book folder" on a finished row whose originals are gone opens the converted file's folder.
   paint([finished('bg',{source_state:'gone'}),finished('bp'),bookRow('ng',{source_state:'gone'})]);
   const face=tr=>buttonsOf(tr).find(b=>/^Open (source|book) folder$/.test(b.textContent));

@@ -33,6 +33,8 @@ INDEXES = ('CREATE INDEX IF NOT EXISTS destination_overrides_by_book ON destinat
 MAX_PATH = 240
 # Typed causes (Judy's 0.23.1 spec, section 18.2); the page maps each to its own sentence. 'unchecked' (M2: a source or
 # data folder whose place can't be told now) has none of its own: the page shows the engine's sentence, which names it.
+# 'unsafe' likewise shows the engine's sentence (Judy 2026-10-30): the source folder it is inside (UNSAFE_SOURCE), the
+# app's own folder (UNSAFE_APP) or a link or junction (UNSAFE_LINK).
 CAUSES = ('target_exists', 'unavailable', 'not_writable', 'no_space', 'in_use', 'source_missing', 'unsafe', 'partial', 'changed', 'unchecked')
 PROBE_PREFIX = '.books-arranger-probe-'
 
@@ -87,8 +89,12 @@ def inside(folder, root):
 
 
 NOT_FOUND = (2, 3)  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
-UNCHECKED_AWAY = "The app can't check whether that folder is inside {place}: it isn't available now. Connect it and try again."
+UNCHECKED_AWAY = "{place} isn't available, so the app can't tell whether that folder is inside it. Connect the drive and try again."
 UNCHECKED_INDEX = "The app can't check whether that folder is inside {place}: that drive doesn't report folder identities. Choose a folder on another drive."
+# Judy 2026-10-30: why an 'unsafe' folder was refused. The page shows these as sent.
+UNSAFE_SOURCE = 'That folder is inside {place}, one of your source folders. Choose another folder.'
+UNSAFE_APP = 'That folder belongs to the app. Choose another folder.'
+UNSAFE_LINK = 'That folder is a link or junction. Choose an ordinary folder.'
 
 
 def resolved_identity(path):
@@ -138,10 +144,11 @@ def _absent(place, resolve):
         current = parent
 
 
-def _inside_by_identity(chain, places, resolve):
+def _inside_by_identity(chain, places, resolve, data_dir=None):
     """Senua 0.24.0 M2: refuse when a folder of the chosen folder's chain (itself and every folder above it, opened without
     following links) is one of places (source folders, the data folder) by native identity. A place that can't be
-    resolved, or a match that can't be trusted (no file index on that volume), refuses with the reason."""
+    resolved, or a match that can't be trusted (no file index on that volume), refuses with the reason. A match names
+    the source folder, or says the folder is the app's own when the place is data_dir."""
     held = [(item[1], item[2], item[3]) for item in chain]
     for place in places:
         if not place:
@@ -165,7 +172,7 @@ def _inside_by_identity(chain, places, resolve):
             if not (item[1] or item[2]):
                 refuse('unchecked', UNCHECKED_INDEX.format(place=place))
             if item == found:
-                refuse('unsafe')
+                refuse('unsafe', UNSAFE_APP if data_dir and place == data_dir else UNSAFE_SOURCE.format(place=place))
 
 
 def default_probe(folder):
@@ -190,14 +197,14 @@ def validate(folder, *, sources=(), data_dir=None, name='', probe=None, boundary
     text = str(path)
     for source in sources or ():
         if source and inside(text, source):
-            refuse('unsafe')
+            refuse('unsafe', UNSAFE_SOURCE.format(place=source))
     if data_dir and inside(text, data_dir):
-        refuse('unsafe')
+        refuse('unsafe', UNSAFE_APP)
     try:
         if not os.path.lexists(text):
             refuse('unavailable')
         if os.path.islink(text) or os.path.isjunction(text):
-            refuse('unsafe')
+            refuse('unsafe', UNSAFE_LINK)
         if not os.path.isdir(text):
             refuse('unavailable')
     except OSError:
@@ -210,11 +217,11 @@ def validate(folder, *, sources=(), data_dir=None, name='', probe=None, boundary
     except AncestorUnavailable:
         refuse('unavailable')
     except BoundaryError:
-        refuse('unsafe', 'That folder is a link or junction. Choose an ordinary folder.')
+        refuse('unsafe', UNSAFE_LINK)
     except OSError:
         refuse('unavailable')
     # Before the probe writes anything: a source or the data folder under another spelling (Senua 0.24.0 M2).
-    _inside_by_identity(chain, [*(sources or ()), data_dir], resolve)
+    _inside_by_identity(chain, [*(sources or ()), data_dir], resolve, data_dir=data_dir)
     try:
         (probe or default_probe)(text)
     except PermissionError:

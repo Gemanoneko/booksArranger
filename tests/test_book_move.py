@@ -179,7 +179,10 @@ class RefusalTests(MoveFixture):
         self.assertEqual(self.mover().run(move['move_id'])['cause'], 'unavailable')
         inside = self.library / 'inside'
         inside.mkdir()
-        self.assertEqual(self.mover().run(self.plan(inside)['move_id'])['cause'], 'unsafe')
+        done = self.mover().run(self.plan(inside)['move_id'])
+        self.assertEqual(done['cause'], 'unsafe')
+        # Judy 2026-10-30: the row shows the engine's sentence, which names the source folder.
+        self.assertEqual(book_move.view(done)['message'], 'That folder is inside %s, one of your source folders. Choose another folder.' % self.library)
         self.assertTrue(self.old.exists())
 
     def test_queued_move_cancels_and_a_new_choice_supersedes_it(self):
@@ -408,6 +411,39 @@ class UnexpectedErrorTests(MoveFixture):
                     self.assertEqual((self.other / self.old.name).read_bytes(), self.payload)
                     self.assertFalse(self.old.exists())
                     self.assertEqual(self.effective()['final_path'], str(self.other / self.old.name))
+
+    def test_a_failure_after_the_copy_is_placed_finishes_the_move_and_leaves_no_stray_copy(self):
+        """Senua 0.24.0 D1: the copy is published into the folder, then the step after it fails (the re-open of the placed
+        file in use for a moment, the share dropping, any other error). The move is settled from publish_intent as recovery
+        settles it: the placed file proven, the catalog moved to it, the old file removed. Before: failed 'unavailable'
+        ("Nothing was moved") with the new file left untracked in the folder."""
+        real = book_move.VerifiedFile
+        failures = (lambda: native_io.FileInUse('Cannot protect exact file: in use'),
+                    lambda: native_io.BoundaryError('Cannot protect exact file: the network name is no longer available'),
+                    lambda: KeyError('identity'))
+        for index, make in enumerate(failures):
+            with self.subTest(error=type(make()).__name__):
+                if index:
+                    self.setUp()  # a fresh library for each failure
+                self.volume = lambda a, b: False  # the copy strategy (setUp resets the seam)
+                target = self.other / self.old.name
+                raised = []
+
+                def once(path, *args, **kwargs):
+                    if not raised and Path(str(path)) == target and target.exists():
+                        raised.append(str(path))
+                        raise make()
+                    return real(path, *args, **kwargs)
+                move = self.plan(self.other)
+                with patch.object(book_move, 'VerifiedFile', once):
+                    done = self.mover().run(move['move_id'])
+                self.assertEqual(raised, [str(target)], 'positive control: the re-open of the placed copy failed')
+                self.assertEqual((done['state'], done['strategy'], book_move.view(done)['state']), ('complete', 'copy', 'moved'))
+                self.assertEqual(target.read_bytes(), self.payload)
+                self.assertFalse(self.old.exists())
+                self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
+                self.assertEqual(self.effective()['final_path'], str(target))
+                self.assertTrue(any('unexpected error' in proof for proof in self.events(move['move_id'])), 'the error is on the move')
 
 
 class RenameAcrossSharesTests(MoveFixture):
