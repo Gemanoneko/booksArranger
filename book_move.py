@@ -113,6 +113,20 @@ class Unfinished(Exception):
 UNFINISHED = 'Close and reopen Books Arranger to finish the move. Then you can choose another folder.'
 
 
+def _absent(path):
+    """Senua 0.24.0 D1r2: True only when path provably does not exist: lstat answers ERROR_FILE_NOT_FOUND or
+    ERROR_PATH_NOT_FOUND and a folder above it opens (destination_overrides._absent). False when it is there. Any other
+    error raises Unopened: os.path.lexists reads every error as absent, so a dropped share hid a placed copy."""
+    import destination_overrides
+    try:
+        os.lstat(str(path))
+        return False
+    except OSError as error:
+        if getattr(error, 'winerror', None) in destination_overrides.NOT_FOUND and destination_overrides._absent(str(path), lambda place: os.stat(place)):
+            return True
+        raise Unopened(error) from error
+
+
 def _unfinished_cause(error):
     return 'copy' if isinstance(error, Unopened) else 'catalog'
 
@@ -798,7 +812,8 @@ class Mover:
             # Senua 0.24.0 D1r: a copy already in the target folder that cannot be opened or read now (in use, the share
             # dropped) raises, so Mover._settle tries again after its pauses, or recover() at the next start; it is never
             # failed as "nothing moved". The move fails only when the target is absent, or opens and is not the same bytes.
-            final = self._prove(move, target, placed=True) if os.path.lexists(target) else None
+            # D1r2: absent means a definite "not found" with its folder answering (_absent); a share that is away raises.
+            final = None if _absent(target) else self._prove(move, target, placed=True)
             if final is None:
                 if move.get('temp_path'):
                     self._discard_temp(move['temp_path'])

@@ -541,6 +541,76 @@ class UnexpectedErrorTests(MoveFixture):
                     self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
                     self.assertEqual(self.effective()['final_path'], str(target))
 
+    def share_away(self, state):
+        """The target folder's share dropped once state['away'] is set: lstat and stat of anything in it answer WinError 64
+        (ERROR_NETNAME_DELETED), os.path.lexists and exists read it as absent (as they do for any error; they are native fast
+        paths on 3.14, so they are replaced here, not reached through lstat), and its re-open fails the same way. Returns
+        the patches, the VerifiedFile double last."""
+        real_lstat, real_stat, real_file = os.lstat, os.stat, book_move.VerifiedFile
+        real_lexists, real_exists = os.path.lexists, os.path.exists
+        inside = str(self.other).lower()
+
+        def gone(path):
+            return state['away'] and str(path).lower().startswith(inside)
+
+        def lstat(path, *args, **kwargs):
+            if gone(path):
+                raise ctypes.WinError(64)
+            return real_lstat(path, *args, **kwargs)
+
+        def stat(path, *args, **kwargs):
+            if gone(path):
+                raise ctypes.WinError(64)
+            return real_stat(path, *args, **kwargs)
+
+        def opened(path, *args, **kwargs):
+            if gone(path):
+                raise native_io.BoundaryError('Cannot protect exact file: [WinError 64] The specified network name is no longer available.')
+            return real_file(path, *args, **kwargs)
+        return (patch.object(book_move.os, 'lstat', lstat), patch.object(book_move.os, 'stat', stat),
+                patch.object(book_move.os.path, 'lexists', lambda path: False if gone(path) else real_lexists(path)),
+                patch.object(book_move.os.path, 'exists', lambda path: False if gone(path) else real_exists(path)),
+                patch.object(book_move, 'VerifiedFile', opened))
+
+    def test_a_placed_copy_behind_a_dropped_share_is_never_nothing_moved_D1r2(self):
+        """Senua 0.24.0 D1r2: the share holding the placed copy drops, so the copy is invisible (os.path.lexists is False for
+        any error), not merely unopenable. Only a definite "not found" with its folder answering is absent; anything else is
+        retried and ends Unfinished('copy') with both files kept, and recovery leaves it journaled while the share is away.
+        Before: failed "nothing moved", no pause taken, the copy left in the folder unrecorded, in the run and in recovery."""
+        for case in ('drops during the move', 'still away at the next start'):
+            with self.subTest(case=case):
+                if case != 'drops during the move':
+                    self.setUp()
+                self.volume = lambda a, b: False  # the copy strategy
+                target = self.other / self.old.name
+                state, slept = {'away': False}, []
+                away = self.share_away(state)
+                share_file = away[-1].new  # the share's own VerifiedFile double (real while the share is there)
+
+                def placed_then_away(path, *args, **kwargs):  # the placed copy's re-open fails; here the share drops too
+                    if not state['away'] and Path(str(path)) == target and target.exists():
+                        if case == 'drops during the move':
+                            state['away'] = True
+                        raise native_io.FileInUse('Cannot protect exact file: in use')
+                    return share_file(path, *args, **kwargs)
+                move = self.plan(self.other)
+                with patch.object(book_move, 'time', SimpleNamespace(sleep=slept.append)), away[0], away[1], away[2], away[3], away[4]:
+                    with patch.object(book_move, 'VerifiedFile', placed_then_away), self.assertRaises(book_move.Unfinished) as ran_out:
+                        self.mover().run(move['move_id'])
+                    self.assertEqual((ran_out.exception.cause, slept), ('copy', [0.5, 2]), 'retried after each pause, then unfinished')
+                    state['away'] = True
+                    self.assertFalse(os.path.lexists(target), 'positive control: the placed copy is invisible')
+                    still = self.mover()
+                    self.assertEqual(still.recover(), [], 'recovery while the share is away finishes nothing')
+                    self.assertEqual(still.unfinished[move['move_id']]['cause'], 'copy')
+                state['away'] = False
+                with connect(self.db) as db:
+                    self.assertEqual(book_move.load(db, move['move_id'])['state'], 'publish_intent', 'journaled, never failed')
+                self.assertEqual((target.read_bytes(), self.old.read_bytes()), (self.payload, self.payload), 'both files kept')
+                self.assertEqual(self.mover().recover()[0]['state'], 'complete', 'the share is back: recovery finishes it')
+                self.assertEqual(self.effective()['final_path'], str(target))
+                self.assertFalse(self.old.exists())
+
     def test_a_catalog_that_stays_unwritable_ends_unfinished_catalog_73k(self):
         """Ruling 73k: the other way the retries run out. The copy is placed and opens, but the catalog refuses its commit on
         every attempt: Unfinished with the reason 'catalog' (the page says the app couldn't save its progress), the journal
