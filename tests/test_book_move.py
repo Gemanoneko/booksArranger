@@ -344,6 +344,35 @@ class ViewTests(MoveFixture):
         with connect(self.db) as db:
             self.assertEqual(book_move.latest(db, [self.candidate])[self.candidate]['move_id'], move['move_id'])
 
+    def test_a_journaled_move_that_is_not_running_reads_unfinished_73k(self):
+        """Ruling 73k (Judy): a journaled move whose retries ran out is 'unfinished', with the target folder, the reason the
+        page words ('copy' or 'catalog') and the raw error for Technical details; while it runs it is 'moving' as before."""
+        move = self.plan(self.other)
+        with connect(self.db) as db:
+            book_move._set(db, move['move_id'], 'publish_intent', strategy='copy')
+            journaled = book_move.load(db, move['move_id'])
+        self.assertEqual(book_move.view(journaled)['state'], 'moving', 'running (or unknown): as before')
+        for cause in ('copy', 'catalog'):
+            line = book_move.view(journaled, unfinished={'cause': cause, 'detail': 'Cannot protect exact file: in use'})
+            self.assertEqual((line['state'], line['cause'], line['folder'], line['old_folder'], line['detail'], line['progress']),
+                             ('unfinished', cause, str(self.other), str(self.old.parent), 'Cannot protect exact file: in use', None))
+        for state, shown in (('queued', 'queued'), ('complete', 'moved'), ('failed', 'failed')):
+            self.assertEqual(book_move.view(dict(journaled, state=state), unfinished={'cause': 'copy'})['state'], shown, state)
+
+    def test_a_new_choice_beside_an_unfinished_move_says_to_restart_73k(self):
+        move = self.plan(self.other)
+        with connect(self.db) as db:
+            book_move._set(db, move['move_id'], 'publish_intent', strategy='copy')
+        start = book_move.location(self.resolve(self.job_id, 'base'))
+        for running, cause, said in ((None, 'changed', 'This audiobook is being moved now. Choose another folder when it finishes.'),
+                                     (lambda move_id: True, 'changed', 'This audiobook is being moved now. Choose another folder when it finishes.'),
+                                     (lambda move_id: False, 'unfinished', book_move.UNFINISHED)):
+            with connect(self.db) as db, self.assertRaises(book_move.Refused) as raised:
+                book_move.plan(db, job_id=self.job_id, kind='base', candidate_id=self.candidate, start=start, folder=str(self.library),
+                               root=str(self.library), running=running)
+            self.assertEqual((raised.exception.cause, str(raised.exception)), (cause, said))
+        self.assertEqual(book_move.UNFINISHED, 'Close and reopen Books Arranger to finish the move. Then you can choose another folder.')
+
     def test_events_are_append_only(self):
         move = self.plan(self.other)
         with connect(self.db) as db:
@@ -476,8 +505,20 @@ class UnexpectedErrorTests(MoveFixture):
                         if times < 4:
                             done = self.mover().run(move['move_id'])
                         else:
-                            with self.assertRaises(native_io.BoundaryError):
+                            with self.assertRaises(book_move.Unfinished) as ran_out:  # ruling 73k: typed, with its reason
                                 self.mover().run(move['move_id'])
+                            self.assertEqual((ran_out.exception.cause, ran_out.exception.move['move_id']), ('copy', move['move_id']))
+                            self.assertIn('Cannot protect exact file', ran_out.exception.detail)
+                            self.assertIsInstance(ran_out.exception.error, native_io.BoundaryError)
+                            still = self.mover()
+
+                            def unopenable(path, *args, **kwargs):
+                                if Path(str(path)) == target:
+                                    raise make()
+                                return real(path, *args, **kwargs)
+                            with patch.object(book_move, 'VerifiedFile', unopenable):
+                                self.assertEqual(still.recover(), [])
+                            self.assertEqual(still.unfinished[move['move_id']]['cause'], 'copy', 'recovery that cannot open it says why')
                     self.assertEqual(raised, [str(target)] * times, 'positive control: each re-open of the placed copy failed')
                     # The pauses the injected failures need, in order (a real transient on a fresh file may add one more).
                     self.assertEqual(slept[:times - 1], [0.5, 2][:times - 1], 'each retry came after its pause, never all at once')
@@ -499,6 +540,30 @@ class UnexpectedErrorTests(MoveFixture):
                     self.assertFalse(self.old.exists())
                     self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
                     self.assertEqual(self.effective()['final_path'], str(target))
+
+    def test_a_catalog_that_stays_unwritable_ends_unfinished_catalog_73k(self):
+        """Ruling 73k: the other way the retries run out. The copy is placed and opens, but the catalog refuses its commit on
+        every attempt: Unfinished with the reason 'catalog' (the page says the app couldn't save its progress), the journal
+        left at publish_intent with both files kept, and recovery at the next start finishes it."""
+        self.volume = lambda a, b: False  # the copy strategy
+        real = book_move.Mover._write
+        refused, slept = [], []
+
+        def unwritable(mover, move_id, state, **values):
+            if state == 'committed':
+                refused.append(state)
+                raise sqlite3.OperationalError('disk I/O error')
+            return real(mover, move_id, state, **values)
+        move = self.plan(self.other)
+        with patch.object(book_move.Mover, '_write', unwritable), patch.object(book_move, 'time', SimpleNamespace(sleep=slept.append)):
+            with self.assertRaises(book_move.Unfinished) as ran_out:
+                self.mover().run(move['move_id'])
+        self.assertEqual(len(refused), 4, 'positive control: the commit and each of the three settle attempts were refused')
+        self.assertEqual((ran_out.exception.cause, ran_out.exception.detail, slept), ('catalog', 'disk I/O error', [0.5, 2]))
+        with connect(self.db) as db:
+            self.assertEqual(book_move.load(db, move['move_id'])['state'], 'publish_intent')
+        self.assertEqual(((self.other / self.old.name).read_bytes(), self.old.read_bytes()), (self.payload, self.payload))
+        self.assertEqual(self.mover().recover()[0]['state'], 'complete')
 
 
 class RenameAcrossSharesTests(MoveFixture):

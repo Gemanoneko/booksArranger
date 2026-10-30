@@ -180,6 +180,42 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   assert.equal(face(tr).getAttribute('aria-label'),'Open book folder: Title bg');assert.equal(walk(statusCell(tr)).find(e=>e.className==='goes-to source-line').hidden,true,'"Now in" replaces the In line');
   await face(tr).handlers.click({stopPropagation(){}});assert.deepEqual(opened.at(-1),{library:'Audiobooks',view:'candidates',id:'cand-bg',folder_kind:'output'});
   assert.equal(face(trOf('cand-bp')).textContent,'Open source folder','originals present');assert.equal(face(trOf('cand-ng')).textContent,'Open source folder','not finished');
+  // Ruling 73k (Judy): a move whose retries ran out is "unfinished" in the engine's own row (painted fresh, nothing
+  // page-local: a page reload). Both files are kept; the row says why and how to finish it; no clock; Choose folder… and
+  // Use computed folder wait for a restart (aria-disabled, still focusable); the raw error is in Technical details only.
+  const RESTART='Close and reopen Books Arranger to finish the move. Then you can choose another folder.';
+  const COPY_LINE="Move not finished. The app couldn't open the copy in D:\\Books\\Horror, so both files are kept. Close and reopen Books Arranger to finish it.";
+  const CATALOG_LINE="Move not finished. The app couldn't save its progress. Close and reopen Books Arranger to finish it.";
+  const unfinished=(cause,extra={})=>({state:'unfinished',cause,target:'D:\\Books\\Horror\\Hat - Pratchett Terry.m4b',folder:'D:\\Books\\Horror',name:'Hat - Pratchett Terry.m4b',
+    old_folder:ROOT+'\\Pratchett Terry',move_id:'m-'+cause,detail:'Cannot protect exact file: in use',...extra});
+  run('moveSeen.clear();destNotes.clear()');
+  paint([finished('uc',{destination_override:chosen,move:unfinished('copy')}),finished('ug',{move:unfinished('catalog',{detail:'disk I/O error'})})]);
+  tr=trOf('cand-uc');
+  assert.equal(stateLine(tr).textContent,COPY_LINE);assert.equal(stateLine(tr).getAttribute('role'),'status');assert.equal(stateLine(tr).classList.contains('retry-refused'),true,'warn');
+  assert.equal(goes(tr),'Now in '+HAT,'the old file, never "Moving to"');assert.match(chosenLine(tr).textContent,/^Folder chosen by you\./);
+  assert.equal(choose(tr).textContent,'Needs restart');assert.equal(choose(tr).getAttribute('aria-disabled'),'true');assert.equal(choose(tr).title,RESTART);
+  assert.notEqual(choose(tr).disabled,true,'still focusable');choose(tr).focus();assert.equal(run('document.activeElement')===choose(tr),true);
+  assert.equal(reset(tr).hidden,false);assert.equal(reset(tr).getAttribute('aria-disabled'),'true');assert.equal(reset(tr).title,RESTART);
+  const sentBefore=sent.length;await press(choose(tr));await press(reset(tr));assert.equal(sent.length,sentBefore,'nothing is sent while it waits for a restart');
+  run('ladderClock=Date.now()+70000;updateDestinations();ladderClock=null');assert.equal(stateLine(tr).textContent,COPY_LINE,'no clock, no "Still waiting"');
+  assert.ok(!texts(tr).some(t=>/Moving|Still waiting|Cannot protect/.test(t)),'no moving copy, clock or raw error on the row');
+  tr=trOf('cand-ug');assert.equal(stateLine(tr).textContent,CATALOG_LINE);assert.equal(stateLine(tr).getAttribute('role'),'status');
+  assert.equal(goes(tr),'Now in Audiobooks Sorted\\Pratchett Terry\\Hat - Pratchett Terry.m4b');assert.equal(choose(tr).textContent,'Needs restart');
+  run('automaticResultKey=null;renderAutomaticResult(rows.find(row=>row.id==="cand-ug"))');assert.equal(get('automatic-technical').textContent,'Technical detail: disk I/O error');
+  assert.equal(get('automatic-technical').hidden,false);assert.ok(!texts(tr).some(t=>/disk I\/O/.test(t)),'the raw error is in Technical details only');
+  // The queued move ran out of retries: the row turns from moving to unfinished at once; the queue line names the book.
+  paint([finished('uq',{move:{state:'moving',target:'D:\\Books\\Horror\\Hat - Pratchett Terry.m4b',folder:'D:\\Books\\Horror',progress:12}})]);tr=trOf('cand-uq');
+  assert.equal(stateLine(tr).textContent,'Moving the audiobook… · 12%','control: moving before the outcome');
+  context.outcomeFixture={queued_actions:[],queue_running:null,queue_outcomes:[{id:'o-unf',action:'move',book_id:'cand-uq',result:'refused',cause:'unfinished',code:'unfinished',
+    folder:'D:\\Books\\Horror',title:'Title uq',move:unfinished('copy')}]};
+  run('syncQueue(outcomeFixture)');
+  assert.equal(stateLine(tr).textContent,COPY_LINE);assert.equal(goes(tr),'Now in Audiobooks Sorted\\Pratchett Terry\\Hat - Pratchett Terry.m4b');assert.equal(choose(tr).textContent,'Needs restart');
+  assert.equal(get('queue-announce').textContent,'Title uq: move not finished. Both files are kept. Close and reopen Books Arranger to finish it.');
+  assert.ok(calls.some(c=>c.route==='/api/queue/ack' && JSON.parse(c.options.body).ids[0]==='o-unf'),'acknowledged');
+  // A choice the engine refused because another move of the book is unfinished: the same sentence as the tooltip.
+  paint([finished('ur')]);tr=trOf('cand-ur');pickAnswer='D:\\Books\\Horror';
+  destAnswer=()=>({ok:false,status:409,json:async()=>({cause:'unfinished',code:'unfinished',error:RESTART})});await press(choose(tr));
+  assert.equal(stateLine(tr).textContent,RESTART);
   console.log('PASS 0.23.1 destination: the block on every row, Choose folder… with the stub picker, the chosen folder lines, reset and its confirmation, move states and every failure, Now in, Open book folder');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

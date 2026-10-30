@@ -2358,7 +2358,7 @@ function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) 
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
   renderProducerRetained(row);
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id)]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
@@ -2372,7 +2372,9 @@ function renderAutomaticResult(row){
   setText('automatic-repaired-title',patched.length?(repaired.applied===true?'Repaired':'Repair queued'):'');$('automatic-repaired-list').replaceChildren(...patched.map(item=>node('li',patchCopy(item))));$('automatic-repaired').hidden=!patched.length;
   // A stopped job with no typed cause reads "Stopped — see details": its own text is here, in Technical details.
   const untyped=row.creation?.job?.state==='Output needs attention' && typeof row.creation.job.reason==='string' && row.creation.job.reason;
-  const technical=attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'';
+  // Ruling 73k: a move that waits for a restart keeps its raw error here only.
+  const move=moveOf(row),moveDetail=move?.state==='unfinished' && typeof move.detail==='string' && move.detail?'Technical detail: '+move.detail:'';
+  const technical=(attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'') || moveDetail;
   setText('automatic-technical',technical);$('automatic-technical').hidden=!technical;if($('technical-details'))$('technical-details').hidden=!technical;
   // Names found (section 7): where the title and author came from, for the three name reasons.
   const ask=askOf(row),names=ask && ['title_author','author_unclear','same_author'].includes(askKind(ask))?askNames(ask):[];
@@ -2879,14 +2881,21 @@ const DEST_TIPS={choose:'Choose the folder this book is filed in. Your choice re
   chooseDone:'Choose a new folder for this audiobook. The file is moved there. Nothing is converted again.',picking:'Waiting for the folder picker.',
   moving:'Moving the audiobook. Choose another folder when it finishes.',nobridge:'Choosing a folder works in the desktop app.',
   reset:'Stop using your folder. The book goes to the folder the app computes.',resetDone:'Move the audiobook back to the folder the app computes. Nothing is converted again. You confirm first.',
-  move:'Move the audiobook to the folder shown now. Nothing is converted again.',keep:'Leave the audiobook where it is and keep your folder.'};
+  move:'Move the audiobook to the folder shown now. Nothing is converted again.',keep:'Leave the audiobook where it is and keep your folder.',
+  unfinished:'Close and reopen Books Arranger to finish the move. Then you can choose another folder.'};  // ruling 73k (Judy)
+// Ruling 73k (Judy): a move whose retries ran out waits for a restart, both files kept. 'copy': the app couldn't open the
+// copy it placed in {folder}; 'catalog': it couldn't save its progress. The raw error is in Technical details only.
+const MOVE_UNFINISHED={copy:"Move not finished. The app couldn't open the copy in {folder}, so both files are kept. Close and reopen Books Arranger to finish it.",
+  catalog:"Move not finished. The app couldn't save its progress. Close and reopen Books Arranger to finish it.",
+  queue:'{title}: move not finished. Both files are kept. Close and reopen Books Arranger to finish it.'};
 // unsafe: the engine words it (Judy 2026-10-30: the source folder it is inside, the app's own folder, or a link or
 // junction) and moveFailure shows that sentence as sent; with none, the refused sentence.
 const MOVE_FAILURES={target_exists:'A file named {name} is already in {folder}. Nothing was moved.',unavailable:"{folder} isn't available. Connect the drive or choose another folder. Nothing was moved.",
   not_writable:"The app can't write to {folder}. Choose another folder. Nothing was moved.",no_space:"There isn't enough free space on that drive. Nothing was moved.",
   in_use:'The audiobook is open in another program. Close it and try again. Nothing was moved.',source_missing:"The audiobook isn't where the app expects it. Nothing was moved.",
   unsafe:'',partial:"Moved to {folder}. The old file in {old folder} couldn't be removed. Delete it yourself.",
-  changed:'This book changed. Review its details and try again.',refused:'Move was not accepted. Nothing was moved.',closing:'Books Arranger is closing. Nothing was moved.'};
+  changed:'This book changed. Review its details and try again.',refused:'Move was not accepted. Nothing was moved.',closing:'Books Arranger is closing. Nothing was moved.',
+  unfinished:DEST_TIPS.unfinished};  // a choice refused beside a move that waits for a restart (ruling 73k)
 function isAbsolutePath(path){return /^[A-Za-z]:[\\/]|^\\\\/.test(String(path || ''));}
 // A destination as the row prints it: relative paths sit under Audiobooks Sorted (as today); a chosen folder is in full.
 function shownPath(path){return !path?'':isAbsolutePath(path)?String(path):outputName()+'\\'+path;}
@@ -2904,7 +2913,11 @@ function shownFolder(path){const text=shownPath(path);return text && !/[\\/]$/.t
 function pickerBridge(){const api=globalThis.window?.booksDesktop || shellApi;return typeof api?.chooseFolder==='function'?api:null;}
 function rowFinished(row){return row?.kind==='candidate' && row.audiobook_ready===true;}
 function overrideOf(row){const value=row?.destination_override;return value && typeof value==='object' && typeof value.folder==='string' && value.folder?value:null;}
-function moveOf(row){const value=row?.move;return value && typeof value==='object' && ['queued','moving','moved','failed'].includes(value.state)?value:null;}
+function moveOf(row){const value=row?.move;return value && typeof value==='object' && ['queued','moving','unfinished','moved','failed'].includes(value.state)?value:null;}
+function unfinishedLine(move){
+  const folder=shownFolder(move?.folder || folderOf(move?.target));
+  return move?.cause==='copy' && folder?MOVE_UNFINISHED.copy.replace('{folder}',folder.replace(/[\\/]$/,'') || folder):MOVE_UNFINISHED.catalog;
+}
 // Rulings 19.2: while a folder is chosen, copy that promises Audiobooks Sorted names the chosen folder instead.
 function chosenCopy(row,text){
   if(!overrideOf(row) || typeof text!=='string')return text;
@@ -3106,6 +3119,7 @@ function chooseMode(row){
   if(ended || recoveryDisconnected)return 'offline';
   const move=moveOf(row);
   if(destPending.has(row.id))return 'picking';
+  if(move?.state==='unfinished')return 'unfinished';  // ruling 73k: waits for a restart, ahead of moving
   if(move?.state==='moving' || queueRunning(row,'move'))return 'moving';
   if(move?.state==='queued' || queuedFor(row,'move'))return 'queued';
   return pickerBridge()?'ready':'nobridge';
@@ -3122,6 +3136,7 @@ function destStateLine(row){
   const fromMove=()=>{
     if(!move || !rowFinished(row))return null;
     if(move.state==='queued')return {text:'Move queued. It runs when the app is free.',warn:false};
+    if(move.state==='unfinished')return {text:unfinishedLine(move),warn:true,polite:true};  // ruling 73k: no clock, role status
     if(move.state==='moving'){const progress=Number.isFinite(Number(move.progress)) && move.progress!==null && move.progress!==''?` · ${Math.round(Number(move.progress))}%`:'',base='Moving the audiobook…',since=seen?.state==='moving'?seen.at:NaN;
       const text=clockNote(base,since);return {text:progress?text.replace(/^(Moving the audiobook…(?: \d+:\d\d)?)/,'$1'+progress):text,warn:false};}
     if(move.state==='moved')return {text:`Moved. The audiobook is now in ${shownFolder(move.folder || folderOf(move.target || row.output?.path)).replace(/[\\/]$/,'')}.`,warn:false};
@@ -3142,17 +3157,17 @@ function updateDestination(entry){
   const mode=chooseMode(row),finished=plan.finished,confirming=finished && !!override && destConfirm.has(row.id),name=askName(row);
   if(!override || !finished)destConfirm.delete(row.id);
   entry.controls.hidden=confirming;entry.confirm.hidden=!confirming;
-  const face={picking:'Choosing…',queued:'Queued',moving:'Moving…'}[mode] || 'Choose folder…';
-  const tip={picking:DEST_TIPS.picking,queued:`${queueWord('move')} is queued for this book. Cancel it to use this.`,moving:DEST_TIPS.moving,nobridge:DEST_TIPS.nobridge,offline:'Local server unavailable.'}[mode] || (finished?DEST_TIPS.chooseDone:DEST_TIPS.choose);
+  const face={picking:'Choosing…',queued:'Queued',unfinished:'Needs restart',moving:'Moving…'}[mode] || 'Choose folder…';
+  const tip={picking:DEST_TIPS.picking,queued:`${queueWord('move')} is queued for this book. Cancel it to use this.`,unfinished:DEST_TIPS.unfinished,moving:DEST_TIPS.moving,nobridge:DEST_TIPS.nobridge,offline:'Local server unavailable.'}[mode] || (finished?DEST_TIPS.chooseDone:DEST_TIPS.choose);
   if(entry.choose.textContent!==face)entry.choose.textContent=face;if(entry.choose.title!==tip)entry.choose.title=tip;entry.choose.setAttribute('aria-label','Choose folder: '+name);
   if(mode==='ready')entry.choose.removeAttribute('aria-disabled');else entry.choose.setAttribute('aria-disabled','true');
-  entry.reset.hidden=!override;const resetTip=finished?DEST_TIPS.resetDone:DEST_TIPS.reset;if(entry.reset.title!==resetTip)entry.reset.title=resetTip;entry.reset.setAttribute('aria-label','Use computed folder: '+name);
+  entry.reset.hidden=!override;const resetTip=mode==='unfinished'?DEST_TIPS.unfinished:finished?DEST_TIPS.resetDone:DEST_TIPS.reset;if(entry.reset.title!==resetTip)entry.reset.title=resetTip;entry.reset.setAttribute('aria-label','Use computed folder: '+name);
   if(['ready','nobridge'].includes(mode))entry.reset.removeAttribute('aria-disabled');else entry.reset.setAttribute('aria-disabled','true');
   updateQueueCancel(entry.cancel,row,['move','destination']);
   if(confirming){const text=`Move the audiobook back to ${sortedPath(override.computed_path || override.computed_folder,null)}? Nothing is converted again.`;if(entry.confirmText.textContent!==text)entry.confirmText.textContent=text;
     entry.moveButton.setAttribute('aria-label','Move book: '+name);entry.keep.setAttribute('aria-label','Keep it here: '+name);}
   const line=destStateLine(row);setLine(entry.state,line?.text || '');entry.state.classList?.toggle?.('retry-refused',!!line?.warn);
-  if(line?.alert || line?.warn)entry.state.setAttribute('role','alert');else entry.state.setAttribute('role','status');
+  if(line?.alert || line?.warn && !line?.polite)entry.state.setAttribute('role','alert');else entry.state.setAttribute('role','status');
 }
 function updateDestinations(){for(const entry of destRows.values())updateDestination(entry);}
 function destTitle(row){const ask=askOf(row);return askProposal(ask,'title') || row.review?.title || row.title_clue || 'this book';}
@@ -3963,6 +3978,11 @@ function applyQueueOutcome(outcome){
     // Judy 0.23.1 section 18: a queued folder choice or move ended. The row takes the engine's own move state at the next
     // list read; a refusal says why on the row (18.2) and leaves the audiobook where it was.
     if(outcome.result==='done'){if(row && outcome.answer && typeof outcome.answer==='object')applyDestination(row,outcome.answer,outcome.answer.folder ?? null);queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);}
+    else if(outcome.action==='move' && outcome.cause==='unfinished'){
+      // Ruling 73k: its retries ran out. The row takes the engine's move line now (the next list read sends the same).
+      if(row)row.move=outcome.move && typeof outcome.move==='object'?outcome.move:{...(row.move || {}),state:'unfinished',cause:'catalog',folder:outcome.folder || row.move?.folder || ''};
+      queueAnnounce(MOVE_UNFINISHED.queue.replace('{title}',title));
+    }
     else{const cause=outcome.cause || outcome.code,text=Object.hasOwn(MOVE_FAILURES,cause || '')?moveFailure(row || {},{folder:outcome.folder,name:outcome.name,target:outcome.target,old_folder:outcome.old_folder,message:outcome.error},cause):serverSentence({body:{error:outcome.error}},MOVE_FAILURES.refused);
       destNotes.set(id,{text,warn:true,alert:true,at:Date.now()});queueAnnounce(`${title}: ${text}`);}
     queueAck(outcome.id);const entry=destRows.get(id);if(entry)updateDestination(entry);return;

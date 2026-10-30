@@ -24,12 +24,13 @@ reconciles in the engine (recover()), from what is on disk and the journal, neve
   rename_intent                 -> renamed and verified: committed then complete; untouched: failed (nothing moved)
   copy_intent / copied          -> owned temporary removed; failed (nothing moved)
   publish_intent                -> published and verified: committed, then the old removal below; published but not
-                                   openable now: left as it is (the error raised); absent or other bytes: temporary removed
+                                   openable now: left as it is (Unopened raised); absent or other bytes: temporary removed
   committed / old_removal_intent-> the old file removed once proven to be the same bytes, else 'partial' (both kept)
 An OS, catalog or boundary error a step did not type is reconciled the same way in the session (Mover._settle: at once,
 then after each pause); so is any failure after a copy is placed in the target folder (Senua 0.24.0 D1, D1r), reported as
 "nothing moved" only when the placed file is gone or is not the receipt's bytes. An error that outlasts every pause (the
-catalog unwritable, the placed copy still unopenable) leaves the move "moving", journaled, until recover() at next start.
+catalog unwritable, the placed copy still unopenable) raises Unfinished and leaves the move journaled until recover() at
+the next start; while no one runs it, the row reads 'unfinished' with why (view(), ruling 73k), never "moving".
 
 After a move the old folder is removed if its listing is empty (71k), then each empty parent up to, never including, the
 output folder; never a source or output root, never anything recursive."""
@@ -85,12 +86,48 @@ class Failed(Exception):
         self.detail = detail
 
 
+class Unopened(ValueError):
+    """Ruling 73k: a copy publish_intent already placed in the target folder could not be opened or read to prove it (D1r).
+    A ValueError, so Mover._settle tries again and recover() leaves the move journaled, as for any other error."""
+
+    def __init__(self, error):
+        super().__init__(str(error) or type(error).__name__)
+        self.error = error
+
+
+class Unfinished(Exception):
+    """Ruling 73k: a move whose error outlasted every settle attempt. It stays journaled (both files kept) for recover() at
+    the next start. cause: 'copy' (the placed copy could not be opened) or 'catalog' (its progress could not be saved);
+    detail: the last attempt's raw error (Technical details only); move: the journal row as last read, or None; error:
+    the error that started the settling."""
+
+    def __init__(self, cause, detail, move=None, error=None):
+        super().__init__(detail or cause)
+        self.cause = cause
+        self.detail = detail
+        self.move = move
+        self.error = error
+
+
+# Ruling 73k (Judy): a new choice beside a move that waits for a restart, and Choose folder…'s tooltip, say the same.
+UNFINISHED = 'Close and reopen Books Arranger to finish the move. Then you can choose another folder.'
+
+
+def _unfinished_cause(error):
+    return 'copy' if isinstance(error, Unopened) else 'catalog'
+
+
+def _raw(error):
+    return (str(error) or type(error).__name__)[:500]
+
+
 class Placed(Exception):
     """Senua 0.24.0 D1: a copy move's file is already in the target folder under its final name, and a step after that
     failed (its re-open was in use, the share dropped). run() settles the move from publish_intent as recovery would
     (Mover._settle), proving the placed file before the old one is removed. While the placed file cannot be opened it is
-    tried again after each pause (D1r); if it still cannot, the move stays at publish_intent for recover() at the next
-    start, both files kept. "Nothing moved" only when the placed file is gone or is not the receipt's bytes."""
+    tried again after each pause (D1r); if it still cannot, Unfinished ('copy') is raised and the move stays at
+    publish_intent for recover() at the next start, both files kept. "Nothing moved" only when the placed file is gone or
+    is not the receipt's bytes."""
 
     def __init__(self, error):
         super().__init__(str(error) or type(error).__name__)
@@ -238,9 +275,10 @@ def current(db, job_id, kind):
     return {'move_id': record[0], 'generation': record[1]} if record else None
 
 
-def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None):
+def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=None, running=None):
     """Queue one move of the book from its current location (start) into folder. None when it is already there (no-op).
-    A queued move of the same book is superseded; a move already running is refused."""
+    A queued move of the same book is superseded; a move already running is refused. running(move_id): whether that
+    journaled move is running now (None: assume it is); one that is not waits for a restart (ruling 73k: 'unfinished')."""
     setup(db)
     if kind not in KINDS:
         raise Refused('changed', 'This audiobook cannot be moved: it is a chapter update of another file.')
@@ -254,6 +292,8 @@ def plan(db, *, job_id, kind, candidate_id, start, folder, root, override_id=Non
                       (job_id, kind, *TERMINAL)).fetchall()
     for move_id, state in busy:
         if state != 'queued':
+            if running is not None and not running(move_id):
+                raise Refused('unfinished', UNFINISHED)
             raise Refused('changed', 'This audiobook is being moved now. Choose another folder when it finishes.')
         _set(db, move_id, 'cancelled', detail={'reason': 'superseded'})
     generation = (db.execute('SELECT coalesce(max(generation),0) FROM book_moves WHERE job_id=? AND kind=?', (job_id, kind)).fetchone()[0] or 0) + 1
@@ -302,19 +342,29 @@ def cancel(db, move_id):
     return True
 
 
-def view(move):
+def view(move, unfinished=None):
     """The row's move line (Judy 18.1): {state, target, folder, name, old_folder, progress, cause, message} or None.
-    message: the engine's own sentence for a failure the page shows as sent ('unsafe' names the source folder)."""
+    message: the engine's own sentence for a failure the page shows as sent ('unsafe' names the source folder).
+    unfinished (ruling 73k): {'cause', 'detail'} for a journaled move that is not running (its retries ran out, or recovery
+    at start could not finish it). The line is then 'unfinished', its cause 'copy' or 'catalog' (what the page words) and
+    its detail the raw error (Technical details only). Without it a journaled move reads 'moving', as before."""
     if not move or move['state'] == 'cancelled':
         return None
     state = {'queued': 'queued', 'complete': 'moved', 'failed': 'failed', 'partial': 'failed'}.get(move['state'], 'moving')
+    if state == 'moving' and unfinished:
+        state = 'unfinished'
     start = move.get('from') or {}
     cause = (move.get('cause') or ('partial' if move['state'] == 'partial' else None)) if state == 'failed' else None
+    if state == 'unfinished':
+        cause = 'copy' if unfinished.get('cause') == 'copy' else 'catalog'
     detail = move.get('detail') if isinstance(move.get('detail'), dict) else {}
-    return {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
+    line = {'state': state, 'target': move['target_path'], 'folder': move['target_folder'], 'name': ntpath.basename(move['target_path']),
             'old_folder': ntpath.dirname(start.get('final_path') or ''), 'progress': move.get('progress') if state == 'moving' else None,
             'cause': cause, 'message': str(detail.get('reason') or '') if cause == 'unsafe' else '',
             'move_id': move['move_id']}
+    if state == 'unfinished':
+        line['detail'] = str(unfinished.get('detail') or '')[:500]
+    return line
 
 
 def _volume(identities):
@@ -358,6 +408,7 @@ class Mover:
         self.remove_folder = remove_folder
         self.stop = stop
         self.protected_roots = protected_roots
+        self.unfinished = {}  # recover(): {move_id: {'cause', 'detail'}} for each move it could not finish (ruling 73k)
 
     # ------------------------------------------------------------------ journal
     def _write(self, move_id, state, **values):
@@ -409,8 +460,10 @@ class Mover:
         nothing moved, its owned temporary removed and the old file untouched; a committed one finishes, the old file
         removed only once proven to be the published bytes, or both are kept ('partial'). The error is recorded on the
         move. When the catalog stays unwritable, or a copy placed in the target folder stays unopenable (D1r), through every
-        attempt the error is raised and recover() at the next start reconciles the journal, as before."""
+        attempt, Unfinished is raised (ruling 73k: its cause 'catalog' or 'copy' from the last attempt) and recover() at
+        the next start reconciles the journal, as before."""
         reason = ('The move stopped on an unexpected error: ' + (str(error) or type(error).__name__))[:500]
+        last, seen = error, None
         for pause in self.SETTLE_PAUSES:
             if pause:
                 if self.stop is not None and self.stop.is_set():
@@ -420,6 +473,7 @@ class Mover:
                 current = self._load(move_id)
                 if current is None:
                     break
+                seen = current
                 if current['state'] in TERMINAL:
                     return current
                 with self.connect() as db:
@@ -427,9 +481,10 @@ class Mover:
                 if current['state'] == 'queued':
                     return self._fail(current, '', reason)
                 return self.reconcile(current)
-            except (OSError, sqlite3.Error, ValueError, Failed):
+            except (OSError, sqlite3.Error, ValueError, Failed) as attempt:
+                last = attempt
                 continue
-        raise error
+        raise Unfinished(_unfinished_cause(last), _raw(last), seen, error) from error
 
     def _run(self, move):
         start = move['from']
@@ -694,7 +749,9 @@ class Mover:
 
     # ------------------------------------------------------------------ recovery (engine start)
     def recover(self):
-        """Reconcile every move a restart interrupted. Returns the moves it touched."""
+        """Reconcile every move a restart interrupted. Returns the moves it touched; self.unfinished says why each move it
+        could not finish stays journaled (ruling 73k)."""
+        self.unfinished = {}
         with self.connect() as db:
             if not have(db):
                 return []
@@ -704,6 +761,7 @@ class Mover:
             try:
                 done.append(self.reconcile(move))
             except Exception as error:  # never stops startup; the move stays as it is, the book reads as before
+                self.unfinished[move['move_id']] = {'cause': _unfinished_cause(error), 'detail': _raw(error)}
                 with self.connect() as db:
                     _event(db, move['move_id'], move['state'], move['state'], {'recovery_error': str(error)[:500]})
         return done
@@ -764,7 +822,7 @@ class Mover:
     def _prove(self, move, path, *, placed=False):
         """The verified location of the moved file at path, or None when it is not the receipt's bytes (one link, size and
         full hash equal to the receipt). An error opening or reading it is None too, unless placed (a copy publish_intent
-        already put there, Senua 0.24.0 D1r): then the error is raised, because the file is there but unproven yet."""
+        already put there, Senua 0.24.0 D1r): then Unopened is raised, because the file is there but unproven yet."""
         try:
             target = ordinary(path)
             with DirectoryBoundary(ordinary(move['target_root']), target.parent) as boundary, VerifiedFile(target) as file:
@@ -773,9 +831,9 @@ class Mover:
                     return None
                 return dict(move['from'], root=str(ordinary(move['target_root'])), final_path=str(target),
                             parent_identity=[list(i) for i in boundary.identities], identity=list(facts['identity']))
-        except (BoundaryError, OSError, ValueError):
+        except (BoundaryError, OSError, ValueError) as error:
             if placed:
-                raise
+                raise Unopened(error) from error
             return None
 
     def _remove_old(self, move):

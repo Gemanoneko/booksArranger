@@ -465,7 +465,12 @@ class BrowserServer(ThreadingHTTPServer):
                     return {'result': 'refused', 'code': refusal.cause, 'cause': refusal.cause, 'error': str(refusal)}
                 return {'result': 'done', 'answer': answer}
             if action == 'move':
-                return {'result': 'done', 'answer': {'move': merge.run_move(args['move_id'])}}
+                move = merge.run_move(args['move_id'])
+                if isinstance(move, dict) and move.get('state') == 'unfinished':
+                    # Ruling 73k: its retries ran out and it waits for a restart, both files kept. The page words it from the
+                    # cause and folder (the queue adds the title); the raw error is on the move line, for Technical details.
+                    return {'result': 'refused', 'cause': 'unfinished', 'code': 'unfinished', 'folder': move.get('folder') or '', 'move': move}
+                return {'result': 'done', 'answer': {'move': move}}
             if action == 'cleanup':
                 return {'result': 'done', 'answer': merge.start_historical_cleanup(args['job_id'])}
             if action == 'restore':

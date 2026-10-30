@@ -4921,7 +4921,7 @@ class MergeService:
         publication,kind,job_id=finished
         root=self._move_root(folder)
         with connect(self.inventory.database) as db:
-            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id)
+            move=book_move.plan(db,job_id=job_id,kind=kind,candidate_id=row['id'],start=start,folder=folder,root=root,override_id=override_id,running=self._move_running)
         if move is None:return self._destination_answer(row['id'],'unchanged')
         title=str(row.get('title_clue') or '')[:200]
         if self.move_requester is not None:
@@ -4949,20 +4949,42 @@ class MergeService:
 
     @operation
     def run_move(self,move_id):
-        """Run one queued move now (the action queue's runner). Returns the row's move line."""
+        """Run one queued move now (the action queue's runner). Returns the row's move line: 'unfinished' (ruling 73k) when
+        its retries ran out, the move journaled with both files kept for recovery at the next start."""
         import book_move
         if self.draining or self.__dict__.get('_closing'):
             with connect(self.inventory.database) as db:book_move.cancel(db,move_id)
             raise ValueError('Books Arranger is closing. Nothing was moved.')
-        move=self._mover().run(move_id)
+        running=self.__dict__.setdefault('_moves_running',set());running.add(move_id)
+        try:move=self._mover().run(move_id)
+        except book_move.Unfinished as ran_out:
+            why=self.__dict__.setdefault('_move_unfinished',{})[move_id]={'cause':ran_out.cause,'detail':ran_out.detail}
+            self.__dict__.get('_move_progress',{}).pop(move_id,None);self._destination_changed()
+            if ran_out.move is not None:return book_move.view(ran_out.move,unfinished=why)
+            # The catalog could not even be read: the line still says unfinished, never the raw error.
+            return {'state':'unfinished','target':'','folder':'','name':'','old_folder':'','progress':None,'cause':why['cause'],'message':'','move_id':move_id,'detail':why['detail']}
+        finally:running.discard(move_id)
         self._after_move(move)
         return book_move.view(move)
+
+    def _move_running(self,move_id):
+        """Whether this journaled move is being run (run_move) or reconciled (recovery at start) now."""
+        recovery=self.__dict__.get('_move_recovery')
+        return move_id in self.__dict__.get('_moves_running',()) or bool(recovery is not None and recovery.is_alive())
+
+    def _unfinished_move(self,move):
+        """Ruling 73k: {'cause','detail'} for a journaled move that nothing runs now (its retries ran out, or recovery at start
+        could not finish it), else None. Why unknown (no record this session): 'catalog', the app couldn't save its progress."""
+        import book_move
+        if not move or move.get('state') not in book_move.ACTIVE or self._move_running(move['move_id']):return None
+        return self.__dict__.get('_move_unfinished',{}).get(move['move_id']) or {'cause':'catalog','detail':''}
 
     def _after_move(self,move):
         """A committed move: its new location is the book's owned output and its last full verification (the move hashed
         every byte); the caches that showed the old location are dropped."""
         import book_move
         self.__dict__.get('_move_progress',{}).pop(move['move_id'],None)
+        if move['state'] in book_move.TERMINAL:self.__dict__.get('_move_unfinished',{}).pop(move['move_id'],None)
         if move['state'] in book_move.EFFECTIVE and isinstance(move.get('final'),dict):
             final=move['final']
             try:
@@ -4981,9 +5003,12 @@ class MergeService:
         except sqlite3.Error:return
         if not open_moves:return
         def work():
+            try:mover=self._mover()
+            except Exception:return
             try:
-                for move in self._mover().recover():self._after_move(move)
+                for move in mover.recover():self._after_move(move)
             except Exception:pass  # each unreconciled move stays journaled; the next start tries again
+            finally:self.__dict__.setdefault('_move_unfinished',{}).update(mover.unfinished)  # why, for its row (ruling 73k)
         self._move_recovery=threading.Thread(target=work,name='books-move-recovery',daemon=True)
         self._move_recovery.start()
 
@@ -5036,7 +5061,8 @@ class MergeService:
             if current.get('state')=='verified' and current.get('path'):
                 path=current['path'];output={'path':self._shown_path(path,output_root),'absolute':path,'folder':os.path.dirname(path)}
             row['output']=output
-            move=book_move.view(moves.get(row.get('id')))
+            found=moves.get(row.get('id'))
+            move=book_move.view(found,unfinished=self._unfinished_move(found))  # ruling 73k: not running is 'unfinished'
             if move and move['state']=='moving' and move['move_id'] in progress:move['progress']=progress[move['move_id']]
             row['move']=move
             live=lives.get(row.get('id'))

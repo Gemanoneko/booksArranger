@@ -272,7 +272,8 @@ def merge_double(fix, finished=True, computed=None):
     names = ('destination_choose', '_queue_move', '_destination_answer', '_override_rows', '_live_override', '_with_override', '_chosen_display', '_shown_path',
              '_move_root', '_override_stale', 'destination_view', '_chosen_folders', '_chosen_root', '_job_manifest', '_mover', 'run_move',
              '_after_move', 'cancel_move', '_publication_location', '_all_source_roots', '_destination_changed', '_start_move_recovery',
-             '_move_to_chosen', '_approval_destination', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE', 'FOLDER_UNAVAILABLE')
+             '_move_to_chosen', '_approval_destination', '_move_running', '_unfinished_move', 'OVERRIDE_REPLANNED', 'OVERRIDE_UNAVAILABLE',
+             'FOLDER_UNAVAILABLE')
     Double = type('Double', (), {name: MergeService.__dict__[name] for name in names})
     double = Double()
     row = {'id': fix.candidate, 'revision': 1, 'title_clue': 'Book', 'members': [{'path': str(fix.library / 'a.mp3')}], 'metadata': {}}
@@ -332,6 +333,62 @@ class ChooseTests(fixture.MoveFixture):
         self.assertTrue(self.old.exists())
         self.assertTrue(merge.cancel_move(queued[0]['move_id']))
         self.assertIsNone(merge.destination_view([dict(merge.row)]) or None)
+
+    def test_a_move_whose_retries_ran_out_reads_unfinished_on_every_list_read_73k(self):
+        """Ruling 73k (Judy): the state is the engine's, not the page's. While the move is journaled and not running, every
+        list read (a page reload) gives 'unfinished' with the target folder, why ('copy': the placed copy couldn't be opened;
+        'catalog': its progress couldn't be saved) and the raw error; a new choice says to restart; recovery finishes it."""
+        import native_io
+        import sqlite3
+        real, writes = book_move.VerifiedFile, book_move.Mover._write
+        for cause in ('copy', 'catalog'):
+            with self.subTest(cause=cause):
+                if cause == 'catalog':
+                    self.setUp()
+                merge = merge_double(self)
+                merge.move_same_volume = lambda a, b: False  # the copy strategy
+                target = self.other / self.old.name
+
+                def unopenable(path, *args, **kwargs):
+                    if Path(str(path)) == target and target.exists():
+                        raise native_io.FileInUse('Cannot protect exact file: in use')
+                    return real(path, *args, **kwargs)
+
+                def unwritable(mover, move_id, state, **values):
+                    if state == 'committed':
+                        raise sqlite3.OperationalError('disk I/O error')
+                    return writes(mover, move_id, state, **values)
+                fault = patch.object(book_move, 'VerifiedFile', unopenable) if cause == 'copy' else patch.object(book_move.Mover, '_write', unwritable)
+                with fault, patch.object(book_move, 'time', SimpleNamespace(sleep=lambda seconds: None)):
+                    answer = merge.destination_choose(self.candidate, 1, str(self.other))
+                line = answer['move']
+                self.assertEqual((answer['outcome'], line['state'], line['cause'], line['folder']), ('move_queued', 'unfinished', cause, str(self.other)))
+                for _ in range(2):  # the page reloads: each list read asks the engine again
+                    row = dict(merge.row, current_audiobook={'state': 'verified', 'path': str(self.old)})
+                    merge.destination_view([row])
+                    self.assertEqual((row['move']['state'], row['move']['cause'], row['move']['folder']), ('unfinished', cause, str(self.other)))
+                    self.assertEqual(row['output']['absolute'], str(self.old), 'Now in: the old file, still the book')
+                self.assertIn('Cannot protect exact file' if cause == 'copy' else 'disk I/O error', row['move']['detail'])
+                self.assertTrue(target.exists() and self.old.exists(), 'both files kept')
+                # A new choice for the book says to restart, never "being moved now".
+                elsewhere = self.base / 'elsewhere'
+                elsewhere.mkdir(exist_ok=True)
+                with self.assertRaises(book_move.Refused) as raised:
+                    merge.destination_choose(self.candidate, 1, str(elsewhere))
+                self.assertEqual((raised.exception.cause, str(raised.exception)), ('unfinished', book_move.UNFINISHED))
+                # While it runs (here: marked running) it reads 'moving', as before.
+                merge.__dict__.setdefault('_moves_running', set()).add(line['move_id'])
+                row = dict(merge.row)
+                merge.destination_view([row])
+                self.assertEqual(row['move']['state'], 'moving')
+                merge._moves_running.clear()
+                # Recovery at the next start finishes it.
+                merge._start_move_recovery()
+                merge._move_recovery.join(60)
+                row = dict(merge.row)
+                merge.destination_view([row])
+                self.assertEqual(row['move']['state'], 'moved')
+                self.assertEqual(self.effective()['final_path'], str(target))
 
     def test_not_finished_saves_the_choice_and_approves_nothing(self):
         merge = merge_double(self, finished=False)
@@ -503,6 +560,17 @@ class QueueTests(unittest.TestCase):
         queue.items.append({'id': 'x', 'action': 'move', 'book_id': identity, 'title': '', 'args': {'move_id': 'm2'}, 'queued_at': 0, 'blocker': 'operation'})
         self.assertEqual(queue.cancel('x'), {'cancelled': True})
         self.assertEqual(self.server.merge.cancelled, ['m2'])
+
+    def test_a_move_whose_retries_ran_out_is_an_unfinished_outcome_73k(self):
+        """Ruling 73k: the queue outcome says 'unfinished' with the folder and the engine's move line (title is the queue's
+        own), never code 'failed' with the raw OS error; the raw error stays in the move line's detail (Technical details)."""
+        line = {'state': 'unfinished', 'cause': 'copy', 'folder': 'D:\\Books', 'target': 'D:\\Books\\Hat.m4b', 'move_id': 'm',
+                'detail': 'Cannot protect exact file: in use'}
+        self.server.merge.run_move = lambda move_id: dict(line)
+        answer = self.server.run_queued({'action': 'move', 'book_id': 'b', 'args': {'move_id': 'm'}})
+        self.assertEqual(answer, {'result': 'refused', 'cause': 'unfinished', 'code': 'unfinished', 'folder': 'D:\\Books', 'move': line})
+        self.server.merge.run_move = lambda move_id: {'state': 'moved', 'move_id': move_id}  # control: a finished move
+        self.assertEqual(self.server.run_queued({'action': 'move', 'book_id': 'b', 'args': {'move_id': 'm'}})['result'], 'done')
 
     def test_refusal_is_typed(self):
         merge = self.server.merge
