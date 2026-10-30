@@ -254,6 +254,18 @@ class LargeNumbersAreNotParts(unittest.TestCase):
         # Whole, they need no Numbers line: nothing before 1001 is missing.
         self.assertIsNone(self.numbers(['%d.mp3'%n for n in range(1001,1013)]))
 
+    def test_ids_that_outnumber_the_parts_name_no_gap_73j(self):
+        # Ruling 73j: 0998, 0999 beside ids 2500-2510 (73f leaves out more files than it keeps): the larger run is ids and
+        # no gap is named. Before: a Numbers line 0998-0999, so Missing files listed parts 1-500.
+        ids=['%d.mp3'%n for n in range(2500,2511)]
+        self.assertIsNone(self.numbers(['0998.mp3','0999.mp3']+ids))
+        # Those parts count from their first: a skip among them is still named, nothing before them is.
+        found=self.numbers(['0996.mp3','0998.mp3','0999.mp3']+ids)
+        self.assertEqual((found['first'],found['last'],found['skipped'],found['missing'],found['counts_from_one']),('0996','0999',['0997'],[997],False))
+        # Control, unchanged: one year beside one part (it leaves out no more than it keeps) still counts from one.
+        found=self.numbers(['05.mp3','Интервью 2019.mp3'])
+        self.assertEqual((found['first'],found['start'],found['counts_from_one']),('05',5,True))
+
     def test_a_lone_part_beside_a_year_reads_as_alone(self):
         self.assertIsNone(self.numbers(['01.mp3','Интервью 2019.mp3']))
         found=self.numbers(['05.mp3','Интервью 2019.mp3'])
@@ -323,6 +335,14 @@ class AttentionGap(unittest.TestCase):
         found,_=self.gap(['%d.mp3'%n for n in range(1001,1013) if n!=1005])  # before: no Missing files row
         self.assertEqual((found['kind'],found['missing'],found['total'],found['numbers']['skipped']),('missing_parts',[1005],1012,['1005']))
         self.assertIsNone(self.gap(['%d.mp3'%n for n in range(1001,1013)])[0],'whole: nothing before 1001 is missing')
+
+    def test_ids_that_outnumber_the_parts_list_nothing_missing_73j(self):
+        ids=['%d.mp3'%n for n in range(2500,2511)]
+        self.assertIsNone(self.gap(['0998.mp3','0999.mp3']+ids)[0],'ruling 73j: no gap is named (before: parts 1-500)')
+        found,_=self.gap(['0996.mp3','0998.mp3','0999.mp3']+ids)
+        self.assertEqual((found['missing'],found['total']),([997],999),'a skip among the parts, never the numbers before them')
+        found,_=self.gap(['05.mp3','Интервью 2019.mp3'])  # control, unchanged: parts 1-4 before a lone part 05
+        self.assertEqual((found['missing'],found['total']),([1,2,3,4],5))
 
     def test_a_real_gap_beside_a_year_is_listed_without_it_73f(self):
         found,_=self.gap(['01.mp3','02.mp3','04.mp3','Послесловие 2005.mp3'])  # before: 3, 5, 6 .. of 2005

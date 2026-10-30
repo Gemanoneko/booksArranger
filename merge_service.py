@@ -2447,7 +2447,8 @@ class MergeService:
         current book holds a file of it; not a raised folder question) and its numbering (file names, else track tags)
         skips numbers or starts after 1. A year or an id in a file name is not a part number (ruling 73f,
         folder_unit.numbers); a numbering whose numbers are all 1000 or more starts at its first (ruling 73i: 1001-1012
-        without 1005 lists 1005, never 1-1000). None otherwise. Read-only."""
+        without 1005 lists 1005, never 1-1000), and so does one beside more ids than parts (ruling 73j: 0998, 0999 beside
+        2500-2510 lists nothing). None otherwise. Read-only."""
         import folder_unit,itertools
         with connect(self.inventory.database) as db:
             found=db.execute('SELECT root,evidence FROM book_groups WHERE id=? AND superseded=0',(identity,)).fetchone()

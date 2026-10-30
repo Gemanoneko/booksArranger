@@ -290,6 +290,8 @@ def _token(name, value, width):
 # Ruling 73i (Sergei 2026-10-30, narrows 73f; Senua 0.24.0 d6): 73f drops only an outlier next to smaller part numbers.
 # When no place in the names holds smaller part numbers, numbers that are all NOT_A_PART or more are the parts
 # ("1001…1012" without "1005" names 1005), counted from the first of them (nothing below it is missing).
+# Ruling 73j (Sergei 2026-10-30): "0998, 0999" beside ids "2500"-"2510" names no gap. When 73f leaves out more files than it
+# keeps, the parts count from their first too.
 NOT_A_PART = 1000
 FAR = 2
 
@@ -315,12 +317,13 @@ def numbers(members):
     nothing numbers them. A year or an id in a name is left out of the numbering (ruling 73f, _part_numbers); a place in
     the names that holds only those numbers numbers nothing while the next place holds smaller part numbers. When no place
     does, the first such place is the numbering (ruling 73i), read before the track tags and counted from its first
-    number: None without a skip. 'counts_from_one': whether the numbers below 'start' count as missing (False for 73i)."""
+    number: None without a skip. So is a numbering beside more ids than parts (ruling 73j). 'counts_from_one': whether the
+    numbers below 'start' count as missing (False for 73i and 73j)."""
     names = track_order.member_names(members)
     digits = [re.findall(r'\d+', Path(str(n)).stem) for n in names]
     runs = [[int(v) for v in d] for d in digits]
     found = None
-    alone = False
+    from_first = False  # rulings 73i and 73j: the numbering counts from its first number, nothing below it missing
     if runs and all(runs):
         shortest = min(len(r) for r in runs)
         chosen = large = None
@@ -333,10 +336,13 @@ def numbers(members):
                     break
                 large = large or (index, values)  # every number here is NOT_A_PART or more
         if chosen is None and large is not None:
-            alone = True  # 73i: no place holds smaller part numbers
+            from_first = True  # 73i: no place holds smaller part numbers
             chosen = (*large, _part_numbers(sorted(large[1]), alone=True))
         if chosen is not None:
             index, values, kept = chosen
+            # Ruling 73j: when 73f leaves out more files than it keeps as parts ("0998", "0999" beside ids "2500"-"2510"),
+            # the larger run is ids and the parts count from their first, as in 73i: no gap before them is named.
+            from_first = from_first or len(values) - len(kept) > len(kept)
             # Zero-padded like the parts' own names, never like a year's or an id's.
             width = max(len(d[index]) for d, value in zip(digits, values) if value <= kept[-1])
             found = ('names', kept, width)
@@ -353,7 +359,7 @@ def numbers(members):
     source, values, width = found
     first, last = values[0], values[-1]
     ranges = _ranges(values)  # values are sorted and distinct (checked above)
-    if not ranges and (first in (0, 1) or alone) and disc is None:
+    if not ranges and (first in (0, 1) or from_first) and disc is None:
         return None
     # 'missing': the first MAX_LISTED skipped numbers (every reader lists at most that many).
     if disc is not None:
@@ -364,4 +370,4 @@ def numbers(members):
     tokens = [_token(source, a, width) if a == b else _token(source, a, width) + '-' + _token(source, b, width) for a, b in ranges[:6]]
     return {'source': source, 'first': _token(source, first, width), 'last': _token(source, last, width),
             'skipped': tokens, 'skipped_total': len(ranges), 'missing': _listed(ranges), 'start': first, 'end': last,
-            'counts_from_one': not alone}
+            'counts_from_one': not from_first}
