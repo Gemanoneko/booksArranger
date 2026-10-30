@@ -541,17 +541,17 @@ class UnexpectedErrorTests(MoveFixture):
                     self.assertEqual([p.name for p in self.other.iterdir()], [self.old.name])  # one file, no temporary
                     self.assertEqual(self.effective()['final_path'], str(target))
 
-    def share_away(self, state):
-        """The target folder's share dropped once state['away'] is set: lstat and stat of anything in it answer WinError 64
-        (ERROR_NETNAME_DELETED), os.path.lexists and exists read it as absent (as they do for any error; they are native fast
-        paths on 3.14, so they are replaced here, not reached through lstat), and its re-open fails the same way. Returns
-        the patches, the VerifiedFile double last."""
+    def share_away(self, state, *folders):
+        """The share holding folders (default: the target folder) dropped once state['away'] is set: lstat and stat of
+        anything in them answer WinError 64 (ERROR_NETNAME_DELETED), os.path.lexists and exists read it as absent (as they
+        do for any error; they are native fast paths on 3.14, so they are replaced here, not reached through lstat), and
+        a re-open fails the same way. Returns the patches, the VerifiedFile double last."""
         real_lstat, real_stat, real_file = os.lstat, os.stat, book_move.VerifiedFile
         real_lexists, real_exists = os.path.lexists, os.path.exists
-        inside = str(self.other).lower()
+        places = [str(folder).lower() for folder in (folders or (self.other,))]
 
         def gone(path):
-            return state['away'] and str(path).lower().startswith(inside)
+            return state['away'] and any(str(path).lower().startswith(place) for place in places)
 
         def lstat(path, *args, **kwargs):
             if gone(path):
@@ -610,6 +610,52 @@ class UnexpectedErrorTests(MoveFixture):
                 self.assertEqual(self.mover().recover()[0]['state'], 'complete', 'the share is back: recovery finishes it')
                 self.assertEqual(self.effective()['final_path'], str(target))
                 self.assertFalse(self.old.exists())
+
+    def test_a_rename_behind_a_dropped_share_waits_for_it_never_fails_D1r2(self):
+        """Senua 0.24.0 D1r2 on the rename path (ruling 73l). After the rename, the share holding both folders drops, so the
+        old and the new name are both invisible: neither is provably absent, so the move is retried and ends
+        Unfinished('renamed'), and recovery waits while the share is away. With the old file still there and only the new
+        folder away (a rename journaled, then the app closed before it ran), it waits as 'copy'. Before: failed at once,
+        "Neither file is there" after the rename and "nothing moved" before it, and never looked at again."""
+        real_rename = book_move.rename_no_replace
+        for case in ('after the rename', 'before the rename'):
+            with self.subTest(case=case):
+                if case != 'after the rename':
+                    self.setUp()
+                target = self.other / self.old.name
+                state, slept = {'away': False}, []
+                away = self.share_away(state, self.other, self.sorted) if case == 'after the rename' else self.share_away(state, self.other)
+
+                def renamed_then_away(*args, **kwargs):
+                    real_rename(*args, **kwargs)
+                    state['away'] = True
+                    raise native_io.RenamePostconditionError('Renamed audiobook could not be re-opened: the network name is no longer available')
+                move = self.plan(self.other)
+                if case == 'before the rename':
+                    self.crash_at = 'rename_intent'  # journaled, then the app closed
+                    with self.assertRaises(Crash):
+                        self.mover().run(move['move_id'])
+                    state['away'] = True
+                with patch.object(book_move, 'rename_no_replace', renamed_then_away), patch.object(book_move, 'time', SimpleNamespace(sleep=slept.append)), \
+                        away[0], away[1], away[2], away[3], away[4]:
+                    if case == 'after the rename':
+                        with self.assertRaises(book_move.Unfinished) as ran_out:
+                            self.mover().run(move['move_id'])
+                        self.assertEqual((ran_out.exception.cause, slept), ('renamed', [0.5, 2]), 'retried after each pause')
+                    self.assertFalse(os.path.lexists(target), 'positive control: the new name is invisible')
+                    self.assertEqual(os.path.lexists(self.old), case == 'before the rename', 'positive control: the old name too, after the rename')
+                    still = self.mover()
+                    self.assertEqual(still.recover(), [], 'recovery while the share is away finishes nothing')
+                    self.assertEqual(still.unfinished[move['move_id']]['cause'], 'renamed' if case == 'after the rename' else 'copy')
+                with connect(self.db) as db:
+                    self.assertEqual(book_move.load(db, move['move_id'])['state'], 'rename_intent', 'journaled, never failed')
+                self.crash_at = None
+                done = self.mover().recover()[0]  # the share is back
+                if case == 'after the rename':
+                    self.assertEqual((done['state'], target.read_bytes()), ('complete', self.payload))
+                    self.assertEqual(self.effective()['final_path'], str(target))
+                else:
+                    self.assertEqual((done['state'], done['cause'], self.old.read_bytes()), ('failed', '', self.payload), 'it never ran: nothing moved')
 
     def test_a_renamed_file_that_cannot_be_checked_is_unfinished_never_partial_D1r3(self):
         """Senua 0.24.0 D1r3: a same-volume rename the OS accepted, whose check of the renamed file is refused (in use). The

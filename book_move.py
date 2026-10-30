@@ -22,7 +22,8 @@ Journal. Every state is written (and committed) before the side effect it announ
 reconciles in the engine (recover()), from what is on disk and the journal, never by refusing to start:
   queued                        -> cancelled (nothing ran)
   rename_intent                 -> renamed and verified: committed then complete; untouched: failed (nothing moved);
-                                   renamed but not openable now: left as it is (Unopened raised); other bytes: 'changed'
+                                   renamed but not openable now, or a name a share that is away hides: left as it is
+                                   (Unopened raised); other bytes: 'changed'
   copy_intent / copied          -> owned temporary removed; failed (nothing moved)
   publish_intent                -> published and verified: committed, then the old removal below; published but not
                                    openable now: left as it is (Unopened raised); absent or other bytes: temporary removed
@@ -117,10 +118,10 @@ class Unfinished(Exception):
 UNFINISHED = 'Close and reopen Books Arranger to finish the move. Then you can choose another folder.'
 
 
-def _absent(path):
+def _absent(path, cause='copy'):
     """Senua 0.24.0 D1r2: True only when path provably does not exist: lstat answers ERROR_FILE_NOT_FOUND or
     ERROR_PATH_NOT_FOUND and a folder above it opens (destination_overrides._absent). False when it is there. Any other
-    error raises Unopened: os.path.lexists reads every error as absent, so a dropped share hid a placed copy."""
+    error raises Unopened(cause): os.path.lexists reads every error as absent, so a dropped share hid a placed copy."""
     import destination_overrides
     try:
         os.lstat(str(path))
@@ -128,7 +129,7 @@ def _absent(path):
     except OSError as error:
         if getattr(error, 'winerror', None) in destination_overrides.NOT_FOUND and destination_overrides._absent(str(path), lambda place: os.stat(place)):
             return True
-        raise Unopened(error) from error
+        raise Unopened(error, cause) from error
 
 
 def _unfinished_cause(error):
@@ -793,7 +794,11 @@ class Mover:
             self._write(move_id, 'cancelled', expected='queued', detail={'reason': 'The app closed before the move ran'})
             return self._load(move_id)
         if state == 'rename_intent':
-            old_there, new_there = os.path.lexists(start['final_path']), os.path.lexists(target)
+            # D1r2 on the rename path (ruling 73l): a name is absent only on a definite "not found" with its folder
+            # answering (_absent). A share that is away hides the names, so the move raises Unopened and waits (retried,
+            # then Unfinished, recover() later): 'copy' while the old file is still there, else 'renamed'.
+            old_there = not _absent(start['final_path'], 'renamed')
+            new_there = not _absent(target, 'copy' if old_there else 'renamed')
             if old_there and not new_there:
                 return self._fail(move, '', 'The move was interrupted before the file moved')
             if not old_there and new_there:
