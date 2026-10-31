@@ -89,6 +89,7 @@ textarea{font:inherit;background:var(--field);color:var(--text);border:1px solid
 .goes-to{margin:6px 0 0}
 .goes-to .goes-label{color:var(--muted);margin-right:8px;font-size:13px}
 .goes-to.taken .goes-label{color:var(--warning)}
+.id-line .undecided{color:var(--muted)}
 .goes-to .path,.ask-missing .path{color:var(--text);margin:0}
 .ask-missing{margin-top:4px}
 /* Futaba 0.22.0 QA, m-1: .row-retry[aria-label^="Convert"] (104px) out-ranked this rule on Convert what's there. */

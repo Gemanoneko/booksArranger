@@ -95,6 +95,17 @@ class ReviewTests(unittest.TestCase):
     def test_order_inclusion_requires_exact_keys(self):
         with self.assertRaises(ValueError):self.service.tracks('Audiobooks',self.row['id'],self.row['revision'],['wrong'],[],True,True,False,evidence_note='Reviewed')
 
+    def test_list_rows_carry_the_decided_author_not_the_tag(self):
+        # Ruling 74f (Judy 0.24.1 section 3): the Author / reader column reads row.credits, the saved review's author (the folder
+        # name it files under, else its Artist-tag author) and reader; no review yet is "not decided", whatever the tags say.
+        self.assertEqual(self.row['credits'],{'author':'','reader':'','decided':False})
+        self.service.save('Audiobooks',self.row['id'],self.row['revision'],self.review,False,'')
+        self.assertEqual(self.service.page()['rows'][0]['credits'],{'author':'Author Name','reader':'Reader','decided':True})
+        from review_backend import decided_credits
+        self.assertEqual(decided_credits({'review':{'author':' ','canonical_author':'Stephen King','narrator':''},'artists':['Reader Tag']}),{'author':'Stephen King','reader':'','decided':True})
+        self.assertEqual(decided_credits({'review':None,'artists':['Пухов Сергей']}),{'author':'','reader':'','decided':False})
+        self.assertEqual(decided_credits({'review':{'author':'Без автора'}})['author'],'Без автора','an approval without an author shows where it files')
+
     def test_m3_a_books_names_are_never_saved_from_the_panel(self):
         # Ruling 40 (Senua's 0.22.3 review, M3): the six name fields hidden in a book's panel were still sent and saved,
         # as an "Entered by you" source, so a stale title held the book against his newer Edit names.

@@ -551,11 +551,13 @@ function renderRows(force=false) {
     const tr=document.createElement('tr'); tr.dataset.path=row.path; tr.tabIndex=0;tr.setAttribute('role','row');
     tr.setAttribute('aria-selected',String(row.path===selectedPath));
     if(row.kind==='candidate'){const td=document.createElement('td'),label=document.createElement('label'),check=document.createElement('input');td.setAttribute('role','cell');label.className='check';check.type='checkbox';check.checked=selectedBooks.has(row.id);check.setAttribute('aria-label','Select '+row.title_clue);check.title='Select this candidate for the reviewed audiobook queue.';check.addEventListener('click',event=>event.stopPropagation());check.addEventListener('keydown',event=>event.stopPropagation());check.addEventListener('change',()=>{if(check.checked)selectedBooks.set(row.id,row.revision);else selectedBooks.delete(row.id);batchCounts();});label.append(check);td.append(label);tr.append(td);}
-    const values=row.kind==='candidate'?[candidateTitle(row),row.artists.join('; ') || 'Unknown',row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',readError(row) ? `Read error · ${readError(row).split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
+    const values=row.kind==='candidate'?[candidateTitle(row),creditsOf(row).author || NOT_DECIDED,row.members.length,candidateStatus(row)]:[row.kind,row.arrival ? 'Yes' : '',row.metadata.title || row.path.split(/[\\/]/).pop(),row.metadata.author || '',readError(row) ? `Read error · ${readError(row).split(/\r?\n/)[0].slice(0,200)}`:row.preview.confidence,row.preview.path || 'Needs review'];
     for (const [index,value] of values.entries()) { const td=document.createElement('td'); td.textContent=value;td.setAttribute('role','cell');
-      // A question row's Book and Author / reader columns are labelled lines (Judy 0.23.1 section 4); other rows keep the clue.
+      // A question row's Book and Author / reader columns are labelled lines (Judy 0.23.1 section 4); every other candidate
+      // row's Author / reader column is labelled lines too, with the decided author, never the raw tag (ruling 74f).
       if(row.kind==='candidate' && askOf(row) && index===0)buildBookCell(row,td);
       if(row.kind==='candidate' && askOf(row) && index===1)buildAuthorCell(row,td);
+      else if(row.kind==='candidate' && index===1)buildCreditCell(row,td);
       // Medium and compact bands fold the two clue columns into a second line of the title cell (follow-up 3, section 5).
       if(row.kind==='candidate' && index===0){const facts=node('p',titleFacts(row),'field-help title-facts');td.append(facts);const cell=bookCells.get(row.id);if(cell){cell.facts=facts;td.append(cell.narrowFlag);}}
       if(row.kind==='candidate' && index===3){
@@ -2255,8 +2257,26 @@ function rowState(row){
 function titleFacts(row){
   const count=Array.isArray(row.members)?row.members.length:0,files=`${count.toLocaleString()} audio ${count===1?'file':'files'}`,ask=askOf(row);
   // A question row folds its Author and Reader lines here (Judy 0.23.1 section 4.3): the author Approve uses, the reader.
-  if(ask){const reader=typeof ask.reader==='string'?ask.reader.trim():'';return [bookAuthor(row) || 'Unknown',reader?'Reader: '+reader:'',files].filter(Boolean).join(' · ');}
-  return `${(row.artists || []).join('; ') || 'Unknown'} · ${files}`;
+  // Every other row folds the decided author and reader (ruling 74f, Judy 0.24.1 section 3.3); the Clue line never folds.
+  const [author,reader]=ask?[bookAuthor(row),typeof ask.reader==='string'?ask.reader.trim():'']:[creditsOf(row).author,creditsOf(row).reader];
+  return [author || 'Author not decided yet',reader?'Reader: '+reader:'',files].filter(Boolean).join(' · ');
+}
+// Ruling 74f (Judy 0.24.1 section 3): the author the app decided, from the engine's row.credits; never row.artists, the raw
+// grouping tag, which can be the reader. A row without credits (or not decided) reads as not decided.
+const NOT_DECIDED='Not decided yet';
+function creditsOf(row){
+  const credits=row?.credits && typeof row.credits==='object'?row.credits:{},text=value=>typeof value==='string'?value.trim():'';
+  return {author:credits.decided===true?text(credits.author):'',reader:text(credits.reader)};
+}
+// The Author / reader cell of a row that asks nothing: Author (or "Not decided yet", muted), Reader when one is known, and the
+// raw tag as a muted Clue only when it is the only name there is (no author, no reader).
+function buildCreditCell(row,td){
+  const {author,reader}=creditsOf(row),tag=(Array.isArray(row.artists)?row.artists:[]).join('; ').trim();
+  const lines={author:idLine('Author'),reader:idLine('Reader'),clue:idLine('Clue')};
+  setValue(lines.author,author || NOT_DECIDED);lines.author.value.className=author?'':'undecided';
+  setValue(lines.reader,reader);
+  setValue(lines.clue,!author && !reader?tag:'');lines.clue.value.className='undecided';
+  td.textContent='';td.append(lines.author,lines.reader,lines.clue);
 }
 // The Started over summary line (follow-up 3, section 2.3; follow-up 4, section 1.3): global counts, live pass state.
 function renderRestartSummary(){
@@ -3064,8 +3084,8 @@ function updateBookCell(row){
   setLine(cell.title,title);setLine(cell.flag,flag);setLine(cell.series,seriesLine(row));
   const raw=clue.text && clue.text!==title.trim() && 'Title clue: '+clue.text!==title.trim()?`Title clue: ${clue.text}`+(clue.role?` · ${clue.role}`:''):'';setLine(cell.clue,raw);
   const [includes,others]=includesLines(ask);setLine(cell.includes,includes);setLine(cell.others,others);
-  const author=bookAuthor(row) || 'Unknown',reader=typeof ask.reader==='string'?ask.reader.trim():'',credit=clueText(ask.fields?.author?.clue,(row.artists || []).join('; '));
-  setValue(cell.author,author);setLine(cell.authorFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setLine(cell.narrowFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setValue(cell.reader,reader);
+  const author=bookAuthor(row) || NOT_DECIDED,reader=typeof ask.reader==='string'?ask.reader.trim():'',credit=clueText(ask.fields?.author?.clue,(row.artists || []).join('; '));
+  setValue(cell.author,author);cell.author.value.className=author===NOT_DECIDED?'undecided':'';setLine(cell.authorFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setLine(cell.narrowFlag,AUTHOR_FLAGS[ask.fields?.author?.flag] || '');setValue(cell.reader,reader);
   setValue(cell.authorClue,credit.text && credit.text!==author && credit.text!==reader?credit.text+(credit.role?` · ${credit.role}`:''):'');
 }
 // ---- Numbers and membership (section 5)

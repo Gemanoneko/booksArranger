@@ -32,6 +32,18 @@ def job_destination(manifest):
     destination,root=manifest.get('destination'),manifest.get('output_root')
     if not isinstance(destination,str) or not destination or not isinstance(root,str) or not root or not inside(destination,root):return None
     return {'path':os.path.relpath(destination,root),'absolute':destination}
+def decided_credits(row):
+    """Ruling 74f (Judy's 0.24.1 spec, section 3; her open question 5): the list's Author / reader column shows the author the
+    app decided, never the raw grouping tag (row['artists'], which can be the reader). That is the saved review's author:
+    the folder name the book files under, else its Artist-tag author, the order organization.plan routes by (Без автора
+    included once he approves a book without one); and the review's reader. A saved review written by the automatic pass
+    is its settled author. decided is False while no review names an author: the page then says "Not decided yet"."""
+    review=row.get('review') if isinstance(row.get('review'),dict) else {}
+    def text(key):
+        value=review.get(key)
+        return value.strip()[:1000] if isinstance(value,str) else ''
+    author=text('author') or text('canonical_author')
+    return {'author':author,'reader':text('narrator'),'decided':bool(author)}
 def utc(): return datetime.datetime.now(datetime.timezone.utc).isoformat()
 def member_key(path): return str(uuid.uuid5(uuid.NAMESPACE_URL,os.path.normcase(os.path.abspath(path))))
 def digest(path):
@@ -492,6 +504,7 @@ class CandidateReviewService:
             if job_rows is not None and self.jobs and hasattr(self.jobs,'current_audiobook'):
                 self.page_local.audiobooks={r['id']:self.jobs.current_audiobook(r['id'],jobs=job_rows) for r in chosen}
             rows=[self.enrich(r,check_sources=False) for r in chosen]
+            for row in rows:row['credits']=decided_credits(row)  # ruling 74f: the Author / reader column
             for row in rows:
                 if row['id'] in needs:
                     # The shown page only: the question, its proposals and the destination (Judy's section 11).

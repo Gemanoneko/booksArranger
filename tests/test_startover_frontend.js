@@ -406,8 +406,10 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   run('filters.candidates="all";viewControls()');paint([m4bRow('t')]);tr=rowOf('t');
   assert.equal(tr.attrs.role,'row');assert.ok([...tr.children].every(cell=>cell.attrs.role==='cell'),'every cell keeps the cell role');
   assert.ok(get('inventory-head').children[0].children.every(cell=>cell.attrs.role==='columnheader'));
-  assert.equal(titleCell(tr).children[0].textContent,'Author t · 2 audio files');assert.match(titleCell(tr).children[0].className,/title-facts/);
-  assert.equal(run('titleFacts({artists:[],members:[{}]})'),'Unknown · 1 audio file');
+  assert.equal(titleCell(tr).children[0].textContent,'Author not decided yet · 2 audio files','74f: no decided author, never the raw tag');assert.match(titleCell(tr).children[0].className,/title-facts/);
+  assert.equal(run('titleFacts({artists:[],members:[{}]})'),'Author not decided yet · 1 audio file');
+  assert.equal(run('titleFacts({artists:["Пухов Сергей"],credits:{author:"Herbert James",reader:"Пухов Сергей",decided:true},members:[{},{}]})'),'Herbert James · Reader: Пухов Сергей · 2 audio files','74f: the decided author and reader fold, the tag does not');
+  assert.equal(run('titleFacts({artists:["Tag"],credits:{author:"Half",reader:"",decided:false},members:[{}]})'),'Author not decided yet · 1 audio file','not decided: no author, whatever the field holds');
   assert.ok(get('inventory-table').classes.has('candidates'));
   const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');
   assert.match(html,/<div class="table-scroll" id="inventory-scroll"><table id="inventory-table" role="table"><thead id="inventory-head" role="rowgroup">/);

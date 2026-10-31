@@ -178,6 +178,32 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // Check 12: the source line makes a divided folder visible: two rows that print the same folder (the S5 control shape).
   const split=[bookRow('k1',{source_directories:[{id:'d',path:'Z:\\Audiobooks\\Криг',files:34}]}),bookRow('k2',{source_directories:[{id:'d',path:'Z:\\Audiobooks\\Криг',files:1}]})];paint(split);
   const printed=split.map(r=>lineText(sourceLine(trOf(r.id))));assert.equal(new Set(printed).size,1,'the deliberately split fixture prints one folder twice');
+  // Ruling 74f (Judy 0.24.1 section 3.2; Futaba's check 12): every candidate row's Author / reader column is labelled lines with
+  // the author the app decided (row.credits), never the raw grouping tag, which can be the reader.
+  const decided=[bookRow('d1',{artists:['Пухов Сергей'],credits:{author:'Herbert James',reader:'Пухов Сергей',decided:true}}),
+    bookRow('d2',{artists:['Herbert James'],credits:{author:'Pratchett Terry',reader:'',decided:true}}),
+    bookRow('d3',{artists:['Антон Ческидов'],credits:{author:'',reader:'Антон Ческидов',decided:false}}),
+    bookRow('d4',{artists:['Raw Tag'],credits:{author:'',reader:'',decided:false}}),
+    bookRow('d5',{artists:[],credits:{author:'',reader:'',decided:false}}),
+    bookRow('d6',{artists:['Old Engine Tag']})];
+  paint(decided);
+  const credit=tr=>walk(tr.children[2]).filter(e=>e.className==='goes-to id-line' && !e.hidden).map(lineText);
+  assert.deepEqual(credit(trOf('cand-d1')),['Author Herbert James','Reader Пухов Сергей'],'the decided author, never the reader tag');
+  assert.deepEqual(credit(trOf('cand-d2')),['Author Pratchett Terry'],'no reader line, nothing says unknown, no clue on a decided row');
+  assert.deepEqual(credit(trOf('cand-d3')),['Author Not decided yet','Reader Антон Ческидов']);
+  assert.deepEqual(credit(trOf('cand-d4')),['Author Not decided yet','Clue Raw Tag'],'the tag only when it is the only name there is');
+  assert.deepEqual(credit(trOf('cand-d5')),['Author Not decided yet']);
+  assert.deepEqual(credit(trOf('cand-d6')),['Author Not decided yet','Clue Old Engine Tag'],'a row without credits reads as not decided');
+  const value=(tr,label)=>walk(tr.children[2]).find(e=>e.className==='goes-to id-line' && e.children[0].textContent===label).children[1];
+  assert.equal(value(trOf('cand-d1'),'Author').className,'');assert.equal(value(trOf('cand-d3'),'Author').className,'undecided','Not decided yet is muted');
+  assert.equal(value(trOf('cand-d4'),'Clue').className,'undecided','the clue is evidence, muted');
+  const fold=tr=>walk(tr.children[1]).find(e=>String(e.className).includes('title-facts')).textContent;
+  assert.equal(fold(trOf('cand-d1')),'Herbert James · Reader: Пухов Сергей · 1 audio file');assert.equal(fold(trOf('cand-d4')),'Author not decided yet · 1 audio file','the Clue line does not fold');
+  assert.ok(fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8').includes('.id-line .undecided{color:var(--muted)}'),'Not decided yet and the Clue are muted');
+  // A question row with no author proposal: "Not decided yet" replaces "Unknown" there too.
+  paint([asked('q',{kind:'title_author',why:'',fields:{title:{proposal:'T',basis:'tag'},author:{proposal:'',basis:''}}})]);
+  assert.equal(credit(trOf('cand-q'))[0],'Author Not decided yet');assert.equal(value(trOf('cand-q'),'Author').className,'undecided');
+  assert.equal(fold(trOf('cand-q')),'Author not decided yet · 1 audio file');
   console.log('PASS 0.23.1 rows: Open source folder (one, several, 12, gone list, details builder), the In line, Book / Author / reader lines, Numbers and membership lines, gap faces, Includes, the raised folder question');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
