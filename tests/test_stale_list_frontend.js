@@ -91,6 +91,11 @@ const line=()=>get('list-stale');
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   assert.equal(run('listClock('+yesterday.getTime()+',Date.now())'),yesterday.getDate()+' '+months[yesterday.getMonth()]+', 23:48');
   run('paintedAt='+yesterday.getTime()+';pressTick('+(since8+6000)+')');assert.equal(line().textContent,'List from '+yesterday.getDate()+' '+months[yesterday.getMonth()]+', 23:48. The app is busy; this updates by itself.');
+  // "Life Signs" (2026-10-31): a queued Approve refused because the book changed meanwhile asks for the list at once, past the
+  // busy pause; another refusal keeps the pause.
+  context.outcome={id:'q1',action:'approve',book_id:'cand-a',title:'Title a',result:'refused',code:'changed',error:'Candidate changed; reload evidence before reviewing'};
+  run('lastKey="painted";applyQueueOutcome(outcome)');assert.equal(run('lastKey'),null);assert.match(run('askResults.get("cand-a").text'),/^Approve cancelled: this book changed/);
+  context.outcome={...context.outcome,id:'q2',code:'name_taken',error:'Name taken'};run('lastKey="painted";applyQueueOutcome(outcome)');assert.equal(run('lastKey'),'painted');
   console.log('PASS stale list: the poll never waits for the list, S0-S8, re-ask keeps the clock, the busy pause, list reads out of oldestWait, the status time limit, another day');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;

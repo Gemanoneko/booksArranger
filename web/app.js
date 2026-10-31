@@ -4112,6 +4112,10 @@ function applyQueueOutcome(outcome){
     const entry=askRows.get(id) || {id,row,title};
     if(outcome.result==='saved' && outcome.code==='series_needed' && outcome.answer?.saved===true && outcome.answer?.code==='series_needed'){askSettled(entry,asked,outcome.answer,null);queueAck(outcome.id);return;}
     if(outcome.result==='done'){askSettled(entry,asked,outcome.answer || {},null);queueStripOutcome=outcome.id;queueAnnounce(`${title}: ${queueWord(outcome.action)} done.`);return;}
+    // Ruling 75a ("Life Signs", 2026-10-31): a refusal because the book changed meanwhile (there, automatic processing had
+    // approved and queued it while the row on screen was old) asks for the list at once, past the busy pause, so the row
+    // shows what the book is now.
+    if(outcome.code==='changed')lastKey=null;
     const text=queueAskText(outcome,asked);askResults.set(id,{text});queueAnnounce(`${title}: ${text}`);queueAck(outcome.id);return;
   }
   if(outcome.action==='names' || outcome.action==='names_forget'){namesQueued(outcome);return;}
@@ -4574,6 +4578,7 @@ async function askPress(entry,kind){
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
     if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
+    if(error.body?.code==='changed')lastKey=null;  // ruling 75a: the row on screen is old; the list is read again at once
     if(!error.httpStatus)refreshFailed(error);
   }finally{askPendings.delete(id);}
   // Read before the buttons update: a focused button that becomes disabled drops focus to the page.
