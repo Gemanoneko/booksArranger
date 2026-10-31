@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.24.1] - 2026-10-31
+
+### Added
+
+- Start over appears on a stopped book whose source file changed on disk. It sets the old job aside and sends the book back to automatic processing.
+- A record of every file deleted when a source folder is cleaned up, kept per book.
+
+### Changed
+
+- The list stays current while the app is busy. If a read is slow, the old rows stay with a "list from HH:MM, engine busy" line.
+- The author column shows the author the app decided on, not the raw tag (which can be the reader).
+- Empty source folders are removed after conversion, including for books converted earlier. Only known leftovers are deleted (covers, .nfo, .txt, .cue and similar); any unknown file keeps the whole folder. If the drive can't be reached, the book is retried later.
+- Your Approve or name edit wins over automatic processing, and replaces a job queued but not started.
+- Approve as one book accepts the English author name the preview already shows.
+
+### Fixed
+
+- Stale text in settings about recovery copies being kept for 24 hours is removed. They are deleted right after a successful conversion.
+
+### Known issue
+
+- After Start over the book waits for Approve and Start instead of returning to automatic processing on its own. Fix planned for 0.24.2.
+
+
 ## [v0.24.0] - 2026-10-30
 
 ### Added
