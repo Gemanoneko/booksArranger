@@ -2582,7 +2582,10 @@ function askText(row){
     const total=Number(ask.missing?.total) || 0,present=Number(ask.missing?.present) || 0,gone=Math.max(0,total-present);
     // Parts the track tags say exist but were never here (a part set, N4): where the claim comes from.
     const parts=Array.isArray(ask.missing?.parts)?ask.missing.parts:null;
-    if(parts && parts.length)return {status:'Missing files',hint:parts.length===1?`The track tags say there are ${total.toLocaleString()} parts, but part ${Number(parts[0]).toLocaleString()} isn't here.`:`The track tags say there are ${total.toLocaleString()} parts, but ${parts.length.toLocaleString()} aren't here.`};
+    // Futaba's 0.24.0 QA, m2: the file names number them (ruling 71m) or the track tags do (a part set); numbers are printed
+    // as the numbering writes them, never "part 1,005".
+    const said=ask.missing?.source==='names'?'The file names say':'The track tags say',plain=value=>String(Number(value));
+    if(parts && parts.length)return {status:'Missing files',hint:parts.length===1?`${said} there are ${plain(total)} parts, but part ${plain(parts[0])} isn't here.`:`${said} there are ${plain(total)} parts, but ${plain(parts.length)} aren't here.`};
     return present>0?{status:'Missing files',hint:`${gone.toLocaleString()} of ${total.toLocaleString()} files ${gone===1?'is':'are'} missing.`}:{status:'All files missing',hint:`All ${total.toLocaleString()} files are missing.`};
   }
   // A verified duplicate with the server's Remove this copy offer: the row says what it is (Judy's update spec 3.1).

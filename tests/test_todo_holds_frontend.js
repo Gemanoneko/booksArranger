@@ -177,6 +177,12 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     missing:{folders:['Z:\\Audiobooks\\Незнакомцы'],files:missing.map(n=>'Z:\\Audiobooks\\Незнакомцы\\Part '+n+' of '+total),present:total-missing.length,total,parts:missing},destination:dest('Кунц Дин\\Незнакомцы.m4b')});
   const gone=[partsGone('m1',[3],3),partsGone('m2',[2,3],3),partsGone('m3',[2,3,4,5],12)];paint(gone);
   assert.deepEqual(gone.map(r=>hint(trOf(r.id))),["The track tags say there are 3 parts, but part 3 isn't here.","The track tags say there are 3 parts, but 2 aren't here.","The track tags say there are 12 parts, but 4 aren't here."]);
+  // Futaba's 0.24.0 QA, m2: a gap the file names show (ruling 71m, files with no track tags) names the file names, and a part
+  // number is printed as the names number it ("1005", never "1,005").
+  const named71m=partsGone('n1',[1005],12);named71m.ask.missing.source='names';
+  const tagged=partsGone('n2',[1005],1012);tagged.ask.missing.source='tags';paint([named71m,tagged]);
+  assert.deepEqual([named71m,tagged].map(r=>hint(trOf(r.id))),["The file names say there are 12 parts, but part 1005 isn't here.","The track tags say there are 1012 parts, but part 1005 isn't here."]);
+  paint(gone);
   assert.ok(!gone.some(r=>buttonsOf(trOf(r.id)).some(b=>b.textContent==='Keep as separate books')),'not on missing parts');
   assert.ok(texts(trOf('cand-m1')).includes('Part 3 of 3'),'part: '+texts(trOf('cand-m1')).join(' | '));
   assert.ok(texts(trOf('cand-m3')).includes('+ 1 more.'),'more1: '+texts(trOf('cand-m3')).join(' | '));assert.ok(!texts(trOf('cand-m3')).some(t=>/details panel/.test(t)));

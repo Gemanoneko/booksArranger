@@ -57,6 +57,9 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((hold['kind'],hold['missing'],hold['total']),('missing_parts',[3],4))
         row=self.service.reviews.page(status='output_attention')['rows'][0]
         self.assertEqual(row['ask']['numbers']['skipped'],['03'])
+        # Futaba's 0.24.0 QA, m2: the file names number these parts (the tags carry no track numbers here), and the row
+        # says so: its hint named "the track tags" for every gap.
+        self.assertEqual((row['ask']['missing']['parts'],row['ask']['missing']['source']),([3],'names'))
 
     def test_order_question_says_membership_is_settled_and_rows_say_where_their_files_are(self):
         folder=self.audio/'Unsorted'/'Око мира'

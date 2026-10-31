@@ -2356,7 +2356,10 @@ class MergeService:
             # The parts the track numbers say are missing, named "Part 3 of 3" in the book's folder.
             folder=os.path.dirname(members[0]['path']);total=int(parts.get('total') or len(members))
             payload['missing']={'folders':[folder],'files':[os.path.join(folder,'Part %d of %d'%(int(n),total)) for n in parts.get('missing') or []],
-                                'present':len(members),'total':len(members)+len(parts.get('missing') or []),'parts':list(parts.get('missing') or [])}
+                                'present':len(members),'total':len(members)+len(parts.get('missing') or []),'parts':list(parts.get('missing') or []),
+                                # Futaba's 0.24.0 QA, m2: what numbers the parts, so the hint names it: the file names (ruling 71m's
+                                # numbering, folder_unit.numbers) or the track tags (a part set's, part_sets.decide).
+                                'source':'names' if (parts.get('numbers') or {}).get('source')=='names' else 'tags'}
         elif entry['group']=='files_missing' or any(m.get('missing') for m in members):
             gone=[m for m in members if m.get('missing')]
             try:root=self.reviews._source_root(row)
