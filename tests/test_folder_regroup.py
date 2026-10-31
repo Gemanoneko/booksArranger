@@ -85,12 +85,12 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','basis':'research'}))
         self.assertNotIn('series_clue',row['ask'])
 
-    def test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b(self):
-        """Ruling 74b, both ends: research holds «Хранители. Летопись первая» when FantLab numbers it book 2; the to-do row
-        (needs_you, ask_payload) carries both numbers and the provider with Series, Number and Title filled in; Approve
-        with them untouched queues the book with that series and the title's number. FantLab's live answer shapes of
-        2026-10-31, the novels' order changed; real MP3 files, a real catalog and engine, offline."""
-        import threading,urllib.parse
+    def number_unclear_book(self):
+        """Ruling 74b's book on real files: «Хранители. Летопись первая», which FantLab numbers book 2 (FantLab's live answer
+        shapes of 2026-10-31, the novels' order changed). Researched twice, as the run does: the first research learns the
+        English spelling (a rule deciding the book's own credit), so the run researches it once more before listing it
+        (rules_changed_for, Senua's 0.22.0 review G6). Returns its to-do row."""
+        import urllib.parse
         from public_research import PublicClient,PublicResearch
         folder=self.audio/'Unsorted'/'Хранители. Летопись первая'
         for n in (1,2):tone(folder/('%02d.mp3'%n),self.cover,album='Хранители. Летопись первая',artist='Джон Рональд Руэл Толкин',track='%d/2'%n)
@@ -112,19 +112,40 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
             return b'{"items":[],"results":[],"docs":[]}'
         minutes=iter(range(10**6,10**9,60))  # no pacing wait; the cache stays fresh
         self.service.automatic.research=PublicResearch(PublicClient(self.inv.database,fetch=fetch,clock=lambda:next(minutes)),leads=[])
-        # The first research learns the English spelling (a rule that decides the book's own credit), so the run researches
-        # the book once more before listing it (rules_changed_for, Senua's 0.22.0 review G6), as for every question.
         self.research_all();self.research_all()
-        row=self.service.reviews.page(status='output_attention')['rows'][0];ask=row['ask']
+        return self.service.reviews.page(status='output_attention')['rows'][0]
+
+    def queued_metadata(self,approved):
+        job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
+        return job['manifest']['metadata'],job['manifest']['destination']
+
+    def test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b(self):
+        """Ruling 74b, both ends: the to-do row (needs_you, ask_payload) carries both numbers and the provider with Series,
+        Number and Title filled in; Approve with them untouched (a press that sends none) queues the book with that series
+        and the title's number. Senua's 74b review, r2: the disagreeing record's English title is not used."""
+        row=self.number_unclear_book();ask=row['ask']
         self.assertEqual((ask['kind'],ask['why'],ask['odd_name']),('title_author','number_unclear',True))
         self.assertEqual(ask['volume'],{'title_number':1,'series_number':'2','provider':'fantlab'})
         self.assertEqual({name:ask['fields'][name]['proposal'] for name in ('title','author','series','number')},
-                         {'title':'The Fellowship of the Ring','author':'Tolkien J. R. R.','series':'Властелин колец','number':'1'})
-        approved=self.service.approve_book(row['id'],row['revision'])  # nothing typed
-        job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
-        metadata=job['manifest']['metadata']
-        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('The Fellowship of the Ring','Tolkien J. R. R.','Властелин колец','1'))
-        self.assertIn(os.path.join('Tolkien J. R. R','Властелин колец',''),job['manifest']['destination'])
+                         {'title':'Хранители. Летопись первая','author':'Tolkien J. R. R.','series':'Властелин колец','number':'1'})
+        self.assertEqual(self.service.approval_preview(row['id'],row['revision']).get('series'),{'name':'Властелин колец','number':'1'},'its Goes to line')
+        metadata,destination=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))  # nothing typed
+        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','Властелин колец','1'))
+        self.assertIn(os.path.join('Tolkien J. R. R','Властелин колец',''),destination)
+
+    def test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1(self):
+        """Senua's 74b review, r1: the same book and the same disagreement in the research cache, but its current question is
+        another one (here: one part of a bigger book). An Approve that sends no Series or Number, and its Goes to line, file
+        no series: only the "Number unclear" question fills them in."""
+        import local_identity
+        row=self.number_unclear_book()
+        fresh=self.service.reviews._row('Audiobooks',row['id'])
+        result=self.research(fresh)
+        self.assertEqual((result.get('ask') or {}).get('why'),'number_unclear','positive control: the cache holds the disagreement')
+        self.service.automatic._record(fresh,'Held',dict(result,ask=None,reasons=[local_identity.PIECE_REASON],identity_hold={'kind':'piece','detail':''},until_change=True),None)
+        self.assertFalse(self.service.approval_preview(row['id'],row['revision']).get('series'),'its Goes to line names no series')
+        metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
+        self.assertEqual((metadata['title'],metadata['series'],metadata['number']),('Хранители. Летопись первая','',''))
 
     def test_raised_folder_question_and_keep_as_separate_books(self):
         folder=self.audio/'Unsorted'/'Разное'

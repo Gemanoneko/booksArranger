@@ -1287,9 +1287,7 @@ class TolkienHeldTranslationTests(Base):
         self.SEARCH=dict(self.SEARCH,**{'Хранители':dict(self.SEARCH['Две твердыни'],altname='Хранители')})  # a wrong record: novel 2
         books,_=self.books()
         self.lookup(books[0])
-        # Ruling 74b (Sergei 2026-10-31): Approve as shown files the source's series with the title's number, never book 2.
-        review=self.research.approved(books[0],ROOT)['review']
-        self.assertEqual((review.get('series'),review.get('number')),('Властелин колец','1'),'«Летопись первая» is never filed as book 2')
+        self.assertFalse(self.research.approved(books[0],ROOT)['review'].get('series'),'«Летопись первая» is never filed as book 2')
 
     def test_a_title_or_series_he_entered_is_never_looked_up(self):
         import entered_names
@@ -1401,24 +1399,40 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
         control=self.lookup(books['Возвращение государя. Летопись третья'])
         self.assertEqual(control['reasons'],[],'the numbers agree: filed with no question')
         self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Властелин колец','3','The Return of the King'))
-        for album,(title_number,source_number,english) in (('Хранители. Летопись первая',(1,'2','The Fellowship of the Ring')),('Две твердыни. Летопись вторая',(2,'1','The Two Towers'))):
+        for album,title_number,source_number in (('Хранители. Летопись первая',1,'2'),('Две твердыни. Летопись вторая',2,'1')):
             with self.subTest(album=album):
                 row=books[album];result=self.lookup(row);ask=result.get('ask') or {}
                 self.assertEqual(result['reasons'],[local_identity.ASK_REASONS['title_author']],'held: never filed without its question')
                 self.assertEqual((ask.get('kind'),ask.get('why'),ask.get('odd_name')),('title_author','number_unclear',True))
                 self.assertEqual(ask['volume'],{'title_number':title_number,'series_number':source_number,'provider':'fantlab'})
+                # Senua's 74b review, r2: the record that numbers it differently gives no English title; the title as it is.
                 self.assertEqual({name:field['proposal'] for name,field in ask['fields'].items()},
-                                 {'title':english,'author':'Tolkien J. R. R.','series':'Властелин колец','number':str(title_number)})
-                # Approve with the fields untouched (no names: bulk Approve as is too) files the pre-filled series and number.
-                asked=len(calls);approved=self.research.approved(row,ROOT)
+                                 {'title':album,'author':'Tolkien J. R. R.','series':'Властелин колец','number':str(title_number)})
+                # Approve with the row's values (what its Approve sends) files them, reading the cache only.
+                asked=len(calls);approved=self.research.approved(row,ROOT,names={'series':'Властелин колец','number':str(title_number)})
                 self.assertEqual(len(calls),asked,'Approve reads the cache only')
                 review=approved['review']
-                self.assertEqual((review['title'],review['canonical_author'],review['series'],review['number']),(english,'Tolkien J. R. R.','Властелин колец',str(title_number)))
+                self.assertEqual((review['title'],review['canonical_author'],review['series'],review['number']),(album,'Tolkien J. R. R.','Властелин колец',str(title_number)))
                 self.assertEqual(evidence_missing(approved),set(),'every field it files is evidenced')
                 self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.goes_to(row,approved))
+                # Senua's 74b review, r1: research alone never files the disagreeing source's series (no question, no values).
+                self.assertEqual(self.research.approved(row,ROOT)['review']['series'],'')
                 # Numbers he types win.
                 typed=self.research.approved(row,ROOT,names={'series':'Властелин колец','number':source_number})['review']
                 self.assertEqual(typed['number'],source_number)
+
+    def test_a_record_that_numbers_the_volume_differently_gives_no_english_title_r2(self):
+        # Senua's 74b review, r2: FantLab's search for «Хранители» answers «Две твердыни» (its book 2). That record's English
+        # title is never offered or filed for «Хранители. Летопись первая», whether the warm-up or the ruling-39 author lookup
+        # read it (this volume is researched first, so the lookup reads it). Control: the agreeing volume keeps its title.
+        self.SEARCH=dict(self.SEARCH,**{'Хранители':dict(self.SEARCH['Две твердыни'],altname='Хранители')})
+        books,_=self.books()
+        row=books['Хранители. Летопись первая'];result=self.lookup(row);ask=result.get('ask') or {}
+        self.assertEqual((ask.get('why'),ask.get('volume')),('number_unclear',{'title_number':1,'series_number':'2','provider':'fantlab'}))
+        self.assertEqual(ask['fields']['title']['proposal'],'Хранители. Летопись первая','never "The Two Towers"')
+        self.assertEqual(self.research.approved(row,ROOT,names={'series':'Властелин колец','number':'1'})['review']['title'],'Хранители. Летопись первая')
+        control=self.lookup(books['Возвращение государя. Летопись третья'])
+        self.assertEqual((control['reasons'],control['review']['title'],control['review']['number']),([],'The Return of the King','3'))
 
     # The inherited held-volume tests are TolkienHeldTranslationTests' own.
     test_held_volumes_get_the_english_title_and_the_series_from_the_catalog=None

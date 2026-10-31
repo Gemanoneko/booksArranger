@@ -2712,6 +2712,14 @@ class MergeService:
             names={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
             entered_names.check(names)
         row=self.reviews._row('Audiobooks',id,revision)
+        shown=self._number_unclear(row)
+        if shown and not {'series','number'}&set(names or {}):
+            # Ruling 74b (Senua's 74b review, r1): a press without Series and Number (an API call; the row itself sends them)
+            # on a book whose current question is "Number unclear" files the Series and Number that row shows, and so does its
+            # Goes to line. Only that question: a book held for anything else never takes a disagreeing source's series here.
+            names=dict(names or {},**shown)
+            import entered_names
+            entered_names.check(names)  # the same bounds as a typed value
         # 0.22.1 (item 1, the list read during research): every listed to-do row computes this for its "Goes to" line and
         # Author field, about 0.3 s each (folder siblings, the catalog index, the rules); a page of 100 held rows took
         # 11-30 s while research ran. The answer is reused while the book, the rules and the catalog facts it reads are
@@ -2726,6 +2734,18 @@ class MergeService:
         if len(cache)>=4096:cache.clear()
         cache[key]=copy.deepcopy(result)
         return row,result
+
+    def _number_unclear(self,row):
+        """Ruling 74b: {'series', 'number'} the book's current "Number unclear" question fills in (its stored research ask, for
+        this exact revision and files), else None."""
+        automatic=getattr(self,'automatic',None)
+        if automatic is None or not hasattr(automatic,'candidate'):return None
+        try:ask=(automatic.candidate(row) or {}).get('ask') or {}
+        except (sqlite3.Error,ValueError,TypeError,KeyError):return None
+        if not isinstance(ask,dict) or ask.get('why')!='number_unclear':return None
+        fields=ask.get('fields') if isinstance(ask.get('fields'),dict) else {}
+        series,number=(str((fields.get(name) or {}).get('proposal') or '').strip() for name in ('series','number'))
+        return {'series':series,'number':number} if series and number else None
 
     def _approval_stamp(self):
         """What research.approved() reads beyond the book: the catalog revision (folder siblings), the job manifests
