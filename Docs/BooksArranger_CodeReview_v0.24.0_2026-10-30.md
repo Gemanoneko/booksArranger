@@ -560,4 +560,241 @@ Pass for the rest of this range: Electron settings, preload and IPC surface are 
 - Open Minor: 27 (the 16 from the first review, d2, d3, d5, d7 to d10, and d11 to d14).
 - Report bookkeeping: I changed the verdict line of the `4b7c8fe..790af0b` delta (above) to plain text, so the line below is the only one the release gate reads.
 
+Verdict at `797cc95` (superseded by the delta review below; kept as plain text so the release gate reads one verdict line only): RELEASE CLEAR
+
+---
+
+## Delta review edff197..01f8669 (2026-10-31): Futaba's 0.24.0 NO-GO fixes
+
+```text
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-31
+Commit range: edff1975f77207c0e5fc6fb043021a0d914a91c6..01f86692e973879e7643d63ba07b148b996fc6fa
+Commits: 5
+  8b21f7a fix: Tolkien volumes file under one author with their English titles and series (Futaba 0.24.0 B1)
+  82169e6 fix: a book moved to its chosen folder stays in Audiobook Ready (Futaba 0.24.0 M1)
+  b2d53c0 fix: a chosen folder shows on a row with no computed destination yet (Futaba 0.24.0 m1)
+  0dce386 fix: the Missing-files hint names the file names or the tags and prints part 1005 plainly (Futaba 0.24.0 m2)
+  01f8669 docs: Brief decision log for Futaba's 0.24.0 QA fixes (B1, M1, m1, m2)
+Files changed: 10 files, +241 / -22 (3 product files, 1 doc, 6 test files)
+Also covered: 797cc95..edff197 (3e9d125 version bump with changelog, edff197 docs) holds no product code, so this range follows on from the last review with nothing in between.
+Input: Docs/BooksArranger_QAReport_v0.24.0_2026-10-31.md (Futaba, NO-GO: B1, M1, m1, m2)
+```
+
+Method:
+
+- **Reading.** I read the whole diff. I also read the code around it:
+  - in `public_research.py`: the client's `read` (cache, budget, reservation, pauses and lanes), `_gap_fill`, `_gap_fill_once`, `_held_translation`, `lookup`, `_lookup`, `approved()` and `_author_latin`;
+  - in `merge_service.py`: `file_identity`, `_publication_verified`, `_remember_identity`, the startup load of verified identities, the converted check in `progress_books`, `_output_current` and `_identity_current_at`;
+  - and every place the page renders the hint and the destination line.
+- **Targeted tests on an exported copy of `01f8669`.** These passed: `test_folder_structure`'s two Tolkien classes (8), `test_identity_0222` (19), `test_destination_override` (34), and the node suites `test_todo_holds_frontend` and `test_0231_destination_frontend`.
+  - `test_folder_regroup` (3 lines changed) can't run from the scratch export: the folder is too deep for its fixtures, as noted in the earlier deltas. The coming gate run covers it.
+- **Two scratch probes, never committed:**
+  - B1 in the clean-library fixture: the requests for one research pass, Sergei's entered title with series and number, and his entered title only;
+  - M1: the moved file is edited, same size, between the move's proof and `_after_move`.
+- **Not done:** the full suite, the entry check, a build, an app launch, and any write to Z: or the live `data/`.
+
+### The three areas the brief named
+
+**1. B1: no bypass of pacing or pauses, and it never runs on Approve or on Sergei's entered fields. The 12-request bound is per lookup, not per book (q3).**
+- **Pacing and pauses: no bypass.** Every new request goes through `PublicClient.read`. That function enforces:
+  - the cache;
+  - the reservation per site;
+  - each site's pause (more than 5 s raises `ResearchWait`, and the source is skipped);
+  - the Wikimedia family limit, the hourly bounds and the lanes.
+  - `_gap_fill_once` turns a `ResearchWait` into a closed source. `_translation_lookup` passes a throwaway wait list, so nothing defers the book. The new test with five paused sites shows no request to a paused source.
+- **Bound per lookup: 12.** `_translation_lookup` has its own budget of 12 (`public_research.py:898`). The re-read afterwards uses `{'remaining':0}`, which reads the cache only and makes no request.
+- **Approve: never.** It runs only when the research budget is above 0 (`:1267`). `approved()` calls `_local_lookup` with `{'remaining':0}` (`:664`), and the new test checks that Approve and its preview make no request.
+- **Sergei's fields: never.**
+  - A title he entered or approved (state `entered` or `approved`, which Edit names also sets) drops the original-title gap.
+  - A series he entered is not a gap at all.
+  - **Probe**, in the clean-library fixture:
+    - his title, series and number: `translation_lookup` did not run;
+    - his title only: it asked for `['series']`, not the original title.
+    - The 2 requests to FantLab or Goodreads in the first case are ruling 39's author lookup (M15, older behaviour), not B1.
+  - The inherited test that guards this was switched off for the clean-library class (`test_a_title_or_series_he_entered_is_never_looked_up = None`), so this path has no test of its own (q4).
+- **Other B1 changes are sound:**
+  - An author a rule names keeps the rule's spelling.
+  - `_local_latin` takes the library's own spelling first.
+  - The `original_language 'en'` evidence is written only when `english_title` is set. `_author_latin` sets that only from a record whose language is `en` (`_author_latin`: `english=original if entry.get('language')=='en'`).
+
+**2. M1: can recording the identity mark a file ready that was never fully verified?** Only through a narrow window, and the same window already existed in the restart path (q1).
+- **The proof is full.** Every move's final file is hashed in full before it is committed:
+  - a rename: the held handle is hashed and writers are denied across the rename;
+  - a copy: the temporary is re-hashed, and `publish_no_replace` hashes it again under a handle that denies writers;
+  - recovery: `_prove`.
+- **The gap.** `_after_move` reads `file_identity()` after that proof, once the handles are closed. It checks the result against the move only by size (`merge_service.py:5023`). A same-size edit or replacement in between is recorded as the last full verification.
+  - **Probe:** after `run`, I flipped one byte of the moved file and kept its size. `_validated_outputs` then equals the edited file's stat, and its bytes are no longer the receipt.
+  - The window is milliseconds in a session. It can be minutes in start-up recovery, which reconciles every move before it calls `_after_move`.
+- **The exposure is limited.** `_validated_outputs` only feeds the ready and converted check in `progress_books`. Removing originals, recovery copies or working files still hashes the book in full (`_output_current`'s docstring; `_output_valid` / `_identity_current_at`).
+- **It is older than this range.** `_publication_verified` (`:4547`) already saved the same unchecked identity in `verified_outputs`, and every engine start loads it into `_validated_outputs` (`:270`). M1 makes it take effect at once instead of after a restart.
+
+**3. The new engine-to-page field (`ask.missing.source`), and escaping.** Escaped, with one copy leftover (q2).
+- **The field.** It is an engine-made enum, `'names'` or `'tags'` (`merge_service.py:2362`). The page compares it with `'names'` and picks one of two fixed strings (`web/app.js:2587`). Numbers are printed with `String(Number(v))`. The hint goes through `setHint` (`textContent`), and the cell's tip is the `title` property.
+- **m1's chosen-folder line.** It is built with `node()`, the tooltip is the `title` property, and the folder text is the engine's validated override folder. Nothing is HTML.
+- `web/` still has no `innerHTML`, `insertAdjacentHTML`, `outerHTML` or `document.write`.
+
+### New findings
+
+- **[Minor] q1** (dimension 5): `merge_service.py:5023`, and the older `:4547`. The identity recorded as the moved file's last full verification is read after the proof, not during it, and compared with the move only by size. A same-size change in that window is recorded as verified (probe above). Only the ready and converted display is affected; destructive steps still hash in full.
+  - **Fix:** capture the `(st_dev, st_ino, st_size, st_mtime_ns)` tuple inside the proof, while the handle is held (as `_output_valid_at` does with `captured`). Store it in the move's `final`, and use it in `_after_move` and `_publication_verified`. At minimum, check `st_ino` and `st_dev` against `final['identity']`.
+- **[Minor] q2** (dimension 2): `merge_service.py:2357` with `:2470`. Futaba's m2 is fixed for the wording and the number format, but not for its third point.
+  - For a numbering counted from its first number (73i, `1001…1012` without `1005`), `total` is the last number (1012). The files read "Part 1005 of 1012", while the hint says "there are 12 parts". This is the "Part 1005 of 1012 beside 12 parts" in Futaba's report.
+- **[Minor] q3** (dimensions 4 and 8): `public_research.py:898`, `:1267` and `:825`. The new lookup has its own budget of 12. It does not draw on the book's research budget of 12, which `_author_latin` still uses afterwards, and `lookup()` then runs `_held_translation` with another 12.
+  - **Bound:** one research pass of one translated book can make up to 24 requests, or 36 if the book is then held. Repeats are cached, and each site's hourly bounds still apply.
+  - **Waits:** for each request, the research thread waits out that site's pacing gap, up to 5 s, or 7 s for the Wikimedia family. So research of a translation with an open gap now takes seconds. The `_local_lookup` docstring and the Brief say "nothing waits"; that is true only of pauses and deferral.
+  - **Fix:** charge the lookup to the book's research budget (or `min(12, remaining)`), and reword "nothing waits" as "never deferred; the client's pacing applies".
+- **[Minor] q4** (dimension 7): `tests/test_folder_structure.py`, `TolkienCleanLibraryTests`. The entered-fields guard of the new path has no test: the inherited test is switched off because `books()` now returns a dict. My probe shows the guard holds today. Add a dict-keyed version of `test_a_title_or_series_he_entered_is_never_looked_up` for the clean-library class.
+
+The findings from the earlier ranges (D1r4, d2, d3, d5, d7 to d14 and the first review's 16 Minors) are not touched by this range and are in the backlog (`Docs/BooksArranger_0.22.1_Backlog.md`).
+
+Pass for the rest of this range: Electron settings, preload and IPC are unchanged. There are no secrets. Every new network request goes through the app's own client. Nothing new writes outside the catalog, and nothing new deletes.
+
+### Final verdict
+
+- Open Critical: 0. The safety floor is intact.
+- Open Major: 1 (D1r4, from `790af0b..797cc95`, in the backlog). This range adds none.
+- Open Minor: 31 (the 27 from before, plus q1 to q4).
+- Report bookkeeping: I changed the verdict line of the `790af0b..797cc95` delta (above) to plain text, so the line below is the only one the release gate reads.
+
+Verdict at `01f8669` (superseded by the delta review below; kept as plain text so the release gate reads one verdict line only): RELEASE CLEAR
+
+---
+
+## Delta review 01f8669..0318217 (2026-10-31): ruling 74b, "Number unclear"
+
+```text
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-31
+Commit range: 01f86692e973879e7643d63ba07b148b996fc6fa..031821752d4ff6d8e8eb0446f90ed15dfd6402a4
+Commits: 1 (0318217 feat: hold and ask when a volume title and the source disagree on the number (ruling 74b, "Number unclear"))
+Files changed: 7 files, +137 / -8 (3 product files, 1 doc, 3 test files)
+```
+
+Method:
+
+- **Reading.** I read the whole diff. I also read the code around it: `approved()` (`typed`, `typed_names`, `with_names`, `_english_original`), `_local_lookup`'s returns before the new ask, `_gap_fill`, `lookup()`'s piece hold, the page's `namesFor`, `askValues`, `bulkChip`, `approveSelectable`, `oddName` and `setHint`.
+- **Targeted tests on an exported copy of `0318217`.** These passed: the two Tolkien classes in `test_folder_structure` (9), and the node suites `test_odd_names_frontend` and `test_todo_holds_frontend`.
+  - The new `test_folder_regroup` case can't run from the scratch export: the folder is too deep for its fixtures, as noted in the earlier deltas. The coming gate run covers it.
+- **One scratch probe, never committed,** run on the Tolkien fixtures:
+  - H1: a volume held as two halves, which FantLab numbers book 2;
+  - H2: the same, with a wrong record (FantLab's search for «Хранители» answers «Две твердыни»);
+  - C1: the clean library with the wrong record;
+  - H3: the clean library with duplicate track numbers.
+- **Not done:** the full suite, the entry check, a build, an app launch, and any write to Z: or the live `data/`.
+
+### The three areas the brief named
+
+**1. Can the new `approved()` default file a series Sergei never saw on a book held for another reason?** Yes (r1).
+- **What the default keys on.** It is in `public_research.py:660`. It applies whenever the cache-only `_gap_fill` reports a `volume_mismatch`, the identity has no series, and no Series or Number was typed or entered. It does not check that the book's row asked "Number unclear".
+- **The "Number unclear" row itself never uses this default:**
+  - its Approve always sends Series and Number (`namesFor`; the frontend test checks `names == {series, number}`);
+  - it is an odd-name row, so bulk Approve and Select all skip it (`approveSelectable`; "never in Select all or bulk Approve").
+- **Where the default does take effect.** Only presses that send no Series or Number:
+  - single Approve, and its preview, on a row of another kind that shows no Series or Number fields;
+  - bulk Approve on the "Title or author" and "Author unclear" chips, for rows that are not odd-name rows.
+- **When the cache holds a mismatch but the row did not ask "Number unclear":**
+  - research returned earlier with another question (`_local_lookup` before `:1473`), or failed the ask's own conditions (`not reasons`, `one_source`, `not part`);
+  - or the mismatch reached the cache after research (`_held_translation` runs after a hold, inside `lookup()`).
+- **What the probe showed.** In the Tolkien fixtures the ask is raised: H1 and H2 carry both "Title or author missing" and "One part of a bigger book", with the ask `number_unclear`, so the row there is "Number unclear". The gap is in the other paths above.
+- **Ender's point holds only partly.** Such a row's Goes-to preview shows the series path, but not the disagreement. Bulk Approve shows no preview for each row. And the series evidence the default writes says "approved by Sergei as shown (ruling 74b)" (`:2060`) even where nothing was shown.
+
+**2. Does untouched Approve ever override fields Sergei typed?** No.
+- **Series or Number typed now** (an empty value included: `namesFor` sends `''` for a cleared field, and the key alone counts) or **entered through Edit names:** the default is skipped (`{'series','number'} & (names_entered | typed_names)`).
+- **Title typed or entered** (`typed` includes `names_entered`): `_english_original` is not called, so there is no mismatch and no default.
+- **His saved series** (`settled['series']`): skipped.
+- **The new test checks it:** a typed number wins.
+
+**3. The new `volume` field from the engine to the page: is it escaped?** Yes.
+- **The field.** `payload['volume']` carries `title_number`, `series_number` and `provider` (`merge_service.py:2353`).
+- **The page.** `numberUnclear` (`web/app.js:2533`) requires `title_number` to be a whole number of at least 1. `provider` only selects one of four fixed site names, else "an online source".
+- **`series_number` is the only text from outside**, from the source record. It is inserted into the sentence, which goes through `setHint`, which uses `textContent`. The tooltip is the `title` property. The proposals fill input `value`s.
+- `web/` still has no HTML sinks.
+
+### New findings
+
+- **[Major] r1** (dimension 2): `public_research.py:660`. The default for an untouched Approve files the source's series with the title's number whenever the cache shows a volume mismatch, whether or not the row asked "Number unclear".
+  - **Why that inverts the ruling.** The "Number unclear" row sends its own values and is never bulk-approved. So in the app this default takes effect only for books Sergei was not asked about. That is the opposite of 74b ("hold the book and ask Sergei"). It also overrides rulings 51 and 52 (a disagreeing position is never filed without asking).
+  - **The evidence is false in that case.** The series evidence records "approved by Sergei as shown".
+  - **Severity: Major, not Critical.** Nothing is lost. The worst outcome is a wrong series folder, or a wrong number, that Sergei has to move.
+  - **Fix:** apply the default only when the book's current research ask is `number_unclear` (read from the stored research result), or drop the engine-side default, since the row already sends the values. Add a regression: a book held for another reason, with a mismatch in the cache, files no series on an Approve without names.
+- **[Minor] r2** (dimension 2): `public_research.py:1580` with `approved()`'s `_english_original`. A volume mismatch can mean the record is the wrong book, not just the wrong number. `_gap_fill` still keeps that record's catalog entry, so its English title becomes the title.
+  - **Probes H2 and C1:** «Хранители. Летопись первая» is proposed on the row as "The Two Towers" and would be filed that way (series «Властелин колец», number 1).
+  - The title source is older than this range (ruling 49). But 74b now presents it as "Title (what Approve files under now)" beside a sentence that blames only the number.
+  - **Fix:** when `volume_mismatch` is set, do not take `original_title` from the record of that second pass, or say on the row that the title came from the same disagreeing record.
+
+The findings from the earlier ranges (D1r4, d2, d3, d5, d7 to d14, q1 to q4 and the first review's 16 Minors) are not touched by this range.
+
+Pass for the rest of this range:
+- The ask is raised only when research has no other reason, no title of Sergei's, and no series.
+- Ruling 74c (a translation the sources don't answer files at once) is unchanged.
+- Nothing new makes network requests: `approved()` stays cache-only, and the test checks it.
+- There are no Electron, IPC, secret or file-deletion changes.
+
+### Final verdict
+
+- Open Critical: 0. The safety floor is intact.
+- Open Major: 2 (D1r4 from `790af0b..797cc95`, in the backlog; r1 from this range).
+- Open Minor: 32 (the 31 from before, plus r2).
+- Report bookkeeping: I changed the verdict line of the `edff197..01f8669` delta (above) to plain text, so the line below is the only one the release gate reads.
+
+Verdict at `0318217` (superseded by the delta review below; kept as plain text so the release gate reads one verdict line only): RELEASE CLEAR
+
+---
+
+## Delta review 0318217..abe5fab (2026-10-31): the release commit
+
+```text
+Reviewer: Senua (Code Reviewer)
+Date: 2026-10-31
+Commit range: 031821752d4ff6d8e8eb0446f90ed15dfd6402a4..abe5fab23cc5d74bc6e6510751a15eb4b1dcaac8
+Commits: 2
+  629ac23 fix: only a "Number unclear" book takes its row's series; a disagreeing record gives no English title (Senua 74b r1, r2)
+  abe5fab feat: an Approve answering another question on disagreeing numbers asks "Number unclear" next (ruling 74b follow-up)
+Files changed: 5 files, +144 / -45 (2 product files, 1 doc, 2 test files)
+```
+
+Release source commit: abe5fab23cc5d74bc6e6510751a15eb4b1dcaac8
+
+Release artifact manifest SHA256: 7932ed4319c1e35c323bbaea6f21352d1760ec340de19cf134e5ef0fb57422a2
+
+- **The manifest checks out.** I read it in place at `Worktrees\Books Arranger\q240\r11\dist\release-artifacts.json` (read-only). Its SHA-256 equals the line above, and it shows `version` 0.24.0, `source_head` `abe5fab23cc5d74bc6e6510751a15eb4b1dcaac8` and `build_id` `d1a0856a-98ef-4936-a66c-56df3eefcf9d`. Futaba's GO report pins the same commit and hash.
+- **The format checks out.** Both lines and the verdict line pass the tool repo's own `scripts/release-contract.mjs` (`reportPin`, `reportManifest`) and the studio's `check_release_preconditions.mjs` (`findVerdict`).
+- **The release will refuse as things stand.** The tool repo's own `dist/release-artifacts.json` is still 0.23.0's (`36d601be…4f9c`). `scripts/release-flow.mjs` hashes that file, so the accepted 0.24.0 manifest has to be in place before the release runs.
+
+Method:
+
+- **Reading.** I read the whole diff and the code around it:
+  - `MergeService._approval_result` and the new `_number_unclear`;
+  - the `number_question` branch in Approve;
+  - `_answer_then_ask_series`;
+  - in `public_research.py`: `approved()`, `_english_original`, `_gap_fill`, and the ask conditions in `_local_lookup`.
+- **Targeted tests on an exported copy of `abe5fab`.** These passed: the two Tolkien classes in `test_folder_structure` (10), and the node suite `test_odd_names_frontend`.
+  - The changed `test_folder_regroup` cases can't run from the scratch export (the folder is too deep, as before). They belong to the gate run.
+- **Not done:** the full suite, the entry check, a build, an app launch, and any write to Z: or the live `data/`.
+
+### Earlier findings
+
+| # | Status | Evidence |
+|---|--------|----------|
+| r1 | **Closed** | The default for an untouched Approve is gone from `approved()`, along with its "approved by Sergei as shown" evidence text. A press without Series and Number now gets the row's values only when the book's stored research question is `number_unclear` (`merge_service.py:2715`, `_number_unclear` at `:2738`). Any other Approve that meets a mismatch saves his answer, files nothing, and asks "Number unclear" next (`:3444`). |
+| r2 | **Closed** | A pass whose series number disagrees now keeps nothing from that record: no series, no catalog entry and no full author name (`public_research.py`, `_gap_fill`). So no English title comes from it. The question proposes the files' own title when the English title came from the ruling-39 lookup. |
+
+### New finding
+
+- **[Minor] s1** (dimension 2): `public_research.py:673` against `:1477`. The two conditions don't match.
+  - **Approve:** `number_question` is set on any volume mismatch where no series was typed or saved.
+  - **Research:** the "Number unclear" question itself also needs `not his`, `one_source`, `not reasons` and `not part`.
+  - **The effect.** Take a book held for a reason that survives Sergei's answer: a part book, "Author full name not established", or a title or author already in state `approved`. Every Approve on it saves his answer and says "Number unclear" comes next, but research never asks it. The book can be filed only by typing a Series and Number. Nothing is lost.
+  - **Fix:** give `number_question` the same conditions as the question, or let the follow-up ask regardless of the other gates.
+
+There are no page changes in this range, so escaping is unchanged. The findings from the earlier ranges (D1r4, d2, d3, d5, d7 to d14, q1 to q4 and the first review's 16 Minors) are not touched by it.
+
+### Final verdict
+
+- Open Critical: 0. The safety floor is intact.
+- Open Major: 1 (D1r4, in the backlog; r1 is closed).
+- Open Minor: 32 (r2 is closed, s1 is added).
+- Report bookkeeping: I changed the verdict line of the `01f8669..0318217` delta (above) to plain text, so the line below is the only one the release gate reads.
+
 **Verdict:** RELEASE CLEAR

@@ -261,6 +261,13 @@ Sergei explicitly requested logging only: no investigation, implementation, test
   - d13: a crash after commit while the old share is away leaves a duplicate.
   - d14: an error that never clears keeps the move unfinished forever, with no way out.
   - The `$` pattern (d9) also applies to the `renamed` sentence.
+- **Futaba 0.24.0 M2, also in 0.23.0:** if another program holds a finished book's file open when the engine starts, the book is flagged "Output needs attention" and never recovers. The startup check can't open the file, and the later checks only look at completed jobs. Fix: treat "can't open" as retry later, or re-check jobs that need attention. Futaba's m3 ("Candidate changed" after a fresh scan) is also still open.
+- **Senua's minor findings from the delta review of `edff197..01f8669`** (details in the review doc):
+  - q1: a moved file's identity is recorded after its check and compared by size only.
+  - q2: the row still says "Part 1005 of 1012" next to "12 parts".
+  - q3: one research pass can make up to 24–36 requests, and research waits through pacing gaps although the docs say "nothing waits".
+  - q4: no test guards Sergei's entered fields on the new clean-library path.
+- **Senua s1 (Minor):** Approve promises "Number unclear" next under looser conditions than research uses to ask it. Affected: part books, "Author full name not established", or already-approved fields. The question never comes, so Sergei must type Series and Number. Also Futaba m5: after a kept-answer Approve the row leaves the list until Start; add a "press Start" hint.
 - **Rare copy mismatch** (`797cc95`): a rename recorded before the app closed, while the share is away, shows the `copy` line ("both files are kept"), but only the old file is known to exist. Judy should write a line for it.
 - **"Restart Books Arranger" button on an unfinished-move row** (Judy's offer, 2026-10-30). It would use `shellApi.restartEngine`, which also stops other books' work. Offered to Sergei; not approved.
 - **Sweep fails open on a `git grep` error** (studio tooling, not this tool): a grep error counts as "not cited", so the folder can be deleted. Offered to Sergei 2026-10-30, unanswered.
