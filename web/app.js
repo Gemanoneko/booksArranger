@@ -3099,6 +3099,10 @@ function destPlan(row){
   const raw=typeof dest?.path==='string'?dest.path:'',path=raw?sortedPath(raw,row):'';
   // A book with a job whose destination the engine did not send: no line (the job's own destination is the engine's).
   if(!path && !ask && job && typeof job==='object')return null;
+  // Futaba's 0.24.0 QA, m1: no computed destination yet (no title), but a folder Sergei chose: the book goes straight into
+  // that folder (Judy 15.1: the chosen folder plus the computed file name, which comes with the title).
+  const chosen=path?null:overrideOf(row);
+  if(chosen)return {label,path:shownFolder(chosen.folder),absolute:chosen.folder,taken,finished:false,undecided:false};
   return {label,path,absolute:dest?.absolute || (isAbsolutePath(raw)?raw:path),taken,finished:false,undecided:!path};
 }
 function buildDestination(row,td,line=null){
@@ -3159,7 +3163,7 @@ function updateDestination(entry){
   if(entry.line.dataset.key!==key){entry.line.replaceChildren();entry.line.append(node('span',plan.label,'goes-label'),node('span',path,plan.undecided?'':'path'));entry.line.dataset.key=key;}
   entry.line.hidden=false;entry.line.title=plan.undecided?'':plan.absolute || path;entry.line.classList?.toggle?.('taken',!!plan.taken);
   const override=overrideOf(row),computed=override?sortedPath(override.computed_folder || folderOf(override.computed_path),null).replace(/([^\\/])$/,'$1\\'):'';
-  setLine(entry.chosen,override?`Folder chosen by you. The app would use ${computed}`:'');
+  setLine(entry.chosen,override?'Folder chosen by you.'+(computed?` The app would use ${computed}`:''):'');  // m1: nothing computed yet, no empty "would use"
   const mode=chooseMode(row),finished=plan.finished,confirming=finished && !!override && destConfirm.has(row.id),name=askName(row);
   if(!override || !finished)destConfirm.delete(row.id);
   entry.controls.hidden=confirming;entry.confirm.hidden=!confirming;
@@ -3221,9 +3225,10 @@ function applyDestination(row,answer,folder){
     if(askOf(row)){row.ask.destination={...(row.ask.destination || {}),path:preview.path,absolute:preview.absolute || '',taken:preview.taken===true,reason:''};const d=askDrafts.get(id);if(d){d.preview=null;d.previewKey=null;const entry=askRows.get(id);if(entry)askPreview(entry,0);}}
   }
   if(answer?.move && typeof answer.move==='object')row.move=answer.move;
-  const path=shownPath(preview?.path || destPlan(row)?.path || '');
-  if(outcome==='saved')destNotes.set(id,{text:hasApprove(row)?'Folder saved. Approve converts the book and files it there.':`Folder saved. This book goes to ${path}.`,warn:false,at:Date.now()});
-  else if(outcome==='cleared')destNotes.set(id,{text:`Folder reset. This book goes to ${path}.`,warn:false,at:Date.now()});
+  // m1: a book with no file name yet goes to the chosen folder itself (destPlan); a sentence never ends in an empty path.
+  const path=shownPath(preview?.path || destPlan(row)?.path || '').replace(/[\\/]$/,'');
+  if(outcome==='saved')destNotes.set(id,{text:hasApprove(row)?'Folder saved. Approve converts the book and files it there.':path?`Folder saved. This book goes to ${path}.`:'Folder saved.',warn:false,at:Date.now()});
+  else if(outcome==='cleared')destNotes.set(id,{text:path?`Folder reset. This book goes to ${path}.`:'Folder reset.',warn:false,at:Date.now()});
   else if(outcome==='move_queued'){if(!moveOf(row))row.move={state:'queued',target:answer?.move?.target || (folder?folder.replace(/[\\/]+$/,'')+'\\'+baseName(row.output?.path):''),folder:folder || ''};}
 }
 function resetFolderPress(id){

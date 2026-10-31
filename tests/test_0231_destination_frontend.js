@@ -94,6 +94,21 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   // A row without Approve: the saved line names the path.
   destAnswer=ok({outcome:'saved',destination_override:{...chosen,folder:'D:\\Books'},preview:{path:'D:\\Books\\B.m4b',absolute:'D:\\Books\\B.m4b'}});pickAnswer='D:\\Books';
   await press(choose(trOf('cand-pend')));assert.equal(stateLine(trOf('cand-pend')).textContent,'Folder saved. This book goes to D:\\Books\\B.m4b.');
+  // Futaba's 0.24.0 QA, m1: a row with no computed destination yet (no title) shows the folder chosen for it, and never an
+  // empty sentence ("The app would use " and "This book goes to ." with nothing in them).
+  const none={folder:'D:\\Moved\\Interview',computed_folder:'',computed_path:'',outside_sorted:true};
+  paint([bookRow('nd2',{preview:{path:'',reason:'Type a title first.'}})]);
+  assert.equal(goes(trOf('cand-nd2')),'Goes to Not decided yet.');
+  destAnswer=ok({outcome:'saved',destination_override:none,preview:{path:'',absolute:'',taken:false}});pickAnswer='D:\\Moved\\Interview';
+  await press(choose(trOf('cand-nd2')));
+  assert.equal(stateLine(trOf('cand-nd2')).textContent,'Folder saved. This book goes to D:\\Moved\\Interview.');
+  assert.equal(goes(trOf('cand-nd2')),'Goes to D:\\Moved\\Interview\\');assert.equal(destBlock(trOf('cand-nd2')).children[0].title,'D:\\Moved\\Interview');
+  assert.equal(chosenLine(trOf('cand-nd2')).textContent,'Folder chosen by you.');
+  paint([bookRow('nd4',{preview:{path:'',reason:'Type a title first.'},destination_override:none})]);  // a later poll: the engine's row
+  assert.equal(goes(trOf('cand-nd4')),'Goes to D:\\Moved\\Interview\\');assert.equal(chosenLine(trOf('cand-nd4')).textContent,'Folder chosen by you.');
+  destAnswer=ok({outcome:'cleared',destination_override:null,preview:{path:'',absolute:''}});
+  await press(reset(trOf('cand-nd4')));
+  assert.equal(stateLine(trOf('cand-nd4')).textContent,'Folder reset.');assert.equal(goes(trOf('cand-nd4')),'Goes to Not decided yet.');assert.equal(chosenLine(trOf('cand-nd4')).hidden,true);
   // Check 17: with a chosen folder painted from the engine; a name taken there; without one: neither line nor button.
   paint([waiting('c',{path:'D:\\Books\\Horror\\X.m4b',absolute:'D:\\Books\\Horror\\X.m4b',taken:false,reason:''},{destination_override:chosen}),
     waiting('t',{path:'D:\\Books\\Horror\\X.m4b',absolute:'D:\\Books\\Horror\\X.m4b',taken:true,reason:''},{destination_override:chosen}),waiting('plain',rel('A\\X.m4b'))]);
