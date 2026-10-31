@@ -12,8 +12,9 @@ from storage_cleanup import StorageCleanup
 
 @unittest.skipUnless(os.name=='nt','Exact native directory fixtures require Windows')
 class SourceFolderTests(unittest.TestCase):
-    # Tests marked fixture_only_simulated_streamless_provider exercise receipt
-    # transitions only. Real NTFS is tested separately and must NEVER dispose.
+    # Ruling 74e (2026-10-31): the book's own folder goes once no audio is left in it, its non-audio files with it, with a
+    # plain non-recursive rmdir that also works on real NTFS (ruling 24a's removal). The patched-capability tests below
+    # come from the exact-handle disposition model; the post-conversion cleanup no longer asks for that capability.
     def setUp(self):
         scratch=Path(__file__).resolve().parents[1]/'scratch/progress-folders-2026-10-10/empty-folder-fixtures'
         scratch.mkdir(parents=True,exist_ok=True)
@@ -100,15 +101,16 @@ class SourceFolderTests(unittest.TestCase):
         self.retire();replacement=Path(self.sources[0]['path']);replacement.write_bytes(b'NEW ORIGINAL')
         with self.assertRaisesRegex(BoundaryError,'replacement original'):self.storage.run_folders(self.job_id)
         self.assertEqual(replacement.read_bytes(),b'NEW ORIGINAL');self.assertTrue(self.folder.exists())
-    @patch.object(VerifiedDirectory,'require_empty_disposition',return_value={'fixture_only_simulated_streamless_provider':True})
-    def test_file_arriving_between_empty_check_and_native_disposition_survives(self,_capability):
-        self.retire();real=VerifiedDirectory.dispose_empty;arrived=[]
-        def arrival(target):
-            if target.path==self.folder and not arrived:
-                path=self.folder/'arrived.txt';path.write_bytes(b'NEW SIDECAR');arrived.append(path)
-            return real(target)
-        with patch.object(VerifiedDirectory,'dispose_empty',arrival):status=self.storage.run_folders(self.job_id)
+    def test_file_arriving_between_empty_check_and_removal_survives(self):
+        # 74e: the plain rmdir itself refuses a folder that is no longer empty; nothing recursive ever runs.
+        self.retire();real=os.rmdir;arrived=[]
+        def arrival(path,*args,**kwargs):
+            if Path(path)==self.folder and not arrived:
+                late=self.folder/'arrived.txt';late.write_bytes(b'NEW SIDECAR');arrived.append(late)
+            return real(path,*args,**kwargs)
+        with patch('os.rmdir',arrival):status=self.storage.run_folders(self.job_id)
         self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],0);self.assertEqual(arrived[0].read_bytes(),b'NEW SIDECAR')
+        self.assertEqual(self.receipt(self.folder)['state'],'retained_nonempty');self.assert_output()
     def test_native_atomic_disposition_preserves_new_directory_stream(self):
         import ctypes
         from ctypes import wintypes
@@ -126,13 +128,55 @@ class SourceFolderTests(unittest.TestCase):
                 with self.assertRaisesRegex(DirectoryDispositionUnsupported,'named data streams'):target.dispose_empty()
         self.assertTrue(self.folder.exists())
         with open(str(self.folder)+':late','rb') as stream:self.assertEqual(stream.read(),b'UNIQUE LATE DIRECTORY STREAM')
-    def test_real_named_stream_volume_retains_empty_source_folders_unsupported(self):
+    def test_real_named_stream_volume_removes_emptied_source_folders(self):
+        # 74e (Legends' empty folder on Z:): a real NTFS volume, which reports named streams, no longer keeps the folders.
         self.retire();status=self.storage.run_folders(self.job_id)
-        self.assertEqual(status['state'],'unsupported');self.assertEqual(status['removed'],0);self.assertEqual(status['unsupported'],1);self.assertIn('named data streams',status['reason'])
-        self.assertTrue(self.folder.exists());self.assertTrue((self.library/'Author').exists());self.assertTrue(self.library.exists());self.assertIsNone(self.receipt(self.library));self.assert_output()
+        self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],2);self.assertEqual(status['unsupported'],0)
+        self.assertFalse((self.library/'Author'/'Old Book').exists());self.assertTrue((self.library/'Author').is_dir());self.assertTrue(self.library.exists())
+        self.assertIsNone(self.receipt(self.library/'Author'));self.assertIsNone(self.receipt(self.library));self.assert_output()
         self.assertEqual(self.storage.status()[0]['state'],'completed');self.assertEqual(self.source.status(self.job_id)['state'],'completed')
-        self.assertEqual(len(list((self.source.root/self.cleanup_id).iterdir())),len(self.sources))
-        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'unsupported')
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed')
+    def test_cover_hidden_and_text_files_go_with_the_folder_when_no_audio_is_left(self):
+        # 74e (Логово's .jpg): the book's own folder loses its non-audio files, then goes; the author folder stays (m2).
+        for name in ('.hidden','cover.jpg','notes.txt'):(self.folder/name).write_bytes(b'LEFTOVER')
+        kernel.SetFileAttributesW(str(self.folder/'.hidden'),2)
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],2);self.assertEqual(status['retained'],0)
+        self.assertFalse(self.folder.exists());self.assertFalse((self.library/'Author'/'Old Book').exists());self.assertTrue((self.library/'Author').is_dir())
+        self.assertEqual(self.receipt(self.folder)['state'],'removed');self.assert_output()
+    def test_audio_in_any_format_keeps_the_folder_and_every_file(self):
+        for name,data in (('bonus.ape',b'OTHER RECORDING'),('cover.jpg',b'COVER')):(self.folder/name).write_bytes(data)
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertEqual(status['retained'],2)
+        self.assertEqual((self.folder/'bonus.ape').read_bytes(),b'OTHER RECORDING');self.assertEqual((self.folder/'cover.jpg').read_bytes(),b'COVER')
+        self.assertIn('Audio files remain',self.receipt(self.folder)['reason']);self.assert_output()
+    def test_subfolder_keeps_the_folder_and_its_files(self):
+        (self.folder/'Scans').mkdir();(self.folder/'Scans'/'page.jpg').write_bytes(b'SCAN');(self.folder/'cover.jpg').write_bytes(b'COVER')
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertEqual((self.folder/'Scans'/'page.jpg').read_bytes(),b'SCAN');self.assertEqual((self.folder/'cover.jpg').read_bytes(),b'COVER')
+        self.assertIn('subfolder',self.receipt(self.folder)['reason'])
+    def test_ancestor_folder_keeps_its_own_files(self):
+        # Only a folder a source sat in loses its other files; a series or book folder above it goes only when empty.
+        (self.folder.parent/'series.jpg').write_bytes(b'SERIES');(self.folder/'cover.jpg').write_bytes(b'COVER')
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],1);self.assertEqual(status['retained'],1);self.assertFalse(self.folder.exists())
+        self.assertEqual((self.folder.parent/'series.jpg').read_bytes(),b'SERIES');self.assertEqual(self.receipt(self.folder.parent)['state'],'retained_nonempty')
+    def test_file_another_unfinished_job_names_keeps_the_folder(self):
+        cover=self.folder/'cover.jpg';cover.write_bytes(b'COVER');self.retire()
+        other=dict(self.manifest,job_id=str(uuid.uuid4()),candidate_id=str(uuid.uuid4()),sources=[],cover={'path':str(cover),'sha256':'0'*64})
+        with connect(self.db) as db:db.execute('INSERT INTO audio_jobs(job_id,state,stage,manifest,manifest_hash,created,updated,journal,reason) VALUES(?,?,?,?,?,?,?,?,?)',
+                                               (other['job_id'],'pending','queued',json.dumps(other),'x','2026-10-31','2026-10-31','{}',''))
+        status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertEqual(cover.read_bytes(),b'COVER');self.assertIn('Another book or job',self.receipt(self.folder)['reason'])
+    def test_file_with_a_second_name_keeps_the_folder(self):
+        (self.folder/'cover.jpg').write_bytes(b'COVER');os.link(self.folder/'cover.jpg',self.base/'elsewhere.jpg')
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertEqual((self.folder/'cover.jpg').read_bytes(),b'COVER');self.assertIn('second name',self.receipt(self.folder)['reason'])
+    def test_leftover_that_cannot_be_removed_keeps_the_folder(self):
+        (self.folder/'cover.jpg').write_bytes(b'COVER');(self.folder/'notes.txt').write_bytes(b'NOTES')
+        self.retire()
+        with patch('book_delete.remove',return_value=('in_use','[WinError 32] in use')):status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertTrue(self.folder.exists());self.assertIn('could not be removed',self.receipt(self.folder)['reason'])
     def test_unknown_volume_capability_refuses_native_disposition(self):
         self.retire()
         with DirectoryBoundary(self.library,self.folder.parent),VerifiedDirectory(self.folder,delete=True) as target,patch.object(kernel,'GetVolumeInformationByHandleW',return_value=0):
@@ -195,10 +239,9 @@ class SourceFolderTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'simulated'):self.storage.run_folders(self.job_id)
         self.assertFalse(failed[0].exists());status=self.storage.run_folders(self.job_id)
         self.assertEqual(status['state'],'completed');self.assertEqual(status['absent_after_intent'],1);self.assertEqual(status['removed'],1);self.assert_output()  # Disc, Old Book (m2)
-    @patch.object(VerifiedDirectory,'require_empty_disposition',return_value={'fixture_only_simulated_streamless_provider':True})
-    def test_crash_before_disposition_rejects_replaced_empty_directory(self,_capability):
+    def test_crash_before_disposition_rejects_replaced_empty_directory(self):
         self.retire()
-        with patch.object(VerifiedDirectory,'dispose_empty',side_effect=RuntimeError('simulated before disposition')):
+        with patch('os.rmdir',side_effect=RuntimeError('simulated before disposition')):
             with self.assertRaises(RuntimeError):self.storage.run_folders(self.job_id)
         saved=self.base/'old-empty';self.folder.rename(saved);self.folder.mkdir()
         with self.assertRaisesRegex(BoundaryError,'identity changed'):self.storage.run_folders(self.job_id)
@@ -217,7 +260,10 @@ class SourceFolderTests(unittest.TestCase):
             self.assertEqual(self.storage.run_folders(self.job_id),prior)
         self.assertTrue(self.folder.exists());self.assert_output()
     def test_terminal_unsupported_receipt_returns_without_output_rehash(self):
-        self.retire();prior=self.storage.run_folders(self.job_id);self.assertEqual(prior['state'],'unsupported')
+        # A receipt an earlier version left 'unsupported' (an empty folder kept on NTFS) is final: 74e applies to cleanups
+        # from 0.24.1 on and never re-runs a finished one.
+        self.retire();self.storage._folder_set(self.job_id,self.output['sha256'],'unsupported','Empty source folder retained: NTFS supports named data streams')
+        prior=self.storage.run_folders(self.job_id);self.assertEqual(prior['state'],'unsupported')
         with patch.object(self.storage,'protected_output',side_effect=AssertionError('Deferred folder receipt must not rehash output')):
             self.assertEqual(self.storage.run_folders(self.job_id),prior)
         self.assertTrue(self.folder.exists());self.assert_output()

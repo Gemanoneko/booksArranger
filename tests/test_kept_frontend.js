@@ -110,9 +110,9 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:1,attention_counts:{retry:2,repair:1,changed:1,audiobook:1,other:0,unsupported:1}}})+';renderJobs()');
   assert.match(get('jobs-status').textContent,/ · 6 need attention$/);
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Needs attention',queued:0,failed:4}})+';renderJobs()');assert.match(get('jobs-status').textContent,/ · 4 need attention$/);
-  // Empty source folders hold nothing: the server sends no folder note, so the panel shows none.
+  // Source folders hold nothing: the server sends no folder note, so the panel shows none.
   run('state='+JSON.stringify({...backend,audiobook_jobs:{state:'Completed',queued:0,failed:0,folder_cleanup_notes:[]}})+';renderJobs()');
-  assert.doesNotMatch(get('jobs-help').textContent,/Empty source folders/);
+  assert.doesNotMatch(get('jobs-help').textContent,/source folders/i);
   context.setTimeout=()=>0;
   console.log('PASS kept-files classes and copy, Keep files row and panel action (one request, pending, refused, landed), kept-by-choice lines, strip groups and zero hiding with fallback, Jobs panel total');
 })().catch(error=>{console.error(error);process.exitCode=1;});

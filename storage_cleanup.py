@@ -738,40 +738,120 @@ class StorageCleanup:
                 return None
         return self._folder_known(job_id,path)
 
-    def _remove_folder(self, job_id, manifest, output, path):
+    # Ruling 74e (Sergei, 2026-10-31): a book's own source folder goes once no audio file is left in it, even when covers or
+    # other non-audio files remain. A bound past which a folder counts as holding something else (its files stay).
+    LEFTOVER_LIMIT = 500
+
+    def _held(self, job_id, manifest, paths):
+        """The leftover paths another book, an unfinished job or a reacquire record still names, as normcase keys: another
+        current book's member, a source or cover of any other job that has not completed (its cover may still be read), or a
+        reacquire record that is not archived. Read-only; an unreadable catalog holds everything."""
+        wanted = {os.path.normcase(str(p)) for p in paths}
+        held = set()
+        try:
+            with connect(self.database) as db:
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if 'catalog_group_members' in tables and 'book_groups' in tables:
+                    for (member,) in db.execute('SELECT c.path FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE g.superseded=0 AND g.id IS NOT ?', (manifest.get('candidate_id'),)):
+                        held.add(os.path.normcase(str(member)))
+                for (raw,) in db.execute("SELECT manifest FROM audio_jobs WHERE job_id!=? AND state!='completed'", (job_id,)):
+                    other = json.loads(raw)
+                    for source in other.get('sources') or []:
+                        if isinstance(source, dict) and source.get('path'):held.add(os.path.normcase(str(source['path'])))
+                    cover = other.get('cover')
+                    if isinstance(cover, dict) and cover.get('path'):held.add(os.path.normcase(str(cover['path'])))
+                if 'reacquire_markers' in tables:
+                    for (snapshot,) in db.execute("SELECT snapshot FROM reacquire_markers WHERE state!='archived'"):
+                        for member in (json.loads(snapshot) or {}).get('members') or []:
+                            if isinstance(member, dict) and member.get('path'):held.add(os.path.normcase(str(member['path'])))
+        except (sqlite3.Error, ValueError, TypeError, AttributeError):
+            return wanted
+        return wanted & held
+
+    def _leftovers(self, job_id, manifest, path, own):
+        """What stands between the folder and its removal: ([{'path','size'}] to remove first, reason to keep it or None).
+
+        Ruling 74e: only a folder a source of this book sat in (own) loses its other files, and only when nothing in it is
+        audio in any format (book_delete.SOUND, as Delete book counts it), a subfolder or a link, every file is an ordinary
+        single-name file the app can name, and no other book, unfinished job or reacquire record names one of them. An
+        ancestor folder is removed only once it is empty. Read-only."""
+        from book_delete import SOUND
+        import stat as stat_module
+        with os.scandir(path) as listing:
+            entries = []
+            for entry in listing:
+                entries.append(entry)
+                if len(entries) > self.LEFTOVER_LIMIT:return [], 'Folder holds too many entries to clear; retained'
+        if not entries:return [], None
+        if not own:return [], 'Folder contains entries or filesystem streams; retained'
+        for entry in entries:
+            if entry.is_symlink() or os.path.isjunction(entry.path) or entry.is_dir(follow_symlinks=False):
+                return [], 'Folder contains a subfolder or link; retained'
+            if Path(entry.name).suffix.lower() in SOUND:
+                return [], 'Audio files remain in the folder; retained'
+        leftovers = []
+        for entry in entries:
+            try:
+                item = ordinary(entry.path);facts = os.lstat(item)
+            except FileNotFoundError:
+                continue
+            except (BoundaryError, OSError):
+                return [], 'A file in the folder cannot be removed safely; retained'
+            if not stat_module.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
+                return [], 'A file in the folder is a link or has a second name; retained'
+            leftovers.append({'path': str(item), 'size': facts.st_size})
+        if self._held(job_id, manifest, [item['path'] for item in leftovers]):
+            return [], 'Another book or job uses a file in this folder; retained'
+        return leftovers, None
+
+    def _remove_folder(self, job_id, manifest, output, path, own=False):
+        """One candidate folder (deepest first). Ruling 74e: the book's own folder loses its non-audio leftovers through the
+        exact-handle file disposal source cleanup and Delete book use (book_delete.remove: inside the source root, held
+        ancestry, one link, the listed size), then the folder goes with a plain, non-recursive rmdir (ruling 24a's removal,
+        extended by 74e to this automatic cleanup): it fails if anything arrived meanwhile, and works on NTFS and network
+        drives such as Z:, where the exact-handle empty-folder disposition refuses. The folder's native identity and
+        ancestry must still be the ones captured, it must hold no named stream, the source root and its direct children
+        are never candidates (_folder_candidates), and a folder holding the published audiobook is never touched."""
         from producer_recovery import protected_dependency
+        from book_delete import remove
         with connect(self.database) as db:
             if protected_dependency(db,[path]):raise BoundaryError('Isolated old namespace is retained')
-        known=self._capture_folder(job_id,ordinary(manifest['root']),path)
+        root=ordinary(manifest['root'])
+        known=self._capture_folder(job_id,root,path)
         if known is None:return
-        # The validated output keeps any candidate containing it nonempty. Its
-        # held ancestor handle also intentionally denies DELETE on that target.
         effective=getattr(self._location_local,'effective',None) or output
-        contains_output=ordinary(effective['final_path']).is_relative_to(path)
-        with self._folder_boundary(job_id,manifest['root'],path.parent,json.loads(known['ancestry'])) as boundary, VerifiedDirectory(path,delete=not contains_output) as target:
-            if target.facts()!=json.loads(known['identity']):raise BoundaryError('Source-folder native identity changed before disposition')
-            if not target.empty():
-                self._folder_state(job_id,path,'retained_nonempty','Folder contains entries or filesystem streams; retained')
-                return
-            if contains_output:raise BoundaryError('Protected published output ancestry unexpectedly became empty')
-            try:target.require_empty_disposition()
-            except DirectoryDispositionUnsupported as error:
-                self._folder_state(job_id,path,'retained_unsupported',str(error));return
-            self.guard();boundary.revalidate();self._folder_obligations(job_id,manifest,output)
-            self._folder_state(job_id,path,'removal_intended')
-            try:
-                with self._publication_transaction():
-                    target.dispose_empty()
-                    target.__exit__(None,None,None)
-                    try:path.lstat()
-                    except FileNotFoundError:pass
-                    else:raise BoundaryError('Exact empty-directory disposition did not remove its name')
-            except DirectoryNotEmptyError as error:
-                self._folder_state(job_id,path,'retained_nonempty',str(error));return
-            except DirectoryDispositionUnsupported as error:
-                self._folder_state(job_id,path,'retained_unsupported',str(error));return
-            self._folder_state(job_id,path,'disposition_set')
-            self._folder_state(job_id,path,'removed')
+        if ordinary(effective['final_path']).is_relative_to(path):
+            self._folder_state(job_id,path,'retained_nonempty','Folder contains the published audiobook; retained');return
+        ancestry=json.loads(known['ancestry'])
+        with DirectoryBoundary(root,path) as held:
+            if [list(i) for i in held.identities]!=ancestry:raise BoundaryError('Source-folder native identity changed before disposition')
+            leftovers,reason=self._leftovers(job_id,manifest,path,own)
+            if reason:
+                self._folder_state(job_id,path,'retained_nonempty',reason);return
+            self.guard();held.revalidate();self._folder_obligations(job_id,manifest,output);self._folder_sources_absent(job_id,manifest)
+            names=', '.join(Path(item['path']).name for item in leftovers)
+            self._folder_state(job_id,path,'removal_intended',('Removing with its non-audio files: '+names)[:1000] if names else '')
+            for item in leftovers:
+                self.guard()
+                failed=remove(item['path'],str(root),item['size'])
+                if failed:
+                    self._folder_state(job_id,path,'retained_nonempty',('A non-audio file could not be removed; retained: '+failed[1])[:1000]);return
+        try:
+            with self._folder_boundary(job_id,root,path.parent,ancestry) as boundary:
+                with VerifiedDirectory(path) as target:
+                    if target.facts()!=json.loads(known['identity']):raise BoundaryError('Source-folder native identity changed before disposition')
+                    if not target.empty():
+                        self._folder_state(job_id,path,'retained_nonempty','Folder contains entries or filesystem streams; retained');return
+                self.guard();boundary.revalidate()
+                os.rmdir(path)
+        except FileNotFoundError:
+            pass  # gone after our intent: reconciled below
+        except OSError as error:
+            self._folder_state(job_id,path,'retained_nonempty',('Folder could not be removed; retained: '+str(error))[:1000]);return
+        if os.path.lexists(path):
+            self._folder_state(job_id,path,'retained_nonempty','Folder is still there after its removal; retained');return
+        self._folder_state(job_id,path,'disposition_set')
+        self._folder_state(job_id,path,'removed')
 
     def run_folders(self, job_id, progress=None):
         """Check only completed enrolled source parents; never enroll originals."""
@@ -794,7 +874,8 @@ class StorageCleanup:
                 # Capture every initial identity before the first disposition.
                 for path in candidates:self.guard();self._capture_folder(job_id,ordinary(manifest['root']),path)
                 self._folder_set(job_id,output_hash,'removing')
-                for path in candidates:self.guard();self._remove_folder(job_id,manifest,output,path)
+                own={ordinary(source['path']).parent for source in manifest['sources']}  # ruling 74e: the folders the book sat in
+                for path in candidates:self.guard();self._remove_folder(job_id,manifest,output,path,own=path in own)
                 self._folder_obligations(job_id,manifest,output);self._folder_sources_absent(job_id,manifest)
                 with connect(self.database) as db:
                     reasons=[r[0] for r in db.execute("SELECT DISTINCT reason FROM source_folder_cleanup_directories WHERE job_id=? AND state='retained_unsupported'",(job_id,))]

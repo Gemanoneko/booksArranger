@@ -35,8 +35,10 @@ book stays listed and nothing is half-forgotten. A folder is housekeeping: one t
 never keeps the book listed. Ruling 24a (Sergei 2026-10-25, "Allow"): for these two explicit actions only, a folder left
 empty is removed with a plain, non-recursive directory removal (rmdir: it fails unless the folder is empty), also on
 NTFS and network drives such as Z:, where the app's exact-handle empty-folder disposition refuses (a late directory
-stream could be lost: Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md). Every other path, source folder
-cleanup and Clear working files included, keeps that refusal: nothing here changes native_io."""
+stream could be lost: Docs/BooksArranger_EmptyFolders_Safety_v0.7.0_2026-10-10.md). Ruling 74e (Sergei 2026-10-31)
+extends this removal to the post-conversion source folder cleanup (storage_cleanup._remove_folder), which also removes
+the book's own folder's non-audio files through remove() below. Every other path, Clear working files included, keeps
+that refusal: nothing here changes native_io."""
 import contextlib
 import critical_sections
 import datetime

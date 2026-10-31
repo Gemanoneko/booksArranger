@@ -80,6 +80,9 @@ row=parts(render({},[{id:'cleanup',kind:'cleanup',subject:'Dune',step:'originals
 assert.equal(row.label,'Removing originals: ');assert.equal(row.detail,'12 of 40 files');assert.equal(row.step,'Removing original files');assert.equal(get('jobs-more').hidden,true);
 row=parts(render({},[{id:'cleanup',kind:'cleanup',subject:'Dune',step:'temporary',indeterminate:true,state:'running',step_started_at:NOW}])[0]);
 assert.equal(row.label,'Cleaning up: ');assert.equal(row.step,'Removing temporary recovery and working files');
+// 74e (Judy 0.24.1 section 5): a folder holding a cover is removed too, so the step no longer says "empty".
+row=parts(render({},[{id:'cleanup',kind:'cleanup',subject:'Dune',step:'folders',indeterminate:true,state:'running',step_started_at:NOW}])[0]);
+assert.equal(row.step,'Removing source folders');
 
 // Paused: muted, labelled, elapsed frozen; attention (v0.16.8): "On hold — reason", warning style, no bar or count.
 rows=render({state:'Paused'},[conversion({state:'paused'})]);row=parts(rows[0]);
@@ -106,7 +109,7 @@ rows=render({},[conversion({step:'normalizing',step_index:2,step_started_at:NOW-
 rows=render({},[conversion({step:'joined audio',step_index:2,step_started_at:NOW-60000,done:1,total:100})]);assert.doesNotMatch(parts(rows[0]).time,/left/);
 
 // Folder note in the help text is unchanged.
-render({folder_cleanup_notes:['Native protected stream namespace unsupported']});assert.match(get('jobs-help').textContent,/Empty source folders retained: safe automatic removal is unavailable on this drive/);
+render({folder_cleanup_notes:['Native protected stream namespace unsupported']});assert.match(get('jobs-help').textContent,/Source folders retained: safe automatic removal is unavailable on this drive/);
 
 // Page contract: the toolbar sits above the rows; the bar styles exist for every state.
 const html=fs.readFileSync(path.join(__dirname,'../web/index.html'),'utf8'),css=fs.readFileSync(path.join(__dirname,'../web/style.css'),'utf8');

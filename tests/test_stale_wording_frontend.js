@@ -5,7 +5,8 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.join(__dirname,'..');
 const files=['web','desktop'].flatMap(folder=>fs.readdirSync(path.join(root,folder)).filter(name=>/\.(js|html|css)$/.test(name)).map(name=>path.join(folder,name)));
-const stale=[/24 hours/i,/overdue copies/i];
+// 74e (Judy section 5): a folder holding a cover is removed too, so no string may call the removed folders "empty".
+const stale=[/24 hours/i,/overdue copies/i,/empty source folders/i];
 let seen=0;
 for(const file of files){
   const text=fs.readFileSync(path.join(root,file),'utf8');
