@@ -88,6 +88,26 @@ class AttentionListTests(test_approve_as_is.ApproveFixture):
         self.assertEqual(job['state'],'completed')
         self.assertEqual(Path(job['output']['final_path']),Path(preview['absolute']))
 
+    def test_ruling_76c_approve_accepts_the_english_name_the_goes_to_line_already_shows(self):
+        # «Decoration Disorder Disconnection 2» (Sergei 2026-10-31): the credit is in Cyrillic with a first name the app does
+        # not know, but a rule already gives its English spelling, and the Goes to line files under it. The ruling-59 guard
+        # read the Cyrillic credit, not the name the book files under, and refused with "enter the author's English name".
+        import author_rules
+        from scanner import connect
+        from unittest.mock import patch
+        for n in (1,2):
+            tone(self.audio/'Unsorted'/'Тихая река'/('%02d.mp3'%n),self.cover,album='Тихая река',title='Глава %d'%n,artist='Киноко Насу',track='%d/2'%n)
+        row=self.start()[0]
+        with connect(self.inv.database) as db:
+            author_rules.setup(db);author_rules.append(db,'same_as','Киноко Насу',target='Nasu Kinoko',actor='user',source='his earlier answer')
+        with patch.object(self.service.automatic.research,'_author_latin',side_effect=AssertionError('Approve never looks up')):
+            # The row's Author field shows the credit, and Approve sends what the field shows.
+            preview=self.service.approval_preview(row['id'],row['revision'],author='Киноко Насу')
+            self.assertEqual(Path(preview['path']).parts[0],'Nasu Kinoko','positive control: the Goes to line files under the English name')
+            self.service.approve_book(row['id'],row['revision'],author='Киноко Насу',path=preview['path'])
+        job=self.service.jobs.status()['jobs'][0]
+        self.assertEqual(job['state'],'pending');self.assertEqual(Path(job['manifest']['destination']).parent.name,'Nasu Kinoko')
+
     def test_a_suspected_reader_is_never_the_proposed_author_on_the_row(self):
         # Ruling 14: the only credit is a person named in brackets (a reader or uploader). The row asks; its Author
         # field starts empty and Goes to shows Без автора, so "Approve as is" (single or bulk) never files a reader.

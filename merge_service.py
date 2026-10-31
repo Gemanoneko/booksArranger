@@ -3423,7 +3423,11 @@ class MergeService:
         row,result=self._approval_result(id,revision,title,author,chosen,names=names)
         import local_identity
         approved_author=(result.get('approval') or {}).get('author') or ''
-        if local_identity.script(approved_author)=='cyrillic' and (result.get('work') or {}).get('original_language')!='ru' \
+        # Ruling 76c (Sergei 2026-10-31, «Decoration Disorder Disconnection 2»): the guard reads the name the book files under,
+        # the one its Goes to line shows. A credit in Cyrillic that a rule or the research already spells in English (Киноко
+        # Насу filed as Nasu Kinoko) files in English, so ruling 59 is met; only a filing name still in Cyrillic is held.
+        filed=str((result.get('review') or {}).get('author') or approved_author)
+        if local_identity.script(approved_author)=='cyrillic' and local_identity.script(filed)=='cyrillic' and (result.get('work') or {}).get('original_language')!='ru' \
                 and (local_identity.foreign_given(approved_author) or local_identity.unknown_given(approved_author)):
             # Ruling 59 for every Approve, "Approve this order" included (POST-023-01: «Джин Вулф» was filed in Cyrillic
             # because the guard needed an old keep rule, and «джин» was no known first name). A foreign first name in
