@@ -2,7 +2,15 @@
 
 Repository: https://github.com/Gemanoneko/booksArranger
 
-Books Arranger helps Sergei inventory and arrange his audiobook, podcast and text-book libraries. It produces verified Apple-compatible audiobooks with source-track navigation and recorded metadata evidence. Automatic public research can approve and enqueue a book only after all independent metadata, exact source scope/order, encoding and cover gates pass; uncertain books are held while other candidates continue. The original scanner milestone remains read-only. The current workflow verifies the audiobook before removing its exact included originals. Verified working files are removed after successful cleanup. Original-track recovery copies remain for 24 hours after source cleanup completes, then expire while the app runs; a selected-book button can permanently delete them sooner. Errors preserve remaining files for recovery. Podcasts, ebooks and unrelated siblings remain untouched. It never invents metadata matches.
+Books Arranger helps Sergei inventory and arrange his audiobook, podcast and text-book libraries. It produces verified Apple-compatible audiobooks with source-track navigation and recorded metadata evidence. Automatic public research can approve and enqueue a book only after all independent metadata, exact source scope/order, encoding and cover gates pass; uncertain books are held while other candidates continue. The original scanner milestone remains read-only. The current workflow verifies the audiobook before removing its exact included originals. Verified working files are removed after successful cleanup. Recovery copies of removed original tracks are deleted as soon as the audiobook is verified. A selected book's Delete recovery copies button deletes them by hand when verification keeps them. Errors preserve remaining files for recovery. Podcasts, ebooks and unrelated siblings remain untouched. It never invents metadata matches.
+
+## Stale list, Start over on a changed file, decided author, recovery text, leftover folders — 0.24.1, 2026-10-31 (main)
+
+Rulings 74e, 74f, 74g, 75a, 75b (`Team/Docs/BooksArranger_Rulings_2026-10-24.md`), Ender's stale-list diagnosis of 2026-10-31 and Judy's `Docs/BooksArranger_0.24.1_UX.md`.
+
+| Decision | Reason | Revisit when |
+| --- | --- | --- |
+| **74g: no retention promise in the window.** The Recovery copies panel loses its "Automatic deletion" row and the "overdue copies" sentence; the rule is said once, in `#automatic-policy`. README and this brief say copies are deleted as soon as the audiobook is verified. `tests/test_stale_wording_frontend.js` fails the gate if `24 hours` or `overdue copies` returns to `web/` or `desktop/`. | Ruling 74g; Judy section 4 (her default for open question 1, which waits for Sergei) | Sergei names another screen that said "24 hours" |
 
 ## One folder is one book, your folder, moving finished books — post-0.23.0 batch for 0.24.0, 2026-10-29 (main)
 
