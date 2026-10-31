@@ -1298,6 +1298,106 @@ class TolkienHeldTranslationTests(Base):
         self.assertEqual(self.approved(books[0])['title'],'Хранители','his title files the book')
 
 
+def evidence_missing(result):
+    """The fields the assistant's approval (review_backend.save, actor 'assistant') refuses a book for: what its policy
+    records with no cited evidence ("Assistant approval requires per-field identity, author role, original language and
+    series/standalone evidence")."""
+    facts, review = result['metadata_facts'], result['review']
+    needed = {'title', 'authors'} | ({'original_language'} if facts['original_language']['value'] else set()) | ({'series', 'number'} if review.get('series') else set())
+    return needed - {e['field'] for e in result['evidence']}
+
+
+class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
+    """Futaba's 0.24.0 QA, B1: the same three volumes as two MP3 files each in a clean library (no `J. R. R. Tolkien`
+    folder), so each is a whole book, identified by its files and filed by research. The first lookup found the English
+    spelling (learned as a rule, Tolkien J. R. R.) and «The Return of the King», but recorded no original-language
+    evidence, so its approval was refused and retried 15 minutes later; the other two followed the rule with no request,
+    under their Russian titles and no series; the retry took the catalog's "J. R. R. Tolkien" over the rule. Two author
+    folders, one English title, no series. The private answers are FantLab's live answers of 2026-10-31 (the authors'
+    "J. R. R. Tolkien" / «Дж. Р. Р. Толкин», «Властелин Колец» with two forewords before the three novels)."""
+    SEARCH={'Хранители':{'work_id':1667,'name':'The Fellowship of the Ring','rusname':'Братство Кольца','altname':'Хранители кольца; Хранители; Дружество кольца; Содружество кольца; Товарищество кольца'},
+            'Две твердыни':{'work_id':1668,'name':'The Two Towers','rusname':'Две твердыни','altname':'Две башни; Две крепости'},
+            'Возвращение государя':{'work_id':1669,'name':'The Return of the King','rusname':'Возвращение Короля','altname':'Возвращение Государя'}}
+
+    def sources(self,closed=()):
+        import urllib.error,urllib.parse
+        fetch,calls=super().sources(closed)
+        works={record['work_id']:record for record in self.SEARCH.values()}
+        def live(url,*args):
+            parts=urllib.parse.urlsplit(url)
+            if parts.hostname in closed or parts.hostname!='api.fantlab.ru':return fetch(url,*args)
+            calls.append(url)
+            if parts.path=='/work/1693/extended':
+                children=[{'work_id':505060,'work_type_id':11,'deep':1,'plus':1},{'work_id':143576,'work_type_id':11,'deep':1,'plus':1}]+[{'work_id':n,'work_type_id':1,'deep':1,'plus':None} for n in (1667,1668,1669)]+[{'work_id':183141,'work_type_id':7,'deep':1,'plus':1}]
+                return json.dumps({'work_id':1693,'work_name':'Властелин Колец','work_name_orig':'The Lord of the Rings','work_type_id':13,'children':children},ensure_ascii=False).encode()
+            if parts.path=='/search-works':
+                q=urllib.parse.parse_qs(parts.query)['q'][0]
+                return json.dumps([dict(self.SEARCH[q],all_autor_name='J. R. R. Tolkien',all_autor_rusname='Дж. Р. Р. Толкин')] if q in self.SEARCH else [],ensure_ascii=False).encode()
+            work=works[int(parts.path.split('/')[2])]
+            return json.dumps({'work_id':work['work_id'],'work_name':work['rusname'],'work_name_orig':work['name'],'work_type_id':1,'work_type_name':'novel','lang_code':'en',
+                               'authors':[{'type':'autor','name':'Дж. Р. Р. Толкин','name_orig':'J. R. R. Tolkien'}],
+                               'parents':{'cycles':[[{'work_id':29203,'work_name':'Легендариум Средиземья','work_type_id':4},{'work_id':1693,'work_name':'Властелин Колец','work_type_id':13}]]}},ensure_ascii=False).encode()
+        return live,calls
+
+    def books(self,closed=()):
+        rows=[]
+        for album,_,titles,_ in self.VOLUMES:
+            for index,title in enumerate(titles,1):
+                rows.append(file_row('Unsorted\\%s\\%02d.mp3'%(album,index),title=title,artist='Джон Рональд Руэл Толкин',album_artist='Джон Рональд Руэл Толкин',
+                                     album=album,genre='Фэнтези',track='%d/2'%index))
+        books=self.catalog(rows)
+        fetch,calls=self.sources(closed)
+        minutes=iter(range(10**6,10**9,60))
+        self.research=PublicResearch(PublicClient(self.research.client.database,fetch=fetch,clock=lambda:next(minutes)),leads=[])
+        return {Path(key).name:row for key,row in books.items()},calls
+
+    def test_three_volumes_file_under_one_author_with_their_english_titles_and_series(self):
+        books,calls=self.books()
+        english={album:(number,title) for album,number,_,title in self.VOLUMES}
+        # The run's order (by folder name), then the first book once more, as its retry was.
+        for album in sorted(books)+sorted(books)[:1]:
+            with self.subTest(album=album):
+                result=self.lookup(books[album]);review=result['review'];number,title=english[album]
+                self.assertEqual(result['reasons'],[],'identified by its files: research files it')
+                self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Властелин колец',str(number)))
+                self.assertEqual(evidence_missing(result),set(),'the approval has evidence for every field its policy records')
+                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.goes_to(books[album],result))
+                asked=len(calls);self.research.approved(books[album],ROOT)
+                self.assertEqual(len(calls),asked,'Approve and its preview read the cache only')
+
+    def test_a_ruled_author_whose_sources_are_paused_files_at_once_under_the_title_it_has(self):
+        # Ruling 38: nothing waits for the English title; the lookup asks once and respects each pause (no bypass).
+        books,calls=self.books(closed=('api.fantlab.ru','www.goodreads.com','www.wikidata.org','html.duckduckgo.com','www.litres.ru'))
+        with contextlib.closing(sqlite3.connect(self.research.client.database)) as db:
+            author_rules.append(db,'same_as','Джон Рональд Руэл Толкин',target='Tolkien J. R. R.',actor='assistant',source='https://fantlab.ru/work1669');db.commit()
+        first=self.lookup(books['Хранители. Летопись первая'])
+        self.assertEqual(first['reasons'],[])
+        self.assertEqual((first['review']['canonical_author'],first['review']['title'],first['review']['series']),('Tolkien J. R. R.','Хранители. Летопись первая',''))
+        asked=len(calls)
+        self.assertEqual(self.lookup(books['Две твердыни. Летопись вторая'])['reasons'],[])
+        self.assertEqual(len(calls),asked,'no request to a paused source')
+
+    def test_an_english_title_found_with_the_authors_spelling_carries_its_original_language(self):
+        # The ruling-39 lookup's record names the English title: the policy records English as the original language,
+        # and the approval needs evidence for it (it refused the book and retried it 15 minutes later).
+        from unittest import mock
+        books,_=self.books(closed=('api.fantlab.ru','www.goodreads.com','www.wikidata.org','html.duckduckgo.com','www.litres.ru'))
+        found={'state':'found','name':'J. R. R. Tolkien','title':'The Return of the King','source_url':'https://fantlab.ru/work1669'}
+        with mock.patch.object(self.research,'_author_latin',return_value=found):
+            result=self.lookup(books['Возвращение государя. Летопись третья'])
+        self.assertEqual((result['reasons'],result['review']['title'],result['metadata_facts']['original_language']['value']),([],'The Return of the King','en'))
+        self.assertEqual(evidence_missing(result),set())
+        self.assertIn({'field':'original_language','cited_value':'en','source_url':'https://fantlab.ru/work1669'},
+                      [{key:e[key] for key in ('field','cited_value','source_url')} for e in result['evidence']])
+
+    # The inherited held-volume tests are TolkienHeldTranslationTests' own.
+    test_held_volumes_get_the_english_title_and_the_series_from_the_catalog=None
+    test_ruling_72b_the_series_is_spelled_as_sergei_spells_it_whichever_source_names_it=None
+    test_a_closed_source_files_nothing_new_and_is_never_asked_again_during_its_pause=None
+    test_a_series_position_that_disagrees_with_the_volume_number_is_not_used=None
+    test_a_title_or_series_he_entered_is_never_looked_up=None
+
+
 def tearDownModule():
     _no_original_title_wait.stop()
 

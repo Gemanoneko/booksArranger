@@ -289,9 +289,11 @@ class ForeignCyrillicAuthorTests(Base):
         self.assertEqual(result['metadata_facts']['original_title_lookup'], {'state': 'found', 'title': 'Goliath'})
         self.assertEqual(self.rules(), [('same_as', author_rules.key('Скотт Вестерфельд'), 'Westerfeld Scott', 'assistant')], 'learned once, for the credit')
         online, asked = self.online({})
-        with online:
+        with online, patch.object(self.research, '_author_latin', side_effect=AssertionError('the author was looked up again')):
             result = self.lookup(leviathan)
-        self.assertEqual(asked, [], 'the author\'s next book needs no lookup')
+        # The author's next book needs no author lookup (the rule); Futaba's 0.24.0 QA, B1: its own original title is asked
+        # once, by its own title (rulings 38 and 49: «Две твердыни» had filed under the Russian title with no request).
+        self.assertEqual(asked, ['Левиафан'], 'only the book\'s own title')
         self.assertEqual(result['reasons'], [])
         self.assertEqual(self.goes_to(leviathan, result), SORTED + '\\Westerfeld Scott\\Левиафан - Westerfeld Scott.m4b', 'no English title for it: its own')
 

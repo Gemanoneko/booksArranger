@@ -879,6 +879,33 @@ class PublicResearch:
         except Exception:
             return
 
+    def _translation_lookup(self,local,title,author,filled,stop,progress,result):
+        """Futaba's 0.24.0 QA, B1 (Tolkien; rulings 38, 49 and 72b). A translation identified by its files (a Cyrillic title,
+        an author in Latin letters or with a foreign first name: original_titles.translation) whose original title or
+        series the research cache does not answer asks the sources once, as a held translation does (_held_translation):
+        by the edition's book title («Хранители. Летопись первая» -> «Хранители»), through the client's cache, per-site
+        bounds and pauses (no bypass), at most HELD_TRANSLATION_BUDGET requests. The answers are then read as before, from
+        the cache (_gap_fill, which still checks a found series position against the volume number). Only the ruling-39
+        lookup of an author with no English spelling yet used to ask, and never for the series: once a rule named the
+        author, his other volumes were filed with neither. Never a title or series Sergei entered; nothing waits (ruling
+        38): a closed source leaves the gap to the background pass. Returns the cache's answers (filled when unchanged)."""
+        import local_identity
+        fields=local['fields']
+        if stop.is_set() or local.get('version')!=local_identity.IDENTITY_VERSION or local.get('part_book') or not original_titles.translation(title,author):return filled
+        his=fields['title'].get('state') in ('entered','approved') or any(s.get('kind')=='entered by you' for s in fields['title'].get('sources') or ())
+        gaps=[gap for gap in ('original_title','series') if gap in (filled.get('unfilled') or ()) and not (gap=='original_title' and his)]
+        if not gaps:return filled
+        base=edition_volume(title)[0];scratch={'sources':[],'evidence':[],'reasons':[]};budget={'remaining':self.HELD_TRANSLATION_BUDGET}
+        try:self._gap_fill_once({'gaps':gaps,'fields':{'author':{'partial':bool(fields['author'].get('partial'))}}},base,author,stop,budget,[],progress,scratch)
+        except InterruptedError:raise  # a pause stops research here, as any request does
+        except Exception:return filled  # best effort: the book is filed as the cache had it
+        result['translation_lookup']={'title':base,'author':author,'gaps':gaps,'requests':self.HELD_TRANSLATION_BUDGET-budget['remaining'],
+                                      'sources':[source.get('url','') for source in scratch['sources']][:8]}
+        again={'sources':[]};found=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,again)
+        known={(source.get('url'),source.get('api_url')) for source in result['sources']}
+        result['sources'].extend(source for source in again['sources'] if (source.get('url'),source.get('api_url')) not in known)
+        return found
+
     def _part_set(self,row,root,stop):
         """Rulings 19 and 19a (Sergei 2026-10-24): whole .m4b parts of one set: their chapters decide whether they are one
         book (part_sets.decide). None for any other row, an explicitly marked split book (joined) and a split book whose
@@ -1231,11 +1258,13 @@ class PublicResearch:
         fields come from answers already in the research cache only: no request is made and nothing waits or defers the
         book. The gaps nothing answered are recorded (metadata_facts gap_search 'background') and filled later by the
         background pass (gap_fill.GapFill; series positions by series backfill). It used to wait 5-7 s per site, plus
-        downloads, and to defer the book up to 3 times while sources cooled down."""
+        downloads, and to defer the book up to 3 times while sources cooled down. A translation is the exception
+        (_translation_lookup, Futaba's 0.24.0 QA B1): research asks for its original title and series once."""
         import local_identity
         from standing_metadata import build_policy
         fields=local['fields'];title=fields['title']['value'];author=fields['author']['value']
         waits=[];filled=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
+        if budget.get('remaining',0)>0:filled=self._translation_lookup(local,title,author,filled,stop,progress,result)
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
         titles=local_identity.title_forms(local)
@@ -1260,7 +1289,10 @@ class PublicResearch:
         typed_author=any(source.get('kind')=='entered by you' for source in fields['author'].get('sources') or ())
         if typed_author:
             pass
-        elif catalog and language:
+        elif catalog and language and not fields['author'].get('rule'):
+            # Futaba's 0.24.0 QA, B1 (Tolkien): an author a rule names (Sergei's, or one research learned for this credit)
+            # keeps the rule's spelling. The catalog's own form of the same person ("J. R. R. Tolkien") replaced it, so one
+            # author filed under both "Tolkien J. R. R" and "J. R. R. Tolkien" (rulings 3 and 33: one spelling, surname first).
             names=[catalog['author_native'] if language=='ru' else catalog['author_latin'] or catalog['author_native']]
             name_source=catalog['source_url']
         elif filled.get('author_full'):
@@ -1287,9 +1319,15 @@ class PublicResearch:
             if ruled is not None and ruled.taken_back(author):
                 names=[author]  # he took this match back: ruling 39's question asks him (below), the catalog never decides again
             else:
-                latin=_latin_surname_first(names[0],author)
-                self._learn_author('same_as',author,latin,catalog.get('source_url',''),title)
-                result['author_learned']={'credit':author,'name':latin,'source_url':catalog.get('source_url','')}
+                # Futaba's 0.24.0 QA, B1: ruling 39's first step comes first here too. A Latin spelling the library itself
+                # holds for this person (a folder of the book, an author it files: _local_latin) wins over the catalog's
+                # own form ("J. R. R. Tolkien" over FantLab's "John Ronald Reuel Tolkien"), as in the lookup below.
+                known=[spelling for spelling,_ in (ruled.known_authors.values() if ruled is not None else [])]
+                own=_local_latin(author,folders=_ancestor_folders(row),known=known)
+                cited=own['source_url'] if own else catalog.get('source_url','')
+                latin=_latin_surname_first(own['name'] if own else names[0],author)
+                self._learn_author('same_as',author,latin,cited,title)
+                result['author_learned']={'credit':author,'name':latin,'source_url':cited}
                 if latin not in authors:authors.append(latin)
                 names=[latin];fields=dict(fields,author=dict(fields['author'],rule='catalog-latin'))
         spelling=None
@@ -1383,13 +1421,7 @@ class PublicResearch:
             approving=any(fields[field].get('state')=='approved' for field in ('title','author'))
             # 2026-10-29 (Tolkien): the book's own folders and the authors the library already files are read first, and
             # an edition's volume title («Хранители. Летопись первая») is also looked up by its book title.
-            ancestors=[]
-            for member in row.get('members') or []:
-                folder=ntpath.dirname(member['path'])
-                for _ in range(4):
-                    name=ntpath.basename(folder)
-                    if not name or name in ancestors:break
-                    ancestors.append(name);folder=ntpath.dirname(folder)
+            ancestors=_ancestor_folders(row)
             known=[spelling for spelling,_ in (rules.known_authors.values() if rules is not None else [])]
             found=None if approving or rules is not None and rules.taken_back(names[0]) else self._author_latin(title,names[0],stop,budget,result,folders=ancestors,known=known)
             if found and found['state']=='found':
@@ -1474,6 +1506,11 @@ class PublicResearch:
         evidence('authors',review['canonical_author'],name_source,(basis if not name_source else confirmed_note if spelling and spelling.get('confirmed_by') else 'Full author name from the catalog record matching the locally agreed title and author; it only fills a field missing locally.')+spelled)
         if language:
             evidence('original_language',language,catalog.get('source_url',''),'Original-work language from the catalog record matching the locally agreed title and author.')
+        elif english_title:
+            # Futaba's 0.24.0 QA, B1: the ruling-39 record that named the English title says the original is English
+            # (_author_latin). The policy records that language, and approval refused a book with no evidence for it
+            # ("Assistant approval requires ... original language"), holding it 15 minutes until the cache answered.
+            evidence('original_language','en',name_source,'Original-work language from the catalog record that named the author\'s English spelling and the original English title (ruling 39).')
         if review['series']:
             url=series.get('source_url','')
             why=(SERIES_WHY.get(series.get('provider'),'Series and position from the catalog record matching the locally agreed title and author.') if url else
@@ -2180,6 +2217,17 @@ def _fantlab_names(record):
     names=[v for v in (record.get('name'),record.get('rusname'),record.get('altname')) if isinstance(v,str) and v]
     alt=record.get('altname') if isinstance(record.get('altname'),str) else ''
     return names+[part for part in re.split(r'\s*;\s*|\s+/\s+',alt) if part]
+
+def _ancestor_folders(row):
+    """The names of a book's folders, up to four levels above each file (ruling 39's first step reads them: _local_latin)."""
+    ancestors=[]
+    for member in row.get('members') or []:
+        folder=ntpath.dirname(member['path'])
+        for _ in range(4):
+            name=ntpath.basename(folder)
+            if not name or name in ancestors:break
+            ancestors.append(name);folder=ntpath.dirname(folder)
+    return ancestors
 
 def _local_latin(author,folders=(),known=()):
     """Ruling 39, 2026-10-29 (Tolkien): a foreign author's Latin spelling the library itself already holds, read before any
