@@ -3366,8 +3366,8 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return back
 
-    # Ruling 76a (Sergei 2026-10-31: "My approval is the highest authority"). Plain copy, flagged for Judy.
-    APPROVE_CONVERTING="This book is already converting, so your values were not used. Nothing was changed."
+    # Ruling 76a (Sergei 2026-10-31: "My approval is the highest authority"). Judy's final copy (2026-10-31).
+    APPROVE_CONVERTING="This book is already converting, so it will finish with the automatic names. Your names were not applied."
     APPROVE_REPLACED='Replaced by your Approve before it started.'  # the set-aside job's own record, not shown on a row
 
     def _his_revision(self,id,revision,fingerprint):

@@ -387,8 +387,9 @@ class Ruling76aTests(ApproveFixture):
         row,fresh,auto_job=self.automatic()
         from unittest.mock import patch
         with patch.object(self.service.jobs,'claimed',return_value=True):
-            with self.assertRaisesRegex(ValueError,'already converting'):
+            with self.assertRaises(ValueError) as refused:
                 self.service.approve_book(row['id'],row['revision'],title='Ясный день',fingerprint=row['fingerprint'])
+        self.assertEqual(str(refused.exception),'This book is already converting, so it will finish with the automatic names. Your names were not applied.')
         self.assertEqual(self.set_aside(),[]);self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending')
 
     def test_changed_files_still_refuse_and_his_own_queued_job_is_not_replaced(self):
