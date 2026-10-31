@@ -137,13 +137,46 @@ class SourceFolderTests(unittest.TestCase):
         self.assertEqual(self.storage.status()[0]['state'],'completed');self.assertEqual(self.source.status(self.job_id)['state'],'completed')
         self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed')
     def test_cover_hidden_and_text_files_go_with_the_folder_when_no_audio_is_left(self):
-        # 74e (Логово's .jpg): the book's own folder loses its non-audio files, then goes; the author folder stays (m2).
-        for name in ('.hidden','cover.jpg','notes.txt'):(self.folder/name).write_bytes(b'LEFTOVER')
-        kernel.SetFileAttributesW(str(self.folder/'.hidden'),2)
+        # 74e (Логово's .jpg): the book's own folder loses its known safe leftovers (77a), then goes; the author folder stays (m2).
+        names=('Thumbs.db','cover.JPG','notes.txt','book.nfo','disc.cue','list.m3u','rip.log','check.sfv','link.url')
+        for name in names:(self.folder/name).write_bytes(b'LEFTOVER '+name.encode())
+        kernel.SetFileAttributesW(str(self.folder/'Thumbs.db'),2)
         self.retire();status=self.storage.run_folders(self.job_id)
         self.assertEqual(status['state'],'completed');self.assertEqual(status['removed'],2);self.assertEqual(status['retained'],0)
         self.assertFalse(self.folder.exists());self.assertFalse((self.library/'Author'/'Old Book').exists());self.assertTrue((self.library/'Author').is_dir())
         self.assertEqual(self.receipt(self.folder)['state'],'removed');self.assert_output()
+        # 77c (Senua's M4): every deleted file stays on record in full: path, size, time, outcome.
+        record=self.storage.removed_files(self.job_id)
+        self.assertEqual(sorted(Path(r['path']).name for r in record),sorted(names))
+        self.assertTrue(all(r['state']=='removed' and r['detail']=='' and r['folder']==str(self.folder) and r['size']==len(b'LEFTOVER '+Path(r['path']).name.encode()) for r in record))
+        self.assertEqual({r['candidate_id'] for r in record},{self.manifest['candidate_id']})
+    def test_ruling_77a_anything_not_on_the_safe_list_keeps_the_whole_folder(self):
+        # Senua's M5: audio the old list missed, archives, partial downloads, documents and names without an extension.
+        for name in ('book.aaxc','part.mpa','Chapter 1.mp3.part','download.crdownload','torrent.!qb','booklet.pdf','scans.zip','extras.rar',
+                     'README','ebook.epub','book.mp3.txt','unknown.xyz'):
+            with self.subTest(name=name):
+                (self.folder/'cover.jpg').write_bytes(b'COVER');(self.folder/name).write_bytes(b'KEEP ME')
+                self.assertEqual(self.storage._might_clear(self.folder),False)
+                with os.scandir(self.folder) as listing:reasons=[__import__('storage_cleanup').leftover_verdict(e) for e in listing]
+                self.assertTrue(any(reasons),name)
+                (self.folder/name).unlink();(self.folder/'cover.jpg').unlink()
+        (self.folder/'booklet.pdf').write_bytes(b'KEEP ME');(self.folder/'cover.jpg').write_bytes(b'COVER')
+        self.retire();status=self.storage.run_folders(self.job_id)
+        self.assertEqual(status['removed'],0);self.assertEqual((self.folder/'booklet.pdf').read_bytes(),b'KEEP ME');self.assertEqual((self.folder/'cover.jpg').read_bytes(),b'COVER')
+        self.assertIn('booklet.pdf',self.receipt(self.folder)['reason']);self.assertEqual(self.storage.removed_files(self.job_id),[],'nothing deleted, nothing recorded')
+    def test_ruling_77c_a_long_list_is_recorded_in_full_and_a_failed_removal_says_why(self):
+        names=['Обложка книги — сканы, страница %03d, высокое разрешение.jpg'%i for i in range(40)]
+        for name in names:(self.folder/name).write_bytes(b'SCAN')
+        self.retire()
+        real=__import__('book_delete').remove
+        def flaky(path,root,size):
+            return ('in_use','[WinError 32] The process cannot access the file') if path.endswith('039, высокое разрешение.jpg') else real(path,root,size)
+        with patch('book_delete.remove',flaky):self.storage.run_folders(self.job_id)
+        record=self.storage.removed_files(self.job_id)
+        self.assertEqual(len(record),40);self.assertGreater(sum(len(r['path']) for r in record),1000,'longer than the old 1,000-character receipt')
+        failed=[r for r in record if r['state']!='removed']
+        self.assertEqual(len(failed),1);self.assertEqual(failed[0]['state'],'not_removed');self.assertIn('[WinError 32]',failed[0]['detail'])
+        self.assertTrue(self.folder.exists());self.assertTrue(Path(failed[0]['path']).exists())
     def test_audio_in_any_format_keeps_the_folder_and_every_file(self):
         for name,data in (('bonus.ape',b'OTHER RECORDING'),('cover.jpg',b'COVER')):(self.folder/name).write_bytes(data)
         self.retire();status=self.storage.run_folders(self.job_id)
@@ -301,5 +334,33 @@ class SourceFolderTests(unittest.TestCase):
         (self.folder/'bonus.ape').unlink();self.folder.rmdir();(self.library/'Author'/'Old Book').rmdir()
         with patch.object(self.storage,'protected_output',side_effect=AssertionError('nothing is there')):
             self.assertEqual(self.storage.sweep_folders(self.job_id),'gone')
+
+    def test_ruling_77b_an_unreachable_drive_or_a_failed_listing_is_tried_again_later(self):
+        # Senua's M2: Z: or the NAS away, or a listing that fails, is no outcome: nothing is recorded and the book stays listed.
+        (self.folder/'cover.jpg').write_bytes(b'LEFTOVER');self.old_run()
+        with patch.object(self.storage,'_root_reachable',return_value=False),patch.object(self.storage,'protected_output',side_effect=AssertionError('never reached')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'later')
+        self.assertIsNone(self.sweep_marker());self.assertEqual(self.storage.old_folder_jobs(),[self.job_id])
+        real=os.scandir
+        def failing(path='.'):
+            if Path(path)==self.folder:raise PermissionError(13,'listing failed')
+            return real(path)
+        with patch('os.scandir',failing),patch.object(self.storage,'protected_output',side_effect=AssertionError('never reached')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'later')
+        self.assertIsNone(self.sweep_marker());self.assertEqual(self.storage.old_folder_jobs(),[self.job_id])
+        # The drive drops during the full run: the folder job keeps its state, so the next pass finds the book again.
+        with patch.object(self.storage,'_leftovers',side_effect=OSError(53,'The network path was not found')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'later')
+        self.assertIsNone(self.sweep_marker());self.assertEqual(self.storage.folder_status(self.job_id)['state'],'unsupported');self.assertEqual(self.storage.old_folder_jobs(),[self.job_id])
+        self.assertTrue((self.folder/'cover.jpg').exists())
+        # Back on line: the folder is cleared and the outcome recorded once.
+        self.assertEqual(self.storage.sweep_folders(self.job_id),'completed');self.assertFalse(self.folder.exists());self.assertEqual(self.sweep_marker()[0],'completed')
+    def test_ruling_77b_a_new_book_whose_run_failed_on_the_drive_is_marked_to_try_again(self):
+        self.retire()
+        with patch.object(self.storage,'_leftovers',side_effect=OSError(53,'The network path was not found')):
+            with self.assertRaises(OSError):self.storage.run_folders(self.job_id)
+        status=self.storage.folder_status(self.job_id)
+        self.assertEqual(status['state'],'needs_attention');self.assertTrue(status['reason'].startswith(__import__('storage_cleanup').FOLDER_RETRY))
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed','the retry clears it')
 
 if __name__=='__main__':unittest.main()

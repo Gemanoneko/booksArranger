@@ -199,5 +199,14 @@ class FolderJobTests(unittest.TestCase):
         s.storage_cleanup.sweep_folders = Mock(side_effect=[InterruptedError('closing'), 'kept'])
         s._settle_folder_jobs(); self.assertEqual(s.storage_cleanup.sweep_folders.call_count, 1, 'closing stops the pass')
 
+    def test_ruling_77b_a_folder_job_that_failed_on_the_drive_is_run_again(self):
+        from storage_cleanup import FOLDER_RETRY
+        s = service(); s._purge_tried = set()
+        rows = [{'job_id': 'away', 'state': 'needs_attention', 'reason': FOLDER_RETRY + '[WinError 53] The network path was not found', 'output_hash': 'h'},
+                {'job_id': 'refused', 'state': 'needs_attention', 'reason': 'Source-folder native identity changed', 'output_hash': 'h'}]
+        s.storage_cleanup = SimpleNamespace(folder_status=lambda: rows, _folder_set=Mock(), run_folders=Mock())
+        s._settle_folder_jobs()
+        s.storage_cleanup.run_folders.assert_called_once_with('away')
+
 if __name__ == '__main__':
     unittest.main()

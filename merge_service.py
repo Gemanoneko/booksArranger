@@ -1200,7 +1200,7 @@ class MergeService:
             if row['state']!='needs_attention' or ('folder',row['job_id']) in self._purge_tried:continue
             self._purge_tried.add(('folder',row['job_id']))
             if row['reason']==self.FOLDER_ALREADY_GONE:storage._folder_set(row['job_id'],row['output_hash'],'completed','Source folder was already gone')
-            elif catalog_busy_text(row['reason']):
+            elif catalog_busy_text(row['reason']) or str(row['reason'] or '').startswith(__import__('storage_cleanup').FOLDER_RETRY):  # 77b: the drive was away
                 try:
                     with self.operation_lock:storage.run_folders(row['job_id'])
                 except Exception:pass  # stays as housekeeping; it holds nothing

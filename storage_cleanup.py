@@ -25,6 +25,44 @@ TERMINAL = {'removed', 'absent_after_intent'}
 # folder is run once more under 74e. One row per job once it has been looked at: never twice.
 SWEEP_TABLE = 'CREATE TABLE IF NOT EXISTS source_folder_sweep(job_id TEXT PRIMARY KEY,outcome TEXT NOT NULL,at TEXT NOT NULL)'
 KEPT_STATES = ('retained_nonempty', 'retained_unsupported', 'verified')
+INTENT_STATES = ('removal_intended', 'disposition_set')  # a removal a crash or a drive drop left half done: reconciled by a run
+# Ruling 77a (Sergei 2026-10-31, after Senua's M5): the folder cleanup deletes only files on this list of known safe leftovers.
+# Anything else keeps the whole folder: audio in any format, archives, partial downloads, documents, a file with no
+# extension or one this list does not name. Matched on the last extension, case-insensitively; a name that also carries an
+# audio extension (book.mp3.txt) keeps the folder. Sergei reviews this list.
+SAFE_LEFTOVERS = frozenset({
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff',  # covers and other images
+    '.txt', '.nfo', '.diz',                                             # text and release info
+    '.cue', '.m3u', '.m3u8', '.pls',                                    # cue sheets and playlists
+    '.sfv', '.md5', '.sha1', '.sha256', '.ffp',                         # checksum lists
+    '.log',                                                             # rip and download logs
+    '.url',                                                             # web links
+})
+SAFE_LEFTOVER_NAMES = frozenset({'thumbs.db', 'desktop.ini', '.ds_store'})  # files the system itself leaves in a folder
+# Ruling 77c (after Senua's M4): every leftover file the folder cleanup deletes, one row each, written before the file goes and
+# never deleted, shortened or blanked.
+REMOVED_FILES_TABLE = ('CREATE TABLE IF NOT EXISTS source_folder_removed_files(id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,'
+                       'candidate_id TEXT,folder TEXT NOT NULL,path TEXT NOT NULL,size INTEGER NOT NULL,modified_ns TEXT NOT NULL,'
+                       'state TEXT NOT NULL,detail TEXT NOT NULL,at TEXT NOT NULL,updated TEXT NOT NULL)')
+FOLDER_RETRY = 'Folder cleanup tries again later: '  # ruling 77b: a run that failed on the drive (unreachable, a listing failed)
+
+
+def leftover_verdict(entry):
+    """Ruling 77a: None when the folder entry (an os.DirEntry) is a known safe leftover the folder cleanup may delete, else
+    the reason it keeps the whole folder. Read-only; a failing stat raises OSError (the caller tries again later)."""
+    from book_delete import SOUND
+    if entry.is_symlink() or os.path.isjunction(entry.path) or entry.is_dir(follow_symlinks=False):
+        return 'Folder contains a subfolder or link; retained'
+    suffixes = [suffix.lower() for suffix in Path(entry.name).suffixes]
+    if any(suffix in SOUND for suffix in suffixes):
+        return 'Audio files remain in the folder; retained'
+    if entry.name.casefold() in SAFE_LEFTOVER_NAMES:
+        return None
+    if not suffixes or suffixes[-1] not in SAFE_LEFTOVERS:
+        return 'A file that is not a known leftover keeps the folder: ' + entry.name
+    return None
+
+
 
 class StorageCleanup:
     def __init__(self, database, stage_root, recovery_root, guard=lambda: None,output_location=None,output_location_guard=None,repair_publication=None,repair_location_guard=None):
@@ -46,6 +84,7 @@ class StorageCleanup:
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_directories(job_id TEXT,path TEXT,identity TEXT,ancestry TEXT,state TEXT,reason TEXT,updated TEXT,PRIMARY KEY(job_id,path))')
             db.execute(SWEEP_TABLE)  # ruling 76b: the folder cleanups an earlier version finished, looked at again once
+            db.execute(REMOVED_FILES_TABLE)  # ruling 77c: the record of every leftover file the folder cleanup deletes
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_files(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER, facts TEXT, state TEXT, updated TEXT)')
             # Recovery status reads these per book on every status read and book-list page; without an index
             # each lookup scanned the whole table (about 1.6 GB read per status on the real catalog).
@@ -743,8 +782,8 @@ class StorageCleanup:
                 return None
         return self._folder_known(job_id,path)
 
-    # Ruling 74e (Sergei, 2026-10-31): a book's own source folder goes once no audio file is left in it, even when covers or
-    # other non-audio files remain. A bound past which a folder counts as holding something else (its files stay).
+    # Ruling 74e (Sergei, 2026-10-31): a book's own source folder goes once nothing but leftovers is left in it. A bound past
+    # which a folder counts as holding something else (its files stay).
     LEFTOVER_LIMIT = 500
 
     def _held(self, job_id, manifest, paths):
@@ -774,13 +813,15 @@ class StorageCleanup:
         return wanted & held
 
     def _leftovers(self, job_id, manifest, path, own):
-        """What stands between the folder and its removal: ([{'path','size'}] to remove first, reason to keep it or None).
+        """What stands between the folder and its removal: ([{'path','size','modified_ns'}] to remove first, reason to keep it
+        or None).
 
-        Ruling 74e: only a folder a source of this book sat in (own) loses its other files, and only when nothing in it is
-        audio in any format (book_delete.SOUND, as Delete book counts it), a subfolder or a link, every file is an ordinary
-        single-name file the app can name, and no other book, unfinished job or reacquire record names one of them. An
-        ancestor folder is removed only once it is empty. Read-only."""
-        from book_delete import SOUND
+        Ruling 77a (Sergei 2026-10-31, after Senua's M5): only a folder a source of this book sat in (own) loses its other
+        files, and only when every one of them is a known safe leftover (leftover_verdict: SAFE_LEFTOVERS). Anything else (a
+        subfolder, a link, audio, an archive, a partial download, a file with no extension or one the list does not name)
+        keeps the whole folder. Every file must also be an ordinary single-name file the app can name, and no other book,
+        unfinished job or reacquire record may name one of them. An ancestor folder is removed only once it is empty.
+        Read-only. A listing that fails raises OSError (ruling 77b: the caller tries again later)."""
         import stat as stat_module
         with os.scandir(path) as listing:
             entries = []
@@ -790,33 +831,52 @@ class StorageCleanup:
         if not entries:return [], None
         if not own:return [], 'Folder contains entries or filesystem streams; retained'
         for entry in entries:
-            if entry.is_symlink() or os.path.isjunction(entry.path) or entry.is_dir(follow_symlinks=False):
-                return [], 'Folder contains a subfolder or link; retained'
-            if Path(entry.name).suffix.lower() in SOUND:
-                return [], 'Audio files remain in the folder; retained'
+            reason = leftover_verdict(entry)
+            if reason:return [], reason
         leftovers = []
         for entry in entries:
             try:
                 item = ordinary(entry.path);facts = os.lstat(item)
             except FileNotFoundError:
                 continue
-            except (BoundaryError, OSError):
+            except BoundaryError:
                 return [], 'A file in the folder cannot be removed safely; retained'
             if not stat_module.S_ISREG(facts.st_mode) or getattr(facts, 'st_file_attributes', 0) & 0x400 or facts.st_nlink != 1:
                 return [], 'A file in the folder is a link or has a second name; retained'
-            leftovers.append({'path': str(item), 'size': facts.st_size})
+            leftovers.append({'path': str(item), 'size': facts.st_size, 'modified_ns': str(facts.st_mtime_ns)})
         if self._held(job_id, manifest, [item['path'] for item in leftovers]):
             return [], 'Another book or job uses a file in this folder; retained'
         return leftovers, None
 
+    def _record_removal(self, job_id, manifest, folder, item, state, detail=''):
+        """Ruling 77c (after Senua's M4): one row per leftover file 74e or 76b deletes, in source_folder_removed_files, written
+        'removing' before the file goes and then set to 'removed' or 'not_removed' (detail: the cause, in full). Rows are never
+        deleted, shortened or blanked; a retry adds new rows. Returns the row id."""
+        with connect(self.database) as db:
+            db.execute(REMOVED_FILES_TABLE)
+            cursor = db.execute('INSERT INTO source_folder_removed_files(job_id,candidate_id,folder,path,size,modified_ns,state,detail,at,updated) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                                (job_id, manifest.get('candidate_id'), str(folder), item['path'], item['size'], item.get('modified_ns', ''), state, detail, stamp(), stamp()))
+            return cursor.lastrowid
+
+    def _record_outcome(self, row_id, state, detail=''):
+        with connect(self.database) as db:
+            db.execute('UPDATE source_folder_removed_files SET state=?,detail=?,updated=? WHERE id=?', (state, detail, stamp(), row_id))
+
+    def removed_files(self, job_id=None):
+        """Ruling 77c: the record of leftover files the folder cleanup deleted (or tried to), oldest first: a book's, or all."""
+        with connect(self.database) as db:
+            db.execute(REMOVED_FILES_TABLE)
+            return [dict(r) for r in db.execute('SELECT * FROM source_folder_removed_files' + (' WHERE job_id=?' if job_id else '') + ' ORDER BY id', (job_id,) if job_id else ())]
+
     def _remove_folder(self, job_id, manifest, output, path, own=False):
-        """One candidate folder (deepest first). Ruling 74e: the book's own folder loses its non-audio leftovers through the
-        exact-handle file disposal source cleanup and Delete book use (book_delete.remove: inside the source root, held
-        ancestry, one link, the listed size), then the folder goes with a plain, non-recursive rmdir (ruling 24a's removal,
-        extended by 74e to this automatic cleanup): it fails if anything arrived meanwhile, and works on NTFS and network
-        drives such as Z:, where the exact-handle empty-folder disposition refuses. The folder's native identity and
-        ancestry must still be the ones captured, it must hold no named stream, the source root and its direct children
-        are never candidates (_folder_candidates), and a folder holding the published audiobook is never touched."""
+        """One candidate folder (deepest first). Ruling 74e: the book's own folder loses its leftovers (77a: known safe
+        leftovers only) through the exact-handle file disposal source cleanup and Delete book use (book_delete.remove:
+        inside the source root, held ancestry, one link, the listed size), each one recorded first (77c), then the folder
+        goes with a plain, non-recursive rmdir (ruling 24a's removal, extended by 74e to this automatic cleanup): it fails if
+        anything arrived meanwhile, and works on NTFS and network drives such as Z:, where the exact-handle empty-folder
+        disposition refuses. The folder's native identity and ancestry must still be the ones captured, it must hold no
+        named stream, the source root and its direct children are never candidates (_folder_candidates), and a folder
+        holding the published audiobook is never touched."""
         from producer_recovery import protected_dependency
         from book_delete import remove
         with connect(self.database) as db:
@@ -834,13 +894,14 @@ class StorageCleanup:
             if reason:
                 self._folder_state(job_id,path,'retained_nonempty',reason);return
             self.guard();held.revalidate();self._folder_obligations(job_id,manifest,output);self._folder_sources_absent(job_id,manifest)
-            names=', '.join(Path(item['path']).name for item in leftovers)
-            self._folder_state(job_id,path,'removal_intended',('Removing with its non-audio files: '+names)[:1000] if names else '')
+            self._folder_state(job_id,path,'removal_intended','Removing %d leftover file(s), each recorded in source_folder_removed_files' % len(leftovers) if leftovers else '')
             for item in leftovers:
                 self.guard()
+                row_id=self._record_removal(job_id,manifest,path,item,'removing')  # durable before the file goes (77c)
                 failed=remove(item['path'],str(root),item['size'])
+                self._record_outcome(row_id,'not_removed' if failed else 'removed',('%s: %s' % failed) if failed else '')
                 if failed:
-                    self._folder_state(job_id,path,'retained_nonempty',('A non-audio file could not be removed; retained: '+failed[1])[:1000]);return
+                    self._folder_state(job_id,path,'retained_nonempty','A leftover file could not be removed; retained (see source_folder_removed_files)');return
         try:
             with self._folder_boundary(job_id,root,path.parent,ancestry) as boundary:
                 with VerifiedDirectory(path) as target:
@@ -859,43 +920,66 @@ class StorageCleanup:
         self._folder_state(job_id,path,'removed')
 
     def old_folder_jobs(self):
-        """Ruling 76b: the folder cleanups an earlier version finished ('completed' or 'unsupported') that kept a folder and
-        that the sweep has not looked at yet, oldest first. Read-only."""
+        """Ruling 76b: the folder cleanups an earlier version finished ('completed' or 'unsupported') that kept a folder (or
+        left one mid-removal) and that the sweep has not settled yet, oldest first. Read-only."""
+        states=KEPT_STATES+INTENT_STATES
         with connect(self.database) as db:
             db.execute(SWEEP_TABLE)
             return [r[0] for r in db.execute("SELECT j.job_id FROM source_folder_cleanup_jobs j WHERE j.state IN ('completed','unsupported') "
                                              "AND j.job_id NOT IN (SELECT job_id FROM source_folder_sweep) AND EXISTS (SELECT 1 FROM source_folder_cleanup_directories d "
-                                             "WHERE d.job_id=j.job_id AND d.state IN (%s)) ORDER BY j.updated,j.job_id" % ','.join('?'*len(KEPT_STATES)),KEPT_STATES)]
+                                             "WHERE d.job_id=j.job_id AND d.state IN (%s)) ORDER BY j.updated,j.job_id" % ','.join('?'*len(states)),states)]
 
     @staticmethod
     def _might_clear(path):
-        """A kept folder 74e could remove now: it holds nothing, or only files that are not audio (no subfolder, no link, no
-        audio in any format). Read-only, one listing; the run itself checks everything again."""
-        from book_delete import SOUND
+        """A kept folder 74e could remove now: True when it holds nothing or only known safe leftovers (leftover_verdict),
+        False when something keeps it, None when it cannot be listed (ruling 77b: try again later). Read-only, one listing;
+        the run itself checks everything again."""
         try:
             with os.scandir(path) as listing:
                 for entry in listing:
-                    if entry.is_symlink() or os.path.isjunction(entry.path) or entry.is_dir(follow_symlinks=False) or Path(entry.name).suffix.lower() in SOUND:return False
+                    if leftover_verdict(entry):return False
         except OSError:
-            return False
+            return None
         return True
 
+    def _root_reachable(self, job_id):
+        """The library folder the book's job came from can be listed now (ruling 77b: Z: or the NAS away is no outcome)."""
+        try:
+            manifest,_output=self._job(job_id)
+            root=manifest['root']
+            with os.scandir(root) as listing:next(listing,None)
+            return True
+        except Exception:
+            return False
+
     def sweep_folders(self, job_id):
-        """Ruling 76b: one earlier folder cleanup, run again under 74e, once. Cheap checks first: 'gone' when no kept folder
-        is there any more, 'kept' when each one still holds audio, a subfolder or a link. Otherwise the full run, with every
-        check of the post-conversion cleanup (the published audiobook re-read, source retirement and the copy purge
-        complete, no replacement original, identity and ancestry, never a source root or a folder directly inside one); its
-        resulting state is the outcome. The outcome is recorded whatever it is, so a job is never swept twice; an
-        InterruptedError (closing) records nothing and the next start resumes it."""
+        """Ruling 76b: one earlier folder cleanup, run again under 74e, settled once. Ruling 77b (after Senua's M2): only an
+        outcome seen on a reachable library folder is recorded. 'later' (nothing recorded, the next pass tries again) when the
+        library folder or a kept folder cannot be reached or listed, or the run fails on the drive (OSError, or the library
+        folder gone meanwhile; the folder job keeps the state it had, so the sweep finds it again). Recorded: 'gone' when no
+        kept folder is there any more on a reachable drive, 'kept' when each one holds something that is not a known safe
+        leftover, else the state after the full run, with every check of the post-conversion cleanup (the published
+        audiobook re-read, source retirement and the copy purge complete, no replacement original, identity and ancestry,
+        never a source root or a folder directly inside one). An InterruptedError (closing) records nothing."""
+        if not self._root_reachable(job_id):return 'later'
+        states=KEPT_STATES+INTENT_STATES
         with connect(self.database) as db:
-            kept=[r[0] for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(KEPT_STATES)),(job_id,*KEPT_STATES))]
-        present=[path for path in kept if os.path.isdir(path)]
-        if not present:outcome='gone'
-        elif not any(self._might_clear(path) for path in present):outcome='kept'
+            rows=[(r[0],r[1]) for r in db.execute('SELECT path,state FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(states)),(job_id,*states))]
+            prior=db.execute('SELECT * FROM source_folder_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
+        present=[path for path,state in rows if os.path.isdir(path)]
+        intent=any(state in INTENT_STATES for _path,state in rows)
+        verdicts=[self._might_clear(path) for path in present]
+        if None in verdicts:return 'later'
+        if not present and not intent:outcome='gone'
+        elif not intent and not any(verdicts):outcome='kept'
         else:
             try:outcome=(self.run_folders(job_id,rerun=True) or {}).get('state') or 'none'
             except InterruptedError:raise
-            except Exception:outcome='needs_attention'  # recorded on the folder job by run_folders; housekeeping, never attention
+            except Exception as error:
+                if isinstance(error,OSError) and not isinstance(error,BoundaryError) or not self._root_reachable(job_id):
+                    if prior is not None:self._folder_set(job_id,prior['output_hash'],prior['state'],prior['reason'])
+                    return 'later'
+                outcome='needs_attention'  # recorded on the folder job by run_folders; housekeeping, never attention
         with connect(self.database) as db:
             db.execute(SWEEP_TABLE)
             db.execute('INSERT OR REPLACE INTO source_folder_sweep VALUES(?,?,?)',(job_id,outcome,stamp()))
@@ -931,7 +1015,9 @@ class StorageCleanup:
                 self._folder_set(job_id,output_hash,'unsupported' if reasons else 'completed','; '.join(reasons))
             return self.folder_status(job_id)
         except Exception as error:
-            self._folder_set(job_id,output_hash,'needs_attention',str(error));raise
+            # Ruling 77b: a failure on the drive (unreachable, a listing failed) is marked so a later pass tries again.
+            transient=not isinstance(error,InterruptedError) and (isinstance(error,OSError) and not isinstance(error,BoundaryError) or not self._root_reachable(job_id))
+            self._folder_set(job_id,output_hash,'needs_attention',(FOLDER_RETRY if transient else '')+str(error));raise
 
     def discard_repair_copy(self, job_id, path, sha256, size):
         """Explicit one-off caller: validate its retained repair journal before calling.
