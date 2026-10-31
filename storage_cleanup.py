@@ -21,6 +21,10 @@ from source_cleanup import packed, stamp, single_stream
 TAG_REPAIR=re.compile(r'tag-repair-[0-9a-f]{32}\.(?:mp3|json)')
 
 TERMINAL = {'removed', 'absent_after_intent'}
+# Ruling 76b (Sergei 2026-10-31): a folder cleanup an earlier version finished ('completed' or 'unsupported') while it kept a
+# folder is run once more under 74e. One row per job once it has been looked at: never twice.
+SWEEP_TABLE = 'CREATE TABLE IF NOT EXISTS source_folder_sweep(job_id TEXT PRIMARY KEY,outcome TEXT NOT NULL,at TEXT NOT NULL)'
+KEPT_STATES = ('retained_nonempty', 'retained_unsupported', 'verified')
 
 class StorageCleanup:
     def __init__(self, database, stage_root, recovery_root, guard=lambda: None,output_location=None,output_location_guard=None,repair_publication=None,repair_location_guard=None):
@@ -41,6 +45,7 @@ class StorageCleanup:
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_preserved(path TEXT PRIMARY KEY,job_id TEXT,reason TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_jobs(job_id TEXT PRIMARY KEY,output_hash TEXT,state TEXT,reason TEXT,updated TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS source_folder_cleanup_directories(job_id TEXT,path TEXT,identity TEXT,ancestry TEXT,state TEXT,reason TEXT,updated TEXT,PRIMARY KEY(job_id,path))')
+            db.execute(SWEEP_TABLE)  # ruling 76b: the folder cleanups an earlier version finished, looked at again once
             db.execute('CREATE TABLE IF NOT EXISTS storage_cleanup_files(path TEXT PRIMARY KEY, job_id TEXT, kind TEXT, sha256 TEXT, size INTEGER, facts TEXT, state TEXT, updated TEXT)')
             # Recovery status reads these per book on every status read and book-list page; without an index
             # each lookup scanned the whole table (about 1.6 GB read per status on the real catalog).
@@ -853,13 +858,57 @@ class StorageCleanup:
         self._folder_state(job_id,path,'disposition_set')
         self._folder_state(job_id,path,'removed')
 
-    def run_folders(self, job_id, progress=None):
-        """Check only completed enrolled source parents; never enroll originals."""
+    def old_folder_jobs(self):
+        """Ruling 76b: the folder cleanups an earlier version finished ('completed' or 'unsupported') that kept a folder and
+        that the sweep has not looked at yet, oldest first. Read-only."""
+        with connect(self.database) as db:
+            db.execute(SWEEP_TABLE)
+            return [r[0] for r in db.execute("SELECT j.job_id FROM source_folder_cleanup_jobs j WHERE j.state IN ('completed','unsupported') "
+                                             "AND j.job_id NOT IN (SELECT job_id FROM source_folder_sweep) AND EXISTS (SELECT 1 FROM source_folder_cleanup_directories d "
+                                             "WHERE d.job_id=j.job_id AND d.state IN (%s)) ORDER BY j.updated,j.job_id" % ','.join('?'*len(KEPT_STATES)),KEPT_STATES)]
+
+    @staticmethod
+    def _might_clear(path):
+        """A kept folder 74e could remove now: it holds nothing, or only files that are not audio (no subfolder, no link, no
+        audio in any format). Read-only, one listing; the run itself checks everything again."""
+        from book_delete import SOUND
+        try:
+            with os.scandir(path) as listing:
+                for entry in listing:
+                    if entry.is_symlink() or os.path.isjunction(entry.path) or entry.is_dir(follow_symlinks=False) or Path(entry.name).suffix.lower() in SOUND:return False
+        except OSError:
+            return False
+        return True
+
+    def sweep_folders(self, job_id):
+        """Ruling 76b: one earlier folder cleanup, run again under 74e, once. Cheap checks first: 'gone' when no kept folder
+        is there any more, 'kept' when each one still holds audio, a subfolder or a link. Otherwise the full run, with every
+        check of the post-conversion cleanup (the published audiobook re-read, source retirement and the copy purge
+        complete, no replacement original, identity and ancestry, never a source root or a folder directly inside one); its
+        resulting state is the outcome. The outcome is recorded whatever it is, so a job is never swept twice; an
+        InterruptedError (closing) records nothing and the next start resumes it."""
+        with connect(self.database) as db:
+            kept=[r[0] for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(KEPT_STATES)),(job_id,*KEPT_STATES))]
+        present=[path for path in kept if os.path.isdir(path)]
+        if not present:outcome='gone'
+        elif not any(self._might_clear(path) for path in present):outcome='kept'
+        else:
+            try:outcome=(self.run_folders(job_id,rerun=True) or {}).get('state') or 'none'
+            except InterruptedError:raise
+            except Exception:outcome='needs_attention'  # recorded on the folder job by run_folders; housekeeping, never attention
+        with connect(self.database) as db:
+            db.execute(SWEEP_TABLE)
+            db.execute('INSERT OR REPLACE INTO source_folder_sweep VALUES(?,?,?)',(job_id,outcome,stamp()))
+        return outcome
+
+    def run_folders(self, job_id, progress=None, rerun=False):
+        """Check only completed enrolled source parents; never enroll originals. rerun (ruling 76b, sweep_folders only): a
+        cleanup an earlier version finished runs again."""
         with connect(self.database) as db:
             enrolled=db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
         if not enrolled:return None
         terminal=self.folder_status(job_id)
-        if terminal and terminal['state'] in ('completed','unsupported'):return terminal
+        if terminal and terminal['state'] in ('completed','unsupported') and not rerun:return terminal
         output_hash=''
         try:
             with self.protected_output(job_id) as (manifest,output):

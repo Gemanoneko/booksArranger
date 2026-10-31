@@ -1204,6 +1204,27 @@ class MergeService:
                 try:
                     with self.operation_lock:storage.run_folders(row['job_id'])
                 except Exception:pass  # stays as housekeeping; it holds nothing
+        self._sweep_old_folders()
+
+    OLD_FOLDER_BUDGET=20.0  # seconds of one retention pass the 76b sweep may use; it goes on at the next pass (every minute)
+
+    def _sweep_old_folders(self):
+        """Ruling 76b (Sergei 2026-10-31): the source folders of books converted before 0.24.1 that an earlier version kept
+        are looked at again under 74e, once each (StorageCleanup.sweep_folders). It runs from the retention pass, which comes
+        here only while no conversion or cleanup runs and no scan holds the catalog, one book at a time under the operation
+        lock, for at most OLD_FOLDER_BUDGET seconds a pass; closing stops it and the next start goes on where it stopped."""
+        storage=getattr(self,'storage_cleanup',None)
+        if storage is None or not hasattr(storage,'old_folder_jobs') or self.draining or self.__dict__.get('_closing'):return
+        try:pending=storage.old_folder_jobs()
+        except sqlite3.Error:return
+        until=time.monotonic()+self.OLD_FOLDER_BUDGET
+        for job_id in pending:
+            if time.monotonic()>until or self.draining or self.__dict__.get('_closing'):return
+            if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
+            try:
+                with self.operation_lock:storage.sweep_folders(job_id)
+            except InterruptedError:return
+            except Exception:pass  # housekeeping: the next pass goes on with the others
 
     def _prune_working(self,job_id):
         output_hash=''

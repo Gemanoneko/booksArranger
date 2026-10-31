@@ -183,5 +183,21 @@ class FolderJobTests(unittest.TestCase):
         s.storage_cleanup.run_folders.assert_called_once_with('locked')
 
 
+    def test_ruling_76b_old_folders_are_swept_only_while_nothing_converts(self):
+        s = service(); s._purge_tried = set(); s.draining = False
+        swept = []
+        s.storage_cleanup = SimpleNamespace(folder_status=lambda: [], _folder_set=Mock(), run_folders=Mock(),
+                                            old_folder_jobs=lambda: ['a', 'b', 'c'], sweep_folders=lambda job_id: swept.append(job_id) or 'completed')
+        s._settle_folder_jobs()
+        self.assertEqual(swept, [], 'a conversion is running: the sweep waits')
+        s.jobs._thread = SimpleNamespace(is_alive=lambda: False)
+        s._settle_folder_jobs()
+        self.assertEqual(swept, ['a', 'b', 'c'], 'one book at a time, every pending one inside the budget')
+        swept.clear(); s.draining = True; s._settle_folder_jobs(); self.assertEqual(swept, [], 'never while closing')
+        s.draining = False; s.OLD_FOLDER_BUDGET = -1; s._settle_folder_jobs(); self.assertEqual(swept, [], 'the budget ends a pass')
+        s.OLD_FOLDER_BUDGET = 20.0
+        s.storage_cleanup.sweep_folders = Mock(side_effect=[InterruptedError('closing'), 'kept'])
+        s._settle_folder_jobs(); self.assertEqual(s.storage_cleanup.sweep_folders.call_count, 1, 'closing stops the pass')
+
 if __name__ == '__main__':
     unittest.main()

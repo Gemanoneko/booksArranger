@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from audio_jobs import AudioJobs
-from native_io import BoundaryError,DirectoryBoundary,VerifiedDirectory,DirectoryNotEmptyError,DirectoryDispositionUnsupported,kernel
+from native_io import BoundaryError,DirectoryBoundary,VerifiedDirectory,DirectoryNotEmptyError,DirectoryDispositionUnsupported,kernel,ordinary
 from scanner import connect
 from source_cleanup import CleanupJobs,packed
 from storage_cleanup import StorageCleanup
@@ -273,5 +273,33 @@ class SourceFolderTests(unittest.TestCase):
         self.retire();sibling=self.library/'Author'/'Other Book';sibling.mkdir();(sibling/'keep.txt').write_bytes(b'keep')
         status=self.storage.run_folders(self.job_id)
         self.assertEqual(status['removed'],2);self.assertEqual(status['retained'],0);self.assertEqual((sibling/'keep.txt').read_bytes(),b'keep');self.assertTrue(self.library.exists())  # Author is no candidate (m2)
+
+    def old_run(self):
+        """A folder cleanup as 0.24.0 left it: every folder kept as unsupported (NTFS named streams), the job finished."""
+        def retained(job_id,manifest,output,path,own=False):
+            if self.storage._capture_folder(job_id,ordinary(manifest['root']),path) is not None:
+                self.storage._folder_state(job_id,path,'retained_unsupported','Empty source folder retained: NTFS supports named data streams; arriving directory stream data cannot be protected atomically')
+        self.retire()
+        with patch.object(self.storage,'_remove_folder',side_effect=retained):status=self.storage.run_folders(self.job_id)
+        self.assertEqual((status['state'],status['unsupported']),('unsupported',2),'positive control: the old outcome')
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'unsupported','a finished cleanup is not run again by itself')
+    def sweep_marker(self):
+        with connect(self.db) as db:return db.execute('SELECT outcome FROM source_folder_sweep WHERE job_id=?',(self.job_id,)).fetchone()
+    def test_ruling_76b_a_folder_an_earlier_version_kept_is_cleared_once(self):
+        (self.folder/'cover.jpg').write_bytes(b'LEFTOVER');self.old_run()
+        self.assertEqual(self.storage.old_folder_jobs(),[self.job_id])
+        self.assertEqual(self.storage.sweep_folders(self.job_id),'completed')
+        self.assertFalse(self.folder.exists());self.assertFalse((self.library/'Author'/'Old Book').exists());self.assertTrue((self.library/'Author').is_dir(),'never a direct child of the root')
+        self.assertTrue(self.library.is_dir());self.assert_output()
+        self.assertEqual(self.sweep_marker()[0],'completed');self.assertEqual(self.storage.old_folder_jobs(),[],'never swept twice')
+    def test_ruling_76b_a_kept_folder_with_audio_or_already_gone_is_only_recorded(self):
+        (self.folder/'bonus.ape').write_bytes(b'OTHER RECORDING');self.old_run()
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('nothing to clear: the audiobook is not re-read')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'kept')
+        self.assertEqual((self.folder/'bonus.ape').read_bytes(),b'OTHER RECORDING');self.assertEqual(self.storage.old_folder_jobs(),[])
+        with connect(self.db) as db:db.execute('DELETE FROM source_folder_sweep')
+        (self.folder/'bonus.ape').unlink();self.folder.rmdir();(self.library/'Author'/'Old Book').rmdir()
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('nothing is there')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'gone')
 
 if __name__=='__main__':unittest.main()
