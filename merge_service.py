@@ -2347,6 +2347,10 @@ class MergeService:
                  'fields':ask.get('fields') or {},'candidates':ask.get('candidates') or [],
                  # 0.22.1: an odd-name question is approved on its own row only, never in bulk (Judy 11.4, item 2).
                  'odd_name':ask.get('odd_name') is True}
+        if isinstance(ask.get('volume'),dict):
+            # Ruling 74b ("Number unclear"): the title's number, the source's number and the source's provider, for the
+            # row's sentence (the page names the provider's site); Series, Number and Title come in fields.
+            payload['volume']={key:ask['volume'].get(key) for key in ('title_number','series_number','provider')}
         if entry['group']=='same_author':
             payload['same_author']={k:ask.get(k) for k in ('new','existing','existing_books','why')}
             payload['same_author']['count']=sum(1 for e in self.needs_you().values() if e['group']=='same_author' and (e.get('ask') or {}).get('new')==ask.get('new'))

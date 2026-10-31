@@ -65,6 +65,21 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   tr=trOf('cand-pe');assert.equal(statusCell(tr).textContent,'Author unclear');
   assert.equal(statusCell(tr).children[0].textContent,"Two people are credited. The app can't tell who wrote it.");
   assert.ok(radios(tr).length>=2,'a choice between the people');
+  // Ruling 74b (Judy): "Number unclear": the title's number against the source's, named by its provider's site (else "an
+  // online source", never "the catalog"); Title, Series and Number inline and filled in; Approve untouched sends them.
+  const numberAsk=(name,provider)=>askRow(name,{kind:'title_author',also:null,why:'number_unclear',odd_name:true,reasons:['Title or author missing'],volume:{title_number:1,series_number:'2',provider},
+    fields:{title:{proposal:'The Fellowship of the Ring',basis:'tag'},author:{proposal:'Tolkien J. R. R.',basis:'tag'},series:{proposal:'Властелин колец',basis:'source'},number:{proposal:'1',basis:'title'}},candidates:[],
+    destination:dest('Tolkien J. R. R\\Властелин колец\\Властелин колец - 1 - The Fellowship of the Ring - Tolkien J. R. R.m4b')});
+  paint([numberAsk('nf','fantlab'),numberAsk('ng','goodreads'),numberAsk('nx','publisher')]);
+  for(const [id,source] of [['cand-nf','FantLab'],['cand-ng','Goodreads'],['cand-nx','an online source']]){
+    tr=trOf(id);assert.equal(statusCell(tr).textContent,'Number unclear',id);
+    assert.equal(statusCell(tr).children[0].textContent,'The title says book 1, but '+source+' says book 2.',id);
+    assert.deepEqual(inputs(tr).map(e=>[e.dataset.name,e.value]),[['title','The Fellowship of the Ring'],['series','Властелин колец'],['number','1']],id+': the odd-title inline fields, filled in');
+  }
+  await buttonsOf(trOf('cand-nf'))[0].handlers.click({stopPropagation(){}});await tick();
+  const numbered=posted('/api/candidate/approve').at(-1);
+  assert.equal(numbered.id,'cand-nf');assert.deepEqual(numbered.names,{series:'Властелин колец',number:'1'});assert.equal('title' in numbered,false,'untouched: the shown values');
+  paint([bitrate,series,latin,folder,people]);
   // Approve as is files the book unchanged: nothing typed sends no title or author.
   await buttonsOf(trOf('cand-br'))[0].handlers.click({stopPropagation(){}});await tick();
   const sent=posted('/api/candidate/approve').at(-1);assert.equal(sent.id,'cand-br');assert.equal('title' in sent,false);assert.equal('author' in sent,false);

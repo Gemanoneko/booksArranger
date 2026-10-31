@@ -2526,7 +2526,15 @@ function askDraft(id){if(!askDrafts.has(id))askDrafts.set(id,{seq:0,previewKey:'
 function askProposal(ask,name){const value=ask?.fields?.[name]?.proposal;return typeof value==='string'?value:'';}
 function plural(n,one,many){return `${n.toLocaleString()} ${n===1?one:many}`;}
 // Which fields the row shows: Title when it is missing or a guess, Author when it is missing or unclear (section 3).
-function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && (!!askFieldPlanOf(ask).author || ask.why==='title_series'));}
+function inlineNames(row){const ask=askOf(row);return !!ask && (['author_unclear','same_author'].includes(askKind(ask)) || askKind(ask)==='title_author' && (!!askFieldPlanOf(ask).author || ['title_series','number_unclear'].includes(ask.why)));}
+// Ruling 74b (Judy): "Number unclear": the title's number (an Arabic numeral) against the source's, the source named by its
+// provider's site, else "an online source"; never "the catalog".
+const NUMBER_SOURCES={fantlab:'FantLab',goodreads:'Goodreads',wikidata:'Wikidata',litres:'Litres'};
+function numberUnclear(ask){
+  const v=ask?.volume || {},title=Number(v.title_number),series=String(v.series_number ?? '').trim();
+  if(!Number.isInteger(title) || title<1 || !series)return ASK_COPY.other[1];
+  return `The title says book ${title}, but ${NUMBER_SOURCES[String(v.provider || '').toLowerCase()] || 'an online source'} says book ${series}.`;
+}
 function askFieldPlan(ask,row=null){
   const plan=askFieldPlanOf(ask);
   if(row && inlineNames(row))return {...plan,title:true,author:namesOpen(row.id)?plan.author || 'input':plan.author};
@@ -2592,6 +2600,7 @@ function askText(row){
   if(copyOffer(row))return {status:ASK_COPY.other[0],hint:sortedText(COPY_HINT)};
   if(ask.kind==='same_author')return {status:'Same author?',hint:`Is "${ask.same_author?.new || ''}" the same author as "${ask.same_author?.existing || ''}"?`};
   if(holdKind(ask))return {status:HOLD_STATUS[ask.kind],hint:holdSentence(ask.kind,ask.cause,{...(ask.facts || {}),membership:ask.membership})};
+  if(ask.kind==='title_author' && ask.why==='number_unclear')return {status:'Number unclear',hint:numberUnclear(ask)};
   const copy=ASK_COPY[['title_author','author_unclear'].includes(ask.kind)?ask.why:ask.kind] || ASK_COPY[{title_author:'both_missing',author_unclear:'two_people'}[ask.kind] || 'other'];
   return {status:copy[0],hint:copy[1]};
 }

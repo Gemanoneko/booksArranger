@@ -85,6 +85,47 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','basis':'research'}))
         self.assertNotIn('series_clue',row['ask'])
 
+    def test_number_unclear_reaches_the_row_and_approve_as_shown_files_the_series_74b(self):
+        """Ruling 74b, both ends: research holds «Хранители. Летопись первая» when FantLab numbers it book 2; the to-do row
+        (needs_you, ask_payload) carries both numbers and the provider with Series, Number and Title filled in; Approve
+        with them untouched queues the book with that series and the title's number. FantLab's live answer shapes of
+        2026-10-31, the novels' order changed; real MP3 files, a real catalog and engine, offline."""
+        import threading,urllib.parse
+        from public_research import PublicClient,PublicResearch
+        folder=self.audio/'Unsorted'/'Хранители. Летопись первая'
+        for n in (1,2):tone(folder/('%02d.mp3'%n),self.cover,album='Хранители. Летопись первая',artist='Джон Рональд Руэл Толкин',track='%d/2'%n)
+        self.start()
+        def fetch(url,*_):
+            parts=urllib.parse.urlsplit(url)
+            if parts.hostname=='api.fantlab.ru' and parts.path=='/search-works':
+                found=[{'work_id':1667,'name':'The Fellowship of the Ring','rusname':'Братство Кольца','altname':'Хранители кольца; Хранители','all_autor_name':'J. R. R. Tolkien',
+                        'all_autor_rusname':'Дж. Р. Р. Толкин'}] if urllib.parse.parse_qs(parts.query)['q'][0]=='Хранители' else []
+                return json.dumps(found,ensure_ascii=False).encode()
+            if parts.hostname=='api.fantlab.ru' and parts.path=='/work/1693/extended':
+                return json.dumps({'work_id':1693,'work_name':'Властелин Колец','work_type_id':13,'children':[{'work_id':n,'work_type_id':1,'deep':1,'plus':None} for n in (1668,1667,1669)]},ensure_ascii=False).encode()
+            if parts.hostname=='api.fantlab.ru' and parts.path=='/work/1667/extended':
+                return json.dumps({'work_id':1667,'work_name':'Братство Кольца','work_name_orig':'The Fellowship of the Ring','work_type_id':1,'work_type_name':'novel','lang_code':'en',
+                                   'authors':[{'type':'autor','name':'Дж. Р. Р. Толкин','name_orig':'J. R. R. Tolkien'}],
+                                   'parents':{'cycles':[[{'work_id':1693,'work_name':'Властелин Колец','work_type_id':13}]]}},ensure_ascii=False).encode()
+            if parts.hostname=='www.goodreads.com':return b'<html><body><table class="tableList"></table></body></html>'
+            if parts.hostname=='www.wikidata.org':return json.dumps({'search':[],'entities':{}}).encode()
+            return b'{"items":[],"results":[],"docs":[]}'
+        minutes=iter(range(10**6,10**9,60))  # no pacing wait; the cache stays fresh
+        self.service.automatic.research=PublicResearch(PublicClient(self.inv.database,fetch=fetch,clock=lambda:next(minutes)),leads=[])
+        # The first research learns the English spelling (a rule that decides the book's own credit), so the run researches
+        # the book once more before listing it (rules_changed_for, Senua's 0.22.0 review G6), as for every question.
+        self.research_all();self.research_all()
+        row=self.service.reviews.page(status='output_attention')['rows'][0];ask=row['ask']
+        self.assertEqual((ask['kind'],ask['why'],ask['odd_name']),('title_author','number_unclear',True))
+        self.assertEqual(ask['volume'],{'title_number':1,'series_number':'2','provider':'fantlab'})
+        self.assertEqual({name:ask['fields'][name]['proposal'] for name in ('title','author','series','number')},
+                         {'title':'The Fellowship of the Ring','author':'Tolkien J. R. R.','series':'Властелин колец','number':'1'})
+        approved=self.service.approve_book(row['id'],row['revision'])  # nothing typed
+        job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
+        metadata=job['manifest']['metadata']
+        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('The Fellowship of the Ring','Tolkien J. R. R.','Властелин колец','1'))
+        self.assertIn(os.path.join('Tolkien J. R. R','Властелин колец',''),job['manifest']['destination'])
+
     def test_raised_folder_question_and_keep_as_separate_books(self):
         folder=self.audio/'Unsorted'/'Разное'
         tone(folder/'Альфа.mp3',self.cover,album='Альфа',artist='Сергей Лукьяненко')

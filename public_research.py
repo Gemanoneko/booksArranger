@@ -645,7 +645,8 @@ class PublicResearch:
         if not final_title:raise ValueError('Type a title first.')
         # Ruling 49 (Sergei 2026-10-27): a Russian edition of a foreign book files under its original English title, on
         # Approve as automatically (_local_lookup's preferred title); a title he typed or entered wins.
-        english=self._english_original(record,final_title) if 'title' not in typed else None
+        mismatch={}  # ruling 74b: what the cache says when the title and the source disagree on the volume number
+        english=self._english_original(record,final_title,mismatch) if 'title' not in typed else None
         if english:final_title=english['original_title']
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
@@ -655,6 +656,12 @@ class PublicResearch:
             if key in record:settled[key]=copy.deepcopy(record[key])
         if english and english.get('series') and not settled.get('series') and not {'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)):
             settled['series']=dict(english['series'])  # found with the Russian title (_english_original); never his own values
+            settled['gaps']=[gap for gap in settled.get('gaps') or [] if gap not in ('series','number')]
+        elif mismatch and not settled.get('series') and not {'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)):
+            # Ruling 74b: the "Number unclear" row shows the source's series with the title's number; Approve with those
+            # fields untouched files exactly that (a press without names too: bulk Approve as is), never no series.
+            settled['series']={'name':mismatch['series'],'number':str(mismatch['title_number']),'provider':'title_number','source_url':mismatch.get('source_url',''),
+                               'source_provider':mismatch.get('provider','')}
             settled['gaps']=[gap for gap in settled.get('gaps') or [] if gap not in ('series','number')]
         if english:
             settled['fields']['title']=dict(settled['fields']['title'],how=settled['fields']['title']['how']+'; the original English title (ruling 49) of "%s"'%shown['title'],
@@ -667,7 +674,7 @@ class PublicResearch:
                             # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
                             'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
         return result
-    def _english_original(self,record,title):
+    def _english_original(self,record,title,mismatch=None):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
         automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
         Lev» for «Лев Гроссман»), when it says the work's original is English and names its Latin title; else None. A title
@@ -681,6 +688,7 @@ class PublicResearch:
         gaps=['original_title']+(['series'] if 'series' in (record.get('gaps') or ()) and not record.get('series') else [])
         try:filled=self._gap_fill(dict(record,gaps=gaps),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
         except Exception:return None  # nothing known: the title shown is filed
+        if mismatch is not None and isinstance((filled or {}).get('volume_mismatch'),dict):mismatch.update(filled['volume_mismatch'])  # ruling 74b
         catalog=(filled or {}).get('catalog') or {}
         original=text(catalog.get('original_title'))
         if catalog.get('language')!='en' or not original or local_identity.script(original)!='latin':return None
@@ -1461,6 +1469,18 @@ class PublicResearch:
                            'series':{'proposal':split['series'],'basis':'title'},'number':{'proposal':split['number'],'basis':'title'}}}
             return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
+        mismatch=filled.get('volume_mismatch')
+        if mismatch and not series and not his and one_source and not reasons and not part:
+            # Ruling 74b (Sergei 2026-10-31; Judy's "Number unclear"): an edition volume title and the source disagree on
+            # the number («Летопись первая», the source's book 2). Asked with both numbers and the source's provider; Series
+            # (the source's), Number (the title's) and Title (what Approve files under now) are filled in, and his Approve as
+            # shown files them (approved()). The author is settled first, as for ruling 52.
+            ask={'kind':'title_author','why':'number_unclear','odd_name':True,
+                 'volume':{'title_number':mismatch['title_number'],'series_number':mismatch['series_number'],'provider':mismatch['provider']},
+                 'fields':{'title':{'proposal':preferred,'basis':fields['title'].get('basis','')},'author':{'proposal':names[0],'basis':fields['author'].get('basis','')},
+                           'series':{'proposal':mismatch['series'],'basis':'source'},'number':{'proposal':str(mismatch['title_number']),'basis':'title'}}}
+            return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
+                           'rules_generation':rules.generation if rules else ''}
         original=None
         if one_source and not reasons and not sergei and not part and names[0]!=NO_AUTHOR and language!='ru':
             # Ruling 38 (Sergei 2026-10-27; it replaces ruling 29's wait): a translation is filed under the English original
@@ -1549,7 +1569,14 @@ class PublicResearch:
         if base==text(title) or not found.get('unfilled') or stop.is_set():return found
         again=self._gap_fill_once(dict(local,gaps=list(found['unfilled'])),base,author,stop,budget,waits,progress,result)
         series=again.get('series')
-        if series and volume is not None and str((series or {}).get('number') or '').strip()!=str(volume):again.pop('series',None)
+        if series and volume is not None and str((series or {}).get('number') or '').strip()!=str(volume):
+            again.pop('series',None)
+            if not found.get('series'):
+                # Ruling 74b (Sergei 2026-10-31): the title and the source disagree on the volume number. Never filed
+                # (rulings 51 and 52); research asks Sergei with both numbers and the source (_local_lookup), and his
+                # Approve as shown files the source's series with the title's number (approved()).
+                found['volume_mismatch']={'series':text(series.get('name')),'series_number':str(series.get('number') or '').strip(),'title_number':volume,
+                                          'provider':text(series.get('provider')),'source_url':text(series.get('source_url'))}
         for key in ('catalog','series','author_full'):
             if again.get(key) and not found.get(key):found[key]=again[key]
         found['closed']=list(dict.fromkeys(list(found.get('closed') or [])+list(again.get('closed') or [])))
@@ -2028,7 +2055,9 @@ class PublicResearch:
 SERIES_WHY={
     'litres':'Series and explicit position on the canonical Litres book page matching the exact title and all credited authors; not the series total or retailer card order.',
     'goodreads':'Series and position from the Goodreads book record or explicit series entry, joined to the exact book id, title and all locally agreed authors (Sergei 2026-10-18: Goodreads is the series source).',
-    'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).'}
+    'fantlab':'Series from the FantLab cycle holding the work matching the locally agreed title and author; FantLab gives no number, so the position is counted in the cycle order (Goodreads listed no series).',
+    # Ruling 74b: the source and the edition volume title disagreed on the number; Sergei approved the row as shown.
+    'title_number':'Series name from the source record; number from the edition volume title, which the source numbered differently; approved by Sergei as shown (ruling 74b).'}
 
 def series_source(series):
     """Where the series and number came from, recorded on the metadata facts."""

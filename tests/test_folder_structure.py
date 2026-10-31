@@ -1287,7 +1287,9 @@ class TolkienHeldTranslationTests(Base):
         self.SEARCH=dict(self.SEARCH,**{'Хранители':dict(self.SEARCH['Две твердыни'],altname='Хранители')})  # a wrong record: novel 2
         books,_=self.books()
         self.lookup(books[0])
-        self.assertFalse(self.research.approved(books[0],ROOT)['review'].get('series'),'«Летопись первая» is never filed as book 2')
+        # Ruling 74b (Sergei 2026-10-31): Approve as shown files the source's series with the title's number, never book 2.
+        review=self.research.approved(books[0],ROOT)['review']
+        self.assertEqual((review.get('series'),review.get('number')),('Властелин колец','1'),'«Летопись первая» is never filed as book 2')
 
     def test_a_title_or_series_he_entered_is_never_looked_up(self):
         import entered_names
@@ -1318,6 +1320,7 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
     SEARCH={'Хранители':{'work_id':1667,'name':'The Fellowship of the Ring','rusname':'Братство Кольца','altname':'Хранители кольца; Хранители; Дружество кольца; Содружество кольца; Товарищество кольца'},
             'Две твердыни':{'work_id':1668,'name':'The Two Towers','rusname':'Две твердыни','altname':'Две башни; Две крепости'},
             'Возвращение государя':{'work_id':1669,'name':'The Return of the King','rusname':'Возвращение Короля','altname':'Возвращение Государя'}}
+    ORDER=(1667,1668,1669)  # the novel-epic's novels in FantLab's order: their positions 1, 2, 3
 
     def sources(self,closed=()):
         import urllib.error,urllib.parse
@@ -1328,7 +1331,7 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
             if parts.hostname in closed or parts.hostname!='api.fantlab.ru':return fetch(url,*args)
             calls.append(url)
             if parts.path=='/work/1693/extended':
-                children=[{'work_id':505060,'work_type_id':11,'deep':1,'plus':1},{'work_id':143576,'work_type_id':11,'deep':1,'plus':1}]+[{'work_id':n,'work_type_id':1,'deep':1,'plus':None} for n in (1667,1668,1669)]+[{'work_id':183141,'work_type_id':7,'deep':1,'plus':1}]
+                children=[{'work_id':505060,'work_type_id':11,'deep':1,'plus':1},{'work_id':143576,'work_type_id':11,'deep':1,'plus':1}]+[{'work_id':n,'work_type_id':1,'deep':1,'plus':None} for n in self.ORDER]+[{'work_id':183141,'work_type_id':7,'deep':1,'plus':1}]
                 return json.dumps({'work_id':1693,'work_name':'Властелин Колец','work_name_orig':'The Lord of the Rings','work_type_id':13,'children':children},ensure_ascii=False).encode()
             if parts.path=='/search-works':
                 q=urllib.parse.parse_qs(parts.query)['q'][0]
@@ -1389,6 +1392,33 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
         self.assertEqual(evidence_missing(result),set())
         self.assertIn({'field':'original_language','cited_value':'en','source_url':'https://fantlab.ru/work1669'},
                       [{key:e[key] for key in ('field','cited_value','source_url')} for e in result['evidence']])
+
+    def test_a_volume_number_the_source_disagrees_with_is_asked_and_approve_files_what_it_shows_74b(self):
+        # Ruling 74b: FantLab numbers the novels 1668, 1667, 1669, so «Хранители. Летопись первая» is its book 2 and «Две
+        # твердыни. Летопись вторая» its book 1; «Возвращение государя. Летопись третья» agrees (book 3): the control.
+        self.ORDER=(1668,1667,1669)
+        books,calls=self.books()
+        control=self.lookup(books['Возвращение государя. Летопись третья'])
+        self.assertEqual(control['reasons'],[],'the numbers agree: filed with no question')
+        self.assertEqual((control['review']['series'],control['review']['number'],control['review']['title']),('Властелин колец','3','The Return of the King'))
+        for album,(title_number,source_number,english) in (('Хранители. Летопись первая',(1,'2','The Fellowship of the Ring')),('Две твердыни. Летопись вторая',(2,'1','The Two Towers'))):
+            with self.subTest(album=album):
+                row=books[album];result=self.lookup(row);ask=result.get('ask') or {}
+                self.assertEqual(result['reasons'],[local_identity.ASK_REASONS['title_author']],'held: never filed without its question')
+                self.assertEqual((ask.get('kind'),ask.get('why'),ask.get('odd_name')),('title_author','number_unclear',True))
+                self.assertEqual(ask['volume'],{'title_number':title_number,'series_number':source_number,'provider':'fantlab'})
+                self.assertEqual({name:field['proposal'] for name,field in ask['fields'].items()},
+                                 {'title':english,'author':'Tolkien J. R. R.','series':'Властелин колец','number':str(title_number)})
+                # Approve with the fields untouched (no names: bulk Approve as is too) files the pre-filled series and number.
+                asked=len(calls);approved=self.research.approved(row,ROOT)
+                self.assertEqual(len(calls),asked,'Approve reads the cache only')
+                review=approved['review']
+                self.assertEqual((review['title'],review['canonical_author'],review['series'],review['number']),(english,'Tolkien J. R. R.','Властелин колец',str(title_number)))
+                self.assertEqual(evidence_missing(approved),set(),'every field it files is evidenced')
+                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.goes_to(row,approved))
+                # Numbers he types win.
+                typed=self.research.approved(row,ROOT,names={'series':'Властелин колец','number':source_number})['review']
+                self.assertEqual(typed['number'],source_number)
 
     # The inherited held-volume tests are TolkienHeldTranslationTests' own.
     test_held_volumes_get_the_english_title_and_the_series_from_the_catalog=None
