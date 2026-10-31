@@ -1396,16 +1396,17 @@ class MergeService:
         if working is None:return {}
         return self.jobs.retry_statuses(working.admission_clear,job_id,self._space_ready)
 
-    def attention_summary(self,job_ids=None,retry=True):
+    def attention_summary(self,job_ids=None,retry=True,source_check=None):
         """Group, cause and Retry data per job that needs attention (audio_jobs.attention_summary).
 
         'repair_check' is the internal trigger for the background check and never leaves this method; the typed
         'precheck' state does (RefusedRetry follow-up, finding F2). A current working-files refusal carries the
-        job's absolute working folder for the Technical detail line only (point 3c)."""
+        job's absolute working folder for the Technical detail line only (point 3c). source_check: 'fresh' for the Start over
+        press (ruling 75b: the frozen sources are compared with freshly opened files)."""
         clear=getattr(getattr(self,'working',None),'admission_clear',None)
         if not hasattr(self.jobs,'attention_summary'):return {}
         if getattr(getattr(self,'inventory',None),'database',None):self._load_repair_checks()
-        summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None)
+        summary=self.jobs.attention_summary(clear,self._space_ready,job_ids,retry and clear is not None,*((source_check,) if source_check is not None else ()))
         unchecked=[job_id for job_id,item in summary.items() if item.pop('repair_check',False)]
         if unchecked:self._check_repairs(unchecked)
         self._startover_facts(summary)
@@ -1432,7 +1433,8 @@ class MergeService:
         holds a book with a saved review), the same read-only test the pass runs; 'release_ok' is true when the combined
         "Start over and let the app handle it" applies (one included .m4b, a saved review, no editing lease now)."""
         wanted=[job_id for job_id,item in summary.items() if isinstance(item.get('readmission'),dict) and item['readmission'].get('state')=='refused'
-                and item['readmission'].get('cause')=='source_changed' and item['readmission'].get('stale') is not True]
+                and item['readmission'].get('cause')=='source_changed' and item['readmission'].get('stale') is not True
+                or isinstance(item.get('source_changed'),dict)]  # ruling 75b: the frozen source no longer matches the file on disk
         database=getattr(getattr(self,'inventory',None),'database',None)
         if not wanted or not database:return
         import book_restart
@@ -1467,7 +1469,8 @@ class MergeService:
         is started if it is not running (O9; a blocker that clears by itself leaves a pending start, O12).
 
         Set aside only the book's newest job that needs attention, has no output and no publication intent, with a
-        current source_changed refusal, on the book revision as read: a compare-and-set on the whole job row and the
+        current source_changed refusal or (ruling 75b) a frozen source that no longer matches the file on disk and its
+        originals untouched, on the book revision as read: a compare-and-set on the whole job row and the
         book's revision in one transaction. The job row, its journal and its working files are kept. discard_review
         (O13, "Start over and let the app handle it") also discards the saved review in the same transaction: all or
         nothing. RetryRefused (typed cause) means nothing changed."""
@@ -1478,8 +1481,11 @@ class MergeService:
         if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
         refused=self.STARTOVER_NOTHING if discard_review else self.STARTOVER_REFUSED
         if self.draining:raise RetryRefused(refused,'closing')
-        entry=self.attention_summary([job_id]).get(job_id)
+        # Ruling 75b: the press opens each frozen source again (source_check='fresh'); a file that is there and differs from what
+        # the job froze is the other way a stopped job qualifies, beside a current "review changed" refusal.
+        entry=self.attention_summary([job_id],source_check='fresh').get(job_id)
         if not entry or entry.get('startover') not in ('automatic','manual_draft'):raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
+        changed=isinstance(entry.get('source_changed'),dict)
         rows=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
         if not rows or json.loads(rows[0]['manifest']).get('candidate_id')!=identity:raise RetryRefused(RETRY_BOOK_CHANGED,'changed')
         row=rows[0]
@@ -1492,7 +1498,13 @@ class MergeService:
                 raise book_restart.Changed('Job changed')
             if book_restart.current_job(db,identity)!=job_id:raise book_restart.Changed('Newer work')
             refusal=m4b_readmission.describe(db,job_id)
-            if not refusal or refusal.get('state')!='refused' or refusal.get('cause')!='source_changed' or refusal.get('stale') is True:
+            refused=bool(refusal and refusal.get('state')=='refused' and refusal.get('cause')=='source_changed' and refusal.get('stale') is not True)
+            if not refused and changed:
+                # The changed-file offer, checked again inside the transaction: the originals are still the job's (no
+                # source cleanup), and no Retry or Repair request is waiting for this job.
+                cleaned=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_cleanup'").fetchone() and db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone()
+                if cleaned or refusal and refusal.get('queued_next') is True:raise book_restart.Changed('Sources changed')
+            elif not refused:
                 raise book_restart.Changed('Refusal changed')
             facts=book_restart.book(db,identity)
             if not facts or facts['revision']!=revision:raise book_restart.Changed('Book changed')

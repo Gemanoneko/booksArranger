@@ -144,6 +144,58 @@ def unreachable(manifest, reach=None):
     return None
 
 
+_CHANGED_KEPT = {}  # {(job_id, manifest_hash): (monotonic time, answer)}: one list's rows are stat'ed at most every CHANGED_RECHECK
+_CHANGED_LOCK = threading.Lock()
+CHANGED_RECHECK = 20.0
+
+
+def changed_sources(manifest, reach=None, key=None, fresh=False):
+    """Ruling 75b: {'count', 'names'} when a stopped job's frozen source no longer matches the file on disk, else None.
+
+    Each source the job froze is compared with the file at its path now: its size and its modification time (ns), the
+    screen the review itself uses (review_backend.unchanged_screen); a file whose bytes changed under the same size and time
+    is left to the revision guard, which hashes. A missing file, a folder the app cannot reach (reach, shared by one
+    list) or a manifest without frozen facts says nothing: only a file that is there and differs counts. Read-only: one
+    stat per source, never a file read. names: at most one file name, for the row's hint. key: (job_id, manifest_hash),
+    to reuse an answer for CHANGED_RECHECK seconds (fresh=True skips that, for the press)."""
+    if key is not None and not fresh:
+        with _CHANGED_LOCK:
+            kept = _CHANGED_KEPT.get(key)
+        if kept and 0 <= time.monotonic() - kept[0] < CHANGED_RECHECK:
+            return copy.deepcopy(kept[1])
+    sources = manifest.get('sources') if isinstance(manifest, dict) else None
+    changed = []
+    reach = {} if reach is None else reach
+    for source in sources if isinstance(sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        path, size, modified = source.get('path'), source.get('size'), source.get('modified')
+        if not isinstance(path, str) or not path or type(size) is not int or not str(modified or '').isdigit():
+            continue
+        folder = os.path.dirname(path)
+        if folder not in reach:
+            reach[folder] = os.path.isdir(folder)
+        if not reach[folder]:
+            continue
+        try:
+            if fresh:
+                from scanner import fresh_stat  # the press: opened, so a network drive's cached facts never decide it
+                facts = fresh_stat(path)
+            else:
+                facts = os.stat(path)
+        except OSError:
+            continue
+        if (facts.st_size, facts.st_mtime_ns) != (size, int(modified)):
+            changed.append(os.path.basename(path))
+    answer = {'count': len(changed), 'names': changed[:1]} if changed else None
+    if key is not None:
+        with _CHANGED_LOCK:
+            if len(_CHANGED_KEPT) > 512:
+                _CHANGED_KEPT.clear()
+            _CHANGED_KEPT[key] = (time.monotonic(), copy.deepcopy(answer))
+    return answer
+
+
 class RetryRefused(ValueError):
     """A Retry request that changed nothing. Its message is shown to the user exactly as written. cause, when given, is
     a typed reason the page picks its words from (Start over, release and Clear working files), never the message."""
@@ -775,7 +827,7 @@ class AudioJobs:
             return None
         return str(found) if found else None
 
-    def attention_summary(self, admission_clear=None, space_ready=None, job_ids=None, retry=True):
+    def attention_summary(self, admission_clear=None, space_ready=None, job_ids=None, retry=True, source_check=None):
         """{job_id: {'group', 'cause', 'originals_untouched', 'retry'}} for every job that needs attention.
 
         group: 'repair' (a single M4B whose damage m4b_repair proved repairable; Repair, never Retry),
@@ -791,6 +843,8 @@ class AudioJobs:
         An M4B row Retry covers (failed_m4b_retry.eligible) and with no current refusal carries 'precheck', the state of
         its read-only dry run (precheck()): 'pending' is group 'checking' with Retry disabled; 'unavailable' is group
         'other' with Retry enabled and the check's raw text in 'precheck_reason'; 'passed' stays in 'retry'.
+        source_check (ruling 75b): whether to compare each stopped job's frozen sources with the files on disk ('source_changed');
+        None follows retry, 'fresh' opens each file for its facts (the Start over press).
         """
         query = "SELECT * FROM audio_jobs WHERE state='needs attention'" + (" AND job_id IN (%s)" % ','.join('?' * len(job_ids)) if job_ids else "") + " ORDER BY created, job_id"
         if job_ids is not None and not job_ids:
@@ -912,6 +966,19 @@ class AudioJobs:
                 if destination:
                     destination['can_retry']=bool(shapes[row['job_id']] is not None and value.get('retry',{}).get('allowed') is True and row['attempt_id'] is None)
                     value['destination_review']=destination
+            # Ruling 75b: a stopped job whose frozen source no longer matches the file on disk offers Start over (the page's
+            # "Stopped — source file changed"), never Retry or Repair, which would fail on it. Only rows nothing else lets
+            # Sergei move on (Other, Can't convert: never counted by Retry all), with the originals still where the job
+            # froze them, nothing published, and no current "review changed" refusal (that one already offers Start over).
+            # Read-only stats of the rows asked about (retry=True: the shown page and the press), never the polled counts.
+            compare = retry if source_check is None else source_check
+            if compare and value['group'] in ('other', 'unsupported') and value.get('originals_untouched') is True and row['output'] is None \
+                    and isinstance(journal, dict) and 'publication_intent' not in journal and not (refusal and refusal.get('cause') == 'source_changed'):
+                changed = changed_sources(manifest, reach, (row['job_id'], row['manifest_hash']), fresh=compare == 'fresh')
+                if changed:
+                    value['source_changed'] = changed
+                    value.pop('retry', None)
+                    value.pop('repair', None)
             if row['job_id'] in readmission:value['readmission'] = readmission[row['job_id']]  # queued_next + position, or a refusal reason
             if readmission.get(row['job_id'],{}).get('state')=='queued':
                 value={'group':'checking','cause':None,'originals_untouched':value.get('originals_untouched',False),'readmission':readmission[row['job_id']],'retry_wait':True}

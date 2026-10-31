@@ -23,6 +23,10 @@ function m4bRow(name,job={},row={}){
 function stuck(name,startover='automatic',release_ok=false){
   return m4bRow(name,{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,startover,release_ok},readmission:refusal('source_changed')});
 }
+// Ruling 75b: a stopped job whose frozen source no longer matches the file on disk (attention.source_changed).
+function changedRow(name,changed={count:1,names:['01.mp3']},startover='automatic',release_ok=false,extra={}){
+  return m4bRow(name,{retry:undefined,attention:{group:'other',cause:null,originals_untouched:true,startover,release_ok,source_changed:changed,...extra}});
+}
 function noJob(name,row={}){
   return blocked({id:'cand-'+name,path:'cand-'+name,title_clue:'Title '+name,review:{title:'Title '+name},artists:['Author '+name],members:[{path:'a'}],status:'Pending',
     creation:{status:'Pending',can_create:false,chapters_available:false,reasons:[],job:null},...row});
@@ -73,6 +77,31 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(actionButtons(tr)[0].title,"Set this failed job aside, discard this book's saved review (including any edits you made by hand), and let automatic processing take the book. Starts automatic processing if it isn't running. This can't be undone. The failed job and your audio files are kept.");
   context.fixture=stuck('a');run('select(fixture,true);controls()');
   assert.equal(get('retry-block').hidden,false);assert.equal(get('retry-job').textContent,'Start over','the panel offers the same press');
+
+  // ---- Ruling 75b (Judy 0.24.1 section 2): Start over for a changed source file; no Retry; one new tooltip.
+  const CHANGED_TIP="Set this stopped job aside and send the book back to automatic processing with the files as they are now. Starts automatic processing if it isn't running. Nothing is deleted.";
+  paint([changedRow('s1'),changedRow('s3',{count:3,names:['02.m4b']}),changedRow('s0',{count:1,names:[]}),changedRow('sh',undefined,'manual_draft'),changedRow('sc',undefined,'manual_draft',true),
+    changedRow('sr',undefined,'automatic',false,{remedy:{kind:'replace_source',cause:'source_decode_failed'}}),changedRow('sx',undefined,'none')]);
+  tr=rowOf('s1');
+  assert.deepEqual([...actionButtons(tr)].filter(b=>/^(Retry|Start over)/.test(b.textContent)).map(b=>b.textContent),['Start over'],'one button, never Retry');
+  assert.equal(actionButtons(tr)[0].title,CHANGED_TIP);assert.equal(actionButtons(tr)[0].getAttribute('aria-label'),'Start over: Title s1');
+  assert.equal(statusCell(tr).textContent,'Stopped — source file changed');
+  assert.equal(statusCell(tr).children[0].textContent,'01.mp3 is not the file this job started with. Start over sends the book back to automatic processing.');
+  assert.ok(statusCell(tr).children[0].classes.has('retry-refused'),'--warning, like "review changed"');
+  tr=rowOf('s3');assert.equal(statusCell(tr).textContent,'Stopped — source files changed');
+  assert.equal(statusCell(tr).children[0].textContent,'3 files are not the ones this job started with. Start over sends the book back to automatic processing.');
+  assert.equal(statusCell(rowOf('s0')).children[0].textContent,'A source file is not the one this job started with. Start over sends the book back to automatic processing.');
+  tr=rowOf('sh');assert.equal(actionButtons(tr)[0].title,"Set this failed job aside. Starts automatic processing if it isn't running. The book has a saved review, so automatic processing will hold it; \"Let the app handle it\" can then release it. Nothing is deleted.");
+  assert.equal(statusCell(tr).children[0].textContent,'01.mp3 is not the file this job started with. Start over sets this job aside, but automatic processing will hold the book.');
+  tr=rowOf('sc');assert.equal(actionButtons(tr)[0].textContent,'Start over and let the app handle it');
+  assert.equal(statusCell(tr).children[0].textContent,'01.mp3 is not the file this job started with. One press sets this job aside, discards its saved review, and sends the book to automatic processing.');
+  assert.equal(statusCell(rowOf('sr')).textContent,'Stopped — source file changed','a replaced MP3 offers Start over, not "needs replacement"');
+  assert.equal(statusCell(rowOf('sx')).textContent,'Stopped — see details','no prediction from the engine: no offer');
+  assert.ok(![...actionButtons(rowOf('sx'))].some(b=>/^Start over/.test(b.textContent)));
+  paint([changedRow('sp')]);tr=rowOf('sp');let settle75b;replies['/api/audiobook/startover']=()=>new Promise(resolve=>{settle75b=resolve;});
+  const posts75b=posts.length,pressed75b=run('retryFromRow(rows[0],'+'rowButtons("cand-sp").children[0])');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(posts.length,posts75b+1);assert.deepEqual(posts.at(-1),{route:'/api/audiobook/startover',body:{library:'Audiobooks',id:'cand-sp',revision:4,job_id:'job-sp'}},'the existing press, same body');
+  settle75b(refused({error:'server words',cause:'changed'}));await pressed75b;run('retryResult=null;heldRow=null;controls()');
 
   // ---- The press: pending face, the request, the held row in its Started over state, the panel note, focus.
   paint([stuck('a')]);tr=rowOf('a');start=actionButtons(tr)[0];

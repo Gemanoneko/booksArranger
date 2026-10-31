@@ -1222,6 +1222,21 @@ async function prepareProducerRecovery(row,origin=null){
   return acknowledged;
 }
 const STARTOVER_HELD_TIP="Set this failed job aside. Starts automatic processing if it isn't running. The book has a saved review, so automatic processing will hold it; \"Let the app handle it\" can then release it. Nothing is deleted.";
+// Ruling 75b (Judy 0.24.1 section 2): a stopped job whose source file changed on disk. The engine sends attention.source_changed
+// {count, names} and, as for "review changed", attention.startover ('automatic' or 'manual_draft') and release_ok.
+const STARTOVER_CHANGED_TIP="Set this stopped job aside and send the book back to automatic processing with the files as they are now. Starts automatic processing if it isn't running. Nothing is deleted.";
+function sourceChangedOf(attention){
+  const changed=attention?.source_changed;
+  return changed && typeof changed==='object' && ['automatic','manual_draft'].includes(attention.startover)?changed:null;
+}
+function sourceChangedText(attention){
+  const changed=sourceChangedOf(attention);if(!changed)return null;
+  const count=Number.isSafeInteger(changed.count) && changed.count>0?changed.count:1,name=Array.isArray(changed.names) && typeof changed.names[0]==='string'?changed.names[0].trim():'';
+  const first=count>1?`${count.toLocaleString()} files are not the ones this job started with.`:name?`${name} is not the file this job started with.`:'A source file is not the one this job started with.';
+  const second=attention.startover!=='manual_draft'?'Start over sends the book back to automatic processing.':attention.release_ok===true?
+    'One press sets this job aside, discards its saved review, and sends the book to automatic processing.':'Start over sets this job aside, but automatic processing will hold the book.';
+  return {status:count>1?'Stopped — source files changed':'Stopped — source file changed',hint:`${first} ${second}`,warn:true};
+}
 const CLEARS_FIRST={retry:['Clear the leftover working files, then check this book again and queue its audiobook job.','Clearing working files, then checking this book…',' Retry clears leftover working files first.'],
   repair:['Clear the leftover working files, patch the damage found in this book, then queue its audiobook job.','Clearing working files, then repairing this book…',' Repair clears leftover working files first.']};
 const KEPT_HINT='Files kept at your choice.';
@@ -1258,6 +1273,12 @@ function rowAction(row){
   if(refusal && refusalFix(refusal)==='review'){
     if(attention?.startover==='manual_draft' && attention.release_ok===true)return {...rowActions.combined,data:{allowed:true,reason:''}};
     return {...rowActions.startover,ready:attention?.startover==='manual_draft'?STARTOVER_HELD_TIP:rowActions.startover.ready,data:{allowed:true,reason:''}};
+  }
+  // Ruling 75b: the frozen source no longer matches the file on disk. The same Start over, never Retry (it would fail on the
+  // same file); its plain tooltip says the files are taken as they are now (Judy 0.24.1 section 2.2).
+  if(sourceChangedOf(attention)){
+    if(attention.startover==='manual_draft' && attention.release_ok===true)return {...rowActions.combined,data:{allowed:true,reason:''}};
+    return {...rowActions.startover,ready:attention.startover==='manual_draft'?STARTOVER_HELD_TIP:STARTOVER_CHANGED_TIP,data:{allowed:true,reason:''}};
   }
   if(refusal && refusalFix(refusal)==='update')return null;
   const [kind,data]=keptGroup(attention)?['keep',job.keep]:attention?.group==='repair' || refusal?.kind==='repair'?['repair',job.repair]:['retry',job.retry];
@@ -2181,6 +2202,7 @@ function attentionText(row){
     if(queued?.queued_next===true)return {status:/paused|stopped|idle/i.test(state?.audiobook_jobs?.state || '')?'Queued — queue paused':queuedNextText(queued),hint:'The saved job is kept. The current sources, review and destination are checked before a new job is created.'};
     return {status:'Queued destination needs review',hint:'This saved job uses a different destination. Retry checks the current book before creating a new job.',warn:true};
   }
+  const changed=readmissionOf(row)?.queued_next===true?null:sourceChangedText(a);if(changed)return changed;  // ruling 75b, before the "replace it" line
   if(a.remedy?.kind==='replace_source' && a.remedy.cause==='source_decode_failed')return {status:'Source audio needs replacement',hint:"The MP3 failed its full audio check and can't be repaired by the app. Delete the book, then get a new copy.",warn:true};
   const kind=a.group==='retry'?(a.cause==='space'?'space':'retry'):a.group==='repair'?'repair':a.group==='unsupported'?'unsupported':a.group==='changed'?'changed':a.group==='audiobook'?(a.cause==='unverified'?'unverified':'missing'):'other',[status,hint]=attentionCopy[kind];
   const readmission=readmissionOf(row);

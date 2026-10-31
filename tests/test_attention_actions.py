@@ -22,6 +22,36 @@ def typed(code=sqlite3.SQLITE_BUSY):
     error=sqlite3.OperationalError('database is locked');error.sqlite_errorcode=code;error.sqlite_errorname='SQLITE_BUSY';return error
 
 
+class ChangedSourceTests(unittest.TestCase):
+    """Ruling 75b: audio_jobs.changed_sources, the read-only screen behind a stopped job's Start over offer."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory(dir=AREA);self.addCleanup(self.temp.cleanup)
+        self.folder=Path(self.temp.name)/'Book';self.folder.mkdir()
+        self.paths=[self.folder/'01.m4b',self.folder/'02.m4b']
+        for path in self.paths:path.write_bytes(b'frozen '+path.name.encode())
+        self.manifest={'sources':[{'path':str(p),'size':p.stat().st_size,'modified':str(p.stat().st_mtime_ns)} for p in self.paths]}
+        audio_jobs._CHANGED_KEPT.clear();self.addCleanup(audio_jobs._CHANGED_KEPT.clear)
+    def test_size_or_time_differences_count_and_name_one_file(self):
+        self.assertIsNone(audio_jobs.changed_sources(self.manifest))
+        self.paths[0].write_bytes(b'repaired')
+        self.assertEqual(audio_jobs.changed_sources(self.manifest),{'count':1,'names':['01.m4b']})
+        facts=self.paths[1].stat();os.utime(self.paths[1],ns=(facts.st_atime_ns,facts.st_mtime_ns+3_000_000_000))
+        self.assertEqual(audio_jobs.changed_sources(self.manifest,fresh=True),{'count':2,'names':['01.m4b']})
+    def test_missing_unreachable_or_unfrozen_sources_say_nothing(self):
+        self.paths[0].unlink()
+        self.assertIsNone(audio_jobs.changed_sources(self.manifest),'a missing file is not a changed one')
+        self.paths[1].write_bytes(b'changed')
+        self.assertIsNone(audio_jobs.changed_sources(self.manifest,reach={str(self.folder):False}),'an unreachable folder says nothing')
+        self.assertIsNone(audio_jobs.changed_sources({'sources':[{'path':str(self.paths[1]),'fingerprint':{'size':1,'modified':1}}]}),'no frozen size and time')
+    def test_a_row_answer_is_reused_briefly_and_the_press_reads_again(self):
+        key=('job','hash')
+        self.assertIsNone(audio_jobs.changed_sources(self.manifest,key=key))
+        self.paths[0].write_bytes(b'repaired')
+        self.assertIsNone(audio_jobs.changed_sources(self.manifest,key=key),'within CHANGED_RECHECK the list reuses its answer')
+        self.assertEqual(audio_jobs.changed_sources(self.manifest,key=key,fresh=True)['count'],1,'the press never reuses it')
+        self.assertEqual(audio_jobs.changed_sources(self.manifest,key=key)['count'],1,'and the fresh answer is the one kept')
+
+
 class CauseTests(unittest.TestCase):
     def failed(self,error,reason=None):
         return {'reason':reason if reason is not None else str(error)},{'failure':_failure_details(error,'checking sources')}

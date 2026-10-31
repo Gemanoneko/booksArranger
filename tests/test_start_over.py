@@ -6,6 +6,7 @@ AutomaticProcessing; its worker is a double that waits, so no research, scan or 
 """
 import hashlib
 import json
+import os
 import tempfile
 import threading
 import time
@@ -15,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import audio_jobs
 import automatic_processing
 import book_restart
 import groups
@@ -191,6 +193,108 @@ class Base(unittest.TestCase):
         return self.s.start_over('Audiobooks', identity, revision, job_id, discard)
 
 
+class SourceChangedTests(Base):
+    """Ruling 75b (Sergei 2026-10-31): a stopped job whose frozen source no longer matches the file on disk offers Start over
+    (Салимов удел: part 1 was repaired and is now smaller than the job froze it). No refusal record is needed."""
+    def stopped(self, identity, paths):
+        sources = []
+        for path in paths:
+            facts = os.stat(path)
+            sources.append({'path': path, 'size': facts.st_size, 'modified': str(facts.st_mtime_ns), 'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+                            'fingerprint': {'size': facts.st_size, 'modified': str(facts.st_mtime_ns)}})
+        manifest = {'job_id': str(uuid.uuid4()), 'candidate_id': identity, 'candidate_revision': 2, 'root': str(self.c.library), 'sources': sources,
+                    'metadata': {'title': 'Frozen'}, 'destination': str(self.c.base / 'out.m4b'), 'profile': 'p', 'evidence': {}, 'cover': {},
+                    'source_chapters': [], 'cleanup_policy': {'enabled': True}}
+        job_id = self.c.jobs.enqueue(manifest)
+        self.c.jobs._update(job_id, state='needs attention', stage='checking sources', reason='Full audio decode failed: [aac @ 0] channel element 0.0 is not allocated',
+                            journal=json.dumps({'failure': {'exception_class': 'ValidationError', 'retryable': False, 'at': 1, 'stage': 'checking sources'}}))
+        audio_jobs._CHANGED_KEPT.clear()
+        return job_id
+
+    def salem(self):
+        identity, paths = self.c.book('salem', files=('Салимов удел 1.m4b', 'Салимов удел 2.m4b'), approved_by_app=True)
+        return identity, paths, self.stopped(identity, paths)
+
+    def test_salem_part_one_smaller_than_frozen_offers_start_over_and_the_press_sets_the_job_aside(self):
+        identity, paths, job_id = self.salem()
+        value = self.summary(job_id)
+        self.assertEqual(value['group'], 'other')
+        self.assertNotIn('source_changed', value, 'unchanged files: "Stopped — see details", no offer')
+        self.assertNotIn('startover', value)
+        Path(paths[0]).write_bytes(b'repaired')  # the frame dropped: a smaller file at the same path
+        audio_jobs._CHANGED_KEPT.clear()
+        value = self.summary(job_id)
+        self.assertEqual(value['source_changed'], {'count': 1, 'names': ['Салимов удел 1.m4b']})
+        self.assertEqual((value['group'], value['startover'], value['release_ok'], 'retry' in value), ('other', 'automatic', False, False))
+        self.assertNotIn('source_changed', self.s.attention_summary(retry=False)[job_id], 'the polled counts never stat the files')
+        before = self.c.job_row(job_id)
+        part2 = Path(paths[1]).read_bytes()
+        answer = self.press(identity, job_id)
+        self.assertEqual((answer['set_aside'], answer['released'], answer['outcome']), (True, False, 'automatic'))
+        self.assertEqual(self.c.set_aside(), [(job_id, identity)])
+        self.assertEqual(self.c.job_row(job_id), before, 'the job row and journal are kept: nothing is deleted')
+        self.assertEqual((Path(paths[0]).read_bytes(), Path(paths[1]).read_bytes()), (b'repaired', part2), 'the files are taken as they are now')
+        self.assertNotIn(job_id, self.s.attention_summary(), 'out of Output needs attention')
+
+    def test_a_newer_modification_time_alone_counts_and_several_files_are_counted(self):
+        identity, paths, job_id = self.salem()
+        for path in paths:
+            facts = os.stat(path)
+            os.utime(path, ns=(facts.st_atime_ns, facts.st_mtime_ns + 5_000_000_000))
+        audio_jobs._CHANGED_KEPT.clear()
+        self.assertEqual(self.summary(job_id)['source_changed'], {'count': 2, 'names': ['Салимов удел 1.m4b']})
+
+    def test_unchanged_missing_or_unreachable_files_offer_nothing_and_the_press_is_refused(self):
+        identity, paths, job_id = self.salem()
+        with self.assertRaises(RetryRefused) as refused:
+            self.press(identity, job_id)
+        self.assertEqual(refused.exception.cause, 'changed')
+        os.remove(paths[0])
+        audio_jobs._CHANGED_KEPT.clear()
+        self.assertNotIn('source_changed', self.summary(job_id), 'a missing file is not a changed one')
+        with patch('os.path.isdir', return_value=False):
+            audio_jobs._CHANGED_KEPT.clear()
+            self.assertNotIn('source_changed', self.summary(job_id), 'a folder the app cannot reach says nothing')
+        self.assertEqual(self.c.set_aside(), [])
+
+    def test_a_file_put_back_before_the_press_is_refused(self):
+        identity, paths, job_id = self.salem()
+        original, facts = Path(paths[0]).read_bytes(), os.stat(paths[0])
+        Path(paths[0]).write_bytes(b'repaired')
+        audio_jobs._CHANGED_KEPT.clear()
+        self.assertIn('source_changed', self.summary(job_id))
+        Path(paths[0]).write_bytes(original)
+        os.utime(paths[0], ns=(facts.st_atime_ns, facts.st_mtime_ns))
+        with self.assertRaises(RetryRefused) as refused:
+            self.press(identity, job_id)  # the press opens the files again; the row's cached answer never decides it
+        self.assertEqual(refused.exception.cause, 'changed')
+        self.assertEqual(self.c.set_aside(), [])
+
+    def test_cleaned_originals_or_a_published_job_offer_nothing(self):
+        identity, paths, job_id = self.salem()
+        Path(paths[0]).write_bytes(b'repaired')
+        with connect(self.c.db) as db:
+            db.execute('CREATE TABLE IF NOT EXISTS source_cleanup(job_id TEXT PRIMARY KEY)')
+            db.execute('INSERT INTO source_cleanup VALUES(?)', (job_id,))
+        audio_jobs._CHANGED_KEPT.clear()
+        self.assertNotIn('source_changed', self.summary(job_id), 'originals the app retired are not "changed"')
+        with self.assertRaises(RetryRefused):
+            self.press(identity, job_id)
+
+    def test_a_saved_review_predicts_the_hold_and_a_current_review_changed_refusal_keeps_its_own_offer(self):
+        identity, paths = self.c.book('held', files=('a.m4b', 'b.m4b'))
+        job_id = self.stopped(identity, paths)
+        Path(paths[0]).write_bytes(b'new')
+        audio_jobs._CHANGED_KEPT.clear()
+        value = self.summary(job_id)
+        self.assertEqual((value['source_changed']['count'], value['startover']), (1, 'manual_draft'))
+        self.c.refusal(job_id, 'source_changed')
+        audio_jobs._CHANGED_KEPT.clear()
+        value = self.summary(job_id)
+        self.assertNotIn('source_changed', value, '"review changed" already offers Start over with its own words')
+        self.assertEqual(value['startover'], 'manual_draft')
+
+
 class StartOverTests(Base):
     def test_the_job_is_set_aside_kept_and_the_book_goes_back_to_automatic_processing(self):
         identity, paths = self.c.book('auto', approved_by_app=True)
@@ -258,7 +362,7 @@ class StartOverTests(Base):
 
     def test_the_transaction_rechecks_every_rule_even_when_the_offer_was_made(self):
         def offered(job_id):
-            return patch.object(MergeService, 'attention_summary', lambda service, job_ids=None, retry=True: {job_id: {'startover': 'automatic'}})
+            return patch.object(MergeService, 'attention_summary', lambda service, job_ids=None, retry=True, source_check=None: {job_id: {'startover': 'automatic'}})
         identity, paths = self.c.book('newer')
         stuck = self.c.stuck(identity, paths)
         manifest = json.loads(self.c.job_row(stuck)['manifest'])
