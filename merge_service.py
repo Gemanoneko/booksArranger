@@ -3437,6 +3437,19 @@ class MergeService:
         series_answered=held.get('why')=='title_series' and isinstance(held.get('split'),dict)
         if (result.get('approval') or {}).get('series_question') and not series_answered:
             self._answer_then_ask_series(row,title,author,names,spelling,press,held)
+        # Ruling 74b (Sergei 2026-10-31: yes, as for ruling 52): the numbers disagree and this Approve answered another
+        # question (an author, a spelling, a hold) with no Series or Number: his answer is kept, nothing is filed, and the
+        # book's next question is "Number unclear" (the same saved-answer outcome and copy). That question's own Approve
+        # carries its Series and Number (_approval_result), so it never comes here.
+        if (result.get('approval') or {}).get('number_question') and held.get('why')!='number_unclear':
+            asked=held
+            if not str(((held.get('fields') or {}).get('author') or {}).get('proposal') or '').strip():
+                # A hold carries no author field: the author his Approve kept is the one it shows (never an empty no-author
+                # answer, ruling 11, that nobody gave).
+                from organization import NO_AUTHOR
+                shown_author=str((result.get('approval') or {}).get('author') or '')
+                asked=dict(held,fields=dict(held.get('fields') or {},author={'proposal':'' if shown_author==NO_AUTHOR else shown_author}))
+            self._answer_then_ask_series(row,title,author,names,spelling,press,asked)
         # Futaba's 0.22.0 QA, m-9: a name taken since the row was shown refused only in build_manifest, after the approval
         # (the review, "Approved by you", the track order) was written, so the row said "Nothing was changed" while the book
         # left the to-do list until the next Start. The destination is checked before anything is written; the late check

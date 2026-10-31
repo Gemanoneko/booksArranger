@@ -4,6 +4,7 @@ foreign author in Cyrillic is re-checked once before a job runs; a gap in a sett
 raised folder question can be answered "Keep as separate books"; list rows say where their files are."""
 import json,os,unittest
 from pathlib import Path
+from unittest import mock
 
 import test_approve_as_is
 from test_approve_as_is import tone
@@ -85,7 +86,7 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((row['ask']['kind'],row['ask']['series']),('order_unclear',{'name':'Дозоры','number':'2','basis':'research'}))
         self.assertNotIn('series_clue',row['ask'])
 
-    def number_unclear_book(self):
+    def number_unclear_book(self,researched=True):
         """Ruling 74b's book on real files: «Хранители. Летопись первая», which FantLab numbers book 2 (FantLab's live answer
         shapes of 2026-10-31, the novels' order changed). Researched twice, as the run does: the first research learns the
         English spelling (a rule deciding the book's own credit), so the run researches it once more before listing it
@@ -112,8 +113,23 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
             return b'{"items":[],"results":[],"docs":[]}'
         minutes=iter(range(10**6,10**9,60))  # no pacing wait; the cache stays fresh
         self.service.automatic.research=PublicResearch(PublicClient(self.inv.database,fetch=fetch,clock=lambda:next(minutes)),leads=[])
+        if not researched:return None
         self.research_all();self.research_all()
         return self.service.reviews.page(status='output_attention')['rows'][0]
+
+    def answered_then_number_unclear(self,row,**press):
+        """Ruling 74b (Sergei 2026-10-31, as for ruling 52's series question): an Approve that answers the book's other
+        question while the numbers disagree keeps the answer, files nothing and starts nothing; once the book is researched
+        again (Start) its question is "Number unclear", and that question's Approve files the series with the title's number."""
+        with mock.patch.object(self.service.automatic,'request_start') as start:
+            with self.assertRaises(self.service.SeriesAsked) as caught:self.service.approve_book(row['id'],row['revision'],**press)
+        self.assertEqual(caught.exception.payload(),{'saved':True,'code':'series_needed','message':self.service.SERIES_ASKED},'the existing copy')
+        start.assert_not_called();self.assertEqual(self.service.jobs.status()['jobs'],[],'nothing filed')
+        self.research_all();self.research_all()
+        row=self.service.reviews.page(status='output_attention')['rows'][0]
+        self.assertEqual((row['ask']['why'],row['ask']['volume']),('number_unclear',{'title_number':1,'series_number':'2','provider':'fantlab'}),'asked next')
+        metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
+        self.assertEqual((metadata['title'],metadata['canonical_author'],metadata['series'],metadata['number']),('Хранители. Летопись первая','Tolkien J. R. R.','Властелин колец','1'))
 
     def queued_metadata(self,approved):
         job=next(j for j in self.service.jobs.status()['jobs'] if j['job_id']==approved['job_id'])
@@ -135,8 +151,8 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
 
     def test_a_book_held_for_another_reason_never_takes_the_disagreeing_series_r1(self):
         """Senua's 74b review, r1: the same book and the same disagreement in the research cache, but its current question is
-        another one (here: one part of a bigger book). An Approve that sends no Series or Number, and its Goes to line, file
-        no series: only the "Number unclear" question fills them in."""
+        another one (here: one part of a bigger book). Its Goes to line names no series, and its Approve without Series or
+        Number files nothing: ruling 74b's "Number unclear" is asked next (answered_then_number_unclear)."""
         import local_identity
         row=self.number_unclear_book()
         fresh=self.service.reviews._row('Audiobooks',row['id'])
@@ -144,8 +160,18 @@ class FolderRegroupTests(test_approve_as_is.ApproveFixture):
         self.assertEqual((result.get('ask') or {}).get('why'),'number_unclear','positive control: the cache holds the disagreement')
         self.service.automatic._record(fresh,'Held',dict(result,ask=None,reasons=[local_identity.PIECE_REASON],identity_hold={'kind':'piece','detail':''},until_change=True),None)
         self.assertFalse(self.service.approval_preview(row['id'],row['revision']).get('series'),'its Goes to line names no series')
-        metadata,_=self.queued_metadata(self.service.approve_book(row['id'],row['revision']))
-        self.assertEqual((metadata['title'],metadata['series'],metadata['number']),('Хранители. Летопись первая','',''))
+        self.answered_then_number_unclear(fresh)
+
+    def test_an_author_answer_on_disagreeing_numbers_asks_number_unclear_next_74b(self):
+        """Ruling 74b's follow-up, an identity question: no English spelling was found online («Джон Рональд Руэл Толкин»),
+        so the book asks for it first; the cache already holds the disagreement. His typed spelling is kept as his rule."""
+        import author_rules
+        self.number_unclear_book(researched=False)
+        with mock.patch.object(self.service.automatic.research,'_author_latin',return_value=None):self.research_all()
+        row=self.service.reviews.page(status='output_attention')['rows'][0]
+        self.assertEqual((row['ask']['kind'],row['ask']['why']),('author_unclear','english_spelling'),'positive control: another question first')
+        self.answered_then_number_unclear(row,author='Tolkien J. R. R.')
+        self.assertEqual(author_rules.load(self.inv.database).same_as('Джон Рональд Руэл Толкин'),'Tolkien J. R. R.','his answer kept')
 
     def test_raised_folder_question_and_keep_as_separate_books(self):
         folder=self.audio/'Unsorted'/'Разное'

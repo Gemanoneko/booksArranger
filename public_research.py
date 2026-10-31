@@ -645,7 +645,9 @@ class PublicResearch:
         if not final_title:raise ValueError('Type a title first.')
         # Ruling 49 (Sergei 2026-10-27): a Russian edition of a foreign book files under its original English title, on
         # Approve as automatically (_local_lookup's preferred title); a title he typed or entered wins.
-        english=self._english_original(record,final_title) if 'title' not in typed else None
+        mismatch={}  # ruling 74b: the files' volume title and the source disagree on the number (the cache only)
+        english=self._english_original(record,final_title,mismatch) if 'title' not in typed else None
+        if 'title' in typed:self._english_original(record,shown['title'],mismatch)  # his title: the files' title still says which volume
         if english:final_title=english['original_title']
         collection=not final_author and shown['collection']
         if not final_author and not collection:final_author=NO_AUTHOR
@@ -665,9 +667,12 @@ class PublicResearch:
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
                             'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),
                             # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
-                            'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
+                            'series_question':bool(record.get('series_unconfirmed')) and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names))),
+                            # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
+                            # the series: an Approve answering another question keeps its answer and "Number unclear" is asked next.
+                            'number_question':bool(mismatch) and not settled.get('series') and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
         return result
-    def _english_original(self,record,title):
+    def _english_original(self,record,title,mismatch=None):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
         automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
         Lev» for «Лев Гроссман»), when it says the work's original is English and names its Latin title; else None. A title
@@ -683,6 +688,7 @@ class PublicResearch:
         wanted='series' in (record.get('gaps') or ()) and not record.get('series')
         try:filled=self._gap_fill(dict(record,gaps=['original_title','series']),title,credit,threading.Event(),{'remaining':0},[],lambda *_:None,scratch)
         except Exception:return None  # nothing known: the title shown is filed
+        if mismatch is not None and isinstance((filled or {}).get('volume_mismatch'),dict):mismatch.update(filled['volume_mismatch'])  # ruling 74b
         catalog=(filled or {}).get('catalog') or {}
         original=text(catalog.get('original_title'))
         if catalog.get('language')!='en' or not original or local_identity.script(original)!='latin':return None
@@ -1464,6 +1470,10 @@ class PublicResearch:
             return result|{'reasons':[local_identity.ASK_REASONS['title_author']],'ask':ask,'identity_hold':{'kind':'title_author','detail':''},'wait':None,
                            'rules_generation':rules.generation if rules else ''}
         mismatch=filled.get('volume_mismatch')
+        if not mismatch and not local['gaps'] and not series and edition_volume(title)[1] is not None:
+            # Ruling 74b's follow-up: an identity settled by his saved answer (settled(): no gaps left) is still read for the
+            # disagreement (the cache only), so the question his Approve was told comes next is asked; nothing else is used.
+            mismatch=self._gap_fill(dict(local,gaps=['series']),title,author,stop,{'remaining':0},[],progress,{'sources':[]}).get('volume_mismatch')
         if mismatch and not series and not his and one_source and not reasons and not part:
             # Ruling 74b (Sergei 2026-10-31; Judy's "Number unclear"): an edition volume title and the source disagree on
             # the number («Летопись первая», the source's book 2). Asked with both numbers and the source's provider; Series
