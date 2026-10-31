@@ -96,7 +96,12 @@ const line=()=>get('list-stale');
   context.outcome={id:'q1',action:'approve',book_id:'cand-a',title:'Title a',result:'refused',code:'changed',error:'Candidate changed; reload evidence before reviewing'};
   run('lastKey="painted";applyQueueOutcome(outcome)');assert.equal(run('lastKey'),null);assert.match(run('askResults.get("cand-a").text'),/^Approve cancelled: this book changed/);
   context.outcome={...context.outcome,id:'q2',code:'name_taken',error:'Name taken'};run('lastKey="painted";applyQueueOutcome(outcome)');assert.equal(run('lastKey'),'painted');
-  console.log('PASS stale list: the poll never waits for the list, S0-S8, re-ask keeps the clock, the busy pause, list reads out of oldestWait, the status time limit, another day');
+  // Ruling 76a: Approve (row and bulk) and names Save carry the files the row showed; a malformed one is never sent.
+  const hash='0123456789abcdef'.repeat(4);assert.equal(run('JSON.stringify(seen({fingerprint:"'+hash+'"}))'),JSON.stringify({fingerprint:hash}));
+  assert.equal(run('JSON.stringify(seen({fingerprint:"x"}))+JSON.stringify(seen({}))'),'{}{}');
+  assert.equal(app.match(/request\('\/api\/candidate\/approve',\{library:'Audiobooks',id(?::row\.id)?,revision:row\.revision,\.\.\.seen\(row\)/g)?.length,2,'both Approve requests');
+  assert.ok(app.includes("request('/api/candidate/names-save',{library:'Audiobooks',id,revision:row.revision,...seen(row),"),'names Save');
+  console.log('PASS stale list: the poll never waits for the list, S0-S8, re-ask keeps the clock, the busy pause, list reads out of oldestWait, the status time limit, another day; 76a fingerprint');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `;
 const Module=require('node:module');const m=new Module(path.join(__dirname,'test_stale_list_frontend.js'),module);m.filename=path.join(__dirname,'test_stale_list_frontend.js');m.paths=module.paths;m._compile(harness,m.filename);

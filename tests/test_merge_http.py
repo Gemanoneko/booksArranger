@@ -105,6 +105,22 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertIn(b' 400 ',real('/api/audiobook/pause',{'unexpected':1})+b' ')
         self.server.invalidate_status.assert_called_once_with()
 
+    def test_ruling_76a_approve_and_save_carry_the_files_the_row_showed(self):
+        # The row's fingerprint travels with Approve and Save, direct and queued, so the engine can tell his own saved edits
+        # (or an approval made meanwhile) from changed files; a malformed one is refused before anything runs.
+        seen='a'*64
+        self.merge.approve_book=Mock(return_value={'job_id':ID,'row':{'id':ID,'revision':3}})
+        self.reviews._row=Mock(return_value={'id':ID});self.reviews.enrich=Mock(return_value={'id':ID,'revision':2})
+        self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'fingerprint':seen})[0],200)
+        self.merge.approve_book.assert_called_once_with(ID,1,None,None,without_missing=False,choice=None,path=None,fingerprint=seen)
+        self.assertEqual(self.call('/api/candidate/approve',self.identity()|{'fingerprint':'not-a-hash'})[0],400)
+        self.merge.approve_book.reset_mock()
+        self.server.run_queued({'action':'approve','book_id':ID,'title':'T','args':{'revision':1,'title':None,'author':None,'choice':None,'path':None,'names':None,'fingerprint':seen}})
+        self.assertEqual(self.merge.approve_book.call_args.kwargs.get('fingerprint'),seen)
+        self.merge.names_save=Mock(return_value={'outcome':'saved','row':{}})
+        self.server.run_queued({'action':'names','book_id':ID,'title':'T','args':{'revision':1,'names':{'title':'T'},'fingerprint':seen}})
+        self.merge.names_save.assert_called_once_with(ID,1,{'title':'T'},fingerprint=seen)
+
     def test_approve_and_its_preview_routes(self):
         # Rulings 6a/6b/10/11a: Approve with the values shown (typed values win) and the "Goes to" line before it.
         self.merge.approval_preview=Mock(return_value={'path':'Без автора\\Тайна.m4b','absolute':'Z:\\S\\Без автора\\Тайна.m4b','taken':False,'title':'Тайна','author':'Без автора','collection':False,'reason':''})

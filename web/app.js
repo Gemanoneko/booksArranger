@@ -2949,6 +2949,9 @@ function askPreview(entry,delay){
   };
   if(delay>0)d.timer=setTimeout(send,delay);else return send();
 }
+// Ruling 76a: his Approve and Save carry the files the row showed (the book's fingerprint), so his own saved edits, or an
+// approval automatic processing made meanwhile, never cancel them; a book whose files changed is still refused.
+function seen(row){return typeof row?.fingerprint==='string' && /^[0-9a-f]{64}$/.test(row.fingerprint)?{fingerprint:row.fingerprint}:{};}
 function askPrimary(entry){const kind=entry.primaryKind==='scan'?(entry.secondKind==='convert'?'convert':null):entry.primaryKind;if(kind)return askPress(entry,kind);}
 // Each Approve gate's code (web_server.approve_code): the real reason and the next step. Provisional copy, sent to Judy
 // (0.22.2 spec, Ender's notes); a code with no line here shows the engine's own sentence, never the bare refusal.
@@ -3607,7 +3610,7 @@ async function namesSave(id){
   if(entry?.save?.getAttribute('aria-disabled')==='true')return;
   const values=namesValues(row);state.pending={at:Date.now()};namesNotes.delete(id);updateNamesRows();
   let answer=null,failure=null;
-  try{answer=await request('/api/candidate/names-save',{library:'Audiobooks',id,revision:row.revision,names:values,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
+  try{answer=await request('/api/candidate/names-save',{library:'Audiobooks',id,revision:row.revision,...seen(row),names:values,queue:true,title:askName(row)},PRESS_TIMEOUT);}catch(error){failure=error;}
   state.pending=null;
   if(answer?.queued===true){queueAccepted(row,'names',answer);updateNamesRows();return;}
   if(answer){namesDone(row,answer);return;}
@@ -4565,7 +4568,7 @@ async function askPress(entry,kind){
       // The "Goes to" line shown travels with the press: a different destination now is refused (Senua's 0.22.0 review, m1).
       // Ruling 35: always accepted and queued with his values; the row shows it running and its outcome.
       const shown=askDestination(row)?.path,names=namesFor(row);
-      result=await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{}),
+      result=await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...seen(row),...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{}),
         ...(names?{names}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
     }else{
       const route=kind==='separate'?'/api/candidate/keep-separate':kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss';
@@ -4630,7 +4633,7 @@ async function runApproveSelected(){
     askPendings.set(row.id,{id:row.id,kind:'approve',at:Date.now()});updateAskRows();
     const shown=confirm.paths?.get(row.id);  // the path the dialog listed (m1)
     // Ruling 35: each Approve is accepted and queued at once; its checks run in the engine's queue, one book at a time.
-    try{const answer=await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...(shown?{path:shown}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
+    try{const answer=await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...seen(row),...(shown?{path:shown}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
       if(answer?.queued===true){queueAccepted(row,'approve',answer);selectedBooks.delete(row.id);queued++;}else{askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}}
     catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
     finally{askPendings.delete(row.id);}

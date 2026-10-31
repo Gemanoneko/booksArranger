@@ -2971,16 +2971,18 @@ class MergeService:
         return {'fields':fields,'read':read,'remembered':entered_names.remembered(self.inventory.database,row,read,scope),'universes':universes,'series':names,
                 'job':job['state'],'place':place,'destination':destination,'entered':entered_names.entered(entered_names.book_values(self.inventory.database,row)),'applies':1}
 
-    def names_save(self,id,revision,values):
+    def names_save(self,id,revision,values,fingerprint=None):
         """Edit names, Save (Judy 1.3 to 1.5): records the values as Sergei's lasting names and touches no file. The book's
         job follows (1.4): a queued job that has not started is set aside and its book checked again with the new names
         ('replanned'); a Stopped one runs with them at its next attempt (the queue's claim check); a finished audiobook keeps
         its name ('ready_only'); a converting one refuses with nothing saved. A retry, repair or delete queued from the row
         is the web layer's refusal ('queued'). {'outcome': 'saved' | 'replanned' | 'ready_only' | 'unchanged', 'applies',
-        'job', 'entered'}. NamesRefused when nothing was saved."""
+        'job', 'entered'}. NamesRefused when nothing was saved. fingerprint (ruling 76a): the files the row showed; with it
+        a Save applies to the book as it is now when only its records moved on (_his_revision)."""
         import entered_names
         if self.draining or self.__dict__.get('_closing'):raise self.NamesRefused('refused','Books Arranger is closing. Nothing was changed.')
         entered_names.check(values)
+        revision=self._his_revision(id,revision,fingerprint)
         try:row,root,research=self._names_book(id,revision)
         except ValueError:raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing') from None
         read,scope,now,_=self._names_state(row,root,research)
@@ -3343,7 +3345,84 @@ class MergeService:
         self.__dict__.pop('_needs_cache',None)
         return back
 
-    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None):
+    # Ruling 76a (Sergei 2026-10-31: "My approval is the highest authority"). Plain copy, flagged for Judy.
+    APPROVE_CONVERTING="This book is already converting, so your values were not used. Nothing was changed."
+    APPROVE_REPLACED='Replaced by your Approve before it started.'  # the set-aside job's own record, not shown on a row
+
+    def _his_revision(self,id,revision,fingerprint):
+        """Ruling 76a: his Approve or Save carries the revision his row showed. When only the book's records moved on since
+        (his own saved edits, an approval automatic processing made meanwhile), its files are the same (the fingerprint the
+        row showed) and the press applies to the book as it is now. A book whose files changed, or that is gone, keeps the
+        revision sent, so the old refusal stands."""
+        if not fingerprint:return revision
+        try:row=self.reviews._row('Audiobooks',id)
+        except ValueError:return revision
+        return row['revision'] if row.get('fingerprint')==fingerprint else revision
+
+    def _approved_automatically(self,identity):
+        """The book's current approval is the automatic pass's own (its context holds automatic_approval, no user_approval)."""
+        try:
+            row=self.reviews._row('Audiobooks',identity)
+            context=self.reviews._context(row) or {}
+        except (ValueError,KeyError,TypeError):return False
+        return bool(context.get('automatic_approval')) and not context.get('user_approval')
+
+    def _replace_automatic_job(self,identity):
+        """Ruling 76a: the job automatic processing queued for this book, while it has not started, is set aside (kind
+        'approve'; its row, journal and working files are kept, as Start over keeps them) so his Approve files the book with
+        his values. Returns (job_id, its reason) to put back if his Approve is refused, or None. A job that has started is
+        never touched: ValueError(APPROVE_CONVERTING). His own queued job, a stopped or a finished one: None, and the
+        existing gates decide."""
+        import book_restart
+        from audio_jobs import _now
+        from sqlite_retry import transaction
+        with connect(self.inventory.database) as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='audio_jobs'").fetchone():return None
+            job_id=book_restart.current_job(db,identity)
+            found=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if job_id else None
+        if found is None:return None
+        if found['state']=='running' or self.jobs.claimed(job_id):raise ValueError(self.APPROVE_CONVERTING)
+        if found['state']!='pending' or not self._approved_automatically(identity):return None
+        def write(db):
+            book_restart.ensure(db)
+            current=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not current or current[0]!='pending':raise book_restart.Changed('Job changed')
+            if book_restart.current_job(db,identity)!=job_id:raise book_restart.Changed('Newer work')
+            facts=book_restart.book(db,identity)
+            if not facts:raise book_restart.Changed('Book changed')
+            db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(self.APPROVE_REPLACED,_now(),job_id))
+            db.execute('INSERT INTO audio_job_set_aside VALUES(?,?,?,?,?)',(job_id,identity,facts['revision'],'approve',book_restart.stamp()))
+        with self.jobs._lock:
+            # Under the queue's lock: its claim either came first (it is converting: refused here) or finds the job set aside.
+            if self.jobs.claimed(job_id):raise ValueError(self.APPROVE_CONVERTING)
+            try:transaction(self.inventory.database,write)
+            except book_restart.Changed:
+                with connect(self.inventory.database) as db:now=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+                if now and now[0]=='running':raise ValueError(self.APPROVE_CONVERTING) from None
+                return None
+        self.__dict__.pop('_needs_cache',None);self.invalidate_status()
+        return (job_id,found['reason'])
+
+    def _restore_automatic_job(self,replaced,identity):
+        """His Approve was refused with nothing filed: the job it set aside goes back to the queue as it was, unless another
+        job of the book was queued meanwhile."""
+        import book_restart
+        from audio_jobs import _now,CURRENT
+        from sqlite_retry import transaction
+        job_id,reason=replaced
+        def write(db):
+            if not db.execute("SELECT 1 FROM audio_job_set_aside WHERE job_id=? AND kind='approve'",(job_id,)).fetchone():return
+            current=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            if not current or current[0]!='needs attention' or current[1]!=self.APPROVE_REPLACED:return
+            if db.execute("SELECT 1 FROM audio_jobs WHERE json_extract(manifest,'$.candidate_id')=? AND job_id!=? AND "+CURRENT,(identity,job_id)).fetchone():return
+            db.execute("UPDATE audio_jobs SET state='pending',reason=?,updated=? WHERE job_id=? AND state='needs attention'",(reason,_now(),job_id))
+            db.execute("DELETE FROM audio_job_set_aside WHERE job_id=? AND kind='approve'",(job_id,))
+        try:
+            with self.jobs._lock:transaction(self.inventory.database,write)
+        except (sqlite3.Error,book_restart.Changed):pass
+        self.__dict__.pop('_needs_cache',None);self.invalidate_status()
+
+    def approve_book(self,id,revision,title=None,author=None,without_missing=False,choice=None,path=None,names=None,fingerprint=None):
         """Sergei's Approve (rulings 6a, 6b, 10, 11a): converts if needed, renames and moves the book to its Audiobooks
         Sorted folder with the values shown (typed values win and are saved as "Entered by you"). without_missing:
         Convert what's there, leaving out the files missing from disk. choice ('same' / 'different'): his answer to the
@@ -3351,8 +3430,19 @@ class MergeService:
         the "Goes to" line the row showed (relative to the output folder); a different destination now refuses (Senua's
         0.22.0 review, m1: the path shown is the path used). names (Edit names, Judy 0.22.2 1.1: "Approve records and
         approves"): the open editor's values, saved as his lasting names first, taken back if the approval is refused.
-        Raises ValueError with the reason it is refused."""
-        if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path)
+        fingerprint (ruling 76a): the files the row showed; with it, his Approve applies to the book as it is now when only
+        its records moved on, and replaces a job automatic processing queued and has not started (put back if his Approve is
+        refused with nothing filed). Raises ValueError with the reason it is refused."""
+        revision=self._his_revision(id,revision,fingerprint)
+        replaced=self._replace_automatic_job(id) if fingerprint else None
+        approval={}
+        try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
+        except BaseException:
+            if replaced and not (approval.get('accepted') or approval.get('answered')):self._restore_automatic_job(replaced,id)
+            raise
+
+    def _approve_values(self,id,revision,title,author,without_missing,choice,path,names,approval):
+        if names is None:return self._approve_book(id,revision,title,author,without_missing,choice,path,press=approval)
         import entered_names
         values={field:value for field,value in names.items() if field in ('series','number','universe','collection')}
         if title is not None and str(title).strip():values['title']=title
@@ -3365,7 +3455,6 @@ class MergeService:
         # Ruling 57: an Approve's corrected series belongs to this book, never the author's other books (M12).
         entries=[entry for entry in entries if not (entry[0]=='fix' and entry[1]=='series')]
         press=entered_names.save(self.inventory.database,row,entries) if entries else ''
-        approval={}
         try:return self._approve_book(id,revision,title,author,without_missing,choice,path,names=values,press=approval)
         except BaseException as error:
             if approval.get('accepted') or approval.get('answered'):raise  # queued (M4), or answered with the series next (M10): his names stay

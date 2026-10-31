@@ -343,4 +343,71 @@ class ReviewFindingsTests(ApproveFixture):
         self.assertEqual(self.service.jobs.status()['jobs'],[])
 
 
+class Ruling76aTests(ApproveFixture):
+    """Ruling 76a (Sergei 2026-10-31, "My approval is the highest authority"; «Life Signs»): his Approve or Save, made on the
+    row he saw, wins over an approval automatic processing made meanwhile, and replaces its job while it has not started."""
+    def automatic(self):
+        for n in (1,2):
+            tone(self.audio/'Unsorted'/'Ясно'/('%02d.mp3'%n),self.cover,album='Ясно',artist='Иван Петров',title='Глава %d'%n,track='%d/2'%n)
+        row=self.start()[0]
+        result=self.research(row)
+        self.assertFalse(result.get('reasons'),'positive control: research identifies the book by itself')
+        from unittest.mock import patch
+        with patch.object(self.service,'resume',lambda *args,**kwargs:None):  # queued, not started: the conversion waits
+            fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.service.automatic.research.client)
+        self.assertNotEqual(fresh['revision'],row['revision'],'positive control: the automatic approval moved the revision on')
+        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending')
+        return row,fresh,job_id
+
+    def set_aside(self):
+        with connect(self.inv.database) as db:
+            return [tuple(r) for r in db.execute('SELECT job_id,kind FROM audio_job_set_aside')]
+
+    def test_his_approve_on_the_row_he_saw_replaces_the_automatic_job(self):
+        row,fresh,auto_job=self.automatic()
+        with self.assertRaisesRegex(ValueError,'Candidate changed'):
+            self.service.approve_book(row['id'],row['revision'],title='Ясный день')  # without the files he saw: refused as before
+        preview=self.service.approval_preview(row['id'],fresh['revision'],title='Ясный день')
+        approved=self.service.approve_book(row['id'],row['revision'],title='Ясный день',path=preview['path'],fingerprint=row['fingerprint'])
+        jobs={job['job_id']:job for job in self.service.jobs.status()['jobs']}
+        self.assertNotIn(auto_job,jobs,'the automatic job is set aside');self.assertIn(approved['job_id'],jobs)
+        self.assertEqual(jobs[approved['job_id']]['manifest']['metadata']['title'],'Ясный день')
+        self.assertEqual(self.set_aside(),[(auto_job,'approve')])
+        with connect(self.inv.database) as db:kept=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(auto_job,)).fetchone()
+        self.assertEqual(tuple(kept),('needs attention',self.service.APPROVE_REPLACED),'its row is kept, as Start over keeps it')
+
+    def test_a_refused_approve_puts_the_automatic_job_back(self):
+        row,fresh,auto_job=self.automatic()
+        with self.assertRaisesRegex(ValueError,'Destination changed'):
+            self.service.approve_book(row['id'],row['revision'],title='Ясный день',path='Elsewhere\\x.m4b',fingerprint=row['fingerprint'])
+        self.assertEqual(self.set_aside(),[])
+        job=self.service.jobs.status()['jobs'][0];self.assertEqual((job['job_id'],job['state'],job['reason']),(auto_job,'pending',''))
+
+    def test_a_job_that_has_started_is_never_replaced(self):
+        row,fresh,auto_job=self.automatic()
+        from unittest.mock import patch
+        with patch.object(self.service.jobs,'claimed',return_value=True):
+            with self.assertRaisesRegex(ValueError,'already converting'):
+                self.service.approve_book(row['id'],row['revision'],title='Ясный день',fingerprint=row['fingerprint'])
+        self.assertEqual(self.set_aside(),[]);self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'pending')
+
+    def test_changed_files_still_refuse_and_his_own_queued_job_is_not_replaced(self):
+        row,fresh,auto_job=self.automatic()
+        with self.assertRaisesRegex(ValueError,'Candidate changed'):
+            self.service.approve_book(row['id'],row['revision'],title='Ясный день',fingerprint='0'*64)
+        self.assertEqual(self.set_aside(),[])
+        preview=self.service.approval_preview(row['id'],fresh['revision'],title='Ясный день')
+        self.service.approve_book(row['id'],row['revision'],title='Ясный день',path=preview['path'],fingerprint=row['fingerprint'])
+        current=self.service.reviews._row('Audiobooks',row['id'])
+        with self.assertRaises(ValueError):  # his own job is queued: the existing gate says so
+            self.service.approve_book(row['id'],row['revision'],title='Ясный вечер',fingerprint=current['fingerprint'])
+        self.assertEqual([kind for _job,kind in self.set_aside()],['approve'])
+
+    def test_his_names_save_on_the_row_he_saw_is_not_refused(self):
+        row,fresh,auto_job=self.automatic()
+        with self.assertRaises(MergeService.NamesRefused):self.service.names_save(row['id'],row['revision'],{'title':'Ясный день'})
+        saved=self.service.names_save(row['id'],row['revision'],{'title':'Ясный день'},fingerprint=row['fingerprint'])
+        self.assertEqual(saved['outcome'],'replanned','the pending automatic job is set aside and the book checked again with his names')
+
+
 if __name__=='__main__':unittest.main()

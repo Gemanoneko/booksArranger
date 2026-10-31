@@ -437,6 +437,7 @@ class BrowserServer(ThreadingHTTPServer):
         try:
             if action in ('approve', 'convert'):
                 extra = {'names': args['names']} if args.get('names') is not None else {}
+                if args.get('fingerprint'):extra['fingerprint'] = args['fingerprint']  # ruling 76a: the files he saw
                 result = merge.approve_book(book, args['revision'], args.get('title'), args.get('author'), without_missing=action == 'convert',
                                             choice=args.get('choice'), path=args.get('path'), **extra)
                 # Futaba's 0.22.3 QA, m-1: the book's list row too, so the strip names its status when it leaves the list.
@@ -448,7 +449,7 @@ class BrowserServer(ThreadingHTTPServer):
             if action == 'dismiss':
                 return {'result': 'done', 'answer': merge.dismiss_attention(book, args['revision'])}
             if action == 'names':
-                return {'result': 'done', 'answer': {k: v for k, v in merge.names_save(book, args['revision'], args['names']).items() if k != 'row'}}
+                return {'result': 'done', 'answer': {k: v for k, v in merge.names_save(book, args['revision'], args['names'], **({'fingerprint': args['fingerprint']} if args.get('fingerprint') else {})).items() if k != 'row'}}
             if action == 'names_forget':
                 return {'result': 'done', 'answer': {k: v for k, v in merge.names_forget(book, args['revision'], args['entry_id']).items() if k != 'row'}}
             if action == 'copy':
@@ -852,13 +853,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.server.actions.enqueue(action,'library:'+library,library,{'library':library},always=always)
         title=self.queue_title(data)
         if path=='/api/candidate/approve':
-            self.shape(data,{'library','id','revision','queue'},{'title','author','names','without_missing','choice','path','label'})
+            self.shape(data,{'library','id','revision','queue'},{'title','author','names','without_missing','choice','path','label','fingerprint'})
             library,id,revision=self.candidate_identity(data)
             if type(data.get('without_missing',False)) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
             if data.get('choice') not in (None,'same','different'): raise ValueError('Same author? takes same or different')
             args={'revision':revision,'title':self.text_value(data.get('title'),1000,nullable=True),'author':self.text_value(data.get('author'),1000,nullable=True),
                   'choice':data.get('choice'),'path':self.text_value(data.get('path'),1000,nullable=True),
                   'names':self.names_value(data['names'],partial=True) if data.get('names') is not None else None}
+            seen=self.fingerprint_value(data.get('fingerprint'))  # ruling 76a: the files the row showed, kept only when sent
+            if seen is not None:args['fingerprint']=seen
             label=data.get('label','')
             if not isinstance(label,str) or len(label)>500:raise ValueError('Title exceeds its allowed bound')
             return self.server.actions.enqueue('convert' if data.get('without_missing') else 'approve',id,label or args['title'] or '',args,always=always)
@@ -867,9 +870,10 @@ class Handler(BaseHTTPRequestHandler):
             library,id,revision=self.candidate_identity(data)
             return self.server.actions.enqueue(action,id,title,{'revision':revision},always=always)
         if path=='/api/candidate/names-save':
-            self.shape(data,{'library','id','revision','names','queue'},{'title'})
+            self.shape(data,{'library','id','revision','names','queue'},{'title','fingerprint'})
             library,id,revision=self.candidate_identity(data)
-            return self.server.actions.enqueue(action,id,title,{'revision':revision,'names':self.names_value(data['names'])},always=always)
+            seen=self.fingerprint_value(data.get('fingerprint'))  # ruling 76a
+            return self.server.actions.enqueue(action,id,title,{'revision':revision,'names':self.names_value(data['names']),**({'fingerprint':seen} if seen is not None else {})},always=always)
         if path=='/api/candidate/destination':
             self.shape(data,{'library','id','revision','folder','queue'},{'title'})
             library,id,revision=self.candidate_identity(data)
@@ -879,6 +883,13 @@ class Handler(BaseHTTPRequestHandler):
             library,id,revision=self.candidate_identity(data)
             return self.server.actions.enqueue(action,id,title,{'revision':revision,'entry_id':self.text_value(data['entry_id'],64)},always=always)
         raise ValueError('This press does not queue')
+
+    @staticmethod
+    def fingerprint_value(value):
+        """Ruling 76a: the files' fingerprint the row showed (a SHA-256 in hex), or None."""
+        if value is None:return None
+        if not isinstance(value,str) or len(value)!=64 or any(c not in '0123456789abcdef' for c in value):raise ValueError('Invalid source fingerprint')
+        return value
 
     @staticmethod
     def folder_value(value):
@@ -1220,7 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
             self.response(200,result);return
         if path in NAMES_ROUTES:
             # Edit names (Sergei 2026-10-26; Judy 0.22.2 section 1): open (read), Save, Forget. Nothing touches a file.
-            self.shape(data,{'library','id','revision'}|({'names'} if path.endswith('/names-save') else {'entry_id'} if path.endswith('/names-forget') else set()))
+            self.shape(data,{'library','id','revision'}|({'names'} if path.endswith('/names-save') else {'entry_id'} if path.endswith('/names-forget') else set()),{'fingerprint'} if path.endswith('/names-save') else ())
             library,id,revision=self.candidate_identity(data)
             if path=='/api/candidate/names':
                 try:self.response(200,{'editor':self.server.merge.names_editor(id,revision)})
@@ -1229,8 +1240,9 @@ class Handler(BaseHTTPRequestHandler):
             queued=self.server.actions.book_action(id) if getattr(self.server,'actions',None) is not None and hasattr(self.server.actions,'book_action') else None
             if queued in NAMES_QUEUED:
                 self.response(409,{'error':NAMES_QUEUED[queued],'code':'queued','action':queued});return  # one queued action per row (Judy 1.4)
+            seen=self.fingerprint_value(data.get('fingerprint'))  # ruling 76a: the files the row showed
             try:
-                if path.endswith('/names-save'):result=self.server.merge.names_save(id,revision,self.names_value(data['names']))
+                if path.endswith('/names-save'):result=self.server.merge.names_save(id,revision,self.names_value(data['names']),**({'fingerprint':seen} if seen is not None else {}))
                 else:result=self.server.merge.names_forget(id,revision,self.text_value(data['entry_id'],64))
             except ValueError as error:
                 code=getattr(error,'code',None) or ('changed' if 'Candidate changed' in str(error) else 'refused')
@@ -1243,7 +1255,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/candidate/approve','/api/candidate/approve-preview'):
             # Sergei's Approve and its "Goes to" line (rulings 6a, 6b, 10, 11a; Judy's attention to-do spec, section 5).
             # names (0.22.2, Judy 1.3): the open Edit names editor's series, number, universe and collection.
-            self.shape(data,{'library','id','revision'},{'title','author','names'}|({'without_missing','choice','path'} if path.endswith('/approve') else set()))
+            self.shape(data,{'library','id','revision'},{'title','author','names'}|({'without_missing','choice','path','fingerprint'} if path.endswith('/approve') else set()))
             library,id,revision=self.candidate_identity(data)
             title=self.text_value(data.get('title'),1000,nullable=True);author=self.text_value(data.get('author'),1000,nullable=True)
             names=self.names_value(data['names'],partial=True) if data.get('names') is not None else None
@@ -1253,7 +1265,8 @@ class Handler(BaseHTTPRequestHandler):
             shown=self.text_value(data.get('path'),1000,nullable=True)  # the "Goes to" line the row showed (Senua's 0.22.0 review, m1)
             if type(without) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
             if choice not in (None,'same','different'): raise ValueError('Same author? takes same or different')
-            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice,path=shown,**({'names':names} if names is not None else {}))
+            seen=self.fingerprint_value(data.get('fingerprint'))  # ruling 76a: the files the row showed
+            try:approved=self.server.merge.approve_book(id,revision,title,author,without_missing=without,choice=choice,path=shown,**({'fingerprint':seen} if seen is not None else {}),**({'names':names} if names is not None else {}))
             except MergeService.SeriesAsked as answer:
                 self.response(200,answer.payload());return
             except ValueError as error:
