@@ -129,6 +129,10 @@ LOAD_PARTS = ('library', 'status', 'books', 'attention', 'jobs')
 NOT_YET = 'Not yet: Books Arranger is still loading. This works when loading finishes.'
 # Read-only presses (View metadata, Open folder) work as soon as the books are on screen (3.6).
 LOOKING = {'/api/inspect', '/api/open-folder', '/api/candidate/names', '/api/author-rules'}  # 0.22.2: opening Edit names only reads (Judy 1.7)
+# Ruling 75a (2026-10-31): reads that arrive as POSTs (a details panel, a "Goes to" preview, opening a folder, the names editor,
+# the author rules, a delete preview that is not queued) change nothing, so their reply no longer throws away the shared
+# status computation (Handler.response, status_control): under load every panel read restarted it from the beginning.
+READ_ONLY_POSTS = frozenset(LOOKING | {'/api/candidate/routing-preview', '/api/candidate/approve-preview', '/api/candidate/delete-preview'})
 def approve_code(text):
     """Each Approve gate its own code (2026-10-26, «Спящие красавицы»: every other refusal read "Approve was not accepted"), so
     the row names the real reason and the next step. Unknown gates answer 'refused' and the row shows the engine's sentence."""
@@ -1317,6 +1321,7 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
+            if path in READ_ONLY_POSTS and isinstance(data,dict) and data.get('queue') is not True:self.status_control=False  # ruling 75a: a read keeps it
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',

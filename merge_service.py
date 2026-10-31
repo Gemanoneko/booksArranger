@@ -38,6 +38,8 @@ QUIET_MAX_AGE=300.0 # Seconds a polling answer is reused while nothing runs and 
 # the bound only refreshes what can change without a commit (files removed by hand outside the app).
 WORKING_MAX_AGE=30.0 # The same bound while any listed row carries leftover working files: files removed outside the app
 # show within a minute, not five (RefusedRetry follow-up 2, section 2.6); or a book stopped by a drive that went away.
+LIST_REUSE_MAX=600.0 # Ruling 75a: the book list reuses the last status computation's converted set and cleanup results
+# this long; the window polls the status every 0.8 s, so they are one computation old. Only past it does a list compute them.
 WORKING_RECHECK=20.0 # Seconds a classified working folder is reused while its listing is unchanged (it stats the originals).
 CHECK_REFRESH=10.0 # Seconds between status refreshes while the M4B check pass finishes checks (follow-up 2, section 3).
 _QUIET_LOCK=threading.Lock()
@@ -579,11 +581,14 @@ class MergeService:
         with leftover working files (they can go without a catalog commit, removed outside the app)."""
         return WORKING_MAX_AGE if self.__dict__.get('_working_listed') else QUIET_MAX_AGE
 
-    def cleanup_statuses(self,job_ids,max_age=30.0):
+    def cleanup_statuses(self,job_ids,max_age=None):
         """Book list: each shown book's cleanup status, reused from the last status computation while it is under
         max_age old or the app has stayed quiet since (one status costs about 30 ms per book on the real catalog). Book
         list speed (Sergei 2026-10-24, ruling 18): 30 s, not 5 s, as for converted_ids(); the page polls the status every
-        0.8 s, and under load one status computation takes longer than 5 s, so the page read every job's status again."""
+        0.8 s, and under load one status computation takes longer than 5 s, so the page read every job's status again.
+        Ruling 75a (2026-10-31): under a running queue one status computation took minutes, so the 30 s bound made every
+        list read compute its own; the list now reuses the last computation's results for LIST_REUSE_MAX."""
+        max_age=LIST_REUSE_MAX if max_age is None else max_age
         kept=self.__dict__.get('_cleanup_kept')
         age=time.monotonic()-kept[0] if kept else -1
         if kept and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and kept[1] is not None and kept[1]==self._quiet_token()):
@@ -748,13 +753,16 @@ class MergeService:
             'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
 
-    def converted_ids(self,max_age=30.0):
+    def converted_ids(self,max_age=None):
         """Converted candidate ids for the book list: the set the last status computation produced, while it is under
         max_age old or the app has stayed quiet since it. The page polls the status every 0.8 s, so that set is at most
         one status computation old, the same moment as the Jobs counts. Book list speed (Sergei 2026-10-24, ruling 18):
         the list no longer computes its own set once that one is 5 s old; that read waited for group_lock behind every
-        automatic approval and costs 10-25 s on the live catalog. Only with no recent set (no status poll for 30 s)
-        does the list compute it."""
+        automatic approval and costs 10-25 s on the live catalog. Only with no recent set does the list compute it.
+        Ruling 75a (2026-10-31): "recent" was 30 s, but under a running queue one status computation took minutes, so
+        every list read computed the whole set again (the cleanup status of every converted book, 8 file checks each);
+        it is now LIST_REUSE_MAX."""
+        max_age=LIST_REUSE_MAX if max_age is None else max_age
         cached=getattr(self,'_converted_cache',None)
         age=time.monotonic()-cached[0] if cached else -1
         if cached and (0<=age<max_age or 0<=age<QUIET_MAX_AGE and len(cached)>2 and cached[2] is not None and cached[2]==self._quiet_token()):return set(cached[1])

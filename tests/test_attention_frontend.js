@@ -207,7 +207,7 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   run('selectedPath=null;selectedRow=null');
   const startCount=listed();const first=run('refresh()');await tick();
   assert.equal(listed(),startCount+1);assert.equal(await run('refresh()'),true);assert.equal(listed(),startCount+1,'a poll never restarts the pending list');
-  slow({ok:true,json:async()=>({rows:[retry],total:1})});await first;
+  slow({ok:true,json:async()=>({rows:[retry],total:1})});await first;await tick();  // ruling 75a: the read paints itself after the poll
   context.fixture=[retry,other];run('rows=fixture.map(row=>({...row}));renderRows(true)');assert.equal(get('inventory').children.length,2);
   let pendingList;inventoryOverride=()=>new Promise(resolve=>{pendingList=resolve;});get('filter').value='all';const changing=get('filter').handlers.change();await tick();
   assert.equal(get('inventory').children.length,0,'the old list is not shown as the new result');assert.equal(get('page').textContent,'Loading All candidates…');assert.equal(get('empty').hidden,false);

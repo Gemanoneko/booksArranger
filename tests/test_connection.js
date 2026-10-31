@@ -41,7 +41,8 @@ const context=vm.createContext({console,clean,bad,document:{
   }});
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/app.js'),'utf8'),context);
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-const poll=()=>vm.runInContext('poll()',context);
+// Ruling 75a: the poll never waits for the list read; the read paints itself a few ticks later.
+const poll=async()=>{await vm.runInContext('poll()',context);await flush();await flush();};
 (async()=>{
   await flush();
   vm.runInContext("view='files';viewControls()",context);

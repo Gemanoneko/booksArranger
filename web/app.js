@@ -115,9 +115,13 @@ const NOT_CONFIRMED={press:"This hasn't been confirmed yet. The app is busy with
 // A press that got no answer at all (4.3): the desktop's "not confirmed" line, else the browser's old one.
 function lostLine(kind='press'){return desktopMode()?NOT_CONFIRMED[kind]:'Connection interrupted. Check the status above before trying again.';}
 function desktopMode(){return !!shellApi;}
-// Requests still waiting for an answer (any route), and when each status read was answered, per library.
-const inflight=new Map(),receivedAt=new Map();let inflightSeq=0,busyShown=false;
-function oldestWait(now=Date.now()){let oldest=null;for(const started of inflight.values())if(oldest===null || started<oldest)oldest=started;return oldest===null?0:Math.max(0,now-oldest);}
+// Requests still waiting for an answer, and when each status read was answered, per library. Ruling 75a (Judy 0.24.1
+// section 1.4): one source of truth for "the app is silent". List reads (/api/inventory) never count: a slow list beside a
+// healthy status read is the stale-list line's (#list-stale), not "No answer for 2 min". The status read counts from the
+// first one left unanswered (statusSilentSince), so its time limit and the next poll's read never restart that clock.
+const inflight=new Map(),receivedAt=new Map();let inflightSeq=0,busyShown=false,statusSilentSince=null;
+function oldestWait(now=Date.now()){let oldest=statusSilentSince;for(const started of inflight.values())if(oldest===null || started<oldest)oldest=started;return oldest===null?0:Math.max(0,now-oldest);}
+const STATE_TIMEOUT=30000;  // ruling 75a: a status read with no answer by then ends, and the next poll asks again
 // The press ladder (4.3): the normal pending note, then one sentence more as time passes.
 let ladderClock=null;  // the tick's own time while it renders (a fake clock in tests)
 function ladderNote(note,since,now=ladderClock ?? Date.now()){
@@ -155,7 +159,7 @@ function clearBusy(){
 }
 // Once a second: the notice, and the ladder of any press waiting 3 s or more.
 function pressTick(now=Date.now()){
-  renderBusy(now);
+  renderBusy(now);renderListStale(now);  // the stale-list line (ruling 75a) moves on the same clock
   const since=[retryPending?.at,...[...askPendings.values()].map(item=>item.at),metaSave?.at,['deleting','queuing'].includes(deleteDialog?.state)?deleteDialog.at:null,...[...queuePresses.values()].map(item=>item.at)].filter(Number.isFinite);
   const clocks=clockSince(),reload=listWait && now-listWait.at>=1000 && !listWait.shown;if(reload)listWait.shown=true;
   if(since.some(at=>now-at>=3000) || clocks.some(at=>now-at>=2000) || since.some(at=>now-at>=2000) || reload){ladderClock=now;try{controls();if(rulesView.pending.size)renderAuthorRules();}finally{ladderClock=null;}if(['deleting','queuing'].includes(deleteDialog?.state))deleteStatusLine(now);}
@@ -181,17 +185,22 @@ function refreshFailed(error){
   renderAutomatic();renderJobs();controls();
 }
 
-async function request(route, data, timeoutMs=0) {
+async function request(route, data, timeoutMs=0, signal=null) {
   const options = {headers:{'X-Books-Token':token}, credentials:'same-origin', cache:'no-store'};
   if (data !== undefined && recoveryDisconnected)throw Error('Connection interrupted. Wait for the local server to reconnect.');
   if (data !== undefined) { options.method='POST'; options.headers['Content-Type']='application/json'; options.body=JSON.stringify(data); }
-  // An optional bound: a request with no reply by then ends like a lost connection (no httpStatus).
-  const controller=timeoutMs && typeof AbortController==='function'?new AbortController():null;
+  // An optional bound: a request with no reply by then ends like a lost connection (no httpStatus). signal: the caller's
+  // own cancel (a list read asked again after a long wait, ruling 75a).
+  const controller=(timeoutMs || signal) && typeof AbortController==='function'?new AbortController():null;
   if(controller)options.signal=controller.signal;
-  const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
-  const ticket=++inflightSeq;inflight.set(ticket,Date.now());
+  if(controller && signal){if(signal.aborted)controller.abort();else signal.addEventListener?.('abort',()=>controller.abort());}
+  const timer=controller && timeoutMs?setTimeout(()=>controller.abort(),timeoutMs):null;
+  const kind=route.startsWith('/api/inventory')?'list':route.startsWith('/api/state')?'status':'other';
+  const ticket=kind==='other'?++inflightSeq:null;if(ticket!==null)inflight.set(ticket,Date.now());
+  if(kind==='status' && statusSilentSince===null)statusSilentSince=Date.now();
   let response;
-  try{response = await fetch(route, options);}finally{if(timer)clearTimeout(timer);inflight.delete(ticket);if(busyShown)renderBusy();}
+  try{response = await fetch(route, options);if(kind==='status')statusSilentSince=null;}  // any reply is the app answering, an error status included
+  finally{if(timer)clearTimeout(timer);if(ticket!==null)inflight.delete(ticket);if(busyShown)renderBusy();}
   const result = await response.json();
   if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;error.body=result;throw error;}
   return result;
@@ -648,12 +657,53 @@ function acknowledgeReacquireArchives(page){
   $('details').hidden=false;$('details-heading').textContent='Source entry cleared';$('reason').textContent=notice;$('proposed').textContent='Historical jobs and evidence are kept.';
   controls();message(notice);if(focused)$('details-heading').focus?.({preventScroll:true});
 }
+// ---- The stale list (ruling 75a; Judy 0.24.1 section 1). The poll never waits for a list read: the status keeps updating
+// while one is out, and the read paints itself when it answers. A read for the list on screen that is still unanswered
+// after LIST_STALE keeps the old rows and says how old they are (#list-stale); after LIST_REASK it is cancelled and asked
+// again (listAsk.since is kept, so the line and its 10-minute step never restart); while the app is busy the poll leaves
+// LIST_PAUSE between one answer and the next read. Desktop window only, like the busy notice.
+const LIST_STALE=5000,LIST_ESCALATE=600000,LIST_REASK=300000,LIST_PAUSE=10000;
+const LIST_BUSY=' The app is busy; this updates by itself.',LIST_LONG='the app has been busy for over 10 minutes. If it goes on, quit from the tray and open Books Arranger again.';
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// listAsk: {context, since (first ask after the last paint), started (this read), ticket, controller}; paintedAt: when the
+// painted list was received; listError: its newest answer was an error other than "busy" (503).
+let paintedAt=null,listAsk=null,listError=false,listAnsweredAt=null,lastListTook=0,listLoadingText='';
+function listClock(ms,now){
+  const d=new Date(ms),n=new Date(now);
+  return d.getFullYear()===n.getFullYear() && d.getMonth()===n.getMonth() && d.getDate()===n.getDate()?askClock(d):`${d.getDate()} ${MONTHS[d.getMonth()]}, ${askClock(d)}`;
+}
+function engineBusy(){
+  const jobs=state?.audiobook_jobs?.state,auto=state?.automatic_processing?.state;
+  return lastListTook>=LIST_STALE || ['Running','Pausing'].includes(jobs) || ['Running','Stopping'].includes(auto) || !!state?.active_library;
+}
+function listPaused(now){return listAnsweredAt!==null && engineBusy() && now-listAnsweredAt<LIST_PAUSE;}
+function renderListStale(now=Date.now()){
+  const line=$('list-stale');if(!line)return;
+  const context=listContext(),waiting=listAsk && listAsk.context===context?now-listAsk.since:0,live=desktopMode() && !ended && !loadingActive && booksOnScreen();
+  let text='',warn=false;
+  if(live && paintedAt!==null && paintedContext===context){
+    const time=listClock(paintedAt,now),silent=statusSilentSince!==null && now-statusSilentSince>=3000;
+    if(listError || waiting>=LIST_STALE && silent)text=`List from ${time}.`;  // S5, S4: the error line or the page-top notice says the rest
+    else if(waiting>=LIST_ESCALATE){text=`List from ${time}; ${LIST_LONG}`;warn=true;}  // S3
+    else if(waiting>=LIST_STALE)text=`List from ${time}.${LIST_BUSY}`;  // S1, S2
+  }
+  if(line.textContent!==text)line.textContent=text;
+  line.hidden=!text;line.classList?.toggle?.('escalated',warn);
+  // S6: a new filter, page or search that is slow: the rows are blank, and the loading text says why after LIST_STALE.
+  if(live && paintedContext!==context && listLoadingText && waiting>=LIST_STALE && String($('empty').textContent).startsWith(listLoadingText)){
+    const said=listLoadingText+(waiting>=LIST_ESCALATE?' The app has been busy for over 10 minutes. If it goes on, quit from the tray and open Books Arranger again.':LIST_BUSY);
+    if($('empty').textContent!==said)$('empty').textContent=said;
+  }
+}
 function loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,forceRender){
   const ticket=++listTicket;listPending=context;
-  if(context!==paintedContext)showListLoading();
+  const asked=Date.now(),again=listAsk?.context===context;
+  listAsk={context,since:again?listAsk.since:asked,started:asked,ticket,controller:typeof AbortController==='function'?new AbortController():null};
+  if(context!==paintedContext && !again)showListLoading();
   const groupQuery=requestView==='candidates' && requestFilter==='output_attention' && attentionGroup!=='all'?`&group=${attentionGroup}`:'';
   const sentAt=Date.now();
-  return request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`).then(page=>{
+  renderListStale(asked);
+  return request(`/api/inventory?library=${encodeURIComponent(library)}&offset=${requestOffset}&search=${encodeURIComponent(requestSearch)}&view=${requestView}&status=${requestFilter}${groupQuery}`,undefined,0,listAsk.controller?.signal).then(page=>{
     // A book list requested before Retry was answered predates it and would repaint the old state.
     if (ended || ticket!==listTicket || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
     acknowledgeReacquireArchives(page);
@@ -664,8 +714,27 @@ function loadList(context,library,requestView,requestFilter,requestOffset,reques
     else if(heldRow && !rows.some(item=>item.path===heldRow.path)){rows.splice(Math.min(heldRow.index,rows.length),0,heldRow.row);if(!heldRow.rechecked)recheckHeld(heldRow);}
     noteLeavers(sentAt);
     const changed=context!==paintedContext;paintedContext=context;renderRows(forceRender || changed);
+    // S7: the answer is painted; the line goes at once.
+    const now=Date.now();paintedAt=now;listAnsweredAt=now;lastListTook=now-sentAt;listAsk=null;listError=false;renderListStale(now);
     return true;
+  },error=>{
+    if(ticket===listTicket){listAnsweredAt=Date.now();lastListTook=listAnsweredAt-sentAt;if(error?.httpStatus && error.httpStatus!==503)listError=true;renderListStale(listAnsweredAt);}
+    else error.superseded=true;  // a newer read for the list replaced it (a re-ask included): its failure says nothing
+    throw error;
   }).finally(()=>{if(ticket===listTicket)listPending='';});
+}
+// A list read the poll started: nobody waits for it. Its failure is reported the way the poll reported it before.
+function pollList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,key){
+  loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,false).then(painted=>{
+    if(!painted)return;
+    lastKey=key;
+    // Settling (3.7) as the refresh that asked would have done once its list was on screen.
+    if(LS && loadingActive && state && LS.loaded(state) && paintedContext===context)settleLoad(state.loading?.took_ms);
+  }).catch(error=>{
+    if(ended || error?.superseded)return;
+    if(error?.httpStatus)loadHeard();  // any reply is the engine answering (Judy 3.4)
+    if(error?.httpStatus!==503)refreshFailed(error);
+  });
 }
 // The pressed book left this list (its child was admitted, or the worker refused it). Re-read it once, so the row held
 // in place shows what is true now, never a stale "Queued" (RefusedRetry spec section 3, "While on screen").
@@ -688,7 +757,7 @@ async function refresh(force=false) {
   const early=force && booksOnScreen()?loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,true):null;
   early?.catch(()=>{});
   const stateSent=Date.now();
-  const current=await request(`/api/state?library=${encodeURIComponent(library)}`);
+  const current=await request(`/api/state?library=${encodeURIComponent(library)}`,undefined,STATE_TIMEOUT);  // ruling 75a: a time limit
   deletedCounts(current,stateSent);  // Judy 0.22.2 section 5: a status from before a delete still counts that book
   observeLoad(current);  // any answer counts, whatever happens to it below (Judy 3.4)
   if (ended || sequence!==refreshSequence || $('library').value!==library || context!==listContext() || epoch!==retryEpoch) return false;
@@ -720,10 +789,16 @@ async function refresh(force=false) {
     lastKey=key;
   } else if (view==='candidates' || key!==lastKey) {
     // The book list is slow on a large catalog: a request already on its way for this exact list paints
-    // itself, so polls never restart it; only a newer request for the list replaces it.
-    if(listPending===context){acknowledgeRestart(current);return true;}
-    if(!await loadList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,false))return false;
-    lastKey=key;
+    // itself, so polls never restart it; only a newer request for the list replaces it. Ruling 75a: the poll never
+    // waits for it (the status keeps updating); after LIST_REASK it is cancelled and asked again; while the app is busy
+    // the next read waits LIST_PAUSE after the last answer, unless something asked for a fresh list (lastKey null).
+    const now=Date.now();
+    if(listPending===context){
+      if(listAsk?.context===context && now-listAsk.started>=LIST_REASK){listAsk.controller?.abort?.();pollList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,key);}
+      acknowledgeRestart(current);return true;
+    }
+    if(lastKey!==null && listPaused(now)){acknowledgeRestart(current);return true;}
+    pollList(context,library,requestView,requestFilter,requestOffset,requestSearch,epoch,key);
   }
   // Settling (3.7): every part has arrived and the first list is on screen; one render pass makes it all live.
   if(LS && loadingActive && LS.loaded(current) && paintedContext===context)settleLoad(current.loading?.took_ms);
@@ -759,6 +834,7 @@ function showListLoading(){
   $('inventory').replaceChildren();rowRetries.clear();askRows.clear();deleteButtons.clear();$('inventory').setAttribute?.('aria-busy','true');
   const text=`Loading ${label}${filters[view]==='output_attention' && attentionGroup!=='all'?' · '+attentionLabels[attentionGroup]:''}…`;
   $('empty').textContent=text;$('empty').hidden=false;$('page').textContent=text;$('previous').disabled=true;$('next').disabled=true;
+  listLoadingText=text;  // ruling 75a, S6: renderListStale says why when it lasts
 }
 function cancelSearchRefresh(){if(searchTimer!==null)clearTimeout(searchTimer);searchTimer=null;}
 function updateList(resetPage=true){

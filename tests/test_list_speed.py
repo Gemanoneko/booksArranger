@@ -30,8 +30,12 @@ class ConvertedSetTests(test_quiet_status.Base):
         s._converted_cache = (time.monotonic() - 12, {'polled'}, None)
         self.assertEqual(s.converted_ids(), {'polled'}, 'a 12 s old set from the status poll is used as is')
         s.progress_books.assert_not_called()
+        # Ruling 75a: under a running queue one status computation took minutes, so the list reuses the poll's set for
+        # LIST_REUSE_MAX (10 min), not 30 s.
         s._converted_cache = (time.monotonic() - 31, {'polled'}, None)
-        self.assertEqual(s.converted_ids(), {'fresh'}, 'positive control: a set no status poll refreshed for 30 s is computed again')
+        self.assertEqual(s.converted_ids(), {'polled'}, 'a 31 s old set is used as is (ruling 75a)'); s.progress_books.assert_not_called()
+        s._converted_cache = (time.monotonic() - 601, {'polled'}, None)
+        self.assertEqual(s.converted_ids(), {'fresh'}, 'positive control: a set no status poll refreshed for 10 min is computed again')
         s.progress_books.reset_mock(); s.__dict__.pop('_converted_cache')
         self.assertEqual(s.converted_ids(), {'fresh'}, 'no set yet: computed'); s.progress_books.assert_called_once()
 
@@ -42,7 +46,9 @@ class ConvertedSetTests(test_quiet_status.Base):
         s._cleanup_kept = (time.monotonic() - 12, None, {'j': {'state': 'polled'}})
         self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'polled'}}); s.cleanup.status.assert_not_called()
         s._cleanup_kept = (time.monotonic() - 31, None, {'j': {'state': 'polled'}})
-        self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'fresh'}}, 'positive control: 30 s without a status poll')
+        self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'polled'}}, 'ruling 75a: 31 s is reused'); s.cleanup.status.assert_not_called()
+        s._cleanup_kept = (time.monotonic() - 601, None, {'j': {'state': 'polled'}})
+        self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'fresh'}}, 'positive control: 10 min without a status poll')
 
 
 class CandidatesTests(test_approve_as_is.ApproveFixture):

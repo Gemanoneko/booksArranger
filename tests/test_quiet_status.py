@@ -146,11 +146,16 @@ class QuietTests(Base):
     def test_converted_ids_and_cleanup_statuses_follow_the_quiet_state(self):
         s = self.service()
         self.assertIsNone(s._quiet_token(), 'no monitor until a poll opens it: a direct state() stays fresh')
+        # Ruling 75a: a set under LIST_REUSE_MAX (10 min) is reused whatever happened since; past it, only a quiet app keeps it
+        # for QUIET_MAX_AGE, which is shorter, so past 10 min a set is always computed again.
         token = s._quiet_token(True); old = time.monotonic() - 60
         s._converted_cache = (old, {'a'}, token); s._cleanup_kept = (old, token, {'j': {'state': 'completed'}})
         s.progress_books = Mock(return_value={'converted_ids': {'b'}}); s.cleanup = SimpleNamespace(thread=None, current=None, status=Mock(return_value={'state': 'fresh'}))
         self.assertEqual(s.converted_ids(), {'a'}); self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'completed'}})
         self.commit()
+        self.assertEqual(s.converted_ids(), {'a'}); self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'completed'}})
+        stale = time.monotonic() - 601
+        s._converted_cache = (stale, {'a'}, s._quiet_token(True)); s._cleanup_kept = (stale, s._quiet_token(True), {'j': {'state': 'completed'}})
         self.assertEqual(s.converted_ids(), {'b'}); self.assertEqual(s.cleanup_statuses(['j']), {'j': {'state': 'fresh'}})
 
 

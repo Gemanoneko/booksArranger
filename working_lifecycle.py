@@ -40,6 +40,80 @@ def normalized(value):
     return text.replace(chr(92), '/')
 
 
+# Ruling 75a (2026-10-31): the published-snapshot reference check after a conversion rebuilt every row of audio_jobs,
+# working_files and the cleanup tables as JSON in Python (80 MB of manifests, 40,000 working-file rows), on the conversion
+# worker and the engine's one Python core, for over ten minutes per book. SQLite now finds the rows that can hold a wanted
+# path, and Python decides each of those exactly as before (normalized(packed(row)) contains normalized(path)).
+#
+# Why no flagged row is missed. Let N = normalized(path) and T a substring of N made only of TOKEN characters.
+#  1. N holds '/' and no '"' (else the full scan runs). packed() writes keys (column names: no '/') and numbers, true, false
+#     and null (no '/'), and joins them with '"', ':', ',' and braces; the only '"' inside a string value comes from an
+#     escaped quote ('\"', normalized '/"'). So an N that occurs in normalized(packed(row)) lies inside one string value:
+#     a column whose value is text (bytes make packed() raise, and such a row is always returned, so it raises as before).
+#  2. normalized(json escape of v) maps each ASCII letter of v to its lower case, each other TOKEN character to itself, '"'
+#     and '\' to sequences holding '/', a control character to its escape (\n, \u001f ...: '/' and ASCII), and a non-ASCII
+#     character to its casefold, which is ASCII-free except for the few in casefold_to_ascii() (the ﬀ ligature, the Kelvin
+#     sign, long s ...). Every character of T's occurrence is a TOKEN character and so comes from an ASCII letter or TOKEN
+#     character of v, from a control character, or from a casefold_to_ascii() character whose casefold shares a character
+#     with T. With none of the last two in v, the occurrence is a run of v with ASCII letters lower-cased:
+#     instr(lower(v), T) finds it (SQLite's built-in lower() folds ASCII only).
+#  3. A value with a NUL, another control character or such a casefold character is always returned.
+TOKEN = frozenset('abcdefghijklmnopqrstuvwxyz0123456789._ -')
+_CASEFOLD = []
+
+
+def casefold_to_ascii():
+    """Every non-ASCII character whose casefold holds an ASCII character, computed once (about a second)."""
+    if not _CASEFOLD:
+        _CASEFOLD.append(''.join(c for c in map(chr, range(0x80, 0x110000)) if any(ord(x) < 0x80 for x in c.casefold())))
+    return _CASEFOLD[0]
+
+
+def search_token(wanted):
+    """The longest run of TOKEN characters in a normalized path (the last of equal ones: the attempt folder before the job
+    folder), or None when the path cannot be searched this way (no '/', a '"', no run)."""
+    if '/' not in wanted or '"' in wanted:
+        return None
+    runs, current = [], ''
+    for character in wanted + '/':
+        if character in TOKEN:
+            current += character
+        else:
+            if current:
+                runs.append(current)
+            current = ''
+    return max(reversed(runs), key=len) if runs else None
+
+
+def reference_candidates(db, table, wanted, limit=64):
+    """The rows of table that can hold one of the normalized paths in wanted; every row when a path has no search token or
+    there are more than limit tokens (the old full scan). See the comment above TOKEN for why none is missed."""
+    tokens = [search_token(path) for path in wanted]
+    if not tokens or None in tokens or len(set(tokens)) > limit:
+        return db.execute('SELECT * FROM ' + table)
+    columns = [row[1] for row in db.execute('PRAGMA table_info(' + table + ')')]
+    if not columns:
+        return db.execute('SELECT * FROM ' + table)
+    # A control character (one GLOB pass), and each casefold character that can stand for a character of a token: one byte
+    # search per distinct start of their UTF-8 forms (every such character is 2 or more bytes; a shared start may also catch
+    # other characters, which only returns more rows). Faster than a GLOB class over non-ASCII text.
+    alphabet = set(''.join(tokens))
+    risky = sorted({c.encode('utf-8')[:2] for c in casefold_to_ascii() if set(c.casefold()) & alphabet})
+    conditions, values = [], []
+    for column in columns:
+        name = '"' + column.replace('"', '""') + '"'
+        text, raw = 'CAST(' + name + ' AS TEXT)', 'CAST(' + name + ' AS BLOB)'
+        conditions += ["typeof(" + name + ")='blob'", 'instr(' + raw + ",x'00')>0", text + ' GLOB ?']
+        values.append('*[' + chr(1) + '-' + chr(31) + ']*')
+        for character in risky:
+            conditions.append('instr(' + raw + ',?)>0')
+            values.append(character)
+        for token in dict.fromkeys(tokens):
+            conditions.append('instr(lower(' + text + '),?)>0')
+            values.append(token)
+    return db.execute('SELECT * FROM ' + table + ' WHERE ' + ' OR '.join(conditions), values)
+
+
 class DirectoryBoundary(NativeBoundary):
     def __exit__(self, *unused):
         failures = []
@@ -574,7 +648,9 @@ class WorkingLifecycle:
             tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for table in ('audio_jobs','working_attempts','working_files')+REFERENCE_TABLES+('audio_failure_history',):
                 if table not in tables:continue
-                for raw in db.execute('SELECT * FROM '+table):
+                # Ruling 75a: SQLite picks the rows that can hold a wanted path (reference_candidates); each one is still
+                # decided below exactly as before. Every row the old full scan would flag is among them.
+                for raw in reference_candidates(db,table,wanted):
                     row=dict(raw)
                     if table=='audio_jobs' and row['job_id']==attempt['job_id']:continue
                     if table in {'working_attempts','working_files'} and row['job_id']==attempt['job_id'] and row['attempt_id']==attempt['attempt_id']:continue

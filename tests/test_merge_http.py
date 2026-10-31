@@ -88,6 +88,23 @@ class MergeHTTPTests(unittest.TestCase):
         self.assertEqual(self.call('/api/audiobook/recovery/cancel',{'job_id':ID})[:2],(200,{'cancelled':True}))
         self.assertEqual(self.call('/api/audiobook/recovery/cancel',{'job_id':ID})[:2],(409,{'error':'It has already started.','code':'started'}))
 
+    def test_read_only_posts_keep_the_shared_status_computation(self):
+        # Ruling 75a: a reply to a read that arrives as a POST no longer throws the shared status computation away; under
+        # load every panel read and "Goes to" preview restarted it. A control, even a refused one, still drops it.
+        self.server.invalidate_status=Mock()
+        self.merge.approval_preview=Mock(return_value={'path':'x.m4b'});self.merge.routing_preview=Mock(return_value={'path':'x'})
+        self.merge.learned_author_rules=Mock(return_value=[])
+        def real(path,data):
+            h=self.handler(path,data);del h.response  # the real reply, which consumes status_control as in the app
+            h.wfile=io.BytesIO();h.request_version='HTTP/1.1';h.requestline='POST '+path+' HTTP/1.1';h.command='POST';h.client_address=('127.0.0.1',1)
+            h.do_POST();return h.wfile.getvalue().split(b'\r\n')[0]
+        for path,data in (('/api/candidate/approve-preview',self.identity()|{'title':'T'}),('/api/candidate/routing-preview',self.identity()|{'review':REVIEW}),
+                          ('/api/inspect',{'library':'Audiobooks','view':'candidates','id':ID}),('/api/author-rules',{})):
+            self.assertIn(b' 200 ',real(path,data)+b' ',path)
+        self.server.invalidate_status.assert_not_called()
+        self.assertIn(b' 400 ',real('/api/audiobook/pause',{'unexpected':1})+b' ')
+        self.server.invalidate_status.assert_called_once_with()
+
     def test_approve_and_its_preview_routes(self):
         # Rulings 6a/6b/10/11a: Approve with the values shown (typed values win) and the "Goes to" line before it.
         self.merge.approval_preview=Mock(return_value={'path':'Без автора\\Тайна.m4b','absolute':'Z:\\S\\Без автора\\Тайна.m4b','taken':False,'title':'Тайна','author':'Без автора','collection':False,'reason':''})
