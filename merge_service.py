@@ -4999,7 +4999,12 @@ class MergeService:
 
     def _after_move(self,move):
         """A committed move: its new location is the book's owned output and its last full verification (the move hashed
-        every byte); the caches that showed the old location are dropped."""
+        every byte); the caches that showed the old location are dropped.
+
+        Futaba's 0.24.0 QA, M1: the in-memory last verification (_validated_outputs, what the converted check compares the
+        live file with) is the moved file's identity. It used to be dropped, and only a routine re-check (Start) or the next
+        engine start put it back, so a book moved to its chosen folder after converting read "not ready" until a restart:
+        out of Audiobook Ready, its row "In <old source folder>" with no Choose folder."""
         import book_move
         self.__dict__.get('_move_progress',{}).pop(move['move_id'],None)
         if move['state'] in book_move.TERMINAL:self.__dict__.get('_move_unfinished',{}).pop(move['move_id'],None)
@@ -5010,7 +5015,10 @@ class MergeService:
                     db.execute('INSERT OR REPLACE INTO owned_artifacts VALUES(?,?,?,?,?)',(final['final_path'],move['job_id'],'output',final['sha256'],final['size']))
             except sqlite3.Error:pass
             self._publication_verified(dict(final,job_id=move['job_id']))
-            self._validated_outputs.pop(move['job_id'],None)
+            try:identity=file_identity(ordinary(final['final_path']))
+            except (OSError,ValueError,KeyError):identity=None
+            if identity and identity[2]==final.get('size'):self._validated_outputs[move['job_id']]=tuple(identity)
+            else:self._validated_outputs.pop(move['job_id'],None)  # not the bytes the move verified: the next check hashes it
         self._destination_changed()
 
     def _start_move_recovery(self):

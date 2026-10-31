@@ -503,6 +503,31 @@ class ChooseTests(fixture.MoveFixture):
         merge._move_to_chosen(self.job_id)
         self.assertEqual(self.effective()['final_path'], str(self.other / self.old.name))
 
+    def test_a_moved_book_stays_converted_its_move_is_its_last_full_verification_M1(self):
+        """Futaba's 0.24.0 QA, M1: the converted check (progress_books) compares the live file with the book's last full
+        verification (_validated_outputs). A move dropped it, so a book moved to its chosen folder after converting read
+        not ready, out of Audiobook Ready, until a restart. Both strategies, after converting and on Choose folder."""
+        from merge_service import file_identity
+        for strategy, same_volume in (('rename', None), ('copy', lambda a, b: False)):
+            for path in ('after converting', 'Choose folder'):
+                with self.subTest(strategy=strategy, path=path):
+                    self.setUp()  # a fresh published book, catalog and folders for each case
+                    merge = merge_double(self, finished=True)
+                    merge.move_same_volume = same_volume
+                    merge._validated_outputs[self.job_id] = tuple(file_identity(self.old))  # verified where it was published
+                    if path == 'after converting':
+                        merge.jobs = SimpleNamespace(status=lambda: {'jobs': [{'job_id': self.job_id, 'state': 'completed', 'manifest': self.manifest}]})
+                        with connect(self.db) as db:
+                            identity = overrides.validate(str(self.other), probe=lambda f: None)[1]
+                            overrides.choose(db, folder=str(self.other), identity=identity, book_key=entered_names.book_key(merge.row), candidate_id=self.candidate)
+                        merge._move_to_chosen(self.job_id)
+                    else:
+                        merge.destination_choose(self.candidate, 1, str(self.other))
+                    moved = self.other / self.old.name
+                    self.assertEqual(self.effective()['final_path'], str(moved))
+                    stat = moved.stat()  # progress_books' own comparison
+                    self.assertEqual((stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns), merge._validated_outputs.get(self.job_id), 'converted: in Audiobook Ready')
+
     def test_chosen_folders_feed_the_roots_a_book_may_live_in(self):
         merge = merge_double(self)
         merge.destination_choose(self.candidate, 1, str(self.other))
