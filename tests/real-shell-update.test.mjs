@@ -170,7 +170,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   assert.ok(exitedAt, 'Quit ends the shell');
   assert.equal(shell.exitCode,0);monitor.checkWindows();assert.equal(intrusion,null);
   assert.deepEqual(await treeFiles(app),manifest.payload.files,'Copied candidate payload remains byte exact');
-  const functional={schema:'books-pa1-functional-v1',binding:plan.binding,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:work,exe,downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:closeProof.healthVersionMatched,closedByQuit:true,payloadUnchanged:true,endpointsOwned:closeProof.endpointsOwned,noVisibleOwnWindow:closeProof.noVisibleOwnWindow,intrusion:null,window_observations:monitor.view().checks};
+  const functional={schema:'books-pa1-functional-v1',binding:plan.binding,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:work,exe,downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:closeProof.healthVersionMatched,closedByQuit:true,payloadUnchanged:true,endpointsOwned:closeProof.endpointsOwned,noVisibleOwnWindow:closeProof.noVisibleOwnWindow,intrusion:null,window_observations:monitor.view().checks,listener_observations:monitor.view()};
   console.log('BOOKS_PA1_FUNCTIONAL '+JSON.stringify(functional));
   progress('functional-passed');
  }catch(error){

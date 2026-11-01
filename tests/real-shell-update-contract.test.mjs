@@ -17,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,listenerOnlyRows,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -208,7 +208,7 @@ test('recovery refuses unknown/live closure, forged callback, new fixture and ch
 
 test('recovery cannot adopt another release, escape its bound arena or change the original payload',async t=>{
  const f=await failedAttemptFixture(t);f.p.binding.version='0.24.3';await assert.rejects(verifyRecovery(f.p),/same release/);f.p.binding.version='0.24.2';
- for(const alter of [p=>p.recovery.attempt=4,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
+ for(const alter of [p=>p.recovery.attempt=5,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
  await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact));
 });
 
@@ -275,4 +275,41 @@ test('private Quit command has a finite wait without any PID kill or command fal
  const fixture=createPrivateShellCommands({spawn,exe:'C:/private/app/Books Arranger.exe',profile:'C:/private/profile',env:{},timeoutMs:5});
  await assert.rejects(fixture.quit(),/timed out/);assert.equal(calls.length,1);assert.equal(calls[0].args[0],'--quit');
  assert.throws(()=>createPrivateShellCommands({spawn,exe:'C:/private/app/Books Arranger.exe',profile:'C:/private/profile',env:{},timeoutMs:60001}));
+});
+
+function tcpRows(rows){const b=Buffer.alloc(4+24*rows.length);b.writeUInt32LE(rows.length);rows.forEach((r,n)=>{const at=4+n*24;b.writeUInt32LE(r.state??0,at);Buffer.from(r.address||[127,0,0,1]).copy(b,at+4);b.writeUInt16BE(r.port??61169,at+8);b.writeUInt32LE(r.pid??42,at+20);});return b;}
+test('exact SDK listener-only role keeps raw state diagnostics without mapping state zero to LISTEN',()=>{
+ for(const state of [0,2]){const buffer=tcpRows([{state}]);assert.deepEqual(listenerOnlyRows(buffer,3,2,61169),[{pid:42,state,listenerTableClass:3}]);assert.equal(buffer.readUInt32LE(4),state);}
+ for(const cls of [0,4,5])assert.throws(()=>listenerOnlyRows(tcpRows([{state:0}]),cls,2,61169),/listener-only query/);
+ assert.throws(()=>listenerOnlyRows(tcpRows([{}]),3,23,61169),/IPv4/);
+});
+test('listener-role decoder rejects nonlistener contradictions, wildcard, unknown owner, duplicate and malformed rows',()=>{
+ for(const state of [1,3,4,5,6,7,8,9,10,11,12,0xffffffff])assert.throws(()=>listenerOnlyRows(tcpRows([{state}]),3,2,61169),/non-listener/);
+ for(const address of [[0,0,0,0],[192,168,1,2],[127,0,0,2]])assert.throws(()=>listenerOnlyRows(tcpRows([{address}]),3,2,61169),/loopback-only/);
+ assert.throws(()=>listenerOnlyRows(tcpRows([{pid:0}]),3,2,61169),/PID/);assert.throws(()=>listenerOnlyRows(tcpRows([{},{}]),3,2,61169),/Ambiguous/);
+ assert.throws(()=>listenerOnlyRows(Buffer.alloc(3),3,2,61169));const truncated=tcpRows([{}]);truncated.writeUInt32LE(2);assert.throws(()=>listenerOnlyRows(truncated,3,2,61169),/truncated/);
+ assert.deepEqual(listenerOnlyRows(tcpRows([{port:61170}]),3,2,61169),[],'another port supplies no positive role evidence');
+});
+
+async function knownFourthFixture(t){
+ const f=await knownThirdFixture(t),third=f.p,dir=third.evidence_root;
+ const pin=async file=>{const b=await fs.readFile(file),s=await fs.lstat(file,{bigint:true});return{path:file,size:b.length,sha256:hash(b),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
+ const write=async(name,value)=>{const file=path.join(dir,name);await fs.writeFile(file,encoded(value));return pin(file);};
+ const base={...f.base,build_id:third.binding.build_id},manifest=await write('artifact.json',base);third.binding.artifact_manifest_sha256=manifest.sha256;third.payload.manifest=manifest;third.authority=await write('authority.json',authority(third.binding));
+ const planRef=await write('plan.json',third),inner={...normal(),ok:false,code:1},controller=structuredClone(inner),owned=await write('owned.json',inner),controllerRef=await write('controller-owned.json',controller);
+ const callback={callback_received:true,error:{code:1,killed:false},plan_sha256:planRef.sha256,owned_sha256:owned.sha256,controller_owned_sha256:controllerRef.sha256},cb=await write('callback.json',callback);
+ const refresh=await write('refresh.json',{original_manifest_sha256:third.recovery.original_artifact_manifest.sha256,base_manifest_sha256:third.recovery.second_failed_attempt.payload_manifest.sha256,current_manifest_sha256:manifest.sha256,exe_identity:third.recovery.exe_identity,changes:third.recovery.cache_refresh,whole_payload_matches_current:true});
+ const p=structuredClone(third);p.binding={...p.binding,build_id:'d3a1de11-1811-4ef5-bf5c-586a70b7db9e'};p.evidence_root=path.join(path.dirname(dir),'fourth');await fs.mkdir(p.evidence_root);const a=authority(p.binding),file=path.join(p.evidence_root,'authority.json');await fs.writeFile(file,encoded(a));p.authority=await pin(file);
+ p.recovery.attempt=4;p.recovery.engine_record_absent=true;p.recovery.third_failed_attempt={plan:planRef,callback:cb,owned,controller_owned:controllerRef,payload_manifest:manifest,cache_refresh:refresh};await fs.unlink(f.live);
+ return {p,a,live:f.live,write,callback,controller,record:f.record};
+}
+test('known fourth attempt binds all three failures and the current base while requiring an absent live control record',async t=>{
+ const f=await knownFourthFixture(t);validatePlan(f.p,f.a);const prior=await verifyRecovery(f.p);assert.equal(prior.baseManifestSha,f.p.recovery.third_failed_attempt.payload_manifest.sha256);
+ const calls=[];assert.equal(await privateEnginePort(f.p,async port=>{calls.push(port);return port;}),61169);assert.deepEqual(calls,[61169]);
+ await fs.writeFile(f.live,encoded(f.record));await assert.rejects(privateEnginePort(f.p,async()=>{throw Error('probe must not run');}),/unexpectedly exists/);
+});
+test('known fourth attempt refuses a relabelled history, unknown third closure and fifth attempt',async t=>{
+ const f=await knownFourthFixture(t),bad=structuredClone(f.p);bad.recovery.attempt=5;assert.throws(()=>validatePlan(bad,f.a));
+ f.p.recovery.engine_record_absent=false;await assert.rejects(verifyRecovery(f.p),/cleanly removed control record/);f.p.recovery.engine_record_absent=true;
+ const v=structuredClone(f.controller);v.native.zero=false;const ref=await f.write('controller-owned.json',v);f.p.recovery.third_failed_attempt.controller_owned=ref;f.callback.controller_owned_sha256=ref.sha256;f.p.recovery.third_failed_attempt.callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p),/normal closure/);
 });

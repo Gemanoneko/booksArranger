@@ -19,9 +19,10 @@ export function validatePlan(plan,authority){
  if(!plan.recovery)need(path.win32.basename(plan.fixture_root)==='pa1-'+plan.binding.build_id&&within(plan.fixture_root,plan.evidence_root),'Fresh candidate fixture root differs');
  else{
   const r=plan.recovery;
-  need(r.schema==='books-pa1-one-failed-attempt-v1'&&[2,3].includes(r.attempt)&&r.fixture_root===plan.fixture_root,'Only the two explicitly recorded failed attempts are supported');
+  need(r.schema==='books-pa1-one-failed-attempt-v1'&&[2,3,4].includes(r.attempt)&&r.fixture_root===plan.fixture_root,'Only the three explicitly recorded failed attempts are supported');
   const keys=['attempt','cache_refresh','exe_identity','fixture_identity','fixture_root','original_artifact_manifest','original_baseline','original_callback','original_controller_owned','original_plan','schema'];
-  if(r.attempt===3)keys.push('second_failed_attempt','engine_port','engine_record','engine_record_identity');
+  if(r.attempt>=3)keys.push('second_failed_attempt','engine_port','engine_record','engine_record_identity');
+  if(r.attempt===4)keys.push('third_failed_attempt','engine_record_absent');
   need(Object.keys(r).sort().join('|')===keys.sort().join('|'),'Exact failed-attempt recovery facts required');
   need(Array.isArray(r.cache_refresh)&&[0,93].includes(r.cache_refresh.length),'Only the observed 93-cache refresh is supported');
   const prior=path.win32.dirname(r.original_plan.path);
@@ -67,7 +68,7 @@ export async function verifyRecovery(plan){
  need(owned.native?.complete===true&&owned.native.zero===true&&Number.isSafeInteger(owned.native.retained)&&owned.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>owned.native[k]===0),'Original failed attempt did not prove all owned processes closed');
  const artifactRaw=await readPin(r.original_artifact_manifest);let artifact=JSON.parse(artifactRaw),baseManifestSha=r.original_artifact_manifest.sha256;
  need(hash(artifactRaw)===previous.binding.artifact_manifest_sha256&&artifact.source_head===previous.binding.source_head&&artifact.build_id===previous.binding.build_id&&artifact.product_digest===previous.binding.product_digest&&artifact.payload?.verified===true&&artifact.payload.installer_equivalent===true,'Original verified payload provenance differs');
- if(r.attempt===3){
+ if(r.attempt>=3){
   const second=r.second_failed_attempt;
   need(second&&Object.keys(second).sort().join('|')===['callback','cache_refresh','controller_owned','owned','payload_manifest','plan','quit_owned'].sort().join('|'),'Exact second failed-attempt evidence required');
   const p=JSON.parse(await readPin(second.plan)),a=JSON.parse(await readPin(p.authority));validatePlan(p,a);
@@ -80,13 +81,27 @@ export async function verifyRecovery(plan){
   need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.current_manifest_sha256===second.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Second attempt cache refresh provenance differs');
   await readPin(r.engine_record);artifact=base;baseManifestSha=second.payload_manifest.sha256;
  }
+ if(r.attempt===4){
+  const third=r.third_failed_attempt;
+  need(third&&Object.keys(third).sort().join('|')===['plan','callback','owned','controller_owned','payload_manifest','cache_refresh'].sort().join('|'),'Exact third failed-attempt evidence required');
+  const p=JSON.parse(await readPin(third.plan));validatePlan(p,JSON.parse(await readPin(p.authority)));
+  need(p.recovery?.attempt===3&&p.recovery.original_plan.sha256===r.original_plan.sha256&&p.recovery.original_baseline.sha256===r.original_baseline.sha256&&p.recovery.second_failed_attempt.plan.sha256===r.second_failed_attempt.plan.sha256&&norm(p.fixture_root)===norm(plan.fixture_root)&&p.binding.version===plan.binding.version&&r.engine_record_absent===true,'Only the recorded third attempt and its cleanly removed control record may precede attempt four');
+  const cb=JSON.parse(await readPin(third.callback));need(cb.callback_received===true&&cb.error?.code===1&&cb.error.killed===false&&cb.plan_sha256===third.plan.sha256&&cb.owned_sha256===third.owned.sha256&&cb.controller_owned_sha256===third.controller_owned.sha256,'Third failed callback provenance differs');
+  for(const ref of [third.owned,third.controller_owned]){const v=JSON.parse(await readPin(ref));need(v.ok===false&&v.code===1&&v.signal===null&&v.error===null&&v.closed===true&&v.outputComplete===true&&v.forced===false&&v.timedOut===false&&v.reason===null&&v.closureError===null&&v.ownership==='private-job'&&v.native?.complete===true&&v.native.zero===true&&v.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>v.native[k]===0),'Third attempt must remain a failed test with fully proved normal closure');}
+  const raw=await readPin(third.payload_manifest),base=JSON.parse(raw),refresh=JSON.parse(await readPin(third.cache_refresh));
+  need(hash(raw)===p.binding.artifact_manifest_sha256&&base.source_head===p.binding.source_head&&base.build_id===p.binding.build_id&&base.product_digest===p.binding.product_digest&&base.payload?.verified===true&&base.payload.installer_equivalent===true,'Third attempt verified payload provenance differs');
+  need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.base_manifest_sha256===r.second_failed_attempt.payload_manifest.sha256&&refresh.current_manifest_sha256===third.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Third attempt cache refresh provenance differs');
+  artifact=base;baseManifestSha=third.payload_manifest.sha256;
+ }
  return {previous,artifact,baseManifestSha,baseline:JSON.parse(await readPin(r.original_baseline))};
 }
 export async function privateEnginePort(plan,probe){
- if(plan.recovery?.attempt!==3)return probe(0);
+ if(![3,4].includes(plan.recovery?.attempt))return probe(0);
  const r=plan.recovery,raw=await readPin(r.engine_record),record=JSON.parse(raw),port=r.engine_port;
  need(Number.isInteger(port)&&port>=1024&&port<=65535&&record.application==='Books Arranger'&&record.version===plan.binding.version&&record.port===port&&record.url==='http://127.0.0.1:'+port+'/'&&Number.isInteger(record.pid)&&record.pid>0&&/^[a-f0-9]{32}$/.test(record.instance),'Exact original private engine port record required');
- await readPin({path:path.join(plan.fixture_root,'home','data','web-instance.json'),sha256:r.engine_record.sha256,size:r.engine_record.size,identity:r.engine_record_identity});
+ const live=path.join(plan.fixture_root,'home','data','web-instance.json');
+ if(r.attempt===4){await ordinary(path.dirname(live));try{await fs.lstat(live);throw Error('Private ownership record unexpectedly exists before attempt four');}catch(error){if(error.code!=='ENOENT')throw error;}}
+ else await readPin({path:live,sha256:r.engine_record.sha256,size:r.engine_record.size,identity:r.engine_record_identity});
  need(await probe(port)===port,'Original private engine port is unavailable; no fallback is permitted');return port;
 }
 export function recoveryCacheChanges(plan,previous,current){
@@ -193,6 +208,24 @@ export function requiredWindowPid(query,window){
  need(Number.isSafeInteger(thread)&&thread>0&&thread<=0xffffffff&&Number.isSafeInteger(pid[0])&&pid[0]>0&&pid[0]<=0xffffffff,'Window PID lookup failed or returned an unknown identity');
  return pid[0];
 }
+// The successful SDK LISTENER-only query proves the row's role. This machine
+// reports raw state 0 for actual listeners; keep it as a diagnostic, never map
+// it to LISTEN or accept it from a connections/all-rows query.
+// https://learn.microsoft.com/en-us/windows/win32/api/iprtrmib/ne-iprtrmib-tcp_table_class
+export function listenerOnlyRows(buffer,tableClass,family,port){
+ need(tableClass===3&&family===2,'Exact SDK IPv4 owner-PID listener-only query required');
+ need(Buffer.isBuffer(buffer)&&buffer.length>=4&&buffer.length<=16*1024*1024&&Number.isInteger(port)&&port>=1024&&port<=65535,'Bounded listener table and exact port required');
+ const count=buffer.readUInt32LE(0);need(4+count*24<=buffer.length,'TCP listener table truncated');const rows=[];
+ for(let n=0;n<count;n++){
+  const at=4+n*24;if(buffer.readUInt16BE(at+8)!==port)continue;
+  const state=buffer.readUInt32LE(at),pid=buffer.readUInt32LE(at+20);
+  need(state===0||state===2,'Listener-only membership contradicts a known non-listener state');
+  need(buffer.subarray(at+4,at+8).equals(Buffer.from([127,0,0,1])),'Private endpoint is not loopback-only');
+  need(pid>0,'TCP listener owner PID is unknown');rows.push({pid,state,listenerTableClass:3});
+ }
+ need(rows.length<=1,'Ambiguous private listener ownership');return rows;
+}
+
 export function nativeAdapters(plan,authority){
  validatePlan(plan,authority);need(process.platform==='win32'&&process.arch==='x64','Native PA-1 requires reviewed Windows x64 ABI');
  const require=createRequire(import.meta.url),k=require(plan.koffi_root),K=k.load('C:/Windows/System32/kernel32.dll'),A=k.load('C:/Windows/System32/advapi32.dll'),N=k.load('C:/Windows/System32/ntdll.dll'),U=k.load('C:/Windows/System32/user32.dll'),I=k.load('C:/Windows/System32/iphlpapi.dll');
@@ -216,15 +249,15 @@ export function nativeAdapters(plan,authority){
  const registry={snapshot,openExact:id=>{need(/^\d+$/.test(id),'Exact numeric key required');return regOpen(ROOT+'\\'+id,0x30019);},readHandle,deleteHandle:h=>ok(del(h),'Delete same retained own key'),close:h=>ok(close(h),'Close same retained own key')};
  const queryJob=K.func('bool __stdcall QueryInformationJobObject(void *,uint32_t,void *,uint32_t,void *)'),openProcess=K.func('void * __stdcall OpenProcess(uint32_t,bool,uint32_t)'),closeProcess=K.func('bool __stdcall CloseHandle(void *)'),wait=K.func('uint32_t __stdcall WaitForSingleObject(void *,uint32_t)'),image=K.func('bool __stdcall QueryFullProcessImageNameW(void *,uint32_t,void *,_Inout_ uint32_t *)');
  const processTimes=K.func('bool __stdcall GetProcessTimes(void *,void *,void *,void *,void *)');
- const held=new Map();let intrusion=null,checks=0;const app=path.join(plan.fixture_root,'app');
+ const held=new Map();let intrusion=null,checks=0,listenerQueries=0;const listenerStates=new Set(),app=path.join(plan.fixture_root,'app');
  function members(){const b=Buffer.alloc(8+8192*8);need(queryJob(null,3,b,b.length,null),'Current private job membership unknown');const assigned=b.readUInt32LE(),listed=b.readUInt32LE(4);need(assigned===listed&&listed>0&&listed<=8192,'Incomplete current job membership');const pids=[];for(let n=0;n<listed;n++){const pid=Number(b.readBigUInt64LE(8+n*8));need(Number.isSafeInteger(pid)&&pid>0&&!pids.includes(pid),'Job member identity');pids.push(pid);}need(pids.includes(process.pid),'Current worker not in owned job');return pids;}
  function retain(pid){need(members().includes(pid),'Endpoint is not in this private owned job');let item=held.get(pid);if(item){need(wait(item.handle,0)===258,'Retained endpoint process ended');return item;}
   const h=openProcess(0x101000,false,pid);need(h,'Cannot retain owned endpoint process');try{need(wait(h,0)===258,'Owned process already ended');const b=Buffer.alloc(65536),len=[32768],created=Buffer.alloc(8),exit=Buffer.alloc(8),kernel=Buffer.alloc(8),user=Buffer.alloc(8);need(image(h,0,b,len)&&processTimes(h,created,exit,kernel,user),'Owned endpoint identity unknown');const exe=b.subarray(0,len[0]*2).toString('utf16le');need(within(exe,app),'Endpoint executable outside private payload');item={handle:h,pid,exe,created:created.toString('hex')};held.set(pid,item);return item;}catch(e){closeProcess(h);throw e;}}
  const tcp=I.func('uint32_t __stdcall GetExtendedTcpTable(void *,_Inout_ uint32_t *,bool,uint32_t,uint32_t,uint32_t)');
- function listeners(port){const size=[0];need(tcp(null,size,false,2,3,0)===122&&size[0]<=16*1024*1024,'TCP table size unknown');const b=Buffer.alloc(size[0]);need(tcp(b,size,false,2,3,0)===0,'TCP ownership query failed');const count=b.readUInt32LE();need(4+count*24<=b.length,'TCP table truncated');const rows=[];for(let n=0;n<count;n++){const at=4+n*24,localPort=b.readUInt16BE(at+8);if(localPort===port){const address=b.subarray(at+4,at+8);need(address.equals(Buffer.from([127,0,0,1])),'Private endpoint is not loopback-only');rows.push({pid:b.readUInt32LE(at+20),state:b.readUInt32LE(at)});}}return rows;}
- function endpoint(port,expectedPid=null){const rows=listeners(port);need(rows.length===1&&rows[0].state===2,'One private loopback listener required');if(expectedPid!==null)need(rows[0].pid===expectedPid,'Listener PID differs');const p=retain(rows[0].pid);need(listeners(port).length===1&&listeners(port)[0].pid===p.pid&&wait(p.handle,0)===258,'Listener changed during ownership proof');return {pid:p.pid,exe:p.exe,created:p.created};}
+ function listeners(port){const size=[0];need(tcp(null,size,false,2,3,0)===122&&size[0]<=16*1024*1024,'TCP table size unknown');const b=Buffer.alloc(size[0]);need(tcp(b,size,false,2,3,0)===0,'TCP ownership query failed');const rows=listenerOnlyRows(b,3,2,port);listenerQueries++;for(const row of rows)listenerStates.add(row.state);return rows;}
+ function endpoint(port,expectedPid=null){const rows=listeners(port);need(rows.length===1&&rows[0].listenerTableClass===3,'One private SDK listener-only row required');if(expectedPid!==null)need(rows[0].pid===expectedPid,'Listener PID differs');const p=retain(rows[0].pid);need(listeners(port).length===1&&listeners(port)[0].pid===p.pid&&wait(p.handle,0)===258,'Listener changed during ownership proof');return {pid:p.pid,exe:p.exe,created:p.created,reportedState:rows[0].state,listenerTableClass:3};}
  const visible=U.func('bool __stdcall IsWindowVisible(void *)'),foreground=U.func('void * __stdcall GetForegroundWindow()'),windowPid=U.func('uint32_t __stdcall GetWindowThreadProcessId(void *,_Out_ uint32_t *)'),enumerate=U.func('bool __stdcall EnumWindows(void *,intptr_t)'),proto=k.proto('bool __stdcall BooksPA1Window(void *,intptr_t)');
  function checkWindows(expectedPid=null){checks++;const own=new Set(members());if(expectedPid!==null){need(Number.isSafeInteger(expectedPid)&&expectedPid>0&&own.has(expectedPid),'Primary window owner is not in this private job');retain(expectedPid);}let failed='',hiddenOwnWindows=0;const cb=k.register(hwnd=>{try{const pid=requiredWindowPid(windowPid,hwnd);if(own.has(pid)){const shown=visible(hwnd);if(shown)intrusion='Owned process displayed a visible window';else if(pid===expectedPid)hiddenOwnWindows++;}return true;}catch(e){failed=e.message;return false;}},k.pointer(proto));try{need(enumerate(cb,0)&&!failed,'Window observation failed');}finally{k.unregister(cb);}const fg=foreground();if(fg){const pid=requiredWindowPid(windowPid,fg);if(own.has(pid))intrusion='Owned process took foreground';}need(!intrusion,intrusion);if(expectedPid!==null){retain(expectedPid);need(hiddenOwnWindows>0,'Primary owned window is not present and hidden');}return {checks,intrusion,hiddenOwnWindows};}
  function dispose(){for(const p of held.values())need(closeProcess(p.handle),'Owned endpoint handle close failed');held.clear();}
- return {registry,monitor:{endpoint,checkWindows,dispose,view:()=>({checks,intrusion}),members}};
+ return {registry,monitor:{endpoint,checkWindows,dispose,view:()=>({checks,intrusion,listenerTableClass:3,listenerQueries,reportedListenerStates:[...listenerStates].sort((a,b)=>a-b)}),members}};
 }
