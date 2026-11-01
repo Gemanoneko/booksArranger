@@ -340,6 +340,7 @@ class WorkingLifecycleTests(unittest.TestCase):
         service=MergeService.__new__(MergeService)
         service.operation_lock=threading.RLock();service._retention_stop=threading.Event()
         service.jobs=self.queue;service.working=self.life;service._post_current=None
+        service.inventory=SimpleNamespace(worker=None,database=self.db)
         service._no_scan=lambda:None
         service.cleanup=SimpleNamespace(thread=None,_rows=lambda *args:[])
         service.state=lambda:self.queue.status()

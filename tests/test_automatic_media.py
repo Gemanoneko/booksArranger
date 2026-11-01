@@ -127,8 +127,9 @@ class AutomaticMediaTests(unittest.TestCase):
         with patch.object(self.client,'read',wraps=self.client.read) as remote:
             fresh,job_id=self.service.approve_automatic(row,result,threading.Event(),self.client);self.wait()
             remote.assert_not_called()
-        self.assertEqual(result['metadata_facts']['cover']['kind'],'embedded')
-        self.assertEqual(self.service.jobs.status()['jobs'][0]['state'],'completed')
+        job=next(item for item in self.service.jobs.status()['jobs'] if item['job_id']==job_id)
+        self.assertEqual(job['manifest']['metadata_facts']['cover']['kind'],'embedded')
+        self.assertEqual(job['state'],'completed')
         self.assertEqual(self.service.reviews.page(status='converted')['total'],1)
 
     def test_destination_collision_does_not_leave_approval_or_queue(self):

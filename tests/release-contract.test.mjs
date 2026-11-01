@@ -136,8 +136,24 @@ test('every raw reference is required byte-bound and confined before file reads'
  for(const mutate of [s=>s.records.plan.path='../plan.json',s=>s.records.plan.path='C:/outside.json',s=>s.records.plan.path=s.records.owned.path,s=>s.records.plan.path=s.records.plan.path.replace('0.24.2','0.24.1'),s=>s.records.plan.size=32*1024*1024+1,s=>s.records.plan.size=-1,s=>s.records.plan.sha256='bad']){const e=nativeBundle(currentBinding());mutate(e.summary);assert.throws(()=>nativeRecordReferences(e.summary,'0.24.2'));}
 });
 test('inner and controller ownership each require normal complete zero closure',()=>{
- const changes=[r=>r.ok=false,r=>r.closed=false,r=>r.code=1,r=>r.signal='SIGTERM',r=>r.error='failed',r=>r.outputComplete=false,r=>r.forced=true,r=>r.timedOut=true,r=>r.overflow=true,r=>r.truncated=true,r=>r.closureError='lost',r=>r.reason='closure refused',r=>r.native.zero=false,r=>r.native.complete=false,r=>r.native.assigned=1,r=>r.native.active=1,r=>r.native.listed=1,r=>r.native.unsignaled=1,r=>r.native.retained=0,r=>r.native.sampling.incompleteQueries=1,r=>r.native.sampling.queries=0,r=>r.ownership='unknown'];
+ const changes=[r=>r.ok=false,r=>r.closed=false,r=>r.code=1,r=>r.signal='SIGTERM',r=>r.error='failed',r=>r.outputComplete=false,r=>r.forced=true,r=>r.timedOut=true,r=>r.overflow=true,r=>r.truncated=true,r=>r.closureError='lost',r=>r.reason='closure refused',r=>r.native.zero=false,r=>r.native.complete=false,r=>r.native.assigned=1,r=>r.native.active=1,r=>r.native.listed=1,r=>r.native.unsignaled=1,r=>r.native.retained=0,r=>r.native.sampling.incompleteQueries=r.native.sampling.queries,r=>r.native.sampling.queries=0,r=>r.ownership='unknown'];
  for(const role of ['owned','controller_owned'])for(const mutate of changes){const e=nativeBundle(currentBinding(),{[role]:mutate});assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.expected),role);}
+});
+test('coherent inner and controller receipts retain transient observations after normal final zero',()=>{
+ for(const roles of [['owned'],['controller_owned'],['owned','controller_owned']]){
+  const mutations=Object.fromEntries(roles.map(role=>[role,r=>{r.native.sampling={queries:3,incompleteQueries:1};}]));
+  const e=nativeBundle(currentBinding(),mutations),before=Object.fromEntries(Object.entries(e.records).map(([role,bytes])=>[role,Buffer.from(bytes)]));
+  assert.equal(validateNativeEvidence(e.summary,e.records,e.expected).passed,true);
+  for(const role of roles)assert.deepEqual(JSON.parse(e.records[role]).native.sampling,{queries:3,incompleteQueries:1});
+  for(const role of NATIVE_ROLES)assert.deepEqual(e.records[role],before[role],'original raw '+role+' remains unchanged');
+ }
+});
+test('malformed sampling in either original owner refuses even with coherent raw hashes',()=>{
+ const bad=[undefined,null,-1,.5,'1',NaN,Infinity,Number.MAX_SAFE_INTEGER+1];
+ for(const role of ['owned','controller_owned'])for(const field of ['queries','incompleteQueries'])for(const value of [...bad,...(field==='queries'?[0]:[3,4])]){
+  const e=nativeBundle(currentBinding(),{[role]:r=>{r.native.sampling={queries:3,incompleteQueries:1};if(value===undefined)delete r.native.sampling[field];else r.native.sampling[field]=value;}});
+  assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.expected),/Native observation incomplete/,role+'.'+field+'='+String(value));
+ }
 });
 test('execution totals and functional markers cannot be skipped duplicated or replaced',()=>{
  for(const mutate of [r=>r.out=r.out.replace('# skipped 0','# skipped 1'),r=>r.out=r.out.replace('# pass 1','# pass 0'),r=>r.out=r.out.replace('# tests 1','# tests 2'),r=>r.out=r.out.replace('# cancelled 0','# cancelled 1'),r=>r.out+=r.out.split('\n')[0]+'\n',r=>r.out=r.out.replace('BOOKS_PA1_FUNCTIONAL','BOOKS_OTHER_FUNCTIONAL')]){const e=nativeBundle(currentBinding(),{owned:mutate});assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.expected));}

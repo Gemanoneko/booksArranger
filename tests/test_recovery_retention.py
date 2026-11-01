@@ -111,6 +111,7 @@ class KeptFilesTests(unittest.TestCase):
     def merge(self):
         s=MergeService.__new__(MergeService);s.recovery=self.retention;s._post_current=None;s.jobs=self.queue
         s.inventory=SimpleNamespace(worker=None,database=self.db);s.invalidate_status=Mock()
+        s._retention_stop=threading.Event();s._retention_thread=None
         return s
     def held(self,damage):
         self.ready();s=self.merge();final=Path(self.output['final_path']);raw=final.read_bytes();damage(final)
@@ -196,7 +197,7 @@ class AdmissionTests(unittest.TestCase):
     def setUp(self):
         self.service=MergeService.__new__(MergeService);s=self.service
         s.operation_lock=threading.RLock();s.inventory=SimpleNamespace(worker=None);s._retention_stop=threading.Event();s._retention_wake=threading.Event();s._manual_recovery=None;s._post_current=None
-        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]});s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[]);s.working=SimpleNamespace(reconcile=lambda **kwargs:None,schedule_published=lambda job_id:None);s.storage_cleanup=None
+        s.jobs=SimpleNamespace(_thread=None,status=lambda:{'jobs':[]},start_published_check=Mock());s.cleanup=SimpleNamespace(thread=None,current=None,_rows=lambda *a:[]);s.working=SimpleNamespace(reconcile=lambda **kwargs:None,schedule_published=lambda job_id:None);s.storage_cleanup=None
         s.recovery=SimpleNamespace(status=lambda id:{'eligible':True,'token':'a'*64,'count':2,'bytes':4096,'reason':''})
     def test_manual_duplicate_stale_and_busy_no_action(self):
         s=self.service

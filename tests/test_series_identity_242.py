@@ -175,6 +175,55 @@ def routing_result(title='Book One', author='Writer One', work_id='catalog:one',
 
 
 class SharedAuthorityTests(unittest.TestCase):
+    def test_all_three_tolkien_volumes_have_exact_middle_earth_authority(self):
+        for work_id, title, number in [('fantlab:1667', 'The Fellowship of the Ring', '1'),
+                                       ('fantlab:1668', 'The Two Towers', '2'),
+                                       ('fantlab:1669', 'The Return of the King', '3')]:
+            with self.subTest(work_id=work_id):
+                first = routing_result(title, 'Tolkien J. R. R.', work_id, 'https://fantlab.ru/work1693', 'Властелин колец', number)
+                first['work']['original_title'] = title
+                before = copy.deepcopy(first)
+                result = attach_shared_routing(first)
+                planned = plan(os.path.abspath('synthetic-output'), result['review'], facts=result['metadata_facts'])
+                self.assertEqual(planned['relative_path'].split(os.sep)[:2], ['Middle-earth', 'Властелин колец'])
+                self.assertTrue(os.path.basename(planned['path']).endswith(' - Tolkien J. R. R.m4b'))
+                self.assertEqual(result['metadata_facts']['authors'], ['Tolkien J. R. R.'])
+                world = result['metadata_facts']['shared_routing']['universe']
+                self.assertEqual((world['id'], world['basis']), ('user:middle-earth-2026-11-01', 'user'))
+                self.assertEqual(world['members'], [{'work_id': work_id, 'authors': ['Tolkien J. R. R.'], 'series_id': 'https://fantlab.ru/work1693'}])
+                self.assertEqual(first, before)
+
+    def test_fellowship_world_requires_identity_and_preserves_explicit_universe(self):
+        from shared_routing import resolve
+        for change in ('work', 'title', 'author', 'number', 'series', 'cycle', 'unverified', 'member_binding',
+                       'typed_empty', 'saved_empty', 'explicit_other'):
+            with self.subTest(change=change):
+                first = routing_result('The Fellowship of the Ring', 'Tolkien J. R. R.', 'fantlab:1667',
+                                       'https://fantlab.ru/work1693', 'Властелин колец', '1')
+                first['work']['original_title'] = 'The Fellowship of the Ring'
+                if change == 'work':
+                    first['work']['id'] = 'fantlab:99999'; first['metadata_facts']['work_ids'] = ['fantlab:99999']
+                if change == 'title': first['work']['original_title'] = 'Another work'
+                if change == 'author':
+                    first['review']['author'] = first['review']['canonical_author'] = 'Another Writer'
+                    first['metadata_facts']['authors'] = ['Another Writer']
+                if change == 'number': first['review']['number'] = first['work']['verified_series']['number'] = '2'
+                if change == 'series': first['review']['series'] = first['work']['verified_series']['name'] = 'Another series'
+                if change == 'cycle': first['work']['verified_series']['source_url'] = 'https://fantlab.ru/work1694'
+                if change == 'unverified': first['metadata_facts']['series_state'] = 'unknown'
+                if change == 'member_binding': first['metadata_facts']['work_ids'] = ['fantlab:1668']
+                if change == 'typed_empty': first['approval'] = {'names': {'universe': ''}}
+                if change == 'saved_empty':
+                    first['metadata_facts']['entered_names'] = {'fields': ['universe'], 'digest': 'a' * 64}
+                    first['review']['universe'] = ''
+                if change == 'explicit_other': first['review']['universe'] = 'My chosen world'
+                before = copy.deepcopy(first)
+                result = attach_shared_routing(first)
+                self.assertEqual(result['review'].get('universe', ''), before['review'].get('universe', ''))
+                self.assertFalse(resolve(result['review'], result['metadata_facts'])['shared_world'])
+                self.assertNotIn('universe', result['metadata_facts'].get('shared_routing', {}))
+                self.assertEqual(first, before)
+
     def test_general_shared_series_requires_same_stable_identity(self):
         first = routing_result(); second = routing_result(title='Book Two', author='Writer Two', work_id='catalog:two', number='2')
         result = attach_shared_routing(first, [second])

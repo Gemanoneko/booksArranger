@@ -75,7 +75,7 @@ function gateRoot(t,{preexisting}={}){
  const box=sandbox(t),root=path.join(box,'root'),ff=path.join(box,'ff');
  fs.mkdirSync(path.join(root,'scripts'),{recursive:true});fs.mkdirSync(ff);
  fs.copyFileSync(gateScript,path.join(root,'scripts','check-desktop.mjs'));
- for(const name of ['python-check-batches.mjs','gate-source-guard.mjs','gate-scratch.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(root,'scripts',name));
+ for(const name of ['python-check-batches.mjs','gate-source-guard.mjs','gate-scratch.mjs','qa-phase-contract.mjs'])fs.copyFileSync(path.join(repo,'scripts',name),path.join(root,'scripts',name));
  const sha=createHash('sha256').update(fs.readFileSync(process.execPath)).digest('hex');
  fs.writeFileSync(path.join(root,'scripts','qa-runtime.json'),JSON.stringify({schema:1,python:{path:process.execPath,sha256:sha},ffmpeg:{root:ff,files:{}}}));
  put(path.join(root,'tests','README.txt'),'placeholder');

@@ -585,13 +585,23 @@ class MergeService:
             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
         with _QUIET_LOCK:
             flights=self.__dict__.setdefault('_page_shared',{})
+            tokens=self.__dict__.setdefault('_page_tokens',{})
             if key not in flights and len(flights)>=32:
                 for old in list(flights):
-                    if flights[old]._flight is None:flights.pop(old)
+                    if flights[old]._flight is None:flights.pop(old);tokens.pop(old,None)
             shared=flights.setdefault(key,SharedSnapshot(keep_flight=True))
+            # A short shared result must never become the new catalog's quiet
+            # answer. Keep an active flight owned while rejecting its old token.
+            if key in tokens and tokens[key]!=token:shared.invalidate()
+            tokens[key]=token
         value=shared.get(lambda:self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status),STATUS_MAX_AGE)
+        current=self._quiet_token()
+        with _QUIET_LOCK:
+            if current!=token or tokens.get(key)!=token:
+                if tokens.get(key)==token:shared.invalidate();tokens[key]=current
+                raise StatusUnavailable('Book list changed; a fresh read is pending')
         recheck=isinstance(value,dict) and value.pop('recheck',False) is True
-        if token is not None and self._quiet_token()==token:
+        if token is not None:
             with _QUIET_LOCK:
                 pages=self.__dict__.setdefault('_quiet_pages',{})
                 if len(pages)>=16:pages.clear()
@@ -1260,15 +1270,27 @@ class MergeService:
         catalog, gets it here between sweeps, once per run (v0.16.11, "Storm of the Century": the step after its
         source cleanup ended without a record, and nothing tried again while the queue kept running). The same
         cleanup as after a book (_prune_completed, without the recovery purge the sweep does itself); a failure
-        is recorded with its reason."""
+        is recorded with its reason. Exact generated working receipts are retried
+        separately even while original-source retirement remains held."""
         storage=getattr(self,'storage_cleanup',None)
         if storage is None or not hasattr(storage,'status'):return
         stored={row['job_id']:row for row in storage.status()}
         posting=self.__dict__.get('_post_jobs',set())
         for row in self.jobs._rows("SELECT job_id FROM audio_jobs WHERE state='completed' ORDER BY updated,job_id"):
             job_id=row['job_id'];prior=stored.get(job_id)
+            if job_id in posting:continue
+            # Generated published-attempt files are independent of original
+            # retirement. A held source cleanup must not strand these receipts.
+            working_key=('working',job_id)
+            if self._cleanup_due(working_key):
+                try:
+                    if storage.working_pending(job_id):
+                        with self._maintenance_book(job_id,'Checking published working files'):
+                            self._prune_working(job_id,raise_errors=True)
+                except InterruptedError:return
+                except Exception as error:self._cleanup_failed(working_key,error)
             if prior and not (prior['state']=='needs_attention' and (prior['output_hash']=='' or __import__('cleanup_retry').transient(prior['reason']))):continue
-            if job_id in posting or not self._cleanup_due(('temporary',job_id)):continue
+            if not self._cleanup_due(('temporary',job_id)):continue
             receipt=self.cleanup.status(job_id)
             if receipt and receipt['state']!='completed':continue  # its source cleanup comes first
             try:
@@ -1323,7 +1345,7 @@ class MergeService:
             except InterruptedError:return
             except Exception:pass  # housekeeping: the next pass goes on with the others
 
-    def _prune_working(self,job_id):
+    def _prune_working(self,job_id,*,raise_errors=False):
         output_hash=''
         try:
             if not self.storage_cleanup.working_pending(job_id):return
@@ -1335,6 +1357,7 @@ class MergeService:
             self.storage_cleanup.working_files(job_id)
         except Exception as error:
             self.storage_cleanup._diagnose(job_id,output_hash,error)
+            if raise_errors:raise
         finally:self._post_current=None
 
     def _prune_completed(self,job_id,source_completed=False,stop=None):

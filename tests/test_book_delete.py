@@ -915,7 +915,11 @@ class DeleteBookTests(test_approve_as_is.ApproveFixture):
         away.rename(final)  # the drive is back: no catalog commit
         self.assertNotIn('copy', page()['ask'], 'positive control: the quiet page is reused')
         real = merge_service.time.monotonic
-        with mock.patch.object(merge_service.time, 'monotonic', side_effect=lambda: real() + merge_service.WORKING_MAX_AGE + 1):
+        clock=lambda: real() + merge_service.WORKING_MAX_AGE + 1
+        shared=self.service._page_shared[(100,0,'','output_attention',None)]
+        # Both cache layers must observe the same elapsed time; SharedSnapshot
+        # captures its default clock when the module is imported.
+        with mock.patch.object(merge_service.time, 'monotonic', side_effect=clock), mock.patch.object(shared,'_clock',side_effect=clock):
             self.assertIn('copy', page()['ask'], 'back within 30 s, no scan or restart')
 
     def test_a_possible_duplicate_has_no_remove_offer_and_is_refused(self):

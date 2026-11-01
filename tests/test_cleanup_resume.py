@@ -371,7 +371,8 @@ class InlineAndStartTests(Base):
     def service(self,b):
         s=MergeService.__new__(MergeService)
         s.jobs=b.queue;s.cleanup=b.cleanup;s._post_current=None;s.operation_lock=threading.RLock()
-        s.inventory=SimpleNamespace(worker=None);s.storage_cleanup=b.storage;s.recovery=RecoveryRetention(b.storage)
+        s.inventory=SimpleNamespace(worker=None,database=b.db);s.storage_cleanup=b.storage;s.recovery=RecoveryRetention(b.storage)
+        s._retention_stop=threading.Event();s._retention_wake=threading.Event();s._retention_thread=None
         s.working=SimpleNamespace(discharge_published=Mock(),schedule_published=Mock());s._prune_working=Mock()
         s.enroll_cleanup=lambda job_id:{'cleanup_id':b.enroll()}
         s.progress_books=lambda *args:{'approved':0,'converted':0,'converted_ids':set()}

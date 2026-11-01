@@ -55,7 +55,7 @@ export function normalOwned(result){
  for(const flag of ['forced','timedOut','overflow','truncated'])need(result[flag]===false,'Abnormal owned result: '+flag);
  need(result.closureError===null&&result.reason===null&&result.native?.complete===true&&result.native?.zero===true,'Original native closure proof missing');
  for(const field of ['active','assigned','listed','unsignaled'])need(result.native[field]===0,'Native processes not closed: '+field);
- need(Number.isSafeInteger(result.native.retained)&&result.native.retained>0&&result.native.sampling?.incompleteQueries===0&&result.native.sampling?.queries>0,'Native observation incomplete');
+ need(Number.isSafeInteger(result.native.retained)&&result.native.retained>0&&Number.isSafeInteger(result.native.sampling?.queries)&&result.native.sampling.queries>0&&Number.isSafeInteger(result.native.sampling?.incompleteQueries)&&result.native.sampling.incompleteQueries>=0&&result.native.sampling.incompleteQueries<result.native.sampling.queries,'Native observation incomplete');
  need(typeof result.out==='string'&&typeof result.err==='string'&&result.ownership==='private-job','Exact private Job owner missing');
  return result;
 }

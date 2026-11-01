@@ -4,11 +4,11 @@ On the live catalog the status computation held Inventory.group_lock for about 5
 research step and every poll; the list, Scan again, Remove from list, Delete and approvals queued behind it (54-100 s),
 and an approval ran Start's re-check of every finished book under the operation lock (4-5 min). Real private audio
 fixtures; the slow lookup is a stub that sleeps. No network, no library access."""
-import threading, time, unittest
+import contextlib, threading, time, unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from merge_service import MergeService
+from merge_service import MergeService, operation
 from scanner import connect
 from scan_wait import finish_scan, finish_thread as finish
 
@@ -157,35 +157,54 @@ class ApprovalStartTests(ApproveFixture):
         self.assertEqual(settled, [], 'the approval re-checked the published outputs')
         self.start_and_wait()
         self.assertEqual([job['state'] for job in self.service.jobs.status()['jobs']], ['completed', 'completed'], 'Start converts the queued book')
-        # Positive control: Start still re-checks every finished book.
+        # 0.24.2: requested Start never runs unrelated finished-book cleanup.
+        # The public idle owner is exercised separately below.
         self.service.pause()
         with patch.object(MergeService, '_prune_completed', recheck):self.service.resume()
-        self.wait(); self.assertEqual(len(checked), 2)
+        self.wait(); self.assertEqual(checked, [], 'Resume must not recheck finished books')
 
-    def test_a_press_runs_between_two_books_of_starts_recheck(self):
+    def test_a_press_runs_between_two_books_of_idle_recheck(self):
         for title in ('Ясно', 'Тихо'):
             tone(self.audio / 'Unsorted' / title / (title + '.mp3'), self.cover, album=title, artist='Иван Петров')
         for row in self.start():
             self.service.approve_book(row['id'], row['revision'])
-        self.start_and_wait(); self.service.pause()
-        inside, releases, pressed = threading.Event(), [threading.Event(), threading.Event()], []
-        real = MergeService._prune_completed
-        def slow(service, job_id, *args, **kwargs):
-            inside.set(); releases[len(seen)].wait(10); seen.append(job_id); return real(service, job_id, *args, **kwargs)
-        seen = []
-        with patch.object(MergeService, '_prune_completed', slow):
-            start = threading.Thread(target=self.service.resume, daemon=True); start.start(); self.addCleanup(finish_thread, start)
-            self.addCleanup(releases[1].set)
-            self.assertTrue(inside.wait(10))
-            def press():
-                with self.service.operation_lock: pressed.append(time.monotonic())
-            waiting = threading.Thread(target=press, daemon=True); waiting.start()
-            time.sleep(.3); self.assertEqual(pressed, [], 'positive control: not during one book')
-            began = time.monotonic(); releases[0].set(); waiting.join(2)
-            self.assertTrue(pressed, 'the press waited for the whole re-check (the second book is still being checked)')
-            self.assertLess(pressed[0] - began, 1.0)
-            releases[1].set(); finish_thread(start)
-        self.assertEqual(len(seen), 2, 'every finished book was still re-checked')
+        self.start_and_wait(); self.service.pause(); self.service.resume()
+        jobs = [job['job_id'] for job in self.service.jobs.status()['jobs']]
+        self.assertEqual(len(jobs), 2)
+        inside = [threading.Event(), threading.Event()]
+        releases = [threading.Event(), threading.Event()]
+        finished = threading.Event(); pressed = []; seen = []
+        real = self.service.storage_cleanup.sweep_folders
+        def slow(job_id):
+            index = len(seen); inside[index].set()
+            if not releases[index].wait(10): raise AssertionError('private idle check did not release')
+            answer = real(job_id); seen.append(job_id)
+            if len(seen) == 2: finished.set()
+            return answer
+        @operation
+        def press(service): pressed.append(time.monotonic())
+        waiting = None
+        with patch.object(self.service.storage_cleanup, 'old_folder_jobs', side_effect=lambda: [job for job in jobs if job not in seen]), \
+                patch.object(self.service.storage_cleanup, 'sweep_folders', side_effect=slow):
+            try:
+                # Same public scheduling owner as production; only which two
+                # private finished jobs need a check and its delay are injected.
+                self.service.start_retention(contextlib.nullcontext)
+                self.assertTrue(inside[0].wait(10))
+                waiting = threading.Thread(target=press, args=(self.service,), daemon=True); waiting.start()
+                time.sleep(.3); self.assertEqual(pressed, [], 'positive control: not during one book')
+                began = time.monotonic(); releases[0].set(); waiting.join(2)
+                self.assertTrue(pressed, 'the foreground press waited for the whole idle pass')
+                self.assertLess(pressed[0] - began, 1.0)
+                self.service._retention_wake.set()
+                self.assertTrue(inside[1].wait(10), 'idle work resumes on its own owner after the press')
+                releases[1].set(); self.assertTrue(finished.wait(10))
+            finally:
+                for release in releases: release.set()
+                self.service._retention_stop.set(); self.service._retention_wake.set()
+                if waiting is not None: finish_thread(waiting)
+                finish_thread(self.service._retention_thread)
+        self.assertEqual(set(seen), set(jobs), 'both finished books were checked by idle maintenance')
 
 
 class ApprovalPreviewTests(ApproveFixture):

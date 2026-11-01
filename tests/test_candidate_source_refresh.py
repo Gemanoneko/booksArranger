@@ -89,8 +89,8 @@ class CandidateRefreshTests(unittest.TestCase):
         self.assertEqual(result['state'],'refreshed');self.assertEqual(before['book_groups'],self.saved()['book_groups'])
     def test_job_backed_candidate_and_journals_are_preserved(self):
         with connect(self.inventory.database) as db:
-            db.execute('CREATE TABLE audio_jobs(id TEXT PRIMARY KEY,manifest TEXT,state TEXT)')
-            db.execute('INSERT INTO audio_jobs VALUES(?,?,?)',('job',json.dumps({'candidate_id':self.group['id'],'sources':[{'path':str(self.source)}]}),'failed'))
+            db.execute('CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,manifest TEXT,state TEXT,journal TEXT,output TEXT)')
+            db.execute('INSERT INTO audio_jobs VALUES(?,?,?,?,?)',('job',json.dumps({'candidate_id':self.group['id'],'sources':[{'path':str(self.source)}]}),'failed','{}',None))
         before=self.saved();self.assertEqual(self.refresh(force=True)['state'],'held');self.assertEqual(before,self.saved())
         with connect(self.inventory.database) as db:self.assertEqual(db.execute('SELECT state FROM audio_jobs').fetchone()[0],'failed')
     def test_missing_source_holds_without_erasing_saved_evidence(self):

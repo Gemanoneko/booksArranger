@@ -43,7 +43,19 @@ test('authority absent, stale or allowing shared-list writes refuses',()=>{const
 test('each candidate binding field is checked',()=>{const expected=candidate();for(const k of Object.keys(expected)){const a=authority();a.binding[k]=k==='version'?'0.24.3':k==='build_id'?'f3a1de11-1811-4ef5-bf5c-586a70b7db9e':'f'.repeat(k==='source_head'?40:64);assert.throws(()=>validateAuthority(a,expected),k);}});
 test('fixed plan rejects wrong selector, deadline, external fixture or authority bytes',()=>{for(const alter of [p=>p.case={...NATIVE_CASE,title:'replacement'},p=>p.deadlineMs=600001,p=>p.fixture_root='Z:/library',p=>p.authority.sha256='0'.repeat(64),p=>p.environment.NODE_OPTIONS='--require bad']){const a=authority(),p=plan(candidate(),a);alter(p);assert.throws(()=>validatePlan(p,a));}});
 test('all eight original functional assertions and extra proof are mandatory',()=>{const b=candidate(),f=functional(b);assert.equal(PA1_ASSERTIONS.length,8);validateFunctional(f,b);for(const flag of ['downloadVerified','invalidInstallerRefused','oldEngineRecovered','shellStayedRunning','healthVersionMatched','closedByQuit','payloadUnchanged','endpointsOwned','noVisibleOwnWindow'])assert.throws(()=>validateFunctional({...f,[flag]:false},b));assert.throws(()=>validateFunctional({...f,assertions:f.assertions.slice(1)},b));});
-test('original ownership rejects timeout, forced, unknown or incomplete closure',()=>{for(const alter of [r=>r.ok=false,r=>r.forced=true,r=>r.timedOut=true,r=>r.outputComplete=false,r=>r.native.zero=false,r=>r.native.complete=false,r=>r.native.sampling.incompleteQueries=1,r=>r.native.assigned=1,r=>r.closureError='lost']){const r=normal();alter(r);assert.throws(()=>normalOwned(r));}});
+test('original ownership rejects timeout, forced, unknown or incomplete closure',()=>{for(const alter of [r=>r.ok=false,r=>r.forced=true,r=>r.timedOut=true,r=>r.outputComplete=false,r=>r.native.zero=false,r=>r.native.complete=false,r=>r.native.sampling.incompleteQueries=r.native.sampling.queries,r=>r.native.active=1,r=>r.native.assigned=1,r=>r.native.listed=1,r=>r.native.unsignaled=1,r=>r.closureError='lost']){const r=normal();alter(r);assert.throws(()=>normalOwned(r));}});
+test('normal final zero closure retains earlier incomplete sampling diagnostics',()=>{
+ const r=normal();r.native.sampling={queries:3,incompleteQueries:1};const before=encoded(r);
+ assert.equal(normalOwned(r),r);assert.deepEqual(encoded(r),before,'validation must not zero or rewrite the original diagnostic');
+});
+test('sampling counts require safe integers and at least one completed final observation',()=>{
+ const bad=[undefined,null,-1,.5,'1',NaN,Infinity,Number.MAX_SAFE_INTEGER+1];
+ for(const field of ['queries','incompleteQueries'])for(const value of [...bad,...(field==='queries'?[0]:[3,4])]){
+  const r=normal();r.native.sampling={queries:3,incompleteQueries:1};if(value===undefined)delete r.native.sampling[field];else r.native.sampling[field]=value;
+  assert.throws(()=>normalOwned(r),/Native observation incomplete/,field+'='+String(value));
+ }
+ for(const sampling of [undefined,null,{}]){const r=normal();r.native.sampling=sampling;assert.throws(()=>normalOwned(r),/Native observation incomplete/);}
+});
 test('strict raw evidence accepts internally consistent original inner and outer owner records',()=>{const e=evidence();assert.equal(validateNativeEvidence(e.summary,e.records,e.b).passed,true);assert.equal(NATIVE_ROLES.length,12);});
 test('every missing or byte-changed raw evidence record refuses',()=>{for(const role of NATIVE_ROLES){const e=evidence();delete e.records[role];assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.b));const f=evidence();f.records[role]=Buffer.concat([f.records[role],Buffer.from(' ')]);assert.throws(()=>validateNativeEvidence(f.summary,f.records,f.b));}});
 test('copied receipt for another candidate refuses even with valid hashes',()=>{const e=evidence(),b={...e.b,build_id:'f3a1de11-1811-4ef5-bf5c-586a70b7db9e'};assert.throws(()=>validateNativeEvidence(e.summary,e.records,b));});

@@ -376,8 +376,9 @@ class EditNamesTests(ApproveFixture):
         with connect(self.inv.database) as db:
             state=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
             aside=db.execute('SELECT kind FROM audio_job_set_aside WHERE job_id=?',(job['job_id'],)).fetchone()
-            record=db.execute('SELECT state FROM automatic_candidates WHERE id=?',(current['id'],)).fetchone()
-        self.assertEqual((state[0],aside[0]),('needs attention','names'),'set aside, kept');self.assertEqual(record[0],'Pending')
+            record=db.execute('SELECT state,result FROM automatic_candidates WHERE id=?',(current['id'],)).fetchone()
+        self.assertEqual((state[0],aside[0]),('needs attention','names'),'set aside, kept');self.assertEqual(record[0],'Held')
+        held=json.loads(record[1]);self.assertEqual(held['reasons'],['Names saved — waiting for your approval.']);self.assertTrue(held['until_change'])
         self.assertEqual(calls,[('requeue',current['id']),('start',)])
         self.assertEqual(self.service.jobs.status()['jobs'],[],'the book has no current job: nothing runs under the old names')
         again=self.research(self.service.reviews._row('Audiobooks',current['id']))

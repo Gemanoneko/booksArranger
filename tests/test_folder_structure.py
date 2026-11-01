@@ -1362,7 +1362,9 @@ class TolkienCleanLibraryTests(TolkienHeldTranslationTests):
                 self.assertEqual(result['reasons'],[],'identified by its files: research files it')
                 self.assertEqual((review['canonical_author'],review['title'],review['series'],review['number']),('Tolkien J. R. R.',title,'Властелин колец',str(number)))
                 self.assertEqual(evidence_missing(result),set(),'the approval has evidence for every field its policy records')
-                self.assertIn('\\Tolkien J. R. R\\Властелин колец\\',self.goes_to(books[album],result))
+                path=self.goes_to(books[album],result)
+                self.assertIn('\\Middle-earth\\Властелин колец\\',path)
+                self.assertTrue(path.endswith(' - Tolkien J. R. R.m4b'),'the shared world never replaces the author credit')
                 asked=len(calls);self.research.approved(books[album],ROOT)
                 self.assertEqual(len(calls),asked,'Approve and its preview read the cache only')
 

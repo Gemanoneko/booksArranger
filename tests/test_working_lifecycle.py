@@ -40,7 +40,20 @@ class WorkingLifecycleTests(unittest.TestCase):
         with patch('storage_cleanup.StorageCleanup.working_files',side_effect=AssertionError('startup must remain inactive')):
             self.f.service=MergeService(self.f.inv,self.f.base/'cache')
         self.assertTrue(list(stage.glob('*.m4b')));self.assertFalse(self.f.service.jobs._thread)
-        self.f.service.resume();self.f.wait()
+        # Global Start does not hash or clean unrelated completed books.
+        with patch.object(self.f.service.storage_cleanup,'working_files',side_effect=AssertionError('global Start must leave completed working files alone')) as untouched:
+            self.f.service.resume();self.f.wait();untouched.assert_not_called()
+        self.assertTrue(list(stage.glob('*.m4b')))
+        # The ordinary idle scheduler retries generated files even while source retirement is held.
+        from contextlib import nullcontext
+        cleaned=threading.Event();calls=[];original=self.f.service.storage_cleanup.working_files
+        def completed(*args,**kwargs):
+            value=original(*args,**kwargs);calls.append((args[0],threading.current_thread().name));cleaned.set();return value
+        with patch.object(self.f.service.storage_cleanup,'working_files',side_effect=completed):
+            self.f.service.start_retention(nullcontext)
+            self.assertTrue(cleaned.wait(10),'idle retention did not retry held generated working files')
+        self.assertEqual(calls,[(job_id,'books-recovery-retention')])
+        self.assertFalse(self.f.service.storage_cleanup.working_pending(job_id))
         self.assertEqual(list(stage.glob('*.m4b')),[]);self.assertEqual(list(stage.glob('normalized*.wav')),[])
         self.assertEqual(self.f.service.cleanup.status(job_id)['state'],'needs_attention')
         self.assertTrue(all(source.exists() for source in self.f.sources));self.assertEqual(self.f.service.state()['converted_total'],0)

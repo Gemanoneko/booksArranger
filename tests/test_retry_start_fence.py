@@ -32,6 +32,7 @@ def cleanup():
 
 def service():
     s=MergeService.__new__(MergeService);s.jobs=queue();s.cleanup=cleanup();s.draining=False
+    s.inventory=SimpleNamespace(worker=None,database=':memory:')  # Pause attribution uses its real small catalog table.
     s.operation_lock=threading.RLock();s._no_scan=Mock();s._prune_completed=Mock()
     s.state=Mock(side_effect=lambda:{'state':'Paused','jobs':[]})
     s._record_start_failure=Mock(side_effect=lambda e:{'state':getattr(e,'start_state','blocked'),'reason':str(e)})
@@ -181,14 +182,14 @@ class RetryStartFenceTests(unittest.TestCase):
         self.assertTrue(c.thread.joined);self.assertTrue(c.stop.is_set())
         with self.assertRaises(ValueError):c.resume()
     def test_pause_during_bulk_summary_prevents_new_event_and_receipt(self):
-        s=service();s.inventory=SimpleNamespace(worker=None);s._save_bulk_receipt=Mock(return_value=True)
+        s=service();s.inventory=SimpleNamespace(worker=None,database=':memory:');s._save_bulk_receipt=Mock(return_value=True)
         s.attention_summary=Mock(side_effect=lambda **_:(s.pause(),{'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})[1])
         with patch.object(merge_service.threading,'Thread',FakeThread):
             with self.assertRaises(StartRefused) as caught:s.retry_all()
         self.assertEqual(caught.exception.start_state,'stale','refusal must come from the Pause fence, not an empty target list')
         s._save_bulk_receipt.assert_not_called();self.assertEqual(FakeThread.created,[])
     def test_initial_receipt_save_holds_no_control_lock_and_pause_cancels_launch(self):
-        s=service();s.inventory=SimpleNamespace(worker=None);s.attention_summary=Mock(return_value={'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})
+        s=service();s.inventory=SimpleNamespace(worker=None,database=':memory:');s.attention_summary=Mock(return_value={'parent':{'group':'retry','retry':{'allowed':True,'reason':''}}})
         waiting=threading.Event();release=threading.Event();saves=[];answers=[];errors=[]
         def save(run):
             acquired=merge_service._BULK_LOCK.acquire(blocking=False)
@@ -216,7 +217,7 @@ class RetryStartFenceTests(unittest.TestCase):
         self.assertEqual(result['start_outcome']['state'],'stale');self.assertEqual(len(saves),2)
 
     def test_per_target_rechecks_captured_generation_after_operation_wait(self):
-        s=service();s.inventory=SimpleNamespace(worker=None);s._reacquire_admission=Mock();s.attention_summary=Mock()
+        s=service();s.inventory=SimpleNamespace(worker=None,database=':memory:');s._reacquire_admission=Mock();s.attention_summary=Mock()
         class DelayedOperation:
             def __enter__(self):s.pause()
             def __exit__(self,*_):return False

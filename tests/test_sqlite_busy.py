@@ -152,12 +152,13 @@ class BusyTests(unittest.TestCase):
         self.auto.merge.state=lambda:{'state':'Completed','queued':0,'cleanup_active':False}
         self.auto.merge._no_scan=lambda:None;self.auto.merge.pause=Mock()
         self.auto.merge.candidate_status=lambda _:None
-        self.auto.merge.reviews=SimpleNamespace(_row=lambda *_:row)
+        self.auto.merge.reviews=SimpleNamespace(_row=lambda *_:row,_context=lambda _: {})
         self.auto.manual_draft=lambda _:True
         self.auto.start();self.threads.append(self.auto.thread)
         deadline=time.monotonic()+3
         while self.auto.next_retry_at is None and time.monotonic()<deadline:time.sleep(.01)
-        self.assertIsNotNone(self.auto.next_retry_at)
+        self.assertIsNotNone(self.auto.next_retry_at,self.saved())
+        with scanner.connect(self.database) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],0)
         original=self.auto._update
         def update(id,**fields):
             original(id,**fields)

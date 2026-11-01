@@ -95,15 +95,21 @@ class JoinTests(test_approve_as_is.ApproveFixture):
         sources = self.three_parts()
         row = self.start()[0]
         result = self.research(row)
-        real = audio_pipeline.source_chapters
-        def changed(path, stage, stop, duration):
-            found = real(path, stage, stop, duration)
-            return [dict(c, title=c['title'] + ' (changed)') for c in found] if str(path).endswith('source00001.m4b') else found
-        with mock.patch.object(audio_pipeline, 'source_chapters', changed):
+        real = audio_pipeline.verified_source_chapters
+        changed_parts = []
+        def changed(path, stage, stop, duration, **kwargs):
+            found = real(path, stage, stop, duration, **kwargs)
+            if str(path).endswith('source00001.m4b'):
+                changed_parts.append(str(path))
+                return dict(found,chapters=[dict(c, title=c['title'] + ' (changed)') for c in found['chapters']])
+            return found
+        with mock.patch.object(audio_pipeline, 'verified_source_chapters', changed):
             self.service.approve_automatic(row, result, threading.Event(), self.service.automatic.research.client)
             self.wait()
         job = self.service.jobs.status()['jobs'][0]
+        self.assertTrue(changed_parts, 'the protected second-part chapter recheck was faulted')
         self.assertNotEqual(job['state'], 'completed', job)
+        self.assertIn('Part chapters differ from the frozen plan', job['reason'])
         self.assertTrue(all(p.exists() for p in sources), 'originals kept')
 
 

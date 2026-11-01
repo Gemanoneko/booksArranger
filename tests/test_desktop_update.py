@@ -56,10 +56,10 @@ def engine(*, converting=False, scanning=False, automatic=False, stubborn=False,
     calls = []
     merge = SimpleNamespace(jobs=SimpleNamespace(_thread=jobs), cleanup=SimpleNamespace(current=None, thread=None), _post_current=None,
                             inventory=SimpleNamespace(database=':memory:'))
-    merge.pause = Mock(side_effect=lambda: (calls.append('pause'), jobs.stop()))
+    merge.pause = Mock(side_effect=lambda origin=None: (calls.append('pause'), jobs.stop()))
     merge.resume = Mock(side_effect=lambda **kw: calls.append(('resume', kw)))
     auto = SimpleNamespace(thread=research, current={'stage': 'Researching work identity'} if automatic else None)
-    auto.stop = Mock(side_effect=lambda force=False: (calls.append(('automatic stop', force)), research.stop()))
+    auto.stop = Mock(side_effect=lambda force=False, origin=None: (calls.append(('automatic stop', force)), research.stop()))
     auto.start = Mock(side_effect=lambda: calls.append('automatic start'))
     auto.status = Mock(return_value={'state': 'Running' if automatic else 'Idle'})
     merge.automatic = auto
@@ -187,7 +187,7 @@ class MatrixTests(unittest.TestCase):
             threading.Thread(target=end, daemon=True).start()
         conversion.stop = stop_conversion
         server.merge.jobs._thread = conversion
-        server.merge.pause = Mock(side_effect=lambda: (calls.append('pause'), conversion.stop()))
+        server.merge.pause = Mock(side_effect=lambda origin=None: (calls.append('pause'), conversion.stop()))
         threading.Thread(target=approval, daemon=True).start(); self.assertTrue(held.wait(5))
         busy = DesktopControl(server).busy({'audiobook_jobs': {'state': 'Running'}, 'automatic_processing': {}})
         value = control(server, safe=30.0, force=30.0)

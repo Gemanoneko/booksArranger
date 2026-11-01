@@ -305,6 +305,7 @@ class AutoTests(unittest.TestCase):
         while not auto.status()['automatic_retry_enabled'] and auto.thread.is_alive() and time.monotonic()<deadline:time.sleep(.01)
         self.assertTrue(auto.status()['automatic_retry_enabled']);begin=time.monotonic();auto.stop();state=self.wait_auto(auto)
         self.assertLess(time.monotonic()-begin,1);self.assertEqual(state['state'],'Paused');self.assertFalse(state['automatic_retry_enabled']);self.assertIsNone(state['next_retry_at'])
+        self.assertTrue(merge.pause.call_args_list);self.assertTrue(all(call.args==() and call.kwargs=={} for call in merge.pause.call_args_list),'an explicit Stop keeps user pause authority')
         pending=json.loads(auto._run_row()['checkpoint'])['pending'];self.assertEqual(len(pending),1)
         restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
         self.assertIsNone(restarted.thread);self.assertEqual(restarted.status()['state'],'Paused');self.assertFalse(restarted.status()['automatic_retry_enabled']);self.assertEqual(json.loads(restarted._run_row()['checkpoint'])['pending'],pending)
@@ -470,6 +471,7 @@ class AutoTests(unittest.TestCase):
     def test_interruption_is_saved_pause_without_an_app_failure_record(self):
         auto,merge,inv=self.fake_merge(lambda *_:(_ for _ in ()).throw(InterruptedError()))
         auto.start();state=self.wait_auto(auto);self.assertEqual(state['state'],'Paused');self.assertIsNone(state['failure'])
+        merge.pause.assert_called_once_with(origin='interrupted')
         self.assertEqual(state['research']['researching'],0);self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1)
         with connect(self.db) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_errors').fetchone()[0],0)
         restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
@@ -530,7 +532,7 @@ class AutoTests(unittest.TestCase):
         inv=Inventory(self.db,{'Audiobooks':str(audio),'Podcasts':str(self.base/'podcasts'),'Ebooks':str(self.base/'ebooks')},lambda p,k,s:json.loads(row(p,'A Book')['metadata']),
                       output_root=str(sorted_root) if output_root is True else output_root)
         state={'state':'Completed','queued':0};reviews=SimpleNamespace(_context=lambda row:{},_row=lambda lib,id,revision=None:inv.candidate(lib,id))
-        merge=SimpleNamespace(inventory=inv,reviews=reviews,_no_scan=lambda:None,state=lambda:dict(state),pause=lambda:state.update(state='Paused'),resume=Mock(),candidate_status=lambda id:None)
+        merge=SimpleNamespace(inventory=inv,reviews=reviews,_no_scan=lambda:None,state=lambda:dict(state),pause=Mock(side_effect=lambda origin=None:state.update(state='Paused')),resume=Mock(),candidate_status=lambda id:None)
         merge.approve_automatic=Mock(side_effect=lambda row,result,stop,client:(row,'fixture-job'))
         research=SimpleNamespace(client=SimpleNamespace(retry_wait=lambda wait:dict(wait)),lookup=lookup or (lambda *args:{'reasons':['Book identity uncertain'],'sources':[]}))
         auto=AutomaticProcessing(merge,research);merge.automatic=auto;self.controllers.append(auto)
@@ -641,8 +643,8 @@ class AutoTests(unittest.TestCase):
         fx=BetweenBooks(self.base);self.addCleanup(fx.release)
         merge.state=fx.merge.state;merge.approve_automatic=Mock(side_effect=lambda row,result,stop,client:(admit(fx),(row,'fixture-job'))[1])
         user_stop=threading.Event();pauses=[]
-        def pause():
-            pauses.append('user stop' if user_stop.is_set() else 'no stop request');return fx.merge.pause()
+        def pause(origin=None):
+            pauses.append('user stop' if user_stop.is_set() else 'no stop request');return fx.merge.pause(origin=origin)
         merge.pause=pause
         return auto,fx,user_stop,pauses
     def test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book(self):
@@ -693,6 +695,8 @@ class BetweenBooks:
         self.removing,self.finish_removal,self.cleared,self.gap=threading.Event(),threading.Event(),threading.Event(),threading.Event();self.gap.set()
         self.started,self.wake,self.straddle=threading.Event(),threading.Event(),threading.Event()
         merge=MergeService.__new__(MergeService);merge.jobs=self.queue;merge._post_current=None
+        # Pause attribution is durable even in this state-only fixture; use its private queue catalog.
+        merge.inventory=SimpleNamespace(database=self.queue.database)
         merge.cleanup=SimpleNamespace(current=None,thread=None,stop=self.stop,status=self.cleanup_status,run=self.run,run_with_retry=self.run,pause=self.pause_cleanup,_set=Mock(),hold=Mock())
         merge.storage_cleanup=SimpleNamespace(status=lambda:[],folder_status=lambda:[]);merge.working=SimpleNamespace(discharge_published=Mock())
         merge._prune_working=Mock();merge.enroll_cleanup=self.enroll;merge._prune_completed=self.pruned
@@ -782,7 +786,9 @@ class BetweenBooksStateTests(unittest.TestCase):
             rows=read();fx.merge.cleanup.thread=worker;worker.start();return rows
         fx.merge.cleanup.status=resumed_mid_read
         try:self.assertEqual(fx.merge.state()['state'],'Running')
-        finally:release.set();finish_thread(worker,'The resumed stand-in cleanup worker')
+        finally:
+            release.set()
+            if worker.ident is not None:finish_thread(worker,'The resumed stand-in cleanup worker')
         fx.merge.cleanup.status=read;self.assertEqual(fx.merge.state()['state'],'Paused')
     def test_pause_during_cleanup_reads_pausing_until_the_converter_exits(self):
         fx=self.fixture();fx.gap.clear();fx.start();self.assertTrue(fx.removing.wait(5))

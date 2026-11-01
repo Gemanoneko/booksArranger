@@ -52,7 +52,7 @@ class StandingAdmissionTests(unittest.TestCase):
             'evidence':[{'field':field,'cited_value':value,'source_url':'https://fantlab.ru/edition900','retrieved_utc':'2026-10-11T00:00:00Z','reviewer_actor':'assistant','reviewer_identity':'Private constituent fixture','basis':'Explicit fetched ordered fan contents and independent original-work author relations; all local sources mapped.'} for field,value in {'title':TITLE,'authors':'; '.join(authors)}.items()]}
         fresh,job_id=self.f.service.approve_automatic(row,result,threading.Event(),self.f.client);self.f.wait()
         job=next(j for j in self.f.service.jobs.status()['jobs'] if j['job_id']==job_id);self.assertEqual(job['state'],'completed',job)
-        self.assertEqual(job['manifest']['metadata_facts']['collection']['component_count'],2);self.assertEqual(result['metadata_facts']['cover']['kind'],'neutral')
+        self.assertEqual(job['manifest']['metadata_facts']['collection']['component_count'],2);self.assertEqual(job['manifest']['metadata_facts']['cover']['kind'],'neutral')
         self.assertTrue(all(not s.exists() for s in sources));self.assertEqual(self.f.service.cleanup.status(job_id)['recovery']['state'],'deleted')
         ready=self.f.service.reviews.page(status='converted');self.assertEqual(ready['total'],1);self.assertTrue(ready['rows'][0]['audiobook_ready'])
     def test_unknown_staging_audio_is_never_admitted_by_wav_extension(self):

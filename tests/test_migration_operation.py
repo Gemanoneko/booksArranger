@@ -19,7 +19,7 @@ class MigrationOperationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(dir=area);self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name)
         data=self.base/'data';data.mkdir();self.database=data/'catalog.sqlite'
         f=fixture.PublicationLocationsTests();f.setUp();self.addCleanup(f.doCleanups);self.f=f
-        review={'title':'Book'};f.manifest.update(metadata=review,cover={'id':'cover'},sources=[{'path':str(Path(f.root)/'source.mp3'),'sha256':'a'*64,'size':1,'modified':'1'}]);f.job['manifest']=p._packed(f.manifest);f.job['manifest_hash']=p._digest(f.manifest);f.store_job();f.routing.update(accepted_candidate_revision=3,accepted_review_sha256=p._digest(review))
+        review={'title':'Book'};f.manifest.update(metadata=review,cover={'id':'cover'},sources=[{'path':str(Path(f.root)/'source.mp3'),'sha256':'a'*64,'size':1,'modified':'1'}]);f.job['manifest']=p._packed(f.manifest);f.job['manifest_hash']=p._digest(f.manifest);f.store_job();f.routing.update(accepted_candidate_revision=3,accepted_review_sha256=p._digest(review),routing_review=copy.deepcopy(review))
         migration=f.plan();f.db.execute('CREATE TABLE book_groups(id TEXT PRIMARY KEY,superseded INTEGER,changed INTEGER,fingerprint TEXT,revision INTEGER,review TEXT)')
         f.db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
         f.db.execute('CREATE TABLE source_cleanup(job_id TEXT,state TEXT)')

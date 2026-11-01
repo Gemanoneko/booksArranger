@@ -137,6 +137,17 @@ class PageConcurrencyTests(unittest.TestCase):
             if not self.release.wait(3): raise AssertionError('private page computation did not release')
             return {'rows': [{'id': 'before-control'}], 'total': 1}
         merge.reviews = SimpleNamespace(page=page)
+        # Give the joining test caller a short wait without racing a mutation
+        # of the first caller's wait bound. The real get/invalidate/run execute.
+        joining_caller = threading.current_thread()
+        class CallerBounds(SharedSnapshot):
+            @property
+            def _wait(self):
+                return self._joining_wait if threading.current_thread() is joining_caller else 4.0
+            @_wait.setter
+            def _wait(self, value): self._joining_wait = value
+        shared = CallerBounds(keep_flight=True)
+        merge._page_shared = {(50, 0, '', 'all', None): shared}
         return merge, entered, calls
 
     def test_same_page_key_shares_inflight_read_and_returns_detached_values(self):
@@ -151,7 +162,7 @@ class PageConcurrencyTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.release.set()
         self.threads[0].join(3)
-        self.assertEqual(first[0][0], 'value')
+        self.assertEqual(first[0][0], 'value', first)
         first[0][1]['rows'][0]['id'] = 'mutated by caller'
         self.assertEqual(merge.cached_page(50, 0, '', 'all')['rows'][0]['id'], 'before-control')
         self.assertEqual(len(calls), 1)
@@ -170,17 +181,47 @@ class PageConcurrencyTests(unittest.TestCase):
         self.threads[0].join(3)
         self.assertEqual(output[0][0], 'error')
         self.assertIsInstance(output[0][1], StatusUnavailable)
+        shared._wait = 4.0
         merge.reviews.page = Mock(return_value={'rows': [{'id': 'after-control'}], 'total': 1})
         self.assertEqual(merge.cached_page(50, 0, '', 'all')['rows'][0]['id'], 'after-control')
+        merge.reviews.page.assert_called_once()
+
+    def test_catalog_change_during_inflight_read_rejects_old_page_without_duplicate_work(self):
+        merge, entered, calls = self.make_page()
+        token = ['catalog-before']
+        merge._quiet_token = lambda *args: token[0]
+        output = []
+        self.call_thread(lambda: merge.cached_page(50, 0, '', 'all'), output)
+        self.assertTrue(entered.wait(2))
+        shared = merge._page_shared[(50, 0, '', 'all', None)]
+        shared._wait = .02
+        token[0] = 'catalog-after'
+        with self.assertRaises(StatusUnavailable): merge.cached_page(50, 0, '', 'all')
+        self.assertIs(merge._page_shared[(50, 0, '', 'all', None)], shared)
+        self.assertEqual(len(calls), 1, 'a catalog commit must not fork active page work')
+        self.release.set()
+        self.threads[0].join(3)
+        self.assertEqual(output[0][0], 'error', output)
+        self.assertIsInstance(output[0][1], StatusUnavailable)
+        self.assertFalse(merge.__dict__.get('_quiet_pages'), 'the old page was not promoted into the new token')
+        shared._wait = 4.0
+        merge.reviews.page = Mock(return_value={'rows': [{'id': 'after-commit'}], 'total': 1})
+        fresh = merge.cached_page(50, 0, '', 'all')
+        self.assertEqual(fresh['rows'][0]['id'], 'after-commit')
+        fresh['rows'][0]['id'] = 'caller mutation'
+        self.assertEqual(merge.cached_page(50, 0, '', 'all')['rows'][0]['id'], 'after-commit')
         merge.reviews.page.assert_called_once()
 
     def test_distinct_page_keys_do_not_share_the_wrong_result(self):
         merge = MergeService.__new__(MergeService)
         merge._quiet_token = lambda *args: None
-        merge.reviews = SimpleNamespace(page=Mock(side_effect=lambda limit, offset, search, status: {'rows': [search]}))
+        merge.reviews = SimpleNamespace(page=Mock(side_effect=lambda limit, offset, search, status, group=None: {'rows': [search] if group is None else [group]}))
         self.assertEqual(merge.cached_page(20, 0, 'first', 'all')['rows'], ['first'])
         self.assertEqual(merge.cached_page(20, 0, 'second', 'all')['rows'], ['second'])
         self.assertEqual(merge.reviews.page.call_count, 2)
+        self.assertEqual(merge.cached_page(20, 0, '', 'output_attention', 'retry')['rows'], ['retry'])
+        self.assertEqual(merge.cached_page(20, 0, '', 'output_attention', 'working')['rows'], ['working'])
+        self.assertEqual(merge.reviews.page.call_count, 4)
 
 
 class ChapterDiagnosticTests(PrivateCatalog):

@@ -59,14 +59,17 @@ class StartupPublishedCheckTests(unittest.TestCase):
         queue.close()
 
     def test_deferred_check_flags_a_changed_published_book_exactly_like_startup_did(self):
-        valid = {self.publishing['job_id']}
-        queue = AudioJobs(self.db, None, lambda m: True, lambda r: r['job_id'] in valid)
+        valid = {self.publishing['job_id']}; checked = []
+        queue = AudioJobs(self.db, None, lambda m: True, lambda r: checked.append(r['job_id']) or r['job_id'] in valid)
+        self.addCleanup(queue.close)
         queue.start_published_check(); queue._verifier.join(5)
         self.assertFalse(queue._verifier.is_alive())
         self.assertEqual(self.states(queue)[self.completed['job_id']],
                          ('needs attention', 'Recorded output is missing, changed, or failed validation'))
-        queue.start_published_check()  # once per process
+        before = list(checked)
+        queue.start_published_check(); queue._verifier.join(5)  # a later idle pass is allowed to resume
         self.assertFalse(queue._verifier.is_alive())
+        self.assertEqual(checked, before, 'unchanged completed rows and not-yet-due retry rows are not rehashed')
         queue.close()
 
     def test_deferred_check_never_writes_after_close(self):

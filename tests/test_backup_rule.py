@@ -25,7 +25,7 @@ def service():
     s._retention_stop = threading.Event(); s._retention_wake = threading.Event(); s._retention_thread = None
     s._manual_recovery = None; s._post_current = None; s.storage_cleanup = None
     s.working = SimpleNamespace(reconcile=lambda **kwargs: None, schedule_published=lambda job_id: None)
-    s.jobs = SimpleNamespace(_thread=SimpleNamespace(is_alive=lambda: True), has_unfinished=lambda: True, status=lambda: {'jobs': [{'state': 'pending'}]})
+    s.jobs = SimpleNamespace(_thread=SimpleNamespace(is_alive=lambda: True), has_unfinished=lambda: True, status=lambda: {'jobs': [{'state': 'pending'}]}, start_published_check=Mock())
     s.cleanup = SimpleNamespace(thread=None, current=None, _rows=lambda *args: [], resume=Mock(return_value={'state':'started'}))
     return s
 
@@ -164,19 +164,33 @@ class KeptFilesTests(unittest.TestCase):
 class FolderJobTests(unittest.TestCase):
     """Empty source folders are housekeeping, not backups: none holds anything or shows as attention."""
 
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        self.database = os.path.join(folder.name, 'catalog.sqlite3')
+        with contextlib.closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,manifest TEXT)')
+
+    def service(self, converting=False):
+        s = service(); s.inventory.database = self.database
+        if not converting: s.jobs._thread = None
+        return s
+
     def test_gone_folders_complete_and_busy_catalog_jobs_rerun_once(self):
-        s = service(); s._purge_tried = set()
+        s = self.service(); s._purge_tried = set()
         rows = [{'job_id': 'gone', 'state': 'needs_attention', 'reason': MergeService.FOLDER_ALREADY_GONE, 'output_hash': 'h1'},
                 {'job_id': 'locked', 'state': 'needs_attention', 'reason': 'database is locked', 'output_hash': 'h2'},
                 {'job_id': 'empty', 'state': 'unsupported', 'reason': 'Empty source folder retained: NTFS supports named data streams', 'output_hash': 'h3'},
                 {'job_id': 'other', 'state': 'needs_attention', 'reason': 'Source folder changed', 'output_hash': 'h4'}]
-        s.storage_cleanup = SimpleNamespace(folder_status=lambda: rows, _folder_set=Mock(), run_folders=Mock())
+        def complete(job_id, *_):
+            next(row for row in rows if row['job_id'] == job_id)['state'] = 'completed'
+        # The real storage layer persists successful completion before the next pass.
+        s.storage_cleanup = SimpleNamespace(folder_status=lambda: rows, _folder_set=Mock(side_effect=complete), run_folders=Mock(side_effect=complete))
         s._settle_folder_jobs(); s._settle_folder_jobs()
         s.storage_cleanup._folder_set.assert_called_once_with('gone', 'h1', 'completed', 'Source folder was already gone')
         s.storage_cleanup.run_folders.assert_called_once_with('locked')
 
     def test_a_failed_rerun_stays_quiet(self):
-        s = service(); s._purge_tried = set()
+        s = self.service(); s._purge_tried = set()
         s.storage_cleanup = SimpleNamespace(folder_status=lambda: [{'job_id': 'locked', 'state': 'needs_attention', 'reason': 'database is busy', 'output_hash': 'h'}],
                                             _folder_set=Mock(), run_folders=Mock(side_effect=sqlite3.OperationalError('database is locked')))
         s._settle_folder_jobs()
@@ -184,7 +198,7 @@ class FolderJobTests(unittest.TestCase):
 
 
     def test_ruling_76b_old_folders_are_swept_only_while_nothing_converts(self):
-        s = service(); s._purge_tried = set(); s.draining = False
+        s = self.service(converting=True); s._purge_tried = set(); s.draining = False
         swept = []
         s.storage_cleanup = SimpleNamespace(folder_status=lambda: [], _folder_set=Mock(), run_folders=Mock(),
                                             old_folder_jobs=lambda: ['a', 'b', 'c'], sweep_folders=lambda job_id: swept.append(job_id) or 'completed')
@@ -201,7 +215,7 @@ class FolderJobTests(unittest.TestCase):
 
     def test_ruling_77b_a_folder_job_that_failed_on_the_drive_is_run_again(self):
         from storage_cleanup import FOLDER_RETRY
-        s = service(); s._purge_tried = set()
+        s = self.service(); s._purge_tried = set()
         rows = [{'job_id': 'away', 'state': 'needs_attention', 'reason': FOLDER_RETRY + '[WinError 53] The network path was not found', 'output_hash': 'h'},
                 {'job_id': 'refused', 'state': 'needs_attention', 'reason': 'Source-folder native identity changed', 'output_hash': 'h'}]
         s.storage_cleanup = SimpleNamespace(folder_status=lambda: rows, _folder_set=Mock(), run_folders=Mock())

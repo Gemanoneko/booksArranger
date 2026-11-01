@@ -2492,7 +2492,7 @@ def attach_shared_routing(result, peers=()):
             break
     names = (out.get('approval') or {}).get('names') or {}
     entered = set((facts.get('entered_names') or {}).get('fields') or [])
-    expected = {'fantlab:1668': ('The Two Towers', '2'), 'fantlab:1669': ('The Return of the King', '3')}.get(work.get('id'))
+    expected = {'fantlab:1667': ('The Fellowship of the Ring', '1'), 'fantlab:1668': ('The Two Towers', '2'), 'fantlab:1669': ('The Return of the King', '3')}.get(work.get('id'))
     if (expected and work.get('original_title') == expected[0] and review.get('series') == 'Властелин колец'
             and review.get('number') == expected[1] and sid == 'https://fantlab.ru/work1693'
             and len(member['authors']) == 1 and any(_exact_people(member['authors'][0], [alias]) for alias in
