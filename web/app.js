@@ -476,11 +476,11 @@ function admissionLine(jobs){
 function renderJobControlState(){
   const jobs=state?.audiobook_jobs;if(!jobs || !$('jobs-help'))return;
   const admission=jobs.start_admission,maintenance=jobs.maintenance,disconnected=ended || recoveryDisconnected;
-  const stopping=jobControlFlights.has('pause') || maintenance?.state==='stopping' || maintenance?.cancel_requested===true;
+  const stopping=jobControlFlights.has('pause') || ['Pausing','pausing'].includes(jobs.state) || maintenance?.state==='stopping' || maintenance?.cancel_requested===true;
   const status=admissionLine(jobs),pause=$('pause-jobs'),resume=$('resume-jobs');
   const stopTip='Stopping at the next safe checkpoint. Pending work is kept.';
   pause.title=disconnected?'Current processing status unavailable.':stopping?stopTip:admission?.state==='checking'?'Pause the start checks and keep pending work. The current read may finish before stopping.':maintenance?'Stop finished-book checks at the next safe checkpoint. Pending work is kept.':pause.disabled?'No audiobook work is running.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
-  resume.title=disconnected?'Current processing status unavailable.':status || (resume.disabled?'No pending audiobook work can be resumed.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.');
+  resume.title=disconnected?'Current processing status unavailable.':status || (resume.disabled?'No pending audiobook work can be resumed.':jobs.cleanup_active===true?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.');
   for(const button of [pause,resume])button.setAttribute('aria-describedby','jobs-help jobs-status');
   const detail=maintenance && stopping?'Stopping finished-book checks…':status || jobControlNote || (['Paused','paused'].includes(jobs.state)?pauseLine(jobs.pause):'');
   const base=jobs.cleanup_active===true?'Pausing source cleanup finishes the current file. Resume continues its saved progress.':'An interrupted conversion restarts; completed outputs stay in place.';
