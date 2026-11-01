@@ -12,6 +12,7 @@ Sergei approved on 2026-11-01: “The scope is everything that is in backlog + t
 - McCammon: recognize the confirmed Matthew Corbett series and positions, and correctly handle The Queen of Bedlam’s internal sections without generic unsafe merging.
 - Tolkien: preserve successful research in grouping preview and approval despite HTTP-cache eviction; retain original titles, exact cycle spelling “Властелин колец” and positions 2/3, plus the confirmed Middle-earth universe relationship through existing naming rules. Internal Books 3–6 are not trilogy positions.
 - Tolkien chapter refusal: correct the proven terminal-end metadata case only with full-audio proof and preserve audio, chapter names, start times and order; give actionable file/chapter/timing explanations. No blanket weakening of chapter validation or dropping chapters.
+- Additional ruling, 2026-11-01: a series whose books have different authors omits the author directory and goes directly under the sorted root, e.g. `Audiobooks Sorted/Omen/<book>`. Worlds spanning multiple series and/or authors likewise omit the author directory, using the existing World/Series/Book hierarchy directly under the sorted root. Preserve each book's real author metadata and existing filename policy. Apply this through confirmed series/world identity, not coincidental matching names; existing explicit per-book destination choices remain authoritative. This supersedes the earlier statement that no multi-author-series feature was ordered.
 
 ## Source records and completion tracking
 
@@ -28,4 +29,4 @@ Ender records each included item’s implementation and verification in a comple
 
 No writes to Z: or live `data/`. No QA installs on Sergei’s profile. No mouse/focus interference or app control. No running-thread snapshot without a fresh request and permission. The four-file Tolkien read-only timing inspection was already completed; it authorized no source repair. Use private fixtures and isolated profiles. No Claude attribution. Preserve other sessions’ edits and recovery data. Clean verified owned temporary output.
 
-Tray-history exceptions require Sergei’s separate OK for this release; prior versions’ exceptions do not apply. Firefly stays a per-book Choose folder decision; no multi-author-series feature was ordered.
+Tray-history exceptions require Sergei’s separate OK for this release; prior versions’ exceptions do not apply. Firefly's existing per-book Choose folder decision remains respected alongside the newly ordered general shared-series/world routing rule.
