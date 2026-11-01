@@ -17,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -208,7 +208,7 @@ test('recovery refuses unknown/live closure, forged callback, new fixture and ch
 
 test('recovery cannot adopt another release, escape its bound arena or change the original payload',async t=>{
  const f=await failedAttemptFixture(t);f.p.binding.version='0.24.3';await assert.rejects(verifyRecovery(f.p),/same release/);f.p.binding.version='0.24.2';
- for(const alter of [p=>p.recovery.attempt=3,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
+ for(const alter of [p=>p.recovery.attempt=4,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
  await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact));
 });
 
@@ -222,4 +222,57 @@ test('exact 93 generated-cache refresh preserves EXE identity, Python sources an
  for(const alter of [v=>delete v['resources/backend/module0.py'],v=>v['resources/backend/module0.py'].sha256='0'.repeat(64),v=>v['Books Arranger.exe'].sha256='0'.repeat(64),v=>v['resources/backend/__pycache__/module0.cpython-314.pyc'].size++,v=>v['resources/backend/__pycache__/module0.cpython-314.pyc']=old['resources/backend/__pycache__/module0.cpython-314.pyc']]){const bad=structuredClone(files);alter(bad);assert.throws(()=>recoveryCacheChanges(f.p,old,bad));}
  const wrong=structuredClone(f.p);wrong.recovery.cache_refresh[0].new_sha256='0'.repeat(64);assert.throws(()=>recoveryCacheChanges(wrong,old,files),/manifest-pinned/);
  await freshFixture(f.p,{payload:{files}});assert.deepEqual(await treeFiles(f.app),files);assert.deepEqual(await ordinary(path.join(f.app,'Books Arranger.exe'),{file:true}),identity);
+});
+
+async function knownThirdFixture(t){
+ const f=await failedAttemptFixture(t),second=f.p,dir=second.evidence_root;
+ const pin=async file=>{const b=await fs.readFile(file),s=await fs.lstat(file,{bigint:true});return{path:file,size:b.length,sha256:hash(b),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
+ const write=async(name,value)=>{const file=path.join(dir,name);await fs.writeFile(file,encoded(value));return pin(file);};
+ const base={...f.artifact,build_id:second.binding.build_id};const manifest=await write('artifact.json',base);second.binding.artifact_manifest_sha256=manifest.sha256;second.payload.manifest=manifest;
+ second.authority=await write('authority.json',authority(second.binding));const secondRef=await write('plan.json',second);
+ const inner={...normal(),ok:false,code:1},controller=structuredClone(inner),owned=await write('owned.json',inner),controllerRef=await write('controller-owned.json',controller);
+ const cb={callback_received:true,error:{code:1,killed:false},plan_sha256:secondRef.sha256,owned_sha256:owned.sha256,controller_owned_sha256:controllerRef.sha256};
+ const callback=await write('callback.json',cb),quit=await write('quit-owned.json',normal()),refresh=await write('refresh.json',{original_manifest_sha256:second.recovery.original_artifact_manifest.sha256,current_manifest_sha256:manifest.sha256,exe_identity:second.recovery.exe_identity,changes:[],whole_payload_matches_current:true});
+ const p=structuredClone(second);p.binding={...p.binding,build_id:'c3a1de11-1811-4ef5-bf5c-586a70b7db9e'};p.evidence_root=path.join(path.dirname(dir),'third');await fs.mkdir(p.evidence_root);
+ const a=authority(p.binding),authorityFile=path.join(p.evidence_root,'authority.json');await fs.writeFile(authorityFile,encoded(a));p.authority=await pin(authorityFile);
+ const record={application:'Books Arranger',version:'0.24.2',pid:42,instance:'c'.repeat(32),port:61169,url:'http://127.0.0.1:61169/'};
+ const live=path.join(p.fixture_root,'home/data/web-instance.json');await fs.mkdir(path.dirname(live),{recursive:true});await fs.writeFile(live,encoded(record));
+ p.recovery.attempt=3;p.recovery.second_failed_attempt={plan:secondRef,owned,controller_owned:controllerRef,callback,quit_owned:quit,payload_manifest:manifest,cache_refresh:refresh};
+ p.recovery.engine_port=61169;p.recovery.engine_record=await write('engine-record-copy.json',record);p.recovery.engine_record_identity=(await pin(live)).identity;
+ return {p,a,write,inner,controller,callback:cb,record,live,base};
+}
+
+test('known third attempt binds both real failure categories and selects only the original private engine port',async t=>{
+ const f=await knownThirdFixture(t);validatePlan(f.p,f.a);const prior=await verifyRecovery(f.p);
+ assert.equal(prior.baseManifestSha,f.p.recovery.second_failed_attempt.payload_manifest.sha256);assert.notEqual(prior.baseManifestSha,f.p.recovery.original_artifact_manifest.sha256);
+ const calls=[];assert.equal(await privateEnginePort(f.p,async port=>{calls.push(port);return port;}),61169);assert.deepEqual(calls,[61169]);
+ assert.throws(()=>normalOwned(f.inner),'second failure is never accepted as a successful native run');
+});
+
+test('known third attempt refuses unknown second closure, forged callback or an unbound payload refresh',async t=>{
+ const f=await knownThirdFixture(t),original=structuredClone(f.p.recovery.second_failed_attempt);
+ for(const alter of [v=>v.forced=true,v=>v.timedOut=true,v=>v.native.zero=false,v=>v.native.active=1,v=>v.outputComplete=false,v=>v.code=0]){
+  const bad=structuredClone(f.controller);alter(bad);const ref=await f.write('controller-owned.json',bad);f.p.recovery.second_failed_attempt.controller_owned=ref;
+  f.callback.controller_owned_sha256=ref.sha256;f.p.recovery.second_failed_attempt.callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p));
+ }
+ f.p.recovery.second_failed_attempt=original;
+ f.p.recovery.second_failed_attempt.controller_owned=await f.write('controller-owned.json',f.controller);f.callback.controller_owned_sha256=f.p.recovery.second_failed_attempt.controller_owned.sha256;
+ f.callback.plan_sha256='0'.repeat(64);f.p.recovery.second_failed_attempt.callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p),/callback provenance/);
+ f.callback.plan_sha256=f.p.recovery.second_failed_attempt.plan.sha256;f.p.recovery.second_failed_attempt.callback=await f.write('callback.json',f.callback);
+ f.p.recovery.second_failed_attempt.cache_refresh=await f.write('refresh.json',{whole_payload_matches_current:false});await assert.rejects(verifyRecovery(f.p),/cache refresh provenance/);
+});
+
+test('private port selection refuses a busy port, fallback, changed record or wrong saved URL before app launch',async t=>{
+ const f=await knownThirdFixture(t);let calls=0;
+ await assert.rejects(privateEnginePort(f.p,async port=>{calls++;assert.equal(port,61169);throw Error('EADDRINUSE');}),/EADDRINUSE/);assert.equal(calls,1);
+ await assert.rejects(privateEnginePort(f.p,async()=>0),/no fallback/);
+ await fs.writeFile(f.live,encoded({...f.record,port:61170}));calls=0;await assert.rejects(privateEnginePort(f.p,async()=>{calls++;return 61169;}));assert.equal(calls,0);
+ f.p.recovery.engine_record=await f.write('wrong-record-copy.json',{...f.record,url:'http://127.0.0.1:61170/'});await assert.rejects(privateEnginePort(f.p,async()=>{calls++;return 61169;}),/Exact original private engine port record/);assert.equal(calls,0);
+});
+
+test('private Quit command has a finite wait without any PID kill or command fallback',async()=>{
+ const calls=[],spawn=(file,args)=>{calls.push({file,args});return{once(){return this;}};};
+ const fixture=createPrivateShellCommands({spawn,exe:'C:/private/app/Books Arranger.exe',profile:'C:/private/profile',env:{},timeoutMs:5});
+ await assert.rejects(fixture.quit(),/timed out/);assert.equal(calls.length,1);assert.equal(calls[0].args[0],'--quit');
+ assert.throws(()=>createPrivateShellCommands({spawn,exe:'C:/private/app/Books Arranger.exe',profile:'C:/private/profile',env:{},timeoutMs:60001}));
 });

@@ -9,9 +9,9 @@ import net from 'node:net';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {hash,NATIVE_CASE,PA1_TITLE,PA1_ASSERTIONS} from '../scripts/qa-phase-contract.mjs';
-import {need,readPin,validatePlan,verifyInputs,treeFiles,nativeAdapters,createPrivateShellCommands,verifyCloseSession} from './real-shell-update-support.mjs';
+import {need,readPin,validatePlan,verifyInputs,treeFiles,nativeAdapters,privateEnginePort,createPrivateShellCommands,verifyCloseSession} from './real-shell-update-support.mjs';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function freePort(){return new Promise((resolve,reject)=>{const server=net.createServer();server.once('error',reject);server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port));});});}
+function freePort(requested=0){return new Promise((resolve,reject)=>{const server=net.createServer(),timer=setTimeout(()=>{server.close(()=>{});reject(new Error('Private loopback port check timed out after 5 s'));},5000);server.once('error',error=>{clearTimeout(timer);reject(error);});server.listen(requested,'127.0.0.1',()=>{const port=server.address().port;server.close(error=>{clearTimeout(timer);error?reject(error):resolve(port);});});});}
 // A self-signed X.509 certificate in plain DER: the fake GitHub's, accepted only through --ignore-certificate-errors.
 function selfSigned(names) {
  const der = (tag, content) => { const length = content.length; const head = length < 128 ? Buffer.from([tag, length]) : length < 256 ? Buffer.from([tag, 0x81, length]) : Buffer.from([tag, 0x82, length >> 8, length & 255]); return Buffer.concat([head, content]); };
@@ -96,7 +96,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
  const dirs=Object.fromEntries(['profile','data','local','roaming','temp','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
  for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json'),rootsBytes=JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books});
  if(plan.recovery)assert.equal(fs.readFileSync(roots,'utf8'),rootsBytes,'Same private recovery roots');else fs.writeFileSync(roots,rootsBytes,{flag:'wx'});
- let shell=null,cdp=null,github=null,output='',originalError=null;const requests=[];
+ let shell=null,cdp=null,github=null,output='',originalError=null,quitRequested=false,privateQuitOnFailure=null,privateStillRunning=()=>false;const requests=[];
  try{
   // The fake GitHub: a release one patch above this version whose "installer" Windows will not start.
   const next = nextPatch(pkg.version), tag = 'v' + next;
@@ -115,7 +115,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   await new Promise((resolve,reject) => {github.once('error',reject);github.listen(0, '127.0.0.1', resolve);});
   const githubPort=github.address().port;
   progress('fake-update-server-ready');
-  const enginePort = await freePort(), debugPort = await freePort();
+  const enginePort = await privateEnginePort(plan,freePort), debugPort = await freePort();progress('private-engine-port-ready',{port:enginePort});
   const env = { ...process.env, LOCALAPPDATA: dirs.local, APPDATA: dirs.roaming, TEMP: dirs.temp, TMP: dirs.temp, USERPROFILE: home };
   for (const name of Object.keys(env)) if (/^(ELECTRON_|NODE_OPTIONS$)/i.test(name)) delete env[name];  // ELECTRON_RUN_AS_NODE, even empty, turns the shell into Node
   const exe = path.join(app, 'Books Arranger.exe');
@@ -127,6 +127,8 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   progress('app-started',{pid:shell.pid});
   shell.stdout.on('data', (chunk) => { output += chunk; }); shell.stderr.on('data', (chunk) => { output += chunk; });
   let exitedAt = null; shell.on('exit', () => { exitedAt = Date.now(); });
+  privateStillRunning=()=>exitedAt===null&&shell.exitCode===null;
+  privateQuitOnFailure=()=>createPrivateShellCommands({spawn,exe,profile:dirs.profile,env,timeoutMs:10000}).quit();
   cdp = await devtools(debugPort,monitor,shell.pid);
   const status = () => cdp.evaluate('window.booksDesktop.status()');
   const until = async (check, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { monitor.checkWindows();if(intrusion)throw intrusion; if (exitedAt) throw new Error('the shell exited while waiting for ' + what + '\n' + output.slice(-3000)); try { const value = await check(); if (value) return value; } catch { /* the page is changing */ } await sleep(500); } throw new Error('timed out waiting for ' + what + '\n' + output.slice(-3000)); };
@@ -162,7 +164,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   monitor.endpoint(enginePort,owner.pid);
   const closeProof=verifyCloseSession({running:exitedAt===null&&shell.exitCode===null,loaded:closeStatus.loaded,quit:closeStatus.quit,health:closeHealth,expectedPid:owner.pid,version:pkg.version,windows:monitor.checkWindows(shell.pid)});
   // Quit through the third invocation, still targeting the same private primary/profile.
-  progress('quitting');await fixture.quit();progress('quit-command-finished');
+  progress('quitting');quitRequested=true;await fixture.quit();progress('quit-command-finished');
   const end = Date.now() + 60000;
   while (!exitedAt && Date.now() < end) await sleep(250);
   assert.ok(exitedAt, 'Quit ends the shell');
@@ -172,7 +174,9 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   console.log('BOOKS_PA1_FUNCTIONAL '+JSON.stringify(functional));
   progress('functional-passed');
  }catch(error){
-  originalError=error;progress('failed',{failed_stage:lastStage,error:String(error.stack||error),output:output.slice(-65536),requests:[...requests]});throw error;
+  originalError=error;let diagnostic=null;
+  try{if(cdp)diagnostic=await cdp.evaluate('(async()=>({startup:await window.booksDesktop.startup(),status:await window.booksDesktop.status()}))()');}catch(e){diagnostic={error:String(e.message||e)};}
+  progress('failed',{failed_stage:lastStage,error:String(error.stack||error),output:output.slice(-65536),requests:[...requests],diagnostic});throw error;
  }finally{
   clearInterval(timer);cdp?.close();
   try{await new Promise((resolve,reject)=>{
@@ -180,7 +184,12 @@ test(PA1_TITLE,{timeout:300000},async()=>{
    const closeTimer=setTimeout(()=>reject(new Error('Fake update server close timed out after 5 s')),5000);
    github.closeAllConnections();github.close(error=>{clearTimeout(closeTimer);error?reject(error):resolve();});
   });}catch(error){progress('server-close-failed',{error:String(error.stack||error)});if(!originalError)throw error;}
-  finally{monitor.dispose();}
+  finally{
+   if(originalError&&!quitRequested&&privateQuitOnFailure&&privateStillRunning()){
+    quitRequested=true;try{progress('failure-quitting-private-app');await privateQuitOnFailure();progress('failure-quit-command-finished');}catch(error){progress('failure-quit-command-failed',{error:String(error.stack||error)});}
+   }
+   monitor.dispose();
+  }
   // No PID kill, directory removal or registry mutation here. On failure the
   // unchanged owner supplies bounded closure; abnormal closure cannot clean keys.
  }

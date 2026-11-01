@@ -19,8 +19,10 @@ export function validatePlan(plan,authority){
  if(!plan.recovery)need(path.win32.basename(plan.fixture_root)==='pa1-'+plan.binding.build_id&&within(plan.fixture_root,plan.evidence_root),'Fresh candidate fixture root differs');
  else{
   const r=plan.recovery;
-  need(r.schema==='books-pa1-one-failed-attempt-v1'&&r.attempt===2&&r.fixture_root===plan.fixture_root,'Only one explicitly bound failed-attempt recovery is supported');
-  need(Object.keys(r).sort().join('|')==='attempt|cache_refresh|exe_identity|fixture_identity|fixture_root|original_artifact_manifest|original_baseline|original_callback|original_controller_owned|original_plan|schema','Exact failed-attempt recovery facts required');
+  need(r.schema==='books-pa1-one-failed-attempt-v1'&&[2,3].includes(r.attempt)&&r.fixture_root===plan.fixture_root,'Only the two explicitly recorded failed attempts are supported');
+  const keys=['attempt','cache_refresh','exe_identity','fixture_identity','fixture_root','original_artifact_manifest','original_baseline','original_callback','original_controller_owned','original_plan','schema'];
+  if(r.attempt===3)keys.push('second_failed_attempt','engine_port','engine_record','engine_record_identity');
+  need(Object.keys(r).sort().join('|')===keys.sort().join('|'),'Exact failed-attempt recovery facts required');
   need(Array.isArray(r.cache_refresh)&&[0,93].includes(r.cache_refresh.length),'Only the observed 93-cache refresh is supported');
   const prior=path.win32.dirname(r.original_plan.path);
   need(within(plan.fixture_root,prior)&&!within(plan.evidence_root,plan.fixture_root)&&norm(prior)!==norm(plan.evidence_root),'Separate recovery evidence and original private fixture required');
@@ -63,9 +65,29 @@ export async function verifyRecovery(plan){
  need(callback.callback_received===true&&callback.error?.code===1&&callback.error.killed===false&&callback.plan_sha256===r.original_plan.sha256&&callback.controller_owned_sha256===r.original_controller_owned.sha256,'Original failed callback provenance differs');
  need(owned.ok===false&&owned.closed===true&&owned.forced===true&&owned.timedOut===true&&owned.outputComplete===false&&owned.closureError===null&&owned.reason==='Total deadline reserved for owned cleanup','Original forced failure required; never a normal-owned substitute');
  need(owned.native?.complete===true&&owned.native.zero===true&&Number.isSafeInteger(owned.native.retained)&&owned.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>owned.native[k]===0),'Original failed attempt did not prove all owned processes closed');
- const artifactRaw=await readPin(r.original_artifact_manifest),artifact=JSON.parse(artifactRaw);
+ const artifactRaw=await readPin(r.original_artifact_manifest);let artifact=JSON.parse(artifactRaw),baseManifestSha=r.original_artifact_manifest.sha256;
  need(hash(artifactRaw)===previous.binding.artifact_manifest_sha256&&artifact.source_head===previous.binding.source_head&&artifact.build_id===previous.binding.build_id&&artifact.product_digest===previous.binding.product_digest&&artifact.payload?.verified===true&&artifact.payload.installer_equivalent===true,'Original verified payload provenance differs');
- return {previous,artifact,baseline:JSON.parse(await readPin(r.original_baseline))};
+ if(r.attempt===3){
+  const second=r.second_failed_attempt;
+  need(second&&Object.keys(second).sort().join('|')===['callback','cache_refresh','controller_owned','owned','payload_manifest','plan','quit_owned'].sort().join('|'),'Exact second failed-attempt evidence required');
+  const p=JSON.parse(await readPin(second.plan)),a=JSON.parse(await readPin(p.authority));validatePlan(p,a);
+  need(p.recovery?.attempt===2&&p.recovery.original_plan.sha256===r.original_plan.sha256&&p.recovery.original_baseline.sha256===r.original_baseline.sha256&&norm(p.fixture_root)===norm(plan.fixture_root)&&p.binding.version===plan.binding.version,'Only the recorded second attempt on this exact original fixture may precede attempt three');
+  const cb=JSON.parse(await readPin(second.callback));need(cb.callback_received===true&&cb.error?.code===1&&cb.error.killed===false&&cb.plan_sha256===second.plan.sha256&&cb.owned_sha256===second.owned.sha256&&cb.controller_owned_sha256===second.controller_owned.sha256,'Second failed callback provenance differs');
+  for(const ref of [second.owned,second.controller_owned]){const v=JSON.parse(await readPin(ref));need(v.ok===false&&v.code===1&&v.signal===null&&v.error===null&&v.closed===true&&v.outputComplete===true&&v.forced===false&&v.timedOut===false&&v.reason===null&&v.closureError===null&&v.ownership==='private-job'&&v.native?.complete===true&&v.native.zero===true&&v.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>v.native[k]===0),'Second attempt must remain a failed test with fully proved normal closure');}
+  normalOwned(JSON.parse(await readPin(second.quit_owned)));
+  const raw=await readPin(second.payload_manifest),base=JSON.parse(raw),refresh=JSON.parse(await readPin(second.cache_refresh));
+  need(hash(raw)===p.binding.artifact_manifest_sha256&&base.source_head===p.binding.source_head&&base.build_id===p.binding.build_id&&base.product_digest===p.binding.product_digest&&base.payload?.verified===true&&base.payload.installer_equivalent===true,'Second attempt verified payload provenance differs');
+  need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.current_manifest_sha256===second.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Second attempt cache refresh provenance differs');
+  await readPin(r.engine_record);artifact=base;baseManifestSha=second.payload_manifest.sha256;
+ }
+ return {previous,artifact,baseManifestSha,baseline:JSON.parse(await readPin(r.original_baseline))};
+}
+export async function privateEnginePort(plan,probe){
+ if(plan.recovery?.attempt!==3)return probe(0);
+ const r=plan.recovery,raw=await readPin(r.engine_record),record=JSON.parse(raw),port=r.engine_port;
+ need(Number.isInteger(port)&&port>=1024&&port<=65535&&record.application==='Books Arranger'&&record.version===plan.binding.version&&record.port===port&&record.url==='http://127.0.0.1:'+port+'/'&&Number.isInteger(record.pid)&&record.pid>0&&/^[a-f0-9]{32}$/.test(record.instance),'Exact original private engine port record required');
+ await readPin({path:path.join(plan.fixture_root,'home','data','web-instance.json'),sha256:r.engine_record.sha256,size:r.engine_record.size,identity:r.engine_record_identity});
+ need(await probe(port)===port,'Original private engine port is unavailable; no fallback is permitted');return port;
 }
 export function recoveryCacheChanges(plan,previous,current){
  const names=Object.keys(previous).sort();need(equal(names,Object.keys(current).sort()),'Recovery payload members differ');
@@ -111,7 +133,7 @@ export async function freshFixture(plan,manifest){
   }
   need(sameFileTree(await ordinary(exe,{file:true}),identity),'Private executable identity changed');
   need(sameFileTree(await treeFiles(app),manifest.payload.files),'Refreshed private payload differs from verified candidate');
-  await fs.writeFile(path.join(plan.evidence_root,'recovery-cache-refresh.private.json'),JSON.stringify({original_manifest_sha256:plan.recovery.original_artifact_manifest.sha256,current_manifest_sha256:plan.binding.artifact_manifest_sha256,exe_identity:identity,changes,whole_payload_matches_current:true}),{flag:'wx'});
+  await fs.writeFile(path.join(plan.evidence_root,'recovery-cache-refresh.private.json'),JSON.stringify({original_manifest_sha256:plan.recovery.original_artifact_manifest.sha256,base_manifest_sha256:prior.baseManifestSha,current_manifest_sha256:plan.binding.artifact_manifest_sha256,exe_identity:identity,changes,whole_payload_matches_current:true}),{flag:'wx'});
   return app;
  }
  try{await fs.lstat(plan.fixture_root);throw Error('Fixture already exists; no adoption or deletion');}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -122,11 +144,13 @@ export async function freshFixture(plan,manifest){
 }
 
 // Only the two documented commands for this already-bound private shell/profile.
-export function createPrivateShellCommands({spawn,exe,profile,env}){
+export function createPrivateShellCommands({spawn,exe,profile,env,timeoutMs=60000}){
  privatePath(exe);privatePath(profile);
+ need(Number.isSafeInteger(timeoutMs)&&timeoutMs>0&&timeoutMs<=60000,'Bounded private shell command timeout required');
  const command=flag=>new Promise((resolve,reject)=>{
   const child=spawn(exe,[flag,'--shell-profile='+profile,'--start-hidden','--quiet-errors'],{env,windowsHide:true,stdio:'ignore'});
-  child.once('error',reject);child.once('exit',(code,signal)=>code===0&&signal===null?resolve():reject(Error('Private shell command failed: '+flag)));
+  const timer=setTimeout(()=>reject(Error('Private shell command timed out: '+flag)),timeoutMs);
+  child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',(code,signal)=>{clearTimeout(timer);code===0&&signal===null?resolve():reject(Error('Private shell command failed: '+flag));});
  });
  return Object.freeze({closeWindow:()=>command('--close-window'),quit:()=>command('--quit')});
 }
