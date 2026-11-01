@@ -17,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -164,10 +164,11 @@ test('close-session proof requires the live primary, unchanged healthy engine an
 });
 
 // The recovery fixtures remain inert bytes under the suite's process/network/native deny guards.
-async function failedAttemptFixture(t){
+async function failedAttemptFixture(t,caches=false){
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'books-pa1-recovery-'));t.after(()=>fs.rm(root,{recursive:true}));
  const prior=path.join(root,'first'),next=path.join(root,'second');await fs.mkdir(prior);await fs.mkdir(next);
  const b=candidate(),fixture=path.join(prior,'pa1-'+b.build_id),app=path.join(fixture,'app');await fs.mkdir(app,{recursive:true});await fs.writeFile(path.join(app,'Books Arranger.exe'),'inert original payload');
+ if(caches)for(let n=0;n<93;n++){const cache=path.join(app,'resources/backend/__pycache__/module'+n+'.cpython-314.pyc');await fs.mkdir(path.dirname(cache),{recursive:true});await fs.writeFile(cache,'old cache '+n);await fs.writeFile(path.join(app,'resources/backend/module'+n+'.py'),'unchanged Python source '+n);}
  const pin=async file=>{const raw=await fs.readFile(file),s=await fs.lstat(file,{bigint:true});return{path:file,size:raw.length,sha256:hash(raw),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
  const write=async(name,value)=>{const file=path.join(prior,name);await fs.writeFile(file,encoded(value));return pin(file);};
  const artifact={version:b.version,source_head:b.source_head,product_digest:b.product_digest,build_id:b.build_id,payload:{verified:true,installer_equivalent:true,files:await treeFiles(app)}};
@@ -180,7 +181,7 @@ async function failedAttemptFixture(t){
  const nextBinding={...b,build_id:'f3a1de11-1811-4ef5-bf5c-586a70b7db9e'},nextAuthority=authority(nextBinding),p=plan(nextBinding,nextAuthority);
  p.fixture_root=fixture;p.evidence_root=next;p.environment=previous.environment;
  const nextAuthorityFile=path.join(next,'authority.json');await fs.writeFile(nextAuthorityFile,encoded(nextAuthority));p.authority=await pin(nextAuthorityFile);
- const s=await ordinary(fixture);p.recovery={schema:'books-pa1-one-failed-attempt-v1',attempt:2,fixture_root:fixture,fixture_identity:{dev:s.dev,ino:s.ino,nlink:s.nlink},original_plan:previousRef,original_controller_owned:ownedRef,original_callback:callbackRef,original_baseline:baselineRef,original_artifact_manifest:artifactRef};
+ const s=await ordinary(fixture);p.recovery={schema:'books-pa1-one-failed-attempt-v1',attempt:2,cache_refresh:[],fixture_root:fixture,fixture_identity:{dev:s.dev,ino:s.ino,nlink:s.nlink},exe_identity:await ordinary(path.join(app,'Books Arranger.exe'),{file:true}),original_plan:previousRef,original_controller_owned:ownedRef,original_callback:callbackRef,original_baseline:baselineRef,original_artifact_manifest:artifactRef};
  const replaceOwned=async value=>{p.recovery.original_controller_owned=await write('controller-owned.json',value);callback.controller_owned_sha256=p.recovery.original_controller_owned.sha256;p.recovery.original_callback=await write('callback.json',callback);};
  return {p,nextAuthority,previous,owned,callback,artifact,baseline,app,write,replaceOwned};
 }
@@ -208,5 +209,17 @@ test('recovery refuses unknown/live closure, forged callback, new fixture and ch
 test('recovery cannot adopt another release, escape its bound arena or change the original payload',async t=>{
  const f=await failedAttemptFixture(t);f.p.binding.version='0.24.3';await assert.rejects(verifyRecovery(f.p),/same release/);f.p.binding.version='0.24.2';
  for(const alter of [p=>p.recovery.attempt=3,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
- await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact),/Existing recovery payload differs/);
+ await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact));
+});
+
+test('exact 93 generated-cache refresh preserves EXE identity, Python sources and the entire new payload',async t=>{
+ const f=await failedAttemptFixture(t,true),payload=path.join(path.dirname(f.p.evidence_root),'verified-new-payload');await fs.cp(f.app,payload,{recursive:true});
+ for(let n=0;n<93;n++)await fs.writeFile(path.join(payload,'resources/backend/__pycache__/module'+n+'.cpython-314.pyc'),'new cache '+n);
+ const files=await treeFiles(payload),old=f.artifact.payload.files;
+ f.p.recovery.cache_refresh=Object.keys(files).sort().filter(name=>!sameFileTree(old[name],files[name])).map(name=>{const source=name.replace('__pycache__/','').replace('.cpython-314.pyc','.py');return{path:name,old_sha256:old[name].sha256,new_sha256:files[name].sha256,size:files[name].size,source_path:source,source_sha256:files[source].sha256};});
+ f.p.payload.root=payload;const identity=await ordinary(path.join(f.app,'Books Arranger.exe'),{file:true});
+ assert.equal(recoveryCacheChanges(f.p,old,files).length,93);
+ for(const alter of [v=>delete v['resources/backend/module0.py'],v=>v['resources/backend/module0.py'].sha256='0'.repeat(64),v=>v['Books Arranger.exe'].sha256='0'.repeat(64),v=>v['resources/backend/__pycache__/module0.cpython-314.pyc'].size++,v=>v['resources/backend/__pycache__/module0.cpython-314.pyc']=old['resources/backend/__pycache__/module0.cpython-314.pyc']]){const bad=structuredClone(files);alter(bad);assert.throws(()=>recoveryCacheChanges(f.p,old,bad));}
+ const wrong=structuredClone(f.p);wrong.recovery.cache_refresh[0].new_sha256='0'.repeat(64);assert.throws(()=>recoveryCacheChanges(wrong,old,files),/manifest-pinned/);
+ await freshFixture(f.p,{payload:{files}});assert.deepEqual(await treeFiles(f.app),files);assert.deepEqual(await ordinary(path.join(f.app,'Books Arranger.exe'),{file:true}),identity);
 });

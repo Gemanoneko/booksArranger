@@ -20,7 +20,8 @@ export function validatePlan(plan,authority){
  else{
   const r=plan.recovery;
   need(r.schema==='books-pa1-one-failed-attempt-v1'&&r.attempt===2&&r.fixture_root===plan.fixture_root,'Only one explicitly bound failed-attempt recovery is supported');
-  need(Object.keys(r).sort().join('|')==='attempt|fixture_identity|fixture_root|original_artifact_manifest|original_baseline|original_callback|original_controller_owned|original_plan|schema','Exact failed-attempt recovery facts required');
+  need(Object.keys(r).sort().join('|')==='attempt|cache_refresh|exe_identity|fixture_identity|fixture_root|original_artifact_manifest|original_baseline|original_callback|original_controller_owned|original_plan|schema','Exact failed-attempt recovery facts required');
+  need(Array.isArray(r.cache_refresh)&&[0,93].includes(r.cache_refresh.length),'Only the observed 93-cache refresh is supported');
   const prior=path.win32.dirname(r.original_plan.path);
   need(within(plan.fixture_root,prior)&&!within(plan.evidence_root,plan.fixture_root)&&norm(prior)!==norm(plan.evidence_root),'Separate recovery evidence and original private fixture required');
   for(const key of ['original_plan','original_callback','original_controller_owned','original_baseline','original_artifact_manifest'])need(within(r[key].path,prior),'Recovery proof escapes original private arena');
@@ -57,6 +58,7 @@ export async function verifyRecovery(plan){
  validatePlan(previous,JSON.parse(await readPin(previous.authority)));
  need(previous.binding.version===plan.binding.version&&norm(previous.fixture_root)===norm(plan.fixture_root),'Recovery must keep the same release and exact EXE path');
  const st=await ordinary(plan.fixture_root);need(st.dev===r.fixture_identity.dev&&st.ino===r.fixture_identity.ino&&st.nlink===r.fixture_identity.nlink,'Original private fixture identity differs');
+ const exe=await ordinary(path.join(plan.fixture_root,'app','Books Arranger.exe'),{file:true});need(sameFileTree(exe,r.exe_identity),'Original private executable identity differs');
  const callback=JSON.parse(await readPin(r.original_callback)),owned=JSON.parse(await readPin(r.original_controller_owned));
  need(callback.callback_received===true&&callback.error?.code===1&&callback.error.killed===false&&callback.plan_sha256===r.original_plan.sha256&&callback.controller_owned_sha256===r.original_controller_owned.sha256,'Original failed callback provenance differs');
  need(owned.ok===false&&owned.closed===true&&owned.forced===true&&owned.timedOut===true&&owned.outputComplete===false&&owned.closureError===null&&owned.reason==='Total deadline reserved for owned cleanup','Original forced failure required; never a normal-owned substitute');
@@ -64,6 +66,19 @@ export async function verifyRecovery(plan){
  const artifactRaw=await readPin(r.original_artifact_manifest),artifact=JSON.parse(artifactRaw);
  need(hash(artifactRaw)===previous.binding.artifact_manifest_sha256&&artifact.source_head===previous.binding.source_head&&artifact.build_id===previous.binding.build_id&&artifact.product_digest===previous.binding.product_digest&&artifact.payload?.verified===true&&artifact.payload.installer_equivalent===true,'Original verified payload provenance differs');
  return {previous,artifact,baseline:JSON.parse(await readPin(r.original_baseline))};
+}
+export function recoveryCacheChanges(plan,previous,current){
+ const names=Object.keys(previous).sort();need(equal(names,Object.keys(current).sort()),'Recovery payload members differ');
+ const changed=names.filter(name=>!sameFileTree(previous[name],current[name]));
+ need(changed.length===0||changed.length===93,'Recovery cache change count differs');
+ const facts=changed.map(name=>{
+  const match=/^resources\/backend\/__pycache__\/([A-Za-z_][A-Za-z0-9_]*)\.cpython-314\.pyc$/.exec(name);
+  need(match,'Recovery may refresh only the observed generated Python caches');
+  const source='resources/backend/'+match[1]+'.py';
+  need(previous[source]&&sameFileTree(previous[source],current[source])&&previous[name].size===current[name].size,'Corresponding Python source or cache size differs');
+  return {path:name,old_sha256:previous[name].sha256,new_sha256:current[name].sha256,size:current[name].size,source_path:source,source_sha256:current[source].sha256};
+ });
+ need(sameFileTree(facts,plan.recovery.cache_refresh),'Exact manifest-pinned recovery cache facts differ');return facts;
 }
 export async function verifyInputs(plan){
  const mandatory=[plan.node,plan.helper,{path:path.join(plan.source_root,'scripts/qa-phase-contract.mjs'),sha256:plan.binding.phase_contract_sha256},{path:path.join(path.dirname(plan.helper.path),'bounded-child.mjs')},...['kernel32.dll','advapi32.dll','ntdll.dll','user32.dll','iphlpapi.dll'].map(name=>({path:'C:/Windows/System32/'+name}))];
@@ -76,11 +91,29 @@ export async function verifyInputs(plan){
  need(m.version===plan.binding.version&&m.source_head===plan.binding.source_head&&m.product_digest===plan.binding.product_digest&&m.build_id===plan.binding.build_id,'Candidate identity differs');
  need(hash(JSON.stringify(m.runtime))===plan.binding.runtime_manifest_sha256&&m.payload?.verified===true&&m.payload.installer_equivalent===true,'Candidate payload/runtime proof absent');
  need(sameFileTree(await treeFiles(plan.payload.root),m.payload.files),'Built payload differs');
- if(plan.recovery){const prior=await verifyRecovery(plan);need(sameFileTree(prior.artifact.payload.files,m.payload.files),'Recovery candidate changes the original private app payload');}
+ if(plan.recovery){const prior=await verifyRecovery(plan);recoveryCacheChanges(plan,prior.artifact.payload.files,m.payload.files);}
  return m;
 }
 export async function freshFixture(plan,manifest){
- if(plan.recovery){await verifyRecovery(plan);const app=path.join(plan.fixture_root,'app');need(sameFileTree(await treeFiles(app),manifest.payload.files),'Existing recovery payload differs');return app;}
+ if(plan.recovery){
+  const prior=await verifyRecovery(plan),app=path.join(plan.fixture_root,'app');
+  need(sameFileTree(await treeFiles(app),prior.artifact.payload.files),'Original private payload differs before recovery');
+  const changes=recoveryCacheChanges(plan,prior.artifact.payload.files,manifest.payload.files),exe=path.join(app,'Books Arranger.exe'),identity=await ordinary(exe,{file:true});
+  for(const change of changes){
+   const target=path.join(app,change.path),st=await ordinary(target,{file:true});
+   await readPin({path:target,sha256:change.old_sha256,size:change.size,identity:st});
+   const bytes=await readPin({path:path.join(plan.payload.root,change.path),sha256:change.new_sha256,size:change.size});
+   const handle=await fs.open(target,'r+');try{
+    const held=await handle.stat({bigint:true});need(held.isFile()&&String(held.dev)===st.dev&&String(held.ino)===st.ino&&held.nlink===1n&&Number(held.size)===change.size,'Private cache changed before its retained-handle write');
+    await handle.writeFile(bytes);await handle.sync();
+   }finally{await handle.close();}
+   await readPin({path:target,sha256:change.new_sha256,size:change.size,identity:st});
+  }
+  need(sameFileTree(await ordinary(exe,{file:true}),identity),'Private executable identity changed');
+  need(sameFileTree(await treeFiles(app),manifest.payload.files),'Refreshed private payload differs from verified candidate');
+  await fs.writeFile(path.join(plan.evidence_root,'recovery-cache-refresh.private.json'),JSON.stringify({original_manifest_sha256:plan.recovery.original_artifact_manifest.sha256,current_manifest_sha256:plan.binding.artifact_manifest_sha256,exe_identity:identity,changes,whole_payload_matches_current:true}),{flag:'wx'});
+  return app;
+ }
  try{await fs.lstat(plan.fixture_root);throw Error('Fixture already exists; no adoption or deletion');}catch(e){if(e.code!=='ENOENT')throw e;}
  await ordinary(path.dirname(plan.fixture_root));await fs.mkdir(plan.fixture_root);
  const app=path.join(plan.fixture_root,'app');await fs.mkdir(app);
