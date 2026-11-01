@@ -16,7 +16,15 @@ export function validatePlan(plan,authority){
  need(plan?.schema==='books-real-shell-plan-v1','Fixed real-shell plan absent');binding(plan.binding);validateAuthority(authority,plan.binding);
  need(equal(plan.case,NATIVE_CASE)&&plan.deadlineMs===600000&&plan.phase_contract_sha256===plan.binding.phase_contract_sha256,'Fixed phase/deadline differs');
  for(const key of ['fixture_root','evidence_root','source_root','koffi_root'])privatePath(plan[key]);
- need(path.win32.basename(plan.fixture_root)==='pa1-'+plan.binding.build_id&&within(plan.fixture_root,plan.evidence_root),'Fresh candidate fixture root differs');
+ if(!plan.recovery)need(path.win32.basename(plan.fixture_root)==='pa1-'+plan.binding.build_id&&within(plan.fixture_root,plan.evidence_root),'Fresh candidate fixture root differs');
+ else{
+  const r=plan.recovery;
+  need(r.schema==='books-pa1-one-failed-attempt-v1'&&r.attempt===2&&r.fixture_root===plan.fixture_root,'Only one explicitly bound failed-attempt recovery is supported');
+  need(Object.keys(r).sort().join('|')==='attempt|fixture_identity|fixture_root|original_artifact_manifest|original_baseline|original_callback|original_controller_owned|original_plan|schema','Exact failed-attempt recovery facts required');
+  const prior=path.win32.dirname(r.original_plan.path);
+  need(within(plan.fixture_root,prior)&&!within(plan.evidence_root,plan.fixture_root)&&norm(prior)!==norm(plan.evidence_root),'Separate recovery evidence and original private fixture required');
+  for(const key of ['original_plan','original_callback','original_controller_owned','original_baseline','original_artifact_manifest'])need(within(r[key].path,prior),'Recovery proof escapes original private arena');
+ }
  need(!within(plan.source_root,plan.fixture_root)&&!within(plan.evidence_root,plan.source_root),'Source/output overlap');
  need(plan.authority?.sha256===hash(JSON.stringify(authority)),'Canonical authority bytes differ from plan');
  need(plan.node?.path==='C:/Program Files/nodejs/node.exe'&&/^[a-f0-9]{64}$/.test(plan.node.sha256),'Fixed installed Node absent');
@@ -41,6 +49,22 @@ export async function readPin(ref){const st=await ordinary(ref.path,{file:true,a
 export async function treeFiles(root){
  await ordinary(root);const out={};async function walk(dir,prefix){for(const ent of await fs.readdir(dir,{withFileTypes:true})){const rel=prefix+ent.name,p=path.join(dir,ent.name);need(!ent.isSymbolicLink(),'Link in private tree');if(ent.isDirectory())await walk(p,rel+'/');else{const st=await ordinary(p,{file:true});out[rel]={size:st.size,sha256:hash(await fs.readFile(p))};}}}await walk(root,'');return Object.fromEntries(Object.entries(out).sort(([a],[b])=>a<b?-1:a>b?1:0));
 }
+// One observed failed attempt only. Its forced result remains a failure; only
+// the independently proved final native zero permits reusing its private files.
+export async function verifyRecovery(plan){
+ if(!plan.recovery)return null;const r=plan.recovery;
+ const previous=JSON.parse(await readPin(r.original_plan));need(!previous.recovery,'Chained failed-attempt recovery is forbidden');
+ validatePlan(previous,JSON.parse(await readPin(previous.authority)));
+ need(previous.binding.version===plan.binding.version&&norm(previous.fixture_root)===norm(plan.fixture_root),'Recovery must keep the same release and exact EXE path');
+ const st=await ordinary(plan.fixture_root);need(st.dev===r.fixture_identity.dev&&st.ino===r.fixture_identity.ino&&st.nlink===r.fixture_identity.nlink,'Original private fixture identity differs');
+ const callback=JSON.parse(await readPin(r.original_callback)),owned=JSON.parse(await readPin(r.original_controller_owned));
+ need(callback.callback_received===true&&callback.error?.code===1&&callback.error.killed===false&&callback.plan_sha256===r.original_plan.sha256&&callback.controller_owned_sha256===r.original_controller_owned.sha256,'Original failed callback provenance differs');
+ need(owned.ok===false&&owned.closed===true&&owned.forced===true&&owned.timedOut===true&&owned.outputComplete===false&&owned.closureError===null&&owned.reason==='Total deadline reserved for owned cleanup','Original forced failure required; never a normal-owned substitute');
+ need(owned.native?.complete===true&&owned.native.zero===true&&Number.isSafeInteger(owned.native.retained)&&owned.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>owned.native[k]===0),'Original failed attempt did not prove all owned processes closed');
+ const artifactRaw=await readPin(r.original_artifact_manifest),artifact=JSON.parse(artifactRaw);
+ need(hash(artifactRaw)===previous.binding.artifact_manifest_sha256&&artifact.source_head===previous.binding.source_head&&artifact.build_id===previous.binding.build_id&&artifact.product_digest===previous.binding.product_digest&&artifact.payload?.verified===true&&artifact.payload.installer_equivalent===true,'Original verified payload provenance differs');
+ return {previous,artifact,baseline:JSON.parse(await readPin(r.original_baseline))};
+}
 export async function verifyInputs(plan){
  const mandatory=[plan.node,plan.helper,{path:path.join(plan.source_root,'scripts/qa-phase-contract.mjs'),sha256:plan.binding.phase_contract_sha256},{path:path.join(path.dirname(plan.helper.path),'bounded-child.mjs')},...['kernel32.dll','advapi32.dll','ntdll.dll','user32.dll','iphlpapi.dll'].map(name=>({path:'C:/Windows/System32/'+name}))];
  for(const expected of mandatory){const ref=plan.inputs.find(r=>norm(r.path)===norm(expected.path));need(ref&&(!expected.sha256||ref.sha256===expected.sha256),'Required executable/helper/system pin absent: '+expected.path);}
@@ -51,9 +75,12 @@ export async function verifyInputs(plan){
  const raw=await readPin(plan.payload.manifest);need(hash(raw)===plan.binding.artifact_manifest_sha256,'Candidate artifact binding differs');const m=JSON.parse(raw);
  need(m.version===plan.binding.version&&m.source_head===plan.binding.source_head&&m.product_digest===plan.binding.product_digest&&m.build_id===plan.binding.build_id,'Candidate identity differs');
  need(hash(JSON.stringify(m.runtime))===plan.binding.runtime_manifest_sha256&&m.payload?.verified===true&&m.payload.installer_equivalent===true,'Candidate payload/runtime proof absent');
- need(sameFileTree(await treeFiles(plan.payload.root),m.payload.files),'Built payload differs');return m;
+ need(sameFileTree(await treeFiles(plan.payload.root),m.payload.files),'Built payload differs');
+ if(plan.recovery){const prior=await verifyRecovery(plan);need(sameFileTree(prior.artifact.payload.files,m.payload.files),'Recovery candidate changes the original private app payload');}
+ return m;
 }
 export async function freshFixture(plan,manifest){
+ if(plan.recovery){await verifyRecovery(plan);const app=path.join(plan.fixture_root,'app');need(sameFileTree(await treeFiles(app),manifest.payload.files),'Existing recovery payload differs');return app;}
  try{await fs.lstat(plan.fixture_root);throw Error('Fixture already exists; no adoption or deletion');}catch(e){if(e.code!=='ENOENT')throw e;}
  await ordinary(path.dirname(plan.fixture_root));await fs.mkdir(plan.fixture_root);
  const app=path.join(plan.fixture_root,'app');await fs.mkdir(app);

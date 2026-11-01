@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {hash,NATIVE_CASE,NATIVE_ROLES,normalOwned,validateFunctional,validateNativeEvidence} from './qa-phase-contract.mjs';
-import {need,readPin,ordinary,within,validatePlan,verifyInputs,freshFixture,treeFiles,sameFileTree,nativeAdapters,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
+import {need,readPin,ordinary,within,validatePlan,verifyInputs,verifyRecovery,freshFixture,treeFiles,sameFileTree,nativeAdapters,ownLeafDelta,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
 const encode=value=>Buffer.from(JSON.stringify(value));
 async function freshWrite(file,bytes){await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:hash(bytes),size:bytes.length};}
 // The external reviewed driver owns this controller with unchanged runOwned.
@@ -20,7 +20,13 @@ export async function runFixedPhase(planPath,planSha,deadline,adapters=null){
  need(hash(await fs.readFile(process.execPath))===plan.node.sha256,'Controller Node differs');
  const app=await freshFixture(plan,manifest);remaining();
  const native=adapters||nativeAdapters(plan,authority);native.monitor.checkWindows();
- const before=await native.registry.snapshot();await freshWrite(path.join(plan.evidence_root,'baseline.private.json'),encode(before));
+ const current=await native.registry.snapshot();let before=current;
+ if(plan.recovery){
+  const prior=await verifyRecovery(plan),own=ownLeafDelta(prior.baseline,current,path.join(app,'Books Arranger.exe'),plan.expected_tray_types);
+  before=prior.baseline;
+  await freshWrite(path.join(plan.evidence_root,'recovery-preflight.private.json'),encode({original_plan_sha256:plan.recovery.original_plan.sha256,original_controller_owned_sha256:plan.recovery.original_controller_owned.sha256,original_forced_failure:true,original_final_native_zero:true,baseline_sha256:hash(encode(before)),ownId:own.id,existingOwnLeaf:true,ownReferenceCount:1,ownReferenceBytes:8,foreignUnchanged:true,uiOrderListWritten:false}));
+ }
+ await freshWrite(path.join(plan.evidence_root,'baseline.private.json'),encode(before));
  const owner=adapters?.runOwned||(await import(pathToFileURL(plan.helper.path).href)).runOwned;
  const nonce=randomBytes(32).toString('hex');
  const result=await owner(plan.node.path,['--test','--test-reporter=tap',path.join(plan.source_root,NATIVE_CASE.entry)],{

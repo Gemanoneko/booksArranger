@@ -44,7 +44,10 @@ async function devtools(port,monitor,ownerPid) {
     if (page) {
      const target=new URL(page.webSocketDebuggerUrl);assert.equal(target.hostname,'127.0.0.1');assert.equal(Number(target.port),port);
      socket = new WebSocket(page.webSocketDebuggerUrl);
-     await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
+     await new Promise((resolve, reject) => {
+      const timer=setTimeout(()=>{socket?.close();reject(new Error('DevTools connection timed out'));},Math.max(1,end-Date.now()));
+      socket.onopen=()=>{clearTimeout(timer);resolve();};socket.onerror=error=>{clearTimeout(timer);reject(error);};
+     });
      monitor.endpoint(port,ownerPid);
      socket.onmessage = (event) => { const message = JSON.parse(event.data); if (waiting.has(message.id)) { waiting.get(message.id)(message); waiting.delete(message.id); } };
      socket.onclose = () => { socket = null; for (const resolve of waiting.values()) resolve({ error: { message: 'closed' } }); waiting.clear(); };
@@ -58,7 +61,12 @@ async function devtools(port,monitor,ownerPid) {
  async function evaluate(expression, awaitPromise = true) {
   monitor.checkWindows();monitor.endpoint(port,ownerPid);
   if (!socket) await connect();
-  const message = await new Promise((resolve) => { const n = ++id; waiting.set(n, resolve); socket.send(JSON.stringify({ id: n, method: 'Runtime.evaluate', params: { expression, awaitPromise, returnByValue: true } })); });
+  const message = await new Promise((resolve,reject) => {
+   const n=++id,timer=setTimeout(()=>{waiting.delete(n);reject(new Error('DevTools reply timed out after 30 s'));},30000);
+   waiting.set(n,value=>{clearTimeout(timer);resolve(value);});
+   try{socket.send(JSON.stringify({id:n,method:'Runtime.evaluate',params:{expression,awaitPromise,returnByValue:true}}));}
+   catch(error){clearTimeout(timer);waiting.delete(n);reject(error);}
+  });
   if (message.error || message.result?.exceptionDetails) throw new Error((message.error && message.error.message) || JSON.stringify(message.result.exceptionDetails).slice(0, 400));
   return message.result.result.value;
  }
@@ -75,22 +83,26 @@ function nextPatch(version) {
 test(PA1_TITLE,{timeout:300000},async()=>{
  need(process.env.BOOKS_PA1_PLAN&&process.env.BOOKS_PA1_PLAN_SHA&&/^[a-f0-9]{64}$/.test(process.env.BOOKS_PA1_NONCE||''),'PA-1 default refused: exact owned phase authority absent');
  const raw=fs.readFileSync(process.env.BOOKS_PA1_PLAN);need(hash(raw)===process.env.BOOKS_PA1_PLAN_SHA,'Worker plan pin differs');const plan=JSON.parse(raw);
- const authority=JSON.parse(await readPin(plan.authority));validatePlan(plan,authority);const manifest=await verifyInputs(plan);
+ const authority=JSON.parse(await readPin(plan.authority));validatePlan(plan,authority);
+ const trace=path.join(plan.evidence_root,'native-progress.private.jsonl');fs.writeFileSync(trace,'',{flag:'wx'});
+ let lastStage='input-verification';
+ const progress=(stage,detail={})=>{lastStage=stage;fs.appendFileSync(trace,JSON.stringify({stage,at:new Date().toISOString(),...detail})+'\n');};
+ progress('input-verification');const manifest=await verifyInputs(plan);progress('inputs-verified');
  need(process.env.BOOKS_PA1_DEADLINE&&Number(process.env.BOOKS_PA1_DEADLINE)>Date.now(),'Original remaining deadline missing');
  const work=plan.fixture_root,app=path.join(work,'app'),home=path.join(work,'home'),pkg={version:plan.binding.version};
  assert.deepEqual(await treeFiles(app),manifest.payload.files,'Actual built candidate payload');
  const {monitor}=nativeAdapters(plan,authority);monitor.checkWindows();let intrusion=null;
  const timer=setInterval(()=>{try{monitor.checkWindows();}catch(e){intrusion=e;}},100);
  const dirs=Object.fromEntries(['profile','data','local','roaming','temp','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
- for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json');fs.writeFileSync(roots,JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books}),{flag:'wx'});
- let shell=null,cdp=null,github=null;
+ for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json'),rootsBytes=JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books});
+ if(plan.recovery)assert.equal(fs.readFileSync(roots,'utf8'),rootsBytes,'Same private recovery roots');else fs.writeFileSync(roots,rootsBytes,{flag:'wx'});
+ let shell=null,cdp=null,github=null,output='',originalError=null;const requests=[];
  try{
   // The fake GitHub: a release one patch above this version whose "installer" Windows will not start.
   const next = nextPatch(pkg.version), tag = 'v' + next;
   const installer = Buffer.from('This is no program: Windows refuses to start it (Books Arranger PA-1).\r\n'.repeat(64));
   const sha512 = crypto.createHash('sha512').update(installer).digest('base64');
   const name = 'Books-Arranger-Setup-' + next + '.exe', base = '/Gemanoneko/booksArranger/releases';
-  const requests = [];
   github = https.createServer(selfSigned(['github.com', 'api.github.com', 'objects.githubusercontent.com']), (req, res) => {
    requests.push(req.url);
    const send = (status, type, body) => { res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) }); res.end(body); };
@@ -102,28 +114,34 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   });
   await new Promise((resolve,reject) => {github.once('error',reject);github.listen(0, '127.0.0.1', resolve);});
   const githubPort=github.address().port;
+  progress('fake-update-server-ready');
   const enginePort = await freePort(), debugPort = await freePort();
   const env = { ...process.env, LOCALAPPDATA: dirs.local, APPDATA: dirs.roaming, TEMP: dirs.temp, TMP: dirs.temp, USERPROFILE: home };
   for (const name of Object.keys(env)) if (/^(ELECTRON_|NODE_OPTIONS$)/i.test(name)) delete env[name];  // ELECTRON_RUN_AS_NODE, even empty, turns the shell into Node
   const exe = path.join(app, 'Books Arranger.exe');
-  const args = ['--start-hidden', '--quiet-errors', '--data-dir=' + dirs.data, '--catalog-mode=new', '--port=' + enginePort, '--roots-json=' + roots, '--shell-profile=' + dirs.profile,
+  const args = ['--start-hidden', '--quiet-errors', '--data-dir=' + dirs.data, '--catalog-mode='+(plan.recovery?'existing':'new'), '--port=' + enginePort, '--roots-json=' + roots, '--shell-profile=' + dirs.profile,
    '--remote-debugging-port=' + debugPort, '--ignore-certificate-errors',
    '--host-resolver-rules=MAP github.com 127.0.0.1:' + githubPort + ',MAP api.github.com 127.0.0.1:' + githubPort + ',MAP objects.githubusercontent.com 127.0.0.1:' + githubPort+',MAP * ~NOTFOUND,EXCLUDE 127.0.0.1,EXCLUDE localhost'];
-  let output = '';
+  progress('app-starting');
   shell = spawn(exe, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  progress('app-started',{pid:shell.pid});
   shell.stdout.on('data', (chunk) => { output += chunk; }); shell.stderr.on('data', (chunk) => { output += chunk; });
   let exitedAt = null; shell.on('exit', () => { exitedAt = Date.now(); });
   cdp = await devtools(debugPort,monitor,shell.pid);
   const status = () => cdp.evaluate('window.booksDesktop.status()');
   const until = async (check, ms, what) => { const end = Date.now() + ms; while (Date.now() < end) { monitor.checkWindows();if(intrusion)throw intrusion; if (exitedAt) throw new Error('the shell exited while waiting for ' + what + '\n' + output.slice(-3000)); try { const value = await check(); if (value) return value; } catch { /* the page is changing */ } await sleep(500); } throw new Error('timed out waiting for ' + what + '\n' + output.slice(-3000)); };
   await until(async () => (await status()).loaded, 120000, 'the engine to load');
+  progress('engine-loaded');progress('checking-update');
   const checked = await cdp.evaluate('window.booksDesktop.checkUpdates()');
+  progress('update-checked',{checked,requests:[...requests]});
   assert.deepEqual([checked.check.phase, checked.available], ['available', next], 'positive control: the real updater read the fake GitHub');
-  const downloaded = await cdp.evaluate('window.booksDesktop.downloadUpdate()');
+  progress('downloading-update');const downloaded = await cdp.evaluate('window.booksDesktop.downloadUpdate()');
+  progress('update-downloaded',{downloaded});
   assert.equal(downloaded.ready, true, 'positive control: downloaded and verified (sha512)');
   const pressed = Date.now();
-  await cdp.evaluate('window.booksDesktop.installUpdate(); true', false);  // the page reloads during the install: no await
+  progress('installing-invalid-update');await cdp.evaluate('window.booksDesktop.installUpdate(); true', false);  // the page reloads during the install: no await
   const failed = await until(async () => { const value = await status(); return value.update && value.update.install.phase === 'failed' && !value.update.busy.install && value.loaded ? value : null; }, 150000, 'the Install line and the old engine loaded again');
+  progress('old-engine-recovered');
   await sleep(5000);  // M-1's queued quit came 1.7 s after the press
   assert.equal(exitedAt, null, 'the shell is still running ' + Math.round((Date.now() - pressed) / 1000) + ' s after Update now');
   assert.equal(failed.update.install.cause, 'installer_blocked');
@@ -137,14 +155,14 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   // The primary stays hidden; this does not claim a physical click or visible-to-hidden transition.
   const fixture=createPrivateShellCommands({spawn,exe,profile:dirs.profile,env});
   monitor.endpoint(debugPort,shell.pid);assert.equal(exitedAt,null);assert.equal(shell.exitCode,null);
-  await fixture.closeWindow();
+  progress('closing-window');await fixture.closeWindow();progress('window-close-command-finished');
   const closeStatus=await status();
   monitor.endpoint(enginePort,owner.pid);
   const closeHealth=await (await fetch('http://127.0.0.1:'+enginePort+'/api/health',{signal:AbortSignal.timeout(5000)})).json();
   monitor.endpoint(enginePort,owner.pid);
   const closeProof=verifyCloseSession({running:exitedAt===null&&shell.exitCode===null,loaded:closeStatus.loaded,quit:closeStatus.quit,health:closeHealth,expectedPid:owner.pid,version:pkg.version,windows:monitor.checkWindows(shell.pid)});
   // Quit through the third invocation, still targeting the same private primary/profile.
-  await fixture.quit();
+  progress('quitting');await fixture.quit();progress('quit-command-finished');
   const end = Date.now() + 60000;
   while (!exitedAt && Date.now() < end) await sleep(250);
   assert.ok(exitedAt, 'Quit ends the shell');
@@ -152,9 +170,17 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   assert.deepEqual(await treeFiles(app),manifest.payload.files,'Copied candidate payload remains byte exact');
   const functional={schema:'books-pa1-functional-v1',binding:plan.binding,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:work,exe,downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:closeProof.healthVersionMatched,closedByQuit:true,payloadUnchanged:true,endpointsOwned:closeProof.endpointsOwned,noVisibleOwnWindow:closeProof.noVisibleOwnWindow,intrusion:null,window_observations:monitor.view().checks};
   console.log('BOOKS_PA1_FUNCTIONAL '+JSON.stringify(functional));
+  progress('functional-passed');
+ }catch(error){
+  originalError=error;progress('failed',{failed_stage:lastStage,error:String(error.stack||error),output:output.slice(-65536),requests:[...requests]});throw error;
  }finally{
-  clearInterval(timer);cdp?.close();await new Promise(resolve=>github?github.close(resolve):resolve());
-  monitor.dispose();
+  clearInterval(timer);cdp?.close();
+  try{await new Promise((resolve,reject)=>{
+   if(!github){resolve();return;}
+   const closeTimer=setTimeout(()=>reject(new Error('Fake update server close timed out after 5 s')),5000);
+   github.closeAllConnections();github.close(error=>{clearTimeout(closeTimer);error?reject(error):resolve();});
+  });}catch(error){progress('server-close-failed',{error:String(error.stack||error)});if(!originalError)throw error;}
+  finally{monitor.dispose();}
   // No PID kill, directory removal or registry mutation here. On failure the
   // unchanged owner supplies bounded closure; abnormal closure cannot clean keys.
  }

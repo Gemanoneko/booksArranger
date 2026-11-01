@@ -17,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -161,4 +161,52 @@ test('close-session proof requires the live primary, unchanged healthy engine an
  for(const alter of [p=>p.running=false,p=>p.loaded=false,p=>p.quit='requested',p=>p.health.pid=43,p=>p.health.version='0.24.1',p=>p.health=null,p=>p.expectedPid=0,p=>p.windows.intrusion='visible own window',p=>p.windows.hiddenOwnWindows=0,p=>p.windows.hiddenOwnWindows=NaN,p=>p.windows=null]){
   const p=structuredClone(proof);alter(p);assert.throws(()=>verifyCloseSession(p));
  }
+});
+
+// The recovery fixtures remain inert bytes under the suite's process/network/native deny guards.
+async function failedAttemptFixture(t){
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'books-pa1-recovery-'));t.after(()=>fs.rm(root,{recursive:true}));
+ const prior=path.join(root,'first'),next=path.join(root,'second');await fs.mkdir(prior);await fs.mkdir(next);
+ const b=candidate(),fixture=path.join(prior,'pa1-'+b.build_id),app=path.join(fixture,'app');await fs.mkdir(app,{recursive:true});await fs.writeFile(path.join(app,'Books Arranger.exe'),'inert original payload');
+ const pin=async file=>{const raw=await fs.readFile(file),s=await fs.lstat(file,{bigint:true});return{path:file,size:raw.length,sha256:hash(raw),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
+ const write=async(name,value)=>{const file=path.join(prior,name);await fs.writeFile(file,encoded(value));return pin(file);};
+ const artifact={version:b.version,source_head:b.source_head,product_digest:b.product_digest,build_id:b.build_id,payload:{verified:true,installer_equivalent:true,files:await treeFiles(app)}};
+ const artifactRef=await write('artifact.json',artifact);b.artifact_manifest_sha256=artifactRef.sha256;
+ const a=authority(b),previous=plan(b,a);previous.evidence_root=prior;previous.fixture_root=fixture;previous.authority=await write('authority.json',a);
+ previous.environment=Object.fromEntries(Object.entries(previous.environment).map(([k,v])=>[k,v.replace('C:/private/pa1-'+b.build_id,fixture)]));
+ const previousRef=await write('plan.json',previous),owned={...normal(),ok:false,forced:true,timedOut:true,outputComplete:false,reason:'Total deadline reserved for owned cleanup'};
+ const ownedRef=await write('controller-owned.json',owned),callback={callback_received:true,error:{code:1,killed:false},plan_sha256:previousRef.sha256,controller_owned_sha256:ownedRef.sha256};
+ const callbackRef=await write('callback.json',callback),baseline={rootSchema:{},order:'',leaves:{}},baselineRef=await write('baseline.private.json',baseline);
+ const nextBinding={...b,build_id:'f3a1de11-1811-4ef5-bf5c-586a70b7db9e'},nextAuthority=authority(nextBinding),p=plan(nextBinding,nextAuthority);
+ p.fixture_root=fixture;p.evidence_root=next;p.environment=previous.environment;
+ const nextAuthorityFile=path.join(next,'authority.json');await fs.writeFile(nextAuthorityFile,encoded(nextAuthority));p.authority=await pin(nextAuthorityFile);
+ const s=await ordinary(fixture);p.recovery={schema:'books-pa1-one-failed-attempt-v1',attempt:2,fixture_root:fixture,fixture_identity:{dev:s.dev,ino:s.ino,nlink:s.nlink},original_plan:previousRef,original_controller_owned:ownedRef,original_callback:callbackRef,original_baseline:baselineRef,original_artifact_manifest:artifactRef};
+ const replaceOwned=async value=>{p.recovery.original_controller_owned=await write('controller-owned.json',value);callback.controller_owned_sha256=p.recovery.original_controller_owned.sha256;p.recovery.original_callback=await write('callback.json',callback);};
+ return {p,nextAuthority,previous,owned,callback,artifact,baseline,app,write,replaceOwned};
+}
+
+test('one forced but fully closed attempt reuses only its exact unchanged app and original baseline',async t=>{
+ const f=await failedAttemptFixture(t);validatePlan(f.p,f.nextAuthority);const prior=await verifyRecovery(f.p);
+ assert.deepEqual(prior.baseline,f.baseline);assert.equal(prior.previous.fixture_root,f.p.fixture_root);
+ assert.equal(await freshFixture(f.p,f.artifact),f.app);assert.equal((await fs.readFile(path.join(f.app,'Books Arranger.exe'))).toString(),'inert original payload');
+ assert.throws(()=>normalOwned(f.owned),'the forced first attempt remains a failure');
+});
+
+test('recovery refuses unknown/live closure, forged callback, new fixture and chained attempts',async t=>{
+ const f=await failedAttemptFixture(t);
+ for(const alter of [o=>o.forced=false,o=>o.closed=false,o=>o.native.zero=false,o=>o.native.complete=false,o=>o.native.active=1,o=>o.native.unsignaled=1,o=>o.closureError='unknown']){
+  const bad=structuredClone(f.owned);alter(bad);await f.replaceOwned(bad);await assert.rejects(verifyRecovery(f.p));
+ }
+ await f.replaceOwned(f.owned);const good=structuredClone(f.p);
+ f.callback.plan_sha256='0'.repeat(64);f.p.recovery.original_callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p),/callback provenance/);
+ f.p=good;f.callback.plan_sha256=good.recovery.original_plan.sha256;await f.replaceOwned(f.owned);
+ f.p.recovery.fixture_identity.ino=String(BigInt(f.p.recovery.fixture_identity.ino)+1n);await assert.rejects(verifyRecovery(f.p),/fixture identity/);
+ f.p.recovery.fixture_identity=good.recovery.fixture_identity;
+ f.previous.recovery={};f.p.recovery.original_plan=await f.write('plan.json',f.previous);await assert.rejects(verifyRecovery(f.p),/Chained/);
+});
+
+test('recovery cannot adopt another release, escape its bound arena or change the original payload',async t=>{
+ const f=await failedAttemptFixture(t);f.p.binding.version='0.24.3';await assert.rejects(verifyRecovery(f.p),/same release/);f.p.binding.version='0.24.2';
+ for(const alter of [p=>p.recovery.attempt=3,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
+ await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact),/Existing recovery payload differs/);
 });
