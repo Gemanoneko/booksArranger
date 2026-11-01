@@ -1,12 +1,27 @@
 // Purely verifies the exact private output and returns the manifest to native owner.
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import * as asar from '@electron/asar';
 import {getCurrentFuseWire,FuseVersion,FuseV1Options} from '@electron/fuses';
 import yaml from 'js-yaml';
 import {productTree} from './release-contract.mjs';
+export function readAsarFiles(archive){
+ const shellFiles={};
+ for(const member of asar.listPackage(archive)){
+  const name=member.replace(/^[/\\]/,'').replace(/\\/g,'/');
+  // Inventory keys stay portable; ASAR's directory lookup splits native path.sep.
+  const lookup=path.normalize(name);
+  const info=asar.statFile(archive,lookup);
+  if(info.link)throw Error('ASAR link member refused');
+  if(!info.files)shellFiles[name]=asar.extractFile(archive,lookup);
+ }
+ return shellFiles;
+}
+
+async function main(){
 const request=JSON.parse(fs.readFileSync(0,'utf8'));
 const root=request.root,output=request.output,unpacked=path.join(output,'win-unpacked');
 function hash(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -30,13 +45,7 @@ if(!request.shell||!request.shell_manifest||!request.pack_inputs_sha256)throw Er
 if(facts(path.join(root,'scripts/build-inputs.json')).sha256!==request.pack_inputs_sha256)throw Error('Pack input inventory changed');
 const expectedShell=JSON.parse(fs.readFileSync(request.shell_manifest,'utf8'));
 if(!same(sorted(map(request.shell)),sorted(expectedShell)))throw Error('Private shell stage changed');
-const shellFiles={};
-for(const member of asar.listPackage(archive)){
- const name=member.replace(/^[/\\]/,'').replace(/\\/g,'/');
- const info=asar.statFile(archive,name);
- if(info.link)throw Error('ASAR link member refused');
- if(!info.files)shellFiles[name]=asar.extractFile(archive,name);
-}
+const shellFiles=readAsarFiles(archive);
 if(!same(Object.keys(shellFiles).sort(),Object.keys(expectedShell).sort()))throw Error('ASAR complete shell/dependency membership mismatch');
 const ignoredMetadata=new Set(['dist','gitHead','build','jspm','ava','xo','nyc','eslintConfig','contributors','bundleDependencies','tags','scripts','keywords']);
 function canonicalJson(value){if(Array.isArray(value))return value.map(canonicalJson);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonicalJson(value[k])]));return value;}
@@ -76,3 +85,6 @@ const artifacts=['Books-Arranger-Setup-'+request.version+'.exe','Books-Arranger-
 const fileMap=sorted(files);
 const manifest={schema:'books-desktop-artifacts-v1',version:request.version,source_head:sourceHead,product_digest:productTree(records),build_id:request.build_id,unpacked:'builds/'+request.build_id+'/win-unpacked',runtime:{pins_sha256:facts(path.join(root,'desktop','runtime-pins.json')).sha256,files:sorted(runtimeFiles)},payload:{verified:true,shell_version:request.version,backend_version:backendVersion,installer_equivalent:true,files:fileMap,protected_data_files:protectedFiles,manifest_sha256:hash(Buffer.from(JSON.stringify(fileMap)))},artifacts};
 process.stdout.write(JSON.stringify(manifest,null,2)+'\n');
+
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))await main();

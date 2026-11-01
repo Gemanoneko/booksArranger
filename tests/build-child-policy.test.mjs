@@ -32,6 +32,8 @@ syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
 const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
 const {verifyAppStage}=await import('../scripts/build-builder.mjs');
+const {readAsarFiles}=await import('../scripts/build-manifest.mjs');
+const asar=await import('@electron/asar');
 const require=createRequire(import.meta.url);
 
 function fixture(overrides={}){
@@ -270,5 +272,31 @@ test('actual stage verifier refuses malformed or extended fingerprint records',t
     {...facts,size:String(facts.size)}, {...facts,sha256:facts.sha256.toUpperCase()},
     {...facts,extra:true}]){
     assert.throws(()=>verifyAppStage(app,{...manifest,'desktop/main.js':record}),/Private app membership or bytes changed/);
+  }
+});
+
+
+test('ASAR native lookup reads every nested member with portable inventory keys',async t=>{
+  const base=path.resolve(os.tmpdir()),folder=fs.mkdtempSync(path.join(base,'books-asar-lookup-'));
+  const relative=path.relative(base,folder);
+  assert.ok(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative));
+  t.after(()=>fs.rmSync(folder,{recursive:true,force:false}));
+  const input=path.join(folder,'input'),archive=path.join(folder,'fixture.asar');
+  const expected={
+    'package.json':Buffer.from('{"name":"fixture","version":"1.0.0"}'),
+    'desktop/main.js':Buffer.from('module.exports = "fixture";'),
+    'node_modules/argparse/CHANGELOG.md':Buffer.from('This member must remain present.'),
+    'node_modules/electron-updater/node_modules/semver/index.js':Buffer.from('nested runtime bytes'),
+  };
+  for(const [name,bytes]of Object.entries(expected)){
+    const file=path.join(input,...name.split('/'));
+    fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes);
+  }
+  await asar.createPackage(input,archive);
+  const actual=readAsarFiles(archive);
+  assert.deepEqual(Object.keys(actual).sort(),Object.keys(expected).sort());
+  for(const [name,bytes]of Object.entries(expected)){
+    assert.ok(actual[name].equals(bytes),name+' bytes differ');
+    assert.equal(name.includes('\\'),false);
   }
 });
