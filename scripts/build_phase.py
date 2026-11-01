@@ -73,6 +73,14 @@ def prepare(tree,proof):
     return runtime,backend,pins,pkg
 
 
+def stage_app_package(tree,shell,pkg):
+    # Two-package layout: build/lifecycle tooling belongs to the project only.
+    metadata={key:value for key,value in pkg.items()
+              if key not in {'build','devDependencies','scripts','allowScripts','directories'}}
+    content=(json.dumps(metadata,sort_keys=True,indent=2)+'\n').encode('utf8')
+    return tree.write(shell/'package.json',[content])
+
+
 def stage_shell(tree,proof,pkg):
     config=load_pack_inputs()
     owned=Path(proof['ownedRoot']);seed=ROOT/config['seedDirectory']
@@ -81,7 +89,8 @@ def stage_shell(tree,proof,pkg):
     # Recheck the complete retained seed, including the cached stock Electron ZIP.
     if tree.tree_manifest(seed)!=config['files']:raise RuntimeError('Pack seed changed')
     shell=tree.directory(owned/'shell',create=True)
-    tree.copy(ROOT/'package.json',shell/'package.json')
+    tree.protect(ROOT/'package.json')
+    stage_app_package(tree,shell,pkg)
     for relative in tree.tree_manifest(ROOT/'desktop'):
         tree.copy(ROOT/'desktop'/relative,shell/'desktop'/relative)
     for relative,facts in config['productionFiles'].items():

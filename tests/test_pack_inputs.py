@@ -9,6 +9,7 @@ import socket
 import subprocess
 import tempfile
 import unittest
+import urllib.request  # Load stdlib socket-derived classes before socket is mocked.
 from unittest.mock import patch
 
 
@@ -20,6 +21,9 @@ with patch.object(ctypes, "WinDLL", side_effect=AssertionError("native import"),
      patch.object(subprocess, "Popen", side_effect=AssertionError("process import")), \
      patch.object(socket, "socket", side_effect=AssertionError("network import")):
     _spec.loader.exec_module(_build)
+    _phase_spec = importlib.util.spec_from_file_location("books_pack_phase_under_test", ROOT / "scripts/build_phase.py")
+    _phase = importlib.util.module_from_spec(_phase_spec)
+    _phase_spec.loader.exec_module(_phase)
 
 
 def fixture():
@@ -49,6 +53,25 @@ def fixture():
         "node_modules/dev-tool": {"version": "3.0.0", "dev": True},
     }}
     return config, lock
+
+
+class AppPackageWriter:
+    """Ordinary private-file stand-in for BuildTree.write, no native handles."""
+    def __init__(self, root):
+        self.root = root
+        self.manifest = {}
+        self.paths = []
+
+    def write(self, target, chunks):
+        if target != self.root / "package.json":
+            raise AssertionError("unexpected stage output")
+        content = b"".join(chunks)
+        with target.open("xb") as output:
+            output.write(content)
+        facts = {"sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+        self.paths.append(target)
+        self.manifest["package.json"] = facts
+        return facts
 
 
 class PackInputTests(unittest.TestCase):
@@ -206,6 +229,59 @@ class PackInputTests(unittest.TestCase):
                     _build.load_pack_inputs(root)
                 self.assertEqual((root / "package-lock.json").read_bytes(), lock_bytes)
                 self.assertEqual((root / "scripts/build-inputs.json").read_text("utf8"), manifest)
+
+    def test_staged_application_package_keeps_real_runtime_identity_and_dependencies(self):
+        project_bytes = (ROOT / "package.json").read_bytes()
+        project = json.loads(project_bytes)
+        with tempfile.TemporaryDirectory(prefix="books-app-package-") as folder:
+            stage = Path(folder)
+            writer = AppPackageWriter(stage)
+            facts = _phase.stage_app_package(writer, stage, project)
+            app = json.loads((stage / "package.json").read_bytes())
+            self.assertEqual(app, {"name": "books-arranger", "productName": "Books Arranger",
+                "version": "0.24.2", "private": True,
+                "description": project["description"], "main": "desktop/main.js",
+                "dependencies": {"electron-updater": "6.8.9"}})
+            self.assertEqual(facts, writer.manifest["package.json"])
+            pins = json.loads((ROOT / "scripts/build-inputs.json").read_bytes())
+            self.assertEqual(len(pins["productionPackages"]), 16)
+            self.assertEqual(len(pins["productionFiles"]), 319)
+            self.assertEqual(app["dependencies"], project["dependencies"])
+        self.assertEqual((ROOT / "package.json").read_bytes(), project_bytes)
+
+    def test_staged_package_removes_only_project_tooling_without_mutating_project(self):
+        project = {"name": "fixture-app", "version": "1.2.3", "main": "desktop/main.js",
+            "dependencies": {"runtime": "1.0.0"}, "optionalDependencies": {"optional": "2.0.0"},
+            "type": "commonjs", "exports": {".": "./desktop/main.js"}, "engines": {"node": ">=22"},
+            "description": "Unicode é metadata", "license": "MIT", "customRuntime": {"nested": [1, True]},
+            "build": {"appId": "fixture.id", "publish": {"provider": "github"}},
+            "devDependencies": {"electron": "44.4.5"}, "scripts": {"postinstall": "must not run"},
+            "allowScripts": {"tool": False}, "directories": {"output": "dist"}}
+        before = copy.deepcopy(project)
+        with tempfile.TemporaryDirectory(prefix="books-app-package-") as folder:
+            stage = Path(folder)
+            _phase.stage_app_package(AppPackageWriter(stage), stage, project)
+            app = json.loads((stage / "package.json").read_bytes())
+            for name in ("build", "devDependencies", "scripts", "allowScripts", "directories"):
+                self.assertNotIn(name, app)
+            for name in ("name", "version", "main", "dependencies", "optionalDependencies", "type", "exports", "engines", "description", "license", "customRuntime"):
+                self.assertEqual(app[name], before[name])
+        self.assertEqual(project, before)
+
+    def test_staged_package_manifest_binds_generated_bytes_instead_of_project_copy(self):
+        project = json.loads((ROOT / "package.json").read_bytes())
+        with tempfile.TemporaryDirectory(prefix="books-app-package-") as folder:
+            stage = Path(folder)
+            writer = AppPackageWriter(stage)
+            _phase.stage_app_package(writer, stage, project)
+            content = (stage / "package.json").read_bytes()
+            self.assertEqual(writer.paths, [stage / "package.json"])
+            self.assertEqual(writer.manifest, {"package.json": {
+                "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}})
+            self.assertNotEqual(content, (ROOT / "package.json").read_bytes())
+            self.assertNotEqual(writer.manifest["package.json"]["sha256"],
+                hashlib.sha256(content.replace(b'0.24.2', b'0.24.3')).hexdigest())
+
 
 if __name__ == "__main__":
     unittest.main()
