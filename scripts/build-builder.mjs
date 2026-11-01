@@ -5,12 +5,13 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire,syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {validateChildLease} from './guarded-io.mjs';
 import {createChildPolicy,fileFacts} from './build-child-policy.mjs';
 const require=createRequire(import.meta.url);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
-const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const same=isDeepStrictEqual; // JSON object property order does not change membership or file facts.
 function ordinaryMap(folder) {
   const values={};
   function walk(current) {

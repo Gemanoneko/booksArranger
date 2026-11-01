@@ -8,6 +8,8 @@ import tls from 'node:tls';
 import dns from 'node:dns';
 import dgram from 'node:dgram';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import {EventEmitter} from 'node:events';
 import {createRequire, syncBuiltinESMExports} from 'node:module';
 
@@ -28,7 +30,8 @@ for(const name of ['lookup','resolve','resolve4','resolve6','reverse'])guard(dns
 guard(dgram,'createSocket');guard(globalThis,'fetch');guard(process,'dlopen');
 syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
-const {createChildPolicy}=await import('../scripts/build-child-policy.mjs');
+const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
+const {verifyAppStage}=await import('../scripts/build-builder.mjs');
 const require=createRequire(import.meta.url);
 
 function fixture(overrides={}){
@@ -217,4 +220,55 @@ test('actual builder-util wrapper rejects changed npm commands before cross-spaw
   const restore=f.policy.wrapBuilderUtilities(util);t.after(()=>{restore();cross.spawn=previous;});
   assert.throws(()=>util.spawn('npm',['install'],{cwd:f.context.root}),/unlisted npm command/);
   assert.equal(resolutions,0);assert.equal(f.policy.launches.length,0);assert.throws(()=>f.policy.assertClean(),/unlisted npm command/);
+});
+
+// Real stage verifier, using the exact nested property order emitted by
+// Python json.dumps(..., sort_keys=True). These fixtures never launch children.
+function appStageFixture(t){
+  const base=path.resolve(os.tmpdir()),app=fs.mkdtempSync(path.join(base,'books-pack-stage-'));
+  const relative=path.relative(base,app);
+  assert.ok(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative));
+  t.after(()=>fs.rmSync(app,{recursive:true,force:false}));
+  fs.mkdirSync(path.join(app,'desktop'));
+  fs.writeFileSync(path.join(app,'desktop','main.js'),'first');
+  fs.writeFileSync(path.join(app,'package.json'),'{}');
+  const manifest=Object.fromEntries(['package.json','desktop/main.js'].map(relative=>{
+    const facts=fileFacts(path.join(app,relative));
+    return [relative,{sha256:facts.sha256,size:facts.size}];
+  }));
+  return {app,manifest};
+}
+
+test('actual stage verifier accepts Python-sorted nested facts without weakening byte comparison',t=>{
+  const {app,manifest}=appStageFixture(t);
+  const pythonJson=JSON.stringify(Object.fromEntries(Object.entries(manifest).sort()));
+  assert.deepEqual(Object.keys(JSON.parse(pythonJson)['desktop/main.js']),['sha256','size']);
+  assert.doesNotThrow(()=>verifyAppStage(app,JSON.parse(pythonJson)));
+});
+
+test('actual stage verifier refuses changed bytes including equal-length changes',t=>{
+  const {app,manifest}=appStageFixture(t),file=path.join(app,'desktop','main.js');
+  for(const body of ['other','longer content']){
+    fs.writeFileSync(file,body);
+    assert.throws(()=>verifyAppStage(app,manifest),/Private app membership or bytes changed/);
+  }
+});
+
+test('actual stage verifier refuses missing, extra and renamed members',t=>{
+  const {app,manifest}=appStageFixture(t),file=path.join(app,'desktop','main.js');
+  fs.unlinkSync(file);
+  assert.throws(()=>verifyAppStage(app,manifest),/Private app membership or bytes changed/);
+  fs.writeFileSync(file,'first');fs.writeFileSync(path.join(app,'extra.txt'),'extra');
+  assert.throws(()=>verifyAppStage(app,manifest),/Private app membership or bytes changed/);
+  fs.unlinkSync(path.join(app,'extra.txt'));fs.renameSync(file,path.join(app,'desktop','renamed.js'));
+  assert.throws(()=>verifyAppStage(app,manifest),/Private app membership or bytes changed/);
+});
+
+test('actual stage verifier refuses malformed or extended fingerprint records',t=>{
+  const {app,manifest}=appStageFixture(t),facts=manifest['desktop/main.js'];
+  for(const record of [null,[],{}, {size:facts.size}, {sha256:facts.sha256},
+    {...facts,size:String(facts.size)}, {...facts,sha256:facts.sha256.toUpperCase()},
+    {...facts,extra:true}]){
+    assert.throws(()=>verifyAppStage(app,{...manifest,'desktop/main.js':record}),/Private app membership or bytes changed/);
+  }
 });
