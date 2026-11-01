@@ -75,14 +75,19 @@ def book(db, identity, now=None):
         evidence = {}
     members = [m['path'] for m in evidence.get('members', []) if isinstance(m, dict) and isinstance(m.get('path'), str)] if isinstance(evidence, dict) else []
     context = {}
+    prior_context = {}
     if _table(db, 'candidate_context'):
         saved = db.execute('SELECT revision,data FROM candidate_context WHERE id=?', (identity,)).fetchone()
+        if saved:
+            try:prior_context=json.loads(saved[1])
+            except (TypeError,ValueError):prior_context={}
         if saved and saved[0] == row['revision']:
             try:
                 context = json.loads(saved[1])
             except (TypeError, ValueError):
                 context = {}
     context = context if isinstance(context, dict) else {}
+    prior_context = prior_context if isinstance(prior_context,dict) else {}
     from review_backend import member_key
     keys = [member_key(path) for path in members]
     order, included = context.get('track_order', keys), context.get('included', keys)
@@ -92,11 +97,59 @@ def book(db, identity, now=None):
     lease = False
     if _table(db, 'automatic_manual_drafts'):
         lease = db.execute('SELECT 1 FROM automatic_manual_drafts WHERE id=? AND expires>?', (identity, time.time() if now is None else now)).fetchone() is not None
-    saved_review = bool(review and not (context.get('automatic_approval') or context.get('automatic_pending'))) or bool(context.get('manual_draft_active'))
+    saved_review = bool(review and not (context.get('automatic_approval') or context.get('automatic_pending') or restart_current(dict(row,review=review),context))) or bool(context.get('manual_draft_active'))
     return {'id': identity, 'revision': row['revision'], 'fingerprint': row.get('fingerprint'), 'review_text': review_text,
             'review': bool(review), 'single_m4b': len(chosen) == 1 and Path(chosen[0]).suffix.lower() == '.m4b',
-            'lease': lease, 'saved_review': saved_review, 'manual_draft': lease or saved_review}
+            'lease': lease, 'saved_review': saved_review, 'manual_draft': lease or saved_review,
+            'review_value':review,'context':context,'prior_context':prior_context,'members':members}
 
+
+
+def restart_current(row,context):
+    """The exact explicit Start-over return treats its retained approval as nondraft."""
+    marker=context.get('automatic_restart') if isinstance(context,dict) else None
+    if not isinstance(marker,dict) or context.get('manual_draft_active'):return False
+    return (marker.get('candidate_id')==row.get('id') and marker.get('revision')==row.get('revision') and
+            marker.get('fingerprint')==row.get('fingerprint') and marker.get('review')==row.get('review'))
+
+def approved_restart(facts,manifest):
+    if not facts or facts['lease'] or not facts.get('review_value') or facts['review_value']!=manifest.get('metadata'):return False
+    context=facts.get('context') or facts.get('prior_context') or {}
+    if context.get('manual_draft_active'):return False
+    evidence=manifest.get('evidence') or {}
+    if context.get('manual_note') and context['manual_note']!=evidence.get('manual_note'):return False
+    from review_backend import member_key
+    if context.get('track_actor')=='user':
+        order=context.get('track_order',[]);included=context.get('included',[])
+        if [key for key in order if key in included]!=[member_key(source['path']) for source in manifest.get('sources',[])]:return False
+    if context.get('cover_id') and context['cover_id']!=(manifest.get('cover') or {}).get('id'):return False
+    return True
+
+def prepare_automatic(db,facts,manifest):
+    """Keep accepted choices; clear stale proof before automatic research and admission."""
+    approved=approved_restart(facts,manifest)
+    if not approved and (not facts or facts['manual_draft'] or facts['lease']):return False
+    context=dict(facts.get('context') or (facts.get('prior_context') if approved else {}) or {})
+    for key in ('automatic_approval','automatic_pending','metadata_facts','duplicate_review','manual_metadata_acceptance'):
+        context.pop(key,None)
+    context.update(metadata_approved=False,source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
+    context['automatic_restart']={'candidate_id':facts['id'],'revision':facts['revision'],'fingerprint':facts['fingerprint'],
+                                  'review':facts['review_value'],'job_id':manifest['job_id']}
+    db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(facts['id'],facts['revision'],json.dumps(context,ensure_ascii=False)))
+    db.execute('UPDATE book_groups SET approved=0 WHERE id=? AND revision=?',(facts['id'],facts['revision']))
+    return True
+
+def refresh_authority(db,group,paths,job_id):
+    """Only an explicit set-aside failed job with no publication or retirement is eligible."""
+    if not job_id or not _table(db,'automatic_restarts') or not _table(db,'audio_job_set_aside'):return False
+    marker=db.execute("SELECT 1 FROM automatic_restarts WHERE id=? AND kind='start_over' AND job_id=?",(group['id'],job_id)).fetchone()
+    aside=db.execute('SELECT 1 FROM audio_job_set_aside WHERE candidate_id=? AND job_id=?',(group['id'],job_id)).fetchone()
+    job=db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+    if not marker or not aside or not job or job['state']!='needs attention' or job['output']:return False
+    if 'publication_intent' in json.loads(job['journal'] or '{}'):return False
+    if _table(db,'source_cleanup') and db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?',(job_id,)).fetchone():return False
+    manifest=json.loads(job['manifest'])
+    return manifest.get('candidate_id')==group['id'] and sorted(source['path'] for source in manifest.get('sources',[]))==sorted(paths)
 
 def release_ok(facts):
     """A saved review that only "Let the app handle it" can release: exactly one included .m4b (a multi-file book can be
@@ -143,14 +196,14 @@ def discard_review(db, facts):
     return facts['revision'] + 1
 
 
-def reset_automatic(db, identity, revision, fingerprint):
+def reset_automatic(db, identity, revision, fingerprint, refresh=False):
     """The book's automatic record reads Pending at its current revision: no reasons, no retry time, so nothing says
     Queued, Approved or Held for it (Follow-up 2, section 1.1 item 3). Its research history is kept."""
     if not _table(db, 'automatic_candidates'):
         return
     old = db.execute('SELECT * FROM automatic_candidates WHERE id=?', (identity,)).fetchone()
     if old is None:
-        return
+        old={'result':'{}','attempted':stamp(),'matcher_version':''}
     try:
         result = json.loads(old['result'] or '{}')
     except (TypeError, ValueError):
@@ -160,6 +213,7 @@ def reset_automatic(db, identity, revision, fingerprint):
         result.pop(key, None)
     result['reasons'] = []
     result['restarted_utc'] = stamp()
+    if refresh:result['source_refresh_required']=True
     db.execute('INSERT OR REPLACE INTO automatic_candidates VALUES(?,?,?,?,?,?,?,?)',
                (identity, revision, fingerprint, 'Pending', json.dumps(result, ensure_ascii=False), None, old['attempted'], old['matcher_version']))
 

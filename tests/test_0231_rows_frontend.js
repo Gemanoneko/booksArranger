@@ -156,11 +156,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
     hold('c2','files_unclear','one_of_many',{index:36,total:38},{reasons:['Source membership uncertain']}),
     hold('c3','order_unclear','gaps',{},{membership:'checking',numbers:{source:'names',first:'004',last:'017',skipped:['007'],skipped_total:1}})]);
   tr=trOf('cand-c1');assert.equal(statusCell(tr).children[0].textContent,'This file is tagged as track 36 of 38.');
-  assert.equal(membershipOf(tr).textContent,'Still checking which other files belong to this book.');
+  assert.equal(membershipOf(tr).textContent,'Other files in this folder may belong to this book.');
   assert.ok(!texts(tr).some(t=>/missing|aren't here/i.test(t)),'no missing claim while checking');
-  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(buttonsOf(tr)[0].title,'The app is still checking which other files belong to this book. This approves only the files shown.');
+  assert.equal(buttonsOf(tr)[0].getAttribute('aria-disabled'),null);assert.equal(buttonsOf(tr)[0].title,'Approve only the files shown as one book. Other files are not included.');
   assert.equal(statusCell(trOf('cand-c2')).children[0].textContent,"This file is tagged as track 36 of 38. The other tracks aren't here.",'positive control: settled or unsent keeps the sentence');
-  assert.equal(buttonsOf(trOf('cand-c3'))[0].textContent,'Approve these files');assert.equal(buttonsOf(trOf('cand-c3'))[0].title,'The app is still checking which other files belong to this book. This approves only the files shown.');
+  assert.equal(buttonsOf(trOf('cand-c3'))[0].textContent,'Approve these files');assert.equal(buttonsOf(trOf('cand-c3'))[0].title,'Approve only the files shown as one book. Other files are not included.');
   assert.ok(!texts(trOf('cand-c3')).some(t=>/missing|aren't here/i.test(t)));
 
   // Check 11: Includes on one row for a novel plus stories; the raised folder question with Books, Approve as one book first.

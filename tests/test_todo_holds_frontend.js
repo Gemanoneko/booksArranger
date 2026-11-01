@@ -214,10 +214,10 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   run('attentionGroup="all";controls()');assert.equal(get('retry-selected').hidden,false);
 
   // Still checking: the strip line in both states, and the empty list (B5.2).
-  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,todo_still_checking:1203},automatic_processing:{...state.automatic_processing,state:"Running"}};controls()');
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,todo_still_checking:1203},automatic_processing:{...state.automatic_processing,state:"Running",can_start:false,research:{...state.automatic_processing.research,researching:1}}};controls()');
   assert.equal(get('attention-sweep').textContent,'Still checking 1,203 books. More may appear here.');assert.equal(get('attention-sweep').hidden,false);
   paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. Still checking 1,203 books.','running: checking');
-  run('state={...state,automatic_processing:{...state.automatic_processing,state:"Idle"}};controls()');
+  run('state={...state,automatic_processing:{...state.automatic_processing,state:"Idle",can_start:true,research:{...state.automatic_processing.research,researching:0}}};controls()');
   assert.equal(get('attention-sweep').textContent,'1,203 books are waiting to be checked. Start automatic processing to check them.');
   // Judy's copy check (must-fix): not running, the empty list never says "checking" under a line that says "waiting".
   paint([]);assert.equal(get('empty').textContent,'Nothing needs your attention yet. 1,203 books are waiting to be checked.');

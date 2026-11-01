@@ -211,9 +211,9 @@ class StaleRecordTests(unittest.TestCase):
             def retire():
                 with catalog_lock(database,roots):return retire_stale_record(database,roots,5211)
             def owner(pid):return {'application':'Books Arranger','pid':pid,'instance':'a'*32,'version':'0.16.0','url':'http://127.0.0.1:5211/'}
-            ended = subprocess.run([sys.executable, '-c', 'import os;print(os.getpid())'], capture_output=True, text=True, check=True)
+            ended = subprocess.run([sys.executable, '-c', 'import os;print(os.getpid())'], capture_output=True, text=True, check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             dead_pid = int(ended.stdout)
-            alive = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(30)'])
+            alive = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(30)'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             try:
                 record.write_text(json.dumps(owner(alive.pid)), encoding='utf-8')
                 self.assertIsNone(retire()); self.assertTrue(record.exists())

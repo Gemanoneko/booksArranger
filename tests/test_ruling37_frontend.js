@@ -30,14 +30,14 @@ const JOB='00000000-0000-4000-8000-0000000000c1';
   answers['/api/state']=()=>ok({...backend,audiobook_jobs:{...backend.audiobook_jobs,state:'Pausing',queued:1,start_waiting:{reason:'pause'}}});
   get('resume-jobs').handlers.click();await tick(8);
   assert.equal(sent('/api/audiobook/resume').length,1);
-  assert.equal(get('message').textContent,'Resume audiobook jobs queued. It starts when the pause finishes. Press it again to cancel.');
+  assert.equal(get('message').textContent,'Resume queued. It starts when the pause finishes. Press Resume again to cancel.');
   run('state={...state,audiobook_jobs:{...state.audiobook_jobs,state:"Pausing",queued:1,start_waiting:{reason:"pause"}}};controls()');
-  assert.equal(get('resume-jobs').title,'Resume audiobook jobs queued. It starts when the pause finishes. Press it again to cancel.');
+  assert.equal(get('resume-jobs').title,'Resume queued. It starts when the pause finishes. Press Resume again to cancel.');
   answers['/api/audiobook/resume-cancel']=()=>ok({cancelled:true});
   answers['/api/state']=()=>ok({...backend,audiobook_jobs:{...backend.audiobook_jobs,state:'Paused',queued:1}});
   get('resume-jobs').handlers.click();await tick(8);
   assert.equal(sent('/api/audiobook/resume-cancel').length,1,'the same button takes it back');assert.equal(sent('/api/audiobook/resume').length,1);
-  assert.equal(get('message').textContent,'Resume audiobook jobs cancelled. Nothing was started.');
+  assert.equal(get('message').textContent,'Resume cancelled. Pending work is kept.');
   delete answers['/api/state'];
   // 2. Retry all while a scan runs: held, sent when the scan ends; a scan that began after the page looked is waited for.
   answers['/api/audiobook/retry-all']=()=>ok({retry_all:{id:'r1',state:'running',mode:'all',total:1,done:0,accepted:0,queued:0,refused:0}},202);

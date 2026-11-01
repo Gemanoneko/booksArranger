@@ -26,6 +26,8 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
     title=text('title');author=text('author') or text('canonical_author')
     cycle=text('series');universe=text('universe');number=text('number')
     collection=review.get('anthology',False);multi=review.get('multi_author',False)
+    from shared_routing import resolve
+    shared=resolve(review,facts)['multi_author_series']
     if type(collection)is not bool or type(multi)is not bool:raise ValueError('Routing choices must be explicit booleans')
     if not author:raise ValueError('Confirm the author credit')
     if not title and not (collection and (cycle or universe)):raise ValueError('Confirm the book title')
@@ -52,7 +54,7 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
         folders.append(safe_name(universe))
         if cycle:folders.append(safe_name(cycle))
     elif cycle:
-        if not multi:folders.append(safe_name(author))
+        if not (multi or shared):folders.append(safe_name(author))
         folders.append(safe_name(cycle))
     elif collection:folders.append('Сборники')  # Preserve unspecified existing behavior.
     else:folders.append(safe_name(author))
@@ -65,7 +67,7 @@ def _plan(output_root,review,*,collection_fallback='legacy',facts=None):
     destination=append_recording_suffix(os.path.join(output_root,*folders,stem+'.m4b'),review,facts)
     if len(destination)>240:raise ValueError('Verified metadata exceeds the supported Windows output path length')
     return {'policy_version':POLICY,'root':output_root,'path':destination,'relative_path':os.path.relpath(destination,output_root),
-            'accepted_routing':{'author':author,'cycle':cycle,'universe':universe,'number':number,'collection':collection,'multi_author_cycle':multi}}
+            'accepted_routing':{'author':author,'cycle':cycle,'universe':universe,'number':number,'collection':collection,'multi_author_cycle':multi or shared}}
 
 
 def chosen_folder(planned,facts):
@@ -104,8 +106,12 @@ def frozen_plan(manifest,output_root,review=None):
     if isinstance(facts,dict) and 'destination_suffix' in facts:
         from recording_classification import destination_suffix
         tracks=[]
-        for source in manifest['sources']:
-            chapters=manifest.get('source_chapters',[]) if len(manifest['sources'])==1 and os.path.splitext(source['path'])[1].lower()=='.m4b' else []
+        policy=facts.get('recording_chapter_policy')
+        if policy not in (None,'joined-chapters-v1'):raise ValueError('Unsupported frozen recording chapter policy')
+        # Absent policy is the exact pre-0.24.2 formula; never rewrite an old receipt.
+        parts=(manifest.get('part_chapters') or []) if policy=='joined-chapters-v1' else []
+        for index,source in enumerate(manifest['sources']):
+            chapters=manifest.get('source_chapters',[]) if len(manifest['sources'])==1 and os.path.splitext(source['path'])[1].lower()=='.m4b' else parts[index]['chapters'] if len(parts)==len(manifest['sources']) else []
             tracks.append({'source_sha256':source['sha256'],'size_bytes':source['size'],'chapter_sha256':hashlib.sha256(json.dumps(chapters,sort_keys=True,separators=(',',':')).encode()).hexdigest()})
         language=facts.get('recording_language') or {}
         candidate={'id':manifest['candidate_id'],'identity_verified':True,'work_ids':facts.get('work_ids'),'collection_kind':(facts.get('collection') or {}).get('kind','single'),'series_volume':metadata.get('number') or None,'narrator':{'value':metadata.get('narrator',''),'verified':bool(metadata.get('narrator'))},'recording_language':{'value':language.get('value'),'verified':language.get('basis') in ('embedded','recording_credit')},'edition':{'value':'','verified':False},'manifest':{'complete':True,'observed_count':len(tracks),'tracks':tracks}}

@@ -18,20 +18,27 @@ async function choose({ dialog, win, title, defaultPath, buttonLabel } = {}) {
   if (label) options.buttonLabel = label;
   if (typeof defaultPath === 'string' && defaultPath.length <= MAX && path.win32.isAbsolute(defaultPath)) options.defaultPath = defaultPath;
   const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-  if (!result || result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length !== 1) return null;
+  if (result?.canceled === true) return null;
+  if (!result || !Array.isArray(result.filePaths) || result.filePaths.length !== 1) throw new Error('The folder picker did not return a folder');
   const chosen = result.filePaths[0];
-  return typeof chosen === 'string' && chosen.length <= MAX && path.win32.isAbsolute(chosen) ? chosen : null;
+  if (typeof chosen !== 'string' || chosen.length > MAX || !path.win32.isAbsolute(chosen)) throw new Error('The folder picker did not return an absolute folder');
+  return chosen;
 }
 
 // ipcMain: Electron's (or a fake); sender(event) answers 'app' for the app window's own page and throws for anything
 // else (main.js trustedSender); window() is the app window the dialog is modal to.
 function register({ ipcMain, dialog, sender, window }) {
+  let picking = false;
   ipcMain.handle('books:choose-folder', async (event, request) => {
     if (sender(event) !== 'app') throw new Error('Choosing a folder is unavailable');
+    if (picking) throw new Error('A folder picker is already open. Finish or cancel it first.');
     const value = request && typeof request === 'object' ? request : {};
     const win = typeof window === 'function' ? window() : null;
-    return choose({ dialog, win: win && !(typeof win.isDestroyed === 'function' && win.isDestroyed()) ? win : null,
-      title: value.title, defaultPath: value.defaultPath, buttonLabel: value.buttonLabel });
+    picking = true;
+    try {
+      return await choose({ dialog, win: win && !(typeof win.isDestroyed === 'function' && win.isDestroyed()) ? win : null,
+        title: value.title, defaultPath: value.defaultPath, buttonLabel: value.buttonLabel });
+    } finally { picking = false; }
   });
 }
 

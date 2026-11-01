@@ -35,9 +35,10 @@ test('defaultPath is passed through when absolute and dropped otherwise', async 
   assert.equal('defaultPath' in dialog.calls[1][1], false);
 });
 
-test('a relative or several answers return null (the page never types a path)', async () => {
-  assert.equal(await choose({ dialog: fakeDialog({ canceled: false, filePaths: ['relative'] }), win: {} }), null);
-  assert.equal(await choose({ dialog: fakeDialog({ canceled: false, filePaths: ['C:\\a', 'C:\\b'] }), win: {} }), null);
+test('invalid native answers reject and are distinguishable from user cancellation', async () => {
+  await assert.rejects(choose({ dialog: fakeDialog({ canceled: false, filePaths: ['relative'] }), win: {} }), /absolute folder/);
+  await assert.rejects(choose({ dialog: fakeDialog({ canceled: false, filePaths: ['C:\\a', 'C:\\b'] }), win: {} }), /return a folder/);
+  await assert.rejects(choose({ dialog: fakeDialog(null), win: {} }), /return a folder/);
 });
 
 test('IPC answers the app window only; another sender is refused before any dialog', async () => {
@@ -59,4 +60,26 @@ test('the bridge answers nothing but the chosen path or null', async () => {
   const handlers = {};
   register({ ipcMain: { handle: (c, fn) => { handlers[c] = fn; } }, dialog: fakeDialog({ canceled: true, filePaths: ['C:\\x'] }), sender: () => 'app', window: () => null });
   assert.equal(await handlers['books:choose-folder']({}, null), null);
+});
+
+test('concurrent trusted requests share one native picker until cancellation settles', async () => {
+  const handlers = {}, calls = []; let finish;
+  const dialog = { showOpenDialog: (...args) => { calls.push(args); return new Promise(resolve => { finish = resolve; }); } };
+  register({ ipcMain: { handle: (c, fn) => { handlers[c] = fn; } }, dialog, sender: () => 'app', window: () => ({}) });
+  const first = handlers['books:choose-folder']({}, { title: 'First book' });
+  await assert.rejects(handlers['books:choose-folder']({}, { title: 'Second book' }), /already open/);
+  assert.equal(calls.length, 1);
+  finish({ canceled: true, filePaths: [] }); assert.equal(await first, null);
+  const next = handlers['books:choose-folder']({}, {});
+  assert.equal(calls.length, 2); finish({ canceled: false, filePaths: ['C:\\Private fixture'] });
+  assert.equal(await next, 'C:\\Private fixture');
+});
+
+test('a rejected native picker releases its single-flight lock for the next request', async () => {
+  const handlers = {}; let calls = 0;
+  const dialog = { showOpenDialog: async () => { if (++calls === 1) throw new Error('Native opening failed'); return { canceled: true, filePaths: [] }; } };
+  register({ ipcMain: { handle: (c, fn) => { handlers[c] = fn; } }, dialog, sender: () => 'app', window: () => ({}) });
+  await assert.rejects(handlers['books:choose-folder']({}, {}), /Native opening failed/);
+  assert.equal(await handlers['books:choose-folder']({}, {}), null);
+  assert.equal(calls, 2);
 });

@@ -53,7 +53,7 @@ class Boundaries(unittest.TestCase):
 
     def test_suspended_job_cancels_its_early_descendant(self):
         script=self.base/'owned_child.py';pidfile=self.base/'descendant.pid'
-        script.write_text('import subprocess,sys,time,os\nfrom pathlib import Path\nprint("Started",os.getpid(),flush=True)\np=subprocess.Popen([sys.executable,"-c","import time;time.sleep(30)"])\nPath(sys.argv[1]).write_text(str(p.pid))\nprint("Descendant",p.pid,flush=True)\ntime.sleep(30)\n',encoding='utf-8')
+        script.write_text('import subprocess,sys,time,os\nfrom pathlib import Path\nprint("Started",os.getpid(),flush=True)\np=subprocess.Popen([sys.executable,"-c","import time;time.sleep(30)"],creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))\nPath(sys.argv[1]).write_text(str(p.pid))\nprint("Descendant",p.pid,flush=True)\ntime.sleep(30)\n',encoding='utf-8')
         stop=threading.Event()
         def request_stop():
             deadline=time.monotonic()+20

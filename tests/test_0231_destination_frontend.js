@@ -68,7 +68,7 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   assert.ok(!walk(destBlock(tr)).some(e=>e.tagName==='input' || e.type==='text'),'no text box for a path');
   // The stub bridge: title, confirm label and start folder; cancel changes nothing and focus returns.
   const picks=[];let pickAnswer=null,release=null;
-  context.window={booksDesktop:{chooseFolder:async options=>{picks.push(options);if(pickAnswer==='hold')return new Promise(resolve=>{release=resolve;});return pickAnswer;}}};
+  context.window={booksDesktop:{chooseFolder:async options=>{picks.push(options);if(pickAnswer==='hold')return new Promise(resolve=>{release=resolve;});if(pickAnswer==='fail')throw Error('Native picker failed');return pickAnswer;}}};
   run('controls()');assert.equal(button.getAttribute('aria-disabled'),null);
   assert.equal(button.title,'Choose the folder this book is filed in. Your choice replaces the folder the app computed. The file goes straight into it.');
   await press(button);
@@ -76,7 +76,16 @@ const press=async button=>{button.focus();return button.handlers.click({stopProp
   assert.equal(sent.length,0,'cancel sends nothing');assert.equal(button.textContent,'Choose folder…');assert.equal(document.activeElement,button);
   pickAnswer='hold';const pending=press(button);
   assert.equal(button.textContent,'Choosing…');assert.equal(button.getAttribute('aria-disabled'),'true');assert.equal(button.title,'Waiting for the folder picker.');
+  assert.equal(stateLine(tr).textContent,'Opening the folder picker…');
+  const otherPicker=choose(trOf('cand-f')),openCount=picks.length;
+  assert.equal(otherPicker.getAttribute('aria-disabled'),'true');assert.equal(otherPicker.title,'A folder picker is already open. Finish or cancel it first.');
+  await press(otherPicker);assert.equal(picks.length,openCount,'another row cannot open a second picker');
   release(null);await pending;assert.equal(button.textContent,'Choose folder…');
+  assert.equal(stateLine(tr).hidden,true,'cancellation has no success or failure note');
+  assert.equal(document.activeElement,otherPicker,'settling the old picker does not steal changed focus');
+  pickAnswer='fail';await press(button);
+  assert.equal(stateLine(tr).textContent,'The folder picker could not open. Try Choose folder again.');assert.equal(sent.length,0);
+  assert.equal(goes(tr),'Goes to Audiobooks Sorted\\Без автора\\X.m4b');
   pickAnswer=null;await press(choose(trOf('cand-f')));assert.equal(picks.at(-1).buttonLabel,'Move here');
   assert.equal(choose(trOf('cand-f')).title,'Choose a new folder for this audiobook. The file is moved there. Nothing is converted again.');
   // Check 22: choosing on a waiting row saves the folder only: no Approve request, the status stays; Approve files it there.

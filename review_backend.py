@@ -200,7 +200,10 @@ class CandidateReviewService:
         row=copy.deepcopy(row); ctx=self._context(row); keys=self._keys(row); held=held or {}
         from groups import shown_grouping
         row['grouping']=shown_grouping(row.get('grouping'))  # no names or rule numbers in the panel, whichever build stored it
-        with connect(self.inventory.database) as db:row['manual_metadata_sources']=manual_metadata.records(db,row)
+        with connect(self.inventory.database) as db:
+            row['manual_metadata_sources']=manual_metadata.records(db,row)
+            row['admission_error']=__import__('admission_diagnostics').read(db,row)
+        row['chapter_check']=copy.deepcopy(self.__dict__.get('_chapter_activity',{}).get(row['id']))
         facts=ctx.get('metadata_facts')
         if facts:
             from standing_metadata import validate_policy
@@ -291,6 +294,10 @@ class CandidateReviewService:
         if job and not allow_existing_job:policy=job.get('cleanup_policy',{'enabled':False,'recovery_root':policy['recovery_root']})
         row['creation']['cleanup_policy']=policy
         row['cleanup']=job.get('cleanup') if job else None
+        if job:
+            if job.get('admission_error'):row['admission_error']=copy.deepcopy(job['admission_error'])
+            if job.get('chapter_check'):row['chapter_check']=copy.deepcopy(job['chapter_check'])
+        if row.get('audiobook_ready') and job:row['chapter_corrections']=copy.deepcopy(job.get('chapter_corrections') or [])
         row['metadata_questions']=self.metadata_questions(row,ctx)
         if self.jobs and hasattr(self.jobs,'producer_retention'):row['producer_recovery_retained']=self.jobs.producer_retention(row['id'])
         return row
@@ -639,6 +646,7 @@ class CandidateReviewService:
             ctx.update(manual_note=manual_note,proposal_id=proposal_id,cover_id=trial['cover_id'],metadata_actor=actor,metadata_utc=utc(),metadata_evidence=records,metadata_approved=bool(approve and automatic_pending is None))
             ctx.pop('manual_metadata_acceptance',None)
             if actor=='user' and approve:ctx['manual_metadata_acceptance']=manual_metadata.acceptance(fresh,review)
+            if user_approval:ctx.pop('names_approval_pending',None)
             if changed:ctx.update(source_coverage_confirmed=False,order_confirmed=False,source_hashes={})
             return self._write(fresh,ctx,manual_source=manual_metadata.capture(fresh,manual_source_values if manual_source_values is not None else review,manual_note) if actor=='user' and capture_manual else None,decision_record=decision_record)
 
@@ -824,6 +832,19 @@ class CandidateReviewService:
             ctx.update(track_order=order,included=included,source_coverage_confirmed=source_coverage_confirmed,order_confirmed=order_confirmed,chapters=chapters,track_actor=actor,track_utc=utc(),track_evidence=evidence_note,source_hashes=hashes)
             return self._write(row,ctx)
 
+    def source_chapter_plan(self,row,member,source,stop,*,joined):
+        from audio_pipeline import source_chapters,verified_source_chapters,ChapterValidationError
+        activity=self.__dict__.setdefault('_chapter_activity',{})
+        try:
+            if not joined:return {'chapters':source_chapters(member['path'],self.cache,stop,float(member.get('duration') or 0)),'terminal_end_correction':None}
+            return verified_source_chapters(member['path'],self.cache,stop,float(member.get('duration') or 0),source=source,
+                on_check=lambda value:activity.__setitem__(row['id'],copy.deepcopy(value)))
+        except ChapterValidationError as error:
+            error.admission_error={'chapter_diagnostic':copy.deepcopy(error.chapter_diagnostic)}
+            with connect(self.inventory.database) as db:__import__('admission_diagnostics').save(db,row,error.chapter_diagnostic)
+            raise
+        finally:activity.pop(row['id'],None)
+
     def build_manifest(self,library,id,revision,allow_existing_job=False,allow_automatic_pending=False,stop=None,held=None):
         """held (0.21.0 in-place publication only): {normcase path: {'sha256','source_chapters'}} for a source the
         converting job holds deny-writers after proving its reviewed bytes in full; its metadata edit changes size."""
@@ -869,7 +890,7 @@ class CandidateReviewService:
                     from audio_pipeline import source_chapters
                     proof=held.get(os.path.normcase(os.path.abspath(sources[0]['path'])))
                     # A held in-place source is open for DELETE (no reader may open it); its chapters were re-probed after the edit.
-                    manifest['source_chapters']=copy.deepcopy(proof['source_chapters']) if proof is not None else source_chapters(sources[0]['path'],self.cache,stop or threading.Event(),row['creation']['duration_seconds'])
+                    manifest['source_chapters']=copy.deepcopy(proof['source_chapters']) if proof is not None else self.source_chapter_plan(row,next(m for m in members.values() if m['path']==sources[0]['path']),sources[0],stop or threading.Event(),joined=False)['chapters']
                 else:
                     from groups import PART_SET_MAX
                     chosen=[members[key] for key in row['track_order'] if key in row['included']]
@@ -877,8 +898,11 @@ class CandidateReviewService:
                         # Rulings 19 and 19a: joined .m4b parts keep every part's own chapters, frozen here and proven again
                         # on each protected snapshot; parts without any chapters (and a book's many chapter files) keep one
                         # chapter per part as before.
-                        from audio_pipeline import source_chapters,part_chapter_name
-                        plan=[{'name':part_chapter_name(m),'chapters':source_chapters(m['path'],self.cache,stop or threading.Event(),float(m.get('duration') or 0))}
-                              for m in chosen]
+                        from audio_pipeline import part_chapter_name
+                        plan=[{'name':part_chapter_name(m),**self.source_chapter_plan(row,m,source,stop or threading.Event(),joined=True)}
+                              for m,source in zip(chosen,sources)]
+                        for part in plan:
+                            if part.get('terminal_end_correction') is None:part.pop('terminal_end_correction',None)
                         if any(part['chapters'] for part in plan):manifest['part_chapters']=plan
+            with connect(self.inventory.database) as db:__import__('admission_diagnostics').clear(db,row)
             return manifest

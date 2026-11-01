@@ -252,7 +252,7 @@ function radios(){const result=[];function walk(element){if(element.tagName==='i
  assert.match(get('metadata-question-status').textContent,/Sources changed/);console.log('METADATA_CHOICE_DOM_CONTRACT_PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
-        result=subprocess.run([shutil.which('node'),'-e',code],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,encoding='utf-8',timeout=30)
+        result=subprocess.run([shutil.which('node'),'-e',code],cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,encoding='utf-8',timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         self.assertEqual(result.returncode,0,result.stdout+result.stderr);self.assertIn('METADATA_CHOICE_DOM_CONTRACT_PASS',result.stdout)
 
 

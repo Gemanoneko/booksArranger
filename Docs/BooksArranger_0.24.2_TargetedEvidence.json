@@ -1,0 +1,1376 @@
+{
+  "schema": "books-arranger-0242-targeted-evidence-v1",
+  "date": "2026-11-01",
+  "limits": [
+    "Targeted slices are not full-entry, packaging or release clearance.",
+    "Source manifests differ across slices; final immutable candidate still requires its canonical full entry.",
+    "Normal native-zero closure does not waive test/output/postflight failures.",
+    "No app, installed profile, live catalog or real source media was used."
+  ],
+  "batches": [
+    {
+      "name": "routing-1",
+      "status": "passed",
+      "test_cases": 45,
+      "modules": [
+        "test_shared_routing",
+        "test_organization"
+      ],
+      "plan_sha256": "880610c5bb2912cf919f1a236f63816aedc591d448556a360a76aa598dcc5a7f",
+      "driver_sha256": "8199ad9106d21df18b44f424ed301b6c7a19195c2a75d0130ac72b741ef6cd6d",
+      "invocation_sha256": "613d5dc9423bd4a3c478271ce0d5e7038e48794bc9d009b3dbf7459de122f94a",
+      "source_tree": "ed7c5f328b0c52f3e7bddf7d3d5027066ac52cbaed699016ca510160f1218c78",
+      "result": {
+        "ok": true,
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 22,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "45 pure planner/proof cases; outer0 and postflight passed."
+    },
+    {
+      "name": "series-1",
+      "status": "passed",
+      "test_cases": 19,
+      "modules": [
+        "test_series_identity_242"
+      ],
+      "plan_sha256": "6d2d8ced8bed5b5ca8d240c569943b223abab19a5eb08885b2e1d150d99a9f89",
+      "driver_sha256": "63e543f3fb39940c4bfb1ec8be89f7a91f08994f1a0d96a433176db75a24fc29",
+      "invocation_sha256": "d3cbce86b3639570c2136d611eaddbfb621cc12eebdc68f2a145d0c9e8537da1",
+      "source_tree": "9b2bd07ed78ed910a228a9626823688285a0a1ca0b4e97f3d3cc272058060324",
+      "result": {
+        "ok": true,
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 32,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "19 source identity/research cases; outer0 and postflight passed."
+    },
+    {
+      "name": "cleanup-1",
+      "status": "failed",
+      "test_cases": 62,
+      "modules": [
+        "test_cleanup_242",
+        "test_source_folders"
+      ],
+      "plan_sha256": "de46a697ffb84e435612c49f45b9ec097cfdd0f06aa8a799bfaa4e1c05415471",
+      "driver_sha256": "ef59d887ec64a1abb21aecf7a2762bc5b40c3a7013e37c57bfa5ba88a1e47e5f",
+      "invocation_sha256": "abd4227cc59d23f75b658402f191a00c6d2bf69a654bf0fede4d64f5d8a1165b",
+      "source_tree": "5ce608e3784100e5b362c9ad26806f06213182683be098d990b14bdac904759a",
+      "result": {
+        "ok": false,
+        "code": 1,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 6,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1226,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "Four outdated fixture expectations failed; outer1, postflight passed; meaningful positive fault-lift fixture corrections tested in cleanup-2."
+    },
+    {
+      "name": "cleanup-2",
+      "status": "passed",
+      "test_cases": 62,
+      "modules": [
+        "test_cleanup_242",
+        "test_source_folders"
+      ],
+      "plan_sha256": "970372077d285ace0887129c7c773cf5245ea57d9ebf717f6f1f5a904bfcf315",
+      "driver_sha256": "d42d2a8e9227ed2be29a076dad9cc6bb93b94a8ee5db6174d04eddcbe9daff1d",
+      "invocation_sha256": "bc8cb115177b191fce68eea4205301821fbf3a8fe3345dbb653ef0589404d23a",
+      "source_tree": "07fc7c8c2fa55859f631cb9c4e83cd1b46c266b2af68a51d91c9b1995054aaea",
+      "result": {
+        "ok": true,
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 6,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1274,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "62 cases passed; outer0 and postflight passed."
+    },
+    {
+      "name": "chapters-1",
+      "status": "failed",
+      "test_cases": 20,
+      "modules": [
+        "test_terminal_chapters"
+      ],
+      "plan_sha256": "54528b9d2549ad11e4fb5a98c3d8966aa4f8ddd057efe120f4866c39caddf25f",
+      "driver_sha256": "42d64b6c4e4cce7d265309c1930fa472d8d1bbe66a46a74fc3a3dfb19d4cd444",
+      "invocation_sha256": "eb18ffe16887a088b4a34a74b7c60842519ecc2dca1500fd31c74e77ce6fbfc7",
+      "source_tree": "98b9ade045de17d2ffe42d560fd0d7bc8580aa390d7041affd0076adbdc4de70",
+      "result": {
+        "ok": false,
+        "code": 1,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 58,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 471,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "Three native fixtures did not expose intended bad endpoint; outer1, postflight passed."
+    },
+    {
+      "name": "chapters-2",
+      "status": "not_accepted",
+      "test_cases": 20,
+      "modules": [
+        "test_terminal_chapters"
+      ],
+      "plan_sha256": "818295ac0b6fdc1e77e80d7a00adedf0e31c3068b48858932bc965a741288f7d",
+      "driver_sha256": "386643f1e958c880e51b380f2f05418ad96b9ee4955989aabb7f79b42f920ba5",
+      "invocation_sha256": "5d2e2e9110e204876ea72f93628e2fc5db52b4760a737d3a1ed215c9515139dd",
+      "source_tree": "92e36c3492388a8d87bde42f5a8d17494f890ca2c12e098ca963263faf674b13",
+      "result": {
+        "ok": false,
+        "code": null,
+        "closed": true,
+        "forced": true,
+        "timedOut": false,
+        "reason": "Final supervisor output differs from streamed bytes",
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 18,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 142,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "Two metadata API errors and diagnostic-byte mismatch; overall unaccepted, forced closure separately proved native zero."
+    },
+    {
+      "name": "chapters-3",
+      "status": "passed",
+      "test_cases": 20,
+      "modules": [
+        "test_terminal_chapters"
+      ],
+      "plan_sha256": "14dd645acc6a0f32cae55e32279cdd91d8548e3b77b9bc6f8bbb824f1cfce612",
+      "driver_sha256": "ca3f05703f147db4abca34a822e85d3074080ea3376596267c343e0718093d7a",
+      "invocation_sha256": "101cf9c0e6bc4a80000b909af8e69adf3fa898f59eb743f1f05a0c1bf6fcbd59",
+      "source_tree": "d65b77594e0d82970e305bd30aa5a9a2403fb8bf8836f5c4e0ba63ee5f9dbcc8",
+      "result": {
+        "ok": true,
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 102,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 830,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "20 cases including3 private native cases passed; ASCII markers, outer0 and full postflight passed."
+    },
+    {
+      "name": "backend-1",
+      "status": "not_accepted",
+      "test_cases": 147,
+      "modules": [
+        "test_start_over",
+        "test_restart_242",
+        "test_backend_242",
+        "test_integration_242",
+        "test_cleanup_242",
+        "test_source_folders"
+      ],
+      "plan_sha256": "d204237f3c24db3ae856cf045987a8d6dc2d0178d2b9c3c46b807d55744b2430",
+      "driver_sha256": "f9b5f4df64c694d58bb2ab30e83e920a48e73ae6b33bac488aab3b37dcf1ad1a",
+      "invocation_sha256": "20823c0b3b7ecd1667a813319e7c89d8924371d3f047481056d0e695ca5b964c",
+      "source_tree": "63f51166ebd8a211e39219d4aa8b78aa7fad342535ba6520c97f1b8407cbfc91",
+      "result": {
+        "ok": false,
+        "code": 1,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 6,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1918,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "Standalone32 had2fail+2error (one case both), integrated115 had19fail+3error; outer1 also failed exact postflight because failed quit fixture left private SQLite under source/scratch. No pinned source file changed; no waiver."
+    },
+    {
+      "name": "backend-3",
+      "status": "not_accepted",
+      "test_cases": 154,
+      "modules": [
+        "test_start_over",
+        "test_restart_242",
+        "test_backend_242",
+        "test_integration_242",
+        "test_cleanup_242",
+        "test_source_folders"
+      ],
+      "plan_sha256": "a6f2a847d2462e215c5ea5b08678ab3e9edf4d840f73590bf1c429838a832539",
+      "driver_sha256": "77a6ef1a3a5fd8e35178b74dbc1c3b0744bbb8ec0fb6c4fbbb761267759f5419",
+      "invocation_sha256": "cffcd7aab40e0fc90128c0ae857e454650b3c9da7069cda55a1f59e5ae825db9",
+      "source_tree": "20d3d6402641c3cab369ab026ec916aa6894b9f9ac66839d6758813b2a9b1d2a",
+      "result": {
+        "ok": false,
+        "code": 1,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 6,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 2054,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "Standalone32 passed; integrated122 had one fixture API-shape assertion error, other153 cases positive. Full postflight passed; outer1 remains overall failure. Current product bytes unchanged."
+    },
+    {
+      "name": "backend-4",
+      "status": "passed",
+      "test_cases": 14,
+      "modules": [
+        "test_integration_242"
+      ],
+      "plan_sha256": "0922623859c4cd25d41567a4fdd233d558f7eaf2f58e2ec5497ed4441cdd408f",
+      "driver_sha256": "4ba572e72859180c863b4e2c709038a69cc2b2bfa959fc15d42abbbd2384d2e8",
+      "invocation_sha256": "e8de05957faf8cc51d19d75be294d4b013eface2aef079f52d30ba0d4f98d949",
+      "source_tree": "20d14388648780ca0d1132bb5af32170db775148fb9e0b5d9602593b536666cf",
+      "result": {
+        "ok": true,
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 49,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "acceptance_detail": "14/no skips; corrected test-only API shape, exact saved title/hold/other job assertions. Outer0/both markers/fullpostflight/normal closure passed. Product95 bytes identical to backend3; aggregate154 contracts positive without replay of other accepted cases."
+    },
+    {
+      "name": "pure-1",
+      "status": "not_admitted",
+      "executed": false,
+      "test_cases": 62,
+      "plan_sha256": "4df244e9d9c320661cea29c2a6becdf01a7cf0a897f393f5a399f445bc6892ce",
+      "acceptance_detail": "Pre-execution driver required single-link installed cmd.exe; actual read-only installed file had two links. Preserved unexecuted; no guard waiver."
+    },
+    {
+      "name": "pure-2",
+      "status": "passed",
+      "test_cases": 69,
+      "plan_sha256": "0d1182f83dc2df537e7a177c4ecf15e5df3b2b62d7d3be3bae6c4aa4639a73fe",
+      "driver_sha256": "ebd4474ebac4468629f6708fd1927348609d7c7d782d8410871b5a696fb9e5ff",
+      "invocation_sha256": "c2a2573f96422452cd678350efd7ca65d5494f02eec46ad743d198d2d13d60f8",
+      "source_tree": "013a3c6eedc31c22962d3a56dbb4c84333db8adcafa7584fc0d233b74bba545d",
+      "summary_sha256": "c2a9defd61db741b2786da5d2e495bed1839eb474b1b4ce319b91f7b4dccb542",
+      "callback_sha256": "30d893d5b01d15341a49ccb685be5b08c325ed0fef2f5dbff04e9b6ab3383a85",
+      "callback": {
+        "started_at": "2026-11-01T15:49:50.426Z",
+        "finished_at": "2026-11-01T15:49:52.295Z",
+        "pid": 108724,
+        "callback_received": true,
+        "error": null,
+        "stdout_bytes": 1397,
+        "stderr_bytes": 0,
+        "stdout_sha256": "676c4c114fd8fa6b368f5b873f43d19da78e8fb29a319bc36ae5b63d9e9b8844",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "start_write_error": null,
+        "write_errors": [],
+        "invocation_sha256": "c2a2573f96422452cd678350efd7ca65d5494f02eec46ad743d198d2d13d60f8",
+        "native_deadline_ms": 600000,
+        "tool_request_timeout_ms": 650000
+      },
+      "postflight": true,
+      "raw_logs_match_original_receipts": true,
+      "live_source14_matches": true,
+      "work_empty": true,
+      "entries": [
+        {
+          "entry": "tests/real-shell-update-contract.test.mjs",
+          "counts": {
+            "tests": 26,
+            "pass": 26,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "guarded_native_attempts": 0,
+          "result": {
+            "ok": true,
+            "code": 0,
+            "closed": true,
+            "forced": false,
+            "timedOut": false,
+            "overflow": false,
+            "truncated": false,
+            "outputComplete": true,
+            "reason": null,
+            "closureError": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 15,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          "owner_sha256": "125fe7bb5d8a2353d2914dd27dca705d252b51642c3b65e76925c35226a67f77",
+          "stdout_sha256": "a932b33221833a613d5cbdc19e9db3295fca89cfabdd3cbc63aa8d3c82df0da1",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "entry": "tests/release-contract.test.mjs",
+          "counts": {
+            "tests": 19,
+            "pass": 19,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "guarded_native_attempts": 0,
+          "result": {
+            "ok": true,
+            "code": 0,
+            "closed": true,
+            "forced": false,
+            "timedOut": false,
+            "overflow": false,
+            "truncated": false,
+            "outputComplete": true,
+            "reason": null,
+            "closureError": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 17,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          "owner_sha256": "a7606e200a125c73f6ae8e6fdf2097a643aa0e392c8d4677de1f55a6b81cbad7",
+          "stdout_sha256": "e3a26d0c652d8c1c646aedd4495884ad6c86572f044df3821744a9b1cab19944",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "entry": "tests/release-flow.test.mjs",
+          "counts": {
+            "tests": 18,
+            "pass": 18,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "guarded_native_attempts": 0,
+          "result": {
+            "ok": true,
+            "code": 0,
+            "closed": true,
+            "forced": false,
+            "timedOut": false,
+            "overflow": false,
+            "truncated": false,
+            "outputComplete": true,
+            "reason": null,
+            "closureError": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 16,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          "owner_sha256": "788ec6dee2c50c2ac839382678b77a1b36045e28d98470bf5baa645d07a14734",
+          "stdout_sha256": "e89ac4595936b73ee09220c1c1cfac943dd31cb4a052c585a0b3a8db51ff3fe9",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "entry": "tests/qa-entry-context.test.mjs",
+          "counts": {
+            "tests": 6,
+            "pass": 6,
+            "fail": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "todo": 0
+          },
+          "guarded_native_attempts": null,
+          "result": {
+            "ok": true,
+            "code": 0,
+            "closed": true,
+            "forced": false,
+            "timedOut": false,
+            "overflow": false,
+            "truncated": false,
+            "outputComplete": true,
+            "reason": null,
+            "closureError": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 30,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          "owner_sha256": "234aa8801e76a2b373f264b6526acc760644e3ba8abdcffaed3bdc4541fb514b",
+          "stdout_sha256": "49cda1233e61d8aacca61b79a778606d256811ce52d969ad68dd1e7f38c29f46",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "acceptance_detail": "69 cases passed with no failures/skips/cancellations/todos. Actual native PA-1 was not selected; native adapters guarded and default authority remained absent. Complete source/runtime/ownership/helper and exact installed-cmd identity/content postflight passed."
+    }
+  ],
+  "ui": [
+    {
+      "name": "ui-1",
+      "status": "not_accepted",
+      "plan_sha256": "4f22a8eac80e73f5474731e6ce80a4d18a2b524eaf1ab7bba0c66ae45ea2aeeb",
+      "source_tree": {
+        "files": 15,
+        "sha256": "d5bba774ce13d2852c84aaaff008ec7871d5da855c580dc0e2082b895011c499"
+      },
+      "summary": {
+        "complete": true,
+        "ok": false,
+        "entries": [
+          {
+            "entry": "tests/test_0242_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 15,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_0231_destination_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 14,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/desktop-folder-picker.test.mjs",
+            "ok": false,
+            "closed": true,
+            "marker": false,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 14,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_automatic_frontend.js",
+            "ok": false,
+            "closed": true,
+            "marker": false,
+            "code": 1,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 16,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_ruling37_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 13,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_0231_rows_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 16,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_todo_holds_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 29,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_progress_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 12,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_odd_names_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 17,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          }
+        ],
+        "plan_sha256": "4f22a8eac80e73f5474731e6ce80a4d18a2b524eaf1ab7bba0c66ae45ea2aeeb",
+        "elapsed_ms": 2775.1967
+      }
+    },
+    {
+      "name": "ui-2",
+      "status": "passed",
+      "plan_sha256": "6eb0015b5f080475793d963efdabe6c1ebeb440bc71893722e306d6e7a1f52d0",
+      "source_tree": {
+        "files": 15,
+        "sha256": "669918707102a28162517b359c3cb10d122d5b94a4dd48c2be8a73c6a4db5a41"
+      },
+      "summary": {
+        "complete": true,
+        "ok": true,
+        "entries": [
+          {
+            "entry": "tests/desktop-folder-picker.test.mjs",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 13,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          },
+          {
+            "entry": "tests/test_automatic_frontend.js",
+            "ok": true,
+            "closed": true,
+            "marker": true,
+            "code": 0,
+            "reason": null,
+            "native": {
+              "active": 0,
+              "assigned": 0,
+              "listed": 0,
+              "retained": 4,
+              "unsignaled": 0,
+              "complete": true,
+              "zero": true,
+              "sampling": {
+                "queries": 14,
+                "incompleteQueries": 0,
+                "firstIncomplete": null,
+                "lastIncomplete": null
+              }
+            }
+          }
+        ],
+        "plan_sha256": "6eb0015b5f080475793d963efdabe6c1ebeb440bc71893722e306d6e7a1f52d0",
+        "elapsed_ms": 955.3878
+      }
+    }
+  ],
+  "pending": [
+    "one canonical immutable non-app entry on the clean 0.24.2 candidate",
+    "verified packaged payload and artifact hashes",
+    "measured engine-load/S8 and independent final QA/review",
+    "mandatory same-candidate native PA-1: concrete graph and actual release-specific user consent still required"
+  ],
+  "current_product_python": [
+    {
+      "path": "action_queue.py",
+      "size": 21523,
+      "sha256": "781ef7d0ef294dfb32f708d4588f7a7872336895aa7c5cca0e4591da0fc6a1ac"
+    },
+    {
+      "path": "admission_diagnostics.py",
+      "size": 1368,
+      "sha256": "ff3eb1fe76f9061bc870914d5db04a6cea7271f132a3f61bdc31cf1e7433c577"
+    },
+    {
+      "path": "anthology_volumes.py",
+      "size": 3936,
+      "sha256": "a603ce441a19df84053f14e168a57cbbb52d429ab16bf3cb3ed1fd6b83b7732c"
+    },
+    {
+      "path": "app.py",
+      "size": 16777,
+      "sha256": "ea1bab470d5659f036449bf231c5c16a9b5f25ea8ce099cc00ff5260c8cef159"
+    },
+    {
+      "path": "app_launcher.py",
+      "size": 15069,
+      "sha256": "9aeceddcfc51435bb3b7b431c8521ec1333f498b5d561097535a2edaaad00af7"
+    },
+    {
+      "path": "audio_jobs.py",
+      "size": 95826,
+      "sha256": "cbea7c719ec056b7813b531effdb06fa7f14c8ed1ceddba96d245491cdc2d91d"
+    },
+    {
+      "path": "audio_pipeline.py",
+      "size": 91379,
+      "sha256": "2650ea70ef839aad200bca5f4bd2f2d507a8046d7722d73f55cbbcbe4057985d"
+    },
+    {
+      "path": "author_rules.py",
+      "size": 34039,
+      "sha256": "c91f3dbe92021fee418f0fc2d4b4fa7dd78b071810342e49258a31e7c08b3085"
+    },
+    {
+      "path": "automatic_processing.py",
+      "size": 66008,
+      "sha256": "13bae4973e0c208fef13371042db83b947a14d1d8810b7fbfd20d4f634a4f28f"
+    },
+    {
+      "path": "book_delete.py",
+      "size": 54098,
+      "sha256": "c23b8a2f0307bcc4426f9fb63e7031f9574a735096144b746900669fd890c63f"
+    },
+    {
+      "path": "book_move.py",
+      "size": 51076,
+      "sha256": "cfaa67188179b4b30072e084101363283572740f5659d32f8ddf567a13c7e25c"
+    },
+    {
+      "path": "book_restart.py",
+      "size": 16172,
+      "sha256": "4f0371686c3039de5f2b9cbcdf6fadc2a773ccec0feabd0db74cc1d82ce9ba13"
+    },
+    {
+      "path": "catalog_contention.py",
+      "size": 6010,
+      "sha256": "86ec318eb149eb3e1014e8dd3adcec9fa47d4bf853d69a867819679d7c9e28b6"
+    },
+    {
+      "path": "catalog_owner.py",
+      "size": 3138,
+      "sha256": "fa0504c5acae3c55e8a7e049d09df5ad5dd5400cc0367085b0341d4a9d534caa"
+    },
+    {
+      "path": "chapter_plan.py",
+      "size": 3960,
+      "sha256": "c615e9fdeefb1f09cb86b1ee65265eee19ea5f32dafb79edd37fe33551399681"
+    },
+    {
+      "path": "chapter_repair.py",
+      "size": 18788,
+      "sha256": "c44daf28cb255613c0a7cb8a86d652c804e85241df613248ad9056201f733f0f"
+    },
+    {
+      "path": "cleanup_ownership.py",
+      "size": 3979,
+      "sha256": "30db5e3061736b2e21502753459000f5eb95153bd29cf6d75fb8236ff7dbe811"
+    },
+    {
+      "path": "cleanup_published_working.py",
+      "size": 5544,
+      "sha256": "4d04bdc8e462d1f7ef0b371d391c411047d681180b29d31351644edcd436a667"
+    },
+    {
+      "path": "cleanup_retry.py",
+      "size": 961,
+      "sha256": "6755f339aec3c7ad2088a3c9ab46a33201174fcd7d9cc696ca9f16615b6f6110"
+    },
+    {
+      "path": "collection_identity.py",
+      "size": 9303,
+      "sha256": "df0f3561cd964a6e38e8eac1b47b71ad1061e3f55cfd717141ca3e9318341e98"
+    },
+    {
+      "path": "conversion_progress.py",
+      "size": 7454,
+      "sha256": "d09dc4b143cb70905e54a2b66b55c38a69fdde3f84affabef0ce5f41059aaaab"
+    },
+    {
+      "path": "critical_sections.py",
+      "size": 1303,
+      "sha256": "c78d86f3f8c99cd90d86ad8310533857975d841e46f60d69b41bdfcd00b51553"
+    },
+    {
+      "path": "current_audiobook.py",
+      "size": 19048,
+      "sha256": "cf5cc3ea60d74b8e5b6029d6657c450c3b3190bd7b1477466b382bbe853affd2"
+    },
+    {
+      "path": "desktop_backend.py",
+      "size": 39433,
+      "sha256": "6b7566a12b680b0043b51ec9de5e5bb5ea15e86c18cc88a981a93ab405a9a38b"
+    },
+    {
+      "path": "desktop_catalog.py",
+      "size": 4172,
+      "sha256": "ee281df4829292c5c677b88dfebcd15ea038a827ca624b7f3c388dc130e8c77e"
+    },
+    {
+      "path": "desktop_host.py",
+      "size": 3956,
+      "sha256": "03ada4dde5cb82848791d2e06ab78aa04f65f96847e737fb27fb697d0445543e"
+    },
+    {
+      "path": "desktop_settings.py",
+      "size": 2609,
+      "sha256": "bfa1eb41d1733784f26980dcd0de7752e44db3120ce25a6547287dd1d823213e"
+    },
+    {
+      "path": "desktop_update_lease.py",
+      "size": 1212,
+      "sha256": "ca80c54048b2e45255410a2d6edb44ef9af6ac6e2d220dc755dbc9971a8f2e61"
+    },
+    {
+      "path": "destination_admission.py",
+      "size": 3414,
+      "sha256": "3fadec53bd1fe5fdf5e8358b411709f523ee5185d70308cadc4c7d0a39cad9bc"
+    },
+    {
+      "path": "destination_overrides.py",
+      "size": 18056,
+      "sha256": "ee51d9d4dd90da5583190de2f76521bd269179c90bb0dda1154f58f8158c8268"
+    },
+    {
+      "path": "encoding_policy.py",
+      "size": 6285,
+      "sha256": "22bbcc20ccef690346c91544462bb4f284c36957de70f8113acbb28007fd410a"
+    },
+    {
+      "path": "entered_names.py",
+      "size": 17196,
+      "sha256": "41e5b2f09b013893ee2c7d0137f462c0b420183ffca8616b567fa989952eae4c"
+    },
+    {
+      "path": "failed_m4b_retry.py",
+      "size": 4296,
+      "sha256": "24f45434afcbcd94d3bce691190c69949ce3b6863f680a8dd006527f36c02e3d"
+    },
+    {
+      "path": "folder_unit.py",
+      "size": 21238,
+      "sha256": "494887bdbb144a150f8379de8491e4039ab4778e45a88d1a36aaa45c9f3ab20b"
+    },
+    {
+      "path": "gap_fill.py",
+      "size": 9286,
+      "sha256": "0f6354d45a2b80741dbd85df4f1c81b999dbbdb579b663d3a7d066ec03e64296"
+    },
+    {
+      "path": "groups.py",
+      "size": 73757,
+      "sha256": "191e7a24346b48e206485d00801bc82cd42b44f54042a87127e5a64b262042a7"
+    },
+    {
+      "path": "inplace_m4b.py",
+      "size": 35904,
+      "sha256": "e3f6e0bde01430811c8b39459decf44235c77be92dce57522a44224db2441e81"
+    },
+    {
+      "path": "install_app_entries.py",
+      "size": 7392,
+      "sha256": "bad85a3e8705f87e9df121d05f842a6e164f34d921405be46a72b402ad699b8d"
+    },
+    {
+      "path": "litres_evidence.py",
+      "size": 4188,
+      "sha256": "592b99ec0bf459bc5b1e6a700cfdabd8456fa540efc6f431836392c8b53718bc"
+    },
+    {
+      "path": "local_identity.py",
+      "size": 227607,
+      "sha256": "8e8a6125eda719fe4decd3b0429293ac677cfe01c163ecd5420fcb57a8f73383"
+    },
+    {
+      "path": "m4b_preservation.py",
+      "size": 49087,
+      "sha256": "1d026e5fbb1fa9d8c51ad3c10c42742ac89aec0fb30f0e1637396fe2ecd97ffd"
+    },
+    {
+      "path": "m4b_readmission.py",
+      "size": 9887,
+      "sha256": "ab2cf33cb6d119067d5ae1a02793a4219f764cb2f8697272d740497e4dc441e1"
+    },
+    {
+      "path": "m4b_repair.py",
+      "size": 13778,
+      "sha256": "ee7b9f06a279f74327948ce41c359ef7aee5bff7b383afe92fa19e689507a9fd"
+    },
+    {
+      "path": "manifest_compatibility.py",
+      "size": 1471,
+      "sha256": "66e4738c68b95eeca36a664714b21ed2168818b35d259a9f5e89335dc3a92435"
+    },
+    {
+      "path": "manual_metadata.py",
+      "size": 7961,
+      "sha256": "0f436736632cefcafe2605acf0c5b05f4116f58694f924734d4cbc01a9c72619"
+    },
+    {
+      "path": "merge_service.py",
+      "size": 421449,
+      "sha256": "912fafdde6a05a757900abe50265be53fc30e03f2f85ad4652421ada8659b016"
+    },
+    {
+      "path": "metadata.py",
+      "size": 15705,
+      "sha256": "b5a5c9d9d20093cc9c70177eabc1d422cd00f5f9988c854605ecb3f0763d08d1"
+    },
+    {
+      "path": "metadata_choices.py",
+      "size": 17235,
+      "sha256": "258bdd001035b4bbc4f0a57ebb989c354d7c8e96e6bcea7875195d9927cb0e6d"
+    },
+    {
+      "path": "metadata_sources.py",
+      "size": 14440,
+      "sha256": "e8af20b86e05e905445f8fa07058c81834146f94a72cee18fa9e27c76f29506e"
+    },
+    {
+      "path": "migration_operation.py",
+      "size": 22399,
+      "sha256": "d07c29fb8e878ca960702df328d050ff40b839e373f4f2d39af04e6edd2da8bf"
+    },
+    {
+      "path": "migration_planning.py",
+      "size": 22681,
+      "sha256": "a0540f4f15c03777631c4dfe76a057140e078e8a5a9149bf7c37c08f10dec602"
+    },
+    {
+      "path": "mp3_tag_repair.py",
+      "size": 6343,
+      "sha256": "83b883ecdfd829d21b7e06f8ad2254849e940b3c0ae9c3049f6b46ed32ca621d"
+    },
+    {
+      "path": "native_io.py",
+      "size": 41769,
+      "sha256": "740d44fa75bc6c5c918e542d426a29df2758a8d84f0942a23b2ad1600186c3d7"
+    },
+    {
+      "path": "neutral_cover.py",
+      "size": 6147,
+      "sha256": "558600a279932f1b695bc5c509ce74084aad821bb2bb5f4ff569bbe22224ea9e"
+    },
+    {
+      "path": "openlibrary_index.py",
+      "size": 36152,
+      "sha256": "bea0dfc88bc802f5af0ca8ef33f196f97bd83605546e4835fde9fe63eda3f885"
+    },
+    {
+      "path": "organization.py",
+      "size": 9779,
+      "sha256": "8904a370b29fa8cae6f2288852b6f8baffcfaba4a81fbea3048d2a78817db661"
+    },
+    {
+      "path": "original_titles.py",
+      "size": 1852,
+      "sha256": "f8621d4b3ccbecf2ad5ec5b11cc175c5b690e120d325457a3445d67c2e0fc452"
+    },
+    {
+      "path": "output_migration.py",
+      "size": 35553,
+      "sha256": "5177317b257a66a5535b5f9e5af6b2b007561e1cea502cbb7955512fc8b327f1"
+    },
+    {
+      "path": "output_rename.py",
+      "size": 17730,
+      "sha256": "2181fbbe067acaf4457cb3f65f94047da70202c360da6b0007ea8692f823e67c"
+    },
+    {
+      "path": "part_sets.py",
+      "size": 16045,
+      "sha256": "4c1fe5fa7cded79f552ec905815e05336a72cede75198890423fc279d7a7c84a"
+    },
+    {
+      "path": "pause_state.py",
+      "size": 1139,
+      "sha256": "63322b5455571c06c71e95a2d53cf2bfa72ee69e2b02c2c89bd5bb39f1fb7b7d"
+    },
+    {
+      "path": "producer_recovery.py",
+      "size": 37957,
+      "sha256": "c642d3992ba819a6da86d3876ab39763afe59bf735708a460b6d632248ca7141"
+    },
+    {
+      "path": "public_research.py",
+      "size": 201027,
+      "sha256": "76a860b4afebb3b15727c6680740ad2ff361c97b77b9abcaf5695f0eb5f5815b"
+    },
+    {
+      "path": "public_work_identity.py",
+      "size": 8557,
+      "sha256": "a2ac95f9e2ee670d1025b94757382201bfaa8b5c0e2dfa967d2158cd7ab8176c"
+    },
+    {
+      "path": "publication_binding.py",
+      "size": 11164,
+      "sha256": "76712f6f912a2791065ecf3755c8f26dc35d98d4acc3c88ef4e1f1d7b913c2e4"
+    },
+    {
+      "path": "publication_locations.py",
+      "size": 53725,
+      "sha256": "d26742dff81b19584cd86fccb9cff56f056180bd71e41d14aed327c25d750231"
+    },
+    {
+      "path": "quicktime_chapters.py",
+      "size": 16507,
+      "sha256": "37d1a23d49844545f066e5e621461063c3d40aa3052c7a412fc8bdf4507b4c51"
+    },
+    {
+      "path": "reacquire_sources.py",
+      "size": 20446,
+      "sha256": "b0f54631e9b552b3927237f819b4fa83c0362a7b6a379c883712ba0ec3eb642e"
+    },
+    {
+      "path": "recording_classification.py",
+      "size": 8193,
+      "sha256": "ce759ce700033a41d9c426859f11abdf2adbfe10e31edec791b712124ab9a567"
+    },
+    {
+      "path": "recovery_retention.py",
+      "size": 14164,
+      "sha256": "8742899a0152f7460f23a27fc2efa77e8645ba8fcb60f1c93bd1a61c53d5e4c9"
+    },
+    {
+      "path": "replacement_jobs.py",
+      "size": 20962,
+      "sha256": "bd136ddc9d1f3df281cb871599e5f2fb0a7cfe25e7b51d83c0660b9431e1328d"
+    },
+    {
+      "path": "replacement_media.py",
+      "size": 23384,
+      "sha256": "e916cc81eea3c16f990332c17dcb8795cd2856a90eac8da8475b04f3e2593f99"
+    },
+    {
+      "path": "replacement_retirement.py",
+      "size": 21947,
+      "sha256": "894674d09b7e62908973cf0692cf0290358a4bf12314a5a57891912f20f27790"
+    },
+    {
+      "path": "retry_intent.py",
+      "size": 5302,
+      "sha256": "c97c7bd5e83c06158bdb96439553555572613abf6be5fb03dd57dc30799660e4"
+    },
+    {
+      "path": "retry_refusal.py",
+      "size": 11631,
+      "sha256": "740fcfe19e07b2bd022df27ada6e29ab86d62cfe34353a86c7ae1d80509c0fb5"
+    },
+    {
+      "path": "review_backend.py",
+      "size": 78072,
+      "sha256": "87111e995c101b3670ecceafd97f79f01f78ba8c008bff890bebac70574dace4"
+    },
+    {
+      "path": "reviewed_routing.py",
+      "size": 1800,
+      "sha256": "9e564c6ccf195f4f29890fe21f759cefd0ec0972e8a3a2ab7d17f7bad2397e32"
+    },
+    {
+      "path": "scanner.py",
+      "size": 58726,
+      "sha256": "d2b1b4ba122cd5bf6bef454057ba5abbcf92833dc9323b0bca670a236202be1e"
+    },
+    {
+      "path": "series_backfill.py",
+      "size": 42755,
+      "sha256": "041718dec0f56f074f4a0527adfcd7d85cc57cc799bc450352a3a1516770ff2c"
+    },
+    {
+      "path": "series_evidence.py",
+      "size": 8113,
+      "sha256": "5a97423670943f3398f1b9e012a948d235c4a98c6eb85a59ed24d0763f09b5fb"
+    },
+    {
+      "path": "shared_routing.py",
+      "size": 8496,
+      "sha256": "6dc9a403a762528c796ac9a2f1737928f747f355a4763542d3eeeefd7edeb3c1"
+    },
+    {
+      "path": "source_cleanup.py",
+      "size": 45717,
+      "sha256": "2a5e9d80926a171791891891ac80ad0acf3a472970c213a75d9a1b6c13a36e7f"
+    },
+    {
+      "path": "source_config.py",
+      "size": 5737,
+      "sha256": "d01ed1ad052c1517e4f6d4cd3f3cc581fda203c715d55a075b4b53dcd445ab81"
+    },
+    {
+      "path": "source_identity.py",
+      "size": 20460,
+      "sha256": "4ae70bfd1c5178308d94a5a399cc31812978e56017b837193694df377babb7be"
+    },
+    {
+      "path": "source_proofs.py",
+      "size": 2600,
+      "sha256": "b26aaf6e86d9322a837097a8a8c31b8ec042f21a1e7e5accba68812fb613fab4"
+    },
+    {
+      "path": "split_books.py",
+      "size": 23460,
+      "sha256": "8d2bb95c108a5d155a29ec0385d5ccc539e0ab1ed1e3c82d607919af2fd21741"
+    },
+    {
+      "path": "sqlite_retry.py",
+      "size": 1240,
+      "sha256": "b51a30c10bc1795916061defc665438fd61121239c1ca61dc781996d81853314"
+    },
+    {
+      "path": "standing_metadata.py",
+      "size": 9165,
+      "sha256": "e35f836c3f200298bdeaa8df0842e6e721e997f8891411350c9f826c8fad8589"
+    },
+    {
+      "path": "storage_cleanup.py",
+      "size": 78857,
+      "sha256": "f05518e67bec0194bf3313fe3684081f86db07b1c3179a05bcaa0c8dfe378974"
+    },
+    {
+      "path": "tag_text.py",
+      "size": 3159,
+      "sha256": "ad13d665b8762b918ea8bce876b0521b79623375364d3c4526043c714bbb6ad0"
+    },
+    {
+      "path": "todo_causes.py",
+      "size": 8708,
+      "sha256": "a0181f6b37c207f5766c1e208dcb8cd87bc42fa9f301062f08a7bcaf5dfa1d3e"
+    },
+    {
+      "path": "track_order.py",
+      "size": 2512,
+      "sha256": "2ee28fe9596ddb08582176b4d2854100b4e60385ed804c7517cf5086217cd0e1"
+    },
+    {
+      "path": "web_server.py",
+      "size": 110236,
+      "sha256": "031b27a2144f1ea035e773d4c433a3825d6498930668ed2f8d21e550ea71bcbe"
+    },
+    {
+      "path": "working_lifecycle.py",
+      "size": 54981,
+      "sha256": "0726648852fdac8890d4d185dd19a2b5dc1db430582f694b84410e83d728a894"
+    },
+    {
+      "path": "zone_identifier.py",
+      "size": 12683,
+      "sha256": "86c0b4175ec3c56c21fe04c7769a022a2c7b63f0103c93e4d4665f468cadca8c"
+    }
+  ],
+  "geometry": {
+    "accepted_unique_cases": 160,
+    "retained_positive_geometry2": 158,
+    "corrected_geometry3": 2,
+    "earlier_geometry2_status": "functional_failure_with_normal_closure",
+    "geometry3_summary_sha256": "619a3245dbd7d134c17864f3ebf438fb240f087aad4b4ee9d3ee3f24b3c84ec2",
+    "geometry3_callback_sha256": "7799e2b1fbfba0065b21783d46064ec0bd911fb036c2416ade722586748acf30",
+    "limits": "Saved private headless fake-page geometry; no packaged app, native picker or behavioral S8/performance proof."
+  }
+}

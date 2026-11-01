@@ -75,7 +75,7 @@ class SourceFolderTests(unittest.TestCase):
         self.assertTrue(self.folder.exists());self.assert_output();self.assertEqual(self.storage.folder_status(self.job_id)['state'],'needs_attention')
     def test_reparse_source_ancestor_is_rejected_without_following(self):
         self.retire();held=self.base/'preserved';self.folder.rename(held)
-        result=subprocess.run(['cmd.exe','/d','/c','mklink','/J',str(self.folder),str(held)],capture_output=True,text=True,timeout=10)
+        result=subprocess.run([str(Path(os.environ['SystemRoot'])/'System32'/'cmd.exe'),'/d','/c','mklink','/J',str(self.folder),str(held)],capture_output=True,text=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
         self.assertEqual(result.returncode,0,result.stderr)
         with self.assertRaisesRegex(BoundaryError,'junction|reparse'):self.storage.run_folders(self.job_id)
         self.assertTrue(held.exists());self.assertTrue(os.path.isjunction(self.folder));self.assert_output()
@@ -171,12 +171,17 @@ class SourceFolderTests(unittest.TestCase):
         real=__import__('book_delete').remove
         def flaky(path,root,size):
             return ('in_use','[WinError 32] The process cannot access the file') if path.endswith('039, высокое разрешение.jpg') else real(path,root,size)
-        with patch('book_delete.remove',flaky):self.storage.run_folders(self.job_id)
+        with patch('book_delete.remove',flaky):
+            with self.assertRaisesRegex(BoundaryError,'WinError 32'):self.storage.run_folders(self.job_id)
         record=self.storage.removed_files(self.job_id)
         self.assertEqual(len(record),40);self.assertGreater(sum(len(r['path']) for r in record),1000,'longer than the old 1,000-character receipt')
         failed=[r for r in record if r['state']!='removed']
         self.assertEqual(len(failed),1);self.assertEqual(failed[0]['state'],'not_removed');self.assertIn('[WinError 32]',failed[0]['detail'])
         self.assertTrue(self.folder.exists());self.assertTrue(Path(failed[0]['path']).exists())
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed')
+        after=self.storage.removed_files(self.job_id)
+        self.assertEqual(after[:40],record,'the earlier attempt receipts remain exact')
+        self.assertEqual(after[-1]['state'],'removed');self.assertFalse(self.folder.exists());self.assert_output()
     def test_audio_in_any_format_keeps_the_folder_and_every_file(self):
         for name,data in (('bonus.ape',b'OTHER RECORDING'),('cover.jpg',b'COVER')):(self.folder/name).write_bytes(data)
         self.retire();status=self.storage.run_folders(self.job_id)
@@ -208,8 +213,13 @@ class SourceFolderTests(unittest.TestCase):
     def test_leftover_that_cannot_be_removed_keeps_the_folder(self):
         (self.folder/'cover.jpg').write_bytes(b'COVER');(self.folder/'notes.txt').write_bytes(b'NOTES')
         self.retire()
-        with patch('book_delete.remove',return_value=('in_use','[WinError 32] in use')):status=self.storage.run_folders(self.job_id)
-        self.assertEqual(status['removed'],0);self.assertTrue(self.folder.exists());self.assertIn('could not be removed',self.receipt(self.folder)['reason'])
+        with patch('book_delete.remove',return_value=('in_use','[WinError 32] in use')):
+            with self.assertRaisesRegex(BoundaryError,'WinError 32'):self.storage.run_folders(self.job_id)
+        status=self.storage.folder_status(self.job_id)
+        self.assertEqual(status['state'],'needs_attention');self.assertEqual(status['removed'],0)
+        self.assertTrue(self.folder.exists());self.assertIn('could not be removed',self.receipt(self.folder)['reason'])
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed')
+        self.assertFalse(self.folder.exists());self.assert_output()
     def test_unknown_volume_capability_refuses_native_disposition(self):
         self.retire()
         with DirectoryBoundary(self.library,self.folder.parent),VerifiedDirectory(self.folder,delete=True) as target,patch.object(kernel,'GetVolumeInformationByHandleW',return_value=0):
@@ -362,5 +372,60 @@ class SourceFolderTests(unittest.TestCase):
         status=self.storage.folder_status(self.job_id)
         self.assertEqual(status['state'],'needs_attention');self.assertTrue(status['reason'].startswith(__import__('storage_cleanup').FOLDER_RETRY))
         self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed','the retry clears it')
+
+    def test_provenance_refusal_precedes_any_output_hash(self):
+        self.retire()
+        with connect(self.db) as db:db.execute("UPDATE source_retirements SET source_hash='changed' WHERE job_id=?",(self.job_id,))
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('must not hash known refusal')):
+            with self.assertRaisesRegex(BoundaryError,'correspondence'):self.storage.run_folders(self.job_id)
+        self.assertTrue(self.folder.exists());self.assert_output()
+
+    def test_new_configured_root_and_its_child_are_preserved(self):
+        self.retire();self.storage.source_roots=lambda:[self.library,self.folder.parent]
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('protected root is known before hashing')):
+            with self.assertRaisesRegex(BoundaryError,'current source root'):self.storage.run_folders(self.job_id)
+        self.assertTrue(self.folder.exists());self.assertTrue(self.folder.parent.exists())
+
+    def test_access_denied_stat_never_records_gone_sweep(self):
+        self.old_run();original=os.lstat
+        def denied(path,*args,**kwargs):
+            if Path(path)==self.folder:raise PermissionError(13,'denied')
+            return original(path,*args,**kwargs)
+        with patch('os.lstat',side_effect=denied):self.assertEqual(self.storage.sweep_folders(self.job_id),'later')
+        self.assertIsNone(self.sweep_marker());self.assertEqual(self.storage.old_folder_jobs(),[self.job_id])
+
+    def test_nonown_ancestor_with_cover_does_not_hash(self):
+        self.old_run();self.folder.rmdir();(self.folder.parent/'cover.jpg').write_bytes(b'ancestor cover')
+        with patch.object(self.storage,'protected_output',side_effect=AssertionError('nonown cover is retained')):
+            self.assertEqual(self.storage.sweep_folders(self.job_id),'kept')
+        self.assertTrue((self.folder.parent/'cover.jpg').exists())
+
+    def test_interrupted_sweep_retains_its_selection_and_retries(self):
+        self.old_run();prior=self.storage.folder_status(self.job_id)
+        with patch.object(self.storage,'protected_output',side_effect=InterruptedError('closing')):
+            with self.assertRaises(InterruptedError):self.storage.sweep_folders(self.job_id)
+        self.assertIsNone(self.sweep_marker())
+        self.assertEqual(self.storage.folder_status(self.job_id)['state'],prior['state'])
+        self.assertEqual(self.storage.sweep_folders(self.job_id),'completed')
+
+    def test_exact_postconversion_folder_fault_is_retryable(self):
+        self.retire();original=os.rmdir
+        def denied(path,*args,**kwargs):
+            if Path(path)==self.folder:raise PermissionError(13,'held open')
+            return original(path,*args,**kwargs)
+        with patch('os.rmdir',side_effect=denied):
+            with self.assertRaises(PermissionError):self.storage.run_folders(self.job_id)
+        self.assertEqual(self.storage.status()[0]['state'],'completed')
+        self.assertTrue(self.storage.folder_status(self.job_id)['reason'].startswith(__import__('storage_cleanup').FOLDER_RETRY))
+        self.assertEqual(self.storage.run_folders(self.job_id)['state'],'completed');self.assert_output()
+
+    def test_crash_after_leftover_removal_reconciles_as_unknown_actor(self):
+        (self.folder/'cover.jpg').write_bytes(b'leftover');self.retire()
+        with patch.object(self.storage,'_record_outcome',side_effect=RuntimeError('crash after remove')):
+            with self.assertRaises(RuntimeError):self.storage.run_folders(self.job_id)
+        self.assertEqual(self.storage.removed_files(self.job_id)[0]['state'],'removing')
+        self.storage.run_folders(self.job_id)
+        record=self.storage.removed_files(self.job_id)[0]
+        self.assertEqual(record['state'],'absent_after_intent');self.assertIn('actor is not established',record['detail'].lower());self.assertNotEqual(record['state'],'removed')
 
 if __name__=='__main__':unittest.main()

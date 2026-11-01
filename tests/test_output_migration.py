@@ -115,11 +115,11 @@ class Harness:
             return {'kind':'sealed_media_proof_reused','supported_validation_contract':'books-audio-output-v1','immutable_receipt_sha256':migration.digest(original),
                 'validation_sha256':'f'*64 if self.bad_validation_digest else migration.digest(original['validation']),'passed':True,'full_content_sha256':sha,'size':len(raw),
                 'details':{'sealed_actual_validation':copy.deepcopy(original['validation'])}}
-        probe=subprocess.run([shutil.which('ffprobe'),'-v','error','-show_streams','-show_chapters','-of','json',str(path)],capture_output=True,timeout=20)
+        probe=subprocess.run([shutil.which('ffprobe'),'-v','error','-show_streams','-show_chapters','-of','json',str(path)],capture_output=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if probe.returncode:raise ValueError('Private media probe failed')
         info=json.loads(probe.stdout);audio=[s for s in info['streams'] if s['codec_type']=='audio']
         if len(audio)!=1 or audio[0]['codec_name']!='aac':raise ValueError('Private fixture AAC profile changed')
-        decoded=subprocess.run([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-i',str(path),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],capture_output=True,timeout=20)
+        decoded=subprocess.run([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-i',str(path),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],capture_output=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if decoded.returncode or not decoded.stdout:raise ValueError('Private complete media decode failed')
         return {'kind':'fresh_full_media_verified','supported_validation_contract':'books-audio-output-v1','immutable_receipt_sha256':migration.digest(original),
             'validation_sha256':migration.digest(original['validation']),'passed':True,'full_content_sha256':sha,'size':len(raw),
@@ -142,11 +142,11 @@ class OutputMigrationTests(unittest.TestCase):
     def setUpClass(cls):
         AREA.mkdir(parents=True,exist_ok=True);seed=AREA/'shared-tiny-aac.m4b'
         if not seed.exists():
-            result=subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','anullsrc=r=22050:cl=mono','-t','0.1','-c:a','aac',str(seed)],capture_output=True,timeout=20)
+            result=subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-n','-f','lavfi','-i','anullsrc=r=22050:cl=mono','-t','0.1','-c:a','aac',str(seed)],capture_output=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             if result.returncode:raise RuntimeError(result.stderr.decode(errors='replace'))
         cls.seed=seed.read_bytes()
-        probe=subprocess.run([shutil.which('ffprobe'),'-v','error','-show_streams','-show_chapters','-of','json',str(seed)],capture_output=True,timeout=20)
-        decoded=subprocess.run([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-i',str(seed),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],capture_output=True,timeout=20)
+        probe=subprocess.run([shutil.which('ffprobe'),'-v','error','-show_streams','-show_chapters','-of','json',str(seed)],capture_output=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        decoded=subprocess.run([shutil.which('ffmpeg'),'-v','error','-xerror','-nostdin','-i',str(seed),'-map','0:a:0','-c:a','pcm_f64le','-f','f64le','pipe:1'],capture_output=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if probe.returncode or decoded.returncode or not decoded.stdout:raise RuntimeError('Actual shared media validation fixture failed')
         info=json.loads(probe.stdout)
         cls.validation={'codec':'aac','complete_pcm_sha256':hashlib.sha256(decoded.stdout).hexdigest(),'pcm_bytes':len(decoded.stdout),'chapters':info.get('chapters',[])}

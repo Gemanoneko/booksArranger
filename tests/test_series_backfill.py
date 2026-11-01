@@ -22,12 +22,12 @@ TITLE,AUTHOR='Призраки белых ночей','Обухова Лена'
 def make_book(path,faststart=False):
     """A small published-style audiobook: AAC audio, one attached cover, two chapters, title/artist tags."""
     folder=path.parent;cover=folder/'cover.png';chapters=folder/'chapters.txt'
-    subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-y','-f','lavfi','-i','color=c=red:s=32x32:d=1','-frames:v','1',str(cover)],check=True)
+    subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-y','-f','lavfi','-i','color=c=red:s=32x32:d=1','-frames:v','1',str(cover)],check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     chapters.write_text(';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=One\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=1000\nEND=2000\ntitle=Two\n',encoding='utf-8')
     subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-y','-f','lavfi','-i','sine=frequency=440:duration=2','-i',str(cover),'-f','ffmetadata','-i',str(chapters),
         '-map','0:a','-map','1:v','-map_chapters','2','-c:a','aac','-b:a','64k','-c:v','copy','-disposition:v:0','attached_pic',
         '-metadata','title='+TITLE,'-metadata','artist='+AUTHOR,'-metadata','album='+TITLE,'-metadata','album_artist='+AUTHOR,'-metadata','media_type=2',
-        *(['-movflags','+faststart'] if faststart else []),'-f','mp4',str(path)],check=True)
+        *(['-movflags','+faststart'] if faststart else []),'-f','mp4',str(path)],check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     cover.unlink();chapters.unlink()
 
 def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()

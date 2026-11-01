@@ -5,6 +5,7 @@ let offset = 0, search = '', selectedPath = null, selectedRow = null, reviewRow 
 let dirty = false, busy = false, polling = false, ended = false, timer = null, state = null;
 let view='candidates',totalRows=0,selectedLibrary=null;
 let automaticRequest=null,automaticFlight=null,automaticResultKey=null,automaticInspectorKey=null;
+const jobControlFlights=new Map();let jobControlNote='';
 let manualMetadataTouched=false,manualTrackTouched=false,manualDraftLease=null,draftLeaseFailure='',draftLeaseQueue=Promise.resolve();
 const filters={files:'all',candidates:'converted'};
 const filterOptions={files:[['all','All files'],['errors','Read errors'],['review','Needs metadata review'],['preview','Preview available'],['missing','No longer found']],candidates:[['converted','Audiobook Ready'],['all','All candidates'],['jobs','Queued / creating'],['held','Held'],['recording_review','Recording review'],['errors','Source read errors'],['changed','Candidate changed'],['output_attention','Output needs attention'],['restarted','Started over']]};
@@ -397,9 +398,9 @@ function controls() {
   const active = state?.active_library;
   const automatic=state?.automatic_processing,automaticOwnsScanner=['Running','Stopping'].includes(automatic?.state);
   // Ruling 35: another press of this page never disables a button (later() holds the press until it is free).
-  $('start-automatic').disabled=ended || recoveryDisconnected || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
+  $('start-automatic').disabled=ended || recoveryDisconnected || automaticRequest==='start' || automatic?.can_start!==true || !!draftLeaseFailure || !!(manualDraftLease?.active && !manualDraftLease.confirmed);
   renderAutomaticEligibility();
-  $('stop-automatic').disabled=ended || recoveryDisconnected || automatic?.can_stop!==true;
+  $('stop-automatic').disabled=ended || recoveryDisconnected || automaticRequest==='stop' || automatic?.can_stop!==true;
   // Cancel automatic start (O12): shown only while a start is pending; the notice above says what it waits for.
   if($('cancel-automatic-start')){const cancel=$('cancel-automatic-start'),active=globalThis.document?.activeElement;cancel.hidden=!startPending(automatic) && active!==cancel;cancel.disabled=busy || ended || recoveryDisconnected || automaticRequest!==null || !startPending(automatic);}
   const stopped = ['stopped','offline','failed'].includes(state?.status?.state);
@@ -419,14 +420,16 @@ function controls() {
   if($('queue-books'))$('queue-books').disabled=ended || recoveryDisconnected || !rows.some(readyForQueue);
   if($('retry-selected'))renderRetrySelected();
   if($('release-selected'))renderReleaseSelected();
-  if($('pause-jobs'))$('pause-jobs').disabled=ended || recoveryDisconnected || !['Running','running'].includes(state?.audiobook_jobs?.state);
+  const jobs=state?.audiobook_jobs,admission=jobs?.start_admission,checking=admission?.state==='checking',maintenance=jobs?.maintenance;
+  if($('pause-jobs'))$('pause-jobs').disabled=ended || recoveryDisconnected || jobControlFlights.has('pause') || maintenance?.cancel_requested===true || maintenance?.state==='stopping' || !checking && !maintenance && !['Running','running'].includes(jobs?.state);
   if($('resume-jobs')){
     // The rest of ruling 35 (ruling 37): pressed while a Pause settles it is kept, so it is no longer disabled while Pausing;
     // while it is kept, the same button takes it back.
-    const jobs=state?.audiobook_jobs,waiting=jobs?.start_waiting;
-    $('resume-jobs').disabled=ended || recoveryDisconnected || !waiting && (!(jobs?.queued || jobs?.retry_checks?.waiting) || ['Running','running'].includes(jobs?.state));
+    const waiting=jobs?.start_waiting || (admission?.state==='waiting'?admission:null);
+    $('resume-jobs').disabled=ended || recoveryDisconnected || jobControlFlights.has('resume') || jobControlFlights.has('resume-cancel') || checking || admission?.state==='closing' || !waiting && (!(jobs?.queued || jobs?.retry_checks?.waiting) || ['Running','running'].includes(jobs?.state));
     startWaitTip($('resume-jobs'),waiting);
   }
+  renderJobControlState();
   renderMetaSave();updateNamesRows();updateFolderRows();updateDestinations();renderLaterButtons();if(choiceSave)updateMetadataChoiceControls();if(trackSave)trackSaveLine();renderNamesFacts();
   gateLoading();  // last: while loading it overrides the states above (Judy 3.6)
   drainLater();
@@ -434,6 +437,7 @@ function controls() {
 }
 async function action(route, data) {
   if (ended) return;
+  if(['/api/audiobook/resume','/api/audiobook/pause','/api/audiobook/resume-cancel'].includes(route))return jobControlAction(route,data);
   if (busy){pressLater('press:'+route,{'/api/scan/start':'scan_start','/api/scan/resume':'scan_resume','/api/scan/stop':'scan_stop','/api/audiobook/pause':'pause','/api/audiobook/resume':'resume'}[route],'',()=>action(route,data));return;}
   busy=true; controls(); message();
   // Ruling 35: Start and Resume scanning are accepted while conversion or automatic processing runs and start when they end.
@@ -454,7 +458,50 @@ async function action(route, data) {
 }
 // Provisional copy (ruling 35's rest, sent to Judy): what a kept Resume waits for.
 const START_WAITS={pause:'the pause',start:'the earlier start'};
-function startWaitLine(reason){return `Resume audiobook jobs queued. It starts when ${START_WAITS[reason] || 'the pause'} finishes. Press it again to cancel.`;}
+function startWaitLine(reason){return `Resume queued. It starts when ${START_WAITS[reason] || 'the current start check'} finishes. Press Resume again to cancel.`;}
+function pauseLine(pause,automatic=false){
+  const origin={user:'Paused by you.',update:'Paused for an update.',closing:'Paused when Books Arranger closed.',interrupted:'Paused after an interruption.'}[pause?.origin] || 'Paused.';
+  return origin+' '+(automatic?'Start automatic processing to continue.':'Resume continues pending work.');
+}
+function admissionLine(jobs){
+  const admission=jobs?.start_admission;
+  if(jobControlFlights.has('pause') && admission?.state==='checking')return 'Pausing start checks…';
+  if(admission?.state==='checking')return 'Checking pending audiobook work';
+  if(admission?.state==='waiting')return startWaitLine(admission.reason);
+  if(admission?.state==='stale')return 'Start checks stopped. Pending work is kept.';
+  if(admission?.state==='closing')return 'Books Arranger is closing. Pending work is kept.';
+  if(jobControlFlights.has('resume'))return 'Resume requested. Waiting for the app to respond.';
+  return jobs?.start_waiting?startWaitLine(jobs.start_waiting.reason):'';
+}
+function renderJobControlState(){
+  const jobs=state?.audiobook_jobs;if(!jobs || !$('jobs-help'))return;
+  const admission=jobs.start_admission,maintenance=jobs.maintenance,disconnected=ended || recoveryDisconnected;
+  const stopping=jobControlFlights.has('pause') || maintenance?.state==='stopping' || maintenance?.cancel_requested===true;
+  const status=admissionLine(jobs),pause=$('pause-jobs'),resume=$('resume-jobs');
+  const stopTip='Stopping at the next safe checkpoint. Pending work is kept.';
+  pause.title=disconnected?'Current processing status unavailable.':stopping?stopTip:admission?.state==='checking'?'Pause the start checks and keep pending work. The current read may finish before stopping.':maintenance?'Stop finished-book checks at the next safe checkpoint. Pending work is kept.':pause.disabled?'No audiobook work is running.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
+  resume.title=disconnected?'Current processing status unavailable.':status || (resume.disabled?'No pending audiobook work can be resumed.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.');
+  for(const button of [pause,resume])button.setAttribute('aria-describedby','jobs-help jobs-status');
+  const detail=maintenance && stopping?'Stopping finished-book checks…':status || jobControlNote || (['Paused','paused'].includes(jobs.state)?pauseLine(jobs.pause):'');
+  const base=jobs.cleanup_active===true?'Pausing source cleanup finishes the current file. Resume continues its saved progress.':'An interrupted conversion restarts; completed outputs stay in place.';
+  writeText($('jobs-help'),[detail,base,'Scanning has separate stop and resume controls.',Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?'Source folders retained: safe automatic removal is unavailable on this drive.':''].filter(Boolean).join(' '));
+}
+async function jobControlAction(route,data){
+  const kind=route.split('/').pop();if(ended || recoveryDisconnected || jobControlFlights.has(kind))return;
+  const flight={};jobControlFlights.set(kind,flight);jobControlNote='';renderJobs();controls();
+  try{
+    const answer=await request(route,data);
+    if(answer?.start_admission && state?.audiobook_jobs)state={...state,audiobook_jobs:{...state.audiobook_jobs,start_admission:answer.start_admission}};
+    if(kind==='resume-cancel' && answer?.cancelled===true)jobControlNote='Resume cancelled. Pending work is kept.';
+    if(kind==='resume' && answer?.start_admission?.state==='waiting')jobControlNote=startWaitLine(answer.start_admission.reason);
+    if(jobControlNote)message(jobControlNote);
+    lastKey=null;await refresh(true);
+  }catch(error){
+    if(kind==='resume' && error.body?.code==='scanning'){const item=pressLater('press:'+route,'resume','',()=>action(route,data),scanSeen());message(laterLine(item)+' Press it again to cancel.');}
+    else message(kind==='resume-cancel' && error.body?.code==='started'?'Too late to cancel: Resume audiobook jobs has already started.':error.message);
+  }
+  finally{if(jobControlFlights.get(kind)===flight)jobControlFlights.delete(kind);renderJobs();controls();}
+}
 function startWaitTip(button,waiting){
   if(!button?.setAttribute || !button.dataset || laterFor('toolbar:resume-jobs'))return;  // a press the page holds says its own line
   if(waiting){if(button.dataset.waitTitle===undefined)button.dataset.waitTitle=button.title || '';const tip=startWaitLine(waiting.reason);if(button.title!==tip)button.title=tip;}
@@ -626,7 +673,7 @@ function renderRows(force=false) {
   const unit=view==='candidates'?'candidates':'files';
   const label=filterOptions[view].find(item=>item[0]===filters[view])[1];
   // Judy's copy check (must-fix): not running, the books are waiting, as the strip line above says.
-  const waiting=stillChecking(),running=state?.automatic_processing?.state==='Running';
+  const waiting=stillChecking(),running=researchChecking();
   const nothing=attentionList && !search?(!waiting?'Nothing needs your attention.':running?`Nothing needs your attention yet. Still checking ${plural(waiting,'book','books')}.`:
     `Nothing needs your attention yet. ${plural(waiting,'book is','books are')} waiting to be checked.`):'';
   const emptyText=view==='candidates' && filters[view]==='converted' && !search && totalRows===0?'No audiobooks are ready yet. Automatic processing progress appears above; choose All candidates or Held to inspect unfinished books.':
@@ -972,19 +1019,35 @@ function renderJobs(){
   const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   const counts=Number.isInteger(jobs.converted_total)&&Number.isInteger(jobs.approved_total)&&jobs.converted_total>=0&&jobs.approved_total>=jobs.converted_total;
   const wholeCounts=Number.isInteger(jobs.candidate_total)&&Number.isInteger(jobs.not_approved_total)&&jobs.candidate_total>=0&&jobs.not_approved_total>=0&&jobs.not_approved_total<=jobs.candidate_total;text('book-candidate-counts',wholeCounts?`${jobs.candidate_total} book candidates found · ${jobs.not_approved_total} not approved`:'Book candidate totals unavailable');
-  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
-  renderActivities(Array.isArray(state.activities)?state.activities:[],jobs);
+  text('jobs-status',(recoveryDisconnected || ended || busyShown?'Last confirmed — ':'')+[counts?`${jobs.converted_total} converted out of ${jobs.approved_total} approved books`:'Approved book progress unavailable',admissionLine(jobs) || jobs.state,`${jobs.queued || 0} queued`,jobs.retry_checks?.waiting?`${jobs.retry_checks.waiting} waiting for retry checks`:'',`${attentionTotal(jobs)} need attention`].filter(Boolean).join(' · '));
+  renderActivities(checkActivities(Array.isArray(state.activities)?state.activities:[],jobs),jobs);
   const cleanup=jobs.cleanup_active===true;
   $('pause-jobs').title=cleanup?'Pause audiobook work. Source cleanup finishes the current file before stopping.':'Stop the current audiobook operation and save pending books. Finished outputs stay in place.';
   $('resume-jobs').title=cleanup?'Continue pending audiobook work. Paused cleanup resumes without recreating the audiobook.':'Continue pending books. An interrupted book restarts; completed outputs are not recreated.';
   const help=cleanup?'Pausing source cleanup finishes the current file. Resume continues its saved progress. Scanning has separate stop and resume controls. An interrupted conversion restarts; completed outputs stay in place.':'An interrupted conversion restarts; completed outputs stay in place. Scanning has separate stop and resume controls.';
   text('jobs-help',help+(Array.isArray(jobs.folder_cleanup_notes)&&jobs.folder_cleanup_notes.length?' Source folders retained: safe automatic removal is unavailable on this drive.':''));
+  renderJobControlState();
 }
 // Progress rows (ProgressRows spec): one row per running activity, fixed order, updated in place.
-const activityOrder=['conversion','cleanup','identity','series','scan'],activityRows=new Map();let activityTimer=null;
+const activityOrder=['admission','chapter','conversion','cleanup','identity','series','scan','maintenance'],activityRows=new Map();let activityTimer=null;
+function checkActivities(list,jobs){
+  const result=list.filter(row=>!['admission','maintenance'].includes(row?.kind));
+  const add=(kind,value)=>{
+    const count=Number.isInteger(value.completed)&&Number.isInteger(value.total)&&value.completed>=0&&value.total>0&&value.completed<=value.total;
+    result.push({kind,state:value.state==='stopping'||value.cancel_requested===true||kind==='admission'&&jobControlFlights.has('pause')?'pausing':'running',subject:typeof value.title==='string'?value.title:'',step:value.phase || '',step_text:value.phase || '',done:count?value.completed:undefined,total:count?value.total:undefined,unit:count?'books':undefined,indeterminate:!count,step_started_at:Number.isFinite(value.started)?value.started:undefined,phase_only:!count});
+  };
+  if(jobs?.start_admission?.state==='checking')add('admission',jobs.start_admission);
+  const checking=rows.find(row=>activeChapterCheck(row));
+  if(checking)result.push({kind:'chapter',state:'running',subject:checking.chapter_check.file || checking.title_clue || '',step:'Checking source audio',phase_only:true,indeterminate:true});
+  if(['checking','stopping'].includes(jobs?.maintenance?.state))add('maintenance',jobs.maintenance);
+  return result;
+}
 const conversionSteps={'checking sources':'Checking source files',preparing:'Copying and checking source files','source copies':'Checking source copies','checking audio':'Checking source audio','matching format':'Choosing the audio format',normalizing:'Normalizing audio','joined audio':'Checking joined audio',creating:'Encoding audio',encoding:'Encoding audio',checking:'Verifying audiobook',copying:'Copying audiobook to the library',publishing:'Copying audiobook to the library'};
 const cleanupSteps={originals:'Removing original files','recovery copies':'Checking recovery copies',temporary:'Removing temporary recovery and working files',folders:'Removing source folders','verifying replacement':'Verifying replacement audiobook','retiring former outputs':'Removing former audiobook versions','former outputs':'Removing former audiobook versions'};
 function activityLabel(row){
+  if(row.kind==='chapter')return 'Checking source audio';
+  if(row.kind==='admission')return row.state==='pausing'?'Pausing start checks…':'Checking pending audiobook work';
+  if(row.kind==='maintenance')return row.state==='pausing'?'Stopping finished-book checks…':'Checking finished books';
   if(row.kind==='conversion')return ({attention:'Audiobook on hold',paused:'Audiobook paused',pausing:'Pausing audiobook'})[row.state] || 'Converting';
   if(row.kind==='cleanup')return ['originals','recovery copies'].includes(row.step)?'Removing originals':'Cleaning up';
   if(row.kind==='identity')return 'Checking finished books';
@@ -993,6 +1056,8 @@ function activityLabel(row){
 }
 function activityStep(row,finishing){
   let step;
+  if(row.kind==='chapter')return 'Checking the complete audio before correcting the final chapter end.';
+  if(row.kind==='admission' || row.kind==='maintenance')return row.step_text || (row.kind==='admission'?'Checking pending audiobook work':'Checking finished books');
   if(row.kind==='conversion'){const name=finishing && row.step==='encoding'?'Finalizing conversion':conversionSteps[row.step] || 'Working';step=Number.isInteger(row.step_index) && Number.isInteger(row.step_count)?`Step ${row.step_index} of ${row.step_count} - ${name}`:name;}
   else if(row.kind==='cleanup')step=cleanupSteps[row.step] || 'Working';
   else if(row.kind==='identity')step='Checking identity';
@@ -1024,7 +1089,8 @@ function activityRow(kind){
 }
 function writeText(element,value){if(element.textContent!==value)element.textContent=value;}
 function renderActivities(list,jobs){
-  const rows=list.filter(row=>row && activityOrder.includes(row.kind)).sort((a,b)=>activityOrder.indexOf(a.kind)-activityOrder.indexOf(b.kind));
+  const priority=row=>(row.state==='paused'?20:0)+activityOrder.indexOf(row.kind);
+  const rows=list.filter(row=>row && activityOrder.includes(row.kind)).sort((a,b)=>priority(a)-priority(b));
   const shown=[],seen=new Set();for(const row of rows){if(seen.has(row.kind))continue;seen.add(row.kind);shown.push(row);}
   const visible=shown.slice(0,4),extra=rows.length-visible.length,holder=$('jobs-rows');
   for(const [kind,view] of activityRows)if(!visible.some(row=>row.kind===kind)){view.item.parentElement?.removeChild(view.item);activityRows.delete(kind);}
@@ -1044,7 +1110,7 @@ function updateActivity(view,now){
   const row=view.row,running=row.state==='running' || row.state==='pausing',measured=!row.indeterminate && row.total>0 && row.done>=0 && row.done<=row.total;
   const finishing=measured && running && row.done>=row.total,determinate=measured && !finishing;
   const held=row.state==='attention',label=activityLabel(row),subject=typeof row.subject==='string'?row.subject:'',step=activityStep(row,finishing),detail=held?'':activityDetail(row,finishing);
-  view.bar.hidden=held;
+  view.bar.hidden=held || row.phase_only===true;
   writeText(view.label,label+(subject?': ':''));writeText(view.subject,subject);view.subject.title=subject;
   writeText(view.detail,detail);writeText(view.step,step);view.step.title=step;
   view.item.classList.toggle('paused',row.state==='paused');view.item.classList.toggle('attention',row.state==='attention');
@@ -1066,7 +1132,8 @@ function updateActivity(view,now){
     if(rate>0){const left=(1-fraction)/rate,minutes=Math.round(left/60);view.eta=left<60?'under 1 min left':minutes<60?`about ${minutes} min left`:`about ${Math.floor(minutes/60)} h ${minutes%60} min left`;}
   }
   // A held row is not running: no elapsed clock (Futaba, v0.16.8).
-  writeText(view.time,held?'':clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=held;
+  const noClock=held || row.phase_only===true || ['admission','maintenance'].includes(row.kind)&&!Number.isFinite(row.step_started_at);
+  writeText(view.time,noClock?'':clockText(elapsed,elapsed>=3600)+' elapsed'+(view.eta?' - '+view.eta:''));view.time.hidden=noClock;
 }
 let candidateFailure=null;
 async function candidateRequest(route,extra={},options={}){candidateFailure=null;if(busy || ended || selectedRow?.kind!=='candidate')return;const original=selectedRow,library=selectedLibrary;busy=true;controls();try{const result=await request(route,{library,id:original.id,revision:original.revision,...extra});if(selectedRow?.id===original.id && selectedLibrary===library && result.row){const updated={...result.row,path:result.row.id,kind:'candidate',library};if(dirty)reviewRow=updated;select(updated,false);}lastKey=null;await refresh(true);return result;}catch(error){candidateFailure=error;if(!options.quiet)message(error.message);}finally{busy=false;controls();}}
@@ -1170,7 +1237,20 @@ function renderMergeCandidate(row,reset){const candidate=row.kind==='candidate';
   $('output-reasons').textContent=[...(creation.reasons || []),dirty?'Save metadata edits before creating.':'',trackDirty?'Save track review before creating.':''].filter(Boolean).join(' · ');$('output-device').textContent=creation.device || 'Apple Books sync not checked';
 }
 function verifiedCount(value){return Number.isSafeInteger(value) && value>=0?value:null;}
-function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; deleting recovery copies';if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals and their backup copies after audiobook verification':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts;}
+function folderCleanupFacts(row){
+  const folder=row.creation?.job?.folder_cleanup;if(!folder || typeof folder!=='object')return [];
+  const facts=[],boundary={'Source library folder is kept':'it is a library folder','Top-level source folder is kept':'it is directly inside a library folder'};
+  for(const item of Array.isArray(folder.protected)?folder.protected:[]){if(typeof item.path!=='string')continue;const reason=boundary[item.reason] || item.reason;if(reason)facts.push(`Source folder retained — ${reason}. ${item.path}`);}
+  for(const item of Array.isArray(folder.retained_details)?folder.retained_details:[]){
+    if(typeof item.path!=='string' || typeof item.reason!=='string')continue;
+    const audio='Audio files remain in the folder; retained: ',reason=item.reason.startsWith(audio)?'audio may remain in '+item.reason.slice(audio.length):lowerFirst(item.reason);
+    facts.push(`Source folder retained — ${reason.replace(/\.?$/,'.')} ${item.path}`);
+  }
+  if(folder.retryable===true){const next=retryDate(folder.retry_at);facts.push('Cleanup waiting — '+(folder.reason || 'the source folder cannot be checked yet').replace(/\.?$/,'.')+' The app will retry automatically.'+(next?' Next retry: '+next:''));}
+  if(verifiedCount(folder.absent_after_intent)>0)facts.push('Removal outcome not confirmed: '+folder.absent_after_intent+' source folders.');
+  return facts;
+}
+function cleanupFacts(row){const creation=row.creation || {},policy=creation.cleanup_policy || {},receipt=row.cleanup || {},removed=verifiedCount(receipt.removed),total=verifiedCount(receipt.total),progress=removed!==null && total!==null?`${removed} of ${total} removed`:null;const state=typeof receipt.state==='string'?receipt.state.toLowerCase().replaceAll('_',' '):'';let status=typeof receipt.status==='string'?receipt.status:'';if(receipt.state==='completed' && receipt.recovery?.state==='retained')status='Originals removed; deleting recovery copies';if(!status){const states={'waiting':'Waiting for output checks','pending':'Waiting for output checks','checking':'Checking temporary recovery copies','checking recovery':'Checking temporary recovery copies','preparing':'Checking temporary recovery copies','removing':removed!==null && total!==null?`Removing originals: ${removed} of ${total}`:'Removing originals','pausing':'Pausing source cleanup','paused':progress?`Source cleanup paused: ${progress}`:'Source cleanup paused','completed':receipt.temporary_cleanup==='completed'?'Originals removed; verified temporary recovery and working copies removed':'Originals removed; temporary file cleanup pending','needs attention':'Source cleanup needs attention','failed':'Source cleanup needs attention'};status=states[state] || (removed>0?'Source cleanup needs attention':policy.enabled===true?'Waiting for output checks':'Originals retained');}const facts=[`Audiobook output: ${candidateStatus(row)}`,`Source cleanup: ${policy.enabled===true?'remove originals and their backup copies after audiobook verification':'originals retained'}`];if(removed>0 && policy.enabled!==true)facts[1]='Source cleanup: '+status;else if(receipt.state || receipt.status || policy.enabled===true)facts.push('Source cleanup status: '+status);if(progress && !status.includes(progress) && !status.includes(`${removed} of ${total}`))facts.push(progress);if(receipt.reason && !status.includes(receipt.reason))facts.push('Source cleanup needs attention: '+receipt.reason);if(receipt.recovery)facts.push('Recovery copies: '+recoveryStatus(receipt.recovery));const location=receipt.recovery?null:(receipt.recovery_location || policy.recovery_root);if(!receipt.recovery && receipt.temporary_cleanup==='completed')facts.push('Temporary recovery files: removed');else if(location && receipt.recovery_bytes!==0)facts.push('Temporary recovery storage: '+location);const bytes=verifiedCount(receipt.bytes_removed),recovery=verifiedCount(receipt.recovery_bytes);if(removed>0 && bytes!==null)facts.push(`Removed from Z: ${bytes.toLocaleString('en-US')} bytes`);if(!receipt.recovery && recovery!==null && recovery>0)facts.push(`Temporary recovery storage on C: ${recovery.toLocaleString('en-US')} bytes`);const evidence=verifiedCount(receipt.preserved_evidence_count);if(evidence>0)facts.push(`Unverified legacy evidence retained: ${evidence.toLocaleString('en-US')} files`);const remaining=verifiedCount(receipt.remaining);if(remaining!==null)facts.push('Originals remaining: '+remaining);return facts.concat(folderCleanupFacts(row));}
 function chapterSummary(row){if(row.creation?.job)return row.creation.chapters_description || 'Chapter markers: see saved job plan';return $('add-chapters').checked && row.creation?.chapters_available?`Chapter markers: ${trackDraft.included.length} — one per included source track`:'Chapter markers: none';}
 function updateChapterSummary(){if(!trackDraft || selectedRow?.kind!=='candidate')return;$('output-summary').textContent=$('output-summary').textContent.replace(/^Chapter markers:.*$/m,chapterSummary(selectedRow));}
 function plannedChapter(member,key){if(!$('add-chapters').checked)return 'Chapter markers disabled';if(!trackDraft.included.includes(key))return 'Excluded from output — no chapter marker';if(member.chapter_name_source==='source' && member.chapter_name)return 'Source chapter name: '+member.chapter_name;const position=trackDraft.order.filter(id=>trackDraft.included.includes(id)).indexOf(key)+1;const number=Number.isInteger(member.chapter_number) && member.chapter_number>=0?member.chapter_number:position;return 'Generated chapter label: Track '+String(number).padStart(Math.max(2,String(trackDraft.included.length).length),'0');}
@@ -1190,7 +1270,7 @@ function trackSaveLine(text){const line=$('track-save-status');if(!line)return;c
 for(const id of ['source-coverage','playback-order','add-chapters'])$(id).addEventListener('change',()=>{trackDirty=true;manualTrackTouched=true;syncManualDraft();updateChapterSummary();if(id==='add-chapters' && selectedRow?.kind==='candidate')renderMembers(selectedRow);controls();});
 $('create-audiobook').addEventListener('click',later('toolbar:create-audiobook','create',()=>{if(!dirty && !trackDirty && selectedRow?.creation?.can_create)candidateRequest('/api/audiobook/create');}));
 $('queue-books').addEventListener('click',later('toolbar:queue-books','queue_books',async()=>{const chosen=rows.filter(row=>row.kind==='candidate' && selectedBooks.has(row.id));const ready=chosen.filter(row=>readyForQueue(row));const blocked=chosen.filter(row=>!ready.includes(row));if(!ready.length)return;if(busy || ended)return;busy=true;controls();try{const result=await request('/api/audiobook/queue',{library:'Audiobooks',candidates:ready.map(row=>({id:row.id,revision:row.revision}))});await refresh(true);message([`${ready.length} reviewed candidate(s) requested for queue.`,...blocked.map(row=>`${row.title_clue}: ${(row.creation?.reasons || ['Needs review or candidate changed']).join('; ')}`)].join('\n'));if(result.excluded?.length)message($('message').textContent+'\n'+result.excluded.map(item=>item.reason || 'Candidate needs review').join('\n'));}catch(error){message(error.message);}finally{busy=false;controls();}}));
-$('pause-jobs').addEventListener('click',later('toolbar:pause-jobs','pause',()=>action('/api/audiobook/pause',{})));{const resume=later('toolbar:resume-jobs','resume',()=>action('/api/audiobook/resume',{}));$('resume-jobs').addEventListener('click',event=>state?.audiobook_jobs?.start_waiting && !laterFor('toolbar:resume-jobs')?action('/api/audiobook/resume-cancel',{}):resume(event));}
+$('pause-jobs').addEventListener('click',()=>{if(!$('pause-jobs').disabled)return action('/api/audiobook/pause',{});});{const resume=later('toolbar:resume-jobs','resume',()=>action('/api/audiobook/resume',{}));$('resume-jobs').addEventListener('click',event=>{if($('resume-jobs').disabled)return;return (state?.audiobook_jobs?.start_waiting || state?.audiobook_jobs?.start_admission?.state==='waiting') && !laterFor('toolbar:resume-jobs')?action('/api/audiobook/resume-cancel',{}):resume(event);});}
 function recoveryDate(value){if(!value)return 'Unavailable';const date=new Date(value);if(!Number.isFinite(date.getTime()))return 'Unavailable';const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;return new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:zone}).format(date)+` (${zone})`;}
 function recoverySpace(value){return verifiedCount(value)===null?'Unavailable':`${(value/(value>0 && value<1000000?1000:1000000)).toLocaleString('en-US',{maximumFractionDigits:2})} ${value>0 && value<1000000?'KB':'MB'} (${value.toLocaleString('en-US')} bytes)`;}
 function recoveryScope(row){const r=row?.cleanup?.recovery;return r?{job_id:row.creation?.job_id || row.creation?.job?.job_id || row.creation?.job?.id,token:r.token,count:r.count,bytes:r.bytes}:null;}
@@ -2012,8 +2092,8 @@ function renderAttentionGroups(){
   if($('attention-set-needs'))$('attention-set-needs').hidden=NEEDS_KEYS.every(key=>$('group-'+key).hidden);
   // Books automatic processing has not settled yet are counted, never silently missing (0.22.0 review B5.2).
   const sweep=$('attention-sweep');
-  if(sweep){const n=stillChecking(),running=state?.automatic_processing?.state==='Running';
-    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked. Start automatic processing to check ${n===1?'it':'them'}.`;
+  if(sweep){const n=stillChecking(),running=researchChecking();
+    const text=!n?'':running?`Still checking ${plural(n,'book','books')}. More may appear here.`:`${plural(n,'book is','books are')} waiting to be checked.`+(state?.automatic_processing?.can_start===true?` Start automatic processing to check ${n===1?'it':'them'}.`:'');
     if(sweep.textContent!==text)sweep.textContent=text;sweep.hidden=!text;}
   const queueLine=$('queue-line');
   if(queueLine){const n=queueState.queued.length,p=n?queueP(queueBlocker(queueState.queued[0])):'';
@@ -2121,18 +2201,21 @@ function automaticPhase(value){return {discovery:'discovery',research:'metadata 
 const PENDING_NOTICE={conversion:'Automatic processing will start by itself when audiobook conversion finishes or is paused. Starting also resumes any queued audiobook jobs.',
   scan:'Automatic processing will start by itself when the library scan ends or is stopped.',stopping:'Automatic processing will start again by itself once it has stopped.'};
 function startPending(automatic){const kind=automatic?.start_pending?.kind;return Object.hasOwn(PENDING_NOTICE,kind)?kind:null;}
+function researchChecking(){return !ended && !recoveryDisconnected && state?.automatic_processing?.state==='Running' && Number.isInteger(state?.automatic_processing?.research?.researching) && state.automatic_processing.research.researching>0;}
 function renderAutomaticEligibility(){
   const automatic=state?.automatic_processing;
   let reason='';
   if(ended)reason='The local server is stopping or stopped. Start is unavailable.';
   else if(recoveryDisconnected || typeof automatic?.can_start!=='boolean')reason='Start availability is unknown. Waiting for the local server.';
-  else if(automaticRequest==='start' || draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
+  else if(automaticRequest==='start')reason='Start requested. Waiting for the app to respond.';
+  else if(draftLeaseFailure || (manualDraftLease?.active && !manualDraftLease.confirmed))reason='';
   // A pending start (O12): the notice says what it waits for, in place of the block reason; Start stays disabled.
   else if(startPending(automatic))reason=PENDING_NOTICE[startPending(automatic)];
   else if(automatic.can_start!==true)reason=automatic.start_block_reason || 'Start availability is unknown. Waiting for the local server.';
   setText('automatic-start-reason',reason);
   $('automatic-start-reason').hidden=$('library').value!=='Audiobooks' || !reason;
   $('start-automatic').title=reason || (automatic?.state==='Paused'?'Continue the saved discovery, metadata research and queued audiobook jobs.':'Discover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held.');
+  $('start-automatic').setAttribute('aria-describedby','automatic-start-reason automatic-status automatic-request');
 }
 function renderAutomatic(){
   // Futaba's 0.22.1 QA, m-7: every answer re-rendered this, so between the library part and the jobs part the page said
@@ -2142,11 +2225,11 @@ function renderAutomatic(){
   reconcileAutomaticRequest(automatic);
   const shown=automatic?.state==='Needs attention'?'Stopped — needs attention':automatic?.state;
   setText('automatic-status',(!known || stale?'Current processing status unavailable. ':'')+stale+'Automatic processing: '+(known?(stale?automatic.state:shown):'status unavailable'));
-  setText('automatic-request',automaticRequest==='start'?'Starting automatic processing…':automaticRequest==='stop'?'Requesting automatic stop…':'');
+  setText('automatic-request',automaticRequest==='start'?'Start requested. Waiting for the app to respond.':automaticRequest==='stop'?'Requesting automatic stop…':automaticRequest==='cancel-start'?'Cancelling the queued start…':'');
   renderAutomaticEligibility();
   let detail='';
   if(automatic?.state==='Stopping')detail='Stopping automatic processing — '+(automatic.reason || automaticPhase(automatic.phase));
-  else if(automatic?.state==='Paused')detail=automatic.restart_paused?'Paused after server restart — start to continue saved work':(automatic.reason || 'Paused — pending work saved');
+  else if(automatic?.state==='Paused')detail=automatic.pause?.origin || !automatic.reason || automatic.reason==='Paused — pending work saved'?pauseLine(automatic.pause,true):automatic.reason.replace(/\.?$/,'.')+' Start automatic processing to continue.';
   else if(automatic?.state==='Completed'){
     const converted=verifiedCount(state?.audiobook_jobs?.converted_total),approved=verifiedCount(state?.audiobook_jobs?.approved_total),held=verifiedCount(automatic.research?.held);
     detail=converted!==null && approved!==null && approved>=converted && held!==null?'Automatic pass complete — '+converted+' converted · '+held+' held':'Automatic pass complete — result counts unavailable';
@@ -2158,6 +2241,7 @@ function renderAutomatic(){
   else if(automatic?.reason)detail=automatic.reason;
   setText('automatic-detail',detail);$('automatic-detail').hidden=!detail;
   $('stop-automatic').title=!known || stale?'Current processing status unavailable.':automatic.state==='Stopping'?'Automatic processing is stopping.':automatic.can_stop!==true && automatic.state!=='Running'?'Automatic processing is stopped.':'Stop research and pause audiobook jobs. Save pending work; finished books stay in place.';
+  $('stop-automatic').setAttribute('aria-describedby','automatic-detail automatic-status automatic-request');
   const research=automatic?.research,counts=research && ['researching','waiting','held'].every(key=>verifiedCount(research[key])!==null);
   setText('research-status',stale+(counts?'Metadata research: '+research.researching+' researching · '+research.waiting+' waiting · '+research.held+' held':'Research status unavailable'));
   const current=automatic?.current;
@@ -2166,7 +2250,7 @@ function renderAutomatic(){
 }
 async function automaticAction(kind){
   controls();const button=$({start:'start-automatic',stop:'stop-automatic','cancel-start':'cancel-automatic-start'}[kind]);
-  if(button.disabled || automaticRequest!==null || $('library').value!=='Audiobooks')return;
+  if(button.disabled || automaticRequest!==null && !(kind==='stop' && automaticRequest==='start') || $('library').value!=='Audiobooks')return;
   const automatic=state?.automatic_processing,flight={kind,run_id:automatic?.run_id,state:automatic?.state,failure_id:automatic?.failure?.id};
   automaticFlight=flight;automaticRequest=kind;busy=true;renderAutomatic();controls();message();
   let refreshNeeded=false;
@@ -2176,6 +2260,8 @@ async function automaticAction(kind){
     const acknowledged=result.automatic_processing || result.state?.automatic_processing;
     if(!automaticStates.has(acknowledged?.state) || typeof acknowledged.can_start!=='boolean' || typeof acknowledged.can_stop!=='boolean')throw Error('Current processing status unavailable. Check the current status before trying again.');
     if(state)state={...state,automatic_processing:acknowledged};
+    if(kind==='cancel-start' && result.cancelled===true)message('Start cancelled. Pending work is kept.');
+    else if(kind==='cancel-start' && result.cancelled===false)message('Too late to cancel: automatic processing has already started.');
     settleAutomaticRequest(flight);renderAutomatic();controls();
     refreshNeeded=true;
   }catch(error){
@@ -2190,11 +2276,11 @@ async function automaticAction(kind){
     catch(error){if(error.httpStatus)message(error.message);else refreshFailed(error);}
   }
   // Cancel automatic start: every other toolbar button is disabled, so focus moves to the notice.
-  if(kind==='cancel-start'){const notice=$('automatic-start-reason');notice.setAttribute('tabindex','-1');notice.focus?.({preventScroll:true});}
+  if(kind==='cancel-start' && (!document.activeElement || document.activeElement===button || document.activeElement===document.body)){const notice=$('automatic-start-reason');notice.setAttribute('tabindex','-1');notice.focus?.({preventScroll:true});}
 }
 $('cancel-automatic-start').addEventListener('click',()=>automaticAction('cancel-start'));
-$('start-automatic').addEventListener('click',later('toolbar:start-automatic','start_automatic',()=>automaticAction('start')));
-$('stop-automatic').addEventListener('click',later('toolbar:stop-automatic','stop_automatic',()=>automaticAction('stop')));
+{const start=later('toolbar:start-automatic','start_automatic',()=>automaticAction('start'));$('start-automatic').addEventListener('click',event=>{if(automaticRequest==='start')return;return start(event);});}
+{const stop=later('toolbar:stop-automatic','stop_automatic',()=>automaticAction('stop'));$('stop-automatic').addEventListener('click',event=>{if($('stop-automatic').disabled)return;return automaticRequest==='start'?automaticAction('stop'):stop(event);});}
 function recordedApproval(row){
   if(row.metadata_approved!==true)return '';
   const approval=row.review_context?.automatic_approval;
@@ -2271,6 +2357,7 @@ function attentionText(row){
   if(reacquire?.state==='required')return {status:'Need to reacquire',hint:(reacquire.certainty==='uncertain'?'The app cannot repair this damage without risking missing audio.':'The audio is damaged and cannot be repaired safely.')+' Delete the book, then get a new copy.',warn:true};
   const producer=producerRecoveryText(row);if(producer)return producer;
   const a=attentionOf(row);if(!a)return null;
+  if(a.retryable===true){const next=retryDate(a.retry_at);return {status:'Cleanup waiting',hint:(a.reason || 'Cleanup cannot continue yet.')+' The app will retry automatically.'+(next?' Next retry: '+next:''),warn:true};}
   const destination=a.destination_review;
   if(destination){
     if(destination.state!=='needs_review')return {status:'Destination unavailable — review this book',hint:destination.reason || 'The destination or review changed. Check the current details before retrying.',warn:true};
@@ -2420,8 +2507,11 @@ const MEDIA_SLOW_PLAIN='The library drive answered slowly while the app checked 
 function plainReason(reason){return typeof reason==='string' && /^Owned (media operation|decode verification) exceeded its deadline$/.test(reason)?MEDIA_SLOW_PLAIN:typeof reason==='string' && OS_TEXT.test(reason)?OS_PLAIN:reason;}
 function rawReasons(row){return (row?.automatic?.reasons || []).filter(reason=>typeof reason==='string' && OS_TEXT.test(reason));}
 function technicalText(row){
-  const ask=askOf(row);if(ask)return 'Technical detail: '+([...(ask.reasons || []),...rawReasons(row)].filter(item=>typeof item==='string' && item).join('; ') || 'Unavailable');
+  const chapter=chapterDiagnostic(row),corrected=row.audiobook_ready===true && Array.isArray(row.chapter_corrections) && row.chapter_corrections.length;
+  const chapterDetail=activeChapterCheck(row)?'Checking source audio: '+JSON.stringify(row.chapter_check,null,2):chapter?'Chapter timing: '+JSON.stringify(chapter,null,2):corrected?'Final chapter end corrected in the audiobook. Chapter names and start times are kept.\n'+JSON.stringify(row.chapter_corrections,null,2):'';
+  const ask=askOf(row);if(ask)return [chapterDetail,'Technical detail: '+([...(ask.reasons || []),...rawReasons(row)].filter(item=>typeof item==='string' && item).join('; ') || 'Unavailable')].filter(Boolean).join('\n');
   const job=row?.creation?.job || {},attention=attentionOf(row),details=(attention?.damage || []).map(item=>item?.description).filter(text=>typeof text==='string' && text);
+  if(chapterDetail)details.push(chapterDetail);
   if(typeof job.retry_parent_job_id==='string')details.push('Saved job retained: '+job.retry_parent_job_id);
   const destination=attention?.destination_review;if(destination?.state==='needs_review')details.push('Saved job destination: '+destination.old_destination,'Current proposed destination: '+destination.proposed_destination,'Saved job retained.');
   const producer=producerRecoveryOf(row);if(producer)details.push(['Producer recovery: '+producer.state,producer.cause,producer.reason,producer.checkpoint_id?'Checkpoint: '+producer.checkpoint_id:'',producer.attempt_id?'Attempt: '+producer.attempt_id:'',producer.retained_path].filter(value=>typeof value==='string' && value).join('; '));
@@ -2476,7 +2566,7 @@ function retryDate(value){if(typeof value!=='number' || !Number.isFinite(value) 
 function renderAutomaticResult(row){
   $('automatic-result').hidden=row.kind!=='candidate';if(row.kind!=='candidate')return;
   renderProducerRetained(row);
-  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move]);
+  const key=JSON.stringify([state?.automatic_processing?.state,state?.automatic_processing?.automatic_retry_enabled,state?.automatic_processing?.can_start,state?.automatic_processing?.start_pending,row.restart,row.release,row.producer_recovery_retained,row.id,row.revision,row.automatic,row.metadata_approved,row.review,row.review_context,row.selected_cover,row.track_order,row.included,row.members,row.creation?.destination,row.creation?.status,row.creation?.job?.state,row.creation?.job?.reason,row.creation?.job?.attention,row.creation?.job?.repaired,row.creation?.job?.readmission,row.creation?.job?.kept,row.creation?.job?.keep,state?.audiobook_jobs?.current_job_id,row.status,row.audiobook_ready,row.cleanup,row.metadata_facts,row.duplicate_review,row.current_audiobook,row.ask,askDone.get(row.id),row.move,row.admission_error,row.chapter_corrections,row.chapter_check,row.creation?.job?.folder_cleanup]);
   if(key===automaticResultKey)return;
   // Retry is updated in place by updateRetry(), never rebuilt here, so its focus does not freeze the status line.
   if($('automatic-result').contains?.(document.activeElement) && !$('retry-block').contains?.(document.activeElement))return;
@@ -2492,7 +2582,8 @@ function renderAutomaticResult(row){
   const untyped=row.creation?.job?.state==='Output needs attention' && typeof row.creation.job.reason==='string' && row.creation.job.reason;
   // Ruling 73k: a move that waits for a restart keeps its raw error here only.
   const move=moveOf(row),moveDetail=move?.state==='unfinished' && typeof move.detail==='string' && move.detail?'Technical detail: '+move.detail:'';
-  const technical=(attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'') || moveDetail;
+  const corrected=row.audiobook_ready===true && Array.isArray(row.chapter_corrections) && row.chapter_corrections.length;
+  const technical=(activeChapterCheck(row) || corrected || chapterDiagnostic(row) || attention || untyped || rawReasons(row).length?technicalText(row):patched.length && typeof repaired.detail==='string' && repaired.detail?'Technical detail: '+repaired.detail:'') || moveDetail;
   setText('automatic-technical',technical);$('automatic-technical').hidden=!technical;if($('technical-details'))$('technical-details').hidden=!technical;
   // Names found (section 7): where the title and author came from, for the three name reasons.
   const ask=askOf(row),names=ask && ['title_author','author_unclear','same_author'].includes(askKind(ask))?askNames(ask):[];
@@ -2912,6 +3003,8 @@ function updateAskRow(entry){
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
   const deleted=deleteNotes.get(row.id);if(deleted && !done){hint=deleted.text;warn=deleted.warn;clause='';lines=deleted.lines;}  // Delete book's outcome (ruling 23)
   const queued=done?null:queueHint(row);if(queued!==null){hint=queued;warn=false;clause='';lines=null;}  // the queued line replaces the hint (1.3)
+  if(!done && activeChapterCheck(row)){status='Checking source audio';hint='Checking the complete audio before correcting the final chapter end.';warn=false;clause='';lines=null;}
+  else if(!done && !pending && !result && chapterDiagnostic(row)){hint=chapterRefusal(chapterDiagnostic(row),row);warn=true;clause='';}
   statusInPlace(entry.cell,status);setHint(entry.hint,hint,clause,warn,lines);
   const also=done?'':askAlso(ask),why=done?'':ask.kind==='same_author'?sameWhy(ask):askReason(ask);
   if(entry.also.textContent!==also)entry.also.textContent=also;entry.also.hidden=!also;
@@ -2965,14 +3058,36 @@ const APPROVE_REFUSALS={name_taken:'An audiobook with this name is already in Au
   binding:'The collection files changed since they were checked. Scan again, then approve.',
   closing:'Books Arranger is closing. Approve again after it restarts.'};
 function serverSentence(error,fallback){const text=typeof error?.body?.error==='string'?error.body.error.trim():'';return text?(/Nothing was (changed|deleted)\.$/.test(text)?text:text.replace(/\.?$/,'.')+' Nothing was changed.'):fallback;}
-function askErrorText(error,kind){
+function chapterDiagnostic(value){const d=value?.admission_error?.chapter_diagnostic;return d && typeof d==='object' && typeof d.predicate==='string'?d:null;}
+function activeChapterCheck(row){return row?.chapter_check?.phase==='Checking source audio' && row.chapter_check.reason==='terminal_chapter_end';}
+function chapterTime(value){
+  if(typeof value!=='number' || !Number.isFinite(value))return String(value ?? 'unavailable');
+  const ms=Math.round(Math.abs(value)*1000),hours=Math.floor(ms/3600000),minutes=Math.floor(ms%3600000/60000),seconds=Math.floor(ms%60000/1000),fraction=ms%1000;
+  return (value<0?'-':'')+hours+':'+String(minutes).padStart(2,'0')+':'+String(seconds).padStart(2,'0')+'.'+String(fraction).padStart(3,'0');
+}
+function chapterRefusal(d,row){
+  const file=d.file || d.path || 'Source file',chapter=d.chapter_title?`chapter “${d.chapter_title}”`:`chapter ${d.chapter_id ?? 'with no ID'}`;
+  const fact={start_before_audio:'starts before the audio',end_not_after_start:'has an end before its start',overlap:d.previous_chapter_title?`overlaps chapter “${d.previous_chapter_title}”`:'overlaps the previous chapter',start_beyond_audio:'starts beyond the audio',unreadable_time:'has an unreadable time',invalid_title:'has an unreadable title',source_changed:'could not be verified because the source file changed'}[d.predicate];
+  let detail=d.predicate==='end_exceeds_audio'?`ends at ${chapterTime(d.end)}; the audio ends at ${chapterTime(d.duration)}`:fact || 'could not be verified';
+  if(d.predicate==='complete_audio_unverified')detail='the complete audio could not be verified'+(d.reason?': '+String(d.reason).replace(/\s+/g,' ').replace(/[.!?]+\s+/g,'; ').replace(/[.!?]+$/,''):'');
+  const action=row?rowAction(row):null,ask=askOf(row),scan=ask && (ask.kind==='files_missing' || setCause(ask) || folderQuestion(ask) || holdKind(ask));
+  const next=['startover','combined'].includes(action?.kind)&&action.data?.allowed===true?'Replace this source file, then Start over.':scan?'Replace this source file, then Scan again.':'View metadata for the source details.';
+  return `Approve not accepted: ${file}, ${chapter}, ${detail}. ${next}`;
+}
+function askErrorText(error,kind,row=null){
   if(!error.httpStatus)return lostLine();
+  const chapter=chapterDiagnostic(error.body);if(chapter)return chapterRefusal(chapter,row);
+  if(error.body?.code==='book_converting'){
+    const names={automatic:' with the automatic names',user:' with your approved names'}[error.body.job_origin] || '';
+    return `This book is already converting${names}. Your new names were not applied.`;
+  }
   if(error.body?.code==='changed')return 'This book changed. Review its details and try again.';
   if(error.body?.code==='moved')return 'The destination changed. Check the Goes to line and try again.';  // N7
   // A safety gate is named (0.22.0 review B5.4).
   if(error.body?.code==='format')return "The audio format needs a decision the app can't make yet. Select the row to read why.";
   if((kind==='approve' || kind==='convert') && Object.hasOwn(APPROVE_REFUSALS,error.body?.code))return APPROVE_REFUSALS[error.body.code];
   // «Спящие красавицы» (2026-10-26): the engine's own sentence, never the bare "… was not accepted. Nothing was changed."
+  if((kind==='approve' || kind==='convert') && typeof error.body?.error==='string')return error.body.error.trim().replace(/\s*Nothing was changed\.$/,'');
   return serverSentence(error,ASK_REFUSED[kind]);
 }
 function askClock(date){return String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
@@ -3000,18 +3115,19 @@ function askLeave(entry){
 // computed folder and the move of a finished book (rulings 69 and 70). Every line hides when the engine sends no data for
 // it; the page never infers a role, a flag, a number or a folder state from text.
 const folderRows=new Map(),folderOpen=new Set(),bookCells=new Map(),destRows=new Map(),destNotes=new Map(),destPending=new Map(),destConfirm=new Set(),moveSeen=new Map();
-let lastChosenFolder='';
+let lastChosenFolder='',pickerFlight=null;
 const FOLDER_TIPS={one:"Open this book's source folder in File Explorer.",closed:"This book's files are in {n} folders. Show them and open any one.",open:'Hide the list of source folders.',
   none:'This book has no source files to open a folder for.',item:'Open this folder in File Explorer.',book:'The original files are gone. Open the folder that holds the converted audiobook.'};
 const CLUE_ROLES={narrator:'narrator credit',garbled:'garbled',author_and_title:'author and title together',uploader:'uploader tag',generic:'generic name'};
 const TITLE_FLAGS={narrator:'Check this title: it looks like a narrator credit.',garbled:'Check this title: it looks garbled.',author_in_title:"Check this title: it starts with the author's name."};
 const AUTHOR_FLAGS={garbled:'Check this author: it looks garbled.'};
-const CHECKING_TIP='The app is still checking which other files belong to this book. This approves only the files shown.';
+const CHECKING_TIP='Approve only the files shown as one book. Other files are not included.';
 const GAP_APPROVE=['Approve these files','Approve the files shown as one book, gaps included: convert if needed, rename, move to Audiobooks Sorted.'];
 const FOLDER_QUESTION={approve:['Approve as one book','File everything in this folder as one book: convert if needed, rename, move to Audiobooks Sorted.'],
   separate:'Keep each book on the Books line as its own book. Nothing is joined. Each is checked again.'};
 const DEST_TIPS={choose:'Choose the folder this book is filed in. Your choice replaces the folder the app computed. The file goes straight into it.',
   chooseDone:'Choose a new folder for this audiobook. The file is moved there. Nothing is converted again.',picking:'Waiting for the folder picker.',
+  pickingOther:'A folder picker is already open. Finish or cancel it first.',saving:'Saving the chosen folder.',
   moving:'Moving the audiobook. Choose another folder when it finishes.',nobridge:'Choosing a folder works in the desktop app.',
   reset:'Stop using your folder. The book goes to the folder the app computes.',resetDone:'Move the audiobook back to the folder the app computes. Nothing is converted again. You confirm first.',
   move:'Move the audiobook to the folder shown now. Nothing is converted again.',keep:'Leave the audiobook where it is and keep your folder.',
@@ -3205,7 +3321,8 @@ function gapRow(ask){return holdKind(ask)==='order_unclear' && (ask.cause==='gap
 function folderQuestion(ask){return holdKind(ask)==='files_unclear' && ask?.cause==='folder_books';}
 function membershipLine(row){
   const ask=askOf(row),state=ask?.membership;
-  if(state==='checking')return 'Still checking which other files belong to this book.';
+  if(ask?.membership_checking===true)return 'Checking which other files belong to this book.';
+  if(state==='checking')return ask.membership_reason==='incomplete_scan'?'The source folder has not been fully checked.':'Other files in this folder may belong to this book.';
   if(state!=='established')return '';
   const n=Array.isArray(row.members) && row.members.length?row.members.length:Number(ask.file_count) || 0;if(n<1)return '';
   return rowFolders(row).count>1?`The source folders hold only these ${n.toLocaleString()} files.`:`The source folder holds only these ${n.toLocaleString()} files.`;
@@ -3261,10 +3378,11 @@ function buildDestination(row,td,line=null){
 function chooseMode(row){
   if(ended || recoveryDisconnected)return 'offline';
   const move=moveOf(row);
-  if(destPending.has(row.id))return 'picking';
+  if(destPending.has(row.id))return destPending.get(row.id).kind==='pick'?'picking':'saving';
   if(move?.state==='unfinished')return 'unfinished';  // ruling 73k: waits for a restart, ahead of moving
   if(move?.state==='moving' || queueRunning(row,'move'))return 'moving';
   if(move?.state==='queued' || queuedFor(row,'move'))return 'queued';
+  if(pickerFlight)return 'pickingOther';
   return pickerBridge()?'ready':'nobridge';
 }
 function moveFailure(row,move,cause){
@@ -3275,7 +3393,9 @@ function moveFailure(row,move,cause){
 // The line under the controls: the latest of this page's own answer and the engine's move state (lines stay until the next press).
 function destStateLine(row){
   const note=destNotes.get(row.id),move=moveOf(row),seen=moveSeen.get(row.id);
-  if(destPending.get(row.id)?.kind==='pick')return null;
+  if(destPending.get(row.id)?.kind==='pick')return {text:'Opening the folder picker…',warn:false,polite:true};
+  if(destPending.get(row.id)?.kind==='send')return {text:'Saving the chosen folder…',warn:false,polite:true};
+  if(chooseMode(row)==='pickingOther')return {text:DEST_TIPS.pickingOther,warn:false,polite:true};
   const fromMove=()=>{
     if(!move || !rowFinished(row))return null;
     if(move.state==='queued')return {text:'Move queued. It runs when the app is free.',warn:false};
@@ -3300,8 +3420,8 @@ function updateDestination(entry){
   const mode=chooseMode(row),finished=plan.finished,confirming=finished && !!override && destConfirm.has(row.id),name=askName(row);
   if(!override || !finished)destConfirm.delete(row.id);
   entry.controls.hidden=confirming;entry.confirm.hidden=!confirming;
-  const face={picking:'Choosing…',queued:'Queued',unfinished:'Needs restart',moving:'Moving…'}[mode] || 'Choose folder…';
-  const tip={picking:DEST_TIPS.picking,queued:`${queueWord('move')} is queued for this book. Cancel it to use this.`,unfinished:DEST_TIPS.unfinished,moving:DEST_TIPS.moving,nobridge:DEST_TIPS.nobridge,offline:'Local server unavailable.'}[mode] || (finished?DEST_TIPS.chooseDone:DEST_TIPS.choose);
+  const face={picking:'Choosing…',saving:'Saving…',queued:'Queued',unfinished:'Needs restart',moving:'Moving…'}[mode] || 'Choose folder…';
+  const tip={picking:DEST_TIPS.picking,pickingOther:DEST_TIPS.pickingOther,saving:DEST_TIPS.saving,queued:`${queueWord('move')} is queued for this book. Cancel it to use this.`,unfinished:DEST_TIPS.unfinished,moving:DEST_TIPS.moving,nobridge:DEST_TIPS.nobridge,offline:'Local server unavailable.'}[mode] || (finished?DEST_TIPS.chooseDone:DEST_TIPS.choose);
   if(entry.choose.textContent!==face)entry.choose.textContent=face;if(entry.choose.title!==tip)entry.choose.title=tip;entry.choose.setAttribute('aria-label','Choose folder: '+name);
   if(mode==='ready')entry.choose.removeAttribute('aria-disabled');else entry.choose.setAttribute('aria-disabled','true');
   entry.reset.hidden=!override;const resetTip=mode==='unfinished'?DEST_TIPS.unfinished:finished?DEST_TIPS.resetDone:DEST_TIPS.reset;if(entry.reset.title!==resetTip)entry.reset.title=resetTip;entry.reset.setAttribute('aria-label','Use computed folder: '+name);
@@ -3322,13 +3442,21 @@ function pickerStart(row){
 function hasApprove(row){const entry=askRows.get(row.id);return !!entry?.buttons?.some(item=>item.kind==='approve');}
 async function chooseFolderPress(id){
   const entry=destRows.get(id),row=entry?.row,button=entry?.choose;
-  if(!row || !button || button.getAttribute('aria-disabled')==='true')return;
+  if(!row || !button || pickerFlight || button.getAttribute('aria-disabled')==='true')return;
   const api=pickerBridge();if(!api)return;
   const finished=rowFinished(row);
-  destPending.set(id,{kind:'pick',at:Date.now()});destNotes.delete(id);updateDestination(entry);
-  let folder=null;
-  try{folder=await api.chooseFolder({title:`Choose a folder for ${destTitle(row)}`,defaultPath:pickerStart(row),buttonLabel:finished?'Move here':'Select folder'});}catch{folder=null;}
-  if(typeof folder!=='string' || !folder.trim()){destPending.delete(id);const fresh=destRows.get(id) || entry;updateDestination(fresh);fresh.choose?.focus?.({preventScroll:true});return;}
+  const flight={id};pickerFlight=flight;
+  destPending.set(id,{kind:'pick',at:Date.now()});destNotes.delete(id);updateDestinations();
+  let folder=null,failed=false;
+  try{folder=await api.chooseFolder({title:`Choose a folder for ${destTitle(row)}`,defaultPath:pickerStart(row),buttonLabel:finished?'Move here':'Select folder'});}catch{failed=true;}
+  finally{if(pickerFlight===flight)pickerFlight=null;destPending.delete(id);}
+  if(failed)destNotes.set(id,{text:'The folder picker could not open. Try Choose folder again.',warn:true,alert:true,at:Date.now()});
+  updateDestinations();
+  if(typeof folder!=='string' || !folder.trim()){
+    const fresh=destRows.get(id) || entry,active=document.activeElement;
+    if(!active || active===button || active===document.body)fresh.choose?.focus?.({preventScroll:true});
+    return;
+  }
   lastChosenFolder=folder;await sendDestination(id,folder);
 }
 async function sendDestination(id,folder){
@@ -3594,7 +3722,7 @@ function namesPreview(id,delay){
 }
 // The row line after a press (Judy 1.6), by the row's family and the engine's outcome.
 function namesSavedText(row,answer){
-  if(answer?.outcome==='replanned')return 'Saved. The queued job uses these names.';
+  if(answer?.outcome==='replanned')return 'Names saved. Approve to queue this book with these names.';
   if(answer?.outcome==='ready_only')return 'Saved. The finished audiobook in Audiobooks Sorted keeps its name.';
   if(answer?.outcome==='unchanged')return 'Nothing changed. Nothing was saved.';
   const ask=askOf(row);
@@ -4145,8 +4273,9 @@ function applyQueueOutcome(outcome){
 }
 // A refused queued press (ruling 35): its gate's own words, else the engine's sentence; never the bare refusal.
 function queueAskText(outcome,kind){
-  const error={httpStatus:409,body:{code:outcome.code,error:outcome.error}};
-  return `${queueWord(outcome.action)} cancelled: ${lowerFirst(askErrorText(error,kind))}`;
+  const error={httpStatus:409,body:{code:outcome.code,error:outcome.error,admission_error:outcome.admission_error,job_origin:outcome.job_origin}},row=rows.find(item=>item.id===outcome.book_id);
+  if(chapterDiagnostic(error.body) || error.body.code==='book_converting')return askErrorText(error,kind,row);
+  return `${queueWord(outcome.action)} cancelled: ${lowerFirst(askErrorText(error,kind,row))}`;
 }
 // The row line of a queued or running action (1.4), or null.
 function queueHint(row){
@@ -4577,7 +4706,7 @@ async function askPress(entry,kind){
     if(result?.queued===true)queueAccepted(row,ASK_QUEUE[kind],result);
     else askSettled(entry,kind,result,values);
   }catch(error){
-    askResults.set(id,{text:askErrorText(error,kind),code:error.body?.code || ''});
+    askResults.set(id,{text:askErrorText(error,kind,row),code:error.body?.code || ''});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
     if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
@@ -4635,7 +4764,7 @@ async function runApproveSelected(){
     // Ruling 35: each Approve is accepted and queued at once; its checks run in the engine's queue, one book at a time.
     try{const answer=await request('/api/candidate/approve',{library:'Audiobooks',id:row.id,revision:row.revision,...seen(row),...(shown?{path:shown}:{}),queue:true,label:askName(row)},APPROVE_TIMEOUT);
       if(answer?.queued===true){queueAccepted(row,'approve',answer);selectedBooks.delete(row.id);queued++;}else{askDone.set(row.id,'approve');askDrafts.delete(row.id);selectedBooks.delete(row.id);approved++;}}
-    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve')});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
+    catch(error){askResults.set(row.id,{text:askErrorText(error,'approve',row)});const entry=askRows.get(row.id);if(['name_taken','changed','moved'].includes(error.body?.code) && entry){askDraft(row.id).previewKey=null;askPreview(entry,0);}if(!error.httpStatus)refreshFailed(error);}
     finally{askPendings.delete(row.id);}
   }
   askBulk=false;

@@ -66,7 +66,7 @@ class StartupBoundaryIntegrationTests(unittest.TestCase):
  def invoke(self,base,data,mode):
   installed=stage_private_backend(base)
   roots={name:str(base/name) for name in ('Audiobooks','Podcasts','Ebooks')};rootsfile=base/'roots.json';rootsfile.write_text(json.dumps(roots));env=os.environ.copy();env['BOOKS_ARRANGER_DESKTOP_TOKEN']='f'*64
-  return subprocess.run([sys.executable,'-I','-B',str(installed/'desktop_backend.py'),'--database',str(data/'inventory.sqlite3'),'--roots-json',str(rootsfile),'--port','5212','--catalog-mode='+mode],env=env,cwd=BASE,capture_output=True,text=True,timeout=20)
+  return subprocess.run([sys.executable,'-I','-B',str(installed/'desktop_backend.py'),'--database',str(data/'inventory.sqlite3'),'--roots-json',str(rootsfile),'--port','5212','--catalog-mode='+mode],env=env,cwd=BASE,capture_output=True,text=True,timeout=20,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
  def test_actual_saved_existing_missing_folder_is_not_recreated(self):
   with tempfile.TemporaryDirectory(dir=AREA) as temp:
    base=Path(temp);data=base/'missing-existing';result=self.invoke(base,data,'existing')

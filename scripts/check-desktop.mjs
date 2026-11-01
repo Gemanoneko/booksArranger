@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Pure-node handoff graph; the outer protocol-2 supervisor owns its descendants.
+// Canonical non-app Node graph with owned Python/codec CLI fixtures; PA-1 is a separate mandatory native phase.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 import {trackGateScratch} from './gate-scratch.mjs';
+import {CANONICAL_NODE_ENTRIES,phaseAccounting} from './qa-phase-contract.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
 {const refusal=liveCatalogRefusal(root);if(refusal){fs.writeSync(2,refusal+'\n');process.exit(1);}}
@@ -26,7 +27,7 @@ const gateStart=performance.timeOrigin,deadline=gateStart+GATE_TOTAL_SECONDS*100
 // gate, but only after every Python worker and the chain have finished.
 const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
 function runAsync(exe,args){return new Promise(resolve=>{const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
-const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=['tests/release-contract.test.mjs','tests/release-flow.test.mjs','tests/update-controller.test.mjs','tests/engine-update.test.mjs','tests/launch-options.test.mjs','tests/release-leased-executables.test.mjs','tests/status-flight.test.mjs','tests/quit-watch.test.mjs','tests/python-check-batches.test.mjs','tests/gate-source-guard.test.mjs','tests/load-state.test.mjs','tests/startup.test.mjs','tests/desktop-loading.test.mjs','tests/main-startup.test.mjs','tests/qa-entry-context.test.mjs','tests/real-shell-update.test.mjs','tests/desktop-folder-picker.test.mjs'];
+const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=[...CANONICAL_NODE_ENTRIES];
 const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
 function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
  const step=async(exe,args)=>{if(failure)return null;const r=await runAsync(exe,args);log.push(r.stdout,r.stderr);if(r.error||r.timedOut||r.status!==0)failure=(r.error||(r.timedOut?'deadline':'exit '+r.status))+': '+args.join(' ');return r;};
@@ -84,6 +85,7 @@ patterns.push('test_entered_names.py','test_live_cases_0222.py');  // 0.22.2: Ed
 patterns.push('test_no_evidence.py','test_ruling35.py');  // 0.22.2: ruling 36 (no evidence asked for), ruling 35 (every press queues)
 patterns.push('test_set_release.py');  // 0.22.3: ruling 53 through the real automatic run (Futaba M-1, Senua M10)
 patterns.push('test_destination_override.py','test_book_move.py');  // 0.24.0: rulings 69, 70 and 71h-k (chosen folder, moving a finished book)
+patterns.push('test_start_over.py','test_restart_242.py','test_backend_242.py','test_integration_242.py','test_cleanup_242.py','test_shared_routing.py','test_series_identity_242.py','test_terminal_chapters.py');  // 0.24.2 changed contracts, including all three private native terminal-chapter cases
 patterns.push('test_folder_unit_grouping.py','test_folder_regroup.py');  // 0.24.0: ruling 68 with 71a-f and 71m, repaired tags, the Tolkien lookup
 const code=`import sys,unittest,json,pathlib,time
 sys.path.insert(0,sys.argv[1]);loader=unittest.defaultTestLoader;s=unittest.TestSuite();patterns=json.loads(sys.argv[2])
@@ -143,7 +145,7 @@ function inventory(directory,relative=''){
 // 2026-10-29: the gate removes the scratch it made when it ends, pass or fail (scripts/gate-scratch.mjs). A failure keeps
 // only the worker copies it names as its evidence and says so. Every run used to leave its 13 worker copies behind.
 const gateScratch=trackGateScratch(root);let gateError=null,passLine=null;
-nodeTests.push('tests/gate-scratch.test.mjs');  // its own suite, in the gate like every other node suite
+const phases=phaseAccounting(nodeTests);  // all18 prior entries accounted for, plus the additive pure contract
 try{
 fs.mkdirSync(gateScratch.claim('scratch/source-fallback-2026-10-11'),{recursive:true});gateScratch.claim('scratch/f');  // the side chain's fixture root
 const inputs=inventory(root),batches=pythonBatches(patterns);
@@ -160,7 +162,7 @@ let outputBytes=0,overflow=false;
 const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
 const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
  const started=performance.now(),limit=workerDeadline(gateStart,Date.now());
- const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
+ const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),BOOKS_TERMINAL_FIXTURE_ROOT:path.join(worker.directory,'scratch','terminal-chapters'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
  for(const key of Object.keys(env))if(/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(key))delete env[key];
  const out=[],err=[];let error=null,timedOut=false;
  const child=spawn(python,['-I','-B','-c',code,worker.directory,JSON.stringify(worker.batch),JSON.stringify(fixtureRootMap),String(worker.i)],{cwd:worker.directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
@@ -198,7 +200,7 @@ const qaRuntime={root:usedRuntime,sha256:treeDigest(await manifestOf(usedRuntime
 // Senua's 0.22.1 review, W10: the whole runtime tree is pinned, not only its three executables.
 if(!fixture.tree||qaRuntime.sha256!==fixture.tree.sha256)throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+qaRuntime.sha256+')');
 const mp3Fixture={path:fixtureFile,sha256:fixtureFile?createHash('sha256').update(fs.readFileSync(fixtureFile)).digest('hex'):''};
-passLine='BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,python_workers:workerSeconds.workers,python_worker_deadline_seconds:workerSeconds.deadline,copy_seconds:copySeconds,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture});
+passLine='BOOKS_INTEGRATED_CHECKS_PASS '+JSON.stringify({phases,python_cases:pythonCount,node_cases:nodeCount,frontend_scripts:frontendScripts,syntax_files:syntaxFiles.length,python_worker_seconds:workerSeconds.real,python_workers:workerSeconds.workers,python_worker_deadline_seconds:workerSeconds.deadline,copy_seconds:copySeconds,qa_runtime:qaRuntime,mp3_fixture:mp3Fixture});
 }catch(error){gateError=error;}
 const tidy=gateScratch.finish(Boolean(gateError));
 for(const line of tidy.lines){if(gateError||tidy.left.length)console.error(line);else console.log(line);}

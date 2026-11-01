@@ -2011,6 +2011,35 @@ def _balanced(value):
     return text(re.sub(r'[()\[\]{}]', ' ', value))
 
 
+
+# Explicit 2026-11-01 identity decisions, scoped to full author + exact work aliases.
+# These are user-confirmed relationships, not a general person-name series heuristic.
+_CONFIRMED_MCCAMMON_AUTHORS = ('Robert R. McCammon', 'Robert McCammon', 'McCammon Robert R.',
+                              'Роберт МакКаммон', 'МакКаммон Роберт')
+_CONFIRMED_CORBETT = (
+    ('1', 'Speaks the Nightbird', ('Голос ночной птицы', 'Speaks the Nightbird')),
+    ('2', 'The Queen of Bedlam', ('Королева Бедлама', 'The Queen of Bedlam')),
+)
+
+
+def confirmed_corbett(title, author):
+    """The two explicitly confirmed works only; no surname-only or character-as-author match."""
+    credit = sorted(words(author))
+    if not credit or credit not in [sorted(words(alias)) for alias in _CONFIRMED_MCCAMMON_AUTHORS]:
+        return None
+    for number, original, aliases in _CONFIRMED_CORBETT:
+        if title_key(title) in {title_key(alias) for alias in aliases}:
+            return {'name': 'Matthew Corbett', 'number': number, 'original_title': original,
+                    'provider': 'user', 'source_url': 'https://www.goodreads.com/series/49541-matthew-corbett',
+                    'decision_id': 'user:corbett-2026-11-01'}
+    return None
+
+
+def _confirmed_corbett_folder(author, series):
+    return (sorted(words(author)) in [sorted(words(alias)) for alias in _CONFIRMED_MCCAMMON_AUTHORS]
+            and title_key(series) in {title_key('Matthew Corbett'), title_key('Мэтью Корбетт')})
+
+
 _UNIVERSE = re.compile(r'^\s*(вселенная\s+\S.*?)(?:\s+[-–—]\s+(\S.*?))?\s*$', re.I)
 
 
@@ -2058,7 +2087,8 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
     author, series = text(first[0]), text(first[1])
     if norm(author) in CONTAINER_NAMES or norm(series) in CONTAINER_NAMES or COLLECTION_FOLDER.search(author) or COLLECTION_FOLDER.search(series):
         return None
-    if not looks_like_person(author, index) or looks_like_person(_series_name(series, author), index) or DISC.fullmatch(series.strip()):
+    confirmed_folder = _confirmed_corbett_folder(author, series)
+    if not looks_like_person(author, index) or (looks_like_person(_series_name(series, author), index) and not confirmed_folder) or DISC.fullmatch(series.strip()):
         return None
     if _BOOK_POSITION.match(_UPLOADER.sub('', _series_name(series, author))):
         # Senua's 0.22.1 review, W2: a second-level folder named like a book ("James S. A. Corey\5. Игры Немезиды\5. Игры
@@ -2117,6 +2147,11 @@ def folder_structure(row, root, index=None, rules=None, folder=''):
     position = position.replace(',', '.')
     position = str(int(position)) if position.isdigit() else position
     named = _series_name(series, author)
+    if confirmed_folder:
+        confirmed = confirmed_corbett(title, author)
+        if not confirmed or confirmed['number'] != position:
+            return None
+        named = confirmed['name']
     place = universe_of(named)
     if place and not place[1]:
         return None  # a folder that names only its universe holds books of it, in no series (book_universe)

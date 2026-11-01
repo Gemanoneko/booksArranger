@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.24.2] - 2026-11-01
+
+### Changed
+
+- Start and Resume admit requested work promptly while idle finished-book checks yield safely. Show actual checks, pause origin and cancellation, and retry transient output, recovery and folder faults.
+- Start over returns eligible stopped work to automatic processing while retaining explicit names, cover, order and destination choices. Changed source files can refresh without restarting the app. Queued name edits preserve the new title and wait for explicit approval.
+- Retain verified title, series and world facts, including the confirmed McCammon, Queen of Bedlam and Tolkien cases. Confirmed shared series and worlds omit the author folder while keeping author credits and explicit folder choices.
+
+### Fixed
+
+- Correct a proven final chapter-end overrun in newly joined outputs while preserving source bytes, chapter starts, titles and order. Refusals explain the exact timing issue. Existing whole-M4B and historical routing protections remain.
+- Coalesce identical inventory reads, open one folder picker at a time, and keep folder retention, ownership and removal receipts accurate.
+
 ## [v0.24.1] - 2026-10-31
 
 ### Added

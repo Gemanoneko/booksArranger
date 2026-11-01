@@ -46,6 +46,7 @@ def _failure_details(error, stage, now=None):
         details['errno'] = error.errno  # typed, so a full disk is told apart without reading the message
     if isinstance(error, OSError) and type(getattr(error, 'winerror', None)) is int:
         details['winerror'] = error.winerror  # typed, so a drive or share that went away is told apart (UNREACHABLE)
+    if isinstance(getattr(error,'chapter_diagnostic',None),dict):details['chapter_diagnostic']=copy.deepcopy(error.chapter_diagnostic)
     if getattr(error, 'tag_repair_checked', False) is True:
         details['tag_repair_checked'] = True  # an MP3 decode failure from a version with the trailing-tag repair
     return details
@@ -422,6 +423,8 @@ class AudioJobs:
         # Startup re-verification of published outputs runs after construction (start_published_check).
         self._verify_stop = threading.Event()
         self._verifier = None
+        self.background_stop = None
+        self._published_seen={};self._published_retry_at={}
         # Optional routine check output_current(record, stop, pace): unchanged verified file identity, else a
         # full interruptible hash. Without it, routine checks use output_validator (always a full check).
         self.output_current = None
@@ -492,7 +495,7 @@ class AudioJobs:
         Completed rows are not hashed here: re-reading every published book over
         the library share kept the engine from answering health past the desktop's
         3-minute start window. start_published_check() runs that same check after
-        startup, and resume() repeats it before any new work.
+        startup and idle maintenance; each new job verifies its own inputs.
         """
         import inplace_m4b
         failure = None
@@ -545,21 +548,24 @@ class AudioJobs:
                 self._update(row["job_id"], **change)
 
     def start_published_check(self):
-        """Re-verify every completed row's published output in the background, once, after startup.
+        """Re-verify every completed row's published output in the background, during idle passes after startup.
 
-        It yields to resume() (which runs the same check itself before any new
-        work) and to close(), and changes a row only if that row is still exactly
+        It yields to foreground work, pause and close, resumes unvisited books at
+        a later idle pass, and changes a row only if that row is still exactly
         what it read. It never starts or touches pending work.
         """
         with self._lock:
-            if self._closed or self._verifier is not None or self._verify_stop.is_set():
-                return
+            if self._closed or self._drain.is_set() or self._resuming or self._thread and self._thread.is_alive():return
+            if self._verifier is not None and self._verifier.is_alive():return
+            if self.background_stop is not None and self.background_stop.is_set():return
+            self._verify_stop.clear()
             self._verifier = threading.Thread(target=self._verify_published, name="BooksArrangerPublishedCheck", daemon=True)
             self._verifier.start()
 
     def _verify_published(self):
         try:
-            rows = self._rows("SELECT * FROM audio_jobs WHERE state='completed' ORDER BY created, job_id")
+            rows = self._rows("SELECT * FROM audio_jobs WHERE state IN ('completed','needs attention') AND output IS NOT NULL ORDER BY created, job_id")
+            rows=[row for row in rows if self._published_seen.get(row['job_id'])!=self._published_stamp(row) and time.monotonic()>=self._published_retry_at.get(row['job_id'],0)]
         except sqlite3.Error:
             return  # resume() still verifies before any new work
         try:
@@ -569,22 +575,31 @@ class AudioJobs:
                 if self._check_progress and self._check_progress['kind'] == 'background':
                     self._check_progress = None
 
+    @staticmethod
+    def _published_stamp(row):
+        return hashlib.sha256(json.dumps([row.get(key) for key in ('manifest_hash','output','state','reason')],ensure_ascii=False).encode()).hexdigest()
+
     def _verify_rows(self, rows):
+        stop=_Any(self._verify_stop,self.background_stop) if self.background_stop is not None else self._verify_stop
         for index, row in enumerate(rows):
-            if self._verify_stop.is_set():
+            if stop.is_set():
                 return
             with self._lock:
                 if not self._resuming:
                     started = self._check_progress['started'] if self._check_progress and self._check_progress['kind'] == 'background' else _epoch_ms()
                     self._check_progress = {'kind': 'background', 'completed': index, 'total': len(rows), 'started': started}
             try:
-                change = self._settle(row, True, self._verify_stop, self.verify_pace)
+                change = self._settle(row, True, stop, self.verify_pace)
                 if not change:
+                    self._published_seen[row['job_id']]=self._published_stamp(row)
+                    self._published_retry_at.pop(row['job_id'],None)
                     continue
                 with self._lock:
-                    if self._verify_stop.is_set():
+                    if stop.is_set():
                         return
                     self._apply_unchanged([(row, change)])
+                    if change.get('state')=='needs attention':self._published_retry_at[row['job_id']]=time.monotonic()+60
+                    else:self._published_retry_at.pop(row['job_id'],None)
             except InterruptedError:
                 return  # resume() or close() took over; nothing is written after a stop.
             except Exception:
@@ -972,7 +987,7 @@ class AudioJobs:
             # froze them, nothing published, and no current "review changed" refusal (that one already offers Start over).
             # Read-only stats of the rows asked about (retry=True: the shown page and the press), never the polled counts.
             compare = retry if source_check is None else source_check
-            if compare and value['group'] in ('other', 'unsupported') and value.get('originals_untouched') is True and row['output'] is None \
+            if compare and value.get('originals_untouched') is True and row['output'] is None \
                     and isinstance(journal, dict) and 'publication_intent' not in journal and not (refusal and refusal.get('cause') == 'source_changed'):
                 changed = changed_sources(manifest, reach, (row['job_id'], row['manifest_hash']), fresh=compare == 'fresh')
                 if changed:
@@ -1114,7 +1129,7 @@ class AudioJobs:
 
     def pause(self):
         with self._lock:
-            self._stop.set()
+            self._stop.set();self._verify_stop.set()
         return self.status()
 
     def drain(self):
@@ -1327,7 +1342,9 @@ class AudioJobs:
                 try:self._progress[job_id]={'attempt_id':attempt,**measured,'started':self._step_started(job_id,attempt,measured['phase'])}
                 finally:self._lock.release()
                 return
-            with self._lock:self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
+            with self._lock:
+                self._progress[job_id]={'attempt_id':attempt,'phase':stage,'started':self._step_started(job_id,attempt,stage)}
+                if isinstance(details,dict) and isinstance(details.get('chapter_check'),dict):self._progress[job_id]['chapter_check']=copy.deepcopy(details['chapter_check'])
             entry = {"stage": stage, "at": _now(), "details": details}
             if stage == "publishing":
                 if self._stop.is_set(): raise InterruptedError("Paused before publication")

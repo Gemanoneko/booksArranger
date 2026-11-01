@@ -102,6 +102,10 @@ class AutomaticProcessing:
             db.execute('CREATE TABLE IF NOT EXISTS automatic_manual_drafts(id TEXT PRIMARY KEY,revision INTEGER,expires REAL)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS automatic_errors(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,created TEXT NOT NULL,diagnostic TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS automatic_result_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL)')
+            db.execute('INSERT OR IGNORE INTO automatic_result_revision VALUES(1,0)')
+            for event in ('INSERT','UPDATE','DELETE'):
+                db.execute(f'CREATE TRIGGER IF NOT EXISTS automatic_result_{event.lower()} AFTER {event} ON automatic_candidates BEGIN UPDATE automatic_result_revision SET revision=revision+1 WHERE id=1; END')
             # Sergei's lasting author rules (ruling 12): the table, and his 2026-10-24 answers once.
             __import__('author_rules').seed(db)
             prior=db.execute('SELECT * FROM automatic_runs ORDER BY created DESC LIMIT 1').fetchone()
@@ -110,6 +114,8 @@ class AutomaticProcessing:
                 failure_reason='Automatic processing error' if candidate_job_exists(db,failed) else RESEARCH_FAILURE
                 db.execute("UPDATE automatic_candidates SET state='Needs attention',result=?,retry_at=NULL WHERE id=? AND state='Researching'",
                     (json.dumps({'reasons':[failure_reason,MISSING_FAILURE_DETAILS],'failure_run_id':prior['id']}),failed))
+            if prior and prior['state'] in ('Running','Stopping'):
+                __import__('pause_state').record(db,'automatic','interrupted','Automatic processing was interrupted before its saved stop checkpoint')
             db.execute("UPDATE automatic_runs SET state='Paused',reason='Paused after server restart — start to continue saved work',restart_paused=1 WHERE state IN ('Running','Stopping')")
             db.execute("UPDATE automatic_candidates SET state='Pending' WHERE state='Researching'")
     def _run_row(self):
@@ -176,13 +182,23 @@ class AutomaticProcessing:
         if len(sources)==1:return sources[0]
         return self.inventory.source_root_for_path(row['members'][0]['path'])
 
+    def retained(self,row):
+        """Exact persisted research for preview/approval, independent of HTTP cache eviction."""
+        with connect(self.database) as db:
+            saved=db.execute('SELECT id,revision,fingerprint,result FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
+        if not saved or saved['revision']!=row['revision'] or saved['fingerprint']!=row['fingerprint']:return None
+        try:result=json.loads(saved['result'])
+        except (ValueError,TypeError):return None
+        if not isinstance(result,dict) or self.rules_changed_for(result):return None
+        return {'candidate_id':saved['id'],'revision':saved['revision'],'fingerprint':saved['fingerprint'],'result':result}
+
     def candidate(self,row):
         with connect(self.database) as db:r=db.execute('SELECT * FROM automatic_candidates WHERE id=?',(row['id'],)).fetchone()
         if not r or r['revision']!=row['revision'] or r['fingerprint']!=row['fingerprint']:return None
         result=json.loads(r['result'])
         if self.volatile_failure and self.volatile_failure['diagnostic']['candidate_id']==row['id']:
             r=dict(r);r['state']='Needs attention';result=self.volatile_failure['candidate_result']
-        return {'state':r['state'],'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
+        return {'state':r['state'],'source_refresh_required':bool(result.get('source_refresh_required')),'until_change':bool(result.get('until_change')),'ask':result.get('ask'),'identity_hold':result.get('identity_hold'),'rules_generation':result.get('rules_generation',''),
                 'rules_stamp':result.get('rules_stamp'),'rules_seen':result.get('rules_seen'),'rules_folders':result.get('rules_folders'),
                 'local_source_gate_version':result.get('local_source_gate_version'),'metadata_holds':result.get('metadata_holds',[]),'manual_metadata_sources':result.get('manual_metadata_sources',[]),'manual_metadata_conflicts':result.get('manual_metadata_conflicts',[]),'research_version':result.get('research_version'),'reasons':result.get('reasons',[]),'sources':result.get('sources',[]),'wait':result.get('wait'),'attempted_utc':r['attempted'],'retry_at':r['retry_at'],'research_attempt':result.get('research_attempt',0),'research_history':result.get('research_history',[]),'metadata_facts':result.get('metadata_facts'),'duplicate_review':result.get('duplicate_review'),'gap_deferrals':result.get('gap_deferrals',0),'media_timeouts':result.get('media_timeouts',0)}
     def _rules_generation(self):
@@ -267,7 +283,8 @@ class AutomaticProcessing:
         armed=state=='Running' and self.next_retry_at is not None and not self.stop_event.is_set() and not self.closed
         kind,block=self._start_block(state,jobs=jobs,scanning=scanning,server_closing=server_closing)
         pending=self.start_pending
-        return {'start_block':{'kind':kind,'clears':kind in CLEARS} if kind and kind!='running' else None,
+        with connect(self.database) as db:pause=__import__('pause_state').read(db,'automatic')
+        return {'pause':pause,'start_block':{'kind':kind,'clears':kind in CLEARS} if kind and kind!='running' else None,
                 'start_pending':{'kind':pending['kind']} if pending else None,'state':state,'phase':'waiting' if armed else run['phase'] if run else 'idle','run_id':run['id'] if run else None,'reason':self.volatile_failure['reason'] if self.volatile_failure else run['reason'] if run else '',
                 'restart_paused':bool(run and run['restart_paused']),'failure':diagnostic,'failure_durable':bool(diagnostic and not self.volatile_failure),'retry_help':RETRY_HELP if research_retry(run) and not self.volatile_failure else '',
                 'can_start':not bool(block),'start_block_reason':block,'can_stop':active and state!='Stopping','research':counts,'current':dict(self.current) if self.current else None,
@@ -316,6 +333,7 @@ class AutomaticProcessing:
                 id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
                 with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
             else:self._update(run['id'],state='Running',reason='',restart_paused=0)
+            with connect(self.database) as db:__import__('pause_state').clear(db,'automatic')
             self.stop_event.clear();self.start_pending=None;self._closing_run=False
             self.thread=threading.Thread(target=self._work,args=(run['id'],),name='BooksArrangerAutomatic',daemon=False);self.thread.start()
         started=self.on_started
@@ -396,9 +414,10 @@ class AutomaticProcessing:
         self._changed()
     def cancel_start(self):
         """Cancel automatic start: the pending start ends; books keep waiting for a press."""
-        with self.lock:self.start_pending=None
+        with self.lock:
+            cancelled=self.start_pending is not None;self.start_pending=None
         self._pending_wake.set();self._changed()
-        return self.status()
+        return self.status()|{'cancelled':cancelled}
     def _pending_loop(self):
         """The pending start fires with exactly what the Start button does, and nothing else: no window, focus, sound
         or notification call exists on this path (the server has none). It keeps waiting through another blocker that
@@ -429,7 +448,7 @@ class AutomaticProcessing:
                 self.start_pending={'kind':kind} if kind in CLEARS else None
             self._changed()
             if kind not in CLEARS:return
-    def stop(self,force=False):
+    def stop(self,force=False,origin=None):
         """Stop, Quit (not forced) and the app's own safety stops (disk full, working-file hold: forced). Each also ends
         a pending start (O12): a start the app or Sergei has just stopped must never come back by itself. The rows and
         the notice then read as after Cancel automatic start (RefusedRetry follow-up 4, section 1.4)."""
@@ -443,7 +462,11 @@ class AutomaticProcessing:
         if cancelled:
             self._pending_wake.set();self._changed()
         if not active:return self.status()
-        self.inventory.stop();self.merge.pause()
+        origin=origin or ('closing' if self.closed else 'interrupted' if force else 'user')
+        with connect(self.database) as db:__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
+        self.inventory.stop()
+        if origin=='user':self.merge.pause()
+        else:self.merge.pause(origin=origin)
         return self.status()
     def close(self,timeout=30):
         self.closed=True;self.stop(force=True);thread=self.thread
@@ -469,9 +492,13 @@ class AutomaticProcessing:
             draft=db.execute('SELECT * FROM automatic_manual_drafts WHERE id=? AND expires>?',(row['id'],time.time())).fetchone()
         if draft:return True
         return self._manual_draft(row)
+    def names_approval_pending(self,row):
+        ctx=self.merge.reviews._context(row)
+        return bool(row.get('fingerprint')) and isinstance(ctx.get('names_approval_pending'),dict) and ctx['names_approval_pending']=={'revision':row.get('revision'),'fingerprint':row['fingerprint']}
+
     def _manual_draft(self,row):
         ctx=self.merge.reviews._context(row)
-        return bool(row.get('review') and not (ctx.get('automatic_approval') or ctx.get('automatic_pending'))) or bool(ctx.get('manual_draft_active'))
+        return self.names_approval_pending(row) or bool(row.get('review') and not (ctx.get('automatic_approval') or ctx.get('automatic_pending') or __import__('book_restart').restart_current(row,ctx))) or bool(ctx.get('manual_draft_active'))
     def _add_current_candidates(self,checkpoint):
         """Regrouping (split books, v0.15.0) replaces candidates with new ids; a saved run adds
         every current candidate it has not seen, so new books are researched without a new
@@ -489,11 +516,14 @@ class AutomaticProcessing:
     def _refresh_observed_sources(self,row,previous):
         """Only stale/unreadable, unprotected observed members are refreshed."""
         stale={'Source files changed','Source embedded identity or order evidence changed','Source changed — review required','Source files unavailable or unreadable'}
-        needs=any(m.get('error') or m.get('missing') for m in row['members']) or bool(stale.intersection((previous or {}).get('reasons',[])))
+        needs=bool((previous or {}).get('source_refresh_required')) or any(m.get('error') or m.get('missing') for m in row['members']) or bool(stale.intersection((previous or {}).get('reasons',[])))
         if not needs:return None
         adapter=getattr(self.inventory,'refresh_candidate_sources',None)
         if adapter is None:return {'state':'held','reason':'Observed source inventory refresh is unavailable'}
-        receipt=adapter('Audiobooks',row['id'],row['revision'],stop=self.stop_event,force=True)
+        prior_context=self.merge.reviews._context(row)
+        restart=prior_context.get('automatic_restart') if __import__('book_restart').restart_current(row,prior_context) else None
+        extra={'restart_job':restart['job_id']} if restart else {}
+        receipt=adapter('Audiobooks',row['id'],row['revision'],stop=self.stop_event,force=True,**extra)
         if self.stop_event.is_set():raise InterruptedError()
         if receipt.get('state') not in ('held','unchanged','refreshed'):raise ValueError('Unsupported source refresh result')
         if receipt['state']=='held':return receipt
@@ -515,6 +545,15 @@ class AutomaticProcessing:
             if sorted(covered)!=old_paths or len(set(covered))!=len(covered):return {'state':'held','reason':'Refreshed source membership is incomplete or overlapping'}
             return receipt|{'replacement_ids':replacements}
         if sorted(m['path'] for m in fresh['members'])!=old_paths:return {'state':'held','reason':'Refreshed source membership changed'}
+        if restart and fresh.get('review')==row.get('review'):
+            with connect(self.database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(fresh['id'],)).fetchone()
+                if not saved or json.loads(saved['data'])!=prior_context:return {'state':'held','reason':'Saved choices changed during automatic restart'}
+                current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(fresh['id'],)).fetchone()
+                if not current or tuple(current)!=(fresh['revision'],fresh['fingerprint']):return {'state':'held','reason':'Book changed during automatic restart'}
+                ctx=dict(prior_context);ctx['automatic_restart']=dict(restart,revision=fresh['revision'],fingerprint=fresh['fingerprint'])
+                db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(fresh['id'],fresh['revision'],json.dumps(ctx,ensure_ascii=False)))
         return receipt|{'row':fresh}
 
     def _failure(self,id,error,phase,identity,row,research_failed):
@@ -639,7 +678,8 @@ class AutomaticProcessing:
                       deferred.append(identity)
                       checkpoint['pending'].pop(0);continue
                   if self.manual_draft(row):
-                      self._record(row,'Held',{'reasons':['Manual draft retained']},self.clock()+300);deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
+                      reason='Names saved — waiting for your approval.' if self.names_approval_pending(row) else 'Manual draft retained'
+                      self._record(row,'Held',{'reasons':[reason]},self.clock()+300);deferred.append(identity);checkpoint['pending'].pop(0);self._update(id,checkpoint=json.dumps(checkpoint));continue
                   refreshed=self._refresh_observed_sources(row,previous)
                   if refreshed:
                       compact={k:v for k,v in refreshed.items() if k not in ('row','replacement_ids')}
@@ -764,7 +804,12 @@ class AutomaticProcessing:
             self.current=None;self.next_retry_at=None;self.live_checkpoint=None
             if isinstance(checkpoint,dict) and checkpoint.get('pending') is not None:self._take_requeued(checkpoint)  # saved, so continuing reaches them
             # Report Paused only after both scan and owned converter/cleanup have stopped.
-            self.inventory.stop();self.merge.pause()
+            with connect(self.database) as db:
+                pause=__import__('pause_state').read(db,'automatic')
+                if not pause:pause=__import__('pause_state').record(db,'automatic','interrupted','Automatic processing stopped before completing its work')
+            self.inventory.stop()
+            if pause['origin']=='user':self.merge.pause()
+            else:self.merge.pause(origin=pause['origin'])
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)
             while self.merge.state()['state']=='Pausing':time.sleep(.2)
             try:self._paused_checkpoint(id,checkpoint)

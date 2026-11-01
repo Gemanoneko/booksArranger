@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { acceptanceIndex, artifactContract, newer, packageContract, productTree, remoteArtifacts, reportManifest, reportPin } from './release-contract.mjs';
+import { acceptanceIndex, artifactContract, newer, packageContract, productTree, remoteArtifacts, reportManifest, reportPin, requiresNativeQa, nativeEvidencePath, nativeEvidenceReportHash, nativeRecordReferences, validateNativeEvidence } from './release-contract.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export function gitEntries(output) {
@@ -39,10 +39,27 @@ export async function releaseFlow(io) {
   if(productTree(await entryList(manifest.source_head))!==digest)throw new Error('Artifact source commit differs from release product');
   await io.run('git',['merge-base','--is-ancestor',manifest.source_head,head],{credential:false});
   const acceptance=acceptanceIndex(JSON.parse(await io.read('Docs/BooksArranger_ReleaseAcceptance_v'+pkg.version+'.json')),pkg.version);
+  let qaText=null;
   for(const [kind,file] of acceptance) {
     const text=await io.read(file),pin=reportPin(text,kind);
+    if(kind==='qa')qaText=text;
     await io.run('git',['merge-base','--is-ancestor',pin,head],{credential:false});
     if(productTree(await entryList(pin))!==digest || reportManifest(text)!==manifestHash)throw new Error(kind+' accepts a different source or installer');
+  }
+  if(requiresNativeQa(pkg.version)){
+    // Mandatory real-shell phase. Canonical PASS or GO prose cannot substitute for
+    // original candidate-bound normal owner/output/postflight/cleanup evidence.
+    const evidencePath=nativeEvidencePath(pkg.version),facts=await io.hash(evidencePath);
+    if(!Number.isSafeInteger(facts.size)||facts.size<=0||facts.size>128*1024||facts.sha256!==nativeEvidenceReportHash(qaText))throw Error('Native QA summary bytes are missing or unaccepted');
+    const nativeRaw=await io.read(evidencePath);if(hash(nativeRaw)!==facts.sha256)throw Error('Native QA summary changed');
+    const summary=JSON.parse(nativeRaw),records={};
+    for(const [role,ref] of nativeRecordReferences(summary,pkg.version)){
+      const actual=await io.hash(ref.path);if(actual.size!==ref.size||actual.sha256!==ref.sha256)throw Error('Native QA raw record differs: '+role);
+      records[role]=await io.read(ref.path);
+    }
+    if(!manifest.runtime||typeof manifest.runtime!=='object')throw Error('Candidate runtime manifest missing');
+    const phase=await io.hash('scripts/qa-phase-contract.mjs');
+    validateNativeEvidence(summary,records,{version:pkg.version,source_head:manifest.source_head,product_digest:digest,build_id:manifest.build_id,artifact_manifest_sha256:manifestHash,runtime_manifest_sha256:hash(JSON.stringify(manifest.runtime)),phase_contract_sha256:phase.sha256});
   }
   await io.verifyPayload(manifest); // Entire unpacked tree, NSIS equivalence receipt, source/raw JSON and runtimes.
   for(const artifact of manifest.artifacts) {

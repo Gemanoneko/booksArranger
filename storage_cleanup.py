@@ -55,7 +55,7 @@ def leftover_verdict(entry):
         return 'Folder contains a subfolder or link; retained'
     suffixes = [suffix.lower() for suffix in Path(entry.name).suffixes]
     if any(suffix in SOUND for suffix in suffixes):
-        return 'Audio files remain in the folder; retained'
+        return 'Audio files remain in the folder; retained: ' + entry.name
     if entry.name.casefold() in SAFE_LEFTOVER_NAMES:
         return None
     if not suffixes or suffixes[-1] not in SAFE_LEFTOVERS:
@@ -65,11 +65,12 @@ def leftover_verdict(entry):
 
 
 class StorageCleanup:
-    def __init__(self, database, stage_root, recovery_root, guard=lambda: None,output_location=None,output_location_guard=None,repair_publication=None,repair_location_guard=None):
+    def __init__(self, database, stage_root, recovery_root, guard=lambda: None,output_location=None,output_location_guard=None,repair_publication=None,repair_location_guard=None,source_roots=None):
         self.database = str(database)
         self.stage_root = ordinary(stage_root)
         self.recovery_root = ordinary(recovery_root)
         self.guard = guard
+        self.source_roots = source_roots
         self.repair_publication=repair_publication;self.repair_location_guard=repair_location_guard
         self.output_location=output_location;self.output_location_guard=output_location_guard;self._location_local=threading.local()
         self._receipts = {}
@@ -663,6 +664,7 @@ class StorageCleanup:
             for row in rows:
                 states=[r[0] for r in db.execute('SELECT state FROM source_folder_cleanup_directories WHERE job_id=?',(row['job_id'],))]
                 row.update(total=len(states),removed=states.count('removed'),absent_after_intent=states.count('absent_after_intent'),retained=states.count('retained_nonempty'),unsupported=states.count('retained_unsupported'))
+                row['retained_details']=[dict(item) for item in db.execute("SELECT path,state,reason FROM source_folder_cleanup_directories WHERE job_id=? AND state LIKE 'retained_%' ORDER BY path LIMIT 50",(row['job_id'],))]
         return (rows[0] if rows else None) if job_id else rows
 
     def _folder_set(self, job_id, output_hash, state, reason=''):
@@ -718,6 +720,25 @@ class StorageCleanup:
                 if not parent.is_relative_to(root):raise BoundaryError('Source-folder ancestry escaped the library')
                 candidates.add(parent);parent=parent.parent
         return sorted(candidates,key=lambda p:(-len(p.parts),str(p).casefold()))
+
+    def _check_current_roots(self, candidates):
+        """Historical manifests never authorize removing a currently configured library boundary."""
+        if self.source_roots is None:return
+        roots={ordinary(root) for root in self.source_roots()}
+        if any(path==root or path.parent==root for path in candidates for root in roots):
+            raise BoundaryError('A current source root or its direct child is retained')
+
+    def _reconcile_removed_files(self, job_id):
+        """A crash after disposal records observed absence, never invents who deleted the file."""
+        with connect(self.database) as db:
+            rows=[dict(r) for r in db.execute("SELECT * FROM source_folder_removed_files WHERE job_id=? AND state='removing'",(job_id,))]
+        for row in rows:
+            self.guard()
+            try:os.lstat(row['path'])
+            except FileNotFoundError:
+                self._record_outcome(row['id'],'absent_after_intent','Absent when reconciling durable removal intent; deletion actor is not established')
+            except OSError:continue  # inaccessible is not absent
+            else:self._record_outcome(row['id'],'not_removed','A file is present at the recorded path; preserved and rechecked before any later disposal')
 
     @contextlib.contextmanager
     def _folder_boundary(self, job_id, root, parent, expected=None):
@@ -791,26 +812,14 @@ class StorageCleanup:
         current book's member, a source or cover of any other job that has not completed (its cover may still be read), or a
         reacquire record that is not archived. Read-only; an unreadable catalog holds everything."""
         wanted = {os.path.normcase(str(p)) for p in paths}
-        held = set()
         try:
+            from cleanup_ownership import OwnershipIndex
+            if not hasattr(self,'_ownership_index'):self._ownership_index=OwnershipIndex()
             with connect(self.database) as db:
-                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if 'catalog_group_members' in tables and 'book_groups' in tables:
-                    for (member,) in db.execute('SELECT c.path FROM catalog_group_members c JOIN book_groups g ON g.id=c.group_id WHERE g.superseded=0 AND g.id IS NOT ?', (manifest.get('candidate_id'),)):
-                        held.add(os.path.normcase(str(member)))
-                for (raw,) in db.execute("SELECT manifest FROM audio_jobs WHERE job_id!=? AND state!='completed'", (job_id,)):
-                    other = json.loads(raw)
-                    for source in other.get('sources') or []:
-                        if isinstance(source, dict) and source.get('path'):held.add(os.path.normcase(str(source['path'])))
-                    cover = other.get('cover')
-                    if isinstance(cover, dict) and cover.get('path'):held.add(os.path.normcase(str(cover['path'])))
-                if 'reacquire_markers' in tables:
-                    for (snapshot,) in db.execute("SELECT snapshot FROM reacquire_markers WHERE state!='archived'"):
-                        for member in (json.loads(snapshot) or {}).get('members') or []:
-                            if isinstance(member, dict) and member.get('path'):held.add(os.path.normcase(str(member['path'])))
-        except (sqlite3.Error, ValueError, TypeError, AttributeError):
-            return wanted
-        return wanted & held
+                tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                return self._ownership_index.held(db,tables,job_id,manifest.get('candidate_id'),wanted)
+        except (sqlite3.Error,ValueError,TypeError,AttributeError):
+            return wanted  # unreadable ownership never permits disposal
 
     def _leftovers(self, job_id, manifest, path, own):
         """What stands between the folder and its removal: ([{'path','size','modified_ns'}] to remove first, reason to keep it
@@ -890,18 +899,24 @@ class StorageCleanup:
         ancestry=json.loads(known['ancestry'])
         with DirectoryBoundary(root,path) as held:
             if [list(i) for i in held.identities]!=ancestry:raise BoundaryError('Source-folder native identity changed before disposition')
+            self._check_current_roots([path])
             leftovers,reason=self._leftovers(job_id,manifest,path,own)
             if reason:
                 self._folder_state(job_id,path,'retained_nonempty',reason);return
             self.guard();held.revalidate();self._folder_obligations(job_id,manifest,output);self._folder_sources_absent(job_id,manifest)
             self._folder_state(job_id,path,'removal_intended','Removing %d leftover file(s), each recorded in source_folder_removed_files' % len(leftovers) if leftovers else '')
             for item in leftovers:
-                self.guard()
+                self.guard();self._check_current_roots([path])
+                if self._held(job_id,manifest,[item['path']]):
+                    self._folder_state(job_id,path,'retained_nonempty','Another book or unfinished job uses a leftover file; retained');return
                 row_id=self._record_removal(job_id,manifest,path,item,'removing')  # durable before the file goes (77c)
                 failed=remove(item['path'],str(root),item['size'])
                 self._record_outcome(row_id,'not_removed' if failed else 'removed',('%s: %s' % failed) if failed else '')
                 if failed:
-                    self._folder_state(job_id,path,'retained_nonempty','A leftover file could not be removed; retained (see source_folder_removed_files)');return
+                    detail='%s: %s' % failed
+                    self._folder_state(job_id,path,'retained_nonempty','A leftover file could not be removed; retained (see source_folder_removed_files)')
+                    if __import__('cleanup_retry').transient(detail):raise BoundaryError(detail)
+                    return
         try:
             with self._folder_boundary(job_id,root,path.parent,ancestry) as boundary:
                 with VerifiedDirectory(path) as target:
@@ -913,7 +928,9 @@ class StorageCleanup:
         except FileNotFoundError:
             pass  # gone after our intent: reconciled below
         except OSError as error:
-            self._folder_state(job_id,path,'retained_nonempty',('Folder could not be removed; retained: '+str(error))[:1000]);return
+            self._folder_state(job_id,path,'retained_nonempty',('Folder could not be removed; retained: '+str(error))[:1000])
+            if __import__('cleanup_retry').transient(error):raise
+            return
         if os.path.lexists(path):
             self._folder_state(job_id,path,'retained_nonempty','Folder is still there after its removal; retained');return
         self._folder_state(job_id,path,'disposition_set')
@@ -930,14 +947,14 @@ class StorageCleanup:
                                              "WHERE d.job_id=j.job_id AND d.state IN (%s)) ORDER BY j.updated,j.job_id" % ','.join('?'*len(states)),states)]
 
     @staticmethod
-    def _might_clear(path):
+    def _might_clear(path, own=True):
         """A kept folder 74e could remove now: True when it holds nothing or only known safe leftovers (leftover_verdict),
         False when something keeps it, None when it cannot be listed (ruling 77b: try again later). Read-only, one listing;
         the run itself checks everything again."""
         try:
             with os.scandir(path) as listing:
                 for entry in listing:
-                    if leftover_verdict(entry):return False
+                    if not own or leftover_verdict(entry):return False
         except OSError:
             return None
         return True
@@ -966,20 +983,29 @@ class StorageCleanup:
         with connect(self.database) as db:
             rows=[(r[0],r[1]) for r in db.execute('SELECT path,state FROM source_folder_cleanup_directories WHERE job_id=? AND state IN (%s)' % ','.join('?'*len(states)),(job_id,*states))]
             prior=db.execute('SELECT * FROM source_folder_cleanup_jobs WHERE job_id=?',(job_id,)).fetchone()
-        present=[path for path,state in rows if os.path.isdir(path)]
+        manifest,_output=self._job(job_id)
+        own={ordinary(source['path']).parent for source in manifest['sources']}
+        present=[]
+        for path,_state in rows:
+            try:
+                facts=os.lstat(path)
+            except FileNotFoundError:continue
+            except OSError:return 'later'
+            if not __import__('stat').S_ISDIR(facts.st_mode) or getattr(facts,'st_file_attributes',0)&0x400:return 'later'
+            present.append(path)
         intent=any(state in INTENT_STATES for _path,state in rows)
-        verdicts=[self._might_clear(path) for path in present]
+        verdicts=[self._might_clear(path,ordinary(path) in own) for path in present]
         if None in verdicts:return 'later'
         if not present and not intent:outcome='gone'
         elif not intent and not any(verdicts):outcome='kept'
         else:
             try:outcome=(self.run_folders(job_id,rerun=True) or {}).get('state') or 'none'
-            except InterruptedError:raise
             except Exception as error:
-                if isinstance(error,OSError) and not isinstance(error,BoundaryError) or not self._root_reachable(job_id):
-                    if prior is not None:self._folder_set(job_id,prior['output_hash'],prior['state'],prior['reason'])
-                    return 'later'
-                outcome='needs_attention'  # recorded on the folder job by run_folders; housekeeping, never attention
+                # A sweep has no new deletion authority. Restore its selection state on every failure;
+                # exact per-file/folder intents remain durable and are revalidated on the next attempt.
+                if prior is not None:self._folder_set(job_id,prior['output_hash'],prior['state'],prior['reason'])
+                if isinstance(error,InterruptedError):raise
+                return 'later'
         with connect(self.database) as db:
             db.execute(SWEEP_TABLE)
             db.execute('INSERT OR REPLACE INTO source_folder_sweep VALUES(?,?,?)',(job_id,outcome,stamp()))
@@ -995,12 +1021,21 @@ class StorageCleanup:
         if terminal and terminal['state'] in ('completed','unsupported') and not rerun:return terminal
         output_hash=''
         try:
+            self.guard()
+            # Cheap immutable provenance checks precede a full output hash. Known refusals
+            # must not re-read gigabytes on each Start/retention wake. Full verification
+            # still happens before any file or directory disposal.
+            manifest,output=self._job(job_id);output_hash=output['sha256']
+            self._folder_obligations(job_id,manifest,output)
+            candidates=self._folder_candidates(manifest)
+            self._check_current_roots(candidates)
+            with connect(self.database) as db:
+                prior={ordinary(r[0]) for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=?',(job_id,))}
+            if not prior.issubset(set(candidates)):raise BoundaryError('Source-folder receipt escaped approved source provenance')
+            self._reconcile_removed_files(job_id)
             with self.protected_output(job_id) as (manifest,output):
-                output_hash=output['sha256'];self._folder_obligations(job_id,manifest,output)
-                candidates=self._folder_candidates(manifest)
-                with connect(self.database) as db:
-                    prior={ordinary(r[0]) for r in db.execute('SELECT path FROM source_folder_cleanup_directories WHERE job_id=?',(job_id,))}
-                if not prior.issubset(set(candidates)):raise BoundaryError('Source-folder receipt escaped approved source provenance')
+                self._folder_obligations(job_id,manifest,output)
+                self._check_current_roots(candidates)
                 self._folder_set(job_id,output_hash,'checking')
                 if progress:progress('folders')
                 self._folder_sources_absent(job_id,manifest)
@@ -1016,7 +1051,7 @@ class StorageCleanup:
             return self.folder_status(job_id)
         except Exception as error:
             # Ruling 77b: a failure on the drive (unreachable, a listing failed) is marked so a later pass tries again.
-            transient=not isinstance(error,InterruptedError) and (isinstance(error,OSError) and not isinstance(error,BoundaryError) or not self._root_reachable(job_id))
+            transient=not isinstance(error,InterruptedError) and (__import__('cleanup_retry').transient(error) or isinstance(error,OSError) and not isinstance(error,BoundaryError) or not self._root_reachable(job_id))
             self._folder_set(job_id,output_hash,'needs_attention',(FOLDER_RETRY if transient else '')+str(error));raise
 
     def discard_repair_copy(self, job_id, path, sha256, size):

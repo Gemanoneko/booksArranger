@@ -112,7 +112,9 @@ class MigrationOperation:
         if routing.get('accepted_candidate_revision')!=candidate['revision'] or routing.get('accepted_review_sha256')!=digest(review):raise ValueError('Accepted routing review changed')
         manifest=json.loads(job['manifest']);original=json.loads(publication['original_output_json'])
         from organization import frozen_plan
-        if manifest.get('metadata_facts',{}).get('destination_suffix') and frozen_plan(manifest,publication['target_root'],routing['routing_review'])['path']!=publication['planned_destination']:raise ValueError('Reviewed frozen recording route differs')
+        from reviewed_routing import for_relocation
+        planned_manifest=for_relocation(manifest,routing['routing_review'],routing.get('user_routing_evidence') or [])
+        if (manifest.get('metadata_facts',{}).get('destination_suffix') or manifest.get('metadata_facts',{}).get('shared_routing')) and frozen_plan(planned_manifest,publication['target_root'],routing['routing_review'])['path']!=publication['planned_destination']:raise ValueError('Reviewed frozen recording route differs')
         if manifest.get('metadata_facts',{}).get('destination_suffix') and (routing.get('recording_facts_sha256')!=digest(manifest['metadata_facts']) or accepted.get('metadata_facts')!=manifest['metadata_facts']):raise ValueError('Reviewed recording distinction evidence changed')
         if manifest['root'] not in self.plan['source_policy']['audiobook_sources']:raise ValueError('Publication source root is outside reviewed configured sources')
         from review_backend import member_key

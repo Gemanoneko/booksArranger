@@ -104,12 +104,15 @@ class SharedSnapshot:
     page showed "Local server unavailable"). Only with no answer yet, or right after a control, does a
     reader wait the full bound for a fresh one.
     """
-    def __init__(self,clock=time.monotonic,wait=STATUS_WAIT):
+    def __init__(self,clock=time.monotonic,wait=STATUS_WAIT,keep_flight=False):
         self._lock=threading.Lock();self._clock=clock;self._wait=wait;self._value=None;self._at=None;self._flight=None;self._generation=0
+        self._keep_flight=keep_flight
         self._last=None  # (value, generation, started) of the newest finished computation
 
     def invalidate(self):
-        with self._lock:self._generation+=1;self._value=None;self._at=None;self._flight=None
+        with self._lock:
+            self._generation+=1;self._value=None;self._at=None
+            if not self._keep_flight:self._flight=None
 
     def _run(self,flight,compute):
         try:flight['value']=compute()
@@ -132,8 +135,9 @@ class SharedSnapshot:
             last=self._last;current=self._generation
         bound=self._wait if last is None or last[1]!=current else min(self._wait,STALE_WAIT)
         if not flight['done'].wait(bound):
-            if last is not None:return copy.deepcopy(last[0])
+            if last is not None and (not self._keep_flight or last[1]==current):return copy.deepcopy(last[0])
             raise StatusUnavailable('Status computation is still running')
+        if self._keep_flight and flight['generation']!=self._generation:raise StatusUnavailable('Book list changed; a fresh read is pending')
         if flight['error'] is not None:raise flight['error']
         return copy.deepcopy(flight['value'])
 
@@ -156,10 +160,21 @@ def attention_counts(summary):
 def catalog_busy_text(reason):
     return 'database is locked' in (reason or '') or 'database is busy' in (reason or '')
 
+def job_origin(manifest):
+    evidence=manifest.get('evidence') or {}
+    if manifest.get('user_approval') or evidence.get('metadata_actor')=='user':return 'user'
+    if manifest.get('metadata_facts') and evidence.get('metadata_actor')=='assistant':return 'automatic'
+    return 'unknown'
+
+
 def operation(method):
     @functools.wraps(method)
     def locked(self,*args,**kwargs):
-        with self.operation_lock:return method(self,*args,**kwargs)
+        with _BULK_LOCK:self._foreground_waiters=self.__dict__.get('_foreground_waiters',0)+1
+        try:
+            with self.operation_lock:return method(self,*args,**kwargs)
+        finally:
+            with _BULK_LOCK:self._foreground_waiters-=1
     return locked
 
 
@@ -193,6 +208,7 @@ class MergeService:
         self.retirement=ReplacementRetirement(self.replacements,self.cache_dir.parent/'replacement-recovery',inventory.roots['Audiobooks'],threading.Event(),self._replacement_guard,self.publications.protect_former,bindings=self.publication_bindings)
         self.jobs = AudioJobs(inventory.database, self._run, self._guard, self._output_valid,self.retirement.historical_retired)
         self.jobs.output_current=self._output_current;self.jobs.verify_pace=self._pacer
+        self.jobs.background_stop=_Flag(lambda:bool(self.__dict__.get('_maintenance_paused') or self.__dict__.get('_foreground_waiters',0) or self.__dict__.get('_closing') or self.draining or self.inventory.worker and self.inventory.worker.is_alive() or self._worker_active() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()))
         self.retirement.stop=self.jobs._stop
         self.jobs.pending_postprocessing=self._pending_replacement_postprocessing
         self.jobs.postprocessing=self._finish_replacement
@@ -203,7 +219,7 @@ class MergeService:
         self.jobs.after_completed=self._after_completed
         self.cleanup.after_drain=None  # Each Merge resume supplies its own generation-bound handoff.
         from storage_cleanup import StorageCleanup
-        self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,repair_publication=self._repair_publication,repair_location_guard=self.publication_bindings.guard)
+        self.storage_cleanup=StorageCleanup(inventory.database,self.stage_root,self.cleanup.root,self._storage_guard,output_location=self.publication_bindings.current,output_location_guard=self.publication_bindings.guard,repair_publication=self._repair_publication,repair_location_guard=self.publication_bindings.guard,source_roots=self._all_source_roots)
         from working_lifecycle import WorkingLifecycle
         self.working=WorkingLifecycle(inventory.database,self.stage_root,self._working_guard)
         from producer_recovery import ProducerRecovery,windows_boot
@@ -567,7 +583,13 @@ class MergeService:
         with _QUIET_LOCK:
             kept=self.__dict__.get('_quiet_pages',{}).get(key)
             if token is not None and kept and kept[0]==token and 0<=time.monotonic()-kept[1]<min(self.quiet_max_age(),kept[3]):return copy.deepcopy(kept[2])
-        value=self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status)
+        with _QUIET_LOCK:
+            flights=self.__dict__.setdefault('_page_shared',{})
+            if key not in flights and len(flights)>=32:
+                for old in list(flights):
+                    if flights[old]._flight is None:flights.pop(old)
+            shared=flights.setdefault(key,SharedSnapshot(keep_flight=True))
+        value=shared.get(lambda:self.reviews.page(limit,offset,search,status,group) if group else self.reviews.page(limit,offset,search,status),STATUS_MAX_AGE)
         recheck=isinstance(value,dict) and value.pop('recheck',False) is True
         if token is not None and self._quiet_token()==token:
             with _QUIET_LOCK:
@@ -606,7 +628,7 @@ class MergeService:
                  getattr(getattr(self,'publications',None),'_thread',None),
                  self.__dict__.get('_retry_all_thread'))
         return bool(any(thread is not None and thread.is_alive() for thread in threads) or getattr(jobs,'_resuming',False)
-                    or getattr(cleanup,'current',None) or getattr(self,'_post_current',None) or getattr(self,'_resume_pending',False) or getattr(self,'draining',False))
+                    or getattr(cleanup,'current',None) or getattr(self,'_post_current',None) or self.__dict__.get('_maintenance') or getattr(self,'_resume_pending',False) or getattr(self,'draining',False))
 
     def _catalog_version(self,create=False):
         """(PRAGMA data_version on one idle monitor connection, control counter): equal between two reads only
@@ -650,6 +672,8 @@ class MergeService:
         shared=self.__dict__.get('_status_shared')
         if shared is not None:shared.invalidate()
         with _QUIET_LOCK:
+            for page in self.__dict__.get('_page_shared',{}).values():page.invalidate()
+        with _QUIET_LOCK:
             self._quiet_generation=self.__dict__.get('_quiet_generation',0)+1;self._quiet_state=None;self._quiet_pages={}
 
     def state(self):
@@ -679,6 +703,7 @@ class MergeService:
         # (its marker cleared, its row still read as pending) is never reported Paused (v0.16.2).
         worker=self._worker_active();token=self._quiet_token();started=time.monotonic()
         value=self.jobs.status()
+        with connect(self.inventory.database) as db:pause=__import__('pause_state').read(db,'jobs')
         cleanups=self._catalog_cached('cleanups',self.cleanup.status);storage=self._catalog_cached('storage',self.storage_cleanup.status)
         folders=self._catalog_cached('folders',self.storage_cleanup.folder_status)
         self._cleanup_kept=(started,token,{item['job_id']:item for item in cleanups})  # the book list reuses these
@@ -691,6 +716,7 @@ class MergeService:
         active=next((c for c in pending if c['id']==self.cleanup.current),None)
         if not active and pending and not value['current_job_id']:active=pending[0]
         post=self._post_current
+        if post and not self.cleanup.current:active=None
         if not current and (active or post):
             id=active['job_id'] if active else post[0]
             current=next((j for j in value['jobs'] if j['job_id']==id),None)
@@ -712,7 +738,10 @@ class MergeService:
         if active:
             progress={'phase':'originals','completed':active.get('removed',0),'total':active.get('total',0)} if active['state'] in ('removing','pausing','paused') else {'phase':'recovery copies','completed':active.get('checked') or 0,'total':active.get('total',0)} if active['state']=='checking' and active.get('total') else {'phase':'recovery copies'}
         elif post:progress={'phase':post[1]}
-        elif current:progress=phase_progress(current['stage'],current.get('progress'))
+        elif current:
+            progress=phase_progress(current['stage'],current.get('progress'))
+            chapter=(current.get('progress') or {}).get('chapter_check')
+            if chapter:progress={'phase':'Checking source audio','chapter_check':copy.deepcopy(chapter)}
         elif errors:
             error=errors[0];current=next((j for j in value['jobs'] if j['job_id']==error['job_id']),None)
             phase='former outputs' if error.get('replacement') else 'originals' if error in cleanups else 'folders' if error in folders else 'temporary'
@@ -746,12 +775,22 @@ class MergeService:
         for group in self.NEEDS_GROUPS:counts.setdefault(group,0)
         return {key:value[key] for key in ('state','queued','completed','failed')} | {
             'approved_total':totals['approved'],'converted_total':totals['converted'],'candidate_total':totals.get('candidate_total'),'not_approved_total':totals.get('not_approved_total'),'folder_cleanup_notes':list(dict.fromkeys(folder_notes)),
+            'pause':pause,'start_admission':self._current_start_admission(),
+            'current_job_origin':job_origin(current['manifest']) if current else 'unknown',
             'current_title':current['manifest']['metadata'].get('title','') if current else '',
             'current_job_id':current['job_id'] if current else None,'attempt_id':current.get('attempt_id') if current else None,
             'progress':progress,'stage':active['status'] if active else progress['phase'] if progress else '',
             'cleanup_active':bool(active or pending or post),'postprocessing_pending':bool(self._pending_replacement_postprocessing()) if hasattr(self,'replacements') else False,
-            'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
+            'maintenance':copy.deepcopy(self.__dict__.get('_maintenance')),'published_check':value.get('published_check'),'attention_counts':counts,'todo_still_checking':coverage['still_checking'],'working_cleanable':cleanable,'attention_row':attention_row,
             'series_update':self.series_backfill.status() if 'series_backfill' in self.__dict__ else None}
+
+    def _current_start_admission(self):
+        with _BULK_LOCK:
+            if self.__dict__.get('_resume_pending'):
+                return {'state':'checking','generation':self.__dict__.get('_start_generation',0)}
+            pending=self.__dict__.get('_start_waiting')
+            if isinstance(pending,dict):return {'state':'waiting','reason':pending['reason'],'generation':pending['generation']}
+        return None
 
     def converted_ids(self,max_age=None):
         """Converted candidate ids for the book list: the set the last status computation produced, while it is under
@@ -774,7 +813,7 @@ class MergeService:
         token=self._quiet_token();started=time.monotonic()
         value=set(self.progress_books()['converted_ids']);self._converted_cache=(started,value,token);return set(value)
 
-    def pause(self):
+    def pause(self,origin=None):
         if self.draining:return None
         with _BULK_LOCK:
             self._start_generation=self.__dict__.get('_start_generation',0)+1
@@ -783,7 +822,11 @@ class MergeService:
             if pending:pending.set()
         try:
             # Neither queue can clear stop after this Pause completes using an older generation.
+            self._maintenance_paused=True
+            if self.__dict__.get('_maintenance'):self._maintenance.update(state='stopping',cancel_requested=True)
             self.cleanup.pause();self.jobs.pause()
+            origin=origin or ('update' if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set() else 'closing' if self.__dict__.get('_closing') else 'user')
+            with connect(self.inventory.database) as db:__import__('pause_state').record(db,'jobs',origin,'Audiobook jobs paused')
         finally:
             with _BULK_LOCK:self._pause_depth-=1
         return self.state()
@@ -817,39 +860,27 @@ class MergeService:
         with _BULK_LOCK:
             if not self._start_allowed(generation):raise StartRefused('stale','Start was superseded by Pause or closing.')
             self._automatic_cleanup_generation=generation
+            self._maintenance_paused=False
+            with connect(self.inventory.database) as db:__import__('pause_state').clear(db,'jobs')
 
     def resume(self,*,start_generation=None,pending_owner=None,recheck=True):
-        """Start (or keep running) the audiobook queue. recheck (Start, the automatic run's start): first re-check every
-        finished book (its temporary and folder cleanup, AudioJobs' published-output check), then answer the full status.
+        """Admit pending work promptly. Finished-book checks belong to idle maintenance.
 
-        recheck=False (an approval that queued a book, 0.22.1): only starts the queue when it is idle; no re-check of the
-        finished books and no status computation. The approval path used to run both under the operation lock: 4-5 min on
-        the live catalog (506 finished books) whenever the converter was idle, and a full status computation otherwise,
-        with every press waiting."""
+        The requested job still verifies its own exact inputs and destination. A Start
+        never hashes unrelated completed books under the foreground operation lock.
+        """
         generation=self._capture_start_generation() if start_generation is None else start_generation
-        if recheck:self._recheck_finished(generation,pending_owner)
-        return self._resume_guarded(generation,pending_owner,recheck)
+        result=self._resume_guarded(generation,pending_owner,False)
+        if recheck:
+            wake=getattr(self,'_retention_wake',None)
+            if wake is not None:wake.set()
+        return result
 
     def _recheck_finished(self,generation,pending_owner=None):
-        """Start's re-check of every finished book, one book at a time under the operation lock (0.22.1): presses run
-        between two books instead of waiting minutes for the whole pass. Skipped while a worker runs, as before."""
-        allow=lambda:self._start_allowed(generation)
-        with self.operation_lock:
-            if not allow():raise StartRefused('closing' if self.draining or self.__dict__.get('_closing') else 'stale','This start was superseded by Pause or closing; saved requests are retained.')
-            if self.__dict__.get('_resume_pending') and self.__dict__.get('_resume_pending_owner') is not pending_owner:
-                raise StartRefused('busy','A previous start request is still checking. Retry Start after it stops; saved retry requests are retained.')
-            self._no_scan()
-            if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
-            finished=[job['job_id'] for job in self.jobs.status()['jobs'] if job['state']=='completed']
-        # The queue itself clears its stop only at guarded admission; pruning cannot erase Pause.
-        stop=_Flag(lambda:not allow() or self.jobs._drain.is_set())
-        try:
-            for job_id in finished:
-                with self.operation_lock:
-                    if stop.is_set():raise InterruptedError()
-                    self._prune_completed(job_id,stop=stop)
-                time.sleep(.01)  # a press waiting for the lock takes it here (a lock handed straight back is not fair)
-        except InterruptedError:raise StartRefused('stale','Startup was paused; saved retry requests are retained.')
+        """Compatibility entry: schedule housekeeping, never perform it on Start."""
+        if not self._start_allowed(generation):raise StartRefused('stale','Start checks stopped. Pending work is kept.')
+        wake=getattr(self,'_retention_wake',None)
+        if wake is not None:wake.set()
 
     @operation
     def _resume_guarded(self,generation,pending_owner=None,recheck=True):
@@ -950,13 +981,48 @@ class MergeService:
         if not receipt:raise ValueError('No recovery enrollment exists for this audiobook')
         self.cleanup.restore(receipt['id']);return self.cleanup.status(job_id)
 
+    def _background_guard(self):
+        """Foreground requests preempt retention hashing at its existing safe points."""
+        background=threading.current_thread() in (getattr(self,'_retention_thread',None),self.__dict__.get('_maintenance_owner'))
+        if background and self.__dict__.get('_foreground_waiters',0):
+            raise InterruptedError('Foreground work requested; cleanup will continue later')
+        if self.draining or self.__dict__.get('_closing'):
+            raise InterruptedError('Books Arranger is closing; remaining files retained')
+        if getattr(self,'_retention_stop',None) is not None and self._retention_stop.is_set():
+            raise InterruptedError('Cleanup is closing; remaining files retained')
+        if getattr(self,'_update_hold',None) is not None and self._update_hold.is_set():
+            raise InterruptedError('An update is stopping the work; remaining files retained')
+
+    @contextlib.contextmanager
+    def _maintenance_book(self,job_id,phase='Checking the audiobook before source-folder cleanup'):
+        # A queued foreground operation wins before and during the protected read.
+        self._background_guard()
+        if not self.operation_lock.acquire(blocking=False):raise InterruptedError('Foreground work is active')
+        try:
+            if self.__dict__.get('_maintenance_paused') or self._worker_active():raise InterruptedError('Finished-book checks paused')
+            self._no_scan();self._background_guard()
+            self._maintenance_owner=threading.current_thread()
+            with connect(self.inventory.database) as db:
+                book=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+            title=(json.loads(book[0]).get('metadata') or {}).get('title','') if book else ''
+            self._maintenance={'phase':phase,'job_id':job_id,'title':title,'state':'checking','cancel_requested':False}
+            self._storage_guard()
+            yield
+        finally:
+            self._maintenance=None;self._maintenance_owner=None
+            self.operation_lock.release()
+
     def _storage_guard(self):
-        self._no_scan()
-        if self.jobs._stop.is_set():
+        self._no_scan();self._background_guard()
+        maintenance=threading.current_thread() is self.__dict__.get('_maintenance_owner')
+        if maintenance and self.__dict__.get('_maintenance_paused'):
+            if self.__dict__.get('_maintenance'):self._maintenance.update(state='stopping',cancel_requested=True)
+            raise InterruptedError('Finished-book checks stopped; remaining files retained')
+        if not maintenance and self.jobs._stop.is_set():
             raise InterruptedError('Temporary cleanup interrupted; remaining copies retained')
 
     def _working_guard(self):
-        self._no_scan()
+        self._no_scan();self._background_guard()
         closing=getattr(self,'_retention_stop',None)
         if closing is not None and closing.is_set():raise InterruptedError('Working cleanup is closing')
         if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise InterruptedError('An update is stopping the work')
@@ -965,7 +1031,7 @@ class MergeService:
                 raise InterruptedError('Foreground audiobook work takes priority over idle working cleanup')
 
     def _retention_guard(self):
-        self._no_scan()
+        self._no_scan();self._background_guard()
         if self._retention_stop.is_set():raise InterruptedError('Recovery cleanup is closing; remaining copies preserved')
         if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set():raise InterruptedError('An update is stopping the work; remaining copies preserved')
 
@@ -1070,6 +1136,27 @@ class MergeService:
             except Exception:pass  # each job stays as it was; the claim check still sets a pending one aside before it runs
         threading.Thread(target=regroup,name='books-folder-regroup',daemon=True).start()
 
+    def _retry_view(self,key):
+        deadline=self.__dict__.get('_cleanup_retry_at',{}).get(key)
+        thread=self.__dict__.get('_retention_thread')
+        maintenance=isinstance(key,tuple) and key[0] in ('folder','temporary')
+        stopped=self.__dict__.get('_closing') or self.draining or self._retention_stop.is_set() or self.__dict__.get('_update_hold') is not None and self._update_hold.is_set()
+        scheduled=bool(deadline is not None and thread and thread.is_alive() and not stopped
+                       and not (maintenance and self.__dict__.get('_maintenance_paused'))
+                       and key not in self.__dict__.get('_purge_tried',set()))
+        return {'retryable':scheduled,'retry_at':time.time()+max(0,deadline-time.monotonic()) if scheduled else None}
+
+    def _cleanup_due(self,key):
+        return key not in self.__dict__.setdefault('_purge_tried',set()) and time.monotonic()>=self.__dict__.setdefault('_cleanup_retry_at',{}).get(key,0)
+
+    def _cleanup_failed(self,key,error):
+        import cleanup_retry
+        if isinstance(error,InterruptedError):return
+        if cleanup_retry.transient(error):
+            self.__dict__.setdefault('_purge_tried',set()).discard(key)
+            self.__dict__.setdefault('_cleanup_retry_at',{})[key]=time.monotonic()+cleanup_retry.RETRY_SECONDS
+        else:self.__dict__.setdefault('_purge_tried',set()).add(key)
+
     def start_retention(self,admission):
         from recovery_retention import kept_reason
         if self._retention_thread:return
@@ -1088,7 +1175,7 @@ class MergeService:
                         self._recovery_idle()
                         # Ruling 35: the queued Delete recovery copies presses, first in first out, one per pass.
                         with _MANUAL_LOCK:manual=next(iter(self._manual_queue()),None)
-                        selected=[manual[0]] if manual else [id for id in self.recovery.due() if id not in self._purge_tried]
+                        selected=[manual[0]] if manual else [id for id in self.recovery.due() if self._cleanup_due(id)]
                         for id in selected:
                             # One set at a time under the operation lock, so controls interleave between sets.
                             with self.operation_lock,_PURGE_LOCK:
@@ -1101,13 +1188,14 @@ class MergeService:
                                 except InterruptedError:pass # Keep the durable partial purge resumable at startup.
                                 except Exception as error:
                                     # Kept and flagged (missing or unverified output, changed copy); tried once per run.
-                                    self._purge_tried.add(id);self.recovery._set(id,'needs_attention',kept_reason(error))
+                                    self._cleanup_failed(id,error);self.recovery._set(id,'needs_attention',kept_reason(error))
                                 finally:self._post_current=None
                         if manual:self._manual_recovery=None
                         self._purge_replacement_recoveries()
                         self._finish_held_cleanups(cleanup_generation)
                         self._finish_temporary_cleanups()
-                except ValueError:pass # Busy/closing admission defers; never purges while scanning.
+                        self.jobs.start_published_check()
+                except (ValueError,InterruptedError):pass # Busy/closing admission defers; never purges while scanning.
                 for id in published_revisits:
                     try:self.working.schedule_published(id)
                     except (InterruptedError,ValueError,OSError):pass
@@ -1138,7 +1226,7 @@ class MergeService:
     def _purge_replacement_recoveries(self):
         """Recovery copies of retired former outputs, once the replacement is verified (same rule)."""
         if not hasattr(self,'replacements'):return
-        relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and relation['id'] not in self._purge_tried]
+        relations=[relation for relation in self.replacements.rows() if relation['state']=='completed' and self._cleanup_due(relation['id'])]
         try:kept=self._kept_by_choice([relation['replacement_job_id'] for relation in relations]) if relations else set()
         except (sqlite3.Error,AttributeError):return  # the Keep files record is unreadable: nothing is purged this pass
         for relation in relations:
@@ -1146,7 +1234,7 @@ class MergeService:
             try:
                 with self.operation_lock:self.retirement.purge_recoveries(relation)
             except InterruptedError:return
-            except Exception:self._purge_tried.add(relation['id'])  # kept; the relation's records say why
+            except Exception as error:self._cleanup_failed(relation['id'],error)  # the durable records retain the reason
 
     HELD_FOR_METADATA=('Download marker native identity differs','Unknown download marker contents preserved')
 
@@ -1179,31 +1267,40 @@ class MergeService:
         posting=self.__dict__.get('_post_jobs',set())
         for row in self.jobs._rows("SELECT job_id FROM audio_jobs WHERE state='completed' ORDER BY updated,job_id"):
             job_id=row['job_id'];prior=stored.get(job_id)
-            if prior and not (prior['state']=='needs_attention' and (prior['output_hash']=='' or catalog_busy_text(prior['reason']))):continue
-            if job_id in posting or ('temporary',job_id) in self._purge_tried:continue
+            if prior and not (prior['state']=='needs_attention' and (prior['output_hash']=='' or __import__('cleanup_retry').transient(prior['reason']))):continue
+            if job_id in posting or not self._cleanup_due(('temporary',job_id)):continue
             receipt=self.cleanup.status(job_id)
             if receipt and receipt['state']!='completed':continue  # its source cleanup comes first
-            self._purge_tried.add(('temporary',job_id))
             try:
-                with self.operation_lock:self._prune_completed(job_id,stop=_Flag(lambda:self._retention_stop.is_set()))
+                with self._maintenance_book(job_id,'Checking finished-book cleanup'):self._prune_completed(job_id,stop=_Flag(lambda:self._retention_stop.is_set()))
             except InterruptedError:return
             except Exception as error:storage._diagnose(job_id,'',error)
+            outcome=next((item for item in storage.status() if item['job_id']==job_id),None)
+            if outcome and outcome['state']=='needs_attention':self._cleanup_failed(('temporary',job_id),outcome['reason'])
 
     FOLDER_ALREADY_GONE='Source-folder ancestor is missing without verified removal intent'
 
     def _settle_folder_jobs(self):
-        """Empty source folders are housekeeping, not backups: none holds anything (Sergei, 2026-10-18).
-        A folder job that stopped on a busy catalog runs again; one whose folder is already gone is complete."""
+        """Resume unfinished housekeeping after transient faults; proof refusals stay retained."""
         storage=getattr(self,'storage_cleanup',None)
         if storage is None or not hasattr(storage,'folder_status'):return
-        for row in storage.folder_status():
-            if row['state']!='needs_attention' or ('folder',row['job_id']) in self._purge_tried:continue
-            self._purge_tried.add(('folder',row['job_id']))
-            if row['reason']==self.FOLDER_ALREADY_GONE:storage._folder_set(row['job_id'],row['output_hash'],'completed','Source folder was already gone')
-            elif catalog_busy_text(row['reason']) or str(row['reason'] or '').startswith(__import__('storage_cleanup').FOLDER_RETRY):  # 77b: the drive was away
-                try:
-                    with self.operation_lock:storage.run_folders(row['job_id'])
-                except Exception:pass  # stays as housekeeping; it holds nothing
+        existing={row['job_id']:row for row in storage.folder_status()}
+        pending=[row for row in existing.values() if row['state']=='needs_attention' and
+                 (row['reason']==self.FOLDER_ALREADY_GONE or __import__('cleanup_retry').transient(row['reason']))]
+        # A stop between temporary cleanup and folder enrollment must not strand the last step.
+        try:
+            for receipt in self.cleanup._rows("SELECT job_id FROM source_cleanup WHERE state='completed'"):
+                if receipt['job_id'] not in existing:pending.append({'job_id':receipt['job_id'],'reason':'','output_hash':''})
+        except (AttributeError,sqlite3.Error):pass
+        for row in pending:
+            key=('folder',row['job_id'])
+            if not self._cleanup_due(key):continue
+            try:
+                with self._maintenance_book(row['job_id']):
+                    if row['reason']==self.FOLDER_ALREADY_GONE:storage._folder_set(row['job_id'],row['output_hash'],'completed','Source folder was already gone')
+                    else:storage.run_folders(row['job_id'])
+            except InterruptedError:return
+            except Exception as error:self._cleanup_failed(key,error)
         self._sweep_old_folders()
 
     OLD_FOLDER_BUDGET=20.0  # seconds of one retention pass the 76b sweep may use; it goes on at the next pass (every minute)
@@ -1222,7 +1319,7 @@ class MergeService:
             if time.monotonic()>until or self.draining or self.__dict__.get('_closing'):return
             if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():return
             try:
-                with self.operation_lock:storage.sweep_folders(job_id)
+                with self._maintenance_book(job_id):storage.sweep_folders(job_id)
             except InterruptedError:return
             except Exception:pass  # housekeeping: the next pass goes on with the others
 
@@ -1258,6 +1355,7 @@ class MergeService:
         try:
             if not prior or prior['state']!='completed':self.storage_cleanup.run(job_id)
             self.storage_cleanup.run_folders(job_id,progress=lambda phase:setattr(self,'_post_current',(job_id,phase)))
+        except InterruptedError:raise
         except Exception:
             # Durable audio success remains independent; cleanup errors stay visible.
             pass
@@ -1397,8 +1495,13 @@ class MergeService:
         job = jobs[-1]
         state = {'pending':'Queued','running':'Creating','completed':'Audiobook created','needs attention':'Output needs attention'}[job['state']]
         from review_backend import job_destination
-        value={'job_id':job['job_id'],'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),
+        value={'job_id':job['job_id'],'job_origin':job_origin(job['manifest']),'state':state,'stage':job['stage'],'reason':job['reason'],'cleanup':self.cleanup.status(job['job_id']),'cleanup_policy':job['manifest'].get('cleanup_policy',{'enabled':False}),
                'destination':job_destination(job['manifest'])}
+        if (job.get('progress') or {}).get('chapter_check'):value['chapter_check']=copy.deepcopy(job['progress']['chapter_check'])
+        if job['state']=='needs attention':
+            with connect(self.inventory.database) as db:failure=db.execute('SELECT journal FROM audio_jobs WHERE job_id=?',(job['job_id'],)).fetchone()
+            diagnostic=(json.loads(failure[0]).get('failure') or {}).get('chapter_diagnostic') if failure else None
+            if diagnostic:value['admission_error']={'chapter_diagnostic':diagnostic}
         if isinstance(job['manifest'].get('retry_intent'),dict):value['retry_parent_job_id']=job['manifest']['retry_intent'].get('parent_job_id')
         if job['state']=='needs attention':
             attention=self.attention_summary([job['job_id']]).get(job['job_id'])
@@ -1413,6 +1516,18 @@ class MergeService:
         repaired=repair_record(job)
         if repaired:value['repaired']=repaired
         if job['state']=='completed':
+            validation=(job.get('output') or {}).get('validation') or {}
+            if validation.get('passed') is True:value['chapter_corrections']=copy.deepcopy(validation.get('terminal_end_corrections') or [])
+            folder=self.storage_cleanup.folder_status(job['job_id'])
+            if folder:
+                value['folder_cleanup']=folder|self._retry_view(('folder',job['job_id']))
+                protected=[];root=Path(job['manifest']['root'])
+                for source in job['manifest']['sources']:
+                    parent=Path(source['path']).parent
+                    if parent==root or parent.parent==root:
+                        detail={'path':str(parent),'reason':'Source library folder is kept' if parent==root else 'Top-level source folder is kept'}
+                        if detail not in protected:protected.append(detail)
+                value['folder_cleanup']['protected']=protected
             kept=self.kept_files([job['job_id']]).get(job['job_id'])
             if kept:
                 value['attention']={key:item for key,item in kept.items() if key!='keep'};value['keep']=kept['keep']
@@ -1470,9 +1585,10 @@ class MergeService:
         try:
             with connect(database) as db:
                 for job_id in wanted:
-                    found=db.execute("SELECT json_extract(manifest,'$.candidate_id') FROM audio_jobs WHERE job_id=?",(job_id,)).fetchone()
-                    facts=book_restart.book(db,found[0]) if found else None
-                    summary[job_id]['startover']='manual_draft' if facts and facts['manual_draft'] else 'automatic'
+                    found=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
+                    manifest=json.loads(found[0]) if found else {}
+                    facts=book_restart.book(db,manifest.get('candidate_id')) if found else None
+                    summary[job_id]['startover']='manual_draft' if facts and facts['manual_draft'] and not book_restart.approved_restart(facts,manifest) else 'automatic'
                     summary[job_id]['release_ok']=book_restart.release_ok(facts)
         except (sqlite3.Error,ValueError):
             for job_id in wanted:summary[job_id].setdefault('startover','automatic');summary[job_id].setdefault('release_ok',False)
@@ -1542,8 +1658,10 @@ class MergeService:
                 if facts['lease']:raise book_restart.Editing('Editing')
                 if not book_restart.release_ok(facts):raise book_restart.Changed('Release not allowed')
                 current_revision=book_restart.discard_review(db,facts)
+            restart_facts=book_restart.book(db,identity) if discard_review else facts
+            returned=book_restart.prepare_automatic(db,restart_facts,json.loads(row['manifest']))
             book_restart.set_aside(db,job_id,identity,revision)
-            book_restart.reset_automatic(db,identity,current_revision,facts['fingerprint'])
+            book_restart.reset_automatic(db,identity,current_revision,facts['fingerprint'],refresh=returned)
             book_restart.mark(db,identity,'start_over',job_id)
         try:
             with self._restart_locks():transaction(self.inventory.database,write)
@@ -1719,7 +1837,7 @@ class MergeService:
                             if (reason or '').startswith(prefix):found[job_id]={'group':'audiobook','cause':cause,'reason':reason[len(prefix):]}
         except sqlite3.Error:return {}
         wanted=set(job_ids) if job_ids is not None else None
-        return {job_id:item|{'originals_untouched':False,'keep':{'allowed':True,'reason':''}} for job_id,item in found.items()
+        return {job_id:item|self._retry_view(job_id)|{'originals_untouched':False,'keep':{'allowed':True,'reason':''}} for job_id,item in found.items()
                 if job_id not in kept and (wanted is None or job_id in wanted)}
 
     def kept_by_choice(self,job_ids):
@@ -2548,8 +2666,11 @@ class MergeService:
             with connect(self.inventory.database) as db:siblings=self._unit_siblings(db,row)
             complete=str(row.get('coverage') or '').startswith('Scanned scope complete')
             if unit.get('kind') in ('ask','remainder'):pass
-            elif siblings or not complete:payload['membership']='checking'
-            else:payload['membership']='established'
+            elif siblings or not complete:
+                payload['membership']='checking'
+                payload['membership_checking']=bool(not complete and self.inventory.worker and self.inventory.worker.is_alive())
+                payload['membership_reason']='incomplete_scan' if not complete else 'unresolved_siblings'
+            else:payload['membership']='established';payload['membership_checking']=False
         if unit.get('kind')=='one' or len({str((m.get('metadata') or {}).get('tags',{}).get('album','')).strip() for m in members})>1:
             found=folder_unit.contents(members)
             if found:payload['contents']=found
@@ -2765,16 +2886,56 @@ class MergeService:
         # Author field, about 0.3 s each (folder siblings, the catalog index, the rules); a page of 100 held rows took
         # 11-30 s while research ran. The answer is reused while the book, the rules and the catalog facts it reads are
         # unchanged; the caller still checks the destination on disk live.
-        key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,json.dumps(names,sort_keys=True,ensure_ascii=False) if names else None,self._approval_stamp())
+        retained=self.automatic.retained(row) if hasattr(self.automatic,'retained') else None
+        retained_stamp=record_digest(retained) if retained else None
+        key=(row['id'],row['revision'],row['fingerprint'],title,author,chosen,json.dumps(names,sort_keys=True,ensure_ascii=False) if names else None,retained_stamp,self._approval_stamp())
         cache=self.__dict__.setdefault('_approval_results',{})
         kept=cache.get(key)
         if kept is not None:return row,copy.deepcopy(kept)
         extra={'chosen':chosen} if chosen is not None else {}
         if names:extra['names']=names
+        if retained is not None:extra['retained']=retained
         result=self.automatic.research.approved(row,self.reviews._source_root(row),title,author,**extra)
+        result=self._shared_result(row,result)
         if len(cache)>=4096:cache.clear()
         cache[key]=copy.deepcopy(result)
         return row,result
+
+    def _shared_result(self,row,result):
+        """Rebuild shared routing only from exact, current, independently bound peers."""
+        from public_research import attach_shared_routing,_routing_series_identity,retained_gap_fields
+        sid=_routing_series_identity(result)
+        world=((result.get('work') or {}).get('verified_world') or {}).get('id')
+        if not sid and not world:return attach_shared_routing(result)
+        stamp=self._approval_stamp();key=(sid,world,stamp)
+        cache=self.__dict__.setdefault('_shared_peers',{})
+        peers=cache.get(key)
+        if peers is None:
+            peers=[]
+            with connect(self.inventory.database) as db:
+                saved=[dict(value) for value in db.execute('SELECT a.id,a.revision,a.fingerprint,a.result FROM automatic_candidates a JOIN book_groups g ON g.id=a.id AND g.revision=a.revision AND g.fingerprint=a.fingerprint WHERE g.superseded=0')]
+            for value in saved:
+                try:
+                    prior=json.loads(value['result'])
+                    if not isinstance(prior,dict):continue
+                    same_series=bool(sid and _routing_series_identity(prior)==sid)
+                    same_world=bool(world and ((prior.get('work') or {}).get('verified_world') or {}).get('id')==world)
+                    if not same_series and not same_world:continue
+                    peer=self.reviews._row('Audiobooks',value['id'],value['revision'])
+                    retained=self.automatic.retained(peer)
+                    if not retained:continue
+                    root=self.reviews._source_root(peer)
+                    local,_=self.automatic.research.identity(peer,root)
+                    local=self.automatic.research.with_names(peer,root,local)
+                    if retained_gap_fields(peer,local,retained) is None:continue
+                    rebuilt=self.automatic.research.approved(peer,root,retained=retained)
+                    if (rebuilt.get('work') or {}).get('id')!=(prior.get('work') or {}).get('id'):continue
+                    peers.append(rebuilt)
+                except (ValueError,KeyError,TypeError):continue  # insufficient peer evidence cannot omit an author
+            if len(cache)>=64:cache.clear()
+            cache[key]=copy.deepcopy(peers)
+        own=(result.get('work') or {}).get('id')
+        return attach_shared_routing(result,[peer for peer in peers if (peer.get('work') or {}).get('id')!=own])
 
     def _number_unclear(self,row):
         """Ruling 74b: {'series', 'number'} the book's current "Number unclear" question fills in (its stored research ask, for
@@ -2799,13 +2960,14 @@ class MergeService:
         each of which changes its hash. The retractions and the saved metadata were not in the stamp at all."""
         import hashlib
         with connect(self.inventory.database) as db:
-            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules','author_rule_retractions','candidate_context','names_entries')")}
+            have={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('book_catalog_revision','audio_jobs','automatic_candidates','author_rules','author_rule_retractions','candidate_context','names_entries','automatic_result_revision')")}
             manifests=hashlib.sha256()
             if 'audio_jobs' in have:
                 for job,digest in db.execute('SELECT job_id,manifest_hash FROM audio_jobs ORDER BY job_id'):manifests.update(f'{job}\0{digest}\n'.encode('utf-8','surrogatepass'))
             return (tuple(db.execute('SELECT revision FROM book_catalog_revision WHERE id=1').fetchone() or ()) if 'book_catalog_revision' in have else (),
                     manifests.hexdigest() if 'audio_jobs' in have else (),
-                    tuple(db.execute("SELECT count(*),max(attempted) FROM automatic_candidates WHERE state='Queued'").fetchone()) if 'automatic_candidates' in have else (),
+                    tuple(db.execute('SELECT revision FROM automatic_result_revision WHERE id=1').fetchone() or ()) if 'automatic_result_revision' in have else
+                    hashlib.sha256(''.join(str(tuple(r)) for r in db.execute('SELECT id,revision,fingerprint,result FROM automatic_candidates ORDER BY id')).encode('utf-8')).hexdigest() if 'automatic_candidates' in have else (),
                     tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rules').fetchone()) if 'author_rules' in have else (),
                     tuple(db.execute('SELECT count(*),max(saved_utc) FROM author_rule_retractions').fetchone()) if 'author_rule_retractions' in have else (),
                     tuple(db.execute('SELECT count(*),sum(revision) FROM candidate_context').fetchone()) if 'candidate_context' in have else (),
@@ -3018,6 +3180,17 @@ class MergeService:
             if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
             try:entered_names.save(self.inventory.database,row,entries)
             except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
+            if job['state']=='pending':
+                from sqlite_retry import transaction
+                def hold(db):
+                    current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(id,)).fetchone()
+                    if not current or tuple(current)!=(row['revision'],row['fingerprint']):raise self.NamesRefused('changed','Names saved. This book changed; reload it before approving.')
+                    saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
+                    context=json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
+                    context['names_approval_pending']={'revision':row['revision'],'fingerprint':row['fingerprint']}
+                    db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(id,row['revision'],json.dumps(context,ensure_ascii=False)))
+                try:transaction(self.inventory.database,hold)
+                except sqlite3.Error:raise self.NamesRefused('saved_waiting','Names saved. The catalog is busy; reload this book before approving.') from None
         outcome='saved'
         if job['state']=='pending':
             try:self._names_replan(job['row'])
@@ -3237,7 +3410,8 @@ class MergeService:
             approval=(self.reviews._context(row) or {}).get('user_approval')
         except (ValueError,KeyError,TypeError):row,approval=None,None
         if row is not None and isinstance(approval,dict) and isinstance(approval.get('values'),dict):
-            values={field:approval['values'][field] for field in ('title','author') if isinstance(approval['values'].get(field),str) and approval['values'][field].strip()}
+            entered=entered_names.book_values(self.inventory.database,row)
+            values={field:approval['values'][field] for field in ('title','author') if field not in entered and isinstance(approval['values'].get(field),str) and approval['values'][field].strip()}
             if values:
                 try:
                     read,scope,now,_=self._names_state(row,self.reviews._source_root(row),self.automatic.research)
@@ -3259,6 +3433,11 @@ class MergeService:
             db.execute("UPDATE audio_jobs SET state='needs attention',reason=?,updated=? WHERE job_id=? AND state='pending'",(reason,stamp,job['job_id']))
             book_restart.set_aside(db,job['job_id'],identity,facts['revision'],kind=kind)
             book_restart.reset_automatic(db,identity,facts['revision'],facts['fingerprint'])
+            hold=(facts.get('context') or {}).get('names_approval_pending')
+            if kind=='names' and hold=={'revision':facts['revision'],'fingerprint':facts['fingerprint']}:
+                from public_research import RESEARCH_VERSION
+                result={'reasons':['Names saved — waiting for your approval.'],'until_change':True,'research_version':RESEARCH_VERSION}
+                db.execute("UPDATE automatic_candidates SET state='Held',result=?,retry_at=NULL WHERE id=?",(json.dumps(result,ensure_ascii=False),identity))
             if kind=='regroup':self._release_for_regroup(db,identity)
         with self.jobs._lock:
             if self.jobs.claimed(job['job_id']):raise book_restart.Changed('Job claimed')
@@ -3367,7 +3546,16 @@ class MergeService:
         return back
 
     # Ruling 76a (Sergei 2026-10-31: "My approval is the highest authority"). Judy's final copy (2026-10-31).
-    APPROVE_CONVERTING="This book is already converting, so it will finish with the automatic names. Your names were not applied."
+    APPROVE_CONVERTING="This book is already converting. Your new names were not applied."
+    def _approve_converting(self,identity):
+        import book_restart
+        with connect(self.inventory.database) as db:
+            job_id=book_restart.current_job(db,identity)
+            row=db.execute('SELECT manifest FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if job_id else None
+        origin=job_origin(json.loads(row[0])) if row else 'unknown'
+        names={'automatic':' with the automatic names','user':' with your approved names'}.get(origin,'')
+        return 'This book is already converting'+names+'. Your new names were not applied.'
+
     APPROVE_REPLACED='Replaced by your Approve before it started.'  # the set-aside job's own record, not shown on a row
 
     def _his_revision(self,id,revision,fingerprint):
@@ -3402,7 +3590,7 @@ class MergeService:
             job_id=book_restart.current_job(db,identity)
             found=db.execute('SELECT state,reason FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone() if job_id else None
         if found is None:return None
-        if found['state']=='running' or self.jobs.claimed(job_id):raise ValueError(self.APPROVE_CONVERTING)
+        if found['state']=='running' or self.jobs.claimed(job_id):raise ValueError(self._approve_converting(identity))
         if found['state']!='pending' or not self._approved_automatically(identity):return None
         def write(db):
             book_restart.ensure(db)
@@ -3415,11 +3603,11 @@ class MergeService:
             db.execute('INSERT INTO audio_job_set_aside VALUES(?,?,?,?,?)',(job_id,identity,facts['revision'],'approve',book_restart.stamp()))
         with self.jobs._lock:
             # Under the queue's lock: its claim either came first (it is converting: refused here) or finds the job set aside.
-            if self.jobs.claimed(job_id):raise ValueError(self.APPROVE_CONVERTING)
+            if self.jobs.claimed(job_id):raise ValueError(self._approve_converting(identity))
             try:transaction(self.inventory.database,write)
             except book_restart.Changed:
                 with connect(self.inventory.database) as db:now=db.execute('SELECT state FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone()
-                if now and now[0]=='running':raise ValueError(self.APPROVE_CONVERTING) from None
+                if now and now[0]=='running':raise ValueError(self._approve_converting(identity)) from None
                 return None
         self.__dict__.pop('_needs_cache',None);self.invalidate_status()
         return (job_id,found['reason'])
@@ -3454,7 +3642,7 @@ class MergeService:
         fingerprint (ruling 76a): the files the row showed; with it, his Approve applies to the book as it is now when only
         its records moved on, and replaces a job automatic processing queued and has not started (put back if his Approve is
         refused with nothing filed). Raises ValueError with the reason it is refused."""
-        revision=self._his_revision(id,revision,fingerprint)
+        revision=self._his_revision(id,revision,fingerprint) if path is not None else revision
         replaced=self._replace_automatic_job(id) if fingerprint else None
         approval={}
         try:return self._approve_values(id,revision,title,author,without_missing,choice,path,names,approval)
@@ -3681,6 +3869,7 @@ class MergeService:
         from review_backend import image_kind,source_hash,identity
         from audio_pipeline import generated_artifacts,run_owned,probe
         from encoding_policy import choose_encoding,choose_automatic_encoding
+        result=self._shared_result(row,result)
         standing=bool(result.get('metadata_facts'))
         # Rulings 69 and 71i: the folder Sergei chose is frozen with the book's facts, so the preview, the manifest, every
         # rebuild of it and the queued-route check (organization.frozen_plan) all name the same destination.
@@ -3716,7 +3905,7 @@ class MergeService:
             # Judy 2026-10-24 (0.22.0 review B4): Sergei's Approve uses the order and the files he saved in the panel
             # (track_actor 'user', this revision); without them, every file in the catalog's order, as before.
             saved=None
-            if approved_by is not None and ctx.get('track_actor')=='user':
+            if (approved_by is not None or __import__('book_restart').restart_current(current,ctx)) and ctx.get('track_actor')=='user':
                 keys=[member_key(m['path']) for m in current['members']];order=ctx.get('track_order');chosen=ctx.get('included')
                 if isinstance(order,list) and sorted(order)==sorted(keys) and isinstance(chosen,list) and chosen and set(chosen)<=set(keys):saved=(order,chosen)
             if include is not None:
@@ -3806,11 +3995,24 @@ class MergeService:
                             if standing:choose_automatic_encoding(profiles,single_m4b=len(paths)==1 and Path(paths[0]).suffix.lower()=='.m4b')
                             else:choose_encoding(profiles)
                         except (ValueError,TypeError):raise ValueError('Audio format needs an encoding decision') from None
+                        restarting=__import__('book_restart').restart_current(current,ctx)
+                        retained_cover=self.reviews._cover(ctx) if restarting and ctx.get('cover_id') else None
+                        if restarting and ctx.get('cover_id') and retained_cover is None:raise ValueError('Previously selected cover is unavailable or changed; choose its replacement before approval')
                         fresh=self.reviews.covers('Audiobooks',current['id'],current['revision'],all_embedded=True,stop=stop)
+                        if restarting:
+                            if fresh['fingerprint']!=current['fingerprint'] or fresh.get('review')!=current.get('review'):raise ValueError('Restart choices changed during cover inspection')
+                            renewed=self.reviews._context(fresh)
+                            renewed['automatic_restart']=dict(ctx['automatic_restart'],revision=fresh['revision'])
+                            if retained_cover and not any(c['id']==retained_cover['id'] for c in renewed.get('cover_choices',[])):
+                                renewed['cover_choices']=list(renewed.get('cover_choices',[]))+[retained_cover]
+                            fresh=self.reviews._write(fresh,renewed,bump=False)
                         if stop.is_set():raise InterruptedError('Automatic cover inspection paused')
                         covers=[c for c in fresh['cover_choices'] if c['source_label'].startswith('Embedded artwork:')]
                         if standing:
-                            if covers:
+                            if retained_cover:
+                                selected_cover=retained_cover
+                                result['metadata_facts']['cover']={'kind':'embedded' if retained_cover['source_label'].startswith('Embedded artwork:') else 'neutral' if retained_cover['source_label']=='Neutral cover' else 'retained_choice'}
+                            elif covers:
                                 selected_cover=covers[0];result['metadata_facts']['cover']={'kind':'embedded'}
                             else:
                                 from neutral_cover import neutral_cover
@@ -4420,8 +4622,10 @@ class MergeService:
         tracks=[]
         for member in row['members']:
             if stop.is_set():raise InterruptedError()
-            chapters=source_chapters(member['path'],self.reviews.cache,stop,member['duration']) if Path(member['path']).suffix.lower()=='.m4b' else []
-            tracks.append({'source_sha256':digest(member['path'],stop),'size_bytes':member['size'],'chapter_sha256':chapter_hash(chapters)})
+            source_hash=digest(member['path'],stop)
+            bound={'sha256':source_hash,'size':member['size'],'modified':member['modified']}
+            chapters=self.reviews.source_chapter_plan(row,member,bound,stop,joined=len(row['members'])>1)['chapters'] if Path(member['path']).suffix.lower()=='.m4b' else []
+            tracks.append({'source_sha256':source_hash,'size_bytes':member['size'],'chapter_sha256':chapter_hash(chapters)})
         def entry(identity,work_ids,meta,policy,source_tracks,complete=True):
             recording=policy.get('recording_language') or {}
             return {'id':identity,'identity_verified':True,'work_ids':work_ids,'collection_kind':(policy.get('collection') or {}).get('kind','single'),
@@ -4438,8 +4642,9 @@ class MergeService:
             work_ids=policy.get('work_ids') or ([approval['work_id']] if approval.get('work_id') else [])
             if sorted(work_ids)!=sorted(facts['work_ids']):continue
             source_tracks=[]
-            for source in manifest['sources']:
-                chapters=manifest.get('source_chapters',[]) if len(manifest['sources'])==1 and Path(source['path']).suffix.lower()=='.m4b' else []
+            parts=manifest.get('part_chapters') or []
+            for index,source in enumerate(manifest['sources']):
+                chapters=manifest.get('source_chapters',[]) if len(manifest['sources'])==1 and Path(source['path']).suffix.lower()=='.m4b' else parts[index]['chapters'] if len(parts)==len(manifest['sources']) else []
                 source_tracks.append({'source_sha256':source['sha256'],'size_bytes':source['size'],'chapter_sha256':chapter_hash(chapters)})
             record=entry(job['job_id'],work_ids,manifest['metadata'],policy,source_tracks)
             output=job.get('output') or {}
@@ -4457,7 +4662,9 @@ class MergeService:
             # Proven existing publication may be skipped; do not manufacture a new
             # completed candidate/job or remove this duplicate's original bytes.
             raise ValueError('Identical verified recording already arranged — duplicate sources preserved')
-        if decision['classification']=='related_distinct':facts['destination_suffix']=decision['destination_suffix']
+        if decision['classification']=='related_distinct':
+            facts['destination_suffix']=decision['destination_suffix']
+            facts['recording_chapter_policy']='joined-chapters-v1'
 
     @operation
     def create(self, library, identity, revision):
@@ -4544,7 +4751,7 @@ class MergeService:
         finally:self._active_producer=None
 
     def _run_media(self, manifest, stop, checkpoint):
-        stages={'Checking sources':'checking sources','Creating audio':'creating','Checking output':'checking'}
+        stages={'Checking sources':'checking sources','Checking source audio':'checking sources','Creating audio':'creating','Checking output':'checking'}
         import inplace_m4b
         try:self._require_sorted(manifest['destination']);sorted_destination=True
         except ValueError:sorted_destination=False  # the copy flow then runs, and its cleanup keeps the sources (C2)

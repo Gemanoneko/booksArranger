@@ -623,7 +623,7 @@ class PublicResearch:
         record['names_entered']=[field for field in entered_names.FIELDS if field in found]
         record['names_digest']=stamp
         return record
-    def approved(self,row,root,title=None,author=None,chosen=None,names=None):
+    def approved(self,row,root,title=None,author=None,chosen=None,names=None,retained=None):
         """Sergei's Approve (rulings 6a, 6b, 11a): the book's identity is the title and author shown on its row, his
         typed values winning (None: nothing typed; '' for the author: no author), with no Internet request, so the
         destination shown before the press is exactly the one used. An empty author files a collection under
@@ -636,6 +636,9 @@ class PublicResearch:
         typed_names={field:value for field,value in (names or {}).items() if field in ('series','number','universe','collection')}
         record=self.with_names(row,root,record,typed=typed_names)
         shown=local_identity.shown(record)
+        retained_fields=retained_gap_fields(row,record,retained)
+        rules=self.rules()
+        if retained_fields and rules is not None and hasattr(rules,'changed_for') and rules.changed_for(retained['result']):retained_fields=None
         typed=set()
         if title is not None and text(title):typed.add('title')
         if author is not None and text(author):typed.add('author')
@@ -646,7 +649,10 @@ class PublicResearch:
         # Ruling 49 (Sergei 2026-10-27): a Russian edition of a foreign book files under its original English title, on
         # Approve as automatically (_local_lookup's preferred title); a title he typed or entered wins.
         mismatch={}  # ruling 74b: the files' volume title and the source disagree on the number (the cache only)
-        english=self._english_original(record,final_title,mismatch) if 'title' not in typed else None
+        known=retained_fields or _confirmed_corbett_fields(record,shown['title'],shown['author'])
+        if known and (author is not None or chosen is not None) and not _exact_people(final_author,[shown['author']]):known=None
+        known_catalog=(known or {}).get('catalog') or {}
+        english=(dict(known_catalog,series=(known or {}).get('series')) if known_catalog.get('language')=='en' else self._english_original(record,final_title,mismatch)) if 'title' not in typed else None
         if 'title' in typed:self._english_original(record,shown['title'],mismatch)  # his title: the files' title still says which volume
         if english:final_title=english['original_title']
         collection=not final_author and shown['collection']
@@ -663,7 +669,7 @@ class PublicResearch:
                                             sources=list(settled['fields']['title']['sources'])+[{'kind':'catalog original title','value':english['original_title'],'url':english.get('source_url','')}])
         result={'research_version':RESEARCH_VERSION,'matcher_version':VERSION,'local_clues':[],'sources':[],'work':None,'review':None,'evidence':[],'reasons':[]}
         result['local_agreement']=local_identity.summary(settled)
-        result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index)
+        result=self._local_collection(row,settled,result) if collection else self._local_lookup(row,settled,threading.Event(),{'remaining':0},lambda *_:None,result,index,retained_fields=known)
         result['approval']={'title':final_title,'author':'' if collection else final_author,'typed':sorted(typed),'collection':collection,'shown':shown,
                             'names':dict(record.get('names') or {}),'entered':list(record.get('names_entered') or []),
                             # Rulings 52 and 53 (Senua's 0.22.3 review, M10): the split's series is unconfirmed and not his.
@@ -671,7 +677,7 @@ class PublicResearch:
                             # Ruling 74b (Sergei 2026-10-31, the follow-up): the numbers disagree and nothing he typed or saved says
                             # the series: an Approve answering another question keeps its answer and "Number unclear" is asked next.
                             'number_question':bool(mismatch) and not settled.get('series') and not ({'series','number'}&(set(record.get('names_entered') or [])|set(typed_names)))}
-        return result
+        return attach_shared_routing(result)
     def _english_original(self,record,title,mismatch=None):
         """Ruling 49: the catalog record the research cache holds for this book (no request: the same cache-only gap fill
         automatic filing uses, asked as automatic filing asks: with the identity's author, after Sergei's rules, «Grossman
@@ -834,6 +840,7 @@ class PublicResearch:
         if result.get('review'):result['review']['organization_policy']='books-hierarchy-v2'
         from source_identity import LOCAL_SOURCE_GATE_VERSION
         result['local_source_gate_version']=LOCAL_SOURCE_GATE_VERSION
+        result=attach_shared_routing(result)
         if not entered:return result
         # Human values guide discovery and remain attributed evidence. They never count
         # as an independent fetched publisher/catalog or as local-file agreement.
@@ -926,6 +933,8 @@ class PublicResearch:
         # ("Annihilation\478. Книга 2. Консолидация") whose album tags all name that book are that one book, whatever the parts'
         # own titles say. Its sibling folders are the other books of the series, never parts of this one.
         import local_identity
+        confirmed=part_sets.confirmed_edition(row)
+        if confirmed:return confirmed
         structure=local_identity.folder_structure(row,root)
         albums={local_identity.title_key(local_identity.text(local_identity._tags(m).get('album'))) for m in members}
         if structure and structure['book']=='folder' and albums=={local_identity.title_key(structure['title'])}:
@@ -1259,7 +1268,7 @@ class PublicResearch:
         result.update(review=review,metadata_facts=facts,reasons=list(dict.fromkeys(reasons)),wait=None,gap_wait=None)
         return result
 
-    def _local_lookup(self,row,local,stop,budget,progress,result,index=None):
+    def _local_lookup(self,row,local,stop,budget,progress,result,index=None,retained_fields=None):
         """Identity from agreeing local sources; the Internet fills only missing fields.
 
         0.22.1 (Sergei's backlog item 8; rulings 5 and 6): the book is approved on its local identity at once. Its missing
@@ -1272,6 +1281,13 @@ class PublicResearch:
         from standing_metadata import build_policy
         fields=local['fields'];title=fields['title']['value'];author=fields['author']['value']
         waits=[];filled=self._gap_fill(local,title,author,stop,{'remaining':0},[],progress,result) if local['gaps'] else {'closed':[],'unfilled':[]}
+        confirmed = _confirmed_corbett_fields(local,title,author)
+        durable = retained_fields or confirmed
+        if durable and not filled.get('volume_mismatch'):
+            for field in ('catalog','series'):
+                if not filled.get(field) and durable.get(field):filled[field]=copy.deepcopy(durable[field])
+            filled['unfilled']=[gap for gap in filled.get('unfilled',[]) if not (gap=='original_title' and filled.get('catalog') or gap=='series' and filled.get('series'))]
+            result['sources'].extend(copy.deepcopy(durable.get('retained_sources') or []))
         if budget.get('remaining',0)>0:filled=self._translation_lookup(local,title,author,filled,stop,progress,result)
         catalog=filled.get('catalog') or {}
         language=catalog.get('language','')
@@ -1282,6 +1298,9 @@ class PublicResearch:
             # its parent work and a valid source title.
             titles.append(part['set_title'])
         authors=local_identity.author_forms(local)
+        if retained_fields:
+            titles += [value for value in (retained_fields.get('retained_work') or {}).get('titles',[]) if value not in titles]
+            authors += [value for value in (retained_fields.get('retained_work') or {}).get('author_aliases',[]) if value not in authors]
         local_script=local_identity.script(author)
         rules=self.rules()
         if language!='ru' and local_script=='cyrillic' and local_identity.foreign_given(author) and rules is not None and rules.keep(author):
@@ -1391,6 +1410,7 @@ class PublicResearch:
         preferred=title
         if language=='ru':preferred=catalog.get('title_native') or title
         elif language=='en':preferred=catalog.get('original_title') or title
+        if fields['title'].get('state') in ('entered','approved'):preferred=title
         sergei=fields['title'].get('state') in ('entered','approved') or fields['author'].get('state') in ('entered','approved')
         folders={name for member in row.get('members') or [] for name in (ntpath.basename(ntpath.dirname(member['path'])),ntpath.basename(ntpath.dirname(ntpath.dirname(member['path']))))}
         odd=None if not one_source or reasons or sergei or part else local_identity.odd_identity(preferred,names[0],author,NO_AUTHOR,ruled=bool(fields['author'].get('rule')),folders=sorted(folders))
@@ -2305,3 +2325,203 @@ def _latin_credit(value):
     if not re.search('[\u3040-\u30ff\u3400-\u9fff]',value):return value
     words=re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[-'][A-Za-zÀ-ÖØ-öø-ÿ]+)*",value)
     return ' '.join(words) if len(words)==2 else ''
+
+
+def retained_gap_fields(row, local, envelope):
+    """Validated durable research inputs, independent of evictable HTTP bodies.
+
+    The caller also checks dependency-aware author rules against current rules.
+    Rebuilding metadata remains mandatory: this never returns an old approval.
+    """
+    import local_identity, entered_names
+    from standing_metadata import validate_policy
+    from source_identity import LOCAL_SOURCE_GATE_VERSION
+    if not isinstance(envelope, dict) or any(envelope.get(key) != row.get(field) for key, field in
+            (('candidate_id', 'id'), ('revision', 'revision'), ('fingerprint', 'fingerprint'))):
+        return None
+    saved = envelope.get('result')
+    if not isinstance(saved, dict) or saved.get('research_version') != RESEARCH_VERSION:
+        return None
+    if saved.get('local_source_gate_version', LOCAL_SOURCE_GATE_VERSION) != LOCAL_SOURCE_GATE_VERSION:
+        return None
+    facts = saved.get('metadata_facts'); review = saved.get('review'); work = saved.get('work')
+    if not all(isinstance(value, dict) for value in (facts, review, work)):
+        return None
+    if saved.get('metadata_holds') or saved.get('manual_metadata_conflicts') or (saved.get('identity_hold') or {}).get('kind') not in (None, 'piece'):
+        return None
+    if any(reason != local_identity.PIECE_REASON for reason in saved.get('reasons') or []):
+        return None
+    try:
+        validate_policy(row, review, facts)
+    except (ValueError, TypeError, KeyError):
+        return None
+    if work.get('policy_version') != facts.get('policy_version') or work.get('id') not in facts['work_ids'] or work.get('part_book'):
+        return None
+    current_names = local.get('names_digest', entered_names.NONE)
+    saved_names = (facts.get('entered_names') or {}).get('digest', entered_names.NONE)
+    if current_names != saved_names:
+        return None
+    fields = local.get('fields') or {}
+    title = text((fields.get('title') or {}).get('value'))
+    author = text((fields.get('author') or {}).get('value'))
+    if local_identity.title_key(title) not in {local_identity.title_key(alias) for alias in work.get('titles') or []}:
+        return None
+    if not _same_people(author, work.get('author_aliases') or []) or not _same_people(author, facts['authors']):
+        return None
+    receipts = [source for source in saved.get('sources') or [] if isinstance(source, dict)
+                and re.fullmatch(r'[0-9a-f]{64}', str(source.get('sha256', ''))) and source.get('retrieved_utc')]
+    original = text(work.get('original_title'))
+    language = (facts.get('original_language') or {}).get('value')
+    if original != facts.get('original_title') or language != work.get('original_language'):
+        return None
+    original_sources = [source for source in receipts if 'original_title' in (source.get('fields') or [])
+                        or source.get('kind') == 'catalog_work' and source.get('work_id') == work['id']]
+    if not original_sources or not original or not language:
+        return None
+    source = original_sources[0]
+    # The stored work ID must match its provider receipt; a receipt for another book is no bridge.
+    if work['id'].startswith('fantlab:') and source.get('url') != 'https://fantlab.ru/work' + work['id'].split(':', 1)[1]:
+        return None
+    found = {'catalog': {'work_id': work['id'], 'original_title': original, 'language': language,
+                        'author_native': author, 'author_latin': review['canonical_author'] if local_identity.script(review['canonical_author']) == 'latin' else '',
+                        'title_native': title, 'source_url': source['url']}, 'closed': [], 'unfilled': [],
+             'retained_sources': copy.deepcopy(receipts), 'retained_work': copy.deepcopy(work)}
+    series = work.get('verified_series') or {}
+    if facts.get('series_state') == 'verified':
+        if series.get('name') != review.get('series') or str(series.get('number')) != review.get('number'):
+            return None
+        if not any(source.get('url') == series.get('source_url') and {'series', 'number'} <= set(source.get('fields') or []) for source in receipts):
+            return None
+        _, volume = edition_volume(title)
+        if volume is not None and str(volume) != str(series.get('number')):
+            return None
+        own = local.get('series') or {}
+        entered = set(local.get('names_entered') or []) | set(local.get('names') or {})
+        if not {'series', 'number'} & entered:
+            if own and (local_identity.title_key(own.get('name', '')) != local_identity.title_key(series['name']) or str(own.get('number')) != str(series['number'])):
+                return None
+            found['series'] = copy.deepcopy(series)
+    return found
+
+
+def _confirmed_corbett_fields(local, title, author):
+    import local_identity
+    confirmed = local_identity.confirmed_corbett(title, author)
+    if not confirmed:
+        return None
+    own = local.get('series') or {}
+    if own and (local_identity.title_key(own.get('name', '')) not in {local_identity.title_key('Matthew Corbett'), local_identity.title_key('Мэтью Корбетт')}
+                or str(own.get('number')) != confirmed['number']):
+        return None
+    return {'catalog': {'work_id': 'user:corbett-' + confirmed['number'] + '-2026-11-01', 'original_title': confirmed['original_title'],
+                        'language': 'en', 'author_native': author, 'author_latin': 'Robert R. McCammon',
+                        'title_native': title, 'source_url': confirmed['source_url']},
+            'series': {key: confirmed[key] for key in ('name', 'number', 'provider', 'source_url', 'decision_id')},
+            'closed': [], 'unfilled': []}
+
+
+
+def _routing_series_identity(result):
+    """A provider series identity, never a coincidental title or a book-page URL."""
+    review = result.get('review') or {}; facts = result.get('metadata_facts') or {}; work = result.get('work') or {}
+    series = work.get('verified_series') or {}
+    if facts.get('series_state') != 'verified' or series.get('name') != review.get('series') or str(series.get('number')) != review.get('number'):
+        return None
+    url = text(series.get('source_url'))
+    if re.fullmatch(r'https://fantlab\.ru/work[1-9]\d*', url):
+        return url
+    match = re.fullmatch(r'https://www\.goodreads\.com/series/([1-9]\d*)(?:-[^/?#]+)?', url)
+    return 'https://www.goodreads.com/series/' + match[1] if match else None
+
+
+def _routing_member(result):
+    review = result.get('review') or {}; facts = result.get('metadata_facts') or {}; work = result.get('work') or {}
+    authors = facts.get('authors'); ids = facts.get('work_ids')
+    if not isinstance(authors, list) or not authors or not isinstance(ids, list) or len(ids) != 1 or ids[0] != work.get('id'):
+        return None
+    if not all(isinstance(author, str) and author.strip() for author in authors) or review.get('canonical_author') != '; '.join(authors):
+        return None
+    return {'work_id': ids[0], 'authors': list(authors)}
+
+
+def attach_shared_routing(result, peers=()):
+    """Attach routing proof to newly accepted metadata, never to old job manifests.
+
+    Peers must be caller-validated current research/approved results, with current
+    source, saved-name and rule bindings. Stable series URLs establish membership;
+    their shared display name alone never does. Explicit 2026-11-01 decisions are
+    scoped to exact works/authors and are attributed as user decisions.
+    """
+    import local_identity
+    from shared_routing import build, RoutingEvidenceError
+    out = copy.deepcopy(result)
+    review = out.get('review'); facts = out.get('metadata_facts'); work = out.get('work') or {}
+    member = _routing_member(out)
+    if not isinstance(review, dict) or not isinstance(facts, dict) or member is None:
+        return out
+    # A new review cannot carry a prior receipt whose name/source binding may be stale.
+    facts.pop('shared_routing', None)
+    series = None; universe = None
+    sid = _routing_series_identity(out)
+    if sid:
+        members = {member['work_id']: member}
+        for peer in peers:
+            if not isinstance(peer, dict) or _routing_series_identity(peer) != sid:
+                continue
+            item = _routing_member(peer)
+            if item is None:
+                continue
+            # Canonical credit ordering/initial variants of the same complete team
+            # do not turn one author into a shared-author series.
+            if _exact_people('; '.join(item['authors']), member['authors']) and _exact_people('; '.join(member['authors']), item['authors']):
+                item['authors'] = list(member['authors'])
+            if item['work_id'] in members and item != members[item['work_id']]:
+                raise RoutingEvidenceError('Series membership has conflicting author credits. Confirm this book in Edit names.')
+            members[item['work_id']] = item
+        series = {'id': sid, 'name': review['series'], 'basis': 'catalog', 'evidence': [sid], 'members': list(members.values())}
+    # The two books/credits were explicitly confirmed in the 2026-11-01 Omen request.
+    omen = (('1', 'The Omen', 'David Seltzer'), ('2', 'Damien', 'Joseph Howard'))
+    for number, title, author in omen:
+        if (local_identity.title_key(review.get('title', '')) == local_identity.title_key(title)
+                and len(member['authors']) == 1 and _exact_people(member['authors'][0], [author])
+                and review.get('number') == number and local_identity.title_key(review.get('series', '')) in {'omen', 'the omen'}):
+            others = [{'work_id': 'user:omen-' + position + '-2026-11-01', 'authors': [credit]}
+                      for position, _, credit in omen if position != number]
+            series = {'id': 'user:omen-series-2026-11-01', 'name': review['series'], 'basis': 'user',
+                      'evidence': ['user:shared-series-decision-2026-11-01'], 'members': [member] + others}
+            break
+    names = (out.get('approval') or {}).get('names') or {}
+    entered = set((facts.get('entered_names') or {}).get('fields') or [])
+    expected = {'fantlab:1668': ('The Two Towers', '2'), 'fantlab:1669': ('The Return of the King', '3')}.get(work.get('id'))
+    if (expected and work.get('original_title') == expected[0] and review.get('series') == 'Властелин колец'
+            and review.get('number') == expected[1] and sid == 'https://fantlab.ru/work1693'
+            and len(member['authors']) == 1 and any(_exact_people(member['authors'][0], [alias]) for alias in
+                ('J. R. R. Tolkien', 'Tolkien J. R. R.', 'John Ronald Reuel Tolkien', 'Джон Рональд Руэл Толкин'))
+            and 'universe' not in names and 'universe' not in entered and not review.get('universe')):
+        review['universe'] = 'Middle-earth'
+        out.setdefault('evidence', []).append({'field': 'universe', 'cited_value': 'Middle-earth', 'source_url': '',
+            'reviewer_actor': 'user', 'reviewer_identity': 'Sergei', 'basis': 'Confirmed Middle-earth relationship, 2026-11-01; exact Tolkien work and cycle identity.'})
+        universe = {'id': 'user:middle-earth-2026-11-01', 'name': 'Middle-earth', 'basis': 'user',
+                    'evidence': ['user:middle-earth-decision-2026-11-01'],
+                    'members': [dict(member, series_id=sid)]}
+    # General worlds use an explicit identity-bound world membership, never just a
+    # universe label. Providers/user-decision producers may retain this in the work.
+    world = work.get('verified_world')
+    if isinstance(world, dict) and world.get('name') == review.get('universe') and world.get('id') and world.get('basis') in ('catalog', 'user'):
+        members = {member['work_id']: dict(member, series_id=sid)}
+        for peer in peers:
+            candidate = (peer.get('work') or {}).get('verified_world') if isinstance(peer, dict) else None
+            item = _routing_member(peer) if isinstance(peer, dict) else None
+            if not item or not isinstance(candidate, dict) or candidate.get('id') != world['id']:
+                continue
+            item = dict(item, series_id=_routing_series_identity(peer))
+            if (peer.get('review') or {}).get('series') and item['series_id'] is None:
+                continue
+            if item['work_id'] in members and item != members[item['work_id']]:
+                raise RoutingEvidenceError('World membership has conflicting book identities. Confirm this book in Edit names.')
+            members[item['work_id']] = item
+        universe = {'id': world['id'], 'name': world['name'], 'basis': world['basis'],
+                    'evidence': list(world.get('evidence') or []), 'members': list(members.values())}
+    if series is not None or universe is not None:
+        facts['shared_routing'] = build(review, facts, series=series, universe=universe)
+    return out

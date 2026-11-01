@@ -50,6 +50,7 @@ async function fixture(t){
   await fs.mkdir(path.join(W,'scripts'),{recursive:true});await fs.mkdir(path.join(W,'node_modules','dep'),{recursive:true});
   await fs.writeFile(path.join(W,'node_modules','dep','index.js'),'x');
   await fs.writeFile(path.join(W,'scripts','check-desktop.mjs'),'// gate\n');
+  await fs.writeFile(path.join(W,'scripts','qa-phase-contract.mjs'),await fs.readFile(new URL('../scripts/qa-phase-contract.mjs',import.meta.url)));
   await fs.writeFile(path.join(W,'package.json'),JSON.stringify({version:'0.22.1',scripts:{check:'node scripts/check-desktop.mjs'}}));
   await fs.writeFile(path.join(W,'.gitignore'),'node_modules/\n');
   await fs.mkdir(path.join(runtime,'python'),{recursive:true});await fs.mkdir(path.join(runtime,'ffmpeg'),{recursive:true});
@@ -113,6 +114,10 @@ test('a good run pins the wrapper in the harness and the assembler in the graph 
   const graph=JSON.parse(await fs.readFile(path.join(C,'harness','graph.json'),'utf8'));
   assert.equal(graph.assembler.sha256,sha(await fs.readFile(new URL('../scripts/qa-entry-context.mjs',import.meta.url))));
   assert.deepEqual(graph.environment,{BOOKS_QA_RUNTIME_ROOT:f.runtime,BOOKS_MP3_REAL_FIXTURE:f.options.fixture});
+  assert.equal(graph.schema,'books-entry-graph-v4');assert.equal(graph.phases.prior_node_entries,18);assert.equal(graph.phases.total_node_entries,19);
+  assert.equal(graph.phases.canonical.node_entries.length,18);assert.equal(graph.phases.canonical.node_entries.includes('tests/real-shell-update.test.mjs'),false);
+  assert.equal(graph.phases.native.required,true);assert.match(graph.phases.native.status,/PENDING/);
+  assert.equal(graph.phases.contract.sha256,sha(await fs.readFile(new URL('../scripts/qa-phase-contract.mjs',import.meta.url))));
 });
 
 test('refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a runtime that differs, a link',async t=>{
@@ -140,4 +145,12 @@ test('refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a
   await fs.rm(path.join(f.runtime,'python','extra.pyd'));
   await fs.symlink(path.join(f.base,'checker'),path.join(f.W,'node_modules','linked'),'junction');
   await assert.rejects(assemble(f.options,deps),/Link refused/);await absent(C);
+});
+
+
+test('assembler refuses a different committed phase contract before creating context',async t=>{
+ const f=await fixture(t),relative='scripts/qa-phase-contract.mjs',bytes=Buffer.from('// different clean snapshot contract\n');
+ await fs.writeFile(path.join(f.W,relative),bytes);f.committed.set(relative,bytes);
+ await assert.rejects(assemble(f.options,{node:f.node,git:f.git,...quiet}),/QA phase contract differs/);
+ await absent(path.join(f.run,'context'));
 });

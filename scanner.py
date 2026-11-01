@@ -519,7 +519,7 @@ class Inventory:
             if not error:_supersede_retirement(db,root,path)
         save(persist_read)
 
-    def refresh_candidate_sources(self,label,identity,revision,stop=None,*,force=False,max_members=500,max_bytes=4*1024*1024*1024,deadline_seconds=120):
+    def refresh_candidate_sources(self,label,identity,revision,stop=None,*,force=False,max_members=500,max_bytes=4*1024*1024*1024,deadline_seconds=120,restart_job=None):
         """Freshen one unprotected candidate's observed sources without a scan.
 
         No discovery, grouping, review reset, counter/outcome changes or source
@@ -554,7 +554,7 @@ class Inventory:
             member_paths=[member['path'] for member in members]
             if not members or len(members)>max_members or len(set(member_paths))!=len(member_paths):raise ValueError('Candidate member count is empty, duplicated or exceeds the refresh bound')
             if group['approved']:raise ValueError('Approved candidate source evidence is preserved')
-            data={}
+            data={};restart_allowed=False
             if table(db,'automatic_manual_drafts') and db.execute(
                 'SELECT 1 FROM automatic_manual_drafts WHERE id=? AND revision=? AND expires>?',
                 (identity,revision,time.time())).fetchone():
@@ -563,13 +563,17 @@ class Inventory:
                 context=db.execute('SELECT * FROM candidate_context WHERE id=?',(identity,)).fetchone()
                 if context:
                     data=json.loads(context['data'])
+                    if restart_job:
+                        import book_restart
+                        view=dict(group);view['review']=json.loads(group['review']) if group['review'] else None
+                        restart_allowed=(context['revision']==revision and book_restart.restart_current(view,data) and book_restart.refresh_authority(db,group,member_paths,restart_job))
                     # Ruling 36: Sergei's "Entered by you" values protect the book, never an evidence text.
                     entered=table(db,'manual_metadata_sources') and db.execute('SELECT 1 FROM manual_metadata_sources WHERE candidate_id=? LIMIT 1',(identity,)).fetchone() is not None
-                    if data.get('metadata_approved') or data.get('automatic_pending') or data.get('manual_draft_active') or entered or data.get('metadata_actor')=='user' or data.get('track_actor')=='user':
+                    if data.get('manual_draft_active') or not restart_allowed and (data.get('metadata_approved') or data.get('automatic_pending') or entered or data.get('metadata_actor')=='user' or data.get('track_actor')=='user'):
                         raise ValueError('Approved metadata or manual editing evidence is preserved')
             else:context=None
             automatic_unapproved=bool(context and context['revision']==revision and data.get('automatic_approval'))
-            if group['review'] and not automatic_unapproved:raise ValueError('Manual or unclassified candidate review is preserved')
+            if group['review'] and not (automatic_unapproved or restart_allowed):raise ValueError('Manual or unclassified candidate review is preserved')
             marks=','.join('?' for _ in member_paths)
             arguments=(root,*member_paths)
             protected=db.execute(f"""SELECT 1 FROM book_groups g,json_each(g.evidence,'$.members') m
@@ -577,9 +581,14 @@ class Inventory:
                   AND json_extract(m.value,'$.path') IN ({marks}) LIMIT 1""",(root,identity,*member_paths)).fetchone()
             if protected:raise ValueError('Member belongs to another approved or reviewed candidate')
             if table(db,'audio_jobs'):
-                job=db.execute(f"""SELECT 1 FROM audio_jobs j WHERE json_extract(j.manifest,'$.candidate_id')=?
-                  OR EXISTS(SELECT 1 FROM json_each(j.manifest,'$.sources') s WHERE json_extract(s.value,'$.path') IN ({marks})) LIMIT 1""",(identity,*member_paths)).fetchone()
-                if job:raise ValueError('Candidate or source has a durable conversion job; immutable job evidence is preserved')
+                jobs=db.execute(f"""SELECT j.* FROM audio_jobs j WHERE json_extract(j.manifest,'$.candidate_id')=?
+                  OR EXISTS(SELECT 1 FROM json_each(j.manifest,'$.sources') s WHERE json_extract(s.value,'$.path') IN ({marks}))""",(identity,*member_paths)).fetchall()
+                for old_job in jobs:
+                    old_manifest=json.loads(old_job['manifest']);journal=json.loads(old_job['journal'] or '{}')
+                    aside=restart_allowed and old_manifest.get('candidate_id')==identity and db.execute('SELECT 1 FROM audio_job_set_aside WHERE job_id=? AND candidate_id=?',(old_job['job_id'],identity)).fetchone()
+                    retired=table(db,'source_cleanup') and db.execute('SELECT 1 FROM source_cleanup WHERE job_id=?',(old_job['job_id'],)).fetchone()
+                    if aside and old_job['state']=='needs attention' and not old_job['output'] and 'publication_intent' not in journal and not retired:continue
+                    raise ValueError('Candidate or source has a durable conversion job; immutable job evidence is preserved')
             if table(db,'source_retirements') and db.execute(f'SELECT 1 FROM source_retirements WHERE root=? AND path IN ({marks}) LIMIT 1',arguments).fetchone():
                 raise ValueError('Source retirement provenance is preserved')
             if table(db,'owned_artifacts') and db.execute(f'SELECT 1 FROM owned_artifacts WHERE path IN ({marks}) LIMIT 1',member_paths).fetchone():

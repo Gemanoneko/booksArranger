@@ -24,7 +24,7 @@ M4B_PARTS_VERSION = 'm4b-parts-v2'
 # 0.22.1, item 9: a clean file-name sequence orders a book (track_order); a single file has no order conflict.
 # Ruling 68 (0.24.0): one source folder is one book (folder_unit); mis-encoded tags are read repaired (tag_text).
 TAG_REPAIR_VERSION = 'tag-repair-v1'
-GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION + '+' + anthology_volumes.VERSION + '+' + folder_unit.VERSION + '+' + TAG_REPAIR_VERSION
+GROUP_VERSION = SOURCE_VERSION + '+' + split_books.VERSION + '+' + SAME_TITLE_VERSION + '+' + SAME_ALBUM_VERSION + '+' + M4B_PARTS_VERSION + '+' + track_order.VERSION + '+' + anthology_volumes.VERSION + '+' + folder_unit.VERSION + '+' + TAG_REPAIR_VERSION + '+confirmed-editions-v1'
 FOLDER_GROUPING = {'one': 'One book: every audio file of its source folder.',
                    'ask': 'One source folder that may hold more than one book: asked before anything is joined or split.',
                    'remainder': 'The files of a source folder that are not in its existing book: held, never joined to it silently.'}
@@ -756,6 +756,30 @@ def current(connection,root):
     except sqlite3.OperationalError:return False  # not set up yet: the first page sets it up
     return bool(revision and saved and saved[0]==revision[0])
 
+def _confirmed_internal_parts(connection,root,protected,frozen):
+    """Retract only inferred volume grouping for a confirmed edition; retain its old evidence.
+
+    Explicit Keep separate, reviewed/approved/job-owned and recovery-frozen members
+    remain authoritative. This never uses a folder name alone or reads audio.
+    """
+    import part_sets
+    held={m['path'] for item in protected.values() for m in item.get('members',[])}
+    held.update(m['path'] for item in frozen.values() for m in item.get('members',[]))
+    kept=kept_parts(connection,root)
+    rows=connection.execute("SELECT f.* FROM files f JOIN part_volumes v ON f.root=v.root AND f.path=v.path WHERE f.root=? AND f.error='' AND f.missing=0 AND f.size=v.size AND CAST(f.modified AS TEXT)=v.modified",(root,)).fetchall()
+    parents={str(Path(row['path']).parent) for row in rows if row['path'] not in held|kept}
+    ignored=set();families={}
+    if parents:
+        for row in connection.execute("SELECT * FROM files WHERE root=? AND error='' AND missing=0",(root,)):
+            parent=str(Path(row['path']).parent)
+            if parent in parents:families.setdefault(parent,[]).append(member(row))
+    for members in families.values():
+        paths={m['path'] for m in members}
+        if not paths or paths&(held|kept):continue
+        if part_sets.confirmed_edition({'members':members}):ignored.update(paths)
+    return ignored
+
+
 def _sync_inputs(connection,root):
     """What a regroup depends on beyond the catalog revision (files, retirements, part chapters and volumes bump that):
     the retired sources, the reacquire markers and the protected groups (approved, reviewed or with a job)."""
@@ -773,8 +797,9 @@ def _sync_inputs(connection,root):
     for r in connection.execute('SELECT * FROM book_groups WHERE root=?',(root,)):
         if r['id'] in archived:continue
         if r['approved'] or r['review'] or r['id'] in jobs:protected[r['scope']]=json.loads(r['evidence'])
+    ignored=_confirmed_internal_parts(connection,root,protected,frozen)
     return {'retired':retired,'archived':archived,'frozen':frozen,'protected':protected,
-            'parts':(chaptered_parts(connection,root),volume_parts(connection,root),kept_parts(connection,root))}
+            'parts':(chaptered_parts(connection,root),volume_parts(connection,root)-ignored,kept_parts(connection,root))}
 
 
 def _sync_build(connection,root,inputs):

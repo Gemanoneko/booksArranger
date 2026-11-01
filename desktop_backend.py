@@ -359,7 +359,7 @@ class DesktopControl:
         try:
             automatic = self._automatic()
             if automatic is not None:
-                automatic.stop()  # saves the research checkpoint; pauses the queue when a run is active
+                automatic.stop(origin='update')  # saves the research checkpoint; pauses the queue when a run is active
             self.server.inventory.stop()  # the scan stops at its checkpoint (Resume scanning continues it)
             # Futaba's 0.22.1 QA, m-1 (Judy 0.22.2 6.3): an approval checking its files holds the review and group locks
             # for the whole check, and the conversion's revision guard waits behind them, so a conversion beside an
@@ -367,7 +367,7 @@ class DesktopControl:
             # flight now stops at once, as for Quit: the book is not approved and Sergei presses Approve again.
             for press in list(getattr(merge, '__dict__', {}).get('_approve_stops', ())):
                 press.set()
-            merge.pause()  # the book in progress stops at its next checkpoint and starts again later
+            merge.pause(origin='update')  # the book in progress stops at its next checkpoint and starts again later
             hold = getattr(merge, '__dict__', {}).get('_update_hold')
             if hold is not None:
                 hold.set()  # m-3: the background recovery pass stops at its next safe point

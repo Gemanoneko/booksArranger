@@ -147,7 +147,9 @@ def _prepare(database,roots,audiobook_sources,output_root,decisions=(),verificat
                     if decision.get('fingerprint')!=book['fingerprint'] or decision.get('review_sha256')!=locations._digest(review):raise ValueError('Explicit routing decision source/review snapshot changed')
                     routing_review.update(decision['values']);evidence.append(decision)
                 if parent['manifest'].get('metadata_facts',{}).get('destination_suffix') and parent['manifest'].get('metadata_facts')!=ctx.get('metadata_facts'):raise ValueError('Current recording distinction evidence differs from frozen publication')
-                route=frozen_plan(parent['manifest'],config.audiobook_output_root,routing_review);destination=route['path'];key=os.path.normcase(destination)
+                from reviewed_routing import for_relocation
+                planned_manifest=for_relocation(parent['manifest'],routing_review,evidence)
+                route=frozen_plan(planned_manifest,config.audiobook_output_root,routing_review);destination=route['path'];key=os.path.normcase(destination)
                 if key in seen and seen[key]!=identity:collisions.add(key)
                 seen[key]=identity
                 if os.path.normcase(str(path))==key:

@@ -211,3 +211,46 @@ def decide(parts):
     if ends[-1] and not any(ends[:-1]) and all(works) and len(set(works)) == 1:
         return result('join', 'end matter only in the last file')
     return result('ask', 'unclear')
+
+
+def confirmed_edition(row):
+    """The confirmed Queen of Bedlam four-section edition; pure metadata, never a folder-name merge.
+
+    Regrouping callers must separately preserve reviewed/job-owned rows and any
+    explicit Keep as separate books receipt. This only identifies the exact set.
+    """
+    import ntpath
+    from local_identity import confirmed_corbett, title_key
+    members = row.get('members') or []
+    if len(members) != 4 or (row.get('volume_of_set') or {}).get('kept'):
+        return None
+    sections = {1: 'Маскер', 2: 'Безумие', 3: 'Послание', 4: 'Методы убийства'}
+    parents = set(); found = {}
+    for member in members:
+        if (member.get('volume_of_set') or {}).get('kept'):
+            return None
+        path = str(member.get('path') or '')
+        parent, filename = ntpath.split(path)
+        if ntpath.splitext(filename)[1].casefold() != '.m4b':
+            return None
+        match = re.fullmatch(r'Часть\s+([1-4])\.\s*(.+)', ntpath.splitext(filename)[0], re.I)
+        if not match or int(match[1]) in found or title_key(match[2]) != title_key(sections[int(match[1])]):
+            return None
+        tags = {str(k).casefold(): str(v) for k, v in ((member.get('metadata') or {}).get('tags') or {}).items()}
+        credit = tags.get('author') or tags.get('album_artist') or tags.get('artist') or ''
+        confirmed = confirmed_corbett(tags.get('album', ''), credit)
+        if not confirmed or confirmed['number'] != '2':
+            return None
+        # Every available author-role credit agrees; composer/reader never supplies authorship.
+        if any(not confirmed_corbett(tags['album'], tags[key]) for key in ('author', 'album_artist', 'artist') if tags.get(key)):
+            return None
+        track = str(tags.get('track') or tags.get('tracknumber') or member.get('source_track') or '')
+        if track and track.strip() != match[1] + '/4':
+            return None
+        found[int(match[1])] = path; parents.add(ntpath.normcase(parent))
+    if len(parents) != 1 or set(found) != set(sections):
+        return None
+    return {'decision': 'ask', 'basis': 'confirmed_internal_sections', 'version': VERSION,
+            'parts': 4, 'ordered_paths': [found[n] for n in range(1, 5)],
+            'work_title': 'The Queen of Bedlam', 'series': 'Matthew Corbett', 'number': '2',
+            'decision_id': 'user:queen-bedlam-sections-2026-11-01'}

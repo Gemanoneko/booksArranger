@@ -4,6 +4,8 @@ follow-ups 2-4; Sergei, 2026-10-19).
 A real catalog (book groups, candidate context, the jobs ledger, the refusal ledger, the automatic tables) and a real
 AutomaticProcessing; its worker is a double that waits, so no research, scan or conversion runs. No library, no media.
 """
+import io
+from email.message import Message
 import hashlib
 import json
 import os
@@ -27,11 +29,9 @@ from automatic_processing import AutomaticProcessing
 from merge_service import MergeService
 from review_backend import member_key
 from scanner import connect
-from web_server import Handler
-import test_merge_http
+from web_server import BrowserServer, Handler
 
 AREA = Path(__file__).resolve().parents[1] / 'scratch' / 'start-over-tests'
-AREA.mkdir(parents=True, exist_ok=True)
 REFUSED = 'M4B preservation requires review: Unsupported structural box'
 
 
@@ -136,6 +136,7 @@ class Reviews:
 
 class Base(unittest.TestCase):
     def setUp(self):
+        AREA.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=AREA)
         self.addCleanup(self.temp.cleanup)
         self.c = Catalog(self.temp.name)
@@ -147,7 +148,10 @@ class Base(unittest.TestCase):
         s.jobs = self.c.jobs
         s.operation_lock = threading.RLock()
         s.draining = False
-        s.inventory = SimpleNamespace(worker=None, database=self.c.db, group_lock=threading.RLock(), roots={'Audiobooks': str(self.c.library)}, stop=lambda: None)
+        sorted_root = self.c.base / 'sorted'
+        sorted_root.mkdir()
+        s.inventory = SimpleNamespace(worker=None, database=self.c.db, group_lock=threading.RLock(),
+                                      roots={'Audiobooks': str(self.c.library)}, output_root=str(sorted_root), stop=lambda: None)
         s.reviews = Reviews(self.c.db)
         s.working = SimpleNamespace(admission_clear=lambda row: None)
         s.stage_root = self.c.base / 'staging'
@@ -163,6 +167,7 @@ class Base(unittest.TestCase):
         self.s = s
         self.release_worker = threading.Event()
         self.worker_runs = []
+        self.desktop_controls = []
         def work(auto, run_id):
             self.worker_runs.append(run_id)
             self.release_worker.wait(30)
@@ -185,6 +190,12 @@ class Base(unittest.TestCase):
         thread = self.s.automatic.thread  # the pending start may have started one meanwhile
         if thread:
             thread.join(10)
+        # Quit answers before its catalog-writing stop thread finishes. Join it even
+        # when a test assertion fails, before jobs and the private catalog are closed.
+        for control in self.desktop_controls:
+            if control.thread:
+                control.thread.join(10)
+                self.assertFalse(control.thread.is_alive(), 'private Quit thread must finish before catalog cleanup')
 
     def summary(self, job_id):
         return self.s.attention_summary([job_id]).get(job_id)
@@ -431,7 +442,8 @@ class StartOverTests(Base):
             self.assertEqual((value['startover'], value['release_ok']), expected[identity])
             # The same read-only test the pass runs (AutomaticProcessing.manual_draft).
             group = self.c.group(identity)
-            row = {'id': identity, 'revision': group['revision'], 'review': json.loads(group['review']) if group['review'] else None}
+            row = {'id': identity, 'revision': group['revision'], 'fingerprint': group['fingerprint'],
+                   'review': json.loads(group['review']) if group['review'] else None}
             self.assertEqual(self.s.automatic.manual_draft(row), value['startover'] == 'manual_draft')
 
     def test_the_combined_press_is_one_transaction(self):
@@ -453,7 +465,13 @@ class StartOverTests(Base):
         self.assertEqual((answer['set_aside'], answer['released'], answer['outcome']), (True, True, 'automatic'))
         group = self.c.group(identity)
         self.assertEqual((group['review'], group['revision'], group['approved']), ('', 3, 0))
-        self.assertIsNone(self.c.context(identity), 'notes, evidence, cover and track choices discarded')
+        context_revision, context = self.c.context(identity)
+        self.assertEqual(context_revision, 3)
+        self.assertEqual(context, {
+            'metadata_approved': False, 'source_coverage_confirmed': False, 'order_confirmed': False, 'source_hashes': {},
+            'automatic_restart': {'candidate_id': identity, 'revision': 3, 'fingerprint': group['fingerprint'],
+                                  'review': None, 'job_id': job_id}},
+            'old notes, metadata proof, cover and track choices are discarded; only fresh restart authority remains')
         self.assertEqual(self.c.set_aside(), [(job_id, identity)])
         self.assertEqual(Path(paths[0]).read_bytes(), source, 'audio files untouched')
 
@@ -602,7 +620,7 @@ class PassTests(Base):
         auto = self.s.automatic
         notified = Mock()
         auto.on_change = notified
-        self.jobs_state['state'] = 'Running'
+        self.jobs_state['state'] = 'Pausing'  # only Pausing blocks Start (ruling 34)
         with patch.object(automatic_processing, 'PENDING_POLL', 0.05):
             first = auto.request_start()
             self.assertEqual((first['action'], first['pending_kind']), ('pending', 'conversion'))
@@ -629,7 +647,7 @@ class PassTests(Base):
 
     def test_cancel_another_blocker_and_a_blocker_that_cannot_clear(self):
         auto = self.s.automatic
-        self.jobs_state['state'] = 'Running'
+        self.jobs_state['state'] = 'Pausing'  # only Pausing blocks Start (ruling 34)
         with patch.object(automatic_processing, 'PENDING_POLL', 0.05):
             auto.request_start()
             auto.cancel_start()
@@ -638,7 +656,7 @@ class PassTests(Base):
             time.sleep(0.3)
             self.assertIsNone(auto.thread, 'cancelled: it does not start when the blocker clears')
             # Conversion, then a scan: it keeps waiting and changes kind.
-            self.jobs_state['state'] = 'Running'
+            self.jobs_state['state'] = 'Pausing'  # only Pausing blocks Start (ruling 34)
             auto.request_start()
             self.s.inventory.worker = SimpleNamespace(is_alive=lambda: True)
             self.jobs_state['state'] = 'Paused'
@@ -669,7 +687,7 @@ class PendingStartStopTests(Base):
 
     def pending(self):
         """A book converts, so Start over leaves one pending start."""
-        self.jobs_state['state'] = 'Running'
+        self.jobs_state['state'] = 'Pausing'  # only Pausing blocks Start (ruling 34)
         answer = self.s.automatic.request_start()
         self.assertEqual((answer['action'], answer['pending_kind']), ('pending', 'conversion'))
 
@@ -694,15 +712,29 @@ class PendingStartStopTests(Base):
                                  control_condition=threading.Condition(lock), scan_active=lambda: False, finish_shutdown=Mock())
         self.s.automatic.server_closing = lambda: server.closing  # as BrowserServer wires it
         control = DesktopControl(server)
-        self.assertEqual(control.quit()['phase'], 'finishing')  # the real Quit: closing, drain, scan stop, automatic.stop()
-        self.assertTrue(self.s.draining)
-        self.assertIsNone(self.s.automatic.start_pending, 'Quit ends the pending start')
-        self.assertTrue(self.notified.called, 'the next poll shows it')
-        self.jobs_state['state'] = 'Paused'  # the book in progress finished under the drain; the next stays queued
-        self.never_starts('Quit')
-        control.thread.join(5)
-        self.assertFalse(control.thread.is_alive(), 'Quit does not hang at "finishing"')
-        server.finish_shutdown.assert_called_once_with()
+        self.desktop_controls.append(control)
+        stopped = threading.Event()
+        real_stop = self.s.automatic.stop
+        def stop(*args, **kwargs):
+            try:
+                return real_stop(*args, **kwargs)
+            finally:
+                stopped.set()
+        with patch.object(self.s.automatic, 'stop', side_effect=stop):
+            self.assertEqual(control.quit()['phase'], 'finishing')
+            self.assertTrue(server.closing, 'the request immediately refuses further controls')
+            # Quit's stops run on its owned thread (0.22.3); completion, not the
+            # immediate request reply, is the boundary for the cancellation check.
+            self.assertTrue(stopped.wait(5), 'Quit must reach automatic.stop promptly')
+            self.assertTrue(self.s.draining)
+            self.assertIsNone(self.s.automatic.start_pending, 'Quit ends the pending start')
+            self.assertTrue(self.notified.called, 'the next poll shows it')
+            self.jobs_state['state'] = 'Paused'  # clearing the blocker cannot revive the cancelled start
+            self.never_starts('Quit')
+            control.thread.join(5)
+            self.assertFalse(control.thread.is_alive(), 'Quit does not hang at finishing')
+            self.assertEqual(control.phase, 'exiting', control.error)
+            server.finish_shutdown.assert_called_once_with()
 
     def test_a_start_never_fires_once_quit_or_shutdown_has_begun(self):
         auto = self.s.automatic
@@ -857,11 +889,40 @@ REAL_WORK = AutomaticProcessing._work
 
 
 class RouteTests(unittest.TestCase):
-    setUp = test_merge_http.MergeHTTPTests.setUp
-    tearDown = test_merge_http.MergeHTTPTests.tearDown
-    handler = test_merge_http.MergeHTTPTests.handler
-    call = test_merge_http.MergeHTTPTests.call
-    identity = test_merge_http.MergeHTTPTests.identity
+    def setUp(self):
+        # Local, socket-free route fixture: importing this suite patches no other suite.
+        self.route_id = str(uuid.uuid4())
+        self.server = BrowserServer.__new__(BrowserServer)
+        self.server.server_address = ('127.0.0.1', 5211)
+        self.server.server_port = 5211
+        self.server.token = 'fixture-token'
+        self.server.closing = False
+        self.server.control_lock = threading.Lock()
+        self.server.control_condition = threading.Condition(self.server.control_lock)
+        self.server.merge_admissions = 0
+        self.server.recovery_operations = 0
+        self.server.inventory = SimpleNamespace(worker=None, roots={'Audiobooks': 'fixture-audio'})
+        self.merge = SimpleNamespace(state=Mock(return_value={'state': 'Paused', 'queued': 0, 'failed': 0}))
+        self.server.merge = self.merge
+
+    def identity(self):
+        return {'library': 'Audiobooks', 'id': self.route_id, 'revision': 1}
+
+    def call(self, path, data=None):
+        handler = Handler.__new__(Handler)
+        handler.server = self.server
+        handler.path = path
+        handler.headers = Message()
+        handler.headers['Host'] = '127.0.0.1:5211'
+        handler.headers['X-Books-Token'] = self.server.token
+        payload = json.dumps(data or {}).encode()
+        handler.headers['Content-Type'] = 'application/json'
+        handler.headers['Content-Length'] = str(len(payload))
+        handler.rfile = io.BytesIO(payload)
+        handler.result = None
+        handler.response = lambda status, body, content_type='application/json': setattr(handler, 'result', (status, body, content_type))
+        handler.do_POST()
+        return handler.result
 
     def test_start_over_release_and_cancel_routes(self):
         job = str(uuid.uuid4())
@@ -870,16 +931,16 @@ class RouteTests(unittest.TestCase):
         self.merge.start_over = Mock(return_value={'set_aside': True, 'outcome': 'automatic', 'pass': {'action': 'started'}, 'row': None})
         self.merge.release = Mock(return_value={'released': True, 'pass': {'action': 'running'}, 'row': None})
         self.merge.release_selected = Mock(return_value={'released': 1, 'refused': [], 'pass': {'action': 'running'}})
-        self.merge.restart_row = Mock(return_value={'id': test_merge_http.ID})
+        self.merge.restart_row = Mock(return_value={'id': self.route_id})
         self.server.scan_active = lambda: False
         status, body, _ = self.call('/api/audiobook/startover', self.identity() | {'job_id': job, 'discard_review': True})
         self.assertEqual((status, body['automatic_processing']), (202, {'state': 'Running'}))
-        self.merge.start_over.assert_called_once_with('Audiobooks', test_merge_http.ID, 1, job, True, server_closing=False)
+        self.merge.start_over.assert_called_once_with('Audiobooks', self.route_id, 1, job, True, server_closing=False)
         self.assertEqual(self.call('/api/audiobook/startover', self.identity() | {'job_id': job, 'discard_review': 'yes'})[0], 400)
         self.assertEqual(self.call('/api/audiobook/startover', self.identity() | {'job_id': job, 'extra': 1})[0], 400)
         self.merge.start_over.side_effect = RetryRefused(RETRY_BOOK_CHANGED, 'changed')
         status, body, _ = self.call('/api/audiobook/startover', self.identity() | {'job_id': job})
-        self.assertEqual((status, body), (409, {'error': RETRY_BOOK_CHANGED, 'cause': 'changed', 'row': {'id': test_merge_http.ID}}))
+        self.assertEqual((status, body), (409, {'error': RETRY_BOOK_CHANGED, 'cause': 'changed', 'row': {'id': self.route_id}}))
         self.assertEqual(self.call('/api/audiobook/release', self.identity())[0], 202)
         items = [{'id': str(uuid.uuid4()), 'revision': 2}, {'id': str(uuid.uuid4()), 'revision': 3}]
         self.assertEqual(self.call('/api/audiobook/release-selected', {'library': 'Audiobooks', 'items': items})[0], 202)

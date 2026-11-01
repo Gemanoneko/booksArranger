@@ -499,7 +499,11 @@ class BrowserServer(ThreadingHTTPServer):
             if self.actions.blocker(action, book, held=1):
                 return None  # the thing it waited for came back between the look and the run: it waits again
             code = approve_code(text) if action in ('approve', 'convert') else getattr(error, 'code', None) or ('changed' if 'changed' in text.casefold() else 'refused')
-            return {'result': 'refused', 'code': code, 'error': text[:500]}
+            extra={}
+            if getattr(error,'admission_error',None):extra['admission_error']=error.admission_error
+            if text.startswith('This book is already converting'):
+                code='book_converting';extra['job_origin']=(merge.candidate_status(book) or {}).get('job_origin','unknown')
+            return {'result': 'refused', 'code': code, 'error': text[:500],**extra}
         return {'result': 'refused', 'code': 'failed', 'error': 'Unknown queued action'}
 
     def jobs_active(self):
@@ -1275,7 +1279,11 @@ class Handler(BaseHTTPRequestHandler):
                 code=approve_code(text)
                 try:row=reviews.enrich(reviews._row(library,id))
                 except ValueError:row=None
-                self.response(409,{'error':text,'code':code,'row':row});return
+                extra={}
+                if getattr(error,'admission_error',None):extra['admission_error']=error.admission_error
+                if text.startswith('This book is already converting'):
+                    code='book_converting';extra['job_origin']=((row or {}).get('creation',{}).get('job') or {}).get('job_origin','unknown')
+                self.response(409,{'error':text,'code':code,'row':row,**extra});return
             # 0.22.3 (Judy 2.3): the book's list row now, so the strip can say where it went when it leaves the list.
             self.response(200,{'approved':True,'job_id':approved['job_id'],'row':approved['row'],**({'list_row':approved['list_row']} if approved.get('list_row') else {})});return
         base={'library','id','revision'}

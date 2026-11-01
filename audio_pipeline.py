@@ -17,6 +17,23 @@ INPUT_FORMATS={'.mp3':'mp3','.m4a':'mov','.m4b':'mov','.aac':'aac','.flac':'flac
 
 class Paused(InterruptedError):pass
 class ValidationError(ValueError):pass
+class ChapterValidationError(ValidationError):
+    """Actionable chapter failure; structured fields survive the row's UI boundary."""
+    def __init__(self,diagnostic):
+        self.chapter_diagnostic=diagnostic
+        title=diagnostic.get('chapter_title')
+        chapter=f'chapter “{title}”' if title else f"chapter {diagnostic.get('chapter_id',diagnostic.get('chapter_index'))}"
+        reason={'unreadable_time':'has an unreadable time','start_before_audio':'starts before the audio',
+          'end_not_after_start':'has an end at or before its start','overlap':'overlaps the previous chapter',
+          'start_beyond_audio':'starts beyond the audio','end_exceeds_audio':'ends beyond the audio',
+          'invalid_title':'has an invalid title','complete_audio_unverified':'complete audio could not be verified',
+          'source_changed':'source changed during chapter verification'}.get(diagnostic['predicate'],diagnostic['predicate'])
+        detail=f"{diagnostic['file']}, {chapter}: {reason}"
+        if diagnostic['predicate']=='overlap' and diagnostic.get('previous_chapter_title'):
+            detail+=f" “{diagnostic['previous_chapter_title']}”"
+        detail+=f" (start {diagnostic.get('start')} s, end {diagnostic.get('end')} s, audio {diagnostic.get('duration')} s)"
+        if diagnostic.get('reason'):detail+=': '+diagnostic['reason']
+        super().__init__(detail)
 class MediaTimeout(TimeoutError):
     """A media operation (probe, hash, decode, encode) ran past its deadline: a busy machine or a slow library drive, so
     transient (0.22.2). Automatic processing tries the book again by itself; every TimeoutError handler still catches it."""
@@ -691,18 +708,113 @@ def stream_normalized(write,stage,copies,durations,encoding,stop,references,join
     step.update(total,force=True)
 
 
-def source_chapters(path,stage,stop,duration):
-    result=[];previous=0
-    for chapter in probe(path,stage,stop).get('chapters',[]):
+def _chapter_diagnostic(path,chapter,index,duration,predicate,**extra):
+    # JSON-safe values also preserve the original strings for unreadable/nonfinite timestamps.
+    def number(value):
+        try:
+            parsed=float(value)
+            return parsed if math.isfinite(parsed) else str(value)
+        except (TypeError,ValueError,OverflowError):return str(value) if value is not None else None
+    tags=chapter.get('tags') or {}
+    return {'file':Path(path).name,'path':str(path),'chapter_index':index,
+      'chapter_id':chapter.get('id',index),'chapter_title':tags.get('title',''),
+      'predicate':predicate,'start':number(chapter.get('start_time')),'end':number(chapter.get('end_time')),
+      'duration':number(duration),**extra}
+
+
+def _checked_chapters(path,chapters,duration,*,terminal_end=None):
+    """The existing 50 ms overlap / 250 ms endpoint tolerances remain unchanged."""
+    if not isinstance(duration,(int,float)) or not math.isfinite(duration) or duration<=0:
+        raise ValidationError('Complete source audio duration cannot be verified: '+str(path))
+    result=[];previous=0;previous_title=''
+    for index,chapter in enumerate(chapters):
+        def fail(predicate,**extra):raise ChapterValidationError(_chapter_diagnostic(path,chapter,index,duration,predicate,**extra))
         try:
             start=float(chapter['start_time']);end=float(chapter['end_time'])
-        except (ValueError,TypeError,KeyError):raise ValidationError('Existing M4B chapter boundaries cannot be verified')
-        if not all(math.isfinite(value) for value in (start,end)) or start<0 or end<=start or start<previous-.05 or end>duration+.25:
-            raise ValidationError('Existing M4B chapters overlap or exceed complete source audio')
+        except (ValueError,TypeError,KeyError,OverflowError):fail('unreadable_time')
+        if not all(math.isfinite(value) for value in (start,end)):fail('unreadable_time')
+        if start<0:fail('start_before_audio')
+        if end<=start:fail('end_not_after_start')
+        if start<previous-.05:fail('overlap',previous_chapter_title=previous_title,previous_end=previous)
+        if start>=duration:fail('start_beyond_audio')
+        if end>duration+.25 and (terminal_end is None or index!=len(chapters)-1):fail('end_exceeds_audio')
+        if terminal_end is not None and index==len(chapters)-1:
+            end=terminal_end
+            if not math.isfinite(end) or end<=start or round(end*1000)<=round(start*1000):fail('end_not_after_start')
         title=chapter.get('tags',{}).get('title','')
-        if not isinstance(title,str):raise ValidationError('Existing M4B chapter title is invalid')
-        result.append({'start':round(start*1000),'end':round(end*1000),'title':title});previous=end
+        if not isinstance(title,str):fail('invalid_title')
+        result.append({'start':round(start*1000),'end':round(end*1000),'title':title});previous=end;previous_title=title
     return result
+
+
+def source_chapters(path,stage,stop,duration):
+    """Strict by default, including every standalone whole-M4B preservation path."""
+    return _checked_chapters(path,probe(path,stage,stop).get('chapters',[]),duration)
+
+
+def verified_source_chapters(path,stage,stop,duration,*,source=None,on_check=None):
+    """For joined parts only: prove an otherwise valid final-end correction on these exact bytes.
+
+    The serializable receipt is evidence, never a reusable capability. Call again on the
+    protected staging copy before conversion. No source or candidate is written here.
+    """
+    def stopped():
+        if stop.is_set():raise Paused('Source chapter verification paused; this book restarts')
+    def held_hash(held):
+        value=hashlib.sha256()
+        for block in held.chunks():stopped();value.update(block)
+        return value.hexdigest()
+    stopped()
+    # Probe/decoding use the name while this lease forbids replacing or writing the file.
+    with VerifiedFile(path) as held:
+        raw=probe(path,stage,stop);chapters=raw.get('chapters',[])
+        try:return {'chapters':_checked_chapters(path,chapters,duration),'terminal_end_correction':None}
+        except ChapterValidationError as failure:
+            diagnostic=failure.chapter_diagnostic
+            if diagnostic['predicate']!='end_exceeds_audio' or diagnostic['chapter_index']!=len(chapters)-1:raise
+            # Validate all titles and every boundary before starting expensive proof work.
+            _checked_chapters(path,chapters,duration,terminal_end=duration)
+        if Path(path).suffix.lower()!='.m4b':
+            raise ChapterValidationError(diagnostic|{'predicate':'complete_audio_unverified','reason':'Terminal correction requires an M4B part'})
+        if on_check is not None:on_check({'phase':'Checking source audio','reason':'terminal_chapter_end',**diagnostic})
+        try:
+            facts=held.facts();sha256=held_hash(held)
+            if source is not None and (source.get('sha256')!=sha256 or source.get('size')!=facts['size'] or str(source.get('modified'))!=str(facts['modified'])):
+                raise ChapterValidationError(diagnostic|{'predicate':'source_changed'})
+            def read_at(offset,count):stopped();return held.read_at(offset,count)
+            # Like m4b_repair.diagnose, use a check title for the read-only planner's
+            # required metadata input. Its in-memory candidate is never streamed;
+            # only intact track facts are consumed. No repair flags are permitted.
+            plan=m4b_preservation.plan(facts['size'],read_at,{'title':'Chapter timing check'})
+            audio=next(track for track in plan.tracks if track['handler']==b'soun')
+            _,profile=audio_info(raw)
+            stream=next(stream for stream in raw['streams'] if stream.get('codec_type')=='audio')
+            rate=int(profile[1]);channels=profile[2]
+            if rate<=0 or type(channels) is not int or channels<=0:raise ValidationError('Native audio rate/channels are invalid')
+            stream_duration=float(stream['duration'])
+            if not math.isfinite(stream_duration) or stream_duration<=0:raise ValidationError('Complete audio stream duration is unavailable')
+            encoding={'sample_rate':rate,'channels':channels,'channel_layout':stream.get('channel_layout')}
+            packets=copied_audio_evidence(path,stage,stop,duration,source_relative=True)
+            if packets['relative_packet_timing']['packet_count']!=audio['samples']:
+                raise ValidationError('Readable audio packets do not match the complete intact source sample table')
+            pcm=native_pcm_evidence(path,stage,stop,duration,encoding)
+            complete_duration=pcm['sample_count']/rate
+            if abs(complete_duration-duration)>.25 or abs(complete_duration-stream_duration)>.25:
+                raise ValidationError('Complete decoded audio duration disagrees with the reviewed source or audio stream')
+            corrected=_checked_chapters(path,chapters,complete_duration,terminal_end=complete_duration)
+            if held.refresh()!=facts or held_hash(held)!=sha256:
+                raise ChapterValidationError(diagnostic|{'predicate':'source_changed'})
+            stopped()
+        except (Paused,TimeoutError):raise
+        except ChapterValidationError:raise
+        except (ValueError,OSError,KeyError,TypeError,StopIteration,OverflowError) as error:
+            raise ChapterValidationError(diagnostic|{'predicate':'complete_audio_unverified','reason':str(error)}) from error
+        receipt={'schema':'terminal-chapter-end-v1','source_sha256':sha256,'source_facts':facts,
+          'chapter_index':diagnostic['chapter_index'],'chapter_id':diagnostic['chapter_id'],
+          'chapter_title':diagnostic['chapter_title'],'original_end':diagnostic['end'],
+          'corrected_end':corrected[-1]['end']/1000,'decoded_duration':complete_duration,
+          'native_pcm_evidence':pcm,'copied_audio_evidence':packets,'source_track_sha256':audio['sha256']}
+        return {'chapters':corrected,'terminal_end_correction':receipt}
 
 
 def part_chapter_name(member):
@@ -940,7 +1052,7 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
     else:source_input=['-protocol_whitelist','file','-format_whitelist','concat,mp3,mov,aac,flac,ogg,wav,asf',
       *(['-f','mov','-i',str(stage/original_copies[0])] if encoding.get('mode')=='copy' else ['-f','concat','-safe','1','-i',str(stage/'inputs.txt')])]
     args=[executable,'-hide_banner','-v','error','-xerror','-nostdin','-n','-threads','2','-filter_threads','1',*source_input,'-f','image2','-i',str(cover)]
-    chapters=[]
+    chapters=[];terminal_corrections=[]
     preserved=source_chapters(stage/original_copies[0],stage,stop,sum(durations)) if encoding.get('mode')=='copy' else []
     if encoding.get('mode')=='copy' and manifest.get('source_chapters')!=preserved:
         raise ValidationError('Existing M4B chapters differ from the frozen complete source plan')
@@ -955,8 +1067,15 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
         # snapshot, must equal the plan frozen when the book was approved.
         parts=manifest['part_chapters']
         if encoding.get('mode')!='normalize' or len(parts)!=len(original_copies):raise ValidationError('Joined part chapter plan must match the protected parts')
-        for part,name,duration in zip(parts,original_copies,durations):
-            if source_chapters(stage/name,stage,stop,duration)!=part['chapters']:raise ValidationError('Part chapters differ from the frozen plan')
+        for part,name,duration,item in zip(parts,original_copies,durations,manifest['sources']):
+            # Snapshot mtime differs from the original; its full hash/size must still be
+            # the frozen source. A saved correction receipt never substitutes for proof.
+            bound=item|{'modified':fingerprint(stage/name)['modified']}
+            checked=verified_source_chapters(stage/name,stage,stop,duration,source=bound,
+                on_check=lambda value:progress('Checking source audio',{'chapter_check':value}))
+            if checked['chapters']!=part['chapters']:raise ValidationError('Part chapters differ from the frozen plan')
+            if checked['terminal_end_correction']:
+                terminal_corrections.append(checked['terminal_end_correction']|{'source_path':item['path']})
         chapters=joined_part_chapters(parts,durations)
         chapter_file=stage/'chapters.txt';text=';FFMETADATA1\n'
         for chapter in chapters:
@@ -993,6 +1112,7 @@ def _encode_tagged(manifest,stage,copies,durations,cover,stop,progress,encoding,
     with VerifiedFile(output) as held_output:
         progress('Checking output',{})
         validation=validate(output,manifest,durations,chapters,stage,stop,encoding)
+        if terminal_corrections:validation['terminal_end_corrections']=terminal_corrections
         if encoding.get('mode')=='copy':
             source_hash=audio_packet_hash(stage/original_copies[0],stage,stop,sum(durations))
             output_hash=audio_packet_hash(output,stage,stop,sum(durations))

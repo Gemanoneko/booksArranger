@@ -1,6 +1,7 @@
 // Pure validation shared by the local publisher and offline tests.
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+export {requiresNativeQa,nativeEvidencePath,nativeEvidenceReportHash,nativeRecordReferences,validateNativeEvidence} from './qa-phase-contract.mjs';
 export const KEEP_RELEASES = 4;
 export function version(value) {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) throw new Error('Expected canonical x.y.z version');
