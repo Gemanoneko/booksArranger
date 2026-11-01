@@ -310,6 +310,135 @@ class AutoTests(unittest.TestCase):
         restarted=AutomaticProcessing(merge,auto.research);self.controllers.append(restarted)
         self.assertIsNone(restarted.thread);self.assertEqual(restarted.status()['state'],'Paused');self.assertFalse(restarted.status()['automatic_retry_enabled']);self.assertEqual(json.loads(restarted._run_row()['checkpoint'])['pending'],pending)
         merge.approve_automatic.assert_not_called()
+    def _pause_origin_interleaving(self,first_origin='user',later_user=False,fail_first_write=False):
+        import pause_state,sqlite3
+        auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
+        auto.start();deadline=time.monotonic()+3
+        while not auto.status()['automatic_retry_enabled'] and auto.thread.is_alive() and time.monotonic()<deadline:time.sleep(.01)
+        self.assertTrue(auto.status()['automatic_retry_enabled'])
+        blocked,release,worker_arrived,user_published=(threading.Event() for _ in range(4));errors=[]
+        original_record=pause_state.record;original_pause=auto._pause_stopped;original_set=auto.stop_event.set
+        def record(db,scope,origin,reason):
+            if scope=='automatic' and threading.current_thread() is first:
+                blocked.set()
+                if not release.wait(5):raise AssertionError('Origin-write barrier was not released')
+                if fail_first_write:raise sqlite3.OperationalError('Injected pause attribution write failure')
+            return original_record(db,scope,origin,reason)
+        def pause(generation):
+            if threading.current_thread() is auto.thread:
+                worker_arrived.set()
+                if not blocked.wait(5):raise AssertionError('Stop did not reach the attribution barrier')
+            return original_pause(generation)
+        def signal():
+            original_set()
+            if threading.current_thread() is second:user_published.set()
+        def stop(origin):
+            try:auto.stop(origin=origin)
+            except BaseException as error:errors.append(error)
+        first=threading.Thread(target=stop,args=(first_origin,),name='fixture-first-stop')
+        second=threading.Thread(target=stop,args=('user',),name='fixture-later-user-stop')
+        with patch.object(pause_state,'record',side_effect=record),patch.object(auto,'_pause_stopped',side_effect=pause),patch.object(auto.stop_event,'set',side_effect=signal):
+            first.start()
+            try:
+                self.assertTrue(blocked.wait(3),'Stop reached the durable-write barrier')
+                self.assertTrue(worker_arrived.wait(3),'the interrupted worker reached pause attribution while Stop was blocked')
+                self.assertTrue(auto.stop_event.is_set(),'the worker stops before the blocked attribution write finishes')
+                with connect(self.db) as db:self.assertIsNone(pause_state.read(db,'automatic'))
+                merge.pause.assert_not_called()
+                if later_user:
+                    second.start();self.assertTrue(user_published.wait(3),'later user intent is published while the earlier write waits')
+            finally:
+                release.set();first.join(5)
+                if second.ident is not None:second.join(5)
+                auto.thread.join(5)
+        self.assertFalse(first.is_alive());self.assertFalse(second.is_alive());self.assertFalse(auto.thread.is_alive())
+        if fail_first_write:
+            self.assertEqual(len(errors),1);self.assertIsInstance(errors[0],sqlite3.OperationalError)
+        else:self.assertEqual(errors,[])
+        state=auto.status();self.assertEqual(state['state'],'Paused');self.assertFalse(state['automatic_retry_enabled'])
+        self.assertIsNone(auto.volatile_failure)
+        with connect(self.db) as db:self.assertEqual(pause_state.read(db,'automatic')['origin'],'user')
+        self.assertEqual(len(json.loads(auto._run_row()['checkpoint'])['pending']),1)
+        calls=merge.pause.call_args_list;self.assertTrue(calls);self.assertEqual((calls[-1].args,calls[-1].kwargs),((),{}))
+        if not later_user:self.assertTrue(all(call.args==() and call.kwargs=={} for call in calls),calls)
+        else:
+            self.assertTrue(all(call.args==() and call.kwargs in ({},{'origin':'update'}) for call in calls),calls)
+            first_user=next(index for index,call in enumerate(calls) if call.kwargs=={})
+            self.assertTrue(all(call.kwargs=={} for call in calls[first_user:]),'an older pause cannot overwrite the later user pause')
+        merge.approve_automatic.assert_not_called()
+    def test_stop_origin_is_visible_while_its_durable_write_waits(self):
+        self._pause_origin_interleaving()
+    def test_later_user_stop_supersedes_a_blocked_update_pause(self):
+        self._pause_origin_interleaving(first_origin='update',later_user=True)
+    def test_failed_stop_origin_write_does_not_make_worker_invent_interrupted(self):
+        self._pause_origin_interleaving(fail_first_write=True)
+    def test_delayed_old_stop_cannot_pause_a_newly_started_run(self):
+        import pause_state
+        auto,merge,inv=self.fake_merge(lambda *_:{'reasons':['Uncertain'],'wait':{'source':'Public fixture','reason':'Unavailable','retry_at':time.time()+3600}})
+        auto.start();deadline=time.monotonic()+3
+        while not auto.status()['automatic_retry_enabled'] and auto.thread.is_alive() and time.monotonic()<deadline:time.sleep(.01)
+        self.assertTrue(auto.status()['automatic_retry_enabled']);old_worker=auto.thread;old_generation=auto._stop_generation
+        blocked,release=threading.Event(),threading.Event();errors=[];original_pause=auto._pause_stopped
+        def pause(generation):
+            if threading.current_thread() is stopper:
+                blocked.set()
+                if not release.wait(5):raise AssertionError('Old Stop dispatch barrier was not released')
+            return original_pause(generation)
+        def stop():
+            try:auto.stop()
+            except BaseException as error:errors.append(error)
+        stopper=threading.Thread(target=stop,name='fixture-delayed-old-stop')
+        with patch.object(auto,'_pause_stopped',side_effect=pause),patch.object(inv,'stop',wraps=inv.stop) as scanner_stop:
+            stopper.start()
+            try:
+                self.assertTrue(blocked.wait(3));old_worker.join(3);self.assertFalse(old_worker.is_alive())
+                self.assertEqual(auto.status()['state'],'Paused')
+                with connect(self.db) as db:self.assertEqual(pause_state.read(db,'automatic')['origin'],'user')
+                auto.start();new_worker=auto.thread;deadline=time.monotonic()+3
+                while not auto.status()['automatic_retry_enabled'] and new_worker.is_alive() and time.monotonic()<deadline:time.sleep(.01)
+                self.assertIsNot(new_worker,old_worker);self.assertTrue(new_worker.is_alive());self.assertTrue(auto.status()['automatic_retry_enabled'])
+                self.assertEqual(auto._stop_generation,old_generation+1);self.assertFalse(auto.stop_event.is_set())
+                with connect(self.db) as db:self.assertIsNone(pause_state.read(db,'automatic'))
+                pending=json.loads(auto._run_row()['checkpoint'])['pending'];self.assertEqual(len(pending),1)
+                pause_calls=merge.pause.call_count;scan_calls=scanner_stop.call_count
+                release.set();stopper.join(3);self.assertFalse(stopper.is_alive());self.assertEqual(errors,[])
+                self.assertEqual(merge.pause.call_count,pause_calls);self.assertEqual(scanner_stop.call_count,scan_calls)
+                self.assertIs(auto.thread,new_worker);self.assertTrue(new_worker.is_alive());self.assertFalse(auto.stop_event.is_set())
+                self.assertEqual(auto.status()['state'],'Running');self.assertTrue(auto.status()['automatic_retry_enabled'])
+                self.assertEqual(json.loads(auto._run_row()['checkpoint'])['pending'],pending)
+                with connect(self.db) as db:self.assertIsNone(pause_state.read(db,'automatic'))
+                merge.approve_automatic.assert_not_called()
+            finally:
+                release.set();stopper.join(5);old_worker.join(5)
+    def test_start_refuses_while_a_previous_pause_dispatch_is_applying(self):
+        import pause_state
+        from audio_jobs import StartRefused
+        auto,merge,inv=self.fake_merge();blocked,release=threading.Event(),threading.Event();errors=[]
+        original_pause=merge.pause.side_effect;generation=auto._stop_generation
+        def pause(*args,**kwargs):
+            if threading.current_thread() is stopper:
+                blocked.set()
+                if not release.wait(5):raise AssertionError('Applying pause barrier was not released')
+            return original_pause(*args,**kwargs)
+        def stop():
+            try:auto.stop(force=True,origin='user')
+            except BaseException as error:errors.append(error)
+        stopper=threading.Thread(target=stop,name='fixture-applying-old-stop')
+        with patch.object(merge,'pause',side_effect=pause):
+            stopper.start()
+            try:
+                self.assertTrue(blocked.wait(3));self.assertIsNone(auto._run_row());self.assertIsNone(auto.thread)
+                with self.assertRaises(StartRefused) as caught:auto.start()
+                self.assertEqual(caught.exception.start_state,'busy')
+                self.assertEqual(str(caught.exception),'A previous start is still reaching its pause checkpoint. Retry Start after it stops.')
+                self.assertIsNone(auto._run_row());self.assertIsNone(auto.thread);self.assertEqual(auto._stop_generation,generation)
+                self.assertTrue(auto.stop_event.is_set())
+                with connect(self.db) as db:self.assertEqual(pause_state.read(db,'automatic')['origin'],'user')
+            finally:
+                release.set();stopper.join(5)
+        self.assertFalse(stopper.is_alive());self.assertEqual(errors,[])
+        auto.start();self.assertEqual(auto._stop_generation,generation+1)
+        self.assertEqual(self.wait_auto(auto)['state'],'Completed');merge.approve_automatic.assert_not_called()
     def test_required_working_cleanup_drains_before_retry_is_armed(self):
         now=[100000];visits=[];cleanup=[False];drained=[]
         def lookup(*_):

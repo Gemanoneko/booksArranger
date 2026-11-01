@@ -3,9 +3,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createRequire} from 'node:module';
+import {isDeepStrictEqual} from 'node:util';
 import {binding,sameBinding,hash,NATIVE_CASE,normalOwned,validateAuthority} from '../scripts/qa-phase-contract.mjs';
 export const need=(ok,message)=>{if(!ok)throw Error(message);};
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+// File inventories compare exact members and typed facts; JSON property order is not identity.
+export const sameFileTree=(a,b)=>isDeepStrictEqual(a,b);
 const norm=p=>path.win32.resolve(p).replaceAll('\\','/').toLowerCase();
 export const within=(p,root)=>norm(p).startsWith(norm(root)+'/');
 export function privatePath(p){need(typeof p==='string'&&/^C:[\\/]/i.test(p)&&!p.includes('\0'),'Private local C: path required');need(!/[. ]([\\/]|$)/.test(p)&&!p.slice(2).includes(':'),'Noncanonical private path');return p;}
@@ -29,8 +32,10 @@ export function validatePlan(plan,authority){
  return plan;
 }
 export async function ordinary(p,{file=false,allowHardlinks=false}={}){
- privatePath(p);const st=await fs.lstat(p);need(!st.isSymbolicLink()&&(file?st.isFile():st.isDirectory()),'Nonordinary path: '+p);if(file&&!allowHardlinks)need(st.nlink===1,'Hard-linked input/output refused: '+p);
- for(let at=path.win32.dirname(p);;at=path.win32.dirname(at)){const s=await fs.lstat(at);need(s.isDirectory()&&!s.isSymbolicLink(),'Nonordinary ancestor');if(at===path.win32.dirname(at))break;}return st;
+ privatePath(p);const st=await fs.lstat(p,{bigint:true});need(!st.isSymbolicLink()&&(file?st.isFile():st.isDirectory()),'Nonordinary path: '+p);if(file&&!allowHardlinks)need(st.nlink===1n,'Hard-linked input/output refused: '+p);
+ for(const key of ['size','nlink'])need(st[key]>=0n&&st[key]<=BigInt(Number.MAX_SAFE_INTEGER),'Unsafe numeric file metadata: '+key);
+ for(let at=path.win32.dirname(p);;at=path.win32.dirname(at)){const s=await fs.lstat(at,{bigint:true});need(s.isDirectory()&&!s.isSymbolicLink(),'Nonordinary ancestor');if(at===path.win32.dirname(at))break;}
+ return {dev:st.dev.toString(),ino:st.ino.toString(),size:Number(st.size),nlink:Number(st.nlink)};
 }
 export async function readPin(ref){const st=await ordinary(ref.path,{file:true,allowHardlinks:!!ref.identity});if(ref.identity)need(String(st.dev)===ref.identity.dev&&String(st.ino)===ref.identity.ino&&st.nlink===ref.identity.nlink,'Pinned input native identity differs');need(st.size===ref.size&&st.size<=1024*1024*1024,'Input size differs');const bytes=await fs.readFile(ref.path);need(hash(bytes)===ref.sha256,'Input bytes differ: '+ref.path);return bytes;}
 export async function treeFiles(root){
@@ -42,19 +47,36 @@ export async function verifyInputs(plan){
  for(const rel of ['scripts/qa-real-shell-phase.mjs','tests/real-shell-update.test.mjs','tests/real-shell-update-support.mjs'])need(plan.inputs.some(r=>norm(r.path)===norm(path.join(plan.source_root,rel))),'Fixed native source pin absent');
  for(const required of [plan.source_root,path.dirname(plan.node.path),plan.koffi_root])need(plan.trees.some(t=>norm(t.root)===norm(required)),'Complete source/Node/Koffi tree absent');
  for(const ref of plan.inputs)await readPin(ref);
- for(const tree of plan.trees)need(equal(await treeFiles(tree.root),tree.files),'Input tree changed: '+tree.root);
+ for(const tree of plan.trees)need(sameFileTree(await treeFiles(tree.root),tree.files),'Input tree changed: '+tree.root);
  const raw=await readPin(plan.payload.manifest);need(hash(raw)===plan.binding.artifact_manifest_sha256,'Candidate artifact binding differs');const m=JSON.parse(raw);
  need(m.version===plan.binding.version&&m.source_head===plan.binding.source_head&&m.product_digest===plan.binding.product_digest&&m.build_id===plan.binding.build_id,'Candidate identity differs');
  need(hash(JSON.stringify(m.runtime))===plan.binding.runtime_manifest_sha256&&m.payload?.verified===true&&m.payload.installer_equivalent===true,'Candidate payload/runtime proof absent');
- need(equal(await treeFiles(plan.payload.root),m.payload.files),'Built payload differs');return m;
+ need(sameFileTree(await treeFiles(plan.payload.root),m.payload.files),'Built payload differs');return m;
 }
 export async function freshFixture(plan,manifest){
  try{await fs.lstat(plan.fixture_root);throw Error('Fixture already exists; no adoption or deletion');}catch(e){if(e.code!=='ENOENT')throw e;}
  await ordinary(path.dirname(plan.fixture_root));await fs.mkdir(plan.fixture_root);
  const app=path.join(plan.fixture_root,'app');await fs.mkdir(app);
  for(const [rel,ref] of Object.entries(manifest.payload.files)){need(!path.isAbsolute(rel)&&!rel.includes('..')&&!rel.includes('\\')&&!rel.includes(':'),'Unsafe payload member');const src=path.join(plan.payload.root,rel),dst=path.join(app,rel);need(within(dst,app),'Payload escape');const bytes=await readPin({path:src,...ref});await fs.mkdir(path.dirname(dst),{recursive:true});await fs.writeFile(dst,bytes,{flag:'wx'});}
- need(equal(await treeFiles(app),manifest.payload.files),'Derived payload copy differs');return app;
+ need(sameFileTree(await treeFiles(app),manifest.payload.files),'Derived payload copy differs');return app;
 }
+
+// Only the two documented commands for this already-bound private shell/profile.
+export function createPrivateShellCommands({spawn,exe,profile,env}){
+ privatePath(exe);privatePath(profile);
+ const command=flag=>new Promise((resolve,reject)=>{
+  const child=spawn(exe,[flag,'--shell-profile='+profile,'--start-hidden','--quiet-errors'],{env,windowsHide:true,stdio:'ignore'});
+  child.once('error',reject);child.once('exit',(code,signal)=>code===0&&signal===null?resolve():reject(Error('Private shell command failed: '+flag)));
+ });
+ return Object.freeze({closeWindow:()=>command('--close-window'),quit:()=>command('--quit')});
+}
+export function verifyCloseSession({running,loaded,quit,health,expectedPid,version,windows}){
+ need(running===true&&loaded===true&&quit==='none','Close window did not preserve the primary session');
+ need(Number.isSafeInteger(expectedPid)&&expectedPid>0&&health?.pid===expectedPid&&health.version===version,'Close window did not preserve the same healthy engine');
+ need(windows?.intrusion===null&&Number.isSafeInteger(windows.hiddenOwnWindows)&&windows.hiddenOwnWindows>0,'Primary owned window is not proved hidden after close');
+ return {endpointsOwned:true,healthVersionMatched:true,noVisibleOwnWindow:true};
+}
+
 // Pure comparison. Foreign raw state stays in the private arena only.
 export function ownLeafDelta(before,current,exe,expectedTypes=null){
  need(before&&current&&equal(before.rootSchema,current.rootSchema),'Tray root schema drift');
@@ -118,7 +140,7 @@ export function nativeAdapters(plan,authority){
  function listeners(port){const size=[0];need(tcp(null,size,false,2,3,0)===122&&size[0]<=16*1024*1024,'TCP table size unknown');const b=Buffer.alloc(size[0]);need(tcp(b,size,false,2,3,0)===0,'TCP ownership query failed');const count=b.readUInt32LE();need(4+count*24<=b.length,'TCP table truncated');const rows=[];for(let n=0;n<count;n++){const at=4+n*24,localPort=b.readUInt16BE(at+8);if(localPort===port){const address=b.subarray(at+4,at+8);need(address.equals(Buffer.from([127,0,0,1])),'Private endpoint is not loopback-only');rows.push({pid:b.readUInt32LE(at+20),state:b.readUInt32LE(at)});}}return rows;}
  function endpoint(port,expectedPid=null){const rows=listeners(port);need(rows.length===1&&rows[0].state===2,'One private loopback listener required');if(expectedPid!==null)need(rows[0].pid===expectedPid,'Listener PID differs');const p=retain(rows[0].pid);need(listeners(port).length===1&&listeners(port)[0].pid===p.pid&&wait(p.handle,0)===258,'Listener changed during ownership proof');return {pid:p.pid,exe:p.exe,created:p.created};}
  const visible=U.func('bool __stdcall IsWindowVisible(void *)'),foreground=U.func('void * __stdcall GetForegroundWindow()'),windowPid=U.func('uint32_t __stdcall GetWindowThreadProcessId(void *,_Out_ uint32_t *)'),enumerate=U.func('bool __stdcall EnumWindows(void *,intptr_t)'),proto=k.proto('bool __stdcall BooksPA1Window(void *,intptr_t)');
- function checkWindows(){checks++;const own=new Set(members());let failed='';const cb=k.register(hwnd=>{try{const pid=requiredWindowPid(windowPid,hwnd);if(own.has(pid)&&visible(hwnd))intrusion='Owned process displayed a visible window';return true;}catch(e){failed=e.message;return false;}},k.pointer(proto));try{need(enumerate(cb,0)&&!failed,'Window observation failed');}finally{k.unregister(cb);}const fg=foreground();if(fg){const pid=requiredWindowPid(windowPid,fg);if(own.has(pid))intrusion='Owned process took foreground';}need(!intrusion,intrusion);return {checks,intrusion};}
+ function checkWindows(expectedPid=null){checks++;const own=new Set(members());if(expectedPid!==null){need(Number.isSafeInteger(expectedPid)&&expectedPid>0&&own.has(expectedPid),'Primary window owner is not in this private job');retain(expectedPid);}let failed='',hiddenOwnWindows=0;const cb=k.register(hwnd=>{try{const pid=requiredWindowPid(windowPid,hwnd);if(own.has(pid)){const shown=visible(hwnd);if(shown)intrusion='Owned process displayed a visible window';else if(pid===expectedPid)hiddenOwnWindows++;}return true;}catch(e){failed=e.message;return false;}},k.pointer(proto));try{need(enumerate(cb,0)&&!failed,'Window observation failed');}finally{k.unregister(cb);}const fg=foreground();if(fg){const pid=requiredWindowPid(windowPid,fg);if(own.has(pid))intrusion='Owned process took foreground';}need(!intrusion,intrusion);if(expectedPid!==null){retain(expectedPid);need(hiddenOwnWindows>0,'Primary owned window is not present and hidden');}return {checks,intrusion,hiddenOwnWindows};}
  function dispose(){for(const p of held.values())need(closeProcess(p.handle),'Owned endpoint handle close failed');held.clear();}
  return {registry,monitor:{endpoint,checkWindows,dispose,view:()=>({checks,intrusion}),members}};
 }

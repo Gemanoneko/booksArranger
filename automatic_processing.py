@@ -81,7 +81,7 @@ def research_retry(run):
 class AutomaticProcessing:
     # Defaults for an instance built without __init__ (private test stubs that run _work directly): no book was put
     # back, the run is not closing, no hook is set, no start is pending.
-    _requeued=();_closing_run=False;on_started=None;server_closing=None;start_pending=None
+    _requeued=();_closing_run=False;on_started=None;server_closing=None;start_pending=None;_stop_origin=None;_stop_generation=0
     def __init__(self,merge,research=None,clock=time.time):
         self.merge=merge;self.inventory=merge.inventory;self.database=self.inventory.database
         self.research=research or PublicResearch(PublicClient(self.database))
@@ -329,12 +329,21 @@ class AutomaticProcessing:
             block=self._start_block_reason(run['state'] if run else 'Idle',jobs=self.merge.state(),server_closing=server_closing)
             if block:raise ValueError(block)
             self.merge._no_scan()  # Recheck discovery immediately before admission.
-            if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
-                id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
-                with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
-            else:self._update(run['id'],state='Running',reason='',restart_paused=0)
-            with connect(self.database) as db:__import__('pause_state').clear(db,'automatic')
-            self.stop_event.clear();self.start_pending=None;self._closing_run=False
+            # Do not wait under self.lock for a pause dispatch that may be in queue locks.
+            # Admission and dispatch share this fence, so a checked old Stop cannot cross Start.
+            pause_lock=self.__dict__.setdefault('_pause_origin_lock',threading.RLock())
+            if not pause_lock.acquire(blocking=False):
+                from audio_jobs import StartRefused
+                raise StartRefused('busy','A previous start is still reaching its pause checkpoint. Retry Start after it stops.')
+            try:
+                if not run or run['state']=='Completed' or run['state']=='Needs attention' and not research_retry(run):
+                    id=str(uuid.uuid4());now=stamp();run={'id':id,'phase':'discovery','checkpoint':'{}'}
+                    with connect(self.database) as db:db.execute('INSERT INTO automatic_runs VALUES(?,?,?,?,?,?,?,0)',(id,'Running','discovery','{}','',now,now))
+                else:self._update(run['id'],state='Running',reason='',restart_paused=0)
+                with connect(self.database) as db:__import__('pause_state').clear(db,'automatic')
+                self._stop_generation+=1
+                self._stop_origin=None;self.stop_event.clear();self.start_pending=None;self._closing_run=False
+            finally:pause_lock.release()
             self.thread=threading.Thread(target=self._work,args=(run['id'],),name='BooksArrangerAutomatic',daemon=False);self.thread.start()
         started=self.on_started
         if started:
@@ -452,22 +461,34 @@ class AutomaticProcessing:
         """Stop, Quit (not forced) and the app's own safety stops (disk full, working-file hold: forced). Each also ends
         a pending start (O12): a start the app or Sergei has just stopped must never come back by itself. The rows and
         the notice then read as after Cancel automatic start (RefusedRetry follow-up 4, section 1.4)."""
+        origin=origin or ('closing' if self.closed else 'interrupted' if force else 'user')
         with self.lock:
             cancelled=self.start_pending is not None;self.start_pending=None
             run=self._run_row()
             active=force or bool(run and run['state'] in ('Running','Stopping'))
             if active:
                 if run and run['state']=='Running':self._update(run['id'],state='Stopping',reason='Stopping automatic processing — saving pending work')
-                self.stop_event.set();self.next_retry_at=None
+                # Publish the press before waking the worker, including while its durable write waits.
+                generation=self._stop_generation;self._stop_origin=origin;self.stop_event.set();self.next_retry_at=None
         if cancelled:
             self._pending_wake.set();self._changed()
         if not active:return self.status()
-        origin=origin or ('closing' if self.closed else 'interrupted' if force else 'user')
-        with connect(self.database) as db:__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
-        self.inventory.stop()
-        if origin=='user':self.merge.pause()
-        else:self.merge.pause(origin=origin)
+        self._pause_stopped(generation)
         return self.status()
+    def _pause_stopped(self,generation):
+        # Never hold self.lock while entering scanner/merge locks. Serialize the
+        # durable origin and queue pause together; a later press is read when its
+        # turn arrives, so an older worker cannot overwrite it with a stale origin.
+        with self.__dict__.setdefault('_pause_origin_lock',threading.RLock()):
+            if generation!=self._stop_generation:return  # A newer Start owns the queues now.
+            origin=self._stop_origin
+            with connect(self.database) as db:
+                pause=__import__('pause_state').read(db,'automatic')
+                if origin is not None:pause=__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
+                elif not pause:pause=__import__('pause_state').record(db,'automatic','interrupted','Automatic processing stopped before completing its work')
+            self.inventory.stop()
+            if pause['origin']=='user':self.merge.pause()
+            else:self.merge.pause(origin=pause['origin'])
     def close(self,timeout=30):
         self.closed=True;self.stop(force=True);thread=self.thread
         if thread and thread is not threading.current_thread():
@@ -603,6 +624,7 @@ class AutomaticProcessing:
             raise ValueError('Discovery incomplete or has read errors; saved progress preserved')
 
     def _work(self,id):
+        generation=self._stop_generation
         row=None;identity=None;phase='unknown';research_failed=False;checkpoint={}
         try:
             run=self._run_row();checkpoint=json.loads(run['checkpoint']);phase=run['phase'];self.live_checkpoint=checkpoint
@@ -804,12 +826,7 @@ class AutomaticProcessing:
             self.current=None;self.next_retry_at=None;self.live_checkpoint=None
             if isinstance(checkpoint,dict) and checkpoint.get('pending') is not None:self._take_requeued(checkpoint)  # saved, so continuing reaches them
             # Report Paused only after both scan and owned converter/cleanup have stopped.
-            with connect(self.database) as db:
-                pause=__import__('pause_state').read(db,'automatic')
-                if not pause:pause=__import__('pause_state').record(db,'automatic','interrupted','Automatic processing stopped before completing its work')
-            self.inventory.stop()
-            if pause['origin']=='user':self.merge.pause()
-            else:self.merge.pause(origin=pause['origin'])
+            self._pause_stopped(generation)
             while self.inventory.worker and self.inventory.worker.is_alive():self.inventory.worker.join(.2)
             while self.merge.state()['state']=='Pausing':time.sleep(.2)
             try:self._paused_checkpoint(id,checkpoint)

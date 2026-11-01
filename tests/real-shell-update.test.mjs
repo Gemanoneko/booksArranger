@@ -9,7 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {hash,NATIVE_CASE,PA1_TITLE,PA1_ASSERTIONS} from '../scripts/qa-phase-contract.mjs';
-import {need,readPin,validatePlan,verifyInputs,treeFiles,nativeAdapters} from './real-shell-update-support.mjs';
+import {need,readPin,validatePlan,verifyInputs,treeFiles,nativeAdapters,createPrivateShellCommands,verifyCloseSession} from './real-shell-update-support.mjs';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function freePort(){return new Promise((resolve,reject)=>{const server=net.createServer();server.once('error',reject);server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port));});});}
 // A self-signed X.509 certificate in plain DER: the fake GitHub's, accepted only through --ignore-certificate-errors.
@@ -133,15 +133,24 @@ test(PA1_TITLE,{timeout:300000},async()=>{
   const health = await (await fetch('http://127.0.0.1:' + enginePort + '/api/health',{signal:AbortSignal.timeout(5000)})).json();
   monitor.endpoint(enginePort,owner.pid);assert.equal(health.pid,owner.pid,'health belongs to private owned engine');
   assert.equal(health.version, pkg.version, 'the old engine answers again');
-  // Quit through a second copy (m-12, the ready state): nothing is left running.
-  const quit = spawn(exe, ['--quit', '--shell-profile=' + dirs.profile], { env, windowsHide: true, stdio: 'ignore' });
-  await new Promise((resolve,reject) => {quit.once('error',reject);quit.once('exit',(code,signal)=>code===0&&signal===null?resolve():reject(Error('Quit helper failed')));});
+  // The documented command reaches the same close callback as the window button.
+  // The primary stays hidden; this does not claim a physical click or visible-to-hidden transition.
+  const fixture=createPrivateShellCommands({spawn,exe,profile:dirs.profile,env});
+  monitor.endpoint(debugPort,shell.pid);assert.equal(exitedAt,null);assert.equal(shell.exitCode,null);
+  await fixture.closeWindow();
+  const closeStatus=await status();
+  monitor.endpoint(enginePort,owner.pid);
+  const closeHealth=await (await fetch('http://127.0.0.1:'+enginePort+'/api/health',{signal:AbortSignal.timeout(5000)})).json();
+  monitor.endpoint(enginePort,owner.pid);
+  const closeProof=verifyCloseSession({running:exitedAt===null&&shell.exitCode===null,loaded:closeStatus.loaded,quit:closeStatus.quit,health:closeHealth,expectedPid:owner.pid,version:pkg.version,windows:monitor.checkWindows(shell.pid)});
+  // Quit through the third invocation, still targeting the same private primary/profile.
+  await fixture.quit();
   const end = Date.now() + 60000;
   while (!exitedAt && Date.now() < end) await sleep(250);
   assert.ok(exitedAt, 'Quit ends the shell');
   assert.equal(shell.exitCode,0);monitor.checkWindows();assert.equal(intrusion,null);
   assert.deepEqual(await treeFiles(app),manifest.payload.files,'Copied candidate payload remains byte exact');
-  const functional={schema:'books-pa1-functional-v1',binding:plan.binding,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:work,exe,downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:true,closedByQuit:true,payloadUnchanged:true,endpointsOwned:true,noVisibleOwnWindow:true,intrusion:null,window_observations:monitor.view().checks};
+  const functional={schema:'books-pa1-functional-v1',binding:plan.binding,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:work,exe,downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:closeProof.healthVersionMatched,closedByQuit:true,payloadUnchanged:true,endpointsOwned:closeProof.endpointsOwned,noVisibleOwnWindow:closeProof.noVisibleOwnWindow,intrusion:null,window_observations:monitor.view().checks};
   console.log('BOOKS_PA1_FUNCTIONAL '+JSON.stringify(functional));
  }finally{
   clearInterval(timer);cdp?.close();await new Promise(resolve=>github?github.close(resolve):resolve());

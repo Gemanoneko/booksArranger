@@ -7,6 +7,9 @@ import http from 'node:http';
 import https from 'node:https';
 import Module,{syncBuiltinESMExports} from 'node:module';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {phaseAccounting,CANONICAL_NODE_ENTRIES,ORIGINAL_NODE_ENTRIES,PA1_ENTRY,PA1_ASSERTIONS,NATIVE_CASE,NATIVE_ROLES,hash,binding,validateAuthority,validateFunctional,normalOwned,validateNativeEvidence,nativeRecordReferences,requiresNativeQa} from '../scripts/qa-phase-contract.mjs';
 let nativeAttempts=0;const restore=[];
 const deny=()=>{nativeAttempts++;throw Error('Native adapter reached during pure contract tests');};
@@ -14,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -76,3 +79,86 @@ test('failed or unknown HWND lookup refuses both enumeration and foreground iden
 test('actual outer forwarding writes distinct controller bytes without inner TAP substitution',async()=>{const result={...normal('controller marker bytes\n'),err:'controller diagnostic bytes\n'},seen={stdout:[],stderr:[]};const streams=Object.fromEntries(Object.keys(seen).map(name=>[name,{write(bytes,done){seen[name].push(Buffer.from(bytes));done();}}]));await forwardControllerStreams(result,streams);assert.equal(Buffer.concat(seen.stdout).toString(),result.out);assert.equal(Buffer.concat(seen.stderr).toString(),result.err);assert.notEqual(result.out,'inner TAP bytes\n');});
 test('outer forwarding refuses abnormal owner before writes and rejects write failure',async()=>{let writes=0;const stream={write(_,done){writes++;done();}};await assert.rejects(forwardControllerStreams({...normal(),forced:true},{stdout:stream,stderr:stream}),/Abnormal owned/);assert.equal(writes,0);await assert.rejects(forwardControllerStreams(normal('marker'),{stdout:{write(_,done){done(Error('sink failed'));}},stderr:stream}),/sink failed/);assert.equal(writes,0);});
 test('callback hashes bound to inner TAP instead of controller bytes refuse despite coherent hashes',()=>{const e=evidence(),callback=JSON.parse(e.records.callback);for(const role of ['stdout','stderr']){callback[role+'_sha256']=hash(e.records[role]);callback[role+'_bytes']=e.records[role].length;}e.records.callback=encoded(callback);e.summary.records.callback.sha256=hash(e.records.callback);e.summary.records.callback.size=e.records.callback.length;assert.notDeepEqual(e.records.stdout,e.records.controller_stdout);assert.notDeepEqual(e.records.stderr,e.records.controller_stderr);assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.b),/Outer callback must bind original controller streams/);});
+
+// Tiny ordinary filesystem fixtures exercise the actual inventory verifier/copy.
+// Fake Node/DLL bytes are inert; the suite's process/network/native guards stay installed.
+async function fileInventoryFixture(t){
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'books-pa1-inventory-'));
+ t.after(async()=>{assert.equal(path.dirname(root),path.resolve(os.tmpdir()));assert.ok(path.basename(root).startsWith('books-pa1-inventory-'));await fs.rm(root,{recursive:true});});
+ const write=async(rel,bytes)=>{const p=path.join(root,rel);await fs.mkdir(path.dirname(p),{recursive:true});await fs.writeFile(p,bytes);return p;};
+ const source=path.join(root,'source'),nodeRoot=path.join(root,'node'),koffi=path.join(root,'owner','koffi'),payload=path.join(root,'payload');
+ const files=[];
+ for(const rel of ['scripts/qa-phase-contract.mjs','scripts/qa-real-shell-phase.mjs','tests/real-shell-update.test.mjs','tests/real-shell-update-support.mjs'])files.push(await write('source/'+rel,'inert source '+rel));
+ files.push(await write('node/node.exe','inert Node fixture'),await write('owner/koffi/index.js','inert ownership fixture'),await write('helper/bounded-check.mjs','inert helper'),await write('helper/bounded-child.mjs','inert child'));
+ await write('payload/Books Arranger.exe','not an executable');await write('payload/resources/backend/VERSION','0.24.2\n');
+ const realStat=fs.lstat.bind(fs),realRead=fs.readFile.bind(fs),system=new Map(['kernel32.dll','advapi32.dll','ntdll.dll','user32.dll','iphlpapi.dll'].map(name=>['C:/Windows/System32/'+name,Buffer.from('inert '+name)]));
+ const key=p=>String(p).replaceAll(String.fromCharCode(92),'/');
+ t.mock.method(fs,'lstat',async(p,options)=>{const bytes=system.get(key(p));if(!bytes)return realStat(p,options);assert.deepEqual(options,{bigint:true});return {dev:1n,ino:2n,nlink:1n,size:BigInt(bytes.length),isFile:()=>true,isDirectory:()=>false,isSymbolicLink:()=>false};});
+ t.mock.method(fs,'readFile',async(p,...args)=>system.has(key(p))?system.get(key(p)):realRead(p,...args));
+ const pin=async p=>{const bytes=await fs.readFile(p),s=await fs.lstat(p,{bigint:true});return {path:p,size:bytes.length,sha256:hash(bytes),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
+ const inputs=await Promise.all([...files,...system.keys()].map(pin));
+ const pythonFacts=tree=>Object.fromEntries(Object.entries(tree).reverse().map(([name,f])=>[name,{sha256:f.sha256,size:f.size}]));
+ const trees=await Promise.all([source,nodeRoot,koffi].map(async root=>({root,files:pythonFacts(await treeFiles(root))})));
+ const p={binding:candidate(),node:inputs.find(f=>f.path===path.join(nodeRoot,'node.exe')),helper:inputs.find(f=>f.path===path.join(root,'helper','bounded-check.mjs')),source_root:source,koffi_root:koffi,inputs,trees,payload:{root:payload},fixture_root:path.join(root,'pa1-'+candidate().build_id)};
+ p.binding.phase_contract_sha256=inputs.find(f=>f.path===path.join(source,'scripts','qa-phase-contract.mjs')).sha256;
+ const published=pythonFacts(await treeFiles(payload)),runtime={fixture:true};p.binding.runtime_manifest_sha256=hash(JSON.stringify(runtime));
+ const publish=async inventory=>{const m={version:p.binding.version,source_head:p.binding.source_head,product_digest:p.binding.product_digest,build_id:p.binding.build_id,runtime,payload:{verified:true,installer_equivalent:true,files:inventory}};const file=await write('release-artifacts.json',JSON.stringify(m));p.payload.manifest=await pin(file);p.binding.artifact_manifest_sha256=p.payload.manifest.sha256;return m;};
+ await publish(published);return {root,p,published,publish,payload};
+}
+test('published Python-shaped payload inventory verifies and copies without depending on JSON key order',async t=>{
+ const f=await fileInventoryFixture(t),actual=await treeFiles(f.payload);
+ assert.deepEqual(Object.keys(f.published['Books Arranger.exe']),['sha256','size']);assert.deepEqual(Object.keys(actual['Books Arranger.exe']),['size','sha256']);
+ assert.notEqual(JSON.stringify(actual),JSON.stringify(f.published));assert.equal(sameFileTree(actual,f.published),true);
+ const manifest=await verifyInputs(f.p),app=await freshFixture(f.p,manifest);
+ assert.equal(sameFileTree(await treeFiles(app),manifest.payload.files),true,'same exact comparator is used by controller postflight');
+ assert.deepEqual(await fs.readFile(path.join(app,'Books Arranger.exe')),await fs.readFile(path.join(f.payload,'Books Arranger.exe')));
+});
+test('actual payload verifier rejects changed bytes, members, keys and typed facts after manifest rebinding',async t=>{
+ const f=await fileInventoryFixture(t),name='Books Arranger.exe';
+ for(const alter of [v=>delete v[name],v=>v['unexpected.exe']={...v[name]},v=>v[name].size=String(v[name].size),v=>delete v[name].sha256,v=>v[name].extra=true,v=>v[name].sha256='0'.repeat(64),v=>v[name]=[v[name].size,v[name].sha256]]){
+  const changed=structuredClone(f.published);alter(changed);await f.publish(changed);await assert.rejects(verifyInputs(f.p),/Built payload differs/);
+ }
+ await f.publish(f.published);const file=path.join(f.payload,name),bytes=await fs.readFile(file);bytes[0]^=1;await fs.writeFile(file,bytes);await assert.rejects(verifyInputs(f.p),/Built payload differs/);
+});
+test('readPin preserves adjacent inode identities above 2^53 and rejects the wrong one before reading bytes',async t=>{
+ const file='C:/private/identity.bin',bytes=Buffer.from('private pin'),ino=9007199254740993n,other=ino-1n;let reads=0;
+ assert.equal(Number(ino),Number(other),'regression needs an actual Number collision');
+ t.mock.method(fs,'lstat',async(p,options)=>{assert.deepEqual(options,{bigint:true});const own=p===file;return {dev:9007199254740995n,ino,nlink:1n,size:BigInt(bytes.length),isFile:()=>own,isDirectory:()=>!own,isSymbolicLink:()=>false};});
+ t.mock.method(fs,'readFile',async p=>{assert.equal(p,file);reads++;return bytes;});
+ const ref={path:file,size:bytes.length,sha256:hash(bytes),identity:{dev:'9007199254740995',ino:String(ino),nlink:1}};
+ const stat=await ordinary(file,{file:true});assert.equal(stat.ino,String(ino));assert.equal(stat.dev,ref.identity.dev);assert.equal(stat.size,bytes.length);assert.equal(stat.nlink,1);
+ assert.deepEqual(await readPin(ref),bytes);assert.equal(reads,1);
+ await assert.rejects(readPin({...ref,identity:{...ref.identity,ino:String(other)}}),/native identity differs/);assert.equal(reads,1);
+ await assert.rejects(readPin({...ref,identity:{...ref.identity,dev:String(9007199254740994n)}}),/native identity differs/);assert.equal(reads,1);
+});
+test('bigint metadata retains hardlink, ancestor, safe-number and byte integrity refusals',async t=>{
+ const file='C:/private/identity.bin',bytes=Buffer.from('private pin');let links=1n,size=BigInt(bytes.length),symlink=false,parentLink=false;
+ t.mock.method(fs,'lstat',async(p,options)=>{assert.deepEqual(options,{bigint:true});const own=p===file;return {dev:1n,ino:2n,nlink:links,size,isFile:()=>own,isDirectory:()=>!own,isSymbolicLink:()=>own?symlink:parentLink};});
+ t.mock.method(fs,'readFile',async p=>{assert.equal(p,file);return bytes;});
+ const ref={path:file,size:bytes.length,sha256:hash(bytes),identity:{dev:'1',ino:'2',nlink:2}};
+ links=2n;await assert.rejects(ordinary(file,{file:true}),/Hard-linked/);assert.deepEqual(await readPin(ref),bytes,'exact read-only hardlink pin remains supported');
+ await assert.rejects(readPin({...ref,sha256:'0'.repeat(64)}),/Input bytes differ/);
+ links=1n;size=BigInt(Number.MAX_SAFE_INTEGER)+1n;await assert.rejects(ordinary(file,{file:true}),/Unsafe numeric file metadata: size/);
+ size=BigInt(bytes.length);links=BigInt(Number.MAX_SAFE_INTEGER)+1n;await assert.rejects(ordinary(file,{file:true,allowHardlinks:true}),/Unsafe numeric file metadata: nlink/);
+ links=1n;symlink=true;await assert.rejects(ordinary(file,{file:true}),/Nonordinary path/);
+ symlink=false;parentLink=true;await assert.rejects(ordinary(file,{file:true}),/Nonordinary ancestor/);
+});
+
+test('private shell commands route close then Quit only to the same hidden private executable and profile',async()=>{
+ const calls=[],exe='C:/private/app/Books Arranger.exe',profile='C:/private/home/profile',env={TEMP:'C:/private/home/temp'};
+ const fake=(file,args,options)=>{calls.push({file,args,options});const listeners={};queueMicrotask(()=>listeners.exit(0,null));return {once(name,fn){listeners[name]=fn;return this;}};};
+ const fixture=createPrivateShellCommands({spawn:fake,exe,profile,env});assert.deepEqual(Object.keys(fixture),['closeWindow','quit']);assert.equal(Object.isFrozen(fixture),true);
+ await fixture.closeWindow();await fixture.quit();
+ assert.deepEqual(calls,[{file:exe,args:['--close-window','--shell-profile='+profile,'--start-hidden','--quiet-errors'],options:{env,windowsHide:true,stdio:'ignore'}},{file:exe,args:['--quit','--shell-profile='+profile,'--start-hidden','--quiet-errors'],options:{env,windowsHide:true,stdio:'ignore'}}]);
+ for(const outcome of [{code:1,signal:null},{code:0,signal:'SIGTERM'},{error:Error('command spawn refused')}]){
+  const failing=()=>{const listeners={};queueMicrotask(()=>outcome.error?listeners.error(outcome.error):listeners.exit(outcome.code,outcome.signal));return {once(name,fn){listeners[name]=fn;return this;}};};
+  const f=createPrivateShellCommands({spawn:failing,exe,profile,env});await assert.rejects(f.closeWindow());await assert.rejects(f.quit());
+ }
+});
+test('close-session proof requires the live primary, unchanged healthy engine and an observed hidden owned window',()=>{
+ const proof={running:true,loaded:true,quit:'none',health:{pid:42,version:'0.24.2'},expectedPid:42,version:'0.24.2',windows:{checks:3,intrusion:null,hiddenOwnWindows:1}},before=encoded(proof);
+ assert.deepEqual(verifyCloseSession(proof),{endpointsOwned:true,healthVersionMatched:true,noVisibleOwnWindow:true});assert.deepEqual(encoded(proof),before);
+ for(const alter of [p=>p.running=false,p=>p.loaded=false,p=>p.quit='requested',p=>p.health.pid=43,p=>p.health.version='0.24.1',p=>p.health=null,p=>p.expectedPid=0,p=>p.windows.intrusion='visible own window',p=>p.windows.hiddenOwnWindows=0,p=>p.windows.hiddenOwnWindows=NaN,p=>p.windows=null]){
+  const p=structuredClone(proof);alter(p);assert.throws(()=>verifyCloseSession(p));
+ }
+});

@@ -408,8 +408,14 @@ class RealWorkerResumeTests(unittest.TestCase):
         def refused():
             # Positive control: the restart the old code made at once is refused by the real queue while it stops.
             from audio_jobs import StartRefused
-            with self.assertRaisesRegex(StartRefused, 'still pausing'):
+            with self.assertRaises(StartRefused) as caught:
                 self.merge.resume(recheck=False)
+            self.assertEqual(caught.exception.start_state,'busy')
+            self.assertIn(str(caught.exception),{
+                'Pause is still reaching the queue checkpoints. Retry Start after it completes.',
+                'The audiobook worker is still pausing. Retry Start after it stops.',
+                'The previous audiobook worker is still pausing. Retry Start after it stops.',
+                'A previous start is still reaching its pause checkpoint. Retry Start after it stops.'})
         value, answer = self.cancel_while_stopping(entered, meanwhile=refused)
         outcome = answer['update']['outcome']
         self.assertEqual((answer['phase'], outcome['result'], outcome['resume_problems']), ('running', 'cancelled', []))

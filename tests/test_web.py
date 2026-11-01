@@ -122,6 +122,22 @@ class BrowserTests(unittest.TestCase):
         status,headers,raw=self.call(*args,**kwargs)
         return status,json.loads(raw)
 
+    def ready_candidate_page(self,path):
+        # An unprimed candidate read may synchronize groups and invalidate its
+        # own catalog token. Re-ask once, exactly as a fresh browser poll would;
+        # no sleep or open-ended retry may hide a page that never settles.
+        code,page=self.json_call(path)
+        if code==503:
+            self.assertEqual(page,{'error':'Status is still updating; retrying'})
+            code,page=self.json_call(path)
+        self.assertEqual(code,200,('Candidate page did not settle after at most one synchronization response',page))
+        return page
+
+    def assert_candidate_groups_current(self):
+        import groups
+        with connect(self.database) as db:
+            self.assertTrue(all(groups.current(db,root) for root in self.inventory.source_roots('Audiobooks')))
+
     def wait_scan(self):
         finish_scan(self.inventory)
 
@@ -135,8 +151,9 @@ class BrowserTests(unittest.TestCase):
         chips=re.findall(r"'([a-z_]+)'",re.search(r"const attentionKeys=\[([^\]]*)\]",script)[1].replace('...NEEDS_KEYS',needs))
         self.assertGreaterEqual(len(chips),17,chips)
         for group in chips:
-            code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group='+group)
-            self.assertEqual(code,200,(group,page));self.assertEqual(page['rows'],[],group)
+            page=self.ready_candidate_page('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group='+group)
+            self.assertEqual(page['rows'],[],group);self.assertEqual(page['total'],0,group)
+            self.assert_candidate_groups_current()
         code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates&status=output_attention&group=no_such_chip')
         self.assertEqual((code,page['error']),(400,'Unknown attention group'),'positive control: an unknown chip is still refused')
         # One list: the server's chips are exactly the page's, and the counts in the status carry every one of them.
@@ -249,9 +266,13 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(code,200);self.assertEqual(page['total'],5)
         self.assertEqual(len(page['rows']),5)
         self.assertEqual(page['rows'][0]['modified'],'1700000000000000101')
-        code,page=self.json_call('/api/inventory?library=Audiobooks&view=candidates')
-        self.assertEqual(code,200);self.assertEqual(page['total'],1)
+        page=self.ready_candidate_page('/api/inventory?library=Audiobooks&view=candidates')
+        self.assertEqual(page['total'],1);self.assertEqual(len(page['rows']),1)
+        self.assert_candidate_groups_current()
         row=page['rows'][0]
+        with connect(self.database) as db:
+            current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(row['id'],)).fetchone()
+        self.assertEqual((row['revision'],row['fingerprint']),tuple(current))
         review={'title':'Book','author':'Writer Jane','canonical_author':'Jane Writer','narrator':'Reader',
             'original_language':'Other','series':'','number':'','genre':'','topic':'','multi_author':False,'anthology':False,'universe':'QA Universe'}
         payload={'library':'Audiobooks','id':row['id'],'revision':row['revision'],'review':review,'approve':False}
@@ -260,6 +281,11 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(saved['row']['review']['universe'],'QA Universe')
         self.assertEqual(saved['row']['review']['canonical_author'],'Jane Writer')
         self.assertIn('QA Universe',saved['row']['preview']['path'])
+        shown=self.ready_candidate_page('/api/inventory?library=Audiobooks&view=candidates')
+        self.assertEqual(shown['total'],1)
+        self.assertEqual(shown['rows'][0]['id'],row['id'])
+        self.assertEqual(shown['rows'][0]['revision'],saved['row']['revision'])
+        self.assertEqual(shown['rows'][0]['review'],saved['row']['review'])
         # A stale revision (2026-10-26, Save preview metadata): typed 409 with the book as it is now, so the page saves his
         # values again on the new revision (ruling 35).
         code,stale=self.json_call('/api/candidate/review',payload)
@@ -487,6 +513,33 @@ class BrowserTests(unittest.TestCase):
             code, body = self.json_call('/api/candidate/destination', {'library': 'Audiobooks', 'id': identity, 'revision': 1, 'folder': None, 'queue': True, 'title': 'Book'})
         self.assertEqual((code, body['outcome']), (200, 'saved'), body)
         choose.assert_called_once_with(identity, 1, None)
+
+
+class CandidatePageReadinessTests(unittest.TestCase):
+    def client(self,responses):
+        client=BrowserTests('test_every_attention_chip_is_served_through_the_http_route')
+        client.json_call=Mock(side_effect=responses)
+        return client
+
+    def test_one_synchronization_response_is_followed_by_the_current_page(self):
+        path='/api/inventory?library=Audiobooks&view=candidates'
+        current={'rows':[{'id':'current-book','revision':7}],'total':1}
+        client=self.client([(503,{'error':'Status is still updating; retrying'}),(200,current)])
+        self.assertEqual(client.ready_candidate_page(path),current)
+        self.assertEqual(client.json_call.call_count,2)
+        self.assertTrue(all(call.args==(path,) and call.kwargs=={} for call in client.json_call.call_args_list))
+
+    def test_repeated_busy_and_other_errors_are_never_hidden_by_reasks(self):
+        path='/api/inventory?library=Audiobooks&view=candidates'
+        busy=(503,{'error':'Status is still updating; retrying'})
+        cases=[([busy,busy],2),([(400,{'error':'Unknown attention group'})],1),
+               ([(500,{'error':'Local catalog request failed; source files remain untouched'})],1),
+               ([(503,{'error':'Different failure'})],1)]
+        for replies,expected_calls in cases:
+            with self.subTest(replies=replies):
+                client=self.client(replies)
+                with self.assertRaises(AssertionError):client.ready_candidate_page(path)
+                self.assertEqual(client.json_call.call_count,expected_calls)
 
 
 class WindowlessMainTests(unittest.TestCase):

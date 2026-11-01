@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {hash,NATIVE_CASE,NATIVE_ROLES,normalOwned,validateFunctional,validateNativeEvidence} from './qa-phase-contract.mjs';
-import {need,readPin,ordinary,within,validatePlan,verifyInputs,freshFixture,treeFiles,nativeAdapters,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
+import {need,readPin,ordinary,within,validatePlan,verifyInputs,freshFixture,treeFiles,sameFileTree,nativeAdapters,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
 const encode=value=>Buffer.from(JSON.stringify(value));
 async function freshWrite(file,bytes){await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:hash(bytes),size:bytes.length};}
 // The external reviewed driver owns this controller with unchanged runOwned.
@@ -34,7 +34,7 @@ export async function runFixedPhase(planPath,planSha,deadline,adapters=null){
  let cleanup;try{cleanup=await cleanupOwnLeaf({plan,authority,owned:result,before,adapter:native.registry,deadline});}
  catch(error){if(error.cleanup)await freshWrite(path.join(plan.evidence_root,'cleanup-failure.json'),encode(error.cleanup));throw error;}
  const cleanupRef=await freshWrite(path.join(plan.evidence_root,'cleanup.json'),encode(cleanup));remaining();
- await verifyInputs(plan);need(JSON.stringify(await treeFiles(app))===JSON.stringify(manifest.payload.files),'Copied payload changed after normal closure');remaining();
+ await verifyInputs(plan);need(sameFileTree(await treeFiles(app),manifest.payload.files),'Copied payload changed after normal closure');remaining();
  const post={schema:'books-native-postflight-v1',binding:plan.binding,unchanged:true,plan_sha256:planSha,owned_sha256:owned.sha256,baseline_sha256:hash(encode(before))};
  const postRef=await freshWrite(path.join(plan.evidence_root,'postflight.json'),encode(post));native.monitor.dispose();
  const marker={schema:'books-pa1-controller-v1',plan_sha256:planSha,owned_sha256:owned.sha256,cleanup_sha256:cleanupRef.sha256,postflight_sha256:postRef.sha256};
