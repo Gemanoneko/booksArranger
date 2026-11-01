@@ -4,6 +4,8 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import * as asar from '@electron/asar';
+import {getCurrentFuseWire,FuseVersion,FuseV1Options} from '@electron/fuses';
+import yaml from 'js-yaml';
 import {productTree} from './release-contract.mjs';
 const request=JSON.parse(fs.readFileSync(0,'utf8'));
 const root=request.root,output=request.output,unpacked=path.join(output,'win-unpacked');
@@ -23,6 +25,37 @@ if(shellPackage.version!==request.version)throw Error('ASAR shell version mismat
 for(const name of ['desktop/main.js','desktop/icon.png','desktop/preload.js']){
  if(fs.existsSync(path.join(root,name))&&!asar.extractFile(archive,name).equals(fs.readFileSync(path.join(root,name))))throw Error('ASAR source mismatch '+name);
 }
+
+if(!request.shell||!request.shell_manifest||!request.pack_inputs_sha256)throw Error('Exact staged shell proof missing');
+if(facts(path.join(root,'scripts/build-inputs.json')).sha256!==request.pack_inputs_sha256)throw Error('Pack input inventory changed');
+const expectedShell=JSON.parse(fs.readFileSync(request.shell_manifest,'utf8'));
+if(!same(sorted(map(request.shell)),sorted(expectedShell)))throw Error('Private shell stage changed');
+const shellFiles={};
+for(const member of asar.listPackage(archive)){
+ const name=member.replace(/^[/\\]/,'').replace(/\\/g,'/');
+ const info=asar.statFile(archive,name);
+ if(info.link)throw Error('ASAR link member refused');
+ if(!info.files)shellFiles[name]=asar.extractFile(archive,name);
+}
+if(!same(Object.keys(shellFiles).sort(),Object.keys(expectedShell).sort()))throw Error('ASAR complete shell/dependency membership mismatch');
+const ignoredMetadata=new Set(['dist','gitHead','build','jspm','ava','xo','nyc','eslintConfig','contributors','bundleDependencies','tags','scripts','keywords']);
+function canonicalJson(value){if(Array.isArray(value))return value.map(canonicalJson);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonicalJson(value[k])]));return value;}
+for(const [name,expected]of Object.entries(expectedShell)){
+ const actual=shellFiles[name];
+ if(name==='package.json'||name.endsWith('/package.json')){
+  const source=JSON.parse(fs.readFileSync(path.join(request.shell,name),'utf8'));
+  const isMain=name==='package.json';
+  const removeBabel=source.dependencies&&typeof source.dependencies==='object'&&!Object.keys(source.dependencies).some(n=>n.startsWith('babel'));
+  for(const key of Object.keys(source))if(key.startsWith('_')||ignoredMetadata.has(key)||(isMain&&key==='devDependencies')||(!isMain&&key==='bugs')||(removeBabel&&key==='babel'))delete source[key];
+  if(!same(canonicalJson(source),canonicalJson(JSON.parse(actual.toString('utf8')))))throw Error('ASAR runtime package metadata differs '+name);
+ }else if(actual.length!==expected.size||hash(actual)!==expected.sha256)throw Error('ASAR complete shell/dependency bytes differ '+name);
+}
+const fuseWire=await getCurrentFuseWire(path.join(unpacked,'Books Arranger.exe'));
+if(fuseWire.version!==FuseVersion.V1||fuseWire[FuseV1Options.RunAsNode]!==48||fuseWire[FuseV1Options.EnableNodeOptionsEnvironmentVariable]!==48||fuseWire[FuseV1Options.OnlyLoadAppFromAsar]!==49)throw Error('Packaged Electron fuse configuration differs');
+const updateConfig=yaml.load(fs.readFileSync(path.join(unpacked,'resources/app-update.yml'),'utf8'));
+const expectedPublish=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).build.publish;
+for(const key of ['provider','owner','repo'])if(updateConfig?.[key]!==expectedPublish[key])throw Error('Packaged update configuration differs '+key);
+
 const backendVersion=fs.readFileSync(path.join(unpacked,'resources','backend','VERSION'),'utf8').trim();
 if(backendVersion!==request.version)throw Error('Packaged backend version mismatch');
 const protectedFiles={};

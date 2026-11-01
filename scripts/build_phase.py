@@ -11,11 +11,11 @@ import urllib.request
 
 ROOT=Path(__file__).absolute().parent.parent
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
-from build_native import bootstrap,lease_check
+from build_native import bootstrap,lease_check,load_pack_inputs
 
-def run(argv, proof, cwd=ROOT):
+def run(argv, proof, cwd=ROOT, input=None):
     remaining=max(1,(proof['deadline']-time.time()*1000)/1000)
-    result=subprocess.run(argv,cwd=cwd,capture_output=True,timeout=remaining,creationflags=0x08000000,env=os.environ.copy())
+    result=subprocess.run(argv,cwd=cwd,input=input,capture_output=True,timeout=remaining,creationflags=0x08000000,env=os.environ.copy())
     # electron-builder reports its errors on stdout, so a stderr-only message is empty.
     # Separate bounded tails: a long stdout can never push stderr out of the message.
     if result.returncode:raise RuntimeError('Build command failed '+str(argv[:2])+'\nstderr tail: '+result.stderr.decode(errors='replace')[-4000:]+'\nstdout tail: '+result.stdout.decode(errors='replace')[-4000:])
@@ -67,23 +67,95 @@ def prepare(tree,proof):
     for source in (ROOT/'web').iterdir():tree.copy(source,backend/'web'/source.name)
     tree.write(backend/'VERSION',[(pkg['version']+'\n').encode()])
     python=runtime/'python'/'python.exe'
-    run([str(python),'-I','-m','compileall','-q','-j','0','--invalidation-mode','unchecked-hash',str(backend)],proof)
+    run([str(python),'-I','-m','compileall','-q','-j','1','--invalidation-mode','unchecked-hash',str(backend)],proof)
     version=run([str(python),'-I','-B','-c','import sys;sys.path.insert(0,sys.argv[1]);import desktop_backend,web_server;print(web_server.version())',str(backend)],proof).strip()
     if version!=pkg['version']:raise RuntimeError('Staged backend version mismatch')
     return runtime,backend,pins,pkg
+
+
+def stage_shell(tree,proof,pkg):
+    config=load_pack_inputs()
+    owned=Path(proof['ownedRoot']);seed=ROOT/config['seedDirectory']
+    if proof.get('pack_inputs')!={'root':str(seed),'config_sha256':hashlib.sha256((ROOT/'scripts/build-inputs.json').read_bytes()).hexdigest()}:
+        raise RuntimeError('Missing exact native-held pack inputs')
+    # Recheck the complete retained seed, including the cached stock Electron ZIP.
+    if tree.tree_manifest(seed)!=config['files']:raise RuntimeError('Pack seed changed')
+    shell=tree.directory(owned/'shell',create=True)
+    tree.copy(ROOT/'package.json',shell/'package.json')
+    for relative in tree.tree_manifest(ROOT/'desktop'):
+        tree.copy(ROOT/'desktop'/relative,shell/'desktop'/relative)
+    for relative,facts in config['productionFiles'].items():
+        tree.protect(ROOT/relative,facts)
+        tree.copy(ROOT/relative,shell/relative)
+    for package in config['productionPackages']:
+        actual=json.loads((shell/package['path']/'package.json').read_text('utf8'))
+        if actual.get('version')!=package['version']:
+            raise RuntimeError('Production package version differs from lockfile')
+    manifest=tree.tree_manifest(shell)
+    tree.write(owned/'shell-manifest.json',[json.dumps(manifest,sort_keys=True).encode()])
+    icons=tree.directory(owned/'icons',create=True)
+    tree.write(owned/'icons-request.json',[json.dumps({'lease_nonce':proof['nonce'],'input':str(ROOT/'desktop/icon.png'),'output':str(icons)},sort_keys=True).encode()])
+    run([proof['node'],str(ROOT/'scripts/build-builder.mjs'),'--icons'],proof,input=json.dumps(proof).encode())
+    icon=icons/'icon.ico'
+    if tree.protect(icon)['size']<22 or icon.read_bytes()[:4]!=b'\0\0\1\0':
+        raise RuntimeError('Private icon conversion failed')
+    return shell,manifest,icon,config,seed
+
+def directory_identity(tree,folder):
+    import ctypes
+    from native_io import kernel,FileInfo
+    tree.directory(folder)
+    info=FileInfo()
+    if not kernel.GetFileInformationByHandle(tree.directories[str(folder).casefold()].handles[-1],ctypes.byref(info)):
+        raise RuntimeError('Fresh output identity unavailable')
+    return [int(info.volume),int(info.index_high),int(info.index_low)]
+
+def private_nsis_include(folder):
+    # NSIS parser escaping is separate from shell escaping; this is an absolute
+    # private constant in a compile-time-only BUILD_UNINSTALLER customHeader.
+    value=str(folder)
+    if any(c in value for c in '\0\r\n'):raise RuntimeError('Unsafe NSIS private path')
+    value=value.replace('$','$$').replace('"','$\\"')
+    return ('!macro customHeader\n  !ifdef BUILD_UNINSTALLER\n    InstallDir "'+value+'"\n  !endif\n!macroend\n').encode()
+
 
 def build(tree,proof,runtime,backend,pins,pkg,prior):
     # electron-builder extracts Electron to win-unpacked.tmp then renames it to
     # win-unpacked inside this directory; that rename needs WRITE (not DELETE) sharing.
     output=tree.fresh(ROOT/'dist'/'builds',allow_child_rename=True);build_id=output.name
-    config={**pkg['build'],'directories':{**pkg['build']['directories'],'output':str(output)},'extraResources':[{'from':str(backend),'to':'backend'},{'from':str(runtime/'python'),'to':'python'},{'from':str(runtime/'ffmpeg'),'to':'ffmpeg'}],'artifactName':'Books-Arranger-Setup-'+pkg['version']+'.exe'}
+    shell,shell_manifest,icon,pack_inputs,seed=stage_shell(tree,proof,pkg)
+    owned=Path(proof['ownedRoot'])
+    generator_cwd=tree.directory(owned/'nsis-generator',create=True)
+    include=owned/'nsis-private.nsh';tree.write(include,[private_nsis_include(generator_cwd)])
+    image=output/('Books-Arranger-Setup-'+pkg['version']+'.exe')
+    generator_request=owned/'nsis-generator-request.json'
+    generator_request_pin=tree.write(generator_request,[json.dumps({'lease':proof,'output':str(output),'output_identity':directory_identity(tree,output),'image':str(image),'cwd':str(generator_cwd)},sort_keys=True).encode()])
+    # Every explicit FileSet preserves its approved full package membership.
+    # The first FileSet is outside appDir, so builder's default file exclusions
+    # do not silently discard declared production members.
+    files=[{'from':str(shell/'desktop'),'to':'desktop','filter':['**/*']},
+           {'from':str(shell),'to':'.','filter':['package.json']}]
+    files.extend({'from':str(shell/p['path']),'to':p['path'],'filter':['**/*','!node_modules{,/**/*}']} for p in pack_inputs['productionPackages'])
+    config={**pkg['build'],'directories':{**pkg['build']['directories'],'app':str(shell),'output':str(output),'buildResources':str(ROOT/'desktop')},
+            'files':files,'extraResources':[{'from':str(backend),'to':'backend'},{'from':str(runtime/'python'),'to':'python'},{'from':str(runtime/'ffmpeg'),'to':'ffmpeg'}],
+            'electronVersion':pack_inputs['electronVersion'],'electronDist':str(seed/pack_inputs['tools']['electron']),
+            'nodeGypRebuild':False,'npmRebuild':True,'icon':str(icon),'win':{**pkg['build']['win'],'icon':str(icon)},
+            'nsis':{**pkg['build']['nsis'],'include':str(include),'installerIcon':str(icon),'uninstallerIcon':str(icon),'preCompressedFileExtensions':[]},
+            'artifactName':'Books-Arranger-Setup-'+pkg['version']+'.exe'}
+    tree.write(owned/'builder-request.json',[json.dumps({'lease_nonce':proof['nonce'],'app':str(shell),'output':str(output),'generator':{'image':str(image),'script':str(ROOT/'scripts/build-nsis-generator.py'),'requestPath':str(generator_request),'requestSha256':generator_request_pin['sha256']}},sort_keys=True).encode()])
+
     config_path=Path(proof['ownedRoot'])/'builder-config.json'
     tree.write(config_path,[json.dumps(config,indent=2).encode()])
-    run([proof['node'],str(ROOT/'node_modules'/'electron-builder'/'cli.js'),'--win','--publish','never','--config',str(config_path)],proof)
+    run([proof['node'],str(ROOT/'scripts/build-builder.mjs')],proof,input=json.dumps(proof).encode())
+    policy_result=json.loads((owned/'builder-policy-result.json').read_text('utf8'))
+    generator_result=json.loads((owned/'nsis-generator-result.json').read_text('utf8'))
+    tree.protect(owned/'builder-policy-result.json');tree.protect(owned/'nsis-generator-result.json')
+    if policy_result.get('passed') is not True or policy_result.get('beforeBuildCalls')!=1 or generator_result.get('completed') is not True or generator_result.get('returncode')!=0:
+        raise RuntimeError('Builder policy/generator receipt did not pass')
     # Final verification is intentionally a separate held-source Node worker,
     # using @electron/asar, and refuses to emit a verified manifest until the
     # NSIS embedded app64.7z payload has been independently compared.
-    request={**proof,'build_id':build_id,'output':str(output),'runtime':str(runtime),'backend':str(backend),'pins':pins,'version':pkg['version']}
+    request={**proof,'build_id':build_id,'output':str(output),'runtime':str(runtime),'backend':str(backend),'pins':pins,'version':pkg['version'],'shell':str(shell),'shell_manifest':str(owned/'shell-manifest.json'),'pack_inputs_sha256':proof['pack_inputs']['config_sha256']}
     tree.write(Path(proof['ownedRoot'])/'build-result.json',[json.dumps(request).encode()])
     seven=ROOT/'node_modules'/'7zip-bin'/'win'/'x64'/'7za.exe'
     tree.protect(seven)

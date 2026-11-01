@@ -16,11 +16,13 @@ import time
 PYTHON_SHA256 = 'd718435b892db4ad5b547d12fec61be7baa7faf7a58d857ea58053be24c7a000'  # Python 3.14.10 (ruling 72g, 2026-10-30); scripts/guarded-io.mjs pins the same
 ROOT = Path(__file__).absolute().parent.parent
 # Bootstrap native API is self-contained; no checkout modules run until leased.
-K = ctypes.WinDLL('kernel32', use_last_error=True) if os.name == 'nt' else None
+K = None  # Loaded only by bootstrap, so manifest validation has no native side effects.
 class Info(ctypes.Structure):
     _fields_ = [('attributes',wintypes.DWORD),('creation',wintypes.FILETIME),('access',wintypes.FILETIME),('write',wintypes.FILETIME),('volume',wintypes.DWORD),('size_high',wintypes.DWORD),('size_low',wintypes.DWORD),('links',wintypes.DWORD),('index_high',wintypes.DWORD),('index_low',wintypes.DWORD)]
 
 def bootstrap(stack):
+    global K
+    if K is None and os.name == 'nt': K = ctypes.WinDLL('kernel32', use_last_error=True)
     if K is None: raise RuntimeError('Native installer guard requires Windows')
     K.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE];K.CreateFileW.restype=wintypes.HANDLE
     K.GetFileInformationByHandle.argtypes=[wintypes.HANDLE,ctypes.c_void_p];K.GetFileInformationByHandle.restype=wintypes.BOOL
@@ -92,6 +94,87 @@ def protect_tree(tree, folder):
         if entry.is_dir(follow_symlinks=False):protect_tree(tree,p)
         else:tree.protect(p)
 
+def validate_pack_inputs(config, lock):
+    """Validate the finite, checked-in pack input inventory without touching files."""
+    import re
+    if not isinstance(config,dict) or not isinstance(lock,dict): raise RuntimeError('Pack inventory and lock must be objects')
+    if config.get('schema') != 'books-pack-inputs-v1' or lock.get('lockfileVersion') != 3:
+        raise RuntimeError('Unsupported pack input inventory')
+    if config.get('seedDirectory') != 'build-cache/pack-inputs':
+        raise RuntimeError('Unexpected pack seed directory')
+    def relative(name):
+        return isinstance(name,str) and bool(name) and not any(c in name for c in ('\\', ':', '\0')) and all(p not in ('', '.', '..') for p in name.split('/'))
+    for field in ('files', 'productionFiles'):
+        values = config.get(field)
+        if not isinstance(values,dict) or not values: raise RuntimeError('Empty pack file inventory')
+        seen=set()
+        for name,facts in values.items():
+            if not relative(name) or name.casefold() in seen: raise RuntimeError('Unsafe/duplicate pack member')
+            seen.add(name.casefold())
+            if not isinstance(facts,dict) or set(facts)!= {'size','sha256'} or type(facts['size']) is not int or facts['size']<0 or not re.fullmatch('[0-9a-f]{64}',str(facts['sha256'])):
+                raise RuntimeError('Malformed pack file fingerprint')
+    packages=config.get('productionPackages')
+    if not isinstance(packages,list) or not packages: raise RuntimeError('Empty production graph')
+    locked=lock.get('packages')
+    if not isinstance(locked,dict): raise RuntimeError('Malformed locked package graph')
+    for name,value in locked.items():
+        if not isinstance(name,str) or name and not relative(name) or not isinstance(value,dict) or not isinstance(value.get('version'),str) or not value['version'] or 'dev' in value and type(value['dev']) is not bool:
+            raise RuntimeError('Malformed locked package record')
+    expected={name:value['version'] for name,value in locked.items() if name and value.get('dev') is not True}
+    actual={}
+    for item in packages:
+        if not isinstance(item,dict) or set(item)!={'path','version'} or not relative(item['path']) or not item['path'].startswith('node_modules/') or item['path'] in actual:
+            raise RuntimeError('Malformed production package membership')
+        actual[item['path']]=item['version']
+    if actual!=expected: raise RuntimeError('Production package graph differs from lockfile')
+    for name in config['productionFiles']:
+        owners=[p for p in actual if name.startswith(p+'/')]
+        if not owners: raise RuntimeError('Production file has no approved package')
+        owner=max(owners,key=len)
+        if '/node_modules/' in '/'+name[len(owner)+1:]: raise RuntimeError('Unapproved nested production package')
+    if any(p+'/package.json' not in config['productionFiles'] for p in actual):
+        raise RuntimeError('Production package metadata missing')
+    tools=config.get('tools',{})
+    expected_tools={'electron':'electron/electron-v44.4.5-win32-x64.zip','nsis':'nsis/Bin/makensis.exe','nsisRoot':'nsis','nsisResources':'nsis-resources','seven':'seven/bin/7za.exe','icons':'icons/icon-tool.js','npm':'npm/bin/npm-cli.js'}
+    if tools!=expected_tools or any(tools[k] not in config['files'] for k in ('electron','nsis','seven','icons','npm')):
+        raise RuntimeError('Unexpected pack tool entrypoints')
+    if (config.get('electronVersion'),config.get('builderVersion'),config.get('iconConverterVersion'))!=('44.4.5','26.15.3','1.2.3'):
+        raise RuntimeError('Pack tool version changed')
+    return config
+
+
+def strict_json(text):
+    def pairs(items):
+        result={}
+        for name,value in items:
+            if name in result: raise RuntimeError('Duplicate JSON member')
+            result[name]=value
+        return result
+    try:return json.loads(text,object_pairs_hook=pairs)
+    except (ValueError,TypeError) as error:raise RuntimeError('Malformed pack JSON') from error
+
+
+def load_pack_inputs(root=ROOT):
+    config=strict_json((root/'scripts/build-inputs.json').read_text('utf8'))
+    if not isinstance(config,dict): raise RuntimeError('Pack inventory must be an object')
+    lock_bytes=(root/'package-lock.json').read_bytes()
+    if hashlib.sha256(lock_bytes).hexdigest()!=config.get('packageLockSha256'):
+        raise RuntimeError('Pack lockfile fingerprint changed')
+    return validate_pack_inputs(config,strict_json(lock_bytes))
+
+
+def retain_pack_inputs(tree):
+    config=load_pack_inputs()
+    seed=ROOT/config['seedDirectory']
+    # Exact membership, ordinary files and native deny-write/delete holds persist
+    # in the supervisor's existing BuildTree until its owned Job closes.
+    if tree.tree_manifest(seed)!=config['files']:
+        raise RuntimeError('Private pack inputs differ or contain unapproved files')
+    for relative,facts in config['productionFiles'].items():
+        tree.protect(ROOT/relative,facts)
+    return {'root':str(seed),'config_sha256':hashlib.sha256((ROOT/'scripts/build-inputs.json').read_bytes()).hexdigest()}
+
+
 def main():
     with contextlib.ExitStack() as stack:
         bootstrap(stack)
@@ -139,6 +222,7 @@ def main():
                 if held.facts()['links']!=1:raise RuntimeError('External tool hardlink refused')
                 externals[name]=str(path)
             proof['executables']=externals
+            if mode=='build':proof['pack_inputs']=retain_pack_inputs(tree)
             # Publish capability bytes only after external executables are held.
             node=Path(request['node']).absolute()
             tree.write(owned/'lease.json',[json.dumps(proof,sort_keys=True).encode()])
@@ -149,6 +233,14 @@ def main():
                 if executable.facts()['links']!=1 or executable.sha256()!=request['node_sha256']:raise RuntimeError('Node runtime changed')
                 env={k:v for k,v in os.environ.items() if k.upper() not in {'NODE_OPTIONS','NODE_PATH','GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN'}}
                 env.update({'TEMP':str(owned),'TMP':str(owned),'ELECTRON_BUILDER_CACHE':str(owned/'builder-cache'),'npm_config_cache':str(owned/'npm-cache')})
+                if mode=='build':
+                    # A finite environment; no user config, signing credentials,
+                    # loader injection, network mirror or build override inherits.
+                    env={'SystemRoot':os.environ.get('SystemRoot','C:\\Windows'),'WINDIR':os.environ.get('WINDIR','C:\\Windows'),'ComSpec':'C:\\Windows\\System32\\cmd.exe','PATH':str(node.parent)+';C:\\Program Files\\Git\\cmd;C:\\Windows\\System32',
+                         'TEMP':str(owned),'TMP':str(owned),'USERPROFILE':str(owned/'profile'),'HOME':str(owned/'profile'),'APPDATA':str(owned/'profile/Roaming'),'LOCALAPPDATA':str(owned/'profile/Local'),
+                         'ELECTRON_BUILDER_CACHE':str(owned/'builder-cache'),'npm_config_cache':str(owned/'npm-cache'),'npm_config_userconfig':str(owned/'empty.npmrc'),'npm_config_globalconfig':str(owned/'empty-global.npmrc'),'npm_config_update_notifier':'false','npm_config_audit':'false','npm_config_fund':'false'}
+                    for directory in ['profile/Roaming','profile/Local','builder-cache','npm-cache']:tree.directory(owned/directory,create=True)
+                    tree.write(owned/'empty.npmrc',[b'']);tree.write(owned/'empty-global.npmrc',[b''])
                 child=subprocess.Popen([str(node),str(ROOT/script),'--owned-'+mode],cwd=ROOT,env=env,stdin=subprocess.PIPE,creationflags=0x08000000|4)
                 child._books_suspended=True
                 child_identity=None
