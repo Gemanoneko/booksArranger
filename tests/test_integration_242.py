@@ -154,48 +154,157 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result['metadata_facts']['recording_chapter_policy'],'joined-chapters-v1')
 
 
-    def test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names(self):
+    def name_save_fixture(self):
         import tempfile,uuid
         from pathlib import Path
         import entered_names,groups
         from audio_jobs import AudioJobs
         from scanner import connect
         area=Path(__file__).resolve().parents[1]/'scratch'/'integration-242-names';area.mkdir(parents=True,exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=area) as tmp:
-            identity=str(uuid.uuid4());other_identity=str(uuid.uuid4())
-            database=Path(tmp)/'catalog.sqlite3';jobs=AudioJobs(database,None,lambda manifest:True,lambda output:False)
-            row={'id':identity,'revision':2,'fingerprint':'files','members':[{'path':str(Path(tmp)/'book.m4b'),'metadata':{}}]}
-            context={'user_approval':{'values':{'title':'Old approved title','author':'Writer'}}}
-            with connect(database) as db:
-                groups.setup(db)
-                db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
-                db.execute('CREATE TABLE automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
-                db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review,approved,changed) VALUES(?,?,?,?,?,?,?,?,?)',(identity,tmp,tmp,2,'files',json.dumps({'members':row['members']}),json.dumps({'title':'Old approved title'}),1,0))
-                db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(identity,2,json.dumps(context)))
-            def manifest(name):return {'job_id':str(uuid.uuid4()),'candidate_id':identity if name=='book' else other_identity,'candidate_revision':2,'root':tmp,'sources':[{'path':row['members'][0]['path'],'sha256':'a'*64,'size':1,'fingerprint':{'size':1,'modified':1}}],'metadata':{'title':'Old approved title'},'destination':str(Path(tmp)/(name+'.m4b')),'profile':'p','evidence':{},'cover':{},'cleanup_policy':{'enabled':False}}
-            selected=jobs.enqueue(manifest('book'));other=jobs.enqueue(manifest('other'))
-            def job_row(identity):
-                with connect(database) as db:return dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(identity,)).fetchone())
-            before_other=job_row(other)
-            merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database);merge.jobs=jobs
-            def current_context(value):
-                with connect(database) as db:return json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?',(value['id'],)).fetchone()[0])
-            merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp)
-            merge.automatic=SimpleNamespace(research=object(),requeue=Mock(),request_start=Mock())
-            merge._his_revision=lambda *a:2;merge._names_book=lambda *a:(row,tmp,merge.automatic.research)
-            merge._names_state=lambda *a:({'title':'Old approved title','author':'Writer'},'',{key:{'value':value} for key,value in entered_names.book_values(database,row).items()},None)
-            merge._names_others=lambda *a:[];merge.invalidate_status=Mock();merge._press_after=lambda *a,**kw:{}
-            answer=merge.names_save(identity,2,{'title':'A newly chosen title'},fingerprint='files')
-            self.assertEqual(answer['outcome'],'replanned')
-            self.assertEqual(entered_names.book_values(database,row)['title'],'A newly chosen title')
-            self.assertEqual(current_context(row)['names_approval_pending'],{'revision':2,'fingerprint':'files'})
-            with connect(database) as db:
-                held=db.execute('SELECT state,result FROM automatic_candidates WHERE id=?',(identity,)).fetchone()
-                self.assertEqual(held['state'],'Held')
-                self.assertEqual(json.loads(held['result'])['reasons'],['Names saved — waiting for your approval.'])
-                self.assertEqual(db.execute('SELECT kind FROM audio_job_set_aside WHERE job_id=?',(selected,)).fetchone()[0],'names')
-            self.assertEqual(job_row(other),before_other)
-            self.assertEqual(job_row(selected)['state'],'needs attention')
+        tmp=self.enterContext(tempfile.TemporaryDirectory(dir=area))
+        identity=str(uuid.uuid4());other_identity=str(uuid.uuid4())
+        database=Path(tmp)/'catalog.sqlite3';jobs=AudioJobs(database,None,lambda manifest:True,lambda output:False)
+        row={'id':identity,'revision':2,'fingerprint':'files','members':[{'path':str(Path(tmp)/'book.m4b'),'metadata':{}}]}
+        context={'user_approval':{'values':{'title':'Old approved title','author':'Writer'}}}
+        with connect(database) as db:
+            groups.setup(db);entered_names.setup(db)
+            db.execute('CREATE TABLE candidate_context(id TEXT PRIMARY KEY,revision INTEGER,data TEXT)')
+            db.execute('CREATE TABLE automatic_candidates(id TEXT PRIMARY KEY,revision INTEGER,fingerprint TEXT,state TEXT,result TEXT,retry_at REAL,attempted TEXT,matcher_version TEXT)')
+            db.execute('INSERT INTO book_groups(id,root,scope,revision,fingerprint,evidence,review,approved,changed) VALUES(?,?,?,?,?,?,?,?,?)',(identity,tmp,tmp,2,'files',json.dumps({'members':row['members']}),json.dumps({'title':'Old approved title'}),1,0))
+            db.execute('INSERT INTO candidate_context VALUES(?,?,?)',(identity,2,json.dumps(context)))
+        def manifest(name):return {'job_id':str(uuid.uuid4()),'candidate_id':identity if name=='book' else other_identity,'candidate_revision':2,'root':tmp,'sources':[{'path':row['members'][0]['path'],'sha256':'a'*64,'size':1,'fingerprint':{'size':1,'modified':1}}],'metadata':{'title':'Old approved title'},'destination':str(Path(tmp)/(name+'.m4b')),'profile':'p','evidence':{},'cover':{},'cleanup_policy':{'enabled':False}}
+        selected=jobs.enqueue(manifest('book'));other=jobs.enqueue(manifest('other'))
+        def job_row(job_id):
+            with connect(database) as db:return dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,)).fetchone())
+        def names_rows():
+            with connect(database) as db:return [dict(value) for value in db.execute('SELECT * FROM names_entries ORDER BY rowid')]
+        merge=object.__new__(MergeService);merge.draining=False;merge.inventory=SimpleNamespace(database=database);merge.jobs=jobs
+        def current_context(value):
+            with connect(database) as db:return json.loads(db.execute('SELECT data FROM candidate_context WHERE id=?',(value['id'],)).fetchone()[0])
+        merge.reviews=SimpleNamespace(_row=lambda *a:row,_context=current_context,_source_root=lambda value:tmp)
+        merge.automatic=SimpleNamespace(research=object(),requeue=Mock(),request_start=Mock())
+        merge._his_revision=lambda *a:2;merge._names_book=lambda *a:(row,tmp,merge.automatic.research)
+        merge._names_state=lambda *a:({'title':'Old approved title','author':'Writer'},'',{key:{'value':value} for key,value in entered_names.book_values(database,row).items()},None)
+        merge._names_others=lambda *a:[];merge.invalidate_status=Mock();merge._press_after=lambda *a,**kw:{}
+        return SimpleNamespace(database=database,row=row,merge=merge,selected=selected,other=other,job_row=job_row,
+                               current_context=current_context,names_rows=names_rows,context=context,
+                               before_selected=job_row(selected),before_other=job_row(other))
+
+    def assert_name_save_failed_untouched(self,f,before_names):
+        self.assertEqual(f.names_rows(),before_names)
+        self.assertEqual(f.current_context(f.row),f.context)
+        self.assertEqual(f.job_row(f.selected),f.before_selected)
+        self.assertEqual(f.job_row(f.other),f.before_other)
+        f.merge.automatic.requeue.assert_not_called();f.merge.automatic.request_start.assert_not_called()
+
+    def test_name_save_replans_exact_pending_job_with_truthful_hold_and_new_names(self):
+        import entered_names
+        from scanner import connect
+        f=self.name_save_fixture()
+        answer=f.merge.names_save(f.row['id'],2,{'title':'A newly chosen title'},fingerprint='files')
+        self.assertEqual(answer['outcome'],'replanned')
+        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'A newly chosen title')
+        self.assertEqual(f.current_context(f.row)['names_approval_pending'],{'revision':2,'fingerprint':'files'})
+        self.assertEqual(f.current_context(f.row)['user_approval'],f.context['user_approval'])
+        with connect(f.database) as db:
+            held=db.execute('SELECT state,result FROM automatic_candidates WHERE id=?',(f.row['id'],)).fetchone()
+            self.assertEqual(held['state'],'Held')
+            self.assertEqual(json.loads(held['result'])['reasons'],['Names saved — waiting for your approval.'])
+            self.assertEqual(db.execute('SELECT kind FROM audio_job_set_aside WHERE job_id=?',(f.selected,)).fetchone()[0],'names')
+        self.assertEqual(f.job_row(f.other),f.before_other)
+        self.assertEqual(f.job_row(f.selected)['state'],'needs attention')
+
+    def test_name_save_hold_failure_rolls_back_the_real_prior_name_inserts(self):
+        import entered_names
+        from scanner import connect
+        f=self.name_save_fixture()
+        entered_names.save(f.database,f.row,[('book','title','Previously saved title','','','')])
+        before=f.names_rows()
+        with connect(f.database) as db:
+            db.execute("""CREATE TRIGGER fail_names_hold BEFORE INSERT ON candidate_context
+                WHEN EXISTS(SELECT 1 FROM names_entries WHERE candidate_id=NEW.id AND value='A newly chosen title')
+                BEGIN SELECT RAISE(ABORT,'injected approval hold failure'); END""")
+        with self.assertRaises(MergeService.NamesRefused) as refused:
+            f.merge.names_save(f.row['id'],2,{'title':'A newly chosen title'},fingerprint='files')
+        self.assertEqual(refused.exception.code,'refused')
+        self.assert_name_save_failed_untouched(f,before)
+        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'Previously saved title')
+        with connect(f.database) as db:self.assertEqual(db.execute('SELECT count(*) FROM automatic_candidates').fetchone()[0],0)
+
+    def test_name_save_candidate_drift_refuses_without_overwriting_newer_names(self):
+        import entered_names
+        from scanner import connect
+        for revision,fingerprint,superseded in ((3,'files',0),(2,'different files',0),(2,'files',1)):
+            with self.subTest(revision=revision,fingerprint=fingerprint,superseded=superseded):
+                f=self.name_save_fixture();captured={}
+                def newer_decision(*unused):
+                    with connect(f.database) as db:
+                        db.execute('UPDATE book_groups SET revision=?,fingerprint=?,superseded=? WHERE id=?',(revision,fingerprint,superseded,f.row['id']))
+                    entered_names.save(f.database,f.row,[('book','title','Newer saved decision','','','')])
+                    captured['names']=f.names_rows()
+                    return []
+                f.merge._names_others=newer_decision
+                with self.assertRaises(MergeService.NamesRefused) as refused:
+                    f.merge.names_save(f.row['id'],2,{'title':'Stale planned title'},fingerprint='files')
+                self.assertEqual(refused.exception.code,'changed')
+                self.assert_name_save_failed_untouched(f,captured['names'])
+                self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'Newer saved decision')
+                with connect(f.database) as db:
+                    self.assertEqual(tuple(db.execute('SELECT revision,fingerprint,superseded FROM book_groups WHERE id=?',(f.row['id'],)).fetchone()),(revision,fingerprint,superseded))
+
+    def test_name_save_busy_retry_does_not_commit_the_aborted_press(self):
+        import sqlite3,entered_names
+        f=self.name_save_fixture();original=entered_names.save_in_transaction;presses=[]
+        def busy_after_inserts(db,row,entries):
+            press=original(db,row,entries)
+            if any(kind=='book' and field=='title' and value=='A newly chosen title' for kind,field,value,*rest in entries):
+                presses.append(press)
+                if len(presses)==1:
+                    error=sqlite3.OperationalError('injected busy after name INSERT');error.sqlite_errorcode=sqlite3.SQLITE_BUSY
+                    raise error
+            return press
+        with patch('entered_names.save_in_transaction',side_effect=busy_after_inserts),patch('sqlite_retry.time.sleep'):
+            answer=f.merge.names_save(f.row['id'],2,{'title':'A newly chosen title'},fingerprint='files')
+        self.assertEqual(answer['outcome'],'replanned');self.assertEqual(len(presses),2)
+        rows=f.names_rows();self.assertFalse(any(value['press']==presses[0] for value in rows))
+        self.assertEqual(sum(value['kind']=='book' and value['field']=='title' and value['value']=='A newly chosen title' for value in rows),1)
+        self.assertTrue(any(value['press']==presses[1] for value in rows))
+        self.assertEqual(f.current_context(f.row)['names_approval_pending'],{'revision':2,'fingerprint':'files'})
+        self.assertEqual(f.job_row(f.other),f.before_other)
+        f.merge.automatic.requeue.assert_called_once_with(f.row['id']);f.merge.automatic.request_start.assert_called_once_with()
+
+    def test_name_save_nonpending_job_keeps_its_state_and_existing_approval(self):
+        import entered_names
+        from scanner import connect
+        f=self.name_save_fixture()
+        with connect(f.database) as db:db.execute("UPDATE audio_jobs SET state='needs attention',reason='Explicitly stopped' WHERE job_id=?",(f.selected,))
+        stopped=f.job_row(f.selected)
+        answer=f.merge.names_save(f.row['id'],2,{'title':'A newly chosen title'},fingerprint='files')
+        self.assertEqual((answer['outcome'],answer['job']),('saved','stopped'))
+        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'A newly chosen title')
+        self.assertEqual(f.current_context(f.row),f.context)
+        self.assertEqual(f.job_row(f.selected),stopped);self.assertEqual(f.job_row(f.other),f.before_other)
+        f.merge.automatic.requeue.assert_not_called();f.merge.automatic.request_start.assert_not_called()
+
+    def test_name_transaction_helper_requires_and_respects_the_outer_transaction(self):
+        import entered_names
+        from scanner import connect
+        f=self.name_save_fixture();entries=[('book','title','Uncommitted name','','','')]
+        with connect(f.database) as db:
+            self.assertFalse(db.in_transaction)
+            with self.assertRaisesRegex(ValueError,'active transaction'):entered_names.save_in_transaction(db,f.row,entries)
+        self.assertEqual(f.names_rows(),[])
+        class AbortPress(Exception):pass
+        with self.assertRaises(AbortPress):
+            with connect(f.database) as db:
+                db.execute('BEGIN IMMEDIATE')
+                press=entered_names.save_in_transaction(db,f.row,entries)
+                self.assertEqual(db.execute('SELECT press FROM names_entries').fetchone()[0],press)
+                raise AbortPress()
+        self.assertEqual(f.names_rows(),[])
+        press=entered_names.save(f.database,f.row,entries)
+        self.assertEqual(f.names_rows()[0]['press'],press)
+        self.assertEqual(entered_names.book_values(f.database,f.row)['title'],'Uncommitted name')
 
 
 if __name__=='__main__':unittest.main()

@@ -274,18 +274,28 @@ def plan(row, values, read, scope, now=None):
     return entries
 
 
+def save_in_transaction(db, row, entries):
+    """Append one press inside the caller's transaction; never commit independently."""
+    if not entries:
+        return ''
+    if not db.in_transaction:
+        raise ValueError('Saving names requires an active transaction')
+    setup(db)
+    press = uuid.uuid4().hex
+    for kind, field, value, source, where, retracts in entries:
+        db.execute('INSERT INTO names_entries ' + COLUMNS + ' VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                   (uuid.uuid4().hex, kind, book_key(row) if kind == 'book' else '', field, value, source, where, row.get('id', ''), retracts, press, _stamp()))
+    return press
+
+
 def save(database, row, entries):
     """Write plan()'s entries in one transaction, as one press. Returns the press id ('' when nothing was written)."""
     if not entries:
         return ''
-    press = uuid.uuid4().hex
     with connect(database) as db:
         setup(db)
         db.execute('BEGIN IMMEDIATE')
-        for kind, field, value, source, where, retracts in entries:
-            db.execute('INSERT INTO names_entries ' + COLUMNS + ' VALUES(?,?,?,?,?,?,?,?,?,?,?)',
-                       (uuid.uuid4().hex, kind, book_key(row) if kind == 'book' else '', field, value, source, where, row.get('id', ''), retracts, press, _stamp()))
-    return press
+        return save_in_transaction(db, row, entries)
 
 
 def forget(database, entry_id):

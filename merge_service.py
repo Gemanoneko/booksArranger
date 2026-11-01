@@ -3178,19 +3178,21 @@ class MergeService:
             # Under the queue's lock: its claim either came first (refused here, nothing saved) or reads these names.
             job=self._names_job(row['id'])
             if job['state']=='running':raise self.NamesRefused('converting',self.NAMES_CONVERTING)
-            try:entered_names.save(self.inventory.database,row,entries)
-            except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
-            if job['state']=='pending':
-                from sqlite_retry import transaction
-                def hold(db):
-                    current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=?',(id,)).fetchone()
-                    if not current or tuple(current)!=(row['revision'],row['fingerprint']):raise self.NamesRefused('changed','Names saved. This book changed; reload it before approving.')
+            from sqlite_retry import transaction
+            def write(db):
+                current=db.execute('SELECT revision,fingerprint FROM book_groups WHERE id=? AND superseded=0',(id,)).fetchone()
+                if not current or tuple(current)!=(row['revision'],row['fingerprint']):
+                    raise self.NamesRefused('changed','Candidate changed; reload evidence before reviewing')
+                # A saved name press and its approval hold are one durable change.
+                # Retrying SQLITE_BUSY may repeat only these database writes.
+                entered_names.save_in_transaction(db,row,entries)
+                if job['state']=='pending':
                     saved=db.execute('SELECT revision,data FROM candidate_context WHERE id=?',(id,)).fetchone()
                     context=json.loads(saved['data']) if saved and saved['revision']==row['revision'] else {}
                     context['names_approval_pending']={'revision':row['revision'],'fingerprint':row['fingerprint']}
                     db.execute('INSERT OR REPLACE INTO candidate_context VALUES(?,?,?)',(id,row['revision'],json.dumps(context,ensure_ascii=False)))
-                try:transaction(self.inventory.database,hold)
-                except sqlite3.Error:raise self.NamesRefused('saved_waiting','Names saved. The catalog is busy; reload this book before approving.') from None
+            try:transaction(self.inventory.database,write)
+            except sqlite3.Error:raise self.NamesRefused('refused',self.NAMES_REFUSED) from None
         outcome='saved'
         if job['state']=='pending':
             try:self._names_replan(job['row'])
