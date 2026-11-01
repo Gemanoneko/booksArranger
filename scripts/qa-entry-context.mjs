@@ -11,7 +11,7 @@
 //
 // node scripts/qa-entry-context.mjs --worktree <clean checkout> --run <run parent> --head <expected 40-hex HEAD>
 //      --runtime <QA runtime: python/ and ffmpeg/> --fixture <private MP3 fixture file> [--checker <qa-handoff scripts>]
-//      [--port <fixture port, default 5212>]
+//      --git-root <installed Git tree> --powershell-root <SystemRoot/System32/WindowsPowerShell/v1.0> [--port <fixture port, default 5212>]
 // Run it with the Node that will run the check (its folder is pinned as the node installation). Writes only
 // <run>/context and refuses if it exists. Runs no checks. Prints the context's path and SHA-256.
 import fs from 'node:fs/promises';
@@ -28,15 +28,15 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fileSha=async file=>sha(await fs.readFile(file));
 
 export function parseArgs(argv){
-  const allowed=new Set(['--worktree','--run','--head','--runtime','--fixture','--checker','--port']),out={};
+  const allowed=new Set(['--worktree','--run','--head','--runtime','--fixture','--checker','--port','--git-root','--powershell-root']),out={};
   for(let i=0;i<argv.length;i+=2){
     if(!allowed.has(argv[i])||Object.hasOwn(out,argv[i].slice(2))||argv[i+1]===undefined)throw Error('Unknown, repeated or empty argument: '+argv[i]);
     out[argv[i].slice(2)]=argv[i+1];
   }
-  for(const name of ['worktree','run','head','runtime','fixture'])if(!out[name])throw Error('--'+name+' is required');
+  for(const name of ['worktree','run','head','runtime','fixture','git-root','powershell-root'])if(!out[name])throw Error('--'+name+' is required');
   if(!/^[0-9a-f]{40}$/.test(out.head))throw Error('--head must be the full expected commit (40 hex digits)');
   out.checker??=DEFAULT_CHECKER;
-  for(const name of ['worktree','run','runtime','fixture','checker'])if(!path.isAbsolute(out[name]))throw Error('--'+name+' must be an absolute path');
+  for(const name of ['worktree','run','runtime','fixture','checker','git-root','powershell-root'])if(!path.isAbsolute(out[name]))throw Error('--'+name+' must be an absolute path');
   out.port=Number(out.port??5212);
   if(!Number.isInteger(out.port)||out.port<1024||out.port>65535)throw Error('--port must be a port number');
   return out;
@@ -47,11 +47,11 @@ export function cleanGitEnv(env=process.env){
   const clean={};for(const [key,value] of Object.entries(env))if(!/^GIT_/i.test(key))clean[key]=value;
   clean.GIT_OPTIONAL_LOCKS='0';return clean;
 }
-// The runner is a parameter of assemble() so its test needs no Git: the qa-handoff entry checker gives the checks it
-// runs only Node and System32 on PATH, and the 0.22.1 entry check failed on the test's own `git` (ENOENT, 2026-10-26).
-export function gitIn(worktree,exec=execFileSync){
+// The injected runner keeps fixture tests independent of Git. Production assembly passes the exact executable
+// from its recorded Git runtime; GIT_OPTIONAL_LOCKS=0 keeps metadata reads from updating the source index cache.
+export function gitIn(worktree,exec=execFileSync,executable='git'){
   const env=cleanGitEnv();
-  return args=>exec('git',['-c','core.fsmonitor=false','-C',worktree,...args],{encoding:'utf8',windowsHide:true,maxBuffer:64*1024*1024,env});
+  return args=>exec(executable,['-c','core.fsmonitor=false','-C',worktree,...args],{encoding:'utf8',windowsHide:true,maxBuffer:64*1024*1024,env});
 }
 
 // Same walk shape as the checker's verifyFiles: '/'-joined relative paths, no links, no special entries.
@@ -89,10 +89,23 @@ export async function checkRuntime(runtime,pins){
     throw Error('QA runtime refused: its files differ from the runtime tree in scripts/qa-runtime.json ('+manifest.files.length+' files, '+pins.tree.files+' pinned)');
 }
 
-export async function assemble(options,{node=process.execPath,log=console.log,git=gitIn(options.worktree)}={}){
+export async function assemble(options,{node=process.execPath,log=console.log,git}={}){
   const W=options.worktree,Q=options.run,C=path.join(Q,'context'),HEAD=options.head;
   const NODE_DIR=path.dirname(node);
   try{await fs.lstat(C);throw Error('Context folder already exists; refusing to adopt it: '+C);}catch(error){if(error.code!=='ENOENT')throw error;}
+  for(const key of ['git-root','powershell-root'])if(typeof options[key]!=='string'||!path.isAbsolute(options[key]))throw Error('--'+key+' must be an absolute path');
+  const gitRoot=path.resolve(options['git-root']),powershellRoot=path.resolve(options['powershell-root']);
+  const systemRoot=path.resolve(powershellRoot,'../../..');
+  if(path.join(systemRoot,'System32','WindowsPowerShell','v1.0').toLowerCase()!==powershellRoot.toLowerCase())throw Error('PowerShell root must match SystemRoot/System32/WindowsPowerShell/v1.0');
+  for(const root of [gitRoot,powershellRoot]){let current=root;for(;;){const stat=await fs.lstat(current).catch(()=>null);if(!stat?.isDirectory()||stat.isSymbolicLink())throw Error('Metadata runtime directory missing or linked: '+current);const parent=path.dirname(current);if(parent===current)break;current=parent;}}
+  const gitExecutable=path.join(gitRoot,'cmd','git.exe'),powershellExecutable=path.join(powershellRoot,'powershell.exe');
+  for(const file of [gitExecutable,powershellExecutable]){const stat=await fs.lstat(file).catch(()=>null);if(!stat?.isFile()||stat.isSymbolicLink())throw Error('Metadata executable missing or linked: '+file);}
+  const metadataTrees=[{name:'git',root:gitRoot},{name:'powershell',root:powershellRoot}];
+  for(const tree of metadataTrees)tree.manifest=await manifestOf(tree.root);
+  const gitPin={name:'git',path:gitExecutable,sha256:await fileSha(gitExecutable)};
+  const powershellPin={path:powershellExecutable,sha256:await fileSha(powershellExecutable)};
+  if(metadataTrees[0].manifest.files.find(f=>f.path==='cmd/git.exe')?.sha256!==gitPin.sha256||metadataTrees[1].manifest.files.find(f=>f.path==='powershell.exe')?.sha256!==powershellPin.sha256)throw Error('Metadata executable changed during preflight');
+  git??=gitIn(W,execFileSync,gitExecutable);
   if(git(['rev-parse','HEAD']).trim()!==HEAD)throw Error('Worktree HEAD is not '+HEAD);
   if(git(['status','--porcelain']).trim())throw Error('Worktree is dirty');
   const list=[...new Set(git(['ls-files','--cached','--others','--exclude-standard','-z']).split('\0').filter(Boolean))].sort();
@@ -103,11 +116,12 @@ export async function assemble(options,{node=process.execPath,log=console.log,gi
   const self=fileURLToPath(import.meta.url),assembler={path:self,sha256:await fileSha(self)};  // E2
   // Every runtime tree is read first: a link or special entry refuses before anything is written.
   const trees=[{name:'dependencies',root:path.join(W,'node_modules')},{name:'ownership',root:path.join(Q,'ownership')},
-    {name:'bundled-media',root:options.runtime},{name:'mp3-fixture',root:path.dirname(options.fixture)},{name:'node-installation',root:NODE_DIR}];
-  for(const tree of trees)tree.manifest=await manifestOf(tree.root);
+    {name:'bundled-media',root:options.runtime},{name:'mp3-fixture',root:path.dirname(options.fixture)},{name:'node-installation',root:NODE_DIR},...metadataTrees];
+  for(const tree of trees)if(!tree.manifest)tree.manifest=await manifestOf(tree.root);
 
   const phaseSource=await fileSha(new URL('./qa-phase-contract.mjs',import.meta.url));
   if(!list.includes('scripts/qa-phase-contract.mjs')||await fileSha(path.join(W,'scripts/qa-phase-contract.mjs'))!==phaseSource)throw Error('QA phase contract differs from assembler source');
+  for(const tree of metadataTrees)if(JSON.stringify(await manifestOf(tree.root))!==JSON.stringify(tree.manifest))throw Error('Metadata runtime changed during Git inspection: '+tree.name);
   await fs.mkdir(C);
   const sha256Of=async(rel,bytes)=>{const file=path.join(C,rel);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:sha(bytes)};};
   const emit=(rel,value)=>sha256Of(rel,Buffer.from(JSON.stringify(value,null,1)+'\n'));
@@ -125,13 +139,14 @@ export async function assemble(options,{node=process.execPath,log=console.log,gi
   const route=sourceFiles.find(item=>item.path==='scripts/check-desktop.mjs');
   if(!route)throw Error('The snapshot has no scripts/check-desktop.mjs');
   const auditedNodes=[{path:route.path,sha256:route.sha256,kind:'pure-node',command:'node scripts/check-desktop.mjs'}];
-  const environment={BOOKS_QA_RUNTIME_ROOT:options.runtime,BOOKS_MP3_REAL_FIXTURE:options.fixture};
+  const environment={BOOKS_QA_RUNTIME_ROOT:options.runtime,BOOKS_MP3_REAL_FIXTURE:options.fixture,SystemRoot:systemRoot,WINDIR:systemRoot};
   const phaseFile=sourceFiles.find(item=>item.path==='scripts/qa-phase-contract.mjs');
   if(!phaseFile||phaseFile.sha256!==phaseSource)throw Error('QA phase contract differs from assembler source');
   const phases={...phaseAccounting(),contract:phaseFile};
   const graph={schema:'books-entry-graph-v4',source_head:HEAD,version:pkg.version,assembler,phases,
     declared_scripts:Object.fromEntries(CHECK_NAMES.filter(name=>Object.hasOwn(pkg.scripts || {},name)).map(name=>[name,pkg.scripts[name]])),
     audited_nodes:auditedNodes,required_free_ports:[options.port],environment,
+    metadata_hygiene:{powershell:powershellPin,system_root:systemRoot,helper:'entry-identity.mjs',scope:'Existing hidden no-profile known-folder/drive metadata query; read-only User Shell Folders, no registry/settings writes'},
     limits:'Canonical non-app phase only: pinned Python/codec CLI fixtures and Node/DOM doubles. No GUI/tray/installer/live catalog/library access. Mandatory PA-1 native phase remains PENDING; this receipt alone cannot authorize release.'};
   const quote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
   const wrapper=['#!/bin/bash',
@@ -140,6 +155,8 @@ export async function assemble(options,{node=process.execPath,log=console.log,gi
     'set -euo pipefail',
     'export BOOKS_QA_RUNTIME_ROOT='+quote(options.runtime),
     'export BOOKS_MP3_REAL_FIXTURE='+quote(options.fixture),
+    'export SystemRoot='+quote(systemRoot),
+    'export WINDIR='+quote(systemRoot),
     'context='+quote(path.join(C,'context.json')),
     'exec '+quote(node)+' '+quote(path.join(options.checker,'run_entry_checks.mjs'))+' --context "$context" --context-sha "$(cat "$context.sha256")" --run-root "$1"',''].join('\n');
   const harnessRoot=path.join(C,'harness');
@@ -155,7 +172,7 @@ export async function assemble(options,{node=process.execPath,log=console.log,gi
   const exe=async(name,file)=>({name,path:file,sha256:await fileSha(file)});
   const runtime={node:await exe('node',node),npmCli:await exe('npmCli',path.join(NODE_DIR,'node_modules','npm','bin','npm-cli.js')),
     shell:await exe('shell','C:\\Windows\\System32\\cmd.exe'),npmShim:await exe('npmShim',path.join(NODE_DIR,'npm.cmd')),
-    manifests,koffiRoot:path.join(Q,'ownership','node_modules','koffi')};
+    manifests,git:gitPin,koffiRoot:path.join(Q,'ownership','node_modules','koffi')};
   const tooling=[];for(const name of CORE)tooling.push({path:name,sha256:await fileSha(path.join(options.checker,name))});
   const context={schema:2,deadlineMs:600000,ownership:'private-job-or-process-group',
     source:{repo:W,root:sourceRoot,head:HEAD,dirty:'N',manifest:sourceRef},
