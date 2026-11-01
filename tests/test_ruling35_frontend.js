@@ -5,7 +5,7 @@
 //   outcome lands later: done as the press would have, a refusal with its gate's own words.
 // - Another row's press never holds a press back; no "Another operation is in progress." anywhere.
 // - A Start over pressed while another press of the page runs waits for it (Queued, Cancel) and runs then.
-// - A toolbar press made while the page is busy waits; pressed again, it is taken back.
+// - Pause reaches the engine immediately while the page is busy, with one acknowledgement in flight.
 // - Edit names: the editor opens with one read, Series and Number go together, "Applies to {n} books.", Save is queued
 //   when the engine says so, the row line says what Save did, and Place and Entered by you show on the closed row.
 const fs=require('node:fs'),path=require('node:path');
@@ -75,11 +75,18 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   const held=buttonsOf(tr).find(b=>b.textContent==='Cancel start over');assert.ok(held && !held.hidden,'its Cancel');
   run('busy=false;controls()');await tick();await tick();
   assert.equal(sent('/api/audiobook/startover').length,1,'it ran when the page was free');
-  // 4. A toolbar press made while busy waits; pressed again, it is taken back.
-  run('busy=true;controls()');get('pause-jobs').handlers.click();
-  assert.equal(get('message').textContent,'Pause audiobook jobs queued. It runs when the current action finishes. Press it again to cancel.');
-  assert.equal(get('pause-jobs').getAttribute('aria-disabled'),'true');get('pause-jobs').handlers.click();
-  assert.equal(get('pause-jobs').getAttribute('aria-disabled'),null,'taken back');assert.equal(run('laterPresses.length'),0);run('busy=false;controls()');
+  // 4. Pause bypasses a busy page so current work can reach its safe checkpoint immediately.
+  let pauseAnswer;answers['/api/audiobook/pause']=()=>new Promise(resolve=>{pauseAnswer=resolve;});
+  run('state={...state,audiobook_jobs:{...state.audiobook_jobs,state:"Running",queued:1}};busy=true;controls()');
+  assert.equal(get('pause-jobs').disabled,false);const pausing=get('pause-jobs').handlers.click();
+  assert.equal(sent('/api/audiobook/pause').length,1,'Pause reaches the engine despite another busy page action');
+  assert.equal(run('jobControlFlights.has("pause")'),true);assert.equal(get('pause-jobs').disabled,true);
+  get('pause-jobs').handlers.click();assert.equal(sent('/api/audiobook/pause').length,1,'no duplicate Pause while its acknowledgement is pending');
+  assert.equal(run('laterPresses.length'),0,'Pause is never held behind the page action');
+  backend={...backend,audiobook_jobs:{...backend.audiobook_jobs,state:'Paused',queued:1,pause:{origin:'user'}}};
+  pauseAnswer(ok({state:'Paused'}));await pausing;await tick();
+  assert.equal(run('jobControlFlights.has("pause")'),false);assert.match(get('jobs-help').textContent,/Paused by you/);
+  assert.equal(get('pause-jobs').disabled,true);run('busy=false;controls()');
   // 4b. Resume audiobook jobs while a library scan runs (the engine refuses it then): held by the page, run when the scan ends.
   answers['/api/audiobook/resume']=()=>ok({state:'Running'});
   run('state={...state,active_library:"Audiobooks",audiobook_jobs:{...state.audiobook_jobs,queued:1,state:"Paused"}};controls()');get('resume-jobs').handlers.click();

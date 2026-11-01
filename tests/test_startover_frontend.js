@@ -285,10 +285,12 @@ function techOf(tr){const title=tr.children[4].title || '';assert.ok(!/Technical
   assert.equal(get('cancel-automatic-start').hidden,false);assert.equal(get('cancel-automatic-start').disabled,false);
   backend={...backend,automatic_processing:{...backend.automatic_processing,...IDLE,can_start:false,start_block_reason:'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.'}};
   replies['/api/automatic/cancel-start']=()=>accepted({automatic_processing:backend.automatic_processing});
+  get('cancel-automatic-start').focus(); // A real Cancel press owns focus; unrelated row focus is preserved.
   await run('automaticAction("cancel-start")');
   assert.equal(posts.at(-1).route,'/api/automatic/cancel-start');assert.deepEqual(posts.at(-1).body,{});
   assert.equal(get('automatic-start-reason').textContent,'Audiobook jobs are pausing. Wait for them to pause before starting automatic processing.','back to the block reason');
-  assert.equal(get('cancel-automatic-start').hidden,true);assert.equal(document.activeElement,get('automatic-start-reason'),'focus moves to the notice');
+  assert.equal(document.activeElement,get('automatic-start-reason'),'focus moves to the notice');
+  run('controls()');assert.equal(get('cancel-automatic-start').hidden,true,'the settled render hides Cancel after its focus hand-off');
   assert.equal(get('automatic-start-reason').getAttribute('tabindex'),'-1');
   // Page contract for Senua M2 (v0.19.0): Stop, Quit or a safety stop (disk full, working-file hold) ends the pending
   // start on the server, with no Cancel press. The next poll carries no start_pending: the row and the notice stop
