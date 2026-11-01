@@ -10,6 +10,10 @@ harness=harness.slice(0,harness.indexOf('(async()=>{'));
 const desktop='vm.createContext({window:{booksDesktop:{}},document,';
 if(!harness.includes('vm.createContext({document,'))throw Error('harness changed: the desktop window cannot be added');
 harness=harness.replace('vm.createContext({document,',desktop);
+// Start at a fixed local noon: the ten-minute ladder must not depend on the wall clock or cross midnight accidentally.
+const clockAnchor='const context=vm.createContext(';
+if(!harness.includes(clockAnchor) || !harness.includes('Intl,Date,JSON'))throw Error('harness clock changed');
+harness=harness.replace(clockAnchor,'const fixtureNow=new Date(2026,10,1,12,0,0).getTime();class FixtureDate extends Date{constructor(...args){super(...(args.length?args:[fixtureNow]));}static now(){return fixtureNow;}}\n'+clockAnchor).replace('Intl,Date,JSON','Intl,Date:FixtureDate,JSON');
 harness+=String.raw`
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const listed=()=>calls.filter(call=>call.route.startsWith('/api/inventory')).length;
@@ -87,8 +91,11 @@ const line=()=>get('list-stale');
   run('loadingActive=true;pressTick('+(since8+6000)+')');assert.equal(line().hidden,true);
   run('loadingActive=false;pressTick('+(since8+6000)+')');assert.equal(line().hidden,false,'positive control: the same wait shows the line');
   // A list from another day names the day (75a-t).
-  const yesterday=new Date();yesterday.setHours(23,48,0,0);yesterday.setDate(yesterday.getDate()-1);
+  const yesterday=new FixtureDate();yesterday.setHours(23,48,0,0);yesterday.setDate(yesterday.getDate()-1);
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const beforeMidnight=new Date(2026,10,1,23,52).getTime(),afterMidnight=new Date(2026,10,2,0,2).getTime();
+  assert.equal(run('listClock('+beforeMidnight+','+beforeMidnight+')'),'23:52','same-day short clock');
+  assert.equal(run('listClock('+beforeMidnight+','+afterMidnight+')'),'1 Nov, 23:52','a wait across midnight names the prior day');
   assert.equal(run('listClock('+yesterday.getTime()+',Date.now())'),yesterday.getDate()+' '+months[yesterday.getMonth()]+', 23:48');
   run('paintedAt='+yesterday.getTime()+';pressTick('+(since8+6000)+')');assert.equal(line().textContent,'List from '+yesterday.getDate()+' '+months[yesterday.getMonth()]+', 23:48. The app is busy; this updates by itself.');
   // "Life Signs" (2026-10-31): a queued Approve refused because the book changed meanwhile asks for the list at once, past the
