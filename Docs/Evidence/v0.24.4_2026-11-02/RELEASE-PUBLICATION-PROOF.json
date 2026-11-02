@@ -1,0 +1,166 @@
+{
+  "schema": "books-release-publication-proof-v1",
+  "version": "0.24.4",
+  "route": "normal npm run release (node scripts/release.mjs) through unchanged native release guard",
+  "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+  "release_head": "2ebc71cc47bb6b95859935512619e5b8e33acb9c",
+  "tag": "v0.24.4",
+  "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+  "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+  "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+  "source_artifact_rebuilt_after_acceptance": false,
+  "compatibility_host_used": false,
+  "publication_deadline_ms": 600000,
+  "full_entry_evidence_unchanged": {
+    "schema": 3,
+    "deadline_ms": 900000,
+    "transport_eof_only_ms": 930000,
+    "summary_sha256": "7278a2f8a5ae455683915867f8a5f7a5962b0bab7f6850638ac908a7b0aa278e"
+  },
+  "acceptance": {
+    "qa_report_sha256": "9e5c5404a0d4defa5cc7046184fbd040ab717bb3b8d35fedc2617081089c6a0a",
+    "review_report_sha256": "5a3a34d2e7c5165d78480421b9689169e157b4cedeafe59ea92e8c2c5c14b079",
+    "index_sha256": "c5d26d7d98261501a1abb06e735da77763533f3fd7b4fe7d56884f836857bf75",
+    "native_summary_sha256": "82cf373c3d5e9cb0ecb34f646bb41665bebb6390a408e63030f780f908f44247",
+    "retry_scope": "Actual packaged-backend/web DOM integration hosted in headless Chrome; not an Electron Retry PASS"
+  },
+  "original_callback": {
+    "started_at": "2026-11-02T17:03:07.916Z",
+    "ended_at": "2026-11-02T17:03:55.684Z",
+    "error": null,
+    "stdout": "",
+    "stderr": ""
+  },
+  "owned": {
+    "code": 0,
+    "ok": true,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "elapsedMs": 47603.3814,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 67,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 3046,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "native_operation": {
+    "active_processes_after": 0,
+    "completed_utc_seconds": 1793639035.2233014,
+    "mode": "release",
+    "native_job_closed": true,
+    "root_exit_code": 0,
+    "schema": "books-native-operation-result-v1",
+    "supervisor": {
+      "creation_filetime": "134381125884372542",
+      "host_pid": 115048,
+      "image": "C:\\Python314\\python.exe",
+      "pid": 115048,
+      "type": "books-native-owner-v1"
+    },
+    "worker": {
+      "creation_filetime": "134381126041160190",
+      "host_pid": 115048,
+      "image": "C:\\Program Files\\nodejs\\node.exe",
+      "pid": 85076,
+      "type": "books-native-owner-v1"
+    }
+  },
+  "preconditions": {
+    "exit": 0,
+    "skips": []
+  },
+  "remote_verification": {
+    "queried_at": "2026-11-02T17:05:19.452Z",
+    "release": {
+      "id": 431730063,
+      "tag": "v0.24.4",
+      "url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.24.4",
+      "published_at": "2026-11-02T17:03:29Z",
+      "draft": false,
+      "prerelease": false,
+      "assets": [
+        {
+          "name": "Books-Arranger-Setup-0.24.4.exe",
+          "size": 174671293,
+          "digest": "sha256:cf3f805af197642a0f586663359baacf8891a8ff90e2cd0513ff0ddfaa39a943",
+          "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/Books-Arranger-Setup-0.24.4.exe"
+        },
+        {
+          "name": "Books-Arranger-Setup-0.24.4.exe.blockmap",
+          "size": 182114,
+          "digest": "sha256:8fac25c9e0639a4e35106bc7e5b2509d376d39082e7774a14f271039eeafb013",
+          "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/Books-Arranger-Setup-0.24.4.exe.blockmap"
+        },
+        {
+          "name": "latest.yml",
+          "size": 360,
+          "digest": "sha256:f60443625aa9ba01b741e74e28998f283ef859d411b281dd22854623de409a89",
+          "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/latest.yml"
+        }
+      ]
+    },
+    "kept_releases": [
+      "v0.24.4",
+      "v0.24.3",
+      "v0.24.2",
+      "v0.24.1"
+    ],
+    "full_local_remote_tag_parity": true,
+    "release_tag_head": "2ebc71cc47bb6b95859935512619e5b8e33acb9c",
+    "remote_tag": "2ebc71cc47bb6b95859935512619e5b8e33acb9c\trefs/tags/v0.24.4"
+  },
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/invocation.json",
+      "size": 716,
+      "sha256": "c977299eb279be24ca771baca0cc3f7f87fe91993b575d767144067cb3ff8255"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/callback.json",
+      "size": 138,
+      "sha256": "edd1fe029f0ff04e23a5dffce58fb314401e55e0e5890a404fd11dec80d043a3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/owned.json",
+      "size": 1737,
+      "sha256": "0c3ac8fb2013a597efe14fe3f21ede0724af615ee343fc772a536b123e343e60"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/stdout.log",
+      "size": 1027,
+      "sha256": "4c60447204aa45b7d4fb1240d631d52a5d300a0f898d546aa7ade7e567fe4d01"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/stderr.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/native-operation-result.json",
+      "size": 522,
+      "sha256": "7a5e02a607ed5a12b8df2a458f12af8c92464dedda0d98ab5c44df0b90027c53"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/preconditions.txt",
+      "size": 440,
+      "sha256": "b6eb6fba167d044a944bdf83d6c9bddd05f723799bde2bd9b074bcf604f96588"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/release/remote-verification.json",
+      "size": 1508,
+      "sha256": "8a10eee7c7d2cefd0564833d0fc47dcac9e39813c9bb266a2081f9553aa14843"
+    }
+  ]
+}

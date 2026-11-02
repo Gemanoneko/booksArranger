@@ -1,0 +1,40 @@
+{
+  "queried_at": "2026-11-02T17:05:19.452Z",
+  "release": {
+    "id": 431730063,
+    "tag": "v0.24.4",
+    "url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.24.4",
+    "published_at": "2026-11-02T17:03:29Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Books-Arranger-Setup-0.24.4.exe",
+        "size": 174671293,
+        "digest": "sha256:cf3f805af197642a0f586663359baacf8891a8ff90e2cd0513ff0ddfaa39a943",
+        "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/Books-Arranger-Setup-0.24.4.exe"
+      },
+      {
+        "name": "Books-Arranger-Setup-0.24.4.exe.blockmap",
+        "size": 182114,
+        "digest": "sha256:8fac25c9e0639a4e35106bc7e5b2509d376d39082e7774a14f271039eeafb013",
+        "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/Books-Arranger-Setup-0.24.4.exe.blockmap"
+      },
+      {
+        "name": "latest.yml",
+        "size": 360,
+        "digest": "sha256:f60443625aa9ba01b741e74e28998f283ef859d411b281dd22854623de409a89",
+        "browser_download_url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.4/latest.yml"
+      }
+    ]
+  },
+  "kept_releases": [
+    "v0.24.4",
+    "v0.24.3",
+    "v0.24.2",
+    "v0.24.1"
+  ],
+  "full_local_remote_tag_parity": true,
+  "release_tag_head": "2ebc71cc47bb6b95859935512619e5b8e33acb9c",
+  "remote_tag": "2ebc71cc47bb6b95859935512619e5b8e33acb9c\trefs/tags/v0.24.4"
+}

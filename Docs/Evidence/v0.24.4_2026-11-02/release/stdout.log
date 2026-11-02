@@ -1,0 +1,13 @@
+[release] Authentication acquired from GitHub CLI; token is supplied only to the publisher child.
+  • loaded configuration  file=package.json ("build" field)
+  • electron-builder  version=26.15.3 os=10.0.26300
+  • loaded configuration  file=package.json ("build" field)
+  • author is missed in the package.json  appPackageFile=C:\Antigravity Projects\Worktrees\Books Arranger\books-0242-candidate-20261101\package.json
+  • publishing      publisher=Github (owner: Gemanoneko, project: booksArranger, version: 0.24.4)
+  • uploading       file=Books-Arranger-Setup-0.24.4.exe provider=github
+  • uploading       file=latest.yml provider=github
+  • uploading       file=Books-Arranger-Setup-0.24.4.exe.blockmap provider=github
+  • creating GitHub release  reason=release doesn't exist tag=v0.24.4 version=0.24.4
+
+[release] Keep-four verified; Sully must now git fetch --prune --prune-tags and verify local tag parity.
+[release] Published v0.24.4 from 2ebc71cc47bb6b95859935512619e5b8e33acb9c; verified 3 assets.

@@ -1,0 +1,16 @@
+{
+  "started_at": "2026-11-02T17:03:07.916Z",
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Antigravity Projects/codex-books-20261102-0244/publication/launch-owned.mjs"
+  ],
+  "cwd": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101",
+  "windowsHide": true,
+  "timeout_ms": 600000,
+  "wrapper_sha256": "e8d6161fd83261985961b96036a15cadc2502ec7e5b95c77b4541215be16b6e7",
+  "release_head": "2ebc71cc47bb6b95859935512619e5b8e33acb9c",
+  "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+  "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+  "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+  "tag": "v0.24.4"
+}
