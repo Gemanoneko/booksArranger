@@ -1,0 +1,21 @@
+{
+  "id": 1,
+  "result": {
+    "result": {
+      "type": "object",
+      "value": {
+        "startup": {
+          "phase": "stopped",
+          "startedAt": 1793612369606,
+          "lastLoadMs": null,
+          "exited": {
+            "code": 1,
+            "lastLines": "    inspect_folder(Path(database).parent,mode,roots,(Path(__file__).resolve().parent,))\n    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Antigravity Projects\\qa-books-0243-ui\\source\\desktop_catalog.py\", line 41, in inspect_folder\n    tables={row[0] for row in db.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")}\n                              ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nsqlite3.DatabaseError: file is not a database"
+          },
+          "portPid": null
+        },
+        "text": "Books Arranger\n\nDiscover, research and arrange your local books.\n\nStopped · The engine stopped while loading. Your files are not touched.\n\nTry again\nCopy details\nCopied.\nTechnical details\n\nClosing this window keeps Books Arranger running in the tray. Choose Quit Books Arranger to close the app.\n\nApp updates\n\nCheckUpdates work only in the installed app.\n\nCheck for updates\n\nDiscovery preserves source files. Verified audiobooks follow their saved source-cleanup policy.\n\nLibrary\nAudiobooks\nPodcasts\nEbooks\nQuit Books Arranger\n\nSource folders: not loaded.\n\nStart automatic processing\nStop automatic processing\n\nAutomatic processing: not loaded.\n\nResearch: not loaded.\n\nAuthor rules learned online · loading…\n\nDiscover audiobooks, research public metadata, and convert confident matches. Uncertain books stay held. One discovery pass per Start. Stop saves pending work; after server restart, Start continues it.\n\nVerified audiobooks replace their included originals. Once a book is verified, its backup copies are deleted right away.\n\nDiscovery only\nStart scanning\nStop scanning\nResume scanning\n\nScanning checks folders for arrivals. Unchanged readable files reuse saved metadata; new, changed and unreadable files are read.\n\nLibrary status: not loaded.\n\nAudiobook jobs\n\nJobs: not loaded.\n\nBook candidates: not loaded.\n\nCandidates are discovered book groups. Scan every source to include its books.\n\nPause audiobook jobs\nResume audiobook jobs\n\nApproved books passed metadata and source-order checks. Converted books also passed output and cleanup checks.\n\nPausing stops only the owned audiobook operation. An interrupted book restarts; finished outputs stay in place. Scanning is separate.\n\nAutomatic processing researches book candidates and converts confident matches. Held books stay out of the queue; manual review is optional.\n\nView\nFiles\nBook candidates\nCandidate contains\nStatus\nNot loaded\nClear filters\nPrevious\nNext\nYour books are not loaded.\nType\tArrival\tExisting title / filename clue\tExisting author / artist clue\tPreview status\tProposed destination\n\nYour books are not loaded.\n\nOne discovery pass per Start. Stop saves pending work; after server restart, Start continues it. Discovery-only controls never start conversion. Audiobook jobs have separate pause and resume controls. A slow read may finish before stopping. Closing this tab leaves the local server running; Stop server saves pending work and stops only owned operations safely.\n\nBooks Arranger stopped loading. Try again is available."
+      }
+    }
+  }
+}

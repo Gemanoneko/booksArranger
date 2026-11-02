@@ -1,0 +1,181 @@
+{
+  "schema": "books-full-timeout-diagnosis-v1",
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "full": {
+    "status": "FAIL_TIMEOUT_PRESERVED",
+    "all_workers": 13,
+    "worker_deadline_seconds": 540,
+    "completion_reports": 0,
+    "observed_failures": [
+      "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+      "test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used",
+      "test_m4b_join.JoinTests.test_marked_parts_are_joined_keeping_every_chapter_and_removed_only_after_verification"
+    ],
+    "forced": true,
+    "timedOut": true,
+    "final_native_zero": true,
+    "no_full_receipt": true
+  },
+  "targeted": {
+    "status": "PASS",
+    "cases": 3,
+    "serial": true,
+    "scope": "Only original failed exact methods; original source/fixture mapping/private environment/runtime, fresh private copies. No code edits or full rerun.",
+    "results": [
+      {
+        "worker": 2,
+        "id": "test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start",
+        "started": "2026-11-02T10:33:41.564Z",
+        "finished": "2026-11-02T10:34:11.511Z",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 110,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1937,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 29935.1819
+      },
+      {
+        "worker": 6,
+        "id": "test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used",
+        "started": "2026-11-02T10:34:16.494Z",
+        "finished": "2026-11-02T10:34:36.719Z",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 58,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1310,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        },
+        "elapsedMs": 20213.914099999995
+      },
+      {
+        "worker": 9,
+        "id": "test_m4b_join.JoinTests.test_marked_parts_are_joined_keeping_every_chapter_and_removed_only_after_verification",
+        "started": "2026-11-02T10:34:42.946Z",
+        "finished": "2026-11-02T10:35:14.158Z",
+        "code": 0,
+        "ok": true,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 112,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 2021,
+            "incompleteQueries": 1,
+            "firstIncomplete": {
+              "assigned": 5,
+              "listed": 4,
+              "capacity": 8192,
+              "query_ok": true
+            },
+            "lastIncomplete": {
+              "assigned": 5,
+              "listed": 4,
+              "capacity": 8192,
+              "query_ok": true
+            }
+          }
+        },
+        "elapsedMs": 31201.271399999998
+      }
+    ]
+  },
+  "conclusion": "Three failures did not reproduce standalone. Original13worker run is concurrency-sensitive/incomplete; logs do not identify CPU/disk/AV or a shared application failure. No product-fix or full-PASS claim follows.",
+  "native": {
+    "status": "NOT_LAUNCHED",
+    "second_tray_reference_used": false
+  },
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/results.json",
+      "sha256": "6026158fe303e1c8c5ad2d35a3fd0366a4302f214e2896c8224900020f8b4d91",
+      "size": 2297
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/callback.json",
+      "sha256": "9f04e01bedbad9112354d83a36c8bf4b5cd0c39fc320087de26dda1e110f2d63",
+      "size": 1879
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-2-owned.json",
+      "sha256": "f46248549c418d5f57b4f93e9b914fa67b53b1a75db85b372135d959594d27bb",
+      "size": 1676
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-2-stdout.log",
+      "sha256": "4034281957869f3523df7e212dac02d32951f2d79e57cde26fec8b6e91fc1efa",
+      "size": 630
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-2-stderr.log",
+      "sha256": "fef72ec937ac4a1c6fa0d8113e6ed3d47b22b16eedad6434137f78a4c0753942",
+      "size": 296
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-6-owned.json",
+      "sha256": "20f504bff580d5b2e6b36c108873162723fedf81e15c207adaa3fdd9228b1832",
+      "size": 1753
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-6-stdout.log",
+      "sha256": "6bffca640347486fb9872beb0d3b86aee8d6f57871b75851b8136221692b6adc",
+      "size": 657
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-6-stderr.log",
+      "sha256": "8cf5ffb43c749838e13343dd784776eb9b529c38608188ebecbd2d1cf39dfde7",
+      "size": 339
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-9-owned.json",
+      "sha256": "e7a262296bf0a61eca56072ab00e0d2249f846df45037608377c7aa475bfd546",
+      "size": 1896
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-9-stdout.log",
+      "sha256": "b0791104f43e314110a0066222bb8a638f2a94633e448c39f7aa40d570c3a145",
+      "size": 627
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-timeout-diagnosis/worker-9-stderr.log",
+      "sha256": "690cb844f34da3f39d60061be944306477bbada545088e31ef8dce27d99069d2",
+      "size": 311
+    }
+  ]
+}

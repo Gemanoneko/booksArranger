@@ -1,0 +1,189 @@
+{
+  "status": "PASS_APPROVED_REPLACEMENT_CANONICAL_NATIVE_STILL_REQUIRED",
+  "version": "0.24.3",
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "artifact_manifest_sha256": "024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd",
+  "runtime_pointer_sha256": "7bce0c6bc2b915cf89ae62d702c9ac9fd3198fa4403dd79c5628104e165b2439",
+  "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f",
+  "context_sha256": "9d1808000220694088d2bacc91f814697c5b0be2d7a3e38438596c830121299b",
+  "approval_exception": "User explicitly approved Allow one replacement check for unchanged sealed0.24.3 candidate; original failed result retained.",
+  "original_failed_summary_sha256": "3055b680e660071c6a54e2a9995777a2ad86cabab05112ae898a95a79f8f6529",
+  "outer_receipt": {
+    "started_at": "2026-11-02T10:41:46.378Z",
+    "finished_at": "2026-11-02T10:50:58.052Z",
+    "pid": 116812,
+    "callback_received": true,
+    "error": null,
+    "stdout_bytes": 732900,
+    "stderr_bytes": 0,
+    "stdout_sha256": "05bd6dadd36c8455118e3e29492985715045574f31d4a18510d860c558813423",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "write_errors": [],
+    "invocation_sha256": "9988225b7290edf34e3dea12ea742c495fc11349e42fe0e0dbc8c7b6ed903758",
+    "native_deadline_ms": 600000,
+    "transport": "short-persistent-launch-and-poll"
+  },
+  "python": {
+    "batches": 13,
+    "discovered": 2331,
+    "completed": 2331,
+    "unique_ids": 2331,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "integrated_pass": {
+    "phases": {
+      "schema": "books-qa-phases-v1",
+      "canonical": {
+        "scope": "non-app; owned Python/codec CLI fixtures and Node/DOM doubles",
+        "node_entries": [
+          "tests/release-contract.test.mjs",
+          "tests/release-flow.test.mjs",
+          "tests/update-controller.test.mjs",
+          "tests/engine-update.test.mjs",
+          "tests/launch-options.test.mjs",
+          "tests/release-leased-executables.test.mjs",
+          "tests/status-flight.test.mjs",
+          "tests/quit-watch.test.mjs",
+          "tests/python-check-batches.test.mjs",
+          "tests/gate-source-guard.test.mjs",
+          "tests/load-state.test.mjs",
+          "tests/startup.test.mjs",
+          "tests/desktop-loading.test.mjs",
+          "tests/main-startup.test.mjs",
+          "tests/qa-entry-context.test.mjs",
+          "tests/desktop-folder-picker.test.mjs",
+          "tests/gate-scratch.test.mjs",
+          "tests/real-shell-update-contract.test.mjs"
+        ]
+      },
+      "native": {
+        "phase": "PA-1",
+        "entry": "tests/real-shell-update.test.mjs",
+        "title": "PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again",
+        "required": true,
+        "status": "PENDING; separate authority and normal native proof required"
+      },
+      "prior_node_entries": 18,
+      "total_node_entries": 19
+    },
+    "python_cases": 2331,
+    "node_cases": 241,
+    "frontend_scripts": [
+      "test_0223_ui_frontend.js",
+      "test_0231_destination_frontend.js",
+      "test_0231_rows_frontend.js",
+      "test_0242_frontend.js",
+      "test_attention_frontend.js",
+      "test_automatic_frontend.js",
+      "test_browser.js",
+      "test_bulk_retry_receipts_frontend.js",
+      "test_busy_frontend.js",
+      "test_cleanup_frontend.js",
+      "test_connection.js",
+      "test_delete_frontend.js",
+      "test_delete_leaves_frontend.js",
+      "test_inline_series_frontend.js",
+      "test_iron_skazka_frontend.js",
+      "test_kept_frontend.js",
+      "test_metadata_frontend.js",
+      "test_missing_files_frontend.js",
+      "test_odd_names_frontend.js",
+      "test_original_title_frontend.js",
+      "test_panel_lock_frontend.js",
+      "test_precheck_frontend.js",
+      "test_producer_recovery_frontend.js",
+      "test_progress_frontend.js",
+      "test_queue_frontend.js",
+      "test_recovery_frontend.js",
+      "test_refused_retry_frontend.js",
+      "test_retry_frontend.js",
+      "test_retry_selected_frontend.js",
+      "test_ruling35_frontend.js",
+      "test_ruling37_frontend.js",
+      "test_save_metadata_frontend.js",
+      "test_setup_frontend.js",
+      "test_stale_list_frontend.js",
+      "test_stale_wording_frontend.js",
+      "test_startover_frontend.js",
+      "test_startup_frontend.js",
+      "test_todo_frontend.js",
+      "test_todo_holds_frontend.js"
+    ],
+    "syntax_files": 11,
+    "python_worker_seconds": [
+      406.9,
+      429.8,
+      439.3,
+      442.7,
+      471.6,
+      494.6,
+      450.6,
+      482.7,
+      498.2,
+      425.9,
+      453.3,
+      441.2,
+      498.5
+    ],
+    "python_workers": 13,
+    "python_worker_deadline_seconds": 540,
+    "copy_seconds": 12.3,
+    "qa_runtime": {
+      "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+      "sha256": "a3cb3b5e0903b98e3a9e4865321a199eb6f4f53f5739be509bd61d50bbacb031"
+    },
+    "mp3_fixture": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3",
+      "sha256": "e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed"
+    }
+  },
+  "owned": {
+    "code": 0,
+    "ok": true,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "reason": null,
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10873,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 26844,
+        "incompleteQueries": 613,
+        "firstIncomplete": {
+          "assigned": 57,
+          "listed": 56,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 13,
+          "listed": 12,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    }
+  },
+  "actual_receipt_line": "Entry-check receipt v2: books-arranger v0.24.3 @ 641aa11e3f751633305f2c54225cee8d832d6da9 (dirty: N) [source:4f62a1a6c1c45ab6afe6f19bbe91f7da122a9aa0523fb1203021654bf4129ea7; harness:7852c9e3cb673b48f3aff491ea71bd245d9eb58bcecb67d5ba999557f8dda877; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:6378352ea131eee3338019d36bafc100c54837e29aac271ea8de1687c639a07f] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean",
+  "entry_postflight_proven": true,
+  "raw": {
+    "stdout_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/replacement/outer-stdout.log",
+    "stdout_sha256": "05bd6dadd36c8455118e3e29492985715045574f31d4a18510d860c558813423",
+    "owned_result_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/replacement/check-owned-result.json",
+    "owned_result_sha256": "1e29c530b0835b8bfb694cdd781368ee75ba24ef6492e389b1dfdc54a3a1fcd2",
+    "stderr_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/replacement/outer-stderr.log",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "limitations": "Canonical approvedreplacementPASS only. Mandatory0.24.3nativeproof remainsseparate. OriginalfirsttimeoutFAIL not relabelled; no third fullrun."
+}

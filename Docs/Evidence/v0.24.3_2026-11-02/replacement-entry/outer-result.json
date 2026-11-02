@@ -1,0 +1,15 @@
+{
+  "started_at": "2026-11-02T10:41:46.378Z",
+  "finished_at": "2026-11-02T10:50:58.052Z",
+  "pid": 116812,
+  "callback_received": true,
+  "error": null,
+  "stdout_bytes": 732900,
+  "stderr_bytes": 0,
+  "stdout_sha256": "05bd6dadd36c8455118e3e29492985715045574f31d4a18510d860c558813423",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "write_errors": [],
+  "invocation_sha256": "9988225b7290edf34e3dea12ea742c495fc11349e42fe0e0dbc8c7b6ed903758",
+  "native_deadline_ms": 600000,
+  "transport": "short-persistent-launch-and-poll"
+}

@@ -1,0 +1,97 @@
+{
+  "schema": "books-source-gui-check-v1",
+  "stage": "developer SOURCE probe; not packaged NativeQA",
+  "source_head": "822bd67b8e58a5a1ebd300c9c22c75eeb7ab0d9d",
+  "version": "0.24.3",
+  "runtime": {
+    "electron": "44.4.5",
+    "archive_sha256": "11c395820a5aaa8ebcc0686b476d0ac98a730274ebfbdc8cf5538a7c2815cb5d"
+  },
+  "provenance": "Entirely synthetic private 3 FILE rows; no user catalog/live data/NAS. Corrupted working SQLite header, preserved sealed good directory.",
+  "cases": {
+    "genuine_fault": "PASS: real startup sqlite3.DatabaseError:file is not a database → Stopped",
+    "copy_details": {
+      "status": "PASS",
+      "actor": "Futaba real GUI button; Ender OS clipboard readback after approved QA sentinel seed",
+      "characters": 674,
+      "sha256": "686ba523f226e21e728d50b64fa98381ed40ea14ecbac0c18c4c8621524c8c8a"
+    },
+    "ctrl_c": {
+      "status": "PASS",
+      "actor": "Futaba actual selection/key input, Ender OS clipboard readback",
+      "selection_stable_seconds": 14.835,
+      "clipboard_actual": "Last engine output:\r\n",
+      "prior_clipboard_read": false
+    },
+    "retry": {
+      "status": "USER_OBSERVED_PASS",
+      "actor": "Sergei voluntary Try again after automated focus deadline; screenshot reported by parent",
+      "result": "Ready with three books in private SOURCE QA instance",
+      "automated_retry": false,
+      "installed_app": false
+    },
+    "closure": {
+      "status": "PASS",
+      "app_retained": 14,
+      "quit_helper_retained": 3,
+      "normal_complete_zero": true,
+      "forced": false,
+      "timedOut": false
+    },
+    "tray": {
+      "status": "PASS",
+      "exact_own_leaf_deleted": true,
+      "foreign_unchanged": true,
+      "uiOrderListWritten": false,
+      "retained_numeric_reference_bytes": 8
+    }
+  },
+  "focus": {
+    "started": "2026-11-02T09:39:48.885Z",
+    "deadline": "2026-11-02T09:41:48.885Z",
+    "last_automated_input": "2026-11-02T09:41:15.992Z",
+    "automated_retry_blocked_at_deadline": true
+  },
+  "records": {
+    "copy-details-clipboard.txt": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/copy-details-clipboard.txt",
+      "sha256": "686ba523f226e21e728d50b64fa98381ed40ea14ecbac0c18c4c8621524c8c8a",
+      "size": 674
+    },
+    "ctrl-c-clipboard.txt": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/ctrl-c-clipboard.txt",
+      "sha256": "078ee66764d374e190ac601b3f5769da2a6fb2a91d9d45b535d0ab45522cf4eb",
+      "size": 21
+    },
+    "launch-start.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/launch-start.json",
+      "sha256": "fc48cab4d02743873cd0da233c9ec5e3cb22cd25cab99732a94ddaa41d82f035",
+      "size": 217
+    },
+    "restore.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/restore.json",
+      "sha256": "97e1a463d5f08c5ef2d6ead52481a493604a50c5ec56abb9647d87ae56819c8e",
+      "size": 370
+    },
+    "source-leaf-cleanup.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/source-leaf-cleanup.json",
+      "sha256": "204f8b3bb5e0550becbc17a1d4dfc788af6858883235c3e92ee5f7667c5513b9",
+      "size": 1430
+    },
+    "source-owned-result.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/source-owned-result.json",
+      "sha256": "7373cc6a2c07a27d22eea536c382e8f3d3d7f66c145b4be64138ad7b46a9f79b",
+      "size": 804
+    },
+    "sully-quit-owned.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/sully-quit-owned.json",
+      "sha256": "9123693dc496b240f4ff19cda489db09cf59b651227e8ca29e325162e0791f5b",
+      "size": 685
+    },
+    "stopped-state.json": {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/source-gui/stopped-state.json",
+      "sha256": "802fee712be5c58d9d2611a815c87addd360c6b874a35a2cbe51f1fd91560fd3",
+      "size": 3492
+    }
+  }
+}

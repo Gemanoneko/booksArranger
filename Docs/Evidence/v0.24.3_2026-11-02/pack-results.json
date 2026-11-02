@@ -1,0 +1,74 @@
+{
+  "schema": "books-pack-results-v1",
+  "failed_attempt": {
+    "source": "23a13c1e11f5b52020465ab900557d3b05d4c440",
+    "code": 1,
+    "reason": "Exactchildpolicy hardcoded0.24.2archive refused0.24.3; preservedFAIL",
+    "elapsedMs": 47386.875400000004,
+    "normal_native_zero": true,
+    "retained": 34
+  },
+  "successful_attempt": {
+    "source": "641aa11e3f751633305f2c54225cee8d832d6da9",
+    "build": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+    "version": "0.24.3",
+    "product_digest": "2e378c8fa18a72c6a8be2ae2708b64a83006d1e078a459be549db72410443a0d",
+    "manifest_sha256": "024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd",
+    "pointer_sha256": "7bce0c6bc2b915cf89ae62d702c9ac9fd3198fa4403dd79c5628104e165b2439",
+    "code": 0,
+    "elapsedMs": 99344.1019,
+    "normal_native_zero": true,
+    "retained": 60,
+    "payload_verified": true,
+    "installer_equivalent": true,
+    "artifacts": [
+      {
+        "path": "builds/5e9c20da-f00b-4a7f-af0b-f87d9c21f399/Books-Arranger-Setup-0.24.3.exe",
+        "sha256": "40dbfafee9094c2b619d8eba437510985f62d8ad1e4150679182f5c481e533ef",
+        "size": 174664830
+      },
+      {
+        "path": "builds/5e9c20da-f00b-4a7f-af0b-f87d9c21f399/Books-Arranger-Setup-0.24.3.exe.blockmap",
+        "sha256": "c33145678394f01544974af715ff82ff20bfdff18cbe3298684e17666752631d",
+        "size": 182045
+      },
+      {
+        "path": "builds/5e9c20da-f00b-4a7f-af0b-f87d9c21f399/latest.yml",
+        "sha256": "23adbf963b5ea67020e0240299de258f007e6f5419a9e6d3d89bca8c5c8206d8",
+        "size": 360
+      }
+    ]
+  },
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/pass-owned.json",
+      "size": 1635,
+      "sha256": "c77533c1b5ccaa7c19b826d60ffea63d410942a97c9fe98013e4a054be78c4ac"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/pass-native.json",
+      "size": 517,
+      "sha256": "b71ec4f15a3be8bcf6248a7c7f9910e8ca7c8930058a94378f2fba3340833ac3"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/pass-callback.json",
+      "size": 116,
+      "sha256": "8c5b2945de608ed71f6b79e3a9628e09dce79b616a793c3f75909b2778562d0c"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/failed-owned.json",
+      "size": 9522,
+      "sha256": "bd14bd5dfe51352fedc4fcd9e5238ab3209b83382ee9b1c061333ebf9527cebd"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/failed-native.json",
+      "size": 517,
+      "sha256": "d81a29a6ab4baf794b58a4c4524842c1d6a3ab5eaccb7c5d270e069e8389fac0"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/pack/failed-callback.json",
+      "size": 308,
+      "sha256": "3b56634866eeca74ab516bbb3d01d139fee22a342537190fa0ce3cbf7e92f087"
+    }
+  ]
+}

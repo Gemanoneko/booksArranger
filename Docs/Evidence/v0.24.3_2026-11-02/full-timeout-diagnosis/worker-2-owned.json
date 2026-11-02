@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "Fixture root map: {\"mapped\": [\"test_automatic_processing.AREA\"], \"absent\": [\"test_local_identity.AREA\", \"test_local_identity_fixes.AREA\", \"test_split_books.AREA\", \"test_multisource.SCRATCH\", \"test_local_gate_consistency.ROOT\", \"test_series_backfill.AREA\"]}\r\nIntegrated Python batch cases: 1\r\nBOOKS_PYTHON_BATCH_RESULT {\"batch\": 2, \"patterns\": [\"test_set_release.py\"], \"ids\": [\"test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start\"], \"discovered\": 1, \"completed\": 1, \"skipped\": 0, \"failures\": 0, \"errors\": 0, \"success\": true, \"module_seconds\": {\"test_set_release.py\": 29.2}}\r\n",
+  "err": "test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start (test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 29.179s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 29844,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 110,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 1937,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 29935.1819,
+  "outputBytes": 926
+}

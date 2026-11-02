@@ -1,0 +1,41 @@
+{
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+    "--context",
+    "C:/Antigravity Projects/q/context/context.json",
+    "--context-sha",
+    "9d1808000220694088d2bacc91f814697c5b0be2d7a3e38438596c830121299b",
+    "--run-root",
+    "C:/Antigravity Projects/q"
+  ],
+  "options": {
+    "cwd": "C:/Antigravity Projects/Studio Illuminati",
+    "env": {
+      "SystemRoot": "C:\\Windows",
+      "WINDIR": "C:\\Windows",
+      "PATH": "C:/Program Files/nodejs;C:/Program Files/Git/cmd;C:/Windows/System32",
+      "TEMP": "C:/Antigravity Projects/q/t",
+      "TMP": "C:/Antigravity Projects/q/t",
+      "TMPDIR": "C:/Antigravity Projects/q/t",
+      "USERPROFILE": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/profile",
+      "APPDATA": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/profile/AppData/Roaming",
+      "LOCALAPPDATA": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/profile/AppData/Local",
+      "GIT_OPTIONAL_LOCKS": "0",
+      "NODE_OPTIONS": "",
+      "NODE_PATH": "",
+      "BOOKS_QA_RUNTIME_ROOT": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+      "BOOKS_MP3_REAL_FIXTURE": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3"
+    },
+    "windowsHide": true,
+    "timeout": 600000,
+    "maxBuffer": 67108864,
+    "encoding": "utf8"
+  },
+  "checker_sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba",
+  "context_sha256": "9d1808000220694088d2bacc91f814697c5b0be2d7a3e38438596c830121299b",
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "one_canonical_entry_for_this_build": true,
+  "approval_exception": "User explicitly approved Allow one replacement check; unchanged sealed0.24.3 candidate, original failed proof retained."
+}

@@ -1,0 +1,3 @@
+Fixture root map: {"mapped": ["test_automatic_processing.AREA"], "absent": ["test_local_identity.AREA", "test_local_identity_fixes.AREA", "test_split_books.AREA", "test_multisource.SCRATCH", "test_local_gate_consistency.ROOT", "test_series_backfill.AREA"]}
+Integrated Python batch cases: 1
+BOOKS_PYTHON_BATCH_RESULT {"batch": 2, "patterns": ["test_set_release.py"], "ids": ["test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start"], "discovered": 1, "completed": 1, "skipped": 0, "failures": 0, "errors": 0, "success": true, "module_seconds": {"test_set_release.py": 29.2}}

@@ -7,12 +7,12 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.3
-Commit range: 72058a077ce0c277bd3f00c577e0599e02bcb035..working tree identified below
+Commit range: 72058a077ce0c277bd3f00c577e0599e02bcb035..641aa11e3f751633305f2c54225cee8d832d6da9
 Files changed: 14 initial source/test files (+262 / -21 lines), plus 3 packaging files reviewed in the addendum
 Stand-down dimensions: none
 ```
 
-This reviews the new patch against the published 0.24.2 source and subsequent documentation-only HEAD. The prior application's accumulated review and frozen 0.24.2 proof remain untouched. Sully may mechanically replace the working-tree endpoint with the commit containing these exact source bytes; artifact and final QA bindings are pending.
+This reviews the new patch against the published 0.24.2 source and subsequent documentation-only HEAD. The prior application's accumulated review and frozen 0.24.2 proof remain untouched. The final source and artifact are bound in the addendum below; final behavior QA remains independent.
 
 ## Summary
 
@@ -77,6 +77,28 @@ No findings in this delta. Measured SHA256 pins:
 
 Captured targeted result `pack-fix-test-result.json` SHA256 `0ae48667501da26b9cc72d2cbe4124ba6acf7b3c551559e3d70a75b93d02c957` reports 26/26 affected policy tests passing in 698ms with normal owned closure (five retained, zero remaining; no force, timeout or incomplete queries). Ender also reports three syntax checks passing. The new tests include exact 0.24.3 archive acceptance and refusal for wrong version/path/cwd, missing archive binding and invalid package identity. This evidence does not claim a successful rebuilt installer or final entry check.
 
+## Final source and artifact binding
+
+Release source commit: 641aa11e3f751633305f2c54225cee8d832d6da9
+
+Release artifact manifest SHA256: 024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd
+
+Final candidate: `C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101`.
+
+All seventeen retained main-source files still hash exactly to the original reviewed pins above. Each final-candidate counterpart equals its reviewed source after changing CRLF to LF only; no other content differs. The candidate's actual phase-contract SHA256 is `63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f`, reflecting that checkout's line endings. Fresh evidence must bind this actual fingerprint, not the earlier working-copy hash.
+
+The remaining release metadata changes are the package version `0.24.3`, matching top-level/root-package lockfile versions, and the single `scripts/build-inputs.json` lock hash field. The candidate lockfile hashes to `ff59b7c33f725153b1722b07aada0e3f5ad958f3749e90fbb73ab17a3471480a`, exactly the new input pin; the other input configuration is unchanged. No dependency changes or unreviewed application changes were found.
+
+Measured `dist/release-artifacts.json` binds source above, product digest `2e378c8fa18a72c6a8be2ae2708b64a83006d1e078a459be549db72410443a0d`, version `0.24.3`, build `5e9c20da-f00b-4a7f-af0b-f87d9c21f399`, verified payload and installer equivalence. Each of its three actual release files was independently hashed and sized:
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| `Books-Arranger-Setup-0.24.3.exe` | 174664830 | `40dbfafee9094c2b619d8eba437510985f62d8ad1e4150679182f5c481e533ef` |
+| `Books-Arranger-Setup-0.24.3.exe.blockmap` | 182045 | `c33145678394f01544974af715ff82ff20bfdff18cbe3298684e17666752631d` |
+| `latest.yml` | 360 | `23adbf963b5ea67020e0240299de258f007e6f5419a9e6d3d89bca8c5c8206d8` |
+
+The actual runtime pointer SHA256 is `7bce0c6bc2b915cf89ae62d702c9ac9fd3198fa4403dd79c5628104e165b2439`. No source drift or missing binding was found. This is a source/artifact construction clearance; full final entry was assembling and fresh candidate-bound native QA was pending at this check. Neither is claimed passed here. The separate QA draft and source-GUI evidence were preserved without modification.
+
 ## Verdict
 
 - Total Critical: 0
@@ -85,4 +107,4 @@ Captured targeted result `pack-fix-test-result.json` SHA256 `0ae48667501da26b9cc
 
 **Verdict:** RELEASE CLEAR
 
-Source construction is clear for the exact patch above. Final release remains subject to the ordinary candidate/artifact binding and independent QA GO.
+Source construction is clear for the exact commit and artifact above. Final release remains subject to completed final entry, fresh candidate-bound native proof and independent QA GO.

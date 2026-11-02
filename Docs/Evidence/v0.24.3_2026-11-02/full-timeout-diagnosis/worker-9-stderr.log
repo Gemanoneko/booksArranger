@@ -1,0 +1,6 @@
+test_marked_parts_are_joined_keeping_every_chapter_and_removed_only_after_verification (test_m4b_join.JoinTests.test_marked_parts_are_joined_keeping_every_chapter_and_removed_only_after_verification) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 30.378s
+
+OK

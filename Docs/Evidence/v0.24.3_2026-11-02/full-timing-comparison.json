@@ -1,0 +1,345 @@
+{
+  "schema": "books-full-timing-comparison-v1",
+  "old": {
+    "source": "f6064c832ef3ff69d91d4ab94a2d7ff799b89a1d",
+    "proof": "Docs/Evidence/v0.24.2_2026-11-01/FINAL-ENTRY-PROOF.json",
+    "proof_sha256": "396a42498a16350e8ac659d8070418c940dd4e126b5066d448d15be01b3cc4ce",
+    "workers": 13,
+    "worker_seconds": [
+      419.4,
+      411.6,
+      417.4,
+      398.2,
+      407.3,
+      463.9,
+      430.5,
+      426.5,
+      437.6,
+      421.8,
+      432,
+      395.3,
+      455.3
+    ],
+    "copy_seconds": 11.8,
+    "source_files": 947,
+    "source_logical_bytes": 17309778
+  },
+  "current": {
+    "source": "641aa11e3f751633305f2c54225cee8d832d6da9",
+    "status": "FAIL_TIMEOUT",
+    "workers": 13,
+    "worker_deadline_seconds": 540,
+    "completion_reports": 0,
+    "observed_started_cases": 1734,
+    "discovered_cases": 2331,
+    "copy_seconds": 18.1,
+    "source_files": 1006,
+    "source_logical_bytes": 18096692,
+    "worker_progress": [
+      {
+        "worker": 0,
+        "patterns": [
+          "test_desktop_quit.py",
+          "test_desktop_host.py",
+          "test_attempt_working_lifecycle.py",
+          "test_automatic_record_retry.py",
+          "test_web.py",
+          "test_status_read_contention.py",
+          "test_candidate_source_refresh.py",
+          "test_status_snapshot.py",
+          "test_startup_published_check.py",
+          "test_blocked_retry.py",
+          "test_publication_locations.py",
+          "test_publication_binding.py",
+          "test_relocated_chapter_repair.py",
+          "test_attention_repair.py",
+          "test_producer_recovery_http.py",
+          "test_merge_http.py",
+          "test_quicktime_chapters.py",
+          "test_retry_start_fence.py",
+          "test_todo_holds.py",
+          "test_entered_names.py",
+          "test_cleanup_242.py"
+        ],
+        "started": 333,
+        "last": {
+          "id": "test_entered_names.EditNamesTests.test_the_editor_reads_what_the_files_say_with_the_place_and_no_job",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 1,
+        "patterns": [
+          "test_book_delete.py"
+        ],
+        "started": 42,
+        "last": {
+          "id": "test_book_delete.DeleteBookTests.test_the_last_copy_of_a_book_whose_original_is_gone_is_deleted_too",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 2,
+        "patterns": [
+          "test_failed_m4b_retry.py",
+          "test_progress_rows.py",
+          "test_library_settings.py",
+          "test_status_under_load.py",
+          "test_backup_rule.py",
+          "test_collection_identity.py",
+          "test_set_release.py",
+          "test_shared_routing.py"
+        ],
+        "started": 82,
+        "last": {
+          "id": "test_set_release.SetReleaseTests.test_ruling_57_approve_one_does_not_release_the_other_even_after_start",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 3,
+        "patterns": [
+          "test_publication_consumers.py",
+          "test_migration_operation.py",
+          "test_derived_migration.py",
+          "test_local_identity.py",
+          "test_inplace_m4b.py:-EligiblePathTests,FallbackTests,RecoveryWiringTests",
+          "test_source_cleanup.py",
+          "test_list_speed.py",
+          "test_folder_unit_grouping.py"
+        ],
+        "started": 57,
+        "last": {
+          "id": "test_inplace_m4b.ServiceTests.test_destination_outside_the_sorted_folder_never_edits_the_original",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 4,
+        "patterns": [
+          "test_working_precision.py",
+          "test_storage_cleanup.py",
+          "test_automatic_media_policy.py",
+          "test_standing_admission.py",
+          "test_published_snapshot_lifecycle.py",
+          "test_progress.py",
+          "test_multisource.py",
+          "test_review_backend.py",
+          "test_source_proofs.py",
+          "test_no_evidence.py",
+          "test_series_identity_242.py"
+        ],
+        "started": 123,
+        "last": {
+          "id": "test_source_proofs.WholeBookReadTests.test_one_full_revision_hash_per_attempt_and_full_deletion_proof",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 5,
+        "patterns": [
+          "test_working_lifecycle.py",
+          "test_attention_failure_policy.py",
+          "test_destination_admission.py",
+          "test_groups_filters.py",
+          "test_anthology_volumes.py",
+          "test_public_work_identity.py",
+          "test_folder_structure.py",
+          "test_catalog_busy.py",
+          "test_destination_override.py",
+          "test_terminal_chapters.py"
+        ],
+        "started": 124,
+        "last": {
+          "id": "test_folder_structure.OddNameTests.test_ruling_51_every_other_name_keeps_how_it_filed_before",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 6,
+        "patterns": [
+          "test_working_cleanup.py",
+          "test_local_identity_fixes.py",
+          "test_catalog_paging.py",
+          "test_safety_boundaries.py",
+          "test_approve_as_is.py",
+          "test_join_parts.py",
+          "test_ruling35.py"
+        ],
+        "started": 73,
+        "last": {
+          "id": "test_approve_as_is.ReviewFindingsTests.test_m4_an_approve_queued_while_pause_settles_is_accepted_and_keeps_every_answer",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 7,
+        "patterns": [
+          "test_automatic_processing.py",
+          "test_mp3_tag_repair.py",
+          "test_relocated_replacement.py",
+          "test_series_research.py",
+          "test_inplace_m4b.py:EligiblePathTests,FallbackTests,RecoveryWiringTests",
+          "test_source_folders.py",
+          "test_author_rules.py",
+          "test_action_queue.py"
+        ],
+        "started": 120,
+        "last": {
+          "id": "test_inplace_m4b.RecoveryWiringTests.test_startup_leaves_an_edit_open_only_while_its_library_root_cannot_be_seen",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 8,
+        "patterns": [
+          "test_build_guard.py",
+          "test_attention_actions.py",
+          "test_quiet_status.py",
+          "test_retry_intent.py",
+          "test_part_sets.py",
+          "test_desktop_update.py",
+          "test_startup_loading.py",
+          "test_book_move.py",
+          "test_start_over.py"
+        ],
+        "started": 119,
+        "last": {
+          "id": "test_startup_loading.ColdServePendingPageTests.test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 9,
+        "patterns": [
+          "test_desktop_catalog.py",
+          "test_sqlite_busy.py",
+          "test_replacement_jobs.py",
+          "test_metadata_choices.py",
+          "test_m4b_join.py",
+          "test_lock_timing.py",
+          "test_gap_fill.py",
+          "test_start_while_converting.py",
+          "test_restart_242.py"
+        ],
+        "started": 114,
+        "last": {
+          "id": "test_gap_fill.LaneTests.test_series_backfill_reserves_in_the_series_lane",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 10,
+        "patterns": [
+          "test_automatic_media.py",
+          "test_m4b_dispatch.py",
+          "test_zone_identifier.py",
+          "test_reacquire_sources.py",
+          "test_local_gate_consistency.py",
+          "test_directory_flush.py",
+          "test_relocation_progress.py",
+          "test_migration_planning.py",
+          "test_organization.py",
+          "test_manifest_compatibility.py",
+          "test_producer_recovery.py",
+          "test_recovery_retention.py",
+          "test_litres_research.py",
+          "test_series_fallbacks.py",
+          "test_openlibrary_index.py",
+          "test_bulk_retry_receipts.py",
+          "test_local_admission.py",
+          "test_cleanup_scope.py",
+          "test_identity_v5.py",
+          "test_backend_242.py"
+        ],
+        "started": 198,
+        "last": {
+          "id": "test_local_admission.LocalAdmissionTests.test_local_agreement_reaches_verified_ready_with_sources_retired_and_recovery_retained",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 11,
+        "patterns": [
+          "test_desktop_owner_recovery.py",
+          "test_cleanup_resume.py",
+          "test_output_migration.py",
+          "test_manual_metadata.py",
+          "test_series_backfill.py",
+          "test_inventory.py",
+          "test_iron_skazka.py",
+          "test_folder_regroup.py"
+        ],
+        "started": 122,
+        "last": {
+          "id": "test_iron_skazka.SkazkaConfirmAndConvert.test_a_changed_child_output_keeps_the_old_files_and_the_original",
+          "tail": "",
+          "unfinished": true
+        }
+      },
+      {
+        "worker": 12,
+        "patterns": [
+          "test_m4b_preservation.py",
+          "test_attention_audio_admission.py",
+          "test_manual_research.py",
+          "test_catalog_contention.py",
+          "test_sorted_wiring.py",
+          "test_attention_list.py",
+          "test_split_books.py",
+          "test_identity_0222.py",
+          "test_original_title_wait.py",
+          "test_live_cases_0222.py",
+          "test_integration_242.py"
+        ],
+        "started": 227,
+        "last": {
+          "id": "test_original_title_wait.EnglishSpellingAnswerTests.test_a_refused_approve_saves_no_spelling_rule",
+          "tail": "Gate scratch removed: scratch/source-fallback-2026-10-11, scratch/0, scratch/1, scratch/2, scratch/3, scratch/4, scratch/5, scratch/6, scratch/7, scra",
+          "unfinished": true
+        }
+      }
+    ]
+  },
+  "unchanged_content_after_EOL_normalization": [
+    {
+      "path": "scripts/check-desktop.mjs",
+      "content_identical": true
+    },
+    {
+      "path": "scripts/python-check-batches.mjs",
+      "content_identical": true
+    },
+    {
+      "path": "tests/test_set_release.py",
+      "content_identical": true
+    },
+    {
+      "path": "tests/test_approve_as_is.py",
+      "content_identical": true
+    },
+    {
+      "path": "tests/test_m4b_join.py",
+      "content_identical": true
+    },
+    {
+      "path": "scripts/qa-runtime.json",
+      "content_identical": true
+    }
+  ],
+  "unchanged_runtime": "Pinned Python/FFmpeg QA runtime and real MP3 fixture; same13worker scheduling/deadline and privatefixture aliases; Node+ownedhelper fingerprints match previousplan",
+  "test_delta": "3new coldserve startup methods in worker8 only; Node/DOM additions in parallel sidechain passed",
+  "conclusion": "Broadthroughput degradation begins before Python testexecution; workers stop in different methods, no commondeadlock or perworker duplicatefull discovered. Three observedFAIL cases pass serial unchanged. Historical CPU/disk/load counters absent, so exactenvironment resourcecause unproven; no productcodefix inferred.",
+  "next_step": "No automaticfullretry. If needed, diagnose resource/parallelism on existing codec fixture under boundedownexecution; requires explicit nexttask."
+}

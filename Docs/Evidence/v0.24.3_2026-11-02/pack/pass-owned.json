@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "{\"verified\": true, \"output\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\books-0242-candidate-20261101\\\\dist\\\\builds\\\\5e9c20da-f00b-4a7f-af0b-f87d9c21f399\", \"build_id\": \"5e9c20da-f00b-4a7f-af0b-f87d9c21f399\", \"manifest\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\books-0242-candidate-20261101\\\\dist\\\\release-artifacts.json\", \"manifest_sha256\": \"024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd\", \"prior_archived\": {\"manifest\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\books-0242-candidate-20261101\\\\dist\\\\release-artifacts.json.previous-5fb5eadc-1f19-4b7b-bb87-ad89bb6cd1e9\", \"pointer\": \"C:\\\\Antigravity Projects\\\\Worktrees\\\\Books Arranger\\\\books-0242-candidate-20261101\\\\build-cache\\\\runtime-pointer.json.previous-7b2907a7-3014-494c-bdca-e9cc0b3122ec\"}, \"staging_cleanup_removed\": 775, \"cleanup_warning\": null}\r\n",
+  "err": "",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 83212,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 60,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 6405,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 99344.1019,
+  "outputBytes": 864
+}

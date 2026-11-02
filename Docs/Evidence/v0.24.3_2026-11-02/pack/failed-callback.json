@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-02T09:59:12.122Z",
+  "error": {
+    "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/pack-0243-driver.mjs\n",
+    "code": 1,
+    "killed": false
+  },
+  "stdout": "{\"code\":1,\"error\":null}\n",
+  "stderr": ""
+}

@@ -1,0 +1,124 @@
+{
+  "status": "FAIL_TIMEOUT_NO_FINAL_ENTRY_RECEIPT",
+  "version": "0.24.3",
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "artifact_manifest_sha256": "024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd",
+  "runtime_pointer_sha256": "7bce0c6bc2b915cf89ae62d702c9ac9fd3198fa4403dd79c5628104e165b2439",
+  "context_sha256": "9d1808000220694088d2bacc91f814697c5b0be2d7a3e38438596c830121299b",
+  "outer_callback": {
+    "started_at": "2026-11-02T10:19:42.278Z",
+    "finished_at": "2026-11-02T10:29:42.317Z",
+    "pid": 69196,
+    "callback_received": true,
+    "error": {
+      "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha 9d1808000220694088d2bacc91f814697c5b0be2d7a3e38438596c830121299b --run-root C:/Antigravity Projects/q\n",
+      "code": null,
+      "signal": "SIGTERM",
+      "killed": true
+    },
+    "stdout_bytes": 367583,
+    "stderr_bytes": 0,
+    "stdout_sha256": "fa2acece1680071c842efc6b77411c6d6ac18bbbbc237de76ef5075956023499",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "write_errors": [],
+    "invocation_sha256": "3a91564e67de8bdd6311d275c5fa799436f4d59ed5e44ee2f1a0a6961c6b0629",
+    "native_deadline_ms": 600000,
+    "transport": "short-persistent-launch-and-poll"
+  },
+  "entry_receipt_present": false,
+  "entry_postflight_proven": false,
+  "check_command": {
+    "file": "C:\\Program Files\\nodejs\\node.exe",
+    "args": [
+      "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      "run",
+      "check"
+    ],
+    "cwd": "C:\\Antigravity Projects\\q\\entry-run-I2Mn7S",
+    "timeoutMs": 577606
+  },
+  "python": {
+    "worker_count": 13,
+    "per_worker_deadline_seconds": 540,
+    "all_workers_hit_deadline": true,
+    "discovered_counts": [
+      365,
+      46,
+      102,
+      138,
+      147,
+      218,
+      105,
+      204,
+      194,
+      134,
+      279,
+      134,
+      265
+    ],
+    "discovered_total": 2331,
+    "completion_reports": 0,
+    "worker_lines": [
+      "Python worker 0: 540 s real, 217 s projected, 540 s deadline (100 %)",
+      "Python worker 1: 540 s real, 285 s projected, 540 s deadline (100 %)",
+      "Python worker 2: 540 s real, 238 s projected, 540 s deadline (100 %)",
+      "Python worker 3: 540 s real, 238 s projected, 540 s deadline (100 %)",
+      "Python worker 4: 540 s real, 237 s projected, 540 s deadline (100 %)",
+      "Python worker 5: 540 s real, 179 s projected, 540 s deadline (100 %)",
+      "Python worker 6: 540 s real, 222 s projected, 540 s deadline (100 %)",
+      "Python worker 7: 540 s real, 293 s projected, 540 s deadline (100 %)",
+      "Python worker 8: 540 s real, 308 s projected, 540 s deadline (100 %)",
+      "Python worker 9: 540 s real, 316 s projected, 540 s deadline (100 %)",
+      "Python worker 10: 540 s real, 296 s projected, 540 s deadline (100 %)",
+      "Python worker 11: 540.4 s real, 275 s projected, 540 s deadline (100 %)",
+      "Python worker 12: 540.3 s real, 212 s projected, 540 s deadline (100 %)"
+    ]
+  },
+  "check_owned": {
+    "code": 1,
+    "ok": false,
+    "closed": true,
+    "forced": true,
+    "timedOut": true,
+    "outputComplete": false,
+    "reason": "Total deadline reserved for owned cleanup",
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 9780,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 26386,
+        "incompleteQueries": 547,
+        "firstIncomplete": {
+          "assigned": 47,
+          "listed": 46,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 28,
+          "listed": 27,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "elapsedMs": 576647.8668000001
+  },
+  "scratch_retained": "C:/Antigravity Projects/q/entry-run-I2Mn7S/scratch/11 (EPERM)",
+  "raw": {
+    "outer_stdout": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/full/outer-stdout.log",
+    "outer_stdout_sha256": "fa2acece1680071c842efc6b77411c6d6ac18bbbbc237de76ef5075956023499",
+    "owned_result": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/full/check-owned-result.json",
+    "owned_result_sha256": "a836d3d48ab72223437f44367e2a631da4e26d2655dbef9f911f2fcfb0b68aea",
+    "check_stdout": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/full/check-stdout.log",
+    "check_stderr": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/entry-0243/full/check-stderr.log"
+  },
+  "limitations": "No PASS receipt; no final entry postflight; outer process killed at600000ms. Owned check native finalcompletezero proven despite forced timeout. No native app launch or automatic rerun. Preserve scratch/evidence for assigned diagnosis."
+}

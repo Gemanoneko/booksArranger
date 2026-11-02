@@ -1,0 +1,13 @@
+Step: engine (1 of 4)
+Engine answered: never
+Progress: 1 s ago
+Loading started: 2026-11-02T09:39:29.606Z
+State: stopped
+Engine exit code: 1
+Last engine output:
+    inspect_folder(Path(database).parent,mode,roots,(Path(__file__).resolve().parent,))
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Antigravity Projects\qa-books-0243-ui\source\desktop_catalog.py", line 41, in inspect_folder
+    tables={row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                              ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.DatabaseError: file is not a database

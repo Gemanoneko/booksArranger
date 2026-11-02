@@ -1,0 +1,38 @@
+{
+  "schema": "books-preserved-entry-timeout-files-v1",
+  "status": "FAIL_TIMEOUT_NO_FINAL_RECEIPT",
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/summary.json",
+      "size": 5118,
+      "sha256": "3055b680e660071c6a54e2a9995777a2ad86cabab05112ae898a95a79f8f6529"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/check-owned-result.json",
+      "size": 367863,
+      "sha256": "a836d3d48ab72223437f44367e2a631da4e26d2655dbef9f911f2fcfb0b68aea"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/check-stdout.log",
+      "size": 71509,
+      "sha256": "8b7e41398e774bef11d32867a095b085136bed60b6492a340cb93cb7ee57ac2e"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/check-stderr.log",
+      "size": 289426,
+      "sha256": "34647286b2ae9df593dff9a6ef6fe1107ae8ccf9c4e7264594014be0faeff1f2"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/outer-result.json",
+      "size": 973,
+      "sha256": "e0fdd047a4f154d92a5ee1c273dc4620bf184f202244d3447d206f4a70bf8715"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.3_2026-11-02/full-entry-timeout/outer-stdout.log",
+      "size": 367583,
+      "sha256": "fa2acece1680071c842efc6b77411c6d6ac18bbbbc237de76ef5075956023499"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "Fixture root map: {\"mapped\": [\"test_automatic_processing.AREA\"], \"absent\": [\"test_local_identity.AREA\", \"test_local_identity_fixes.AREA\", \"test_split_books.AREA\", \"test_multisource.SCRATCH\", \"test_local_gate_consistency.ROOT\", \"test_series_backfill.AREA\"]}\r\nIntegrated Python batch cases: 1\r\nBOOKS_PYTHON_BATCH_RESULT {\"batch\": 6, \"patterns\": [\"test_approve_as_is.py\"], \"ids\": [\"test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used\"], \"discovered\": 1, \"completed\": 1, \"skipped\": 0, \"failures\": 0, \"errors\": 0, \"success\": true, \"module_seconds\": {\"test_approve_as_is.py\": 19.5}}\r\n",
+  "err": "test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used (test_approve_as_is.ApproveAsIsTests.test_no_author_anywhere_approved_as_is_goes_to_bez_avtora_and_the_preview_path_is_the_one_used) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 19.468s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 71696,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 58,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 1310,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 20213.914099999995,
+  "outputBytes": 996
+}

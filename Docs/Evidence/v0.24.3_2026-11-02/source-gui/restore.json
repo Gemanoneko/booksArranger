@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-02T09:41:40.891Z",
+  "hostExitEvidence": "stopped-state.json: phase stopped/exited1 emitted after own desktop_host child exit",
+  "operation": "entire own data directory quarantined; sealed good copied",
+  "good_db_sha256": "7c0a3cfe625523f936538c5270a0607919b4d7c5b637d7a763f8c627f14a71b1",
+  "selection_clipboard_actual": "Last engine output:\r\n"
+}

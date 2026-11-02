@@ -1,0 +1,3 @@
+Fixture root map: {"mapped": ["test_automatic_processing.AREA", "test_local_identity.AREA", "test_split_books.AREA"], "absent": ["test_local_identity_fixes.AREA", "test_multisource.SCRATCH", "test_local_gate_consistency.ROOT", "test_series_backfill.AREA"]}
+Integrated Python batch cases: 1
+BOOKS_PYTHON_BATCH_RESULT {"batch": 9, "patterns": ["test_m4b_join.py"], "ids": ["test_m4b_join.JoinTests.test_marked_parts_are_joined_keeping_every_chapter_and_removed_only_after_verification"], "discovered": 1, "completed": 1, "skipped": 0, "failures": 0, "errors": 0, "success": true, "module_seconds": {"test_m4b_join.py": 30.4}}

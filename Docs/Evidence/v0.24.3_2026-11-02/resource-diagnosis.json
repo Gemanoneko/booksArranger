@@ -1,0 +1,43 @@
+{
+  "schema": "books-readonly-resource-diagnosis-v1",
+  "observed_at": "2026-11-02T10:38:20Z/2026-11-02T10:39:02Z",
+  "method": "Windows typeperf ordinary performance counters; 3samples/1second. No tests/app actions/process controls.",
+  "measurements": {
+    "cpu_percent": [
+      22.744956,
+      25.321003,
+      31.377686
+    ],
+    "physical_disk_busy_percent": [
+      0.023241,
+      0.265676,
+      0.597353
+    ],
+    "average_disk_queue": [
+      0.002324,
+      0.026568,
+      0.059736
+    ],
+    "available_memory_MB": [
+      75552,
+      75532,
+      75107
+    ],
+    "processor_queue": [
+      2,
+      2,
+      0
+    ]
+  },
+  "process_inventory": "Private only; excluded from portable proof. No unrelated process stopped.",
+  "owned_monitor": {
+    "source": "Existing unchanged bounded-check.mjs retained receipts",
+    "previous_queries": 16953,
+    "previous_retained": 10872,
+    "current_queries": 26386,
+    "current_retained": 9780,
+    "limitation": "No monitorCPUtime recorded; querycounts alone cannot prove overhead caused timeout."
+  },
+  "conclusion": "No current resource saturation measured. Historical failure-time CPU/disk/load unavailable; exact cause unproven.",
+  "acceptance": "BLOCKED: originalfulltimeout remainsFAIL, targeted3serialcasesPASS does not supply canonicalfullreceipt. No supported validated600s remedy identified; no blindrerun/newharness/code/native launch."
+}
