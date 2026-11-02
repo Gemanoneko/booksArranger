@@ -1,0 +1,6 @@
+{
+  "at": "2026-11-02T11:02:09.062Z",
+  "error": null,
+  "stdout": "{\"code\":0,\"closed\":true,\"forced\":false,\"timedOut\":false,\"native\":{\"active\":0,\"assigned\":0,\"listed\":0,\"retained\":4,\"unsignaled\":0,\"complete\":true,\"zero\":true,\"sampling\":{\"queries\":1476,\"incompleteQueries\":0,\"firstIncomplete\":null,\"lastIncomplete\":null}},\"err\":\"\"}\n",
+  "stderr": ""
+}

@@ -1,0 +1,345 @@
+{
+  "schema": "books-owned-cleanup-v1",
+  "status": "PASS",
+  "started": "2026-11-02T11:01:45.940773+00:00",
+  "method": "Fixedabsoluteallowlist; ordinaryroot resolution; lstat identity inventory then dev/ino/type recheck before unlink; reparse entries unlinked without traversal; directories removed bottom-up. Existing BuildTree/PriorBuild holds current pair throughout candidate cleanup. Logical file-size bytes, not physical freed space.",
+  "roots": [
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\node_modules",
+      "absent_after": true,
+      "files": 7589,
+      "directories": 1042,
+      "reparse_entries": 0,
+      "logical_file_bytes": 96896782
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\pack-inputs",
+      "absent_after": true,
+      "files": 2301,
+      "directories": 490,
+      "reparse_entries": 0,
+      "logical_file_bytes": 190397122
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57",
+      "absent_after": true,
+      "files": 67,
+      "directories": 4,
+      "reparse_entries": 0,
+      "logical_file_bytes": 192172926
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\f58acdb8-bbd0-4721-9d2c-4676354dd016",
+      "absent_after": true,
+      "files": 933,
+      "directories": 87,
+      "reparse_entries": 0,
+      "logical_file_bytes": 520670535
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\b3ec20ce-84fc-43d7-a352-4bed1cd8a16f",
+      "absent_after": true,
+      "files": 2,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_file_bytes": 1419
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2",
+      "absent_after": true,
+      "files": 321,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_file_bytes": 762174153
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\8401b4d8-df07-4132-acae-e81796974899",
+      "absent_after": true,
+      "files": 319,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_file_bytes": 587330372
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-5fb5eadc-1f19-4b7b-bb87-ad89bb6cd1e9",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 62266
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-7b2907a7-3014-494c-bdca-e9cc0b3122ec",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 5824
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\backend",
+      "absent_after": true,
+      "files": 0,
+      "directories": 3,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\builder-cache",
+      "absent_after": true,
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\builder-config.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 8827
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\builder-policy-result.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 9293
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\builder-request.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 989
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\downloads",
+      "absent_after": true,
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\empty-global.npmrc",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\empty.npmrc",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\extract",
+      "absent_after": true,
+      "files": 0,
+      "directories": 17,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\icons",
+      "absent_after": true,
+      "files": 1,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_file_bytes": 14036
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\icons-request.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 359
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\jiti",
+      "absent_after": true,
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\lease.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 1074
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\node-compile-cache",
+      "absent_after": true,
+      "files": 82,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_file_bytes": 297160
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\npm-cache",
+      "absent_after": true,
+      "files": 1,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_file_bytes": 2468
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-archive",
+      "absent_after": true,
+      "files": 0,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-generator",
+      "absent_after": true,
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-generator-request.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 1631
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-generator-result.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 902
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-generator-start.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 719
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-payload",
+      "absent_after": true,
+      "files": 0,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\nsis-private.nsh",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 233
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\profile",
+      "absent_after": true,
+      "files": 0,
+      "directories": 3,
+      "reparse_entries": 0,
+      "logical_file_bytes": 0
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\shell",
+      "absent_after": true,
+      "files": 335,
+      "directories": 51,
+      "reparse_entries": 0,
+      "logical_file_bytes": 2373924
+    },
+    {
+      "path": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\shell-manifest.json",
+      "absent_after": true,
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_file_bytes": 49595
+    },
+    {
+      "path": "C:\\Antigravity Projects\\q",
+      "absent_after": true,
+      "files": 3681,
+      "directories": 143,
+      "reparse_entries": 2,
+      "logical_file_bytes": 70271344
+    },
+    {
+      "path": "C:\\Antigravity Projects\\qa-books-0243-ui",
+      "absent_after": true,
+      "files": 978,
+      "directories": 116,
+      "reparse_entries": 0,
+      "logical_file_bytes": 599118684
+    },
+    {
+      "path": "C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261102-startup",
+      "absent_after": true,
+      "files": 3559,
+      "directories": 154,
+      "reparse_entries": 0,
+      "logical_file_bytes": 655075202
+    }
+  ],
+  "totals": {
+    "files": 20183,
+    "directories": 2150,
+    "reparse_entries": 2,
+    "logical_file_bytes": 3676937839
+  },
+  "retained": [
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json",
+    "C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\claude\\c--Antigravity-Projects-Studio-Illuminati\\07095a58-8139-4614-a18d-87c3503d825f\\scratchpad\\salem",
+    "Canonical/shared main runtimes and global cached toolchains; all paths outside exactallowlist"
+  ],
+  "errors": [],
+  "current_pair_verified_before": true,
+  "current_build": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "current_runtime": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\02042ee8-f2f5-45f5-89f1-614c54c967f7\\runtime",
+  "current_pair_verified_after": true,
+  "salem_untouched_exists": true,
+  "finished": "2026-11-02T11:02:09.006370+00:00",
+  "post_cleanup": {
+    "whole_roots_absent": {
+      "startup": true,
+      "source_gui": true,
+      "q": true
+    },
+    "remaining_dist_builds": [
+      "5e9c20da-f00b-4a7f-af0b-f87d9c21f399"
+    ],
+    "remaining_producer_builds": [
+      "02042ee8-f2f5-45f5-89f1-614c54c967f7"
+    ],
+    "manifest_sha256": "024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd",
+    "pointer_sha256": "7bce0c6bc2b915cf89ae62d702c9ac9fd3198fa4403dd79c5628104e165b2439",
+    "installer_sha256": "40dbfafee9094c2b619d8eba437510985f62d8ad1e4150679182f5c481e533ef",
+    "installer_size": 174664830,
+    "cleanup_helpers_removed_with_startup_root": true,
+    "pending_cleanup_plan_removed": true
+  },
+  "measurement_scope": "Totals are logical file lengths and entry counts across the 37 explicit removed target roots; not allocated bytes/disk free space. Reparse entries counted separately and never traversed. Completed portable Docs and canonical/shared runtimes retained; pending cleanup-plan draft removed separately."
+}
