@@ -1,0 +1,97 @@
+{
+  "schema": "books-0244-retry-private-feature-failure-v1",
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_binding_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "status": "FUNCTIONAL_FAIL_INVALID_PRIVATE_OUTPUT_CONFIGURATION",
+  "actual_gui": {
+    "loaded_at": "2026-11-02T16:10:13.268Z",
+    "unique_retry_cleanup_button": true,
+    "actual_dom_click_at": "2026-11-02T16:10:13.479Z",
+    "functional_timeout_at": "2026-11-02T16:11:13.549Z",
+    "failure": "Originals were not retired within60s",
+    "http_response": "Not captured; no HTTP status or response inferred"
+  },
+  "lifecycle": {
+    "callback_at": "2026-11-02T16:11:16.737Z",
+    "code": 1,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "closureError": null,
+    "retained": 13,
+    "native_complete_zero": true,
+    "incomplete_queries": 0,
+    "private_failure_quit": true
+  },
+  "diagnosis": {
+    "fixture": "ApproveFixture.start passes Inventory(...,output_root=<private Audiobooks Sorted>); seeded job completed with real verified output and two real source/recovery files.",
+    "launch": "--roots-json supplies all3private libraries, but desktop/main.js deliberately sets audiobookOutputRoot=null in this mode.",
+    "refusal": "Startup output_current/output_valid rejects the seeded final root because it is neither configured output_root nor a recorded chosen destination; audio job became needs attention: Recorded output is missing, changed, or failed validation.",
+    "cleanup": "The previous identity hold and0removed remain unchanged; no per-book cleanup was admitted after job ceased being completed.",
+    "limits": "No product defect inferred. Do not reset job state or weaken output-root/provenance guard. A valid supported configuration/destination policy is needed before another app check."
+  },
+  "private_data_verified": {
+    "originals_present": 2,
+    "output_sha256": "7f5293ece830f1f97864e697266f4931d6a33db1614ddbccffe8f4f7cfb5d731",
+    "output_matches_seed": true,
+    "sibling_sha256": "cf67a6f34ccecac48d87741c9a833c1cb2ceb8283b877a277ec58f5bd7af4cf1",
+    "sibling_matches_seed": true
+  },
+  "history": {
+    "actual_app_checks": 1,
+    "maximum_approved_references": 2,
+    "canonical_launched": false,
+    "own_leaf": "Not deleted; cleanup-only predicate under review, no normalOwned bypass."
+  },
+  "prelaunch_preparation_failure": "Earlier missing await caused prelaunch code1 before app/registry/reference; preserved separately, corrected only in private driver.",
+  "raw": [
+    {
+      "file": "owned.json",
+      "size": 2496,
+      "sha256": "2d0e4b3ceeb3d16d7d57b14358c15bb3334ef828ee7df5f7ee4a2e480d97ccb9"
+    },
+    {
+      "file": "callback.json",
+      "size": 1491,
+      "sha256": "a57110c6ad703b56fe904cf02b0fcfe4ad6d6b0e2abfcbc47021be2394ccb8a4"
+    },
+    {
+      "file": "stdout.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "stderr.log",
+      "size": 1787,
+      "sha256": "9ffca7929c2d089d20c7a385e86acdbd9ec1bc2cada7ca75ae8a57f11f5d1aba"
+    },
+    {
+      "file": "progress.jsonl",
+      "size": 1006,
+      "sha256": "8303e6cf72aae7444c394a6e9f16df2e902ae235f9a608a74b4b5226571b8435"
+    },
+    {
+      "file": "approval.json",
+      "size": 1508,
+      "sha256": "3f39733fec40fe0be31b50b4011ed38cc3a3c93125e13e76e03cb6b2472169ef"
+    },
+    {
+      "file": "prelaunch-failure-callback.json",
+      "size": 1636,
+      "sha256": "f3f51a4bf7f0cccca6269b57c715732ec3811dbcfe673eebc3609a587d0b829d"
+    },
+    {
+      "file": "prelaunch-correction.json",
+      "size": 383,
+      "sha256": "63462ce72434b84b75dc6a3ac37acf285f027e1d94b73647e26a47ff5c6ef610"
+    }
+  ]
+}

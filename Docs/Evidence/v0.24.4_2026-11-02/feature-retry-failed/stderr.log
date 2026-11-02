@@ -1,0 +1,9 @@
+file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:2
+const root=path.dirname(fileURLToPath(import.meta.url)),cfg=JSON.parse(fs.readFileSync(path.join(root,'prepared.json'))),seed=JSON.parse(fs.readFileSync(path.join(root,'seed.json')));let shell,ws,exited=false,quit=false,originalError=null;const commands=createPrivateShellCommands({spawn,exe:cfg.exe,profile:cfg.profile,env:process.env});const progress=(phase,detail={})=>fs.appendFileSync(path.join(root,'feature-progress.private.jsonl'),JSON.stringify({at:new Date().toISOString(),phase,...detail})+'\n');const pause=ms=>new Promise(r=>setTimeout(r,ms));async function until(fn,ms,label){const end=Date.now()+ms;while(Date.now()<end){let v=await fn();if(v)return v;await pause(200);}throw Error('Timeout: '+label)}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ^
+
+Error: Timeout: exact two original retirements
+    at until (file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:2:692)
+    at async file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:12:2
+
+Node.js v26.13.0

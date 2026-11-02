@@ -1,0 +1,42 @@
+{
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+    "--context",
+    "C:/Antigravity Projects/q/context/context.json",
+    "--context-sha",
+    "7cf1faacee0def1838a0c23bc6bf536f42aec3a273097a99d93d306075e097e4",
+    "--run-root",
+    "C:/Antigravity Projects/q"
+  ],
+  "options": {
+    "cwd": "C:/Antigravity Projects/Studio Illuminati",
+    "env": {
+      "SystemRoot": "C:\\Windows",
+      "WINDIR": "C:\\Windows",
+      "PATH": "C:/Program Files/nodejs;C:/Program Files/Git/cmd;C:/Windows/System32",
+      "TEMP": "C:/Antigravity Projects/q/t",
+      "TMP": "C:/Antigravity Projects/q/t",
+      "TMPDIR": "C:/Antigravity Projects/q/t",
+      "USERPROFILE": "C:/Antigravity Projects/codex-books-20261102-0244/entry-budget/profile",
+      "APPDATA": "C:/Antigravity Projects/codex-books-20261102-0244/entry-budget/profile/AppData/Roaming",
+      "LOCALAPPDATA": "C:/Antigravity Projects/codex-books-20261102-0244/entry-budget/profile/AppData/Local",
+      "GIT_OPTIONAL_LOCKS": "0",
+      "NODE_OPTIONS": "",
+      "NODE_PATH": "",
+      "BOOKS_QA_RUNTIME_ROOT": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+      "BOOKS_MP3_REAL_FIXTURE": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3"
+    },
+    "windowsHide": true,
+    "timeout": 930000,
+    "maxBuffer": 67108864,
+    "encoding": "utf8"
+  },
+  "checker_sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba",
+  "context_sha256": "7cf1faacee0def1838a0c23bc6bf536f42aec3a273097a99d93d306075e097e4",
+  "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+  "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+  "entry_deadline_ms": 900000,
+  "transport_eof_only_ms": 930000,
+  "one_canonical_entry_for_this_build": true
+}

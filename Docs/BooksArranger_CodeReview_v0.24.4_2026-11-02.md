@@ -7,13 +7,13 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.4
-Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..reviewed runner-budget working tree after 3c45da40c82043379351fa60aac4e000a02ca172
+Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..9ccbbecef48d12498583a0a97ab595ce2a88ccb1
 Working-tree base: 163feb38f7828a8ee0fde01d897140e2323b31e9 (intervening changes are documentation)
 Scope: 5 product files and 3 focused test files, +278 / -31 lines
 Stand-down dimensions: none
 ```
 
-Source clearance certifies the original patch, public-capability correction and separately reviewed runner-budget repair. Both earlier artifact bindings remain historical and do not contain the runner repair. A new source/build binding, fresh final entry and independent behavior QA remain required.
+Source clearance certifies the original patch, public-capability correction and separately reviewed runner-budget repair. Earlier artifact bindings remain historical. The actual deployed runner source and new artifact are bound below; fresh schema-3 final entry and independent behavior QA remain required.
 
 ## Summary
 
@@ -127,6 +127,26 @@ Source construction for the eight-file shared/tool runner-budget repair is separ
 
 That review is source-clear only: the failed full runs remain failures, and build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063` remains tied to source `3c45da40c82043379351fa60aac4e000a02ca172`. It is not rebound to the runner patch. Canonical current release source/artifact fields must be added only for the actual newly committed and built candidate. Full entry and both approved hidden checks remain pending.
 
+## Final deployed runner source and artifact binding
+
+Release source commit: 9ccbbecef48d12498583a0a97ab595ce2a88ccb1
+
+Release artifact manifest SHA256: 49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1
+
+Shared runner deployment: Studio commit `79b6e3fbe34cb4cb73597bc65dfefe96da5653b2`. The separately reviewed shared report remains byte-identical at SHA256 `e9bd5322e0c441256d244ae096eb6a4352ab2719d7a0fa1d69a5f91f30f9a270`; all three shared source/test files still match its exact pins.
+
+Candidate `C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101` is clean at the release source commit above. All nine reviewed application/correction files and all five tool-budget files retain their latest reviewed main-source hashes. Every candidate counterpart equals those reviewed bytes after CRLF-to-LF normalization only. Package and root lockfile versions remain `0.24.4`; lockfile SHA256 `b3b03db6a1c44a8464a33849de51dee2c52aa43058ed8cc1a7d3ed3da5c03aa7` equals the existing build-input pin.
+
+Measured `dist/release-artifacts.json` binds version `0.24.4`, source above, build `2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e`, product digest `610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566`, verified payload and installer equivalence. All three actual release files independently match its hashes and sizes:
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| `Books-Arranger-Setup-0.24.4.exe` | 174671293 | `cf3f805af197642a0f586663359baacf8891a8ff90e2cd0513ff0ddfaa39a943` |
+| `Books-Arranger-Setup-0.24.4.exe.blockmap` | 182114 | `8fac25c9e0639a4e35106bc7e5b2509d376d39082e7774a14f271039eeafb013` |
+| `latest.yml` | 360 | `f60443625aa9ba01b741e74e28998f283ef859d411b281dd22854623de409a89` |
+
+Actual runtime-pointer SHA256: `149c7eb560f429121cf27503e76f2fdb30d38e193e6c470b24c61c6a9274aca7`. Ender reports packaging callback at `2026-11-02T15:55:13.019Z` returned code 0 without error, with normal owned closure (60 retained, zero remaining). No source/artifact drift was found. The earlier failed full runs, artifacts and expected short-timeout proof retain their original outcomes; none is relabeled or rebound. The schema-3 full entry and two approved hidden checks remain pending, and no QA PASS is inferred here.
+
 ## Verdict
 
 - Total open Critical: 0
@@ -135,4 +155,4 @@ That review is source-clear only: the failed full runs remain failures, and buil
 
 **Verdict:** RELEASE CLEAR
 
-Source construction is clear for the reviewed application corrections and separately pinned runner repair. Final release requires the new source/artifact binding, completed fresh-context entry, approved candidate-native checks and independent QA GO.
+Source and artifact construction are clear for Books source `9ccbbecef48d12498583a0a97ab595ce2a88ccb1`, build `2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e` and shared Studio deployment `79b6e3fbe34cb4cb73597bc65dfefe96da5653b2`. Final release requires completed fresh-context entry, approved candidate-native checks and independent QA GO.

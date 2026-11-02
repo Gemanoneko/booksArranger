@@ -1,0 +1,6 @@
+{
+  "scope": "Single await added to private async payload verification; no source/artifact/context change.",
+  "previous_sha256": "791d6ecc1d889f8a5f72f7b652d8204f0deeffd45e1557a13f3cd09aaf185878",
+  "current_sha256": "f7e3eb8bf571285b0c89124fda716860df230e7f80eb2e9606210ba60cde6290",
+  "previous_attempt": "FAIL before registry/scenario/app launch; no history reference consumed"
+}

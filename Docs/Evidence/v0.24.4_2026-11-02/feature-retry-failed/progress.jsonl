@@ -1,0 +1,5 @@
+{"at":"2026-11-02T16:10:11.104Z","phase":"launch"}
+{"at":"2026-11-02T16:10:13.268Z","phase":"engine-loaded"}
+{"at":"2026-11-02T16:10:13.471Z","phase":"retry-button-ready","count":1,"text":"Title clue: Утро снайпераБез автора · 2 audio filesAuthorБез автораReaderClue2Cleanup on holdThe app could not read file information for Утро снайпера.m4b (Windows error 6: The handle is invalid.). Check the file and drive, then Retry cleanup.InC:\\Antigravity Projects\\codex-books-20261102-0244\\feature-check\\seed\\tmp8uhnks5e\\audio\\Unsorted\\Утро снайпераGoes toAudiobooks Sorted\\Без автора\\Утро снайпера.m4bChoose folder…Use computed folderCancel moveMove bookKeep it hereRetry cleanupCancel retry cleanupEdit namesView metadataOpen source folder"}
+{"at":"2026-11-02T16:10:13.479Z","phase":"actual-dom-button-clicked"}
+{"at":"2026-11-02T16:11:13.549Z","phase":"functional-fail","error":"Timeout: exact two original retirements"}

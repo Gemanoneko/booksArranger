@@ -1,0 +1,9 @@
+{"at":"2026-11-02T16:57:21.336Z","phase":"backend-launch","configured_output_root":"C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\Audiobooks Sorted"}
+{"at":"2026-11-02T16:57:21.952Z","phase":"startup-ready-and-before-proof","job_state":"completed","cleanup_state":"needs_attention","sources":2,"recovery_copies":2}
+{"at":"2026-11-02T16:57:24.298Z","phase":"real-dom-button-ready"}
+{"at":"2026-11-02T16:57:24.306Z","phase":"actual-dom-click"}
+{"at":"2026-11-02T16:57:24.518Z","phase":"actual-post-accepted","status":202,"response":{"accepted":true,"job_id":"fbf7da22-2449-4765-9d36-b9223b67c2e5","cleanup_id":"89d3fcc8-4c6d-4f88-bdce-028f28a4e353","requeued":false}}
+{"at":"2026-11-02T16:57:24.613Z","phase":"functional-complete"}
+{"at":"2026-11-02T16:57:27.258Z","phase":"browser-closed"}
+{"at":"2026-11-02T16:57:27.685Z","phase":"backend-closed"}
+{"at":"2026-11-02T16:57:27.686Z","phase":"PASS"}

@@ -1,0 +1,87 @@
+{
+  "schema": "books-0244-packaged-browser-feature-proof-v1",
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "actual_pass": true,
+  "hosting": "Exact packaged desktop_backend and web assets in existing owned Chrome headless helper",
+  "limitation": "Not Electron Retry/geometry/preload/startup verification; canonical Electron check separate",
+  "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+  "cleanup_id": "89d3fcc8-4c6d-4f88-bdce-028f28a4e353",
+  "actual_dom_click": true,
+  "actual_post_status": 202,
+  "exact_sources_removed": 2,
+  "same_job_attempt_cleanup": true,
+  "output_sha256_unchanged": true,
+  "sibling_sha256_unchanged": true,
+  "no_new_conversion": true,
+  "original_lifecycle": {
+    "code": 0,
+    "error": null,
+    "closed": true,
+    "outputComplete": true,
+    "forced": false,
+    "timedOut": false,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 36,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 422,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "original_owned_sha256": "19f9a5bccab81415b1119b80fc7e5d8710256dcb8dbc893f91e9ecea0d4c8492",
+  "private_original_owned_path": "C:/Antigravity Projects/codex-books-20261102-0244/browser-retry-integration/owned.json",
+  "private_diagnostic_excluded": "Token-bearing page-diagnostic.private.json excluded; prep failure logs preserved private",
+  "packaged_files": [
+    {
+      "path": "desktop_backend.py",
+      "size": 39433,
+      "sha256": "6b7566a12b680b0043b51ec9de5e5bb5ea15e86c18cc88a981a93ab405a9a38b"
+    },
+    {
+      "path": "web_server.py",
+      "size": 110797,
+      "sha256": "503be578a20f83fefb0879ea1ddbb9ea8ab5cf400400f7380f97c0b8d9883ca1"
+    },
+    {
+      "path": "source_cleanup.py",
+      "size": 48842,
+      "sha256": "1fb4e55c199f44f61c1082c144cb2ce4f3dd3456b86cdaf5b09edb7f5d5d106c"
+    },
+    {
+      "path": "merge_service.py",
+      "size": 419789,
+      "sha256": "ba4a057b351e3457f48fe61a3ec7041f66c9218690d75e001cb7279f9ba189ea"
+    },
+    {
+      "path": "native_io.py",
+      "size": 41957,
+      "sha256": "ca2fa12c4352d55708dcc20a3ab911858045b81cbd1dab87f137225d3d426603"
+    },
+    {
+      "path": "web/app.js",
+      "size": 516379,
+      "sha256": "8cc976236d23102610f85c6d4d5a80abd1e4d749997e24485352641643b4e711"
+    },
+    {
+      "path": "web/index.html",
+      "size": 36189,
+      "sha256": "4d539540abcd57bc54d7548dc0391c96f9339ed9779705f3b4363d23e7395c19"
+    }
+  ]
+}

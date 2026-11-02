@@ -1,0 +1,96 @@
+{
+  "schema": "books-one-failed-feature-cleanup-v1",
+  "attempt_started_at": "2026-11-02T16:10:10.029Z",
+  "attempt_finished_at": "2026-11-02T16:11:16.737Z",
+  "controller_pid": 128940,
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_binding_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "fixture_root": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check",
+  "exe": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/app/Books Arranger.exe",
+  "expected_retained": 13,
+  "inputs": {
+    "owned": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/owned.json",
+      "sha256": "2d0e4b3ceeb3d16d7d57b14358c15bb3334ef828ee7df5f7ee4a2e480d97ccb9",
+      "size": 2496,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "209698857649862161",
+        "nlink": 1
+      }
+    },
+    "callback": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/callback.json",
+      "sha256": "a57110c6ad703b56fe904cf02b0fcfe4ad6d6b0e2abfcbc47021be2394ccb8a4",
+      "size": 1491,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "18858823446588901",
+        "nlink": 1
+      }
+    },
+    "approval": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/approval.json",
+      "sha256": "3f39733fec40fe0be31b50b4011ed38cc3a3c93125e13e76e03cb6b2472169ef",
+      "size": 1508,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "5348024564487125",
+        "nlink": 1
+      }
+    },
+    "prepared": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/prepared.json",
+      "sha256": "7687be2daf116ac22c2c85aca4401ffaf7fe2f866d136ffa3493b4738dc78e72",
+      "size": 1455,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "30399297491712523",
+        "nlink": 1
+      }
+    },
+    "baseline": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/tray-before.private.json",
+      "sha256": "eb00f2d97ae3c40a925016bb3f15f608473d39879223f20f04ea170bed447f74",
+      "size": 603307,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "44473046324298558",
+        "nlink": 1
+      }
+    },
+    "manifest": {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/dist/release-artifacts.json",
+      "sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+      "size": 62266,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "3940649681059067",
+        "nlink": 1
+      }
+    },
+    "exe": {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244/feature-check/app/Books Arranger.exe",
+      "sha256": "8d1cdc13caa494544077f581e32ea150fba82180fb1ba02968ac877aaf46216b",
+      "size": 246033408,
+      "identity": {
+        "dev": "2803554832",
+        "ino": "37436171909481217",
+        "nlink": 1
+      }
+    }
+  },
+  "authority": [
+    "request_user_input_async",
+    "call_64f01733f53549ee88ce0322d54d30f5",
+    0
+  ],
+  "meaning": "Functional FAIL remains unchanged; this consumes only actual normal closedzero lifecycle for exact own-leaf cleanup."
+}

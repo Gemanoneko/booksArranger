@@ -1,0 +1,154 @@
+{
+  "schema": "books-0244-packaged-backend-dom-v1",
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "hosting": "Existing owned headless browser; exact packaged desktop_backend and web assets",
+  "limitations": "NOT Electron Retry/geometry/preload/desktop-startup PASS; canonical Electron phase is separate.",
+  "startup": {
+    "phase": "running",
+    "error": "",
+    "requested_at": null,
+    "busy": {
+      "converting": false,
+      "current_title": "Утро снайпера",
+      "stage": "originals",
+      "queued": 0,
+      "automatic": "Idle",
+      "scanning": false,
+      "approvals": 0
+    },
+    "idle": true,
+    "queued_actions": 0,
+    "loading": {
+      "step": "done",
+      "n": 4,
+      "of": 4,
+      "done": null,
+      "total": null,
+      "unit": null,
+      "progress_age_ms": 63,
+      "waiting_for": null,
+      "restart_safe": true,
+      "parts": {
+        "library": true,
+        "status": true,
+        "books": true,
+        "attention": true,
+        "jobs": true
+      },
+      "took_ms": 224,
+      "error": ""
+    }
+  },
+  "before": {
+    "jobs": [
+      {
+        "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+        "state": "completed",
+        "reason": "",
+        "attempt_id": "0825c9dc-ad03-4f31-9884-92e3e45404b3",
+        "manifest": "{\"candidate_id\":\"cc3a9d23-5636-41b5-9830-6d4cc9284a5b\",\"candidate_revision\":4,\"chapters\":[\"Глава 1\",\"Глава 2\"],\"cleanup_policy\":{\"empty_source_folders\":true,\"enabled\":true,\"recovery_retention_hours\":24,\"recovery_root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\source-recovery\"},\"comments\":\"\",\"cover\":{\"evidence_kind\":\"Local artwork — edition unverified\",\"id\":\"c2ee0d70-cfae-5bc2-844e-c8ed96a83718\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\cache\\\\covers\\\\c2ee0d70-cfae-5bc2-844e-c8ed96a83718.png\",\"sha256\":\"637cd969a35ba4ecd3bf201fe8e7358c49a80f3fa8ca9ce69d46c37d81dcefd6\",\"source_label\":\"Embedded artwork: 01.mp3\",\"source_url\":\"\",\"thumbnail_url\":\"/api/cover?id=c2ee0d70-cfae-5bc2-844e-c8ed96a83718\"},\"destination\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\Audiobooks Sorted\\\\Без автора\\\\Утро снайпера.m4b\",\"duplicate_review\":null,\"encoding_policy\":{\"selection\":\"preserve_m4b_or_normalize_complete_sources\",\"source_bytes\":17402,\"supported_rates\":[16000,22050,24000,32000,44100,48000,64000,88200,96000],\"version\":\"aac-normalized-or-m4b-copy-quicktime-v4\"},\"evidence\":{\"manual_note\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"metadata_actor\":\"user\",\"metadata_fields\":[{\"basis\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"cited_value\":\"Утро снайпера\",\"field\":\"title\",\"needs_review\":true,\"retrieved_utc\":\"2026-11-02T16:35:32.710660Z\",\"reviewer_actor\":\"user\",\"reviewer_identity\":\"Sergei (Approve)\",\"source_kind\":\"local_files\",\"source_url\":\"\",\"verification\":\"local agreement\"},{\"basis\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"cited_value\":\"Без автора\",\"field\":\"authors\",\"needs_review\":true,\"retrieved_utc\":\"2026-11-02T16:35:32.710679Z\",\"reviewer_actor\":\"user\",\"reviewer_identity\":\"Sergei (Approve)\",\"source_kind\":\"local_files\",\"source_url\":\"\",\"verification\":\"local agreement\"}],\"metadata_utc\":\"2026-11-02T16:35:34.783045+00:00\",\"recording_completeness\":\"unknown\",\"track_actor\":\"user\",\"track_basis\":\"Approved by you: the files shown, in the order shown; every included file SHA256 verified.\",\"track_utc\":\"2026-11-02T16:35:34.908978+00:00\"},\"job_id\":\"fbf7da22-2449-4765-9d36-b9223b67c2e5\",\"metadata\":{\"anthology\":false,\"author\":\"Без автора\",\"canonical_author\":\"Без автора\",\"genre\":\"\",\"multi_author\":false,\"narrator\":\"\",\"number\":\"\",\"organization_policy\":\"books-hierarchy-v2\",\"original_language\":\"Unknown\",\"series\":\"\",\"title\":\"Утро снайпера\",\"topic\":\"\",\"universe\":\"\"},\"metadata_facts\":{\"author_folder_basis\":\"verified_full_name\",\"authors\":[\"Без автора\"],\"collection\":null,\"cover\":{\"kind\":\"embedded\"},\"gap_search\":{\"background\":[],\"closed_sources\":[],\"from_cache\":true,\"gaps\":[],\"unfilled\":[]},\"identity_basis\":\"local_agreement\",\"local_agreement\":{\"author\":{\"basis\":\"entered\",\"how\":\"Shown on the row; approved by you (Sergei 2026-10-24, ruling 6b)\",\"sources\":[{\"kind\":\"approval\",\"value\":\"Без автора\"}],\"state\":\"approved\",\"value\":\"Без автора\"},\"gaps\":[],\"ignored\":[],\"number\":{\"how\":\"no embedded number tag\",\"sources\":[],\"state\":\"grey\",\"value\":\"\"},\"part_book\":null,\"route\":null,\"series\":{\"how\":\"no embedded series tag\",\"sources\":[],\"state\":\"grey\",\"value\":\"\"},\"title\":{\"basis\":\"tag\",\"how\":\"Shown on the row; approved by you (Sergei 2026-10-24, ruling 6b)\",\"sources\":[{\"kind\":\"approval\",\"value\":\"Утро снайпера\"}],\"state\":\"approved\",\"value\":\"Утро снайпера\"},\"version\":\"local-one-v5\"},\"original_language\":{\"status\":\"unknown\",\"value\":null},\"original_title\":\"Утро снайпера\",\"policy_version\":\"standing-17-v1\",\"recording_language\":{\"basis\":\"source_label\",\"value\":\"ru\"},\"research_version\":\"standing-24-v1\",\"series_state\":\"omitted_unknown\",\"source_fingerprint\":\"af29c3bd72d398b1380208f4578ee192ef63a6007ab50ebe875ee7eedaa875f6\",\"title_basis\":\"local_agreement\",\"work_ids\":[\"local:6fb3365facf526ef4637442a\"]},\"output_root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\Audiobooks Sorted\",\"profile\":\"aac-normalized-or-m4b-copy-quicktime-v4\",\"root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\",\"sources\":[{\"fingerprint\":{\"modified\":\"1793637331654868900\",\"size\":8701},\"metadata\":{\"album_artist\":\"\",\"artist\":\"\",\"author\":\"\",\"edition_language\":\"\",\"genre\":\"\",\"method\":\"embedded audio tags\",\"notes\":[\"Source ARTIST/ALBUMARTIST are unverified role clues; neither author nor reader is inferred\"],\"number\":\"\",\"series\":\"\",\"tags\":{\"album\":\"Утро снайпера\",\"encoder\":\"Lavf62.12.103\",\"title\":\"Глава 1\",\"track\":\"1/2\"},\"title\":\"Утро снайпера\",\"track_title\":\"Глава 1\"},\"modified\":\"1793637331654868900\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\\\\Unsorted\\\\Утро снайпера\\\\01.mp3\",\"sha256\":\"58032b7c266d43ab097f1a1206317d54a92b6d0d60c7f1cb68db05a72e1f5d38\",\"size\":8701},{\"fingerprint\":{\"modified\":\"1793637331752923100\",\"size\":8701},\"metadata\":{\"album_artist\":\"\",\"artist\":\"\",\"author\":\"\",\"edition_language\":\"\",\"genre\":\"\",\"method\":\"embedded audio tags\",\"notes\":[\"Source ARTIST/ALBUMARTIST are unverified role clues; neither author nor reader is inferred\"],\"number\":\"\",\"series\":\"\",\"tags\":{\"album\":\"Утро снайпера\",\"encoder\":\"Lavf62.12.103\",\"title\":\"Глава 2\",\"track\":\"2/2\"},\"title\":\"Утро снайпера\",\"track_title\":\"Глава 2\"},\"modified\":\"1793637331752923100\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\\\\Unsorted\\\\Утро снайпера\\\\02.mp3\",\"sha256\":\"98339901e3879bdd6b07e787e33b76b0ecd53daf0120721b78e694e3f880e8a0\",\"size\":8701}]}"
+      }
+    ],
+    "cleanup": [
+      {
+        "id": "89d3fcc8-4c6d-4f88-bdce-028f28a4e353",
+        "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+        "state": "needs_attention",
+        "reason": "Cannot refresh protected file identity (Windows error 6: The handle is invalid.)"
+      }
+    ],
+    "members": [
+      {
+        "path": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\audio\\Unsorted\\Утро снайпера\\01.mp3",
+        "backup": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\source-recovery\\89d3fcc8-4c6d-4f88-bdce-028f28a4e353\\00000.mp3",
+        "state": "removal_intended",
+        "facts": "{\"attributes\":32,\"dev\":133335364132330000,\"identity\":[2803554832,1572864,5632208],\"identity_api_error\":0,\"identity_method\":\"FileIdInfo128\",\"ino\":6755399446687952,\"links\":1,\"modified\":1793637331654868900,\"size\":8701}"
+      },
+      {
+        "path": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\audio\\Unsorted\\Утро снайпера\\02.mp3",
+        "backup": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\source-recovery\\89d3fcc8-4c6d-4f88-bdce-028f28a4e353\\00001.mp3",
+        "state": "backup_verified",
+        "facts": "{\"attributes\":32,\"dev\":133335364132330000,\"identity\":[2803554832,1245184,7115774],\"identity_api_error\":0,\"identity_method\":\"FileIdInfo128\",\"ino\":5348024564618238,\"links\":1,\"modified\":1793637331752923100,\"size\":8701}"
+      }
+    ]
+  },
+  "actual_dom_button": true,
+  "actual_http": {
+    "requestId": "109288.19",
+    "method": "POST",
+    "url": "http://127.0.0.1:51343/api/audiobook/cleanup/retry",
+    "body": {
+      "library": "Audiobooks",
+      "id": "cc3a9d23-5636-41b5-9830-6d4cc9284a5b",
+      "revision": 4,
+      "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+      "cleanup_id": "89d3fcc8-4c6d-4f88-bdce-028f28a4e353",
+      "queue": true,
+      "title": "Утро снайпера"
+    },
+    "status": 202,
+    "response": {
+      "accepted": true,
+      "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+      "cleanup_id": "89d3fcc8-4c6d-4f88-bdce-028f28a4e353",
+      "requeued": false
+    }
+  },
+  "after": {
+    "jobs": [
+      {
+        "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+        "state": "completed",
+        "reason": "",
+        "attempt_id": "0825c9dc-ad03-4f31-9884-92e3e45404b3",
+        "manifest": "{\"candidate_id\":\"cc3a9d23-5636-41b5-9830-6d4cc9284a5b\",\"candidate_revision\":4,\"chapters\":[\"Глава 1\",\"Глава 2\"],\"cleanup_policy\":{\"empty_source_folders\":true,\"enabled\":true,\"recovery_retention_hours\":24,\"recovery_root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\source-recovery\"},\"comments\":\"\",\"cover\":{\"evidence_kind\":\"Local artwork — edition unverified\",\"id\":\"c2ee0d70-cfae-5bc2-844e-c8ed96a83718\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\cache\\\\covers\\\\c2ee0d70-cfae-5bc2-844e-c8ed96a83718.png\",\"sha256\":\"637cd969a35ba4ecd3bf201fe8e7358c49a80f3fa8ca9ce69d46c37d81dcefd6\",\"source_label\":\"Embedded artwork: 01.mp3\",\"source_url\":\"\",\"thumbnail_url\":\"/api/cover?id=c2ee0d70-cfae-5bc2-844e-c8ed96a83718\"},\"destination\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\Audiobooks Sorted\\\\Без автора\\\\Утро снайпера.m4b\",\"duplicate_review\":null,\"encoding_policy\":{\"selection\":\"preserve_m4b_or_normalize_complete_sources\",\"source_bytes\":17402,\"supported_rates\":[16000,22050,24000,32000,44100,48000,64000,88200,96000],\"version\":\"aac-normalized-or-m4b-copy-quicktime-v4\"},\"evidence\":{\"manual_note\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"metadata_actor\":\"user\",\"metadata_fields\":[{\"basis\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"cited_value\":\"Утро снайпера\",\"field\":\"title\",\"needs_review\":true,\"retrieved_utc\":\"2026-11-02T16:35:32.710660Z\",\"reviewer_actor\":\"user\",\"reviewer_identity\":\"Sergei (Approve)\",\"source_kind\":\"local_files\",\"source_url\":\"\",\"verification\":\"local agreement\"},{\"basis\":\"Approved by you on 2026-11-02T16:35:32.718672+00:00 (Sergei 2026-10-24, ruling 6b): \\\"Утро снайпера\\\" by \\\"Без автора\\\", 2 file(s) in the order shown. Converted if needed, renamed and moved to Audiobooks Sorted; the originals are removed only after the result is verified there.\",\"cited_value\":\"Без автора\",\"field\":\"authors\",\"needs_review\":true,\"retrieved_utc\":\"2026-11-02T16:35:32.710679Z\",\"reviewer_actor\":\"user\",\"reviewer_identity\":\"Sergei (Approve)\",\"source_kind\":\"local_files\",\"source_url\":\"\",\"verification\":\"local agreement\"}],\"metadata_utc\":\"2026-11-02T16:35:34.783045+00:00\",\"recording_completeness\":\"unknown\",\"track_actor\":\"user\",\"track_basis\":\"Approved by you: the files shown, in the order shown; every included file SHA256 verified.\",\"track_utc\":\"2026-11-02T16:35:34.908978+00:00\"},\"job_id\":\"fbf7da22-2449-4765-9d36-b9223b67c2e5\",\"metadata\":{\"anthology\":false,\"author\":\"Без автора\",\"canonical_author\":\"Без автора\",\"genre\":\"\",\"multi_author\":false,\"narrator\":\"\",\"number\":\"\",\"organization_policy\":\"books-hierarchy-v2\",\"original_language\":\"Unknown\",\"series\":\"\",\"title\":\"Утро снайпера\",\"topic\":\"\",\"universe\":\"\"},\"metadata_facts\":{\"author_folder_basis\":\"verified_full_name\",\"authors\":[\"Без автора\"],\"collection\":null,\"cover\":{\"kind\":\"embedded\"},\"gap_search\":{\"background\":[],\"closed_sources\":[],\"from_cache\":true,\"gaps\":[],\"unfilled\":[]},\"identity_basis\":\"local_agreement\",\"local_agreement\":{\"author\":{\"basis\":\"entered\",\"how\":\"Shown on the row; approved by you (Sergei 2026-10-24, ruling 6b)\",\"sources\":[{\"kind\":\"approval\",\"value\":\"Без автора\"}],\"state\":\"approved\",\"value\":\"Без автора\"},\"gaps\":[],\"ignored\":[],\"number\":{\"how\":\"no embedded number tag\",\"sources\":[],\"state\":\"grey\",\"value\":\"\"},\"part_book\":null,\"route\":null,\"series\":{\"how\":\"no embedded series tag\",\"sources\":[],\"state\":\"grey\",\"value\":\"\"},\"title\":{\"basis\":\"tag\",\"how\":\"Shown on the row; approved by you (Sergei 2026-10-24, ruling 6b)\",\"sources\":[{\"kind\":\"approval\",\"value\":\"Утро снайпера\"}],\"state\":\"approved\",\"value\":\"Утро снайпера\"},\"version\":\"local-one-v5\"},\"original_language\":{\"status\":\"unknown\",\"value\":null},\"original_title\":\"Утро снайпера\",\"policy_version\":\"standing-17-v1\",\"recording_language\":{\"basis\":\"source_label\",\"value\":\"ru\"},\"research_version\":\"standing-24-v1\",\"series_state\":\"omitted_unknown\",\"source_fingerprint\":\"af29c3bd72d398b1380208f4578ee192ef63a6007ab50ebe875ee7eedaa875f6\",\"title_basis\":\"local_agreement\",\"work_ids\":[\"local:6fb3365facf526ef4637442a\"]},\"output_root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\Audiobooks Sorted\",\"profile\":\"aac-normalized-or-m4b-copy-quicktime-v4\",\"root\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\",\"sources\":[{\"fingerprint\":{\"modified\":\"1793637331654868900\",\"size\":8701},\"metadata\":{\"album_artist\":\"\",\"artist\":\"\",\"author\":\"\",\"edition_language\":\"\",\"genre\":\"\",\"method\":\"embedded audio tags\",\"notes\":[\"Source ARTIST/ALBUMARTIST are unverified role clues; neither author nor reader is inferred\"],\"number\":\"\",\"series\":\"\",\"tags\":{\"album\":\"Утро снайпера\",\"encoder\":\"Lavf62.12.103\",\"title\":\"Глава 1\",\"track\":\"1/2\"},\"title\":\"Утро снайпера\",\"track_title\":\"Глава 1\"},\"modified\":\"1793637331654868900\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\\\\Unsorted\\\\Утро снайпера\\\\01.mp3\",\"sha256\":\"58032b7c266d43ab097f1a1206317d54a92b6d0d60c7f1cb68db05a72e1f5d38\",\"size\":8701},{\"fingerprint\":{\"modified\":\"1793637331752923100\",\"size\":8701},\"metadata\":{\"album_artist\":\"\",\"artist\":\"\",\"author\":\"\",\"edition_language\":\"\",\"genre\":\"\",\"method\":\"embedded audio tags\",\"notes\":[\"Source ARTIST/ALBUMARTIST are unverified role clues; neither author nor reader is inferred\"],\"number\":\"\",\"series\":\"\",\"tags\":{\"album\":\"Утро снайпера\",\"encoder\":\"Lavf62.12.103\",\"title\":\"Глава 2\",\"track\":\"2/2\"},\"title\":\"Утро снайпера\",\"track_title\":\"Глава 2\"},\"modified\":\"1793637331752923100\",\"path\":\"C:\\\\Antigravity Projects\\\\codex-books-20261102-0244\\\\browser-retry-integration\\\\seed\\\\tmptsa689ec\\\\audio\\\\Unsorted\\\\Утро снайпера\\\\02.mp3\",\"sha256\":\"98339901e3879bdd6b07e787e33b76b0ecd53daf0120721b78e694e3f880e8a0\",\"size\":8701}]}"
+      }
+    ],
+    "cleanup": [
+      {
+        "id": "89d3fcc8-4c6d-4f88-bdce-028f28a4e353",
+        "job_id": "fbf7da22-2449-4765-9d36-b9223b67c2e5",
+        "state": "completed",
+        "reason": ""
+      }
+    ],
+    "members": [
+      {
+        "path": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\audio\\Unsorted\\Утро снайпера\\01.mp3",
+        "backup": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\source-recovery\\89d3fcc8-4c6d-4f88-bdce-028f28a4e353\\00000.mp3",
+        "state": "removed",
+        "facts": "{\"attributes\":32,\"dev\":133335364132330000,\"identity\":[2803554832,1572864,5632208],\"identity_api_error\":0,\"identity_method\":\"FileIdInfo128\",\"ino\":6755399446687952,\"links\":1,\"modified\":1793637331654868900,\"size\":8701}"
+      },
+      {
+        "path": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\audio\\Unsorted\\Утро снайпера\\02.mp3",
+        "backup": "C:\\Antigravity Projects\\codex-books-20261102-0244\\browser-retry-integration\\seed\\tmptsa689ec\\source-recovery\\89d3fcc8-4c6d-4f88-bdce-028f28a4e353\\00001.mp3",
+        "state": "removed",
+        "facts": "{\"attributes\":32,\"dev\":133335364132330000,\"identity\":[2803554832,1245184,7115774],\"identity_api_error\":0,\"identity_method\":\"FileIdInfo128\",\"ino\":5348024564618238,\"links\":1,\"modified\":1793637331752923100,\"size\":8701}"
+      }
+    ]
+  },
+  "output_sha256_unchanged": true,
+  "sibling_unchanged": true,
+  "originals_removed": 2,
+  "same_job_and_cleanup": true,
+  "no_new_conversion": true,
+  "backend_exit": {
+    "code": 0,
+    "signal": null
+  },
+  "browser_closure": {
+    "verified": true,
+    "remaining": 0,
+    "reason": "stop-requested",
+    "personal_verdict": "clean"
+  },
+  "tray_references_created": 0
+}

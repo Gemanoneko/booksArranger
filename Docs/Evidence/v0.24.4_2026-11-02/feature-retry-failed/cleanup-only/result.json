@@ -1,0 +1,30 @@
+{
+  "schema": "books-failed-feature-cleanup-only-v1",
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_binding_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "attempt_started_at": "2026-11-02T16:10:10.029Z",
+  "owned_sha256": "2d0e4b3ceeb3d16d7d57b14358c15bb3334ef828ee7df5f7ee4a2e480d97ccb9",
+  "callback_sha256": "a57110c6ad703b56fe904cf02b0fcfe4ad6d6b0e2abfcbc47021be2394ccb8a4",
+  "authority_sha256": "3f39733fec40fe0be31b50b4011ed38cc3a3c93125e13e76e03cb6b2472169ef",
+  "functional": "FAIL_UNCHANGED",
+  "lifecycle": "NORMAL_CLOSEDZERO_EXIT1",
+  "retained": 13,
+  "ownId": "17584223613434672730",
+  "exactNewLeaf": true,
+  "sameHandle": true,
+  "deleted": true,
+  "closed": true,
+  "absenceVerified": true,
+  "preexistingUnchanged": true,
+  "ownReferenceCount": 1,
+  "ownReferenceBytes": 8,
+  "uiOrderListWritten": false,
+  "uiOrderListSha256": "6c1e95cf0c486fbf8893bc2d597538b551def4e584ddc6533cdc2c08a640addb"
+}

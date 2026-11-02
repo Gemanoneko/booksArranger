@@ -1,0 +1,30 @@
+{
+  "schema": "books-0244-two-hidden-checks-authority-v1",
+  "approved_by": "Sergei",
+  "question_item_id": [
+    "request_user_input_async",
+    "call_64f01733f53549ee88ce0322d54d30f5",
+    0
+  ],
+  "decision_text": "Approve for 0.24.4",
+  "question_text": "Approve two hidden app checks for 0.24.4? One will click Retry cleanup on private test files and verify safe completion; the other checks Close and Quit. No focus, clipboard changes, installation or live-library access. We remove our tray entries, but Windows may retain two small history references. Your rule requires approval for each release.",
+  "received_observation_at": "2026-11-02T12:41:29.145Z",
+  "timestamp_provenance": "Local observation while recording parent-relayed actual reply; no platform timestamp supplied",
+  "limits": {
+    "hidden_checks": 2,
+    "maximum_history_references": 2,
+    "focus": false,
+    "clipboard": false,
+    "install": false,
+    "live_library": false
+  },
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_binding_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  }
+}

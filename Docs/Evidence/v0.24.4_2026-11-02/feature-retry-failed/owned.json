@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:2\r\nconst root=path.dirname(fileURLToPath(import.meta.url)),cfg=JSON.parse(fs.readFileSync(path.join(root,'prepared.json'))),seed=JSON.parse(fs.readFileSync(path.join(root,'seed.json')));let shell,ws,exited=false,quit=false,originalError=null;const commands=createPrivateShellCommands({spawn,exe:cfg.exe,profile:cfg.profile,env:process.env});const progress=(phase,detail={})=>fs.appendFileSync(path.join(root,'feature-progress.private.jsonl'),JSON.stringify({at:new Date().toISOString(),phase,...detail})+'\\n');const pause=ms=>new Promise(r=>setTimeout(r,ms));async function until(fn,ms,label){const end=Date.now()+ms;while(Date.now()<end){let v=await fn();if(v)return v;await pause(200);}throw Error('Timeout: '+label)}\r\n                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ^\r\n\r\nError: Timeout: exact two original retirements\r\n    at until (file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:2:692)\r\n    at async file:///C:/Antigravity%20Projects/codex-books-20261102-0244/feature-check/scenario.mjs:12:2\r\n\r\nNode.js v26.13.0\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 119932,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 13,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 4229,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 65805.2939,
+  "outputBytes": 1787
+}

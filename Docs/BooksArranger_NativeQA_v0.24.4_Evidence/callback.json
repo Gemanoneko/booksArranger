@@ -1,0 +1,17 @@
+{
+  "callback_received": true,
+  "error": null,
+  "start_write_error": null,
+  "write_errors": [],
+  "plan_sha256": "3a4b3402389b272ba992881da198f0a9aa68a1be88ad158e68e22182a849c2f7",
+  "binding_sha256": "82984bea65fbd0bf38e27e63e7fdf534b738857109b5f5cc46a87b02d7f428f4",
+  "owned_sha256": "c13b6c6c67980e08d69341391b58b7be2f5fe5468fa0f95ee81dfaf8794f0239",
+  "controller_owned_sha256": "57f3ba63ed42bc149dc38747eaa01cfeba4f6c49a928577bc3c983986d29a203",
+  "stdout_sha256": "5b66a706b89af6143efe303fe92d1a3848e5799d55f43bc02919fedd3487ef72",
+  "stdout_bytes": 392,
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_bytes": 0,
+  "started_at": "2026-11-02T16:57:51.379Z",
+  "received_at": "2026-11-02T16:58:41.608Z",
+  "pid": 4552
+}

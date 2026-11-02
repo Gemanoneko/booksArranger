@@ -1,0 +1,12 @@
+{
+  "status": "FIXTURE_PREPARATION_FAIL_NO_APP",
+  "code": 1,
+  "normal_closed_zero": true,
+  "retained": 62,
+  "reason": "No sorted output folder is set; the source files are kept",
+  "identity_retry": null,
+  "job_state": "completed",
+  "configuration": "Inventory output_root=None; real saved chosen destination before approval. require_sorted refuses absent global output before chosen-folder exception.",
+  "source_or_artifact_changed": false,
+  "app_launched": false
+}

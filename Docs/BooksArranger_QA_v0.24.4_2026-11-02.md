@@ -2,16 +2,45 @@
 
 Futaba · 2026-11-02 · Focused evidence adjudication only; final build acceptance pending. No QA tests rerun.
 
-**Verdict:** NO-GO
+**Verdict:** GO
 
-Focused cleanup retry evidence passes its stated scope. The first candidate full entry failed; the corrected candidate's full entry also timed out without a final receipt or postflight. Neither approved hidden packaged check launched. No 0.24.4 tray reference was consumed. Release remains blocked.
+Focused cleanup retry evidence passes its stated scope. The first two candidate full entries remain failures. The final candidate passed under the separately reviewed and deployed schema-3 budget profile, with an actual final receipt and postflight. The relevant packaged browser-hosted Retry integration and canonical Electron check both passed with normal closure and exact own-leaf cleanup. QA accepts this named source/build within the limits below.
 
-Release source commit: 3c45da40c82043379351fa60aac4e000a02ca172
-Release artifact manifest SHA256: 0c85b34b48ff0c81fbae5b0b40254b94e15252051e692f41494c46e84f97f78b
+Release source commit: 9ccbbecef48d12498583a0a97ab595ce2a88ccb1
+Release artifact manifest SHA256: 49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1
+Native QA evidence SHA256: 82cf373c3d5e9cb0ecb34f646bb41665bebb6390a408e63030f780f908f44247
 
-## Corrected candidate full entry — FAIL_TIMEOUT
+## Final schema-3 candidate — full PASS
 
-Corrected source above, build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063`, context `c4b46ec3336c571bd0e00d94c1863e9a74721b81fabf8ec97a1641b4e51e736a`, ran 12:41:41.973–12:51:42.006Z. The outer callback reports SIGTERM/killed at 600 seconds. The check was forced/timedOut after 566.17 seconds, output incomplete, closureError null; final owned complete zero was proved, with 10,523 retained and 340 cumulative transient incomplete sampling diagnostics. That final zero does not supply the missing entry receipt/postflight.
+Source `9ccbbecef48d12498583a0a97ab595ce2a88ccb1`, build `2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e`, context `7cf1faacee0def1838a0c23bc6bf536f42aec3a273097a99d93d306075e097e4`. Actual invocation 15:56:42.762–16:06:44.920Z, 602.158 seconds, original callback exit 0/error null. All 2,340 unique Python methods across 13 batches passed without failure/error/skip; 242 Node cases, 39 frontend scripts and 11 syntax files passed. Final postflight and personal-folder checks passed. Owned check closed normally with 10,873 retained, final complete zero, 375 cumulative transient incomplete sampling diagnostics, no force/timeout, output complete.
+
+This was a legitimate schema-3/900-second entry profile, not a claim that 602 seconds passed the old schema-2/600-second deadline. The reviewed deployed shared runner is ROOT79b6e3f/TOOL9ccbbec: exact legacy profile remains 600 seconds; new finite profile uses 660-second workers, 810-second gate, explicit cleanup reserves and a 930-second EOF-only transport drain. The expected 1,200ms nested-timeout probe remains a separate intentionally forced timeout. The failed copy-cache performance experiment and both old full failures remain failed.
+
+QA independently matched original receipt.txt to summary and actual stdout, consumed the final outcome, and preserved eleven files byte-exact in [portable schema-3 evidence](Evidence/v0.24.4_2026-11-02/full-entry-schema3-pass/files.json). Summary SHA256 `7278a2f8a5ae455683915867f8a5f7a5962b0bab7f6850638ac908a7b0aa278e`; files index SHA256 `638d46cc69fbd08a9d8f890a8c0278ed8a34325e5bc1115bed6ba065ad2757c5`. Independent final source/artifact review SHA256 `5a3a34d2e7c5165d78480421b9689169e157b4cedeafe59ea92e8c2c5c14b079` is RELEASE CLEAR. No receiver full rerun was performed.
+
+Actual receipt:
+
+```text
+Entry-check receipt v2: books-arranger v0.24.4 @ 9ccbbecef48d12498583a0a97ab595ce2a88ccb1 (dirty: N) [source:4b327c3a82b697262fbbeaac68c712e8eec78efc5431c2fdec236ebabbb337ca; harness:2e93ff8b0a46c1c2d694051fbbfc043ab5c90640efc1e5dd2b00bcc0a8887f12; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean
+```
+
+## Canonical packaged Electron check — PASS
+
+[NativeQA](BooksArranger_NativeQA_v0.24.4.json), SHA256 `82cf373c3d5e9cb0ecb34f646bb41665bebb6390a408e63030f780f908f44247`, binds the same final source/build/product/artifact as full and feature proof. QA independently matched all twelve raw role sizes/hashes and consumed original callback, functional, inner/controller ownership, postflight and cleanup. Actual callback 16:58:41.608Z error null, empty stderr. All eight required assertions passed: update available, download SHA512 verified, invalid installer refused by Windows, shell stayed alive, installer-blocked cause, fake download seen, old engine health/version recovered and normal Quit ended shell.
+
+Inner 21/controller 25 retained both exited zero normally, complete final zero, zero incomplete queries, no force/timeout, output complete. Postflight unchanged. Exact new own leaf was deleted through the same handle, closed and absent; preexisting leaves unchanged, UIOrderList not written, one approved 8-byte history reference remains. Alongside the failed feature Electron attempt, exactly two approved references were consumed; browser integration added none. Finite 257 observations reported no visible own window/intrusion. This is hidden native scope, not a physical Close click, visible geometry or live catalog proof. The proper current validator accepted the original twelve records without compatibility or bypass.
+
+## Changed Retry cleanup integration — actual PASS
+
+[Portable feature proof](Evidence/v0.24.4_2026-11-02/packaged-browser-retry-pass/summary.json), SHA256 `dda92818bf36ae3bd130081c9a3d9b1b1597a6bee15b04d376a7287d0f019a61`, binds the exact final source/build/product/artifact above. It uses packaged desktop_backend and web assets through an existing owned headless Chrome browser, with a supported explicit private C: output root. QA consumed the original functional/callback/progress records and independently matched the pinned original owned result hash. Six directly reached product files match current source byte pins; web/index.html is the generated packaged file, SHA256 `4d539540abcd57bc54d7548dc0391c96f9339ed9779705f3b4363d23e7395c19`, size 36,189, bound by the actual payload manifest SHA256 `2e9f6ddcc50be61fcc0dc72df3d811ad0b5db8b3001c84aa713cbd0bbbddab26`; it is not mislabelled a seventh unchanged source file.
+
+The real Needs attention shortcut exposed Retry cleanup; actual DOM click at 16:57:24.306Z produced the authenticated POST at 16:57:24.518Z, HTTP 202 accepted for the same completed job and cleanup. At 16:57:24.613Z the two exact originals were absent and their cleanup members recorded removed. Job, attempt and cleanup IDs stayed the same, no new conversion/job was queued, output SHA256 and sibling bytes stayed unchanged. Callback at 16:57:27.728Z had error null/empty stderr; original owned exit 0, normal complete zero/36 retained, zero incomplete queries, no force/timeout, output complete. Browser closure was verified with zero remaining; backend Quit exited zero. This route created no tray reference and took no focus or clipboard.
+
+This is browser-hosted packaged feature integration, **not a successful Electron Retry click, visible geometry, preload or desktop-startup claim**. The earlier Electron feature attempt really failed: its fixture output root was dropped by supported roots-json launch, so startup correctly refused the seeded cleanup. Its normal 13-process closure and exact own-leaf cleanup are retained; one approved 8-byte history reference remains. Subsequent headless operator/Edge DevTools/filter-selection failures remain failures, not product regressions or successful clicks. The successful route uses the same packaged DOM fetch/server/queue/cleanup action without an Electron-specific bridge. No live book or historical 37-source job was retried.
+
+## Historical corrected candidate full entry — FAIL_TIMEOUT
+
+Historical source `3c45da40c82043379351fa60aac4e000a02ca172`, build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063`, context `c4b46ec3336c571bd0e00d94c1863e9a74721b81fabf8ec97a1641b4e51e736a`, ran 12:41:41.973–12:51:42.006Z. The outer callback reports SIGTERM/killed at 600 seconds. The check was forced/timedOut after 566.17 seconds, output incomplete, closureError null; final owned complete zero was proved, with 10,523 retained and 340 cumulative transient incomplete sampling diagnostics. That final zero does not supply the missing entry receipt/postflight.
 
 Only 117 child-output bytes were printed, including source copies finishing at 29.6 seconds. There are zero printed worker completion reports. Discovery/completion/error/pass counts, Node cases and frontend results are **unknown** for this corrected run because output was buffered. No specific assertion or product failure is inferred from absent output, and the first candidate's counts are not carried across.
 
@@ -41,10 +70,10 @@ Actual normal owned closure: BEFORE 4 retained/0.705s; safety 4/2.831s; service+
 
 ## Checklist coverage and limits
 
-The reported trigger, safe reopen/full revalidation, changed/missing proofs, interrupted intent, exact native error, admission, duplicates/Pause and unaffected protective holds have focused evidence. Existing queue cancellation and mixed completed-member behavior are reused; their complete regression results remain pending. No generic proof refusal is granted retry by this patch. No Retry all/bulk or conversion expansion is certified.
+The reported trigger, safe reopen/full revalidation, changed/missing proofs, interrupted intent, exact native error, admission, duplicates/Pause and unaffected protective holds have focused evidence. Existing queue cancellation and mixed completed-member behavior are reused and their regression modules completed in the final full entry; the focused feature run itself does not claim every cancellation/crash boundary. No generic proof refusal is granted retry by this patch. No Retry all/bulk or conversion expansion is certified.
 
-No evidence yet shows the changed controls in a packaged visible window. DOM evidence establishes copy/state semantics, not geometry. A hidden packaged smoke can establish its actual stated native scope, not retrospectively prove visible UI or the live book's recovery. No install, live catalog/NAS/Z: access, user-app control, focus, clipboard or tray action was performed by QA. The historical 37-source/backup/intent diagnosis is not a statement about current live data.
+The real browser-hosted packaged DOM action passed. No evidence shows these changed controls in a packaged visible Electron window; geometry and Electron Retry remain unverified. A hidden packaged smoke establishes only its stated native scope, not visible UI or the live book's recovery. No install, live catalog/NAS/Z: access, user-app control, focus, clipboard or tray action was performed by QA. The historical 37-source/backup/intent diagnosis is not a statement about current live data.
 
 ## Remaining acceptance
 
-Resolve the incomplete full-entry gate under an explicitly agreed next step before either approved hidden packaged check proceeds. Both app checks remain unrun; zero 0.24.4 tray-history references have been consumed. The 121 targeted correction passes remain supplementary and cannot replace a final acceptance receipt. Do not repeat the receiver full entry or automatically rerun the candidate. No acceptance index or release GO is created. No additional tests, app replay, focus or tray action was performed by QA.
+The reviewed schema-3 full entry, relevant packaged browser-hosted feature integration and canonical Electron native proof now pass with exact binding and normal closure/own-leaf cleanup. The 121 targeted correction passes remain supplementary; original failures are not relabelled. The existing-format version-specific acceptance index names this report and independent review. Publication and removal of owned temporary files/folders remain assigned release/cleanup work. No tests, app control, focus or tray action was performed by QA during adjudication.

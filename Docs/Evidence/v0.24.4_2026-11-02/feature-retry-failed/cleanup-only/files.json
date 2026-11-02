@@ -1,0 +1,27 @@
+[
+  {
+    "file": "cleanup.mjs",
+    "size": 3315,
+    "sha256": "a2bfa089a70d7443d89ca3864dcca223d27003155f549a49251d89e30af6a983"
+  },
+  {
+    "file": "plan.json",
+    "size": 3598,
+    "sha256": "684694a136fdbd70b654726d7a85959ffbb66887aea572ce60a1f82ea1fcfc53"
+  },
+  {
+    "file": "result.json",
+    "size": 1364,
+    "sha256": "ebf1977a1e860445c112f1b00e1e3965a1d85f36145b30cdf66716da8fcf3801"
+  },
+  {
+    "file": "operator-owned.json",
+    "size": 2009,
+    "sha256": "23486c416011108cb78f60ec3c44243f19c745b8aee6387caa0f5889fe5ec7f3"
+  },
+  {
+    "file": "callback.json",
+    "size": 119,
+    "sha256": "9785e6fb6bd915c41a23645538690f23f09177e5b0a4ee736d8c5211a0985d9e"
+  }
+]

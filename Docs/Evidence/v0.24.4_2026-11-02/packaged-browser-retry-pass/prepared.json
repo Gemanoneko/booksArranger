@@ -1,0 +1,17 @@
+{
+  "binding": {
+    "version": "0.24.4",
+    "source_head": "9ccbbecef48d12498583a0a97ab595ce2a88ccb1",
+    "product_digest": "610b922a79ce33e6b037debc99e616f266dd3042f46fd52b262d610ae7603566",
+    "build_id": "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e",
+    "artifact_manifest_sha256": "49ed6d8389e2fa224133cd0092e7c6cffe0776d4a3cd1a2bd07a4b43ee9c9fb1",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "63fbc25237be6b9a548a6cb5d0d83ba53b473b86a8d00d6b265beb5fa3f00e3f"
+  },
+  "python": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/dist/builds/2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e/win-unpacked/resources/python/python.exe",
+  "backend": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/dist/builds/2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e/win-unpacked/resources/backend",
+  "ffmpeg": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/dist/builds/2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e/win-unpacked/resources/ffmpeg",
+  "port": 51343,
+  "headless_helper": "C:/Antigravity Projects/Studio Illuminati/scripts/qa/headless-browser.mjs",
+  "headless_helper_sha256": "ddb935440b719fbaeee401c5c94c48c96afae7e92df4b313cc9f7179e393ab92"
+}
