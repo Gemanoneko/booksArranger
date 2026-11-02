@@ -28,6 +28,12 @@ function sorted(value){return Object.fromEntries(Object.entries(value).sort(([a]
 export function verifyAppStage(app,manifest) {
   if(!same(sorted(ordinaryMap(app)),sorted(manifest)))throw Error('Private app membership or bytes changed');
 }
+export function packageArchivePath(packageJson,output,projectRoot) {
+  if(packageJson?.name!=='books-arranger'||!/^\d+\.\d+\.\d+$/.test(packageJson?.version||''))throw Error('Invalid archive package identity/version');
+  const builds=path.join(projectRoot,'dist','builds')+path.sep;
+  if(typeof output!=='string'||!path.isAbsolute(output)||path.resolve(output)!==output||!output.startsWith(builds))throw Error('Archive output escape');
+  return path.join(output,packageJson.name+'-'+packageJson.version+'-x64.nsis.7z');
+}
 function installNetworkBoundary(policy) {
   const restorers=[];
   for(const [name,methods] of [['http',['request','get']],['https',['request','get']],['net',['connect','createConnection']],['tls',['connect']],['dns',['lookup','resolve','resolve4','resolve6']]]) {
@@ -61,7 +67,8 @@ async function main() {
   for(const name of ['npm','nsis','seven'])if(!same(executablePins[tools[name]],pins.files[pins.tools[name]]))throw Error('Pack executable fingerprint mismatch '+name);
   const context={root,ownedRoot:owned,output:request.output,appDir:request.app,deadline:lease.deadline,node:lease.node,bootstrap:'C:/Python314/python.exe',
     npmCli:tools.npm,nsis:tools.nsis,seven:tools.seven,nsisTemplates:path.join(root,'node_modules/app-builder-lib/templates/nsis'),
-    generator:request.generator||{},executablePins,baseEnv,iconOnly};
+    generator:request.generator||{},executablePins,baseEnv,iconOnly,
+    ...(!iconOnly?{archivePath:packageArchivePath(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')),request.output,root)}:{})};
   const policy=createChildPolicy(context);
   policy.install();
   installNetworkBoundary(policy);

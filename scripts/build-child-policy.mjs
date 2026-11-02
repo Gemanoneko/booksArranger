@@ -73,7 +73,8 @@ export function createChildPolicy(context,{now=()=>Date.now(),inspectFile=fileFa
       check(samePath(cwd,context.root)||samePath(cwd,context.appDir),'npm cwd escape');
       pinned(context.npmCli);kind='npm-prefix';
     } else if(samePath(file,context.seven)) {
-      const archive=context.archivePath||path.join(context.output,'books-arranger-0.24.2-x64.nsis.7z');
+      const archive=context.archivePath;
+      check(typeof archive==='string'&&path.isAbsolute(archive)&&samePath(path.dirname(archive),context.output)&&/^books-arranger-\d+\.\d+\.\d+-x64\.nsis\.7z$/.test(path.basename(archive)),'missing or invalid bound archive path');
       check(equalArgs(args,['a','-bd','-mx=9','-md=1m','-mtc=off','-ms=off','-mtm=off','-mta=off',archive,'.']),'unexpected 7zip operation');
       check(samePath(cwd,path.join(context.output,'win-unpacked')),'7zip cwd escape');kind='nsis-archive';
     } else if(samePath(file,context.nsis)) {

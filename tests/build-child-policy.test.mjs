@@ -31,7 +31,7 @@ guard(dgram,'createSocket');guard(globalThis,'fetch');guard(process,'dlopen');
 syncBuiltinESMExports();
 after(()=>{for(const restore of restores.reverse())restore();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No real process/network/native call was attempted');});
 const {createChildPolicy,fileFacts}=await import('../scripts/build-child-policy.mjs');
-const {verifyAppStage}=await import('../scripts/build-builder.mjs');
+const {verifyAppStage,packageArchivePath}=await import('../scripts/build-builder.mjs');
 const {readAsarFiles}=await import('../scripts/build-manifest.mjs');
 const asar=await import('@electron/asar');
 const require=createRequire(import.meta.url);
@@ -39,8 +39,8 @@ const require=createRequire(import.meta.url);
 function fixture(overrides={}){
   const root=path.resolve(process.env.TEMP||process.env.TMP||'.','books-pack-policy-inert');
   const ownedRoot=path.join(root,'build-cache','builds','owned');
-  const output=path.join(ownedRoot,'output');
-  const context={root,ownedRoot,output,appDir:path.join(ownedRoot,'app'),deadline:10000,
+  const output=path.join(root,'dist','builds','output');
+  const context={root,ownedRoot,output,archivePath:packageArchivePath({name:'books-arranger',version:'0.24.3'},output,root),appDir:path.join(ownedRoot,'app'),deadline:10000,
     node:process.execPath,bootstrap:path.join(root,'bootstrap','python.exe'),
     npmCli:path.join(ownedRoot,'inputs','npm','bin','npm-cli.js'),
     nsis:path.join(ownedRoot,'inputs','nsis','Bin','makensis.exe'),
@@ -56,7 +56,7 @@ function fixture(overrides={}){
   const inspected=[];let current=1000,drift=false;
   const policy=createChildPolicy(context,{now:()=>current,inspectFile:file=>{inspected.push(file);return {...facts,...(drift?{sha256:'c'.repeat(64)}:{})};}});
   const npm=[context.npmCli,'prefix','-w'];
-  const archive=['a','-bd','-mx=9','-md=1m','-mtc=off','-ms=off','-mtm=off','-mta=off',path.join(output,'books-arranger-0.24.2-x64.nsis.7z'),'.'];
+  const archive=['a','-bd','-mx=9','-md=1m','-mtc=off','-ms=off','-mtm=off','-mta=off',context.archivePath,'.'];
   return {context,policy,inspected,npm,archive,setNow:n=>{current=n;},setDrift:()=>{drift=true;}};
 }
 function denied(f,call,pattern=/Pack child refused/){
@@ -90,6 +90,20 @@ test('7zip permits only the exact private NSIS archive operation',()=>{
   const f=fixture(),result=f.policy.prepare(f.context.seven,f.archive,{cwd:path.join(f.context.output,'win-unpacked')});
   assert.equal(result.file,f.context.seven);assert.deepEqual(result.args,f.archive);assert.equal(result.options.windowsHide,true);
   assert.equal(f.policy.launches[0].kind,'nsis-archive');f.policy.assertClean();
+});
+
+test('archive identity follows the protected package version and refuses invalid package/output',()=>{
+  const f=fixture();
+  assert.equal(path.basename(f.context.archivePath),'books-arranger-0.24.3-x64.nsis.7z');
+  for(const pkg of [{name:'other',version:'0.24.3'},{name:'books-arranger',version:'../escape'},{name:'books-arranger',version:'0.24.3-beta'}])assert.throws(()=>packageArchivePath(pkg,f.context.output,f.context.root),/Invalid archive/);
+  assert.throws(()=>packageArchivePath({name:'books-arranger',version:'0.24.3'},path.join(f.context.root,'outside'),f.context.root),/output escape/);
+});
+
+test('archive requires explicit exact version/path and private cwd',()=>{
+  for(const mutate of [f=>{f.context.archivePath=undefined;return f.archive;},f=>f.archive.map((a,i)=>i===8?a.replace('0.24.3','0.24.2'):a),f=>{f.context.archivePath=path.join(f.context.root,'books-arranger-0.24.3-x64.nsis.7z');return f.archive;}]){
+    const f=fixture();denied(f,()=>f.policy.prepare(f.context.seven,mutate(f),{cwd:path.join(f.context.output,'win-unpacked')}));
+  }
+  const f=fixture();denied(f,()=>f.policy.prepare(f.context.seven,f.archive,{cwd:f.context.root}));
 });
 
 test('makensis binds stdin compiler shape, templates cwd and generator output',()=>{

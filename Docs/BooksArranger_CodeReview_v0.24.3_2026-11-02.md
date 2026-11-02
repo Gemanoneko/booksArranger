@@ -8,7 +8,7 @@ Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.3
 Commit range: 72058a077ce0c277bd3f00c577e0599e02bcb035..working tree identified below
-Files changed: 14 source/test files, +262 / -21 lines
+Files changed: 14 initial source/test files (+262 / -21 lines), plus 3 packaging files reviewed in the addendum
 Stand-down dimensions: none
 ```
 
@@ -60,6 +60,22 @@ SHA256 values below were measured directly from the files. Line counts include t
 | `web/index.html` | `8a924761ce759786829968f58d1fb1f342fd142f1085d67f0f2b462a16ca26e4` |
 | `web/style.css` | `9cb2ef76cd1d8df77cd867dcbdc2ea027c19e4bd0ccad13b5b643082372451b6` |
 | `web_server.py` | `620a0144ac3a2f6b49d2b0274bc5b7e3a52417e7c6b66a8d638666cec19dccb3` |
+
+## Bounded packaging correction
+
+The first 0.24.3 packaging attempt truthfully failed because the child policy still expected the literal 0.24.2 archive filename. Reviewed only the subsequent three-file correction against source HEAD `23a13c1e11f5b52020465ab900557d3b05d4c440`; the application and previously reviewed proof decoder are unchanged.
+
+`build-builder.mjs` now derives one explicit archive path from the already native-held root `package.json`. It requires the exact package name and a numeric three-component version, and a canonical absolute output below this project's `dist/builds/`. `build-child-policy.mjs` requires that explicit archive in the bound output directory and still requires exact 7-Zip arguments and the private `win-unpacked` cwd. The hardcoded fallback is removed. The existing native supervisor protects root metadata before launching this builder; no guard mode, admission, lease, executable pin, shell option or launch capability changes.
+
+No findings in this delta. Measured SHA256 pins:
+
+| File | SHA256 |
+|---|---|
+| `scripts/build-builder.mjs` | `61a170b461e0b24c31b40d3502ca7230f216f8861a5241357d6b141b42b9be4d` |
+| `scripts/build-child-policy.mjs` | `4699d7f49876409a93059adc968a6e0ebba3e2048b40d95d64fc0acc3a13b823` |
+| `tests/build-child-policy.test.mjs` | `9da1dd2d1c3a840ca9d5b6cd9d6b14a9783f302596fa9c842f3eb3d0774390bf` |
+
+Captured targeted result `pack-fix-test-result.json` SHA256 `0ae48667501da26b9cc72d2cbe4124ba6acf7b3c551559e3d70a75b93d02c957` reports 26/26 affected policy tests passing in 698ms with normal owned closure (five retained, zero remaining; no force, timeout or incomplete queries). Ender also reports three syntax checks passing. The new tests include exact 0.24.3 archive acceptance and refusal for wrong version/path/cwd, missing archive binding and invalid package identity. This evidence does not claim a successful rebuilt installer or final entry check.
 
 ## Verdict
 
