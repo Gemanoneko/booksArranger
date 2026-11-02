@@ -1,0 +1,76 @@
+{
+  "schema": "books-runner-copy-experiment-v1",
+  "version": "0.24.4",
+  "baseline_source_head": "3c45da40c82043379351fa60aac4e000a02ca172",
+  "status": "PERFORMANCE_TARGET_FAILED_NOT_FOR_RELEASE",
+  "source_files": [
+    {
+      "path": "scripts/check-desktop.mjs",
+      "size": 22875,
+      "sha256": "0ae73e0f0cac6759f481e4c34063e6b1d8fe43d1de31c0d2662d9b33920f95e2"
+    },
+    {
+      "path": "scripts/python-check-batches.mjs",
+      "size": 20133,
+      "sha256": "1d74682ebde4e04e76401835256226efa8e4b1061e8ea11beb5c3bcbf4ea0c54"
+    },
+    {
+      "path": "tests/python-check-batches.test.mjs",
+      "size": 16548,
+      "sha256": "8137b154517bf5379009fd2560fdcef22e7ff936348ed5bd47237687d2f9792c"
+    }
+  ],
+  "scope": "Existing inventory/copy extracted into existing python-check-batches module; invocation-local private verified byte cache; existing batch tests exercise real copy helper. No deadlines, worker assignments, native guard or app code changes.",
+  "measurement": {
+    "source_files": 1102,
+    "isolated_copies": 13,
+    "copy_seconds": 75.5213746,
+    "from_process_start_seconds": 75.5631174,
+    "target_seconds": 15,
+    "target_met": false,
+    "correctness_cases": 23,
+    "all_passed": true,
+    "exact_membership_and_bytes": true,
+    "ordinary_distinct_files": true,
+    "existing_file_and_corruption_refused": true,
+    "source_change_final_comparison_refused": true
+  },
+  "execution": {
+    "callback_finished_at": "2026-11-02T13:05:20.008Z",
+    "code": 0,
+    "elapsed_ms": 81900.9643,
+    "normal_closed": true,
+    "retained": 5,
+    "final_complete_zero": true,
+    "incomplete_queries": 0
+  },
+  "limits": "Not evidence of full suite/application acceptance. The earlier29.6s figure is the actual full-gate process-start-to-copy point; this measured helper path includes source snapshot/copies/post-copy checks and separately pinned-runtime/test-process start, with no complete sidechain/Python execution. No cause inferred for slower result. Temporary measurement copies were removed by fixture finally.",
+  "disposition": "Preserve this failed experiment only as evidence; restore the three owned files from HEAD3c45 via Sully. No optimization retry/build/full/app.",
+  "patch": {
+    "file": "experiment.patch",
+    "sha256": "bb5ee360345d07080b2a44a2a0601197f2dbd135ac2995c3980cf76be2b92354",
+    "size": 12325
+  },
+  "raw": [
+    {
+      "file": "owned.json",
+      "size": 5765,
+      "sha256": "c5d8cf736335229ac02d1a8b5784d51736015547c848d449713cb0459a57536c"
+    },
+    {
+      "file": "callback.json",
+      "size": 119,
+      "sha256": "5f33b2f486358ddd18346e6f3879f1b8ac828f297c19f4fc226387a0e9b40ceb"
+    },
+    {
+      "file": "stdout.log",
+      "size": 4906,
+      "sha256": "b11dd0f7f2d5b094ebf6f8a806b71a15ec0423eed5d4363e9982851a14eec2b8"
+    },
+    {
+      "file": "stderr.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

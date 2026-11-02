@@ -7,13 +7,13 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.4
-Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..frozen correction working tree after 1ab490b1fb5852edfd88ca689c0d340842a5ee1d
+Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..3c45da40c82043379351fa60aac4e000a02ca172
 Working-tree base: 163feb38f7828a8ee0fde01d897140e2323b31e9 (intervening changes are documentation)
 Scope: 5 product files and 3 focused test files, +278 / -31 lines
 Stand-down dimensions: none
 ```
 
-Source clearance certifies the original patch plus the frozen public-capability correction below. The earlier artifact binding is historical and does not cover that correction. A new source commit/build, final entry and independent behavior QA remain required.
+Source clearance certifies the original patch plus the public-capability correction below. The first artifact binding remains historical; the corrected actual source/build is bound separately below. Corrected final entry and independent behavior QA remain required.
 
 ## Summary
 
@@ -99,7 +99,27 @@ Actual affected regression receipt: 120 tests passed in 66.102 unittest seconds 
 
 Portable correction evidence is `Docs/Evidence/v0.24.4_2026-11-02/public-capability-correction/results.json`, SHA256 `886c5e88f7833e6767dbe0a82c2db8737e7ff1abebd97992d8b552e73c1afbab`. Its five raw/pin references match their declared hashes and sizes; original failed-full evidence remains explicitly failed. No claim is made that this correction alone resolves the separate deadline workers.
 
-Current source construction is clear for these frozen bytes. Current release source/artifact canonical fields must be added only after Sully commits and the corrected build exists. Historical build `46a8983e-8529-4efd-a91d-01b46d46fe3a` must not be rebound to the new source.
+Source construction is clear for these frozen bytes. Historical build `46a8983e-8529-4efd-a91d-01b46d46fe3a` remains tied to its own failed acceptance and is not rebound to the corrected source.
+
+## Corrected final source and artifact binding
+
+Release source commit: 3c45da40c82043379351fa60aac4e000a02ca172
+
+Release artifact manifest SHA256: 0c85b34b48ff0c81fbae5b0b40254b94e15252051e692f41494c46e84f97f78b
+
+Candidate: `C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101`, clean at the exact source above.
+
+All nine distinct reviewed product/test files match their latest reviewed main-source hashes, using the correction pins in preference to superseded initial pins. All nine candidate counterparts equal those reviewed bytes after CRLF-to-LF normalization only. No source drift was found. Package and both root lockfile version fields remain `0.24.4`; actual lockfile hash `b3b03db6a1c44a8464a33849de51dee2c52aa43058ed8cc1a7d3ed3da5c03aa7` still equals the build-input lock pin.
+
+Measured `dist/release-artifacts.json` binds corrected source above, version `0.24.4`, build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063`, product digest `ebebcac3e553da209f66694839a19be6f4311cd5489567f562e426ff78556924`, verified payload and installer equivalence. Each actual release file was independently hashed and sized:
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| `Books-Arranger-Setup-0.24.4.exe` | 174671440 | `b8db65c4a9ca0f2119c90cb65d2d13669e9eb821d6f6d7565fb585b740a35744` |
+| `Books-Arranger-Setup-0.24.4.exe.blockmap` | 182213 | `21b8a705636afa1327fa234969f6c9ebf44ae53d7fec36addd03983e75437262` |
+| `latest.yml` | 360 | `d97bf29148235e4d320db5eb8f8f0d7dccfca9fdf3438cd9f1f70396d1907e1b` |
+
+Actual corrected runtime-pointer SHA256: `b8a79ed895a443d62a8236fc6fc9f1cf928844aa84322403dab63a18055910a8`. Ender reports corrected packaging passed in 131.404 seconds with normal owned closure (60 retained, zero remaining). Corrected full entry and both approved hidden checks remain pending; no pass for those gates is claimed by this mechanical binding. No tests, app runs or unrelated QA-document changes were made by this reviewer.
 
 ## Verdict
 
@@ -109,4 +129,4 @@ Current source construction is clear for these frozen bytes. Current release sou
 
 **Verdict:** RELEASE CLEAR
 
-Source construction is clear for the original patch plus the frozen correction. Final release requires a new source/artifact binding, completed final entry, fresh candidate-native proof and independent QA GO.
+Source and artifact construction are clear for corrected source `3c45da40c82043379351fa60aac4e000a02ca172` and build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063`. Final release requires completed corrected entry, the approved candidate-native checks and independent QA GO.

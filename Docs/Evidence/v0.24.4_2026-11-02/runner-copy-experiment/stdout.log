@@ -1,0 +1,149 @@
+TAP version 13
+# BOOKS_PYTHON_COPY_MEASUREMENT {"files":1102,"copies":13,"copy_seconds":75.5213746,"from_process_start_seconds":75.5631174,"runtime_verified":true,"exact_bytes":true,"distinct_files":true,"includes":"verified source inventory, thirteen wx copies, thirteen full destination inventories, required directories; process-start figure also includes Node contract startup and pinned-runtime verification","excludes":"full Python/Node/frontend execution; no desktop app"}
+# Subtest: all short worker layouts retain the original fallback prerequisite
+ok 1 - all short worker layouts retain the original fallback prerequisite
+  ---
+  duration_ms: 0.9352
+  type: 'test'
+  ...
+# Subtest: fixed short fixture bounds leave the existing 240-character output guard intact
+ok 2 - fixed short fixture bounds leave the existing 240-character output guard intact
+  ---
+  duration_ms: 0.1128
+  type: 'test'
+  ...
+# Subtest: server conflicts remain serial and every declared pattern appears exactly once
+ok 3 - server conflicts remain serial and every declared pattern appears exactly once
+  ---
+  duration_ms: 0.3136
+  type: 'test'
+  ...
+# Subtest: measured heavy modules spread longest first; serial modules stay together; declared order is kept
+ok 4 - measured heavy modules spread longest first; serial modules stay together; declared order is kept
+  ---
+  duration_ms: 0.2834
+  type: 'test'
+  ...
+# Subtest: the real inventory projects every worker under the deadline from its measured seconds
+ok 5 - the real inventory projects every worker under the deadline from its measured seconds
+  ---
+  duration_ms: 1.0434
+  type: 'test'
+  ...
+# Subtest: the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+ok 6 - the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+  ---
+  duration_ms: 1.3001
+  type: 'test'
+  ...
+# Subtest: the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+ok 7 - the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+  ---
+  duration_ms: 0.6217
+  type: 'test'
+  ...
+# Subtest: the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+ok 8 - the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+  ---
+  duration_ms: 0.4452
+  type: 'test'
+  ...
+# Subtest: duplicate and malformed patterns cannot silently change discovery
+ok 9 - duplicate and malformed patterns cannot silently change discovery
+  ---
+  duration_ms: 0.1161
+  type: 'test'
+  ...
+# Subtest: actual complete occurrence count is summed without deduplicating loader IDs
+ok 10 - actual complete occurrence count is summed without deduplicating loader IDs
+  ---
+  duration_ms: 0.2094
+  type: 'test'
+  ...
+# Subtest: refuses omitted completion
+ok 11 - refuses omitted completion
+  ---
+  duration_ms: 0.1349
+  type: 'test'
+  ...
+# Subtest: refuses skipped case
+ok 12 - refuses skipped case
+  ---
+  duration_ms: 0.0965
+  type: 'test'
+  ...
+# Subtest: refuses failure
+ok 13 - refuses failure
+  ---
+  duration_ms: 0.0732
+  type: 'test'
+  ...
+# Subtest: refuses error
+ok 14 - refuses error
+  ---
+  duration_ms: 0.0639
+  type: 'test'
+  ...
+# Subtest: refuses missing ID
+ok 15 - refuses missing ID
+  ---
+  duration_ms: 0.3887
+  type: 'test'
+  ...
+# Subtest: refuses false success
+ok 16 - refuses false success
+  ---
+  duration_ms: 0.1257
+  type: 'test'
+  ...
+# Subtest: refuses wrong worker
+ok 17 - refuses wrong worker
+  ---
+  duration_ms: 0.0881
+  type: 'test'
+  ...
+# Subtest: refuses unknown pattern
+ok 18 - refuses unknown pattern
+  ---
+  duration_ms: 0.0611
+  type: 'test'
+  ...
+# Subtest: refuses missing worker
+ok 19 - refuses missing worker
+  ---
+  duration_ms: 0.051
+  type: 'test'
+  ...
+# Subtest: each worker's deadline counts from its own start, inside the gate's total (0.22.3)
+ok 20 - each worker's deadline counts from its own start, inside the gate's total (0.22.3)
+  ---
+  duration_ms: 0.3891
+  type: 'test'
+  ...
+# Subtest: a split module runs as two complementary halves of its classes (0.22.3)
+ok 21 - a split module runs as two complementary halves of its classes (0.22.3)
+  ---
+  duration_ms: 0.3792
+  type: 'test'
+  ...
+# Subtest: verified source snapshot creates thirteen isolated ordinary exact copies
+ok 22 - verified source snapshot creates thirteen isolated ordinary exact copies
+  ---
+  duration_ms: 81489.7945
+  type: 'test'
+  ...
+# Subtest: worker copy refuses corruption and existing files; changed source still fails final comparison
+ok 23 - worker copy refuses corruption and existing files; changed source still fails final comparison
+  ---
+  duration_ms: 31.2187
+  type: 'test'
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 81657.47

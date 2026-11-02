@@ -1,0 +1,20 @@
+{
+  "started_at": "2026-11-02T12:41:41.973Z",
+  "finished_at": "2026-11-02T12:51:42.006Z",
+  "pid": 76964,
+  "callback_received": true,
+  "error": {
+    "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha c4b46ec3336c571bd0e00d94c1863e9a74721b81fabf8ec97a1641b4e51e736a --run-root C:/Antigravity Projects/q\n",
+    "code": null,
+    "signal": "SIGTERM",
+    "killed": true
+  },
+  "stdout_bytes": 1048,
+  "stderr_bytes": 0,
+  "stdout_sha256": "ce96017bfc7f530a3c27f7bed1fc1dab4028923dc71a1104e8d918adad0a2d73",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "write_errors": [],
+  "invocation_sha256": "996f03a2d021063a3b2b46da2f637113d083c53ef08d90a2f1ad43546ff89a21",
+  "native_deadline_ms": 600000,
+  "transport": "short-persistent-launch-and-poll"
+}

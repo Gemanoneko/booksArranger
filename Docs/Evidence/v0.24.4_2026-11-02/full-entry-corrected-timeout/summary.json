@@ -1,0 +1,97 @@
+{
+  "status": "FAIL_OWNED_CHECK_TIMEOUT_NO_FINAL_ENTRY_RECEIPT",
+  "version": "0.24.4",
+  "source_head": "3c45da40c82043379351fa60aac4e000a02ca172",
+  "build_id": "3c395d29-d3fc-4ddd-ac3d-e708bfbb9063",
+  "artifact_manifest_sha256": "0c85b34b48ff0c81fbae5b0b40254b94e15252051e692f41494c46e84f97f78b",
+  "runtime_pointer_sha256": "b8a79ed895a443d62a8236fc6fc9f1cf928844aa84322403dab63a18055910a8",
+  "context_sha256": "c4b46ec3336c571bd0e00d94c1863e9a74721b81fabf8ec97a1641b4e51e736a",
+  "outer_callback": {
+    "started_at": "2026-11-02T12:41:41.973Z",
+    "finished_at": "2026-11-02T12:51:42.006Z",
+    "pid": 76964,
+    "callback_received": true,
+    "error": {
+      "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha c4b46ec3336c571bd0e00d94c1863e9a74721b81fabf8ec97a1641b4e51e736a --run-root C:/Antigravity Projects/q\n",
+      "code": null,
+      "signal": "SIGTERM",
+      "killed": true
+    },
+    "stdout_bytes": 1048,
+    "stderr_bytes": 0,
+    "stdout_sha256": "ce96017bfc7f530a3c27f7bed1fc1dab4028923dc71a1104e8d918adad0a2d73",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "write_errors": [],
+    "invocation_sha256": "996f03a2d021063a3b2b46da2f637113d083c53ef08d90a2f1ad43546ff89a21",
+    "native_deadline_ms": 600000,
+    "transport": "short-persistent-launch-and-poll"
+  },
+  "entry_receipt_present": false,
+  "entry_postflight_proven": false,
+  "check_command": {
+    "file": "C:\\Program Files\\nodejs\\node.exe",
+    "args": [
+      "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      "run",
+      "check"
+    ],
+    "cwd": "C:\\Antigravity Projects\\q\\entry-run-U1I8ik",
+    "timeoutMs": 566872
+  },
+  "check_owned": {
+    "code": null,
+    "ok": false,
+    "closed": true,
+    "forced": true,
+    "timedOut": true,
+    "outputComplete": false,
+    "reason": "Total deadline reserved for owned cleanup",
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10523,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 19443,
+        "incompleteQueries": 340,
+        "firstIncomplete": {
+          "assigned": 47,
+          "listed": 45,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 27,
+          "listed": 25,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "elapsedMs": 566169.5569000001
+  },
+  "observations": {
+    "original_child_output_bytes": 117,
+    "source_copy_line": "Sources copied into the 13 Python workers by 29.6 s",
+    "python_worker_completion_reports": 0,
+    "python_discovered_or_completed_count": null,
+    "python_error_or_pass_count": null,
+    "node_count": null,
+    "frontend_count": null,
+    "reason_counts_unknown": "The gate buffers each worker and sidechain until workers settle; owneddeadlineclosedbeforethose records wereprinted."
+  },
+  "raw": {
+    "outer_stdout": "C:/Antigravity Projects/codex-books-20261102-0244/entry-corrected/full/outer-stdout.log",
+    "outer_stdout_sha256": "ce96017bfc7f530a3c27f7bed1fc1dab4028923dc71a1104e8d918adad0a2d73",
+    "owned_result": "C:/Antigravity Projects/codex-books-20261102-0244/entry-corrected/full/check-owned-result.json",
+    "owned_result_sha256": "58f305afc21061d9293aece5d9fb0e74f9a46ed863e5ff5492cb983c1503d45d",
+    "check_stdout": "C:/Antigravity Projects/codex-books-20261102-0244/entry-corrected/full/check-stdout.log",
+    "check_stderr": "C:/Antigravity Projects/codex-books-20261102-0244/entry-corrected/full/check-stderr.log"
+  },
+  "preserved_scratch": "C:/Antigravity Projects/q/entry-run-U1I8ik",
+  "limitations": "No final PASSreceipt/postflight. Outerprocess killedat600000ms; ownedcheckforced/timedOut566169.6ms with finalnativecompletezero. No new assertion/product failure inferred from absentbufferedlogs. No automaticrerun/nativeapp launch. PreserveoldfirstFAILportable/context andcurrentraw/workerinputs."
+}

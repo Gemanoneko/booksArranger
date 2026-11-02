@@ -1,0 +1,120 @@
+diff --git a/scripts/check-desktop.mjs b/scripts/check-desktop.mjs
+index 333603f319112c1bf5d9fbfc6adee3ad750c4abd..7fbdfdd50d7f6ce75cca5060046183ef68c5f357 100644
+--- a/scripts/check-desktop.mjs
++++ b/scripts/check-desktop.mjs
+@@ -2,7 +2,7 @@
+ // Canonical non-app Node graph with owned Python/codec CLI fixtures; PA-1 is a separate mandatory native phase.
+ // No GUI launch, installer execution, live catalog or source-library access.
+ import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
+-import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS} from './python-check-batches.mjs';
++import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS,pythonSourceInventory as inventory,pythonWorkerSource} from './python-check-batches.mjs';
+ import {liveCatalogRefusal} from './gate-source-guard.mjs';
+ import {trackGateScratch} from './gate-scratch.mjs';
+ import {CANONICAL_NODE_ENTRIES,phaseAccounting} from './qa-phase-contract.mjs';
+@@ -130,30 +130,17 @@ sys.exit(not r.wasSuccessful() or bool(r.skipped) or r.testsRun!=len(inventory))
+ `;
+ // Copy only canonical source inputs. Runtime dependencies and generated scratch
+ // are not mutable test inputs; each Python worker gets its own source/cwd/TEMP.
+-function inventory(directory,relative=''){
+- const files=[];
+- for(const item of fs.readdirSync(path.join(directory,relative),{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
+-  if(!relative&&['scratch','node_modules','.git','dist','build-cache'].includes(item.name))continue;
+-  const name=path.join(relative,item.name),file=path.join(directory,name),stat=fs.lstatSync(file);
+-  if(stat.isSymbolicLink())throw Error('Linked Python batch input');
+-  if(stat.isDirectory())files.push(...inventory(directory,name));
+-  else if(stat.isFile())files.push([name,createHash('sha256').update(fs.readFileSync(file)).digest('hex')]);
+-  else throw Error('Nonordinary Python batch input');
+- }
+- return files;
+-}
+ // 2026-10-29: the gate removes the scratch it made when it ends, pass or fail (scripts/gate-scratch.mjs). A failure keeps
+ // only the worker copies it names as its evidence and says so. Every run used to leave its 13 worker copies behind.
+ const gateScratch=trackGateScratch(root);let gateError=null,passLine=null;
+ const phases=phaseAccounting(nodeTests);  // all18 prior entries accounted for, plus the additive pure contract
+ try{
+ fs.mkdirSync(gateScratch.claim('scratch/source-fallback-2026-10-11'),{recursive:true});gateScratch.claim('scratch/f');  // the side chain's fixture root
+-const inputs=inventory(root),batches=pythonBatches(patterns);
++const sources=pythonWorkerSource(root),inputs=sources.inputs,batches=pythonBatches(patterns);
+ const side=sideChecks();  // beside the Python workers (see sideChecks)
+ const workers=batches.map((batch,i)=>{
+  const layout=pythonWorkerLayout(i),directory=gateScratch.claim(layout.relative);fs.mkdirSync(directory); // fresh or refuse
+- for(const [name,sha] of inputs){const destination=path.join(directory,name),bytes=fs.readFileSync(path.join(root,name));if(createHash('sha256').update(bytes).digest('hex')!==sha)throw Error('Python batch source changed during copy');fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes,{flag:'wx'});}
+- if(JSON.stringify(inventory(directory))!==JSON.stringify(inputs)){gateScratch.evidence(layout.relative,'its source copy differs from the gate inputs');throw Error('Python batch copy differs: '+layout.relative);}
++ try{sources.copy(directory);}catch(error){if(error.message.startsWith('Python batch copy differs: '))gateScratch.evidence(layout.relative,'its source copy differs from the gate inputs');throw error;}
+  for(const relative of layout.requiredDirectories)fs.mkdirSync(path.join(directory,relative),{recursive:true});
+  const temp=path.join(directory,'scratch','tmp');
+  return {directory,temp,batch,i,relative:layout.relative};
+diff --git a/scripts/python-check-batches.mjs b/scripts/python-check-batches.mjs
+index a6e7ba20fe502a17f1c2fe56e72ac05382446bc4..66d9b05392bef0b3ecc7b97eaefee5e2f1863850 100644
+--- a/scripts/python-check-batches.mjs
++++ b/scripts/python-check-batches.mjs
+@@ -1,4 +1,5 @@
+-// Pure plan/accounting for isolated workers inside the canonical owner Job.
++import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';
++// Planning/accounting and verified isolated source copies inside the canonical owner Job.
+ const serialServerModules=new Set(['test_desktop_host.py','test_desktop_quit.py','test_web.py','test_merge_http.py','test_blocked_retry.py','test_status_snapshot.py','test_status_read_contention.py','test_startup_published_check.py','test_producer_recovery_http.py','test_attention_repair.py']);
+ // 0.21.1: two workers no longer fit the 540 s deadline (2026-10-23, both concurrent: 499 s and 601 s, the real MP3
+ // fixture case not included). A third worker gets the same isolated copy, cwd and TEMP as the others. Modules are
+@@ -150,3 +151,25 @@ export function validatePythonReports(patterns,batches,reports){
+   }
+   return {count:all.length,ids:all};
+ }
++
++// Invocation-local verified bytes; each worker remains a distinct ordinary source tree.
++export function pythonSourceInventory(directory,relative='',contents=null){
++ const files=[];
++ for(const item of fs.readdirSync(path.join(directory,relative),{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))){
++  if(!relative&&['scratch','node_modules','.git','dist','build-cache'].includes(item.name))continue;
++  const name=path.join(relative,item.name),file=path.join(directory,name),stat=fs.lstatSync(file);
++  if(stat.isSymbolicLink())throw Error('Linked Python batch input');
++  if(stat.isDirectory())files.push(...pythonSourceInventory(directory,name,contents));
++  else if(stat.isFile()){const bytes=fs.readFileSync(file);files.push([name,createHash('sha256').update(bytes).digest('hex')]);if(contents)contents.set(name,bytes);}
++  else throw Error('Nonordinary Python batch input');
++ }
++ return files;
++}
++export function pythonWorkerSource(directory){
++ const contents=new Map(),inputs=pythonSourceInventory(directory,'',contents);
++ for(const item of inputs)Object.freeze(item);Object.freeze(inputs);
++ return Object.freeze({inputs,copy(destination){
++  for(const [name] of inputs){const file=path.join(destination,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,contents.get(name),{flag:'wx'});}
++  if(JSON.stringify(pythonSourceInventory(destination))!==JSON.stringify(inputs))throw Error('Python batch copy differs: '+destination);
++ }});
++}
+diff --git a/tests/python-check-batches.test.mjs b/tests/python-check-batches.test.mjs
+index 4b6f764c6cc7158c42c785c435bede7dedef2d97..5018f978c2d06d6f7f09d7e1895aa9704d94ef78 100644
+--- a/tests/python-check-batches.test.mjs
++++ b/tests/python-check-batches.test.mjs
+@@ -1,3 +1,4 @@
++import copyFs from 'node:fs';import copyPath from 'node:path';import copyOs from 'node:os';import {createHash as copyHash} from 'node:crypto';import {pythonWorkerSource,pythonSourceInventory} from '../scripts/python-check-batches.mjs';
+ import test from 'node:test';import {readFileSync} from 'node:fs';const require_fs=()=>({readFileSync});
+ import assert from 'node:assert/strict';
+ import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds,workerSecondsReport,workerDeadline,PYTHON_WORKER_DEADLINE_SECONDS,GATE_TOTAL_SECONDS} from '../scripts/python-check-batches.mjs';
+@@ -98,3 +99,27 @@ test('a split module runs as two complementary halves of its classes (0.22.3)',(
+  const fs=require_fs();const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
+  assert.ok(source.includes("raise ValueError('Split classes missing from '"),'a renamed class fails the gate, never drops its tests');
+ });
++
++function ownCopyFixture(){const root=copyFs.mkdtempSync(copyPath.join(copyOs.tmpdir(),'books-worker-copy-'));return{root,source:copyPath.join(root,'source'),close(){assert.equal(copyFs.lstatSync(root).isSymbolicLink(),false);copyFs.rmSync(root,{recursive:true,force:false})}}}
++function tinyCopySource(root){copyFs.mkdirSync(root);copyFs.writeFileSync(copyPath.join(root,'one.py'),'verified source');copyFs.mkdirSync(copyPath.join(root,'tests'));copyFs.writeFileSync(copyPath.join(root,'tests','two.py'),'second verified source')}
++test('verified source snapshot creates thirteen isolated ordinary exact copies',()=>{
++ const fixture=ownCopyFixture();try{
++  const supplied=process.env.BOOKS_QA_COPY_MEASURE_SOURCE,source=supplied||fixture.source;
++  if(supplied){assert(copyPath.isAbsolute(source));assert.equal(copyFs.lstatSync(source).isSymbolicLink(),false);const runtime=JSON.parse(copyFs.readFileSync(copyPath.join(source,'scripts','qa-runtime.json'))),runtimeRoot=process.env.BOOKS_QA_RUNTIME_ROOT;assert(runtimeRoot,'Pinned runtime required for comparable measurement');for(const[name,pin]of Object.entries(runtime.ffmpeg.files)){const file=copyPath.join(runtimeRoot,'ffmpeg',name),b=copyFs.readFileSync(file);assert.equal(b.length,pin.size);assert.equal(copyHash('sha256').update(b).digest('hex'),pin.sha256)}assert.equal(copyHash('sha256').update(copyFs.readFileSync(copyPath.join(runtimeRoot,'python','python.exe'))).digest('hex'),runtime.python.sha256)}else tinyCopySource(source);
++  const start=performance.now(),snapshot=pythonWorkerSource(source),identities=new Set();
++  if(supplied){const manifest=JSON.parse(copyFs.readFileSync(process.env.BOOKS_QA_COPY_MEASURE_MANIFEST));assert.deepEqual(snapshot.inputs.map(([name,sha])=>({path:name.replaceAll('\\','/'),sha256:sha})).sort((a,b)=>a.path.localeCompare(b.path)),manifest.files.slice().sort((a,b)=>a.path.localeCompare(b.path)))}
++  for(let i=0;i<13;i++){const destination=copyPath.join(fixture.root,String(i));copyFs.mkdirSync(destination);snapshot.copy(destination);for(const relative of pythonWorkerLayout(i).requiredDirectories)copyFs.mkdirSync(copyPath.join(destination,relative),{recursive:true});const file=copyPath.join(destination,snapshot.inputs[0][0]),stat=copyFs.statSync(file,{bigint:true});assert.equal(stat.nlink,1n);assert(!identities.has(String(stat.ino)));identities.add(String(stat.ino));}
++  const copySeconds=(performance.now()-start)/1000,fromProcessStartSeconds=(performance.now()-0)/1000;
++  if(supplied)console.log('BOOKS_PYTHON_COPY_MEASUREMENT '+JSON.stringify({files:snapshot.inputs.length,copies:13,copy_seconds:copySeconds,from_process_start_seconds:fromProcessStartSeconds,runtime_verified:true,exact_bytes:true,distinct_files:true,includes:'verified source inventory, thirteen wx copies, thirteen full destination inventories, required directories; process-start figure also includes Node contract startup and pinned-runtime verification',excludes:'full Python/Node/frontend execution; no desktop app'}));
++ }finally{fixture.close()}
++});
++test('worker copy refuses corruption and existing files; changed source still fails final comparison',t=>{
++ const fixture=ownCopyFixture();try{
++  tinyCopySource(fixture.source);const snapshot=pythonWorkerSource(fixture.source),destination=copyPath.join(fixture.root,'worker');copyFs.mkdirSync(destination);const write=copyFs.writeFileSync;let damaged=false;
++  const mocked=t.mock.method(copyFs,'writeFileSync',(file,bytes,options)=>{if(!damaged&&String(file).endsWith('one.py')){damaged=true;return write(file,Buffer.from('corrupted'),options)}return write(file,bytes,options)});
++  assert.throws(()=>snapshot.copy(destination),/Python batch copy differs/);mocked.mock.restore();
++  const clean=copyPath.join(fixture.root,'clean');copyFs.mkdirSync(clean);snapshot.copy(clean);assert.throws(()=>snapshot.copy(clean),/EEXIST/);
++  copyFs.writeFileSync(copyPath.join(fixture.source,'one.py'),'source changed after capture');assert.throws(()=>assert.deepEqual(pythonSourceInventory(fixture.source),snapshot.inputs),'the unchanged final source comparison refuses changed input');
++  assert.equal(copyFs.readFileSync(copyPath.join(clean,'one.py'),'utf8'),'verified source');
++ }finally{fixture.close()}
++});

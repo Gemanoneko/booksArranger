@@ -1,0 +1,350 @@
+{
+  "status": "FAIL_PYTHON_WORKER_DEADLINES_NO_FINAL_ENTRY_RECEIPT",
+  "version": "0.24.4",
+  "source_head": "1ab490b1fb5852edfd88ca689c0d340842a5ee1d",
+  "build_id": "46a8983e-8529-4efd-a91d-01b46d46fe3a",
+  "artifact_manifest_sha256": "6fee5b0552f636030003bfa12321dbaae2dbdbea18c2524b42abe7e1529cc9b5",
+  "runtime_pointer_sha256": "245e0baa411fc653304802f541da51520e8eaa25b9d4568bf832ac057a2a59a4",
+  "context_sha256": "54b0364be9d0442a945fb6a99ff241e7b01c840ed44bbcdb16edc707a0ae6757",
+  "outer_callback": {
+    "started_at": "2026-11-02T12:19:03.955Z",
+    "finished_at": "2026-11-02T12:29:03.992Z",
+    "pid": 118752,
+    "callback_received": true,
+    "error": {
+      "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha 54b0364be9d0442a945fb6a99ff241e7b01c840ed44bbcdb16edc707a0ae6757 --run-root C:/Antigravity Projects/q\n",
+      "code": null,
+      "signal": "SIGTERM",
+      "killed": true
+    },
+    "stdout_bytes": 679105,
+    "stderr_bytes": 0,
+    "stdout_sha256": "6d3f753e2369f10601ed05b8f21fd6c5e0bd56ef15c2b16b41df17d31459e19d",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "write_errors": [],
+    "invocation_sha256": "b01b4849b339b2751d164dc32ac5412e8a33ccc69abdc953e9a091f94829245e",
+    "native_deadline_ms": 600000,
+    "transport": "short-persistent-launch-and-poll"
+  },
+  "entry_receipt_present": false,
+  "entry_postflight_proven": false,
+  "check_command": {
+    "file": "C:\\Program Files\\nodejs\\node.exe",
+    "args": [
+      "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+      "run",
+      "check"
+    ],
+    "cwd": "C:\\Antigravity Projects\\q\\entry-run-YemITV",
+    "timeoutMs": 582034
+  },
+  "python": {
+    "worker_count": 13,
+    "per_worker_deadline_seconds": 540,
+    "workers_hit_deadline": [
+      5,
+      8,
+      12
+    ],
+    "discovered_counts": [
+      365,
+      46,
+      102,
+      144,
+      147,
+      218,
+      105,
+      204,
+      194,
+      134,
+      280,
+      134,
+      265
+    ],
+    "discovered_total": 2338,
+    "completion_reports": 10,
+    "completed_batches": [
+      {
+        "batch": 0,
+        "completed": 365,
+        "discovered": 365,
+        "success": false,
+        "failures": 0,
+        "errors": 12,
+        "skipped": 0
+      },
+      {
+        "batch": 1,
+        "completed": 46,
+        "discovered": 46,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 2,
+        "completed": 102,
+        "discovered": 102,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 3,
+        "completed": 144,
+        "discovered": 144,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 4,
+        "completed": 147,
+        "discovered": 147,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 6,
+        "completed": 105,
+        "discovered": 105,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 7,
+        "completed": 204,
+        "discovered": 204,
+        "success": false,
+        "failures": 0,
+        "errors": 11,
+        "skipped": 0
+      },
+      {
+        "batch": 9,
+        "completed": 134,
+        "discovered": 134,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 10,
+        "completed": 280,
+        "discovered": 280,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 11,
+        "completed": 134,
+        "discovered": 134,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "worker_lines": [
+      "Python worker 0: 463.5 s real, 217 s projected, 540 s deadline (86 %)",
+      "Python worker 1: 466.9 s real, 285 s projected, 540 s deadline (86 %)",
+      "Python worker 2: 476.9 s real, 238 s projected, 540 s deadline (88 %)",
+      "Python worker 3: 527 s real, 238 s projected, 540 s deadline (98 %)",
+      "Python worker 4: 478.5 s real, 237 s projected, 540 s deadline (89 %)",
+      "Python worker 5: 540 s real, 179 s projected, 540 s deadline (100 %)",
+      "Python worker 6: 493 s real, 222 s projected, 540 s deadline (91 %)",
+      "Python worker 7: 530.1 s real, 293 s projected, 540 s deadline (98 %)",
+      "Python worker 8: 540 s real, 308 s projected, 540 s deadline (100 %)",
+      "Python worker 9: 475.4 s real, 316 s projected, 540 s deadline (88 %)",
+      "Python worker 10: 485.9 s real, 296 s projected, 540 s deadline (90 %)",
+      "Python worker 11: 480.3 s real, 275 s projected, 540 s deadline (89 %)",
+      "Python worker 12: 540 s real, 212 s projected, 540 s deadline (100 %)"
+    ],
+    "error_failure_headers": [
+      "ERROR: test_operation_requeues_and_resumes (test_blocked_retry.ServiceTests.test_operation_requeues_and_resumes)",
+      "ERROR: test_m4b_reasons_from_the_module_are_can_retry_with_new_child_retry_data (test_attention_repair.ClassificationTests.test_m4b_reasons_from_the_module_are_can_retry_with_new_child_retry_data)",
+      "ERROR: test_provable_damage_is_can_repair_never_retry (test_attention_repair.ClassificationTests.test_provable_damage_is_can_repair_never_retry)",
+      "ERROR: test_superseded_failures_are_history_not_attention (test_attention_repair.ClassificationTests.test_superseded_failures_are_history_not_attention)",
+      "ERROR: test_unchecked_rows_are_checked_off_the_request_thread_once (test_attention_repair.ClassificationTests.test_unchecked_rows_are_checked_off_the_request_thread_once)",
+      "ERROR: test_button_request_rules (test_attention_repair.RepairAdmissionTests.test_button_request_rules)",
+      "ERROR: test_one_proven_child_with_the_approved_repair_and_untouched_originals (test_attention_repair.RepairAdmissionTests.test_one_proven_child_with_the_approved_repair_and_untouched_originals)",
+      "ERROR: test_one_run_at_a_time_and_gates (test_attention_repair.RetryAllTests.test_one_run_at_a_time_and_gates)",
+      "ERROR: test_the_whole_group_one_at_a_time_then_the_queue_starts_once (test_attention_repair.RetryAllTests.test_the_whole_group_one_at_a_time_then_the_queue_starts_once)",
+      "ERROR: test_click_queues_next_and_the_worker_admits_through_the_proof_route (test_attention_repair.RetryRouteTests.test_click_queues_next_and_the_worker_admits_through_the_proof_route)",
+      "ERROR: test_refusals_are_per_book_and_stale_views_change_nothing (test_attention_repair.RetryRouteTests.test_refusals_are_per_book_and_stale_views_change_nothing)",
+      "ERROR: test_children_stopped_by_the_old_guard_show_retry_and_repair_and_run (test_attention_repair.RevisionGuardTests.test_children_stopped_by_the_old_guard_show_retry_and_repair_and_run)",
+      "ERROR: test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book (test_automatic_processing.AutoTests.test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book)",
+      "ERROR: test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book (test_automatic_processing.AutoTests.test_between_books_cleanup_gap_does_not_pause_the_run_or_stop_the_next_book)",
+      "ERROR: test_stalled_queue_with_no_worker_still_pauses_the_run (test_automatic_processing.AutoTests.test_stalled_queue_with_no_worker_still_pauses_the_run)",
+      "ERROR: test_stalled_queue_with_no_worker_still_pauses_the_run (test_automatic_processing.AutoTests.test_stalled_queue_with_no_worker_still_pauses_the_run)",
+      "ERROR: test_cleanup_ending_during_a_status_read_is_not_a_pause (test_automatic_processing.BetweenBooksStateTests.test_cleanup_ending_during_a_status_read_is_not_a_pause)",
+      "ERROR: test_cleanup_enrolled_before_its_marker_is_set_is_not_a_pause (test_automatic_processing.BetweenBooksStateTests.test_cleanup_enrolled_before_its_marker_is_set_is_not_a_pause)",
+      "ERROR: test_cleanup_resumed_during_a_status_read_reads_running (test_automatic_processing.BetweenBooksStateTests.test_cleanup_resumed_during_a_status_read_reads_running)",
+      "ERROR: test_cleanup_worker_handing_back_to_the_converter_is_not_a_pause (test_automatic_processing.BetweenBooksStateTests.test_cleanup_worker_handing_back_to_the_converter_is_not_a_pause)",
+      "ERROR: test_last_book_cleanup_ending_during_a_status_read_is_not_a_pause (test_automatic_processing.BetweenBooksStateTests.test_last_book_cleanup_ending_during_a_status_read_is_not_a_pause)",
+      "ERROR: test_pause_during_cleanup_reads_pausing_until_the_converter_exits (test_automatic_processing.BetweenBooksStateTests.test_pause_during_cleanup_reads_pausing_until_the_converter_exits)",
+      "ERROR: test_pause_during_the_next_book_still_stops_it (test_automatic_processing.BetweenBooksStateTests.test_pause_during_the_next_book_still_stops_it)"
+    ],
+    "completed_batch_results": [
+      {
+        "batch": 0,
+        "discovered": 365,
+        "completed": 365,
+        "success": false,
+        "failures": 0,
+        "errors": 12,
+        "skipped": 0
+      },
+      {
+        "batch": 1,
+        "discovered": 46,
+        "completed": 46,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 2,
+        "discovered": 102,
+        "completed": 102,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 3,
+        "discovered": 144,
+        "completed": 144,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 4,
+        "discovered": 147,
+        "completed": 147,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 6,
+        "discovered": 105,
+        "completed": 105,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 7,
+        "discovered": 204,
+        "completed": 204,
+        "success": false,
+        "failures": 0,
+        "errors": 11,
+        "skipped": 0
+      },
+      {
+        "batch": 9,
+        "discovered": 134,
+        "completed": 134,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 10,
+        "discovered": 280,
+        "completed": 280,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "batch": 11,
+        "discovered": 134,
+        "completed": 134,
+        "success": true,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  "check_owned": {
+    "code": 1,
+    "ok": false,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "reason": null,
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10859,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 21428,
+        "incompleteQueries": 364,
+        "firstIncomplete": {
+          "assigned": 53,
+          "listed": 52,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 13,
+          "listed": 12,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "elapsedMs": 569998.4878
+  },
+  "raw": {
+    "outer_stdout": "C:/Antigravity Projects/codex-books-20261102-0244/entry/full/outer-stdout.log",
+    "outer_stdout_sha256": "6d3f753e2369f10601ed05b8f21fd6c5e0bd56ef15c2b16b41df17d31459e19d",
+    "owned_result": "C:/Antigravity Projects/codex-books-20261102-0244/entry/full/check-owned-result.json",
+    "owned_result_sha256": "8e44fb1c1f51c2d84f200f2f94be78bbec94e291cc60d37b116d7588ac03a9e6",
+    "check_stdout": "C:/Antigravity Projects/codex-books-20261102-0244/entry/full/check-stdout.log",
+    "check_stderr": "C:/Antigravity Projects/codex-books-20261102-0244/entry/full/check-stderr.log"
+  },
+  "limitations": "No PASS receipt; no final entry postflight; outerprocess killed600000ms. Ownedcheck itself closed normally exit1 with nativefinalcompletezero. InternalPythonworkers5/8/12 reached540s. No application defect inferred; no native app launch/automatic rerun. Preserve evidence.",
+  "independent_phase_evidence": {
+    "node_tap": {
+      "tests": 241,
+      "pass": 241,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0
+    },
+    "syntax_files": 11,
+    "syntax_basis": "Sidechain reachesNodeTAPonlyafterall11syntaxchecks succeed.",
+    "frontend_scripts_declared": 39,
+    "frontend_last_marker_present": true,
+    "frontend_basis": "Originalownedstdout reachesfinaltest_todo_holds_frontend.js PASSmarker; no separate per-script exit receipts available; fullgateFAIL remains."
+  }
+}

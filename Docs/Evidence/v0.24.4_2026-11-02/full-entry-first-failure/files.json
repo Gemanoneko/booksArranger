@@ -1,0 +1,45 @@
+{
+  "schema": "books-full-entry-files-v1",
+  "files": [
+    {
+      "path": "summary.json",
+      "size": 13263,
+      "sha256": "c4494e8b46afc5f88533423ec097abf685b8bc2a2e0529bad418d28023a2ff6c"
+    },
+    {
+      "path": "check-owned-result.json",
+      "size": 679385,
+      "sha256": "8e44fb1c1f51c2d84f200f2f94be78bbec94e291cc60d37b116d7588ac03a9e6"
+    },
+    {
+      "path": "check-stdout.log",
+      "size": 247447,
+      "sha256": "0421e8ee286e1ab649f8a5c32e03b9ce999ad015aff32e82d1e489018dd53312"
+    },
+    {
+      "path": "check-stderr.log",
+      "size": 418279,
+      "sha256": "5f2e519883d615aa9f0ae1b946a0f2ef2d2e902e616a187a8ddadad6413fc59c"
+    },
+    {
+      "path": "outer-result.json",
+      "size": 974,
+      "sha256": "41a3f02566fc86ee2537c04f1c60cbc253388f5258391eb87ace91905cb4d7da"
+    },
+    {
+      "path": "outer-stdout.log",
+      "size": 679105,
+      "sha256": "6d3f753e2369f10601ed05b8f21fd6c5e0bd56ef15c2b16b41df17d31459e19d"
+    },
+    {
+      "path": "outer-stderr.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "invocation.json",
+      "size": 1840,
+      "sha256": "b01b4849b339b2751d164dc32ac5412e8a33ccc69abdc953e9a091f94829245e"
+    }
+  ]
+}

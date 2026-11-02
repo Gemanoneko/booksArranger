@@ -1,0 +1,5 @@
+
+> books-arranger@0.24.4 check
+> node scripts/check-desktop.mjs
+
+Sources copied into the 13 Python workers by 29.6 s
