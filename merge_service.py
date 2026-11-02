@@ -1613,12 +1613,10 @@ class MergeService:
                     if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''};item['group']='retry'  # one predicate: an enabled Retry the bulk path accepts
         # A drive that comes back (cause 'unreachable', 0.22.1) is no catalog commit either: its Retry shows within WORKING_MAX_AGE.
         if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) or item.get('cause')=='unreachable' for item in summary.values())
-        cleanup=getattr(self,'cleanup',None)
-        if cleanup is not None:
-            for row in cleanup._rows("SELECT c.id,c.job_id,c.reason FROM source_cleanup c JOIN audio_jobs j ON j.job_id=c.job_id WHERE j.state='completed' AND c.state IN ('needs_attention','checking','removing','pausing')"):
-                if job_ids is not None and row['job_id'] not in job_ids:continue
-                capability=cleanup.identity_retry(row['id'])
-                if capability:summary[row['job_id']]={'group':'audiobook','cause':'cleanup_identity','reason':row['reason'],'cleanup_identity':capability,'retry':{'allowed':False,'reason':'Use this book’s Retry cleanup control.'}}
+        cleanup_attention=getattr(getattr(self,'cleanup',None),'identity_attention',None)
+        if callable(cleanup_attention):
+            for row in cleanup_attention(job_ids):
+                summary[row['job_id']]={'group':'audiobook','cause':'cleanup_identity','reason':row['reason'],'cleanup_identity':row['identity_retry'],'retry':{'allowed':False,'reason':'Use this book’s Retry cleanup control.'}}
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary

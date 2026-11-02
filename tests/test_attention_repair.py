@@ -436,3 +436,13 @@ class HTTPTests(unittest.TestCase):
 
 if __name__=='__main__':unittest.main()
 
+
+class CleanupCapabilityContractTests(Base):
+    def test_absent_capability_adds_no_action_and_real_errors_are_not_hidden(self):
+        service=self.service();self.assertEqual(service.attention_summary(),{})
+        service.cleanup.identity_attention=Mock(side_effect=RuntimeError("cleanup catalog failure"))
+        with self.assertRaisesRegex(RuntimeError,"cleanup catalog failure"):service.attention_summary()
+        capability={"allowed":True,"cleanup_id":"owned"}
+        service.cleanup.identity_attention=Mock(return_value=[{"job_id":"job","reason":"held","identity_retry":capability}])
+        value=service.attention_summary(["job"])["job"];self.assertEqual(value["cleanup_identity"],capability);self.assertFalse(value["retry"]["allowed"])
+        service.cleanup.identity_attention.assert_called_once_with(["job"])

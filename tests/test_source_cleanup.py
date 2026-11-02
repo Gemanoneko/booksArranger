@@ -346,3 +346,15 @@ class OutputIdentityRetryTests(unittest.TestCase):
                     self.assertIs(f.worker.thread,first);f.worker.pause()
                 finally:release.set();first.join(5)
             self.assertFalse(first.is_alive());f.assert_all_kept();self.assertEqual(f.worker.status('test')['state'],'paused')
+
+    def test_public_attention_requires_completed_enrollment_and_keeps_current_capability(self):
+        with self.fixture() as f:
+            self.hold_at_second_output_check(f,legacy=True)
+            with connect(f.db) as db:
+                db.execute("CREATE TABLE audio_jobs(job_id TEXT PRIMARY KEY,state TEXT)")
+                db.execute("INSERT INTO audio_jobs VALUES(?,?)",("test","completed"))
+            items=f.worker.identity_attention(["test"]);self.assertEqual(len(items),1)
+            self.assertEqual(items[0]["identity_retry"],f.worker.identity_retry(f.id));self.assertEqual(items[0]["job_id"],"test")
+            self.assertEqual(f.worker.identity_attention(["unrelated"]),[])
+            with connect(f.db) as db:db.execute("UPDATE audio_jobs SET state=\"pending\"")
+            self.assertEqual(f.worker.identity_attention(),[]);f.assert_all_kept()

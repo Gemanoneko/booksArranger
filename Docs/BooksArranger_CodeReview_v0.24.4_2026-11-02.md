@@ -7,13 +7,13 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.4
-Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..frozen working tree identified below
+Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..frozen correction working tree after 1ab490b1fb5852edfd88ca689c0d340842a5ee1d
 Working-tree base: 163feb38f7828a8ee0fde01d897140e2323b31e9 (intervening changes are documentation)
 Scope: 5 product files and 3 focused test files, +278 / -31 lines
 Stand-down dimensions: none
 ```
 
-Source clearance certifies the exact eight frozen file hashes below. Sully may mechanically bind the commit containing these bytes and the derived version metadata. No artifact manifest exists for this review yet; its canonical `Release artifact manifest SHA256:` field must be filled with the actual final artifact hash later, not a placeholder.
+Source clearance certifies the original patch plus the frozen public-capability correction below. The earlier artifact binding is historical and does not cover that correction. A new source commit/build, final entry and independent behavior QA remain required.
 
 ## Summary
 
@@ -58,6 +58,49 @@ SHA256 values are actual working-copy bytes, measured by Senua and confirmed fro
 | `tests/test_cleanup_scope.py` | `203b46dd2791b53010df9990a0ec8338319ba1de43a69b371b099c271bd9e8fb` |
 | `tests/test_cleanup_frontend.js` | `67052d61e6ddc62610e3f477f50d4315e4c64951cfd5bfc18d941a1b3875e437` |
 
+## Historical source and artifact binding — superseded for acceptance
+
+Historical source commit: 1ab490b1fb5852edfd88ca689c0d340842a5ee1d
+
+Historical artifact manifest SHA256: 6fee5b0552f636030003bfa12321dbaae2dbdbea18c2524b42abe7e1529cc9b5
+
+Candidate: `C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101`.
+
+All eight main-source files retain their exact reviewed SHA256 values. Each candidate counterpart equals the reviewed source after CRLF-to-LF normalization only. The candidate HEAD and artifact source both equal the commit above; no application or test-content drift was found. Package/lockfile root versions are `0.24.4`; the actual lockfile SHA256 `b3b03db6a1c44a8464a33849de51dee2c52aa43058ed8cc1a7d3ed3da5c03aa7` equals the derived build-input lock pin.
+
+The measured `dist/release-artifacts.json` identifies version `0.24.4`, build `46a8983e-8529-4efd-a91d-01b46d46fe3a`, product digest `67f89e514c18ab25f6725b83826f5719837f383af6a55203a6903465f7e108ea`, verified payload and installer equivalence. All three actual release files match its hashes and sizes:
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| `Books-Arranger-Setup-0.24.4.exe` | 174670970 | `e472d681e2edf2e5ccb0352aa49337a441c1b4592f26f66629a74f552e8ef12e` |
+| `Books-Arranger-Setup-0.24.4.exe.blockmap` | 182241 | `1d7b16c395eddd2482fd1636d34f0d46e3ad04a58fdb957bc27a35a8f7641b87` |
+| `latest.yml` | 360 | `0c50086f7ea8b0ee7cf5889532161f820fe03810ad931b196c7f07340822b897` |
+
+Actual runtime-pointer SHA256: `245e0baa411fc653304802f541da51520e8eaa25b9d4568bf832ac057a2a59a4`. Ender reports the packaging operation passed in 94.06 seconds with normal owned closure (60 retained, zero remaining, zero incomplete observations). No full final-entry or fresh candidate-native PASS is claimed here; those gates remain pending. Other agents' QA drafts and evidence were preserved without modification.
+
+## Public cleanup capability correction
+
+The full entry for the historical artifact failed: the new attention-summary code assumed every cleanup collaborator exposed the private `_rows` API, including existing lightweight collaborators which do not. The original failure remains a failure. This review covers only the corrective two product files and two focused test files (+35/-6 lines); it does not repeat the previous source review or claim the old artifact contains the correction.
+
+`CleanupJobs.identity_attention(job_ids=None)` now owns exactly the previous completed-job/enrolled-state query, subset filtering and call to `identity_retry`. `MergeService.attention_summary` consumes that optional public capability. Absent/noncallable legacy capability contributes no cleanup identity action; actual method failures still propagate, with no exception suppression. No eligibility, deletion proof, worker ownership, cancellation, conversion, schema or policy behavior was relaxed.
+
+The real public-capability test checks the completed enrollment, unchanged retry capability, job subset and non-completed exclusion. The consumer contract checks absent capability, a real raised error and a positive result whose conversion Retry remains disabled. No new finding remains open.
+
+Frozen correction pins, independently measured and confirmed by Ender, supersede the earlier pins for their respective files:
+
+| File | SHA256 |
+|---|---|
+| `source_cleanup.py` | `1fb4e55c199f44f61c1082c144cb2ce4f3dd3456b86cdaf5b09edb7f5d5d106c` |
+| `merge_service.py` | `ba4a057b351e3457f48fe61a3ec7041f66c9218690d75e001cb7279f9ba189ea` |
+| `tests/test_source_cleanup.py` | `748fa4a3b6097fc9481f1418f57a20c21ce55e252d2774fdbc0384dc796b5e2e` |
+| `tests/test_attention_repair.py` | `00a5ce62e31e75d0c5836e62f4f16810fb945bd7c221dfdc0bfd8885cae8d9d1` |
+
+Actual affected regression receipt: 120 tests passed in 66.102 unittest seconds (66.870 seconds owned elapsed), normal owned closure with eight retained/zero remaining and zero incomplete observations; SHA256 `32e9bff106e5e5522987489e7a91400ade723183b9c615f6cffaeb9adcf4cf4b`. Original callback SHA256 `57f69c8db77ac79f5556431c0f0de3f4f4ac568fd263f1be6d63dd033611222c` has no error. The separately selected original Start over case passed (one test, 0.261 unittest seconds, normal four retained/zero remaining); owned receipt SHA256 `02fd681113072f762224d3c7644f000bbecdafe30fa296b7aac9d845d6cea948`, callback SHA256 `137864b757814ec1fb95ae1973a25a8f0ad01a13d1146e2f6a92fc837c72e79a`. These are retained under `C:/Antigravity Projects/codex-books-20261102-0244/public-capability`. Neither run was forced or timed out. No tests were run by this reviewer.
+
+Portable correction evidence is `Docs/Evidence/v0.24.4_2026-11-02/public-capability-correction/results.json`, SHA256 `886c5e88f7833e6767dbe0a82c2db8737e7ff1abebd97992d8b552e73c1afbab`. Its five raw/pin references match their declared hashes and sizes; original failed-full evidence remains explicitly failed. No claim is made that this correction alone resolves the separate deadline workers.
+
+Current source construction is clear for these frozen bytes. Current release source/artifact canonical fields must be added only after Sully commits and the corrected build exists. Historical build `46a8983e-8529-4efd-a91d-01b46d46fe3a` must not be rebound to the new source.
+
 ## Verdict
 
 - Total open Critical: 0
@@ -66,4 +109,4 @@ SHA256 values are actual working-copy bytes, measured by Senua and confirmed fro
 
 **Verdict:** RELEASE CLEAR
 
-Source construction is clear for the frozen patch above. Final release still requires actual candidate/artifact binding, final entry and independent QA GO.
+Source construction is clear for the original patch plus the frozen correction. Final release requires a new source/artifact binding, completed final entry, fresh candidate-native proof and independent QA GO.

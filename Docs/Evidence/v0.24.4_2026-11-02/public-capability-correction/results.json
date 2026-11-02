@@ -1,0 +1,132 @@
+{
+  "schema": "books-cleanup-capability-correction-v1",
+  "version": "0.24.4",
+  "supersedes_source_under_test": "1ab490b1fb5852edfd88ca689c0d340842a5ee1d",
+  "source_files": [
+    {
+      "path": "source_cleanup.py",
+      "sha256": "1fb4e55c199f44f61c1082c144cb2ce4f3dd3456b86cdaf5b09edb7f5d5d106c",
+      "size": 48842
+    },
+    {
+      "path": "merge_service.py",
+      "sha256": "ba4a057b351e3457f48fe61a3ec7041f66c9218690d75e001cb7279f9ba189ea",
+      "size": 419789
+    },
+    {
+      "path": "tests/test_source_cleanup.py",
+      "sha256": "748fa4a3b6097fc9481f1418f57a20c21ce55e252d2774fdbc0384dc796b5e2e",
+      "size": 26757
+    },
+    {
+      "path": "tests/test_attention_repair.py",
+      "sha256": "00a5ce62e31e75d0c5836e62f4f16810fb945bd7c221dfdc0bfd8885cae8d9d1",
+      "size": 35329
+    }
+  ],
+  "root_cause": "MergeService.attention_summary crossed the CleanupJobs private SQL boundary; legacy cleanup collaborators implement status but not _rows. Original full recorded23 completed-report errors and one additional start_over ERROR marker in an unfinished worker.",
+  "correction": "CleanupJobs.identity_attention owns the unchanged completed/enrolled-state query and exact identity_retry predicate. MergeService consumes the optional callable capability. Absence adds no action; real implementation exceptions propagate.",
+  "cases": [
+    {
+      "selectors": [
+        "test_blocked_retry",
+        "test_attention_repair",
+        "test_automatic_processing",
+        "test_source_cleanup.OutputIdentityRetryTests"
+      ],
+      "count": 120,
+      "python_seconds": 66.102,
+      "owned_elapsed_ms": 66869.8275,
+      "exit_code": 0,
+      "retained": 8,
+      "normal_final_zero": true
+    },
+    {
+      "selectors": [
+        "test_start_over.ReleaseTests.test_release_discards_the_saved_review_and_sends_the_book_back"
+      ],
+      "count": 1,
+      "python_seconds": 0.261,
+      "owned_elapsed_ms": 944.8686,
+      "exit_code": 0,
+      "retained": 4,
+      "normal_final_zero": true
+    }
+  ],
+  "coverage": [
+    "legacy absent capability does not invent Retry cleanup",
+    "real public capability errors propagate",
+    "actual eligible cleanup capability unchanged",
+    "completed enrolled job and selected subset required",
+    "pending job cannot offer cleanup action",
+    "existing retry/repair/automatic between-book status and Start over regressions"
+  ],
+  "original_full": {
+    "evidence": "entry/full/summary.json (private retained original)",
+    "status": "FAIL; no final entry receipt/postflight",
+    "deadline_workers": [
+      5,
+      8,
+      12
+    ],
+    "worker_seconds": [
+      463.5,
+      466.9,
+      476.9,
+      527,
+      478.5,
+      540,
+      493,
+      530.1,
+      540,
+      475.4,
+      485.9,
+      480.3,
+      540
+    ],
+    "previous_accepted_0243_seconds": [
+      406.9,
+      429.8,
+      439.3,
+      442.7,
+      471.6,
+      494.6,
+      450.6,
+      482.7,
+      498.2,
+      425.9,
+      453.3,
+      441.2,
+      498.5
+    ],
+    "interpretation": "Workers5/8/12 were already slowest in accepted0.24.3; clean completed workers are also slower. New cleanup tests ran workers3/10. No exact resource cause or sufficient scheduling-only remedy proven."
+  },
+  "raw": [
+    {
+      "file": "owned.json",
+      "sha256": "32e9bff106e5e5522987489e7a91400ade723183b9c615f6cffaeb9adcf4cf4b",
+      "size": 21006
+    },
+    {
+      "file": "callback.json",
+      "sha256": "57f69c8db77ac79f5556431c0f0de3f4f4ac568fd263f1be6d63dd033611222c",
+      "size": 95
+    },
+    {
+      "file": "start-over-owned.json",
+      "sha256": "02fd681113072f762224d3c7644f000bbecdafe30fa296b7aac9d845d6cea948",
+      "size": 961
+    },
+    {
+      "file": "start-over-callback.json",
+      "sha256": "137864b757814ec1fb95ae1973a25a8f0ad01a13d1146e2f6a92fc837c72e79a",
+      "size": 95
+    },
+    {
+      "file": "source-pins.json",
+      "sha256": "cd98f86783756dd44c77651b429234d21108ddb2840baa8bdbca110b0fb29eaa",
+      "size": 594
+    }
+  ],
+  "limitations": "Focused source regressions only. Original failed full remains FAIL; new candidate/full and both approved hidden packaged checks remain outstanding. No desktop app launched; zero0.24.4 tray-history references consumed."
+}

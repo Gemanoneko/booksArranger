@@ -245,6 +245,15 @@ class CleanupJobs:
             expected_chapters=planned_chapter_titles(manifest)  # ruling 19a: joined parts keep their own chapters
         else:expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
         if [c.get('title') for c in v.get('chapters',[])]!=expected_chapters:raise ValueError('Validated chapter choice does not match this completed book')
+    def identity_attention(self,job_ids=None):
+        """Current per-book capabilities for completed jobs; no conversion or enrollment."""
+        result=[]
+        for row in self._rows("SELECT c.id,c.job_id,c.reason FROM source_cleanup c JOIN audio_jobs j ON j.job_id=c.job_id WHERE j.state='completed' AND c.state IN ('needs_attention','checking','removing','pausing')"):
+            if job_ids is not None and row['job_id'] not in job_ids:continue
+            capability=self.identity_retry(row['id'])
+            if capability:result.append({'job_id':row['job_id'],'reason':row['reason'],'identity_retry':capability})
+        return result
+
     def identity_retry(self,id):
         rows=self._rows('SELECT state,reason,intent FROM source_cleanup WHERE id=?',(id,))
         if not rows:return None
