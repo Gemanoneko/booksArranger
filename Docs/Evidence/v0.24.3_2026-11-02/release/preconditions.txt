@@ -1,0 +1,9 @@
+Release preconditions for: books-0242-candidate-20261101
+
+Releasing version: v0.24.3
+
+- [Pass] Clean working tree — working tree clean
+- [Pass] Version bumped past latest tag — package.json version v0.24.3 is ahead of latest tag v0.24.2
+- [Pass] Lockfile version matches — package-lock.json version v0.24.3 matches package.json
+- [Pass] QA report names this version — found BooksArranger_QA_v0.24.3_2026-11-02.md — names v0.24.3
+

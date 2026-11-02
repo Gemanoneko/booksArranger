@@ -1,0 +1,15 @@
+{
+  "start": "2026-11-02T10:57:46.342Z",
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup/publication/launch-owned.mjs"
+  ],
+  "cwd": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101",
+  "timeout_ms": 600000,
+  "windowsHide": true,
+  "source_head": "641aa11e3f751633305f2c54225cee8d832d6da9",
+  "release_head": "d88e76257ffba1e48924cf64c50a2eea1a74e651",
+  "build_id": "5e9c20da-f00b-4a7f-af0b-f87d9c21f399",
+  "manifest_sha256": "024ee973e47a5c5d1912f9fe6cf92ef117528448dab34ca3639403273b852ddd",
+  "wrapper_sha256": "6379973ef5e1faf49f47de55a9cfd7647e5bbb4de9ea5864b72380728c216650"
+}
