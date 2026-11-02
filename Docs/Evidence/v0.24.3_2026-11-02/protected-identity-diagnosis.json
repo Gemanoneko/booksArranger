@@ -1,0 +1,69 @@
+{
+  "schema": "books-protected-identity-diagnosis-v1",
+  "diagnosed_at": "2026-11-02T11:36:35.959Z",
+  "method": "Read-only source/settings; file-only catalog+WAL copy guarded by unchanged size/mtime/identity before/after. SQL queried COPY only; no Zfile access or appcontrol.",
+  "catalog": {
+    "cleanup_id": "bc5f1302-fdee-4621-9823-522a0a9ad2a1",
+    "job_id": "c60f052d-aac1-4dc2-b9c1-2a8484928a44",
+    "title": "Похититель детей",
+    "state": "needs_attention",
+    "reason": "Cannot refresh protected file identity",
+    "last_updated": "2026-10-29T01:54:45.276736+00:00",
+    "output_path": "Z:\\Audiobooks Sorted\\Brom\\Похититель детей - Brom.m4b",
+    "recorded_output_size": 1996889421,
+    "recorded_output_sha256": "950e7fe489b2b0f71bede1f6b9f513b501a99de330bb1101e9436a655308acec",
+    "recorded_output_validation_passed": true,
+    "source_count": 37,
+    "member_states": {
+      "removal_intended": 1,
+      "backup_verified": 36
+    }
+  },
+  "source_evidence": {
+    "message": "native_io.py:362 GetFileInformationByHandle returnedfalse; OSerrorcode discarded",
+    "propagating_cleanup_call": "source_cleanup.py:492 _output_present held finalM4B; calls469beforeintent and480afterintent/beforedispose482",
+    "hold": "source_cleanup.py:131 needs_attention withreason",
+    "recovery": "source_cleanup.py:461 all37recoverycopies mustverifybeforefirstdispose",
+    "resume": "source_cleanup.py:323 selector excludes thisneeds_attention reason",
+    "per_book_retry": "No generalper-book sourcecleanupretry endpoint. /api/audiobook/cleanup is restrictedhistoricalcleanup, notthisbook; no recommendedRetry/Resume click."
+  },
+  "conclusions": [
+    "This storedhold dates2026-10-29 andpredates0.24.3.",
+    "Recorded sequence: firstoutputcheckpassed, firstsource removalintent persisted, secondoutputidentity APIreadfailed beforefirstnative disposition. Zeroremoved/disposition_set records.",
+    "Recorded validatedoutput and37recoverycopies existedatthatattempt; currentfilepresence/content wereNOTverified.",
+    "NAS/SMBhandle interruption compatible; OSerror absent soexactenvironmentvsapphandlecause unresolved; no corruptionproved.",
+    "Safeactionnow: leaveheld; globalResume doesnotretrythishold. No supportedtargetedretry click identified."
+  ],
+  "copy_provenance": {
+    "source": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/data/inventory.sqlite3",
+    "copied_at": "2026-11-02T11:33:33.882Z",
+    "attempt": 1,
+    "before": [
+      {
+        "size": "848756736",
+        "mtimeNs": "1793619164027428400",
+        "ino": "69805794224273076"
+      },
+      {
+        "size": "12479512",
+        "mtimeNs": "1793619188951325700",
+        "ino": "123848989753219541"
+      }
+    ],
+    "after": [
+      {
+        "size": "848756736",
+        "mtimeNs": "1793619164027428400",
+        "ino": "69805794224273076"
+      },
+      {
+        "size": "12479512",
+        "mtimeNs": "1793619188951325700",
+        "ino": "123848989753219541"
+      }
+    ],
+    "read_only_source_files": true,
+    "live_sqlite_connection": false
+  },
+  "limits": "No currentNASfilesystem/recoverycopy verification, livecatalogSQL, writes to live data/Z, appcontrol, threadsnapshot, code/build/install/Git."
+}
