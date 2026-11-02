@@ -19,10 +19,11 @@ export function validatePlan(plan,authority){
  if(!plan.recovery)need(path.win32.basename(plan.fixture_root)==='pa1-'+plan.binding.build_id&&within(plan.fixture_root,plan.evidence_root),'Fresh candidate fixture root differs');
  else{
   const r=plan.recovery;
-  need(r.schema==='books-pa1-one-failed-attempt-v1'&&[2,3,4].includes(r.attempt)&&r.fixture_root===plan.fixture_root,'Only the three explicitly recorded failed attempts are supported');
+  need(r.schema==='books-pa1-one-failed-attempt-v1'&&[2,3,4,5].includes(r.attempt)&&r.fixture_root===plan.fixture_root,'Only the four explicitly recorded failed attempts are supported');
   const keys=['attempt','cache_refresh','exe_identity','fixture_identity','fixture_root','original_artifact_manifest','original_baseline','original_callback','original_controller_owned','original_plan','schema'];
   if(r.attempt>=3)keys.push('second_failed_attempt','engine_port','engine_record','engine_record_identity');
-  if(r.attempt===4)keys.push('third_failed_attempt','engine_record_absent');
+  if(r.attempt>=4)keys.push('third_failed_attempt','engine_record_absent');
+   if(r.attempt===5)keys.push('fourth_failed_attempt');
   need(Object.keys(r).sort().join('|')===keys.sort().join('|'),'Exact failed-attempt recovery facts required');
   need(Array.isArray(r.cache_refresh)&&[0,93].includes(r.cache_refresh.length),'Only the observed 93-cache refresh is supported');
   const prior=path.win32.dirname(r.original_plan.path);
@@ -81,7 +82,7 @@ export async function verifyRecovery(plan){
   need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.current_manifest_sha256===second.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Second attempt cache refresh provenance differs');
   await readPin(r.engine_record);artifact=base;baseManifestSha=second.payload_manifest.sha256;
  }
- if(r.attempt===4){
+ if(r.attempt>=4){
   const third=r.third_failed_attempt;
   need(third&&Object.keys(third).sort().join('|')===['plan','callback','owned','controller_owned','payload_manifest','cache_refresh'].sort().join('|'),'Exact third failed-attempt evidence required');
   const p=JSON.parse(await readPin(third.plan));validatePlan(p,JSON.parse(await readPin(p.authority)));
@@ -93,14 +94,26 @@ export async function verifyRecovery(plan){
   need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.base_manifest_sha256===r.second_failed_attempt.payload_manifest.sha256&&refresh.current_manifest_sha256===third.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Third attempt cache refresh provenance differs');
   artifact=base;baseManifestSha=third.payload_manifest.sha256;
  }
+ if(r.attempt===5){
+  const fourth=r.fourth_failed_attempt;
+  need(fourth&&Object.keys(fourth).sort().join('|')===['plan','callback','owned','controller_owned','payload_manifest','cache_refresh'].sort().join('|'),'Exact fourth failed-attempt evidence required');
+  const p=JSON.parse(await readPin(fourth.plan));validatePlan(p,JSON.parse(await readPin(p.authority)));
+  need(p.recovery?.attempt===4&&p.recovery.original_plan.sha256===r.original_plan.sha256&&p.recovery.original_baseline.sha256===r.original_baseline.sha256&&p.recovery.second_failed_attempt.plan.sha256===r.second_failed_attempt.plan.sha256&&p.recovery.third_failed_attempt.plan.sha256===r.third_failed_attempt.plan.sha256&&norm(p.fixture_root)===norm(plan.fixture_root)&&p.binding.version===plan.binding.version&&r.engine_record_absent===true,'Only the recorded fourth attempt and its cleanly removed control record may precede attempt five');
+  const cb=JSON.parse(await readPin(fourth.callback));need(cb.callback_received===true&&cb.error?.code===1&&cb.error.killed===false&&cb.plan_sha256===fourth.plan.sha256&&cb.owned_sha256===fourth.owned.sha256&&cb.controller_owned_sha256===fourth.controller_owned.sha256,'Fourth failed callback provenance differs');
+  for(const ref of [fourth.owned,fourth.controller_owned]){const v=JSON.parse(await readPin(ref));need(v.ok===false&&v.code===1&&v.signal===null&&v.error===null&&v.closed===true&&v.outputComplete===true&&v.forced===false&&v.timedOut===false&&v.reason===null&&v.closureError===null&&v.ownership==='private-job'&&v.native?.complete===true&&v.native.zero===true&&v.native.retained>0&&['active','assigned','listed','unsignaled'].every(k=>v.native[k]===0),'Fourth attempt must remain a failed test with fully proved normal closure');}
+  const raw=await readPin(fourth.payload_manifest),base=JSON.parse(raw),refresh=JSON.parse(await readPin(fourth.cache_refresh));
+  need(hash(raw)===p.binding.artifact_manifest_sha256&&base.source_head===p.binding.source_head&&base.build_id===p.binding.build_id&&base.product_digest===p.binding.product_digest&&base.payload?.verified===true&&base.payload.installer_equivalent===true,'Fourth attempt verified payload provenance differs');
+  need(refresh.whole_payload_matches_current===true&&refresh.original_manifest_sha256===r.original_artifact_manifest.sha256&&refresh.base_manifest_sha256===r.third_failed_attempt.payload_manifest.sha256&&refresh.current_manifest_sha256===fourth.payload_manifest.sha256&&sameFileTree(refresh.exe_identity,r.exe_identity)&&sameFileTree(refresh.changes,p.recovery.cache_refresh),'Fourth attempt cache refresh provenance differs');
+  artifact=base;baseManifestSha=fourth.payload_manifest.sha256;
+ }
  return {previous,artifact,baseManifestSha,baseline:JSON.parse(await readPin(r.original_baseline))};
 }
 export async function privateEnginePort(plan,probe){
- if(![3,4].includes(plan.recovery?.attempt))return probe(0);
+ if(![3,4,5].includes(plan.recovery?.attempt))return probe(0);
  const r=plan.recovery,raw=await readPin(r.engine_record),record=JSON.parse(raw),port=r.engine_port;
  need(Number.isInteger(port)&&port>=1024&&port<=65535&&record.application==='Books Arranger'&&record.version===plan.binding.version&&record.port===port&&record.url==='http://127.0.0.1:'+port+'/'&&Number.isInteger(record.pid)&&record.pid>0&&/^[a-f0-9]{32}$/.test(record.instance),'Exact original private engine port record required');
  const live=path.join(plan.fixture_root,'home','data','web-instance.json');
- if(r.attempt===4){await ordinary(path.dirname(live));try{await fs.lstat(live);throw Error('Private ownership record unexpectedly exists before attempt four');}catch(error){if(error.code!=='ENOENT')throw error;}}
+ if(r.attempt>=4){await ordinary(path.dirname(live));try{await fs.lstat(live);throw Error('Private ownership record unexpectedly exists before retry');}catch(error){if(error.code!=='ENOENT')throw error;}}
  else await readPin({path:live,sha256:r.engine_record.sha256,size:r.engine_record.size,identity:r.engine_record_identity});
  need(await probe(port)===port,'Original private engine port is unavailable; no fallback is permitted');return port;
 }
@@ -226,6 +239,15 @@ export function listenerOnlyRows(buffer,tableClass,family,port){
  need(rows.length<=1,'Ambiguous private listener ownership');return rows;
 }
 
+// A query-only containment witness. Node/libuv may replace its immediate job;
+// this explicit no-breakaway handle remains stable. The existing outer owner
+// remains the sole kill-on-close controller. Closing this handle never kills.
+export function membershipWitness(api,pid){
+ need(Number.isSafeInteger(pid)&&pid>0,'Invalid witness worker');const handle=api.create();need(handle,'Cannot create membership witness');let closed=false;
+ const members=()=>{need(!closed,'Membership witness closed');const b=api.query(handle);need(Buffer.isBuffer(b)&&b.length===8+8192*8,'Witness membership query failed');const assigned=b.readUInt32LE(0),listed=b.readUInt32LE(4);need(assigned===listed&&listed>0&&listed<=8192,'Incomplete witness membership');const pids=[];for(let n=0;n<listed;n++){const member=Number(b.readBigUInt64LE(8+n*8));need(Number.isSafeInteger(member)&&member>0&&member<=0xffffffff&&!pids.includes(member),'Witness member identity');pids.push(member);}need(pids.includes(pid),'Worker left explicit membership witness');return pids;};
+ try{need(api.configure(handle,0),'Cannot set query-only no-breakaway limits');need(api.assignSelf(handle),'Cannot assign observer membership witness');need(api.flags(handle)===0,'Witness must have no breakaway or kill-on-close limits');members();}catch(error){closed=true;need(api.close(handle),'Failed witness handle closure');throw error;}
+ return {members,contains(processHandle){need(!closed,'Membership witness closed');return api.belongs(processHandle,handle)===true;},close(){if(!closed){closed=true;need(api.close(handle),'Membership witness handle closure failed');}}};
+}
 export function nativeAdapters(plan,authority){
  validatePlan(plan,authority);need(process.platform==='win32'&&process.arch==='x64','Native PA-1 requires reviewed Windows x64 ABI');
  const require=createRequire(import.meta.url),k=require(plan.koffi_root),K=k.load('C:/Windows/System32/kernel32.dll'),A=k.load('C:/Windows/System32/advapi32.dll'),N=k.load('C:/Windows/System32/ntdll.dll'),U=k.load('C:/Windows/System32/user32.dll'),I=k.load('C:/Windows/System32/iphlpapi.dll');
@@ -250,14 +272,16 @@ export function nativeAdapters(plan,authority){
  const queryJob=K.func('bool __stdcall QueryInformationJobObject(void *,uint32_t,void *,uint32_t,void *)'),openProcess=K.func('void * __stdcall OpenProcess(uint32_t,bool,uint32_t)'),closeProcess=K.func('bool __stdcall CloseHandle(void *)'),wait=K.func('uint32_t __stdcall WaitForSingleObject(void *,uint32_t)'),image=K.func('bool __stdcall QueryFullProcessImageNameW(void *,uint32_t,void *,_Inout_ uint32_t *)');
  const processTimes=K.func('bool __stdcall GetProcessTimes(void *,void *,void *,void *,void *)');
  const held=new Map();let intrusion=null,checks=0,listenerQueries=0;const listenerStates=new Set(),app=path.join(plan.fixture_root,'app');
- function members(){const b=Buffer.alloc(8+8192*8);need(queryJob(null,3,b,b.length,null),'Current private job membership unknown');const assigned=b.readUInt32LE(),listed=b.readUInt32LE(4);need(assigned===listed&&listed>0&&listed<=8192,'Incomplete current job membership');const pids=[];for(let n=0;n<listed;n++){const pid=Number(b.readBigUInt64LE(8+n*8));need(Number.isSafeInteger(pid)&&pid>0&&!pids.includes(pid),'Job member identity');pids.push(pid);}need(pids.includes(process.pid),'Current worker not in owned job');return pids;}
- function retain(pid){need(members().includes(pid),'Endpoint is not in this private owned job');let item=held.get(pid);if(item){need(wait(item.handle,0)===258,'Retained endpoint process ended');return item;}
-  const h=openProcess(0x101000,false,pid);need(h,'Cannot retain owned endpoint process');try{need(wait(h,0)===258,'Owned process already ended');const b=Buffer.alloc(65536),len=[32768],created=Buffer.alloc(8),exit=Buffer.alloc(8),kernel=Buffer.alloc(8),user=Buffer.alloc(8);need(image(h,0,b,len)&&processTimes(h,created,exit,kernel,user),'Owned endpoint identity unknown');const exe=b.subarray(0,len[0]*2).toString('utf16le');need(within(exe,app),'Endpoint executable outside private payload');item={handle:h,pid,exe,created:created.toString('hex')};held.set(pid,item);return item;}catch(e){closeProcess(h);throw e;}}
+ const createWitness=K.func('void * __stdcall CreateJobObjectW(void *,void *)'),setWitness=K.func('bool __stdcall SetInformationJobObject(void *,int,void *,uint32_t)'),assignWitness=K.func('bool __stdcall AssignProcessToJobObject(void *,void *)'),currentProcess=K.func('void * __stdcall GetCurrentProcess()'),belongsWitness=K.func('bool __stdcall IsProcessInJob(void *,void *,void *)');
+ let witness=null;
+ function members(){if(!witness)witness=membershipWitness({create:()=>createWitness(null,null),configure:(h,flags)=>{const b=Buffer.alloc(144);b.writeUInt32LE(flags,16);return setWitness(h,9,b,b.length);},assignSelf:h=>assignWitness(h,currentProcess()),flags:h=>{const b=Buffer.alloc(144);need(queryJob(h,9,b,b.length,null),'Witness limit query failed');return b.readUInt32LE(16);},query:h=>{const b=Buffer.alloc(8+8192*8);need(queryJob(h,3,b,b.length,null),'Explicit private witness membership unknown');return b;},belongs:(p,h)=>{const b=Buffer.alloc(4);need(belongsWitness(p,h,b),'Exact witness membership query failed');return b.readUInt32LE(0)===1;},close:closeProcess},process.pid);return witness.members();}
+ function retain(pid){need(members().includes(pid),'Endpoint is not in this private owned job');let item=held.get(pid);if(item){need(wait(item.handle,0)===258&&witness.contains(item.handle),'Retained endpoint process ended or left witness');return item;}
+  const h=openProcess(0x101000,false,pid);need(h,'Cannot retain owned endpoint process');try{need(wait(h,0)===258&&witness.contains(h),'Owned process already ended or outside explicit witness');const b=Buffer.alloc(65536),len=[32768],created=Buffer.alloc(8),exit=Buffer.alloc(8),kernel=Buffer.alloc(8),user=Buffer.alloc(8);need(image(h,0,b,len)&&processTimes(h,created,exit,kernel,user),'Owned endpoint identity unknown');const exe=b.subarray(0,len[0]*2).toString('utf16le');need(within(exe,app),'Endpoint executable outside private payload');item={handle:h,pid,exe,created:created.toString('hex')};held.set(pid,item);return item;}catch(e){closeProcess(h);throw e;}}
  const tcp=I.func('uint32_t __stdcall GetExtendedTcpTable(void *,_Inout_ uint32_t *,bool,uint32_t,uint32_t,uint32_t)');
  function listeners(port){const size=[0];need(tcp(null,size,false,2,3,0)===122&&size[0]<=16*1024*1024,'TCP table size unknown');const b=Buffer.alloc(size[0]);need(tcp(b,size,false,2,3,0)===0,'TCP ownership query failed');const rows=listenerOnlyRows(b,3,2,port);listenerQueries++;for(const row of rows)listenerStates.add(row.state);return rows;}
  function endpoint(port,expectedPid=null){const rows=listeners(port);need(rows.length===1&&rows[0].listenerTableClass===3,'One private SDK listener-only row required');if(expectedPid!==null)need(rows[0].pid===expectedPid,'Listener PID differs');const p=retain(rows[0].pid);need(listeners(port).length===1&&listeners(port)[0].pid===p.pid&&wait(p.handle,0)===258,'Listener changed during ownership proof');return {pid:p.pid,exe:p.exe,created:p.created,reportedState:rows[0].state,listenerTableClass:3};}
  const visible=U.func('bool __stdcall IsWindowVisible(void *)'),foreground=U.func('void * __stdcall GetForegroundWindow()'),windowPid=U.func('uint32_t __stdcall GetWindowThreadProcessId(void *,_Out_ uint32_t *)'),enumerate=U.func('bool __stdcall EnumWindows(void *,intptr_t)'),proto=k.proto('bool __stdcall BooksPA1Window(void *,intptr_t)');
  function checkWindows(expectedPid=null){checks++;const own=new Set(members());if(expectedPid!==null){need(Number.isSafeInteger(expectedPid)&&expectedPid>0&&own.has(expectedPid),'Primary window owner is not in this private job');retain(expectedPid);}let failed='',hiddenOwnWindows=0;const cb=k.register(hwnd=>{try{const pid=requiredWindowPid(windowPid,hwnd);if(own.has(pid)){const shown=visible(hwnd);if(shown)intrusion='Owned process displayed a visible window';else if(pid===expectedPid)hiddenOwnWindows++;}return true;}catch(e){failed=e.message;return false;}},k.pointer(proto));try{need(enumerate(cb,0)&&!failed,'Window observation failed');}finally{k.unregister(cb);}const fg=foreground();if(fg){const pid=requiredWindowPid(windowPid,fg);if(own.has(pid))intrusion='Owned process took foreground';}need(!intrusion,intrusion);if(expectedPid!==null){retain(expectedPid);need(hiddenOwnWindows>0,'Primary owned window is not present and hidden');}return {checks,intrusion,hiddenOwnWindows};}
- function dispose(){for(const p of held.values())need(closeProcess(p.handle),'Owned endpoint handle close failed');held.clear();}
+ function dispose(){try{for(const p of held.values())need(closeProcess(p.handle),'Owned endpoint handle close failed');held.clear();}finally{witness?.close();}}
  return {registry,monitor:{endpoint,checkWindows,dispose,view:()=>({checks,intrusion,listenerTableClass:3,listenerQueries,reportedListenerStates:[...listenerStates].sort((a,b)=>a-b)}),members}};
 }

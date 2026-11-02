@@ -91,7 +91,7 @@ test(PA1_TITLE,{timeout:300000},async()=>{
  need(process.env.BOOKS_PA1_DEADLINE&&Number(process.env.BOOKS_PA1_DEADLINE)>Date.now(),'Original remaining deadline missing');
  const work=plan.fixture_root,app=path.join(work,'app'),home=path.join(work,'home'),pkg={version:plan.binding.version};
  assert.deepEqual(await treeFiles(app),manifest.payload.files,'Actual built candidate payload');
- const {monitor}=nativeAdapters(plan,authority);monitor.checkWindows();let intrusion=null;
+ const {monitor}=nativeAdapters(plan,authority);monitor.checkWindows();progress('explicit-membership-witness-ready');let intrusion=null;
  const timer=setInterval(()=>{try{monitor.checkWindows();}catch(e){intrusion=e;}},100);
  const dirs=Object.fromEntries(['profile','data','local','roaming','temp','Audiobooks','Podcasts','Books'].map(name=>[name,path.join(home,name)]));
  for(const dir of Object.values(dirs))fs.mkdirSync(dir,{recursive:true});const roots=path.join(home,'roots.json'),rootsBytes=JSON.stringify({Audiobooks:dirs.Audiobooks,Podcasts:dirs.Podcasts,Ebooks:dirs.Books});

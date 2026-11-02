@@ -17,7 +17,7 @@ for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync
 for(const name of ['fetch','WebSocket']){const old=globalThis[name];restore.push(()=>globalThis[name]=old);globalThis[name]=deny;}
 const originalRequire=Module.createRequire;restore.push(()=>Module.createRequire=originalRequire);Module.createRequire=(...args)=>{const require=originalRequire(...args);return spec=>{if(!String(spec).startsWith('node:'))return deny();return require(spec);};};syncBuiltinESMExports();
 after(()=>{for(const undo of restore.reverse())undo();syncBuiltinESMExports();assert.equal(nativeAttempts,0,'No actual native/child/network operation');});
-const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,listenerOnlyRows,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
+const {validatePlan,ownLeafDelta,cleanupOwnLeaf,nativeAdapters,membershipWitness,listenerOnlyRows,requiredWindowPid,sameFileTree,ordinary,readPin,treeFiles,verifyInputs,verifyRecovery,recoveryCacheChanges,privateEnginePort,freshFixture,createPrivateShellCommands,verifyCloseSession}=await import('./real-shell-update-support.mjs');
 const {evidenceSummary,forwardControllerStreams}=await import('../scripts/qa-real-shell-phase.mjs');
 const encoded=v=>Buffer.from(JSON.stringify(v));
 function candidate(){return {version:'0.24.2',source_head:'a'.repeat(40),product_digest:'b'.repeat(64),build_id:'e3a1de11-1811-4ef5-bf5c-586a70b7db9e',artifact_manifest_sha256:'c'.repeat(64),runtime_manifest_sha256:'d'.repeat(64),phase_contract_sha256:'e'.repeat(64)};}
@@ -208,7 +208,7 @@ test('recovery refuses unknown/live closure, forged callback, new fixture and ch
 
 test('recovery cannot adopt another release, escape its bound arena or change the original payload',async t=>{
  const f=await failedAttemptFixture(t);f.p.binding.version='0.24.3';await assert.rejects(verifyRecovery(f.p),/same release/);f.p.binding.version='0.24.2';
- for(const alter of [p=>p.recovery.attempt=5,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
+ for(const alter of [p=>p.recovery.attempt=6,p=>p.fixture_root='C:/foreign/pa1-'+p.binding.build_id,p=>p.recovery.original_plan.path='C:/foreign/plan.json',p=>p.recovery.extra=true]){const p=structuredClone(f.p);alter(p);assert.throws(()=>validatePlan(p,f.nextAuthority));}
  await fs.writeFile(path.join(f.app,'Books Arranger.exe'),'changed private payload');await assert.rejects(freshFixture(f.p,f.artifact));
 });
 
@@ -308,8 +308,30 @@ test('known fourth attempt binds all three failures and the current base while r
  const calls=[];assert.equal(await privateEnginePort(f.p,async port=>{calls.push(port);return port;}),61169);assert.deepEqual(calls,[61169]);
  await fs.writeFile(f.live,encoded(f.record));await assert.rejects(privateEnginePort(f.p,async()=>{throw Error('probe must not run');}),/unexpectedly exists/);
 });
-test('known fourth attempt refuses a relabelled history, unknown third closure and fifth attempt',async t=>{
+test('known fourth attempt refuses a relabelled history, unknown third closure and unrecorded next attempt',async t=>{
  const f=await knownFourthFixture(t),bad=structuredClone(f.p);bad.recovery.attempt=5;assert.throws(()=>validatePlan(bad,f.a));
  f.p.recovery.engine_record_absent=false;await assert.rejects(verifyRecovery(f.p),/cleanly removed control record/);f.p.recovery.engine_record_absent=true;
  const v=structuredClone(f.controller);v.native.zero=false;const ref=await f.write('controller-owned.json',v);f.p.recovery.third_failed_attempt.controller_owned=ref;f.callback.controller_owned_sha256=ref.sha256;f.p.recovery.third_failed_attempt.callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p),/normal closure/);
 });
+
+async function knownFifthFixture(t){
+ const f=await knownFourthFixture(t),fourth=f.p,dir=fourth.evidence_root;
+ const write=async(name,value)=>{const file=path.join(dir,name),b=encoded(value);await fs.writeFile(file,b);const s=await fs.lstat(file,{bigint:true});return {path:file,size:b.length,sha256:hash(b),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};};
+ const base=JSON.parse(await readPin(fourth.recovery.third_failed_attempt.payload_manifest));base.build_id=fourth.binding.build_id;const manifest=await write('artifact.json',base);fourth.binding.artifact_manifest_sha256=manifest.sha256;fourth.payload.manifest=manifest;fourth.authority=await write('authority.json',authority(fourth.binding));
+ const planRef=await write('plan.json',fourth),inner={...normal(),ok:false,code:1},owned=await write('owned.json',inner),controller=structuredClone(inner),controllerRef=await write('controller-owned.json',controller);
+ const callback={callback_received:true,error:{code:1,killed:false},plan_sha256:planRef.sha256,owned_sha256:owned.sha256,controller_owned_sha256:controllerRef.sha256},cb=await write('callback.json',callback);
+ const refresh=await write('refresh.json',{original_manifest_sha256:fourth.recovery.original_artifact_manifest.sha256,base_manifest_sha256:fourth.recovery.third_failed_attempt.payload_manifest.sha256,current_manifest_sha256:manifest.sha256,exe_identity:fourth.recovery.exe_identity,changes:fourth.recovery.cache_refresh,whole_payload_matches_current:true});
+ const p=structuredClone(fourth);p.binding={...p.binding,build_id:'f3a1de11-1811-4ef5-bf5c-586a70b7db9e'};p.evidence_root=path.join(path.dirname(dir),'fifth');await fs.mkdir(p.evidence_root);const a=authority(p.binding);const b=encoded(a),file=path.join(p.evidence_root,'authority.json');await fs.writeFile(file,b);const s=await fs.lstat(file,{bigint:true});p.authority={path:file,size:b.length,sha256:hash(b),identity:{dev:String(s.dev),ino:String(s.ino),nlink:Number(s.nlink)}};
+ p.recovery.attempt=5;p.recovery.fourth_failed_attempt={plan:planRef,callback:cb,owned,controller_owned:controllerRef,payload_manifest:manifest,cache_refresh:refresh};return {...f,p,a,write,callback,controller};
+}
+test('known fifth attempt pins all four actual failure categories and current payload with absent control record',async t=>{
+ const f=await knownFifthFixture(t);validatePlan(f.p,f.a);const prior=await verifyRecovery(f.p);assert.equal(prior.baseManifestSha,f.p.recovery.fourth_failed_attempt.payload_manifest.sha256);assert.equal(await privateEnginePort(f.p,async port=>port),61169);
+ await fs.writeFile(f.live,encoded(f.record));await assert.rejects(privateEnginePort(f.p,async()=>{throw Error('must not probe');}),/unexpectedly exists/);
+});
+test('known fifth refuses missing fourth provenance, forced fourth closure and arbitrary sixth attempt',async t=>{
+ const f=await knownFifthFixture(t),bad=structuredClone(f.p);delete bad.recovery.fourth_failed_attempt;assert.throws(()=>validatePlan(bad,f.a),/Exact failed-attempt/);bad.recovery=f.p.recovery;bad.recovery={...bad.recovery,attempt:6};assert.throws(()=>validatePlan(bad,f.a));
+ const v=structuredClone(f.controller);v.forced=true;const ref=await f.write('controller-owned.json',v);f.p.recovery.fourth_failed_attempt.controller_owned=ref;f.callback.controller_owned_sha256=ref.sha256;f.p.recovery.fourth_failed_attempt.callback=await f.write('callback.json',f.callback);await assert.rejects(verifyRecovery(f.p),/normal closure/);
+});
+function witnessFixture(){const handle={},calls=[],buffer=Buffer.alloc(8+8192*8);buffer.writeUInt32LE(2,0);buffer.writeUInt32LE(2,4);buffer.writeBigUInt64LE(101n,8);buffer.writeBigUInt64LE(202n,16);const api={create:()=>{calls.push('create');return handle;},configure:(h,flags)=>{assert.equal(h,handle);assert.equal(flags,0);calls.push('configure');return true;},assignSelf:h=>{assert.equal(h,handle);calls.push('assign');return true;},flags:h=>{assert.equal(h,handle);return 0;},query:h=>{assert.equal(h,handle);calls.push('query-explicit');return buffer;},belongs:(p,h)=>{assert.equal(h,handle);return p==='owned';},close:h=>{assert.equal(h,handle);calls.push('close');return true;}};return {handle,calls,buffer,api};}
+test('explicit query-only witness retains fixed handle, checks current worker and rejects foreign process',()=>{const f=witnessFixture(),w=membershipWitness(f.api,101);assert.deepEqual(f.calls.slice(0,3),['create','configure','assign']);assert.deepEqual(w.members(),[101,202]);assert.equal(w.contains('owned'),true);assert.equal(w.contains('foreign'),false);w.close();w.close();assert.equal(f.calls.filter(x=>x==='close').length,1);assert.throws(()=>w.members(),/closed/);});
+test('witness rejects kill-on-close or breakaway flags, failed assignment, incomplete list and missing worker',()=>{for(const flags of [0x2000,0x800,0x1000]){const f=witnessFixture();f.api.flags=()=>flags;assert.throws(()=>membershipWitness(f.api,101),/no breakaway or kill/);assert.equal(f.calls.at(-1),'close');}const failed=witnessFixture();failed.api.assignSelf=()=>false;assert.throws(()=>membershipWitness(failed.api,101),/Cannot assign/);assert.equal(failed.calls.at(-1),'close');for(const mutate of [b=>b.writeUInt32LE(3,0),b=>b.writeBigUInt64LE(303n,8),b=>b.writeBigUInt64LE(101n,16)]){const f=witnessFixture();mutate(f.buffer);assert.throws(()=>membershipWitness(f.api,101));assert.equal(f.calls.at(-1),'close');}});
