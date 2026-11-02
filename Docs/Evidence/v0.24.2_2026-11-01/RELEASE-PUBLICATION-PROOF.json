@@ -1,0 +1,280 @@
+{
+  "schema": "books-0242-release-publication-proof-v1",
+  "version": "0.24.2",
+  "product_source_head": "f6064c832ef3ff69d91d4ab94a2d7ff799b89a1d",
+  "product_tag_head": "e49fb1481272745192ca22c8669ed5ddddb8107d",
+  "tag": "v0.24.2",
+  "host_tooling_head": "377a9da6bf524d052d171c61f5ffa060023e2ca5",
+  "root_consumer_head": "62c2d7a2d388163ba9157bfe4fda948f3a57dcb6",
+  "build_id": "0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2",
+  "artifact_manifest_sha256": "c945bafdec905ef02e988359dedc9781f146cb209a57d1d3a3e876b24fede8d3",
+  "product_digest": "bc759841c6cc8b5ca89d668cc2bd3d9f479cf56fd3b47cebaf989a0a598b25bf",
+  "qa_report_sha256": "77fce804fabbb9a0de7e982c5d7859d075d6989e0f653112fdc17e790404bb91",
+  "qa_index_sha256": "af8022e0f6a9d631b1d223585f76ebbc6099afbcd8f2da4770cae25536baabac",
+  "review_report_sha256": "6c76f1a9f8fe7570e41de12d3d8054cd69d0d1c8cd9e28ebc1d1e83a5df44106",
+  "native_qa_sha256": "bebede431e1f85cd51bd834e53bfd481f5e5ec853dca58808f51acd253c5e07d",
+  "compatibility_receipt_sha256": "b94856d275041cb890b1cbb4ca7e1547bb1bc3c7664306fd8028fd2a4a56ce32",
+  "execution": {
+    "dry": {
+      "callback": {
+        "started_at": "2026-11-02T01:07:05.180Z",
+        "ended_at": "2026-11-02T01:07:20.534Z",
+        "callback_received": true,
+        "error": null,
+        "stdout_bytes": 100,
+        "stderr_bytes": 0,
+        "stdout_sha256": "46e92997fa69ab4332aabe54b65b54598d6988b44823453e86eae7112724d526",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "write_errors": []
+      },
+      "owner_retained": 43,
+      "normal_final_zero": true,
+      "tag_auth_upload_remote_assets_keep_four": "NOT RUN at dry stage"
+    },
+    "publish": {
+      "callback": {
+        "started_at": "2026-11-02T01:08:22.341Z",
+        "ended_at": "2026-11-02T01:09:03.689Z",
+        "callback_received": true,
+        "error": null,
+        "stdout_bytes": 982,
+        "stderr_bytes": 0,
+        "stdout_sha256": "30530977d5fab7447e4001fda0a969d98dac3dd51eeb10c5b5b41f69a95e4fba",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "write_errors": []
+      },
+      "owner_retained": 67,
+      "normal_final_zero": true,
+      "named_tag_remote_auth_upload_assets_keep_four": "ALL PASSED"
+    }
+  },
+  "source_byte_checks": {
+    "non_docs_files_matched_original_candidate": 423,
+    "product_digest_unchanged": true,
+    "restored_raw_files": [
+      "package-lock.json"
+    ],
+    "package_lock_sha256": "0c426b0eec3773056d7befc7fbca9e291fae958a2f9c144fa83128d4a8c63c9e",
+    "exact_final_docs_git_blobs": 43,
+    "normal_git_clean_before_publish": true
+  },
+  "procedural_exception": {
+    "generic_finder": "Selected QAPlan file without verdict instead of the exact accepted QA report",
+    "flag": "--skip-qa",
+    "explicitly_approved": true,
+    "actual_qa_skipped": false,
+    "real_host_preflight": "Strictly enforced actual exact QA/index/native/compatibility acceptance"
+  },
+  "records": {
+    "dry": {
+      "invocation.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-invocation.json",
+        "sha256": "544056d4f08eda13b1fe645e97c521812f168baedbc76dfdf84d3e5cefae6176",
+        "size": 761
+      },
+      "started.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-started.json",
+        "sha256": "8c4bd5de5a3ba5055ca66727a434138b6251bcc51d2fc12b26765057715f53bc",
+        "size": 218
+      },
+      "callback.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-callback.json",
+        "sha256": "2538bc616765e41ac5cbe1d1ee7b2f8ee202e3e7aaff1645fea5d5e364870aa9",
+        "size": 375
+      },
+      "outer-owned.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-outer-owned.json",
+        "sha256": "ada7952a0502ea45158b661442add4502b33bf6aa138fcb7f9b9f26e08f79877",
+        "size": 614
+      },
+      "stdout.log": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-stdout.log",
+        "sha256": "46e92997fa69ab4332aabe54b65b54598d6988b44823453e86eae7112724d526",
+        "size": 100
+      },
+      "stderr.log": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "native-operation-result.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/dry-native-operation-result.json",
+        "sha256": "306ec1eae6bba8628920e14f84eab78f7fb9717ad22b4d4491b45a5d239a52c4",
+        "size": 518
+      }
+    },
+    "publish": {
+      "invocation.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-invocation.json",
+        "sha256": "c74c08fe32d4918bef1795a148144649ca217403f5d93d11d9f8ebd39e538666",
+        "size": 789
+      },
+      "started.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-started.json",
+        "sha256": "b67bc212be04502c12a52c2766cf1dd5919f0cd81386d7c8be5b87e8cf0aa262",
+        "size": 231
+      },
+      "callback.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-callback.json",
+        "sha256": "5ae0543320f5645d8521f38a30173ddf64ff0f4ecc7da31b2bc8d95a3c09e651",
+        "size": 375
+      },
+      "outer-owned.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-outer-owned.json",
+        "sha256": "539fbbd7f6f9de5af9e6c68cec25298d515129aae33797df1d289dd516a5be97",
+        "size": 1525
+      },
+      "stdout.log": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-stdout.log",
+        "sha256": "30530977d5fab7447e4001fda0a969d98dac3dd51eeb10c5b5b41f69a95e4fba",
+        "size": 982
+      },
+      "stderr.log": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "native-operation-result.json": {
+        "path": "Docs/Evidence/v0.24.2_2026-11-01/Publication/publish-native-operation-result.json",
+        "sha256": "e69997737c13eba7b0fadc073abd1088a682bdb5e48dadb70cf4739e7e7498a0",
+        "size": 516
+      }
+    }
+  },
+  "remote_release": {
+    "assets": [
+      {
+        "digest": "sha256:23373729b4ffe827a446085162137451fef829353c72440b31a16af3636700b7",
+        "name": "Books-Arranger-Setup-0.24.2.exe",
+        "size": 174664451,
+        "state": "uploaded",
+        "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.2/Books-Arranger-Setup-0.24.2.exe"
+      },
+      {
+        "digest": "sha256:e93acc58fadb246b439feb23dcd4f9df9f8c4bad56c582c939f51d0ed3b94969",
+        "name": "Books-Arranger-Setup-0.24.2.exe.blockmap",
+        "size": 182062,
+        "state": "uploaded",
+        "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.2/Books-Arranger-Setup-0.24.2.exe.blockmap"
+      },
+      {
+        "digest": "sha256:e2064b719f64d67534d921be444b41227a11ae6d463e8c29477d96df8092a4cc",
+        "name": "latest.yml",
+        "size": 360,
+        "state": "uploaded",
+        "url": "https://github.com/Gemanoneko/booksArranger/releases/download/v0.24.2/latest.yml"
+      }
+    ],
+    "draft": false,
+    "id": 430973276,
+    "prerelease": false,
+    "tag": "v0.24.2",
+    "url": "https://github.com/Gemanoneko/booksArranger/releases/tag/v0.24.2"
+  },
+  "retained_releases": [
+    {
+      "assets": 3,
+      "draft": false,
+      "prerelease": false,
+      "tag": "v0.24.2"
+    },
+    {
+      "assets": 3,
+      "draft": false,
+      "prerelease": false,
+      "tag": "v0.24.1"
+    },
+    {
+      "assets": 3,
+      "draft": false,
+      "prerelease": false,
+      "tag": "v0.24.0"
+    },
+    {
+      "assets": 3,
+      "draft": false,
+      "prerelease": false,
+      "tag": "v0.23.0"
+    }
+  ],
+  "tag_parity": {
+    "local": [
+      "v0.1.0",
+      "v0.10.0",
+      "v0.11.0",
+      "v0.11.1",
+      "v0.11.2",
+      "v0.11.3",
+      "v0.12.0",
+      "v0.12.1",
+      "v0.12.2",
+      "v0.12.3",
+      "v0.13.0",
+      "v0.13.1",
+      "v0.14.0",
+      "v0.15.0",
+      "v0.2.0",
+      "v0.2.1",
+      "v0.2.2",
+      "v0.23.0",
+      "v0.24.0",
+      "v0.24.1",
+      "v0.24.2",
+      "v0.3.0",
+      "v0.3.1",
+      "v0.4.0",
+      "v0.4.1",
+      "v0.4.2",
+      "v0.4.3",
+      "v0.4.4",
+      "v0.5.0",
+      "v0.6.0",
+      "v0.7.0",
+      "v0.8.0",
+      "v0.9.0",
+      "v0.9.1",
+      "v0.9.2"
+    ],
+    "remote": [
+      "v0.1.0",
+      "v0.10.0",
+      "v0.11.0",
+      "v0.11.1",
+      "v0.11.2",
+      "v0.11.3",
+      "v0.12.0",
+      "v0.12.1",
+      "v0.12.2",
+      "v0.12.3",
+      "v0.13.0",
+      "v0.13.1",
+      "v0.14.0",
+      "v0.15.0",
+      "v0.2.0",
+      "v0.2.1",
+      "v0.2.2",
+      "v0.23.0",
+      "v0.24.0",
+      "v0.24.1",
+      "v0.24.2",
+      "v0.3.0",
+      "v0.3.1",
+      "v0.4.0",
+      "v0.4.1",
+      "v0.4.2",
+      "v0.4.3",
+      "v0.4.4",
+      "v0.5.0",
+      "v0.6.0",
+      "v0.7.0",
+      "v0.8.0",
+      "v0.9.0",
+      "v0.9.1",
+      "v0.9.2"
+    ],
+    "equal": true
+  },
+  "verification_observed_at": "2026-11-02T01:13:44.290Z",
+  "application_install_or_replay_at_publish": false,
+  "standard_product_consumer": "Still refuses the documented literal TAP spelling; the separately reviewed genuine HOST consumed exact unchanged raw evidence and published after strict real product checks"
+}

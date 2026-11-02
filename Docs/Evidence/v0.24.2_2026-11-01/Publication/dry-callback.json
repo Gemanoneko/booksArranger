@@ -1,0 +1,11 @@
+{
+  "started_at": "2026-11-02T01:07:05.180Z",
+  "ended_at": "2026-11-02T01:07:20.534Z",
+  "callback_received": true,
+  "error": null,
+  "stdout_bytes": 100,
+  "stderr_bytes": 0,
+  "stdout_sha256": "46e92997fa69ab4332aabe54b65b54598d6988b44823453e86eae7112724d526",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "write_errors": []
+}
