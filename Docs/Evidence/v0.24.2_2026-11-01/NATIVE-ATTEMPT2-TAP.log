@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+not ok 1 - PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+  ---
+  duration_ms: 125241.7287
+  type: 'test'
+  location: 'C:\\Antigravity Projects\\q\\context\\source\\tests\\real-shell-update.test.mjs:83:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    timed out waiting for the engine to load
+    
+    
+    DevTools listening on ws://127.0.0.1:51319/devtools/browser/14007a33-813c-4921-95f0-d26a2c6fd0fb
+    
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    until (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update.test.mjs:132:386)
+    async TestContext.<anonymous> (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update.test.mjs:133:3)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 343747.2666

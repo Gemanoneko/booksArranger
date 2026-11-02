@@ -1,0 +1,115 @@
+{
+  "source_head": "6b47a6ba5fc6686e61cd98a474dc17efdaa65b57",
+  "build_id": "97afab33-94a9-42c4-832d-d7af77bf5f9f",
+  "attempt": 4,
+  "source_progress_sha256": "d1e80411a3f9927de49d406e8e62535f41b46e8dcfcec5d2c1836b476035e4e2",
+  "stages": [
+    {
+      "stage": "input-verification",
+      "at": "2026-11-01T23:55:06.789Z"
+    },
+    {
+      "stage": "inputs-verified",
+      "at": "2026-11-01T23:55:10.375Z"
+    },
+    {
+      "stage": "fake-update-server-ready",
+      "at": "2026-11-01T23:55:11.435Z"
+    },
+    {
+      "stage": "private-engine-port-ready",
+      "at": "2026-11-01T23:55:11.445Z"
+    },
+    {
+      "stage": "app-starting",
+      "at": "2026-11-01T23:55:11.447Z"
+    },
+    {
+      "stage": "app-started",
+      "at": "2026-11-01T23:55:11.480Z"
+    },
+    {
+      "stage": "engine-loaded",
+      "at": "2026-11-01T23:55:13.580Z"
+    },
+    {
+      "stage": "checking-update",
+      "at": "2026-11-01T23:55:13.582Z"
+    },
+    {
+      "stage": "update-checked",
+      "at": "2026-11-01T23:55:13.615Z"
+    },
+    {
+      "stage": "downloading-update",
+      "at": "2026-11-01T23:55:13.618Z"
+    },
+    {
+      "stage": "update-downloaded",
+      "at": "2026-11-01T23:55:13.639Z"
+    },
+    {
+      "stage": "installing-invalid-update",
+      "at": "2026-11-01T23:55:13.642Z"
+    },
+    {
+      "stage": "old-engine-recovered",
+      "at": "2026-11-01T23:55:16.761Z"
+    },
+    {
+      "stage": "failed",
+      "at": "2026-11-01T23:55:21.769Z"
+    },
+    {
+      "stage": "failure-quitting-private-app",
+      "at": "2026-11-01T23:55:21.772Z"
+    },
+    {
+      "stage": "failure-quit-command-finished",
+      "at": "2026-11-01T23:55:24.789Z"
+    }
+  ],
+  "failed_stage": "old-engine-recovered",
+  "error": "Error: Endpoint is not in this private owned job\n    at need (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:8:47)\n    at retain (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:254:23)\n    at Object.endpoint (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:258:254)\n    at TestContext.<anonymous> (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update.test.mjs:152:23)\n    at async Test.run (node:internal/test_runner/test:1409:7)\n    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)",
+  "private_recovered_app": {
+    "startup": {
+      "phase": "running",
+      "startedAt": 1793577314972,
+      "lastLoadMs": 207,
+      "exited": null,
+      "portPid": null
+    },
+    "desktop_phase": "running",
+    "engine_version": "0.24.2",
+    "loaded": true,
+    "verdict": "working",
+    "update_check": "available",
+    "download": "ready",
+    "install": "failed",
+    "install_cause": "installer_blocked"
+  },
+  "controller": {
+    "sha256": "20b40015b18236c644cc5dbaf60fc0e079326fbbf934e86b35ff37d17d3c8a43",
+    "code": 1,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 24,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 1614,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "failure_quit_finished": true
+}

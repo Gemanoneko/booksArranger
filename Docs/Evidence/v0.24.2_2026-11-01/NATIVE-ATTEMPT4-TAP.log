@@ -1,0 +1,27 @@
+TAP version 13
+# Subtest: PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+not ok 1 - PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again
+  ---
+  duration_ms: 18010.9442
+  type: 'test'
+  location: 'C:\\Antigravity Projects\\q\\context\\source\\tests\\real-shell-update.test.mjs:83:1'
+  failureType: 'testCodeFailure'
+  error: 'Endpoint is not in this private owned job'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    need (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:8:47)
+    retain (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:254:23)
+    Object.endpoint (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update-support.mjs:258:254)
+    TestContext.<anonymous> (file:///C:/Antigravity%20Projects/q/context/source/tests/real-shell-update.test.mjs:152:23)
+    async Test.run (node:internal/test_runner/test:1409:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 18382.6351

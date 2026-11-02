@@ -1,0 +1,181 @@
+{
+  "status": "PASS_CANONICAL_NATIVE_STILL_REQUIRED",
+  "source_head": "0e6d48237cf61e75c9eb731b6a28f47402b16240",
+  "build_id": "a606e921-ea2e-4084-bbe8-05c82d7f1c6e",
+  "context_sha256": "3eed4d077353e98e736d3351a68ee94be6397f61f7685ae6e8178013ac566c0b",
+  "outer_receipt": {
+    "started_at": "2026-11-01T23:17:54.590Z",
+    "finished_at": "2026-11-01T23:25:48.921Z",
+    "pid": 83980,
+    "callback_received": true,
+    "error": null,
+    "stdout_bytes": 727875,
+    "stderr_bytes": 0,
+    "stdout_sha256": "23e3d16a1e4983e1040c0a10c00ac467117eaaf68d45c166218af5e045d6ee72",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "start_write_error": null,
+    "write_errors": [],
+    "invocation_sha256": "b3489aff1fe38677b2269957aed7ded2e83e993fde8f6c7a20feebc3af2ed54c",
+    "native_deadline_ms": 600000,
+    "transport": "short-persistent-launch-and-poll"
+  },
+  "python": {
+    "batches": 13,
+    "discovered": 2328,
+    "completed": 2328,
+    "unique_ids": 2328,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "integrated_pass": {
+    "phases": {
+      "schema": "books-qa-phases-v1",
+      "canonical": {
+        "scope": "non-app; owned Python/codec CLI fixtures and Node/DOM doubles",
+        "node_entries": [
+          "tests/release-contract.test.mjs",
+          "tests/release-flow.test.mjs",
+          "tests/update-controller.test.mjs",
+          "tests/engine-update.test.mjs",
+          "tests/launch-options.test.mjs",
+          "tests/release-leased-executables.test.mjs",
+          "tests/status-flight.test.mjs",
+          "tests/quit-watch.test.mjs",
+          "tests/python-check-batches.test.mjs",
+          "tests/gate-source-guard.test.mjs",
+          "tests/load-state.test.mjs",
+          "tests/startup.test.mjs",
+          "tests/desktop-loading.test.mjs",
+          "tests/main-startup.test.mjs",
+          "tests/qa-entry-context.test.mjs",
+          "tests/desktop-folder-picker.test.mjs",
+          "tests/gate-scratch.test.mjs",
+          "tests/real-shell-update-contract.test.mjs"
+        ]
+      },
+      "native": {
+        "phase": "PA-1",
+        "entry": "tests/real-shell-update.test.mjs",
+        "title": "PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again",
+        "required": true,
+        "status": "PENDING; separate authority and normal native proof required"
+      },
+      "prior_node_entries": 18,
+      "total_node_entries": 19
+    },
+    "python_cases": 2328,
+    "node_cases": 228,
+    "frontend_scripts": [
+      "test_0223_ui_frontend.js",
+      "test_0231_destination_frontend.js",
+      "test_0231_rows_frontend.js",
+      "test_0242_frontend.js",
+      "test_attention_frontend.js",
+      "test_automatic_frontend.js",
+      "test_browser.js",
+      "test_bulk_retry_receipts_frontend.js",
+      "test_busy_frontend.js",
+      "test_cleanup_frontend.js",
+      "test_connection.js",
+      "test_delete_frontend.js",
+      "test_delete_leaves_frontend.js",
+      "test_inline_series_frontend.js",
+      "test_iron_skazka_frontend.js",
+      "test_kept_frontend.js",
+      "test_metadata_frontend.js",
+      "test_missing_files_frontend.js",
+      "test_odd_names_frontend.js",
+      "test_original_title_frontend.js",
+      "test_panel_lock_frontend.js",
+      "test_precheck_frontend.js",
+      "test_producer_recovery_frontend.js",
+      "test_progress_frontend.js",
+      "test_queue_frontend.js",
+      "test_recovery_frontend.js",
+      "test_refused_retry_frontend.js",
+      "test_retry_frontend.js",
+      "test_retry_selected_frontend.js",
+      "test_ruling35_frontend.js",
+      "test_ruling37_frontend.js",
+      "test_save_metadata_frontend.js",
+      "test_setup_frontend.js",
+      "test_stale_list_frontend.js",
+      "test_stale_wording_frontend.js",
+      "test_startover_frontend.js",
+      "test_startup_frontend.js",
+      "test_todo_frontend.js",
+      "test_todo_holds_frontend.js"
+    ],
+    "syntax_files": 11,
+    "python_worker_seconds": [
+      379,
+      381.8,
+      371.2,
+      334.1,
+      355.4,
+      433,
+      410,
+      389.7,
+      405,
+      389.1,
+      404.5,
+      351.4,
+      421.8
+    ],
+    "python_workers": 13,
+    "python_worker_deadline_seconds": 540,
+    "copy_seconds": 10.6,
+    "qa_runtime": {
+      "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+      "sha256": "a3cb3b5e0903b98e3a9e4865321a199eb6f4f53f5739be509bd61d50bbacb031"
+    },
+    "mp3_fixture": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3",
+      "sha256": "e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed"
+    }
+  },
+  "owned": {
+    "code": 0,
+    "ok": true,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "reason": null,
+    "closureError": null,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10873,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 15802,
+        "incompleteQueries": 213,
+        "firstIncomplete": {
+          "assigned": 51,
+          "listed": 50,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 9,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    }
+  },
+  "actual_receipt_line": "Entry-check receipt v2: books-arranger v0.24.2 @ 0e6d48237cf61e75c9eb731b6a28f47402b16240 (dirty: N) [source:5ceef1ffbff7ed635218d6d196e8a866e171bf988ba0f231e6fbd648b2ef6bd8; harness:2dd0a53ec2a3d86259d5ab4e8d7129610c745fbf8441a08d2ec9ed4bf147aa8e; runtime:42ec56ecb31596a2f981f345188ba72801309f9e79bff4362ff69841b2f0dd83; checker:6378352ea131eee3338019d36bafc100c54837e29aac271ea8de1687c639a07f] — pre-qa n/a, post-build n/a, check-electron n/a, check pass, test:smoke n/a; personal-folders clean",
+  "raw": {
+    "stdout_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261101-242/shared/entry-prep/canonical-final-0e6d482/outer-stdout.log",
+    "stdout_sha256": "23e3d16a1e4983e1040c0a10c00ac467117eaaf68d45c166218af5e045d6ee72",
+    "stderr_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261101-242/shared/entry-prep/canonical-final-0e6d482/outer-stderr.log",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "limitations": "Canonical full entry PASS only. Mandatory approved finite native recovery attempt3 remains separate. Prior23/e47fullPASS and originalnativeFAILs retained, never relabelled. No QA rerun."
+}

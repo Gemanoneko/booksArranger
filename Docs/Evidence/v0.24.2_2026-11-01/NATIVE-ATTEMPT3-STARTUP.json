@@ -1,0 +1,52 @@
+{
+  "source_head": "0e6d48237cf61e75c9eb731b6a28f47402b16240",
+  "build_id": "a606e921-ea2e-4084-bbe8-05c82d7f1c6e",
+  "attempt": 3,
+  "original_diagnostic_sha256": "c8dabe8879db3bac180b9068078a883eb37c7030aff58a66f174512d8ddb40a4",
+  "private_engine_url": "http://127.0.0.1:61169/",
+  "startup": {
+    "phase": "running",
+    "startedAt": 1793575601317,
+    "lastLoadMs": 248,
+    "exited": null,
+    "portPid": null
+  },
+  "status": {
+    "phase": "running",
+    "loading_done": "done",
+    "load_ms": 248,
+    "engine_version": "0.24.2",
+    "loaded": true,
+    "verdict": "working",
+    "update_install_phase": "idle",
+    "update_check_phase": "idle"
+  },
+  "actual_observer_diagnostic": {
+    "error": "One private loopback listener required"
+  },
+  "failed_stage": "app-started",
+  "controller": {
+    "sha256": "b8549b37e0f869bf7abcc9ece929620cf3e218a7d9487145aba0d0f1bfcf3202",
+    "code": 1,
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 19,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 8673,
+        "incompleteQueries": 0,
+        "firstIncomplete": null,
+        "lastIncomplete": null
+      }
+    }
+  },
+  "failure_quit_finished": true
+}
