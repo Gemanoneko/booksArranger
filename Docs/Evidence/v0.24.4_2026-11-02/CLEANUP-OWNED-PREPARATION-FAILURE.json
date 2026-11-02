@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "Traceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 5, in <module>\r\n    from build_fs_guard import BuildTree,PriorBuild\r\n  File \"C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\scripts\\build_fs_guard.py\", line 13, in <module>\r\n    from native_io import BoundaryError, DirectoryBoundary, VerifiedFile, kernel, FileInfo, ordinary\r\nModuleNotFoundError: No module named 'native_io'\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 108428,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 24,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 408.8107,
+  "outputBytes": 476
+}

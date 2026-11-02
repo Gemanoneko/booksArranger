@@ -1,0 +1,12 @@
+{
+  "started_at": "2026-11-02T17:06:12.026Z",
+  "finished_at": "2026-11-02T17:06:12.554Z",
+  "error": {
+    "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/codex-books-20261102-0244/cleanup-driver.mjs\n",
+    "code": 1,
+    "killed": false,
+    "signal": null
+  },
+  "stdout": "",
+  "stderr": ""
+}

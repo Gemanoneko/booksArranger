@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "{\"status\": \"FAIL\", \"totals\": {\"files\": 13354, \"directories\": 1890, \"reparse_entries\": 0, \"logical_file_bytes\": 3181412852}, \"proof\": \"C:\\\\Antigravity Projects\\\\Studio Illuminati\\\\WIP\\\\Books Arranger\\\\Docs\\\\Evidence\\\\v0.24.4_2026-11-02\\\\CLEANUP-PROOF.json\"}\r\n",
+  "err": "Traceback (most recent call last):\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 56, in <module>\r\n    result['roots'].append(purge(str(p)))\r\n                           ~~~~~^^^^^^^^\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 33, in purge\r\n    scan(root)\r\n    ~~~~^^^^^^\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 28, in scan\r\n    for e in it:scan(Path(e.path))\r\n                ~~~~^^^^^^^^^^^^^^\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 28, in scan\r\n    for e in it:scan(Path(e.path))\r\n                ~~~~^^^^^^^^^^^^^^\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 28, in scan\r\n    for e in it:scan(Path(e.path))\r\n                ~~~~^^^^^^^^^^^^^^\r\n  [Previous line repeated 6 more times]\r\n  File \"C:\\Antigravity Projects\\codex-books-20261102-0244\\cleanup-owned.py\", line 31, in scan\r\n    assert s.st_nlink==1,'Hardlink refused';entries.append((p,s,'file'))\r\n           ^^^^^^^^^^^^^\r\nAssertionError: Hardlink refused\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 118060,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 852,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 13289.192599999998,
+  "outputBytes": 1377
+}

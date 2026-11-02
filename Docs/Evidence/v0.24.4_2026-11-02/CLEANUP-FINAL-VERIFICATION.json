@@ -1,0 +1,43 @@
+{
+  "schema": "books-cleanup-final-verification-v1",
+  "original_proof_sha256": "9cd445d2c6e854083e0bf45b8364af3eb3d93bd6fb8191bf63ffd85abf37daa4",
+  "original_owned_sha256": "81cc7ce49eb0b2c9eb5aa28bee75710cee3f1f3b36735979ab0a8355f1ff7ed5",
+  "absences": [
+    {
+      "path": "C:/Antigravity Projects/codex-books-20261102-0244",
+      "absent": true
+    },
+    {
+      "path": "C:/Antigravity Projects/q",
+      "absent": true
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/node_modules",
+      "absent": true
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/pack-inputs",
+      "absent": true
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/scratch",
+      "absent": true
+    }
+  ],
+  "empty_owned_parent_removed": true,
+  "remaining_dist_builds": [
+    "2adf6f0f-3b2c-4ea6-8ee2-207c096fca9e"
+  ],
+  "remaining_producer_roots": [
+    "ae7fb976-c0eb-43fa-9033-49d7d1f44359"
+  ],
+  "owned_short_or_long_workspace_roots_remaining": [],
+  "combined_totals": {
+    "files": 38386,
+    "directories": 4004,
+    "reparse_entries": 4,
+    "logical_file_bytes": 4894047888
+  },
+  "logical_bytes_note": "File-size sum per removed directory entry; two hardlink pairs counted by names (1740logical entry bytes), not unique physical allocation or disk-space freed.",
+  "source_and_recovery": "Actual tool/candidate sources, current2adf/ae7runtime/manifest/pointer, portableDocs, canonicalsharedcaches, Salem recovery and unrelated files preserved"
+}
