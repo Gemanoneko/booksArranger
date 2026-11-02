@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { acceptanceIndex, artifactContract, newer, packageContract, productTree, remoteArtifacts, reportManifest, reportPin, requiresNativeQa, nativeEvidencePath, nativeEvidenceReportHash, nativeRecordReferences, validateNativeEvidence } from './release-contract.mjs';
 
+import { consumeNativeCompatibility, frozen } from '../Docs/BooksArranger_Compatibility_0.24.2/compat-consumer.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 export function gitEntries(output) {
   return output.split('\0').filter(Boolean).map(line=>{
@@ -12,6 +13,7 @@ export function gitEntries(output) {
 // io owns native path/handle validation and the 600-second descendant job.
 // No shell strings, injected env token, rebuild-after-QA or upload fallback.
 export async function releaseFlow(io) {
+  if(io.productRoot!==frozen.product_root)throw Error('One-off host must use the declared actual product worktree');
   const git = async args => (await io.run('git',args,{credential:false})).stdout.trim();
   if(await git(['status','--porcelain','--untracked-files=normal']))throw new Error('Release needs a clean checkout');
   const head=await git(['rev-parse','HEAD']);
@@ -22,13 +24,8 @@ export async function releaseFlow(io) {
   if(!['https://github.com/'+canonical+'.git','https://github.com/'+canonical,'git@github.com:'+canonical+'.git'].includes(origin))throw new Error('Origin differs from configured GitHub publisher');
   const entryList=async pin=>gitEntries((await io.run('git',['ls-tree','-rz','--full-tree',pin],{credential:false})).stdout);
   const digest=productTree(await entryList(head));
-  if(await git(['rev-parse',tag+'^{commit}'])!==head)throw new Error('Named release tag does not point to HEAD');
   const previous=(await git(['tag','--list','v*'])).split('\n').filter(t=>t&&t!==tag);
   for(const old of previous)if(!newer(pkg.version,old.slice(1)))throw new Error('Version is not newer than previous tags');
-  const remote=await git(['ls-remote','--tags','origin','refs/tags/'+tag,'refs/tags/'+tag+'^{}']);
-  const refs=remote.split('\n').filter(Boolean).map(line=>line.split(/\s+/));
-  const resolved=refs.find(r=>r[1]==='refs/tags/'+tag+'^{}')||refs.find(r=>r[1]==='refs/tags/'+tag);
-  if(resolved?.[0]!==head)throw new Error('Named tag has not been pushed to exact HEAD');
   // A missing candidate is prepared without publishing, then needs fresh acceptance.
   if(!await io.exists('dist/release-artifacts.json')) {
     await io.prepare();
@@ -59,7 +56,11 @@ export async function releaseFlow(io) {
     }
     if(!manifest.runtime||typeof manifest.runtime!=='object')throw Error('Candidate runtime manifest missing');
     const phase=await io.hash('scripts/qa-phase-contract.mjs');
-    validateNativeEvidence(summary,records,{version:pkg.version,source_head:manifest.source_head,product_digest:digest,build_id:manifest.build_id,artifact_manifest_sha256:manifestHash,runtime_manifest_sha256:hash(JSON.stringify(manifest.runtime)),phase_contract_sha256:phase.sha256});
+    const compatibility=await consumeNativeCompatibility(summary,records,{version:pkg.version,source_head:manifest.source_head,product_digest:digest,build_id:manifest.build_id,artifact_manifest_sha256:manifestHash,runtime_manifest_sha256:hash(JSON.stringify(manifest.runtime)),phase_contract_sha256:phase.sha256},{productRoot:io.productRoot});
+    const receiptPath='Docs/BooksArranger_NativeQA_v0.24.2_Compatibility.json',receiptRaw=await io.read(receiptPath),receipt=JSON.parse(receiptRaw),accepted=[...qaText.matchAll(/^Native QA compatibility receipt SHA256:\s*([a-f0-9]{64})\s*$/gm)];
+    if(accepted.length!==1||hash(receiptRaw)!==accepted[0][1])throw Error('Explicit compatibility receipt is missing or unaccepted');
+    const withoutTime=({observed_at,...rest})=>rest;
+    if(JSON.stringify(withoutTime(receipt))!==JSON.stringify(withoutTime(compatibility)))throw Error('Accepted compatibility interpretation differs from current exact check');
   }
   await io.verifyPayload(manifest); // Entire unpacked tree, NSIS equivalence receipt, source/raw JSON and runtimes.
   for(const artifact of manifest.artifacts) {
@@ -67,6 +68,12 @@ export async function releaseFlow(io) {
     if(actual.sha256!==artifact.sha256 || actual.size!==artifact.size)throw new Error('Artifact changed: '+artifact.path);
   }
   // This acquisition strips GH_TOKEN/GITHUB_TOKEN first; no env credential fallback.
+  if(io.compatibilityDryRun===true)return {dryRun:true,version:pkg.version,head,manifestHash,assets:files,deferred:['named tag exact local/remote HEAD','authentication','upload','remote asset verification','keep-four cleanup']};
+  if(await git(['rev-parse',tag+'^{commit}'])!==head)throw new Error('Named release tag does not point to HEAD');
+  const remote=await git(['ls-remote','--tags','origin','refs/tags/'+tag,'refs/tags/'+tag+'^{}']);
+  const refs=remote.split('\n').filter(Boolean).map(line=>line.split(/\s+/));
+  const resolved=refs.find(r=>r[1]==='refs/tags/'+tag+'^{}')||refs.find(r=>r[1]==='refs/tags/'+tag);
+  if(resolved?.[0]!==head)throw new Error('Named tag has not been pushed to exact HEAD');
   await io.authenticate();
   const route='/repos/'+publish.owner+'/'+publish.repo;
   const existing=await io.api('GET',route+'/releases/tags/'+tag,{allow404:true});

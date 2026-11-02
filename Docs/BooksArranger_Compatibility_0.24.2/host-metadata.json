@@ -1,0 +1,23 @@
+{
+  "schema": "books-0242-compat-host-v1",
+  "host_root": "C:/Antigravity Projects/h",
+  "product_root": "C:/Antigravity Projects/h/product",
+  "product_source_head": "f6064c832ef3ff69d91d4ab94a2d7ff799b89a1d",
+  "artifact_manifest_sha256": "c945bafdec905ef02e988359dedc9781f146cb209a57d1d3a3e876b24fede8d3",
+  "phase_contract_sha256": "6704b3b21c849d4866dc5298205fe59728ea6179cb0763a408d6c5b53277616d",
+  "consumer_sha256": "74aebe5df4d041b9ae926799f77ce79d37d3691c4d3b0dfa4cd59e0a785eb525",
+  "metadata_sha256": "4533cb7824b76a7e295dc52b049733437962057abfb2747d8f836a9b87521102",
+  "unmodified_guard_files": [
+    "scripts/guarded-io.mjs",
+    "scripts/build_native.py",
+    "scripts/build_fs_guard.py",
+    "native_io.py"
+  ],
+  "stages": {
+    "consume_only": "BOOKS_0242_COMPAT_CONSUME_ONLY=YES npm run release",
+    "read_only_preflight": "npm run release",
+    "publish": "BOOKS_0242_COMPAT_PUBLISH=YES npm run release"
+  },
+  "standard_product_npm_release": "Still refuses the known final literal-identity mismatch; no source/product changes claimed",
+  "no_app_replay": true
+}

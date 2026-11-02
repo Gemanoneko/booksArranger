@@ -1,0 +1,76 @@
+{
+  "binding": {
+    "version": "0.24.2",
+    "source_head": "f6064c832ef3ff69d91d4ab94a2d7ff799b89a1d",
+    "product_digest": "bc759841c6cc8b5ca89d668cc2bd3d9f479cf56fd3b47cebaf989a0a598b25bf",
+    "build_id": "0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2",
+    "artifact_manifest_sha256": "c945bafdec905ef02e988359dedc9781f146cb209a57d1d3a3e876b24fede8d3",
+    "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+    "phase_contract_sha256": "6704b3b21c849d4866dc5298205fe59728ea6179cb0763a408d6c5b53277616d"
+  },
+  "raw": {
+    "authority": {
+      "sha256": "6ae410ccc72e7cab47a6610884289615118b5717c98b529ff575ab137b623ada",
+      "size": 894
+    },
+    "plan": {
+      "sha256": "47341405b1cb9f14bdfcc153dc12e7e62e08a9f4dd8373532063882d13828b71",
+      "size": 508603
+    },
+    "owned": {
+      "sha256": "73e851ce66755f2f97de730e3740ce8c71c581d9787e97c49373e8234c603bbd",
+      "size": 2868
+    },
+    "controller_owned": {
+      "sha256": "9df02963968e6c1fb24ee20f2ff45dedd27895ddcf504cadcdb2f09b1e375f10",
+      "size": 927
+    },
+    "callback": {
+      "sha256": "8450f85432af0e3c78b155743ff9e99650aab2b320c06ba006e388be9667b293",
+      "size": 707
+    },
+    "stdout": {
+      "sha256": "c03a6dca8afb01845fcc16ed345dd2edfd8387f92b2c4a9346a54b8218705214",
+      "size": 2172
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "controller_stdout": {
+      "sha256": "f7d8ed9b50a4cd3d80cca04b90960b8fea118b797e3ac44aa22caf37191da2df",
+      "size": 392
+    },
+    "controller_stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "functional": {
+      "sha256": "1806183c7895e312260794d787dc24e048ea6386dbeaf86dba41295f7758b1eb",
+      "size": 1744
+    },
+    "postflight": {
+      "sha256": "e17531ca3cfd70c871aa6212a27ebab26dd5b12ca8c3947bdff9aa4ea5fc277b",
+      "size": 804
+    },
+    "cleanup": {
+      "sha256": "17d2a31eb30e46f0ea975e99e834fc40fa186b2ee671c865b4ba54d97599a668",
+      "size": 1384
+    }
+  },
+  "private_exe": "C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261101-242\\shared\\entry-prep\\native-plan-23e82c9\\pa1-07ecdac6-31b3-454e-9858-5f4b9437eb92\\app\\Books Arranger.exe",
+  "exe_identity": {
+    "dev": "2803554832",
+    "ino": "29836347537769817",
+    "size": 246033408,
+    "nlink": 1
+  },
+  "exe_sha256": "cd93b6442e440c743019b3d035b0ef0caaf40f06b791c8b67a4c095bc7c71dea",
+  "fixture_root": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261101-242/shared/entry-prep/native-plan-23e82c9/pa1-07ecdac6-31b3-454e-9858-5f4b9437eb92",
+  "own_id": "18236257877765698895",
+  "strict_refusal": "Cleanup private identity differs",
+  "route": "books-0242-compat-host-only",
+  "host_root": "C:/Antigravity Projects/h",
+  "product_root": "C:/Antigravity Projects/h/product",
+  "artifact_manifest_sha256": "c945bafdec905ef02e988359dedc9781f146cb209a57d1d3a3e876b24fede8d3"
+}

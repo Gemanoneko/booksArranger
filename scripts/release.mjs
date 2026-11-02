@@ -9,12 +9,17 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { releaseFlow } from './release-flow.mjs';
-import { leasedExecutable } from './release-contract.mjs';
+import { leasedExecutable, nativeRecordReferences } from './release-contract.mjs';
+import { consumeNativeCompatibility, frozen } from '../Docs/BooksArranger_Compatibility_0.24.2/compat-consumer.mjs';
 import cleanup from './cleanup-releases.js';
 import { runNativeOwned, validateChildLease } from './guarded-io.mjs';
 
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const require=createRequire(import.meta.url);
+const hostRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const root=path.join(hostRoot,'product').replaceAll('\\','/');
+if(path.resolve(hostRoot)!==path.resolve(frozen.host_root)||path.resolve(root)!==path.resolve(frozen.product_root))throw Error('Wrong one-off compatibility host/product layout');
+const require=createRequire(path.join(root,'package.json'));
+const compatibilityDryRun=process.env.BOOKS_0242_COMPAT_PUBLISH!=='YES';
+if(!compatibilityDryRun&&process.env.BOOKS_0242_COMPAT_CONSUME_ONLY==='YES')throw Error('Conflicting compatibility stages');
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 function baseEnv() {
   const env={...process.env,GIT_OPTIONAL_LOCKS:'0'};
@@ -53,8 +58,8 @@ function sameMap(actual,expected) {
 async function ownedRelease() {
   // The option is not authority: this checks a per-launch stdin nonce, native
   // supervisor generation/image and retained lease. No fallback is permitted.
-  const ownership=await validateChildLease({mode:'release',root});
-  if(ownership.root!==root||!path.isAbsolute(ownership.ownedRoot)||!path.resolve(ownership.ownedRoot).startsWith(path.join(root,'build-cache','builds')+path.sep)||!Number.isFinite(ownership.deadline)||ownership.deadline<=Date.now())throw new Error('Invalid native release lease');
+  const ownership=await validateChildLease({mode:'release',root:hostRoot});
+  if(ownership.root!==hostRoot||!path.isAbsolute(ownership.ownedRoot)||!path.resolve(ownership.ownedRoot).startsWith(path.join(hostRoot,'build-cache','builds')+path.sep)||!Number.isFinite(ownership.deadline)||ownership.deadline<=Date.now())throw new Error('Invalid native release lease');
   let token=null;
   const safePath=relative=>{
     if(typeof relative!=='string'||relative.includes('\\')||path.isAbsolute(relative)||relative.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error('Unsafe release path');
@@ -92,7 +97,7 @@ async function ownedRelease() {
       request.on('error',reject);request.end();
     });
   };
-  const io={run,
+  const io={run,compatibilityDryRun,productRoot:root,
     read:async relative=>fs.readFileSync(safePath(relative),'utf8'),
     exists:async relative=>fs.existsSync(safePath(relative)),
     hash:async relative=>inspectFile(safePath(relative)),
@@ -129,12 +134,20 @@ async function ownedRelease() {
       return result;
     }
   };
+  if(process.env.BOOKS_0242_COMPAT_CONSUME_ONLY==='YES'){
+    const summary=JSON.parse(await io.read('Docs/BooksArranger_NativeQA_v0.24.2.json')),records={};
+    for(const [role,ref]of nativeRecordReferences(summary,'0.24.2'))records[role]=await io.read(ref.path);
+    const receipt=await consumeNativeCompatibility(summary,records,frozen.binding,{productRoot:root});
+    fs.writeFileSync(path.join(ownership.ownedRoot,'native-compatibility-consumption.json'),JSON.stringify(receipt),{flag:'wx'});
+    console.log('BOOKS_0242_COMPAT_CONSUMED '+JSON.stringify(receipt));return;
+  }
   const result=await releaseFlow(io);
+  if(result.dryRun){console.log('[compat-release] Read-only preflight passed; named-tag/auth/upload/remote-assets/keep-four NOT RUN.');return;}
   console.log('[release] Published '+result.tag+' from '+result.head+'; verified '+result.assets.length+' assets.');
   if(result.cleanupWarning)console.warn('[release] Published successfully; cleanup warning: '+result.cleanupWarning);
 }
 try {
-  if(process.argv.slice(2).length===0)await runNativeOwned({mode:'release',root,script:'scripts/release.mjs'});
+  if(process.argv.slice(2).length===0)await runNativeOwned({mode:'release',root:hostRoot,script:'scripts/release.mjs'});
   else if(process.argv.slice(2).join(' ')==='--owned-release')await ownedRelease();
   else throw new Error('Unsupported release arguments');
 } catch(error) {

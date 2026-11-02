@@ -14,3 +14,6 @@ dist/
 # Machine-local Claude state
 .claude/settings.local.json
 .claude/.cache/
+
+# Separately registered, natively held frozen release product.
+/product/
