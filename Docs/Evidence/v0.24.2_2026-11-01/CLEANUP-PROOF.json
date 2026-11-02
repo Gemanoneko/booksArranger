@@ -1,0 +1,735 @@
+{
+  "schema": "books-owned-cleanup-v1",
+  "started_utc": "2026-11-02T01:23:26Z",
+  "status": "COMPLETE",
+  "measurement": "Logical sum of st_size per deleted ordinary-file pathname; not allocated bytes or disk free space; hardlinked names may count same storage more than once",
+  "method": "Explicit absolute allowlist; lstat/native reparse flags; preflight identity inventory; recheck dev/ino/type before unlink; no reparse traversal; empty directories removed bottom-up. Existing PriorBuild current pair guard held during candidate cleanup.",
+  "roots": [
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\07ecdac6-31b3-454e-9858-5f4b9437eb92",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762181812,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\2809e674-6c3b-434a-8f36-c8496e1f3951",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762181916,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\28578d12-65d4-496f-93c6-10dcfa01363d",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762182038,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\407d9cc7-7fb6-4749-865b-a39a3403de36",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762182095,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\6f4c16c3-08b3-4a2a-87b9-b4bff33f4e98",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762181839,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\84b84469-3d60-4f0a-87aa-82888ff30752",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762178600,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\97afab33-94a9-42c4-832d-d7af77bf5f9f",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762182135,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\9d5af059-3972-49d4-8288-81026c3b0334",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762174875,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\a3afdaf1-cdb5-4547-85e1-7eb9db275e11",
+      "category": "obsolete owned candidate output",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\a606e921-ea2e-4084-bbe8-05c82d7f1c6e",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762182037,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\ae4bd2c0-2dd1-4cdb-8209-931879ce19e1",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762182125,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\cb72636a-72d2-4d16-ab0a-5bedd955e85f",
+      "category": "obsolete owned candidate output",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\dd183482-e484-4758-8ad0-38cc473b6acf",
+      "category": "obsolete owned candidate output",
+      "files": 322,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 762174967,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\149c79e5-b211-4244-9873-6a47bd9278db",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194860089,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\1cc30785-bd2f-4e2e-bb10-e219c6ed936e",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194859494,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\21122cc2-1b86-4c30-ad9d-16c86a2842f2",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194860852,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\2eec463c-1418-46d1-bdd4-3882f06ef139",
+      "category": "obsolete owned producer/cache",
+      "files": 847,
+      "directories": 82,
+      "reparse_entries": 0,
+      "logical_bytes": 427030061,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\5f290e51-c3ab-4ed2-b123-b68bea5f5b43",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194858016,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\6370147e-9b78-4d55-9279-0c7f201d987d",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194860148,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\6b948b96-2a64-4e8d-a230-b2260151263e",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194861728,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\88c031cc-35de-440d-88f2-fa3301b73fb0",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194859686,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\a5330a34-7c77-4c25-83cd-fbaf05e1f110",
+      "category": "obsolete owned producer/cache",
+      "files": 847,
+      "directories": 83,
+      "reparse_entries": 0,
+      "logical_bytes": 427030057,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\aeae6794-4477-4dce-a4f1-83b157434009",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194859443,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\b9155871-a675-4154-81ac-66aa024b8efb",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194859853,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\be4dc301-ef84-442e-a488-744b6dc6d56e",
+      "category": "obsolete owned producer/cache",
+      "files": 485,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 194859251,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\f53da0d2-d834-41d7-97a4-11804925b649",
+      "category": "obsolete owned producer/cache",
+      "files": 1253,
+      "directories": 97,
+      "reparse_entries": 0,
+      "logical_bytes": 1188751415,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-1202e55b-ca07-44bd-91be-ee947e69bd5d",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-0afc1b85-5ea6-42c1-af7b-992783bfb7eb",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-157aab2b-7990-417d-91b9-88c167dea907",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-cd609dd5-1f19-462f-b7d5-12e7ba7be0db",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-343bb077-8059-40d2-b044-46925401fad3",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-73de474f-0fa9-4d56-848c-148fddb915d3",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-49f77504-0ddc-47e6-8b0c-51a477d69acb",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62265,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-9bfa0a25-1ef1-41f7-a301-9641e088a1ae",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-621772e4-dc0c-481e-b3ac-8e2697f90f5c",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-47f6bdbf-33d9-4434-b5d5-9211e177e7a3",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-83e8eab8-26e8-408c-9fc1-c410b8f4eae5",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-d5099f45-b79d-47c7-a066-05450d8a3cbb",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-93b0b2b7-ca3e-488e-a77e-0383ccda52dd",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62265,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-24cfb9e2-ec1a-470b-9c41-61482fc72931",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-979bfba1-d3a8-4f01-9678-9acb2dfd0f2d",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-fbc8710b-831c-41ea-87f7-e84d58784bca",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-a42d1ef9-7049-49ba-a8f2-150f1ebfaf9b",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-2ee7bc32-9a44-4b21-a4ec-bf28af2ac249",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json.previous-d038ce9e-befe-40b5-ae5d-2b889cfcfd07",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 62266,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json.previous-fbb6fde8-7e61-48e0-b04e-6311cfb04f23",
+      "category": "old matched metadata pair",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\node_modules",
+      "category": "owned dependency/seed/download copies",
+      "files": 7589,
+      "directories": 1042,
+      "reparse_entries": 0,
+      "logical_bytes": 96896782,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\downloads",
+      "category": "owned dependency/seed/download copies",
+      "files": 2,
+      "directories": 3,
+      "reparse_entries": 0,
+      "logical_bytes": 93335041,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\pack-inputs",
+      "category": "owned dependency/seed/download copies",
+      "files": 2301,
+      "directories": 490,
+      "reparse_entries": 0,
+      "logical_bytes": 190397122,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\backend",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 3,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\builder-cache",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\extract",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 17,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\icons",
+      "category": "current producer disposable staging/cache",
+      "files": 1,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 14036,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\jiti",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\node-compile-cache",
+      "category": "current producer disposable staging/cache",
+      "files": 82,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_bytes": 297144,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\npm-cache",
+      "category": "current producer disposable staging/cache",
+      "files": 1,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_bytes": 2468,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\nsis-archive",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\nsis-generator",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\nsis-payload",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 9,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\profile",
+      "category": "current producer disposable staging/cache",
+      "files": 0,
+      "directories": 3,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57\\shell",
+      "category": "current producer disposable staging/cache",
+      "files": 334,
+      "directories": 51,
+      "reparse_entries": 0,
+      "logical_bytes": 2373276,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2\\builder-debug.yml",
+      "category": "current build disposable builder log",
+      "files": 1,
+      "directories": 0,
+      "reparse_entries": 0,
+      "logical_bytes": 7955,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\h\\product\\node_modules",
+      "category": "registered PRODUCT ignored generated copy",
+      "files": 7589,
+      "directories": 1042,
+      "reparse_entries": 0,
+      "logical_bytes": 96896782,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\h\\product\\dist",
+      "category": "registered PRODUCT ignored generated copy",
+      "files": 323,
+      "directories": 11,
+      "reparse_entries": 0,
+      "logical_bytes": 762244374,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\h\\product\\build-cache",
+      "category": "registered PRODUCT ignored generated copy",
+      "files": 1,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 5824,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\h\\build-cache",
+      "category": "registered HOST ignored generated output",
+      "files": 7,
+      "directories": 6,
+      "reparse_entries": 0,
+      "logical_bytes": 5741,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\h\\dist",
+      "category": "registered HOST ignored generated output",
+      "files": 0,
+      "directories": 1,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Antigravity Projects\\q",
+      "category": "owned QA contexts/runtimes/fixtures",
+      "files": 23655,
+      "directories": 626,
+      "reparse_entries": 9,
+      "logical_bytes": 447156722,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261101-242",
+      "category": "owned session diagnostics/catalog copies/foreign snapshots/probes",
+      "files": 28761,
+      "directories": 3948,
+      "reparse_entries": 1,
+      "logical_bytes": 1110700009,
+      "absent_after": true
+    },
+    {
+      "root": "C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261101-pause",
+      "category": "empty earlier owned diagnosis directories; catalog copies already absent",
+      "files": 0,
+      "directories": 2,
+      "reparse_entries": 0,
+      "logical_bytes": 0,
+      "absent_after": true
+    }
+  ],
+  "totals": {
+    "files": 82007,
+    "directories": 8598,
+    "reparse_entries": 10,
+    "logical_bytes": 15176416359
+  },
+  "retained": [
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\builds\\0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\dist\\release-artifacts.json",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\runtime-pointer.json",
+    "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\build-cache\\builds\\9b0b120e-81f3-454f-acf9-4ff054257e57",
+    "C:/Users/AnGeLZzZ/AppData/Local/Temp/claude/c--Antigravity-Projects-Studio-Illuminati/07095a58-8139-4614-a18d-87c3503d825f/scratchpad/salem",
+    "All canonical installed runtimes and every path outside the explicit allowlist"
+  ],
+  "registered_worktrees": "PRODUCT and HOST removed via real git worktree remove after ordinary/no-reparse clean-root preflight; only canonical main and current deliverable candidate remain registered.",
+  "errors": [],
+  "current_pair_guard": "PriorBuild verified original producer native facts, runtime, payload and all3 artifacts; kept held during deletion",
+  "current_pair_verified_after": true,
+  "salem_untouched_exists": true,
+  "finished_utc": "2026-11-02T01:24:17Z",
+  "execution": {
+    "callback_received": true,
+    "started": "2026-11-02T01:23:25.994Z",
+    "ended": "2026-11-02T01:24:18.005Z",
+    "error": null,
+    "stdout": "{\"status\": \"COMPLETE\", \"totals\": {\"files\": 82006, \"directories\": 8598, \"reparse_entries\": 10, \"logical_bytes\": 15176408706}, \"proof\": \"C:\\\\Antigravity Projects\\\\Studio Illuminati\\\\WIP\\\\Books Arranger\\\\Docs\\\\Evidence\\\\v0.24.2_2026-11-01\\\\CLEANUP-PROOF.json\", \"ready_for_sully_worktree_remove\": true}\r\n",
+    "stderr": ""
+  },
+  "helper_cleanup": {
+    "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-cleanup-20261102.py",
+    "files": 1,
+    "logical_bytes": 7653,
+    "removed": true
+  },
+  "retained_metadata": {
+    "manifest_sha256": "c945bafdec905ef02e988359dedc9781f146cb209a57d1d3a3e876b24fede8d3",
+    "runtime_pointer_sha256": "35556550e4269e3c2012864388ad1a92464b239e07cb4d54b966de432efc4187",
+    "current_build": "0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2",
+    "current_producer": "9b0b120e-81f3-454f-acf9-4ff054257e57",
+    "pair_guard_verified_after": true
+  },
+  "remaining_generated": {
+    "candidate_dist_builds": [
+      "0f85a91a-4ddf-4b50-bcf0-ca57ce000cf2"
+    ],
+    "candidate_producer_builds": [
+      "9b0b120e-81f3-454f-acf9-4ff054257e57"
+    ],
+    "candidate_cache": [
+      "builds",
+      "runtime-pointer.json"
+    ]
+  },
+  "worktree_removal_ready": true,
+  "sully_registered_worktree_cleanup": {
+    "status": "COMPLETE",
+    "roots": [
+      {
+        "root": "C:/Antigravity Projects/h/product",
+        "started_utc": "2026-11-02T01:26:51.403Z",
+        "finished_utc": "2026-11-02T01:26:51.764Z",
+        "method": "Real git worktree remove; preflight normalGitclean, exactresolvedabsolutetarget, no reparse traversal; PRODUCT removed before HOST",
+        "files": 987,
+        "directories": 17,
+        "reparse_entries": 0,
+        "logical_bytes": 18000791,
+        "absent_after": true
+      },
+      {
+        "root": "C:/Antigravity Projects/h",
+        "started_utc": "2026-11-02T01:26:51.969Z",
+        "finished_utc": "2026-11-02T01:26:52.326Z",
+        "method": "Real git worktree remove; preflight normalGitclean, exactresolvedabsolutetarget, no reparse traversal; PRODUCT removed before HOST",
+        "files": 952,
+        "directories": 16,
+        "reparse_entries": 0,
+        "logical_bytes": 17325830,
+        "absent_after": true
+      }
+    ],
+    "totals": {
+      "files": 1939,
+      "directories": 33,
+      "reparse_entries": 0,
+      "logical_bytes": 35326621
+    },
+    "unregistered_after": true,
+    "measurement": "Pre-removal lstat walk of the two ordinary exact worktree roots; PRODUCT removed first, then HOST measured without PRODUCT, preventing double count. Git registration bookkeeping outside those roots is not included."
+  },
+  "overall_totals": {
+    "files": 83946,
+    "directories": 8631,
+    "reparse_entries": 10,
+    "logical_bytes": 15211742980
+  },
+  "cleanup_completed_utc": "2026-11-02T01:27:36.243Z"
+}
