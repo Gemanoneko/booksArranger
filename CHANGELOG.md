@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.24.3] - 2026-11-02
+
+### Fixed
+
+- Preparing the first book list no longer turns a pending read into a startup failure.
+- Copy diagnostic text uses the trusted desktop bridge while general clipboard permission stays blocked.
+- Stopped startup diagnostics remain stable and selectable until a new launch.
+
 ## [v0.24.2] - 2026-11-02
 
 ### Changed

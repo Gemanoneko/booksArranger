@@ -1,6 +1,7 @@
 // Pure only: native adapters are never constructed. Every injected mutation
 // adapter records calls; unselected native operations throw.
 import test,{after} from 'node:test';
+import {tap as tapReporter} from 'node:test/reporters';
 import childProcess from 'node:child_process';
 import net from 'node:net';
 import http from 'node:http';
@@ -10,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {phaseAccounting,CANONICAL_NODE_ENTRIES,ORIGINAL_NODE_ENTRIES,PA1_ENTRY,PA1_ASSERTIONS,NATIVE_CASE,NATIVE_ROLES,hash,binding,validateAuthority,validateFunctional,normalOwned,validateNativeEvidence,nativeRecordReferences,requiresNativeQa} from '../scripts/qa-phase-contract.mjs';
+import {phaseAccounting,CANONICAL_NODE_ENTRIES,ORIGINAL_NODE_ENTRIES,PA1_ENTRY,PA1_ASSERTIONS,NATIVE_CASE,NATIVE_ROLES,hash,binding,validateAuthority,validateFunctional,readFunctionalMarker,normalOwned,validateNativeEvidence,nativeRecordReferences,requiresNativeQa} from '../scripts/qa-phase-contract.mjs';
 let nativeAttempts=0;const restore=[];
 const deny=()=>{nativeAttempts++;throw Error('Native adapter reached during pure contract tests');};
 for(const [object,names] of [[childProcess,['spawn','spawnSync','exec','execSync','execFile','execFileSync','fork']],[net,['connect','createConnection','createServer']],[http,['request','get','createServer']],[https,['request','get','createServer']]])for(const name of names){const old=object[name];restore.push(()=>object[name]=old);object[name]=deny;}
@@ -25,9 +26,9 @@ function authority(b=candidate()){return {schema:'books-native-qa-authority-v1',
 function plan(b=candidate(),a=authority(b)){return {schema:'books-real-shell-plan-v1',binding:b,case:NATIVE_CASE,deadlineMs:600000,phase_contract_sha256:b.phase_contract_sha256,fixture_root:'C:/private/pa1-'+b.build_id,evidence_root:'C:/private',source_root:'C:/source',koffi_root:'C:/owner/node_modules/koffi',node:{path:'C:/Program Files/nodejs/node.exe',sha256:'f'.repeat(64)},helper:{path:'C:/studio/.claude/skills/qa-handoff/scripts/bounded-check.mjs',sha256:'f'.repeat(64)},authority:{path:'C:/private/authority.json',sha256:hash(encoded(a)),size:encoded(a).length},trees:[{},{},{},{}],inputs:[{},{},{},{},{},{},{}],payload:{root:'C:/built'},environment:{SystemRoot:'C:/Windows',WINDIR:'C:/Windows',PATH:'C:/Program Files/nodejs;C:/Windows/System32',TEMP:'C:/private/pa1-'+b.build_id+'/home/temp',TMP:'C:/private/pa1-'+b.build_id+'/home/temp',USERPROFILE:'C:/private/pa1-'+b.build_id+'/home',APPDATA:'C:/private/pa1-'+b.build_id+'/home/roaming',LOCALAPPDATA:'C:/private/pa1-'+b.build_id+'/home/local'},expected_tray_types:{ExecutablePath:1,IsPromoted:4}};}
 function normal(out=''){return {ok:true,closed:true,outputComplete:true,code:0,signal:null,error:null,forced:false,timedOut:false,overflow:false,truncated:false,closureError:null,reason:null,native:{complete:true,zero:true,active:0,assigned:0,listed:0,unsignaled:0,retained:3,sampling:{queries:2,incompleteQueries:0}},out,err:'',ownership:'private-job'};}
 function functional(b){return {schema:'books-pa1-functional-v1',binding:b,case:NATIVE_CASE,assertions:[...PA1_ASSERTIONS],fixture_root:'C:/private/pa1-'+b.build_id,exe:'C:/private/pa1-'+b.build_id+'/app/Books Arranger.exe',downloadVerified:true,invalidInstallerRefused:true,oldEngineRecovered:true,shellStayedRunning:true,healthVersionMatched:true,closedByQuit:true,payloadUnchanged:true,endpointsOwned:true,noVisibleOwnWindow:true,intrusion:null};}
-function evidence(){
- const b=candidate(),a=authority(b),p=plan(b,a),f=functional(b),records={authority:encoded(a),plan:encoded(p),functional:encoded(f)};
- const out='# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f)+'\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n# cancelled 0\n';records.owned=encoded({...normal(out),err:'inner-only diagnostic\n'});records.stdout=Buffer.from(out);records.stderr=Buffer.from('inner-only diagnostic\n');
+function evidence({f=functional(candidate()),marker=JSON.stringify(f)}={}){
+ const b=candidate(),a=authority(b),p={...plan(b,a),fixture_root:f.fixture_root},records={authority:encoded(a),plan:encoded(p),functional:encoded(f)};
+ const out='# BOOKS_PA1_FUNCTIONAL '+marker+'\n# tests 1\n# pass 1\n# fail 0\n# skipped 0\n# cancelled 0\n';records.owned=encoded({...normal(out),err:'inner-only diagnostic\n'});records.stdout=Buffer.from(out);records.stderr=Buffer.from('inner-only diagnostic\n');
  records.postflight=encoded({schema:'books-native-postflight-v1',binding:b,unchanged:true,plan_sha256:hash(records.plan),owned_sha256:hash(records.owned)});
  records.cleanup=encoded({schema:'books-own-tray-cleanup-v1',binding:b,authority_sha256:hash(records.authority),owned_sha256:hash(records.owned),fixture_root:f.fixture_root,exe:f.exe,ownId:'42',exactNewLeaf:true,sameHandle:true,deleted:true,closed:true,absenceVerified:true,preexistingUnchanged:true,uiOrderListWritten:false,ownReferenceCount:1,ownReferenceBytes:8,uiOrderListSha256:'a'.repeat(64),partial:false,error:null});
  records.controller_owned=encoded({...normal('BOOKS_PA1_CONTROLLER '+JSON.stringify({schema:'books-pa1-controller-v1',plan_sha256:hash(records.plan),owned_sha256:hash(records.owned),cleanup_sha256:hash(records.cleanup),postflight_sha256:hash(records.postflight)})+'\n'),err:'controller-only diagnostic\n'});
@@ -60,6 +61,40 @@ test('sampling counts require safe integers and at least one completed final obs
  for(const sampling of [undefined,null,{}]){const r=normal();r.native.sampling=sampling;assert.throws(()=>normalOwned(r),/Native observation incomplete/);}
 });
 test('strict raw evidence accepts internally consistent original inner and outer owner records',()=>{const e=evidence();assert.equal(validateNativeEvidence(e.summary,e.records,e.b).passed,true);assert.equal(NATIVE_ROLES.length,12);});
+test('installed Node TAP diagnostics decode only the exact planned paths and preserve raw evidence',async()=>{
+ for(const nativeRoot of [false,true]){
+  const b=candidate(),p=plan(b),f=functional(b);
+  if(nativeRoot)p.fixture_root=p.fixture_root.replaceAll('/','\\');
+  f.fixture_root=p.fixture_root;f.exe=path.win32.join(p.fixture_root,'app','Books Arranger.exe');
+  const plain='# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f)+'\n';
+  assert.deepEqual(readFunctionalMarker(plain,p),f);
+  let output='';for await(const chunk of tapReporter([{type:'test:diagnostic',data:{nesting:0,message:plain.slice(2,-1)}}]))output+=chunk;
+  const original=Buffer.from(output),marker=output.match(/^# BOOKS_PA1_FUNCTIONAL (.+)$/m)[1];
+  assert.equal(JSON.parse(marker).exe,f.exe.replaceAll('\\','\\\\'),'actual Node reporter reproduces the original doubled-path regression');
+  assert.deepEqual(readFunctionalMarker(output,p),f);assert.deepEqual(Buffer.from(output),original);
+  const e=evidence({f,marker});assert.equal(validateNativeEvidence(e.summary,e.records,e.b).passed,true);
+  assert.equal(JSON.parse(e.records.functional).exe,f.exe);assert.equal(JSON.parse(e.records.cleanup).exe,f.exe);
+  assert.ok(e.records.stdout.includes(Buffer.from('# BOOKS_PA1_FUNCTIONAL '+marker+'\n')),'raw TAP bytes retain the original escaping');
+ }
+});
+test('functional marker rejects foreign paths, traversal, extra escaping and mixed TAP path spellings',()=>{
+ const p=plan(),f=functional(p.binding);f.exe=path.win32.join(p.fixture_root,'app','Books Arranger.exe');
+ const parse=value=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(value)+'\n',p);
+ for(const exe of ['C:/foreign/Books Arranger.exe',f.exe+'x',f.exe.replace('app','app\\..\\app'),f.exe.replace('app','app\\'),f.exe.replaceAll('\\','\\\\\\'),f.exe.replaceAll('\\','\\\\\\\\'),f.exe.replaceAll('\\','\\/')])assert.throws(()=>parse({...f,exe}),/Functional paths/);
+ for(const fixture_root of [p.fixture_root+'x',p.fixture_root+'/../'+path.win32.basename(p.fixture_root),p.fixture_root.replaceAll('/','//')])assert.throws(()=>parse({...f,fixture_root}),/Functional paths/);
+ const nativePlan={...p,fixture_root:p.fixture_root.replaceAll('/','\\')},native={...f,fixture_root:nativePlan.fixture_root};
+ for(const value of [{...native,exe:f.exe.replaceAll('\\','\\\\')},{...native,fixture_root:native.fixture_root.replaceAll('\\','\\\\')}])assert.throws(()=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(value),nativePlan),/Functional paths/);
+ for(const fixture_root of [p.fixture_root+'/../escape',p.fixture_root.replaceAll('/','//'),p.fixture_root+'/'])assert.throws(()=>readFunctionalMarker('# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f),{...p,fixture_root}),/Canonical planned fixture/);
+});
+test('decoded facts cannot retain the old doubled path or hide marker changes with rebound record hashes',()=>{
+ const f=functional(candidate());f.exe=path.win32.join(f.fixture_root,'app','Books Arranger.exe');
+ assert.throws(()=>evidence({f:{...f,exe:f.exe.replaceAll('\\','\\\\')}}),/Original functional output missing or changed/);
+ for(const change of [value=>value.downloadVerified=false,value=>value.assertions.pop(),value=>value.binding.source_head='f'.repeat(40)]){
+  const changed=structuredClone(f);change(changed);assert.throws(()=>evidence({f,marker:JSON.stringify(changed)}));
+ }
+ const marker='# BOOKS_PA1_FUNCTIONAL '+JSON.stringify(f)+'\n';
+ for(const output of ['',marker+marker,marker.replace('BOOKS_PA1_FUNCTIONAL','BOOKS_OTHER_FUNCTIONAL')])assert.throws(()=>readFunctionalMarker(output,plan()),/Exactly one/);
+});
 test('every missing or byte-changed raw evidence record refuses',()=>{for(const role of NATIVE_ROLES){const e=evidence();delete e.records[role];assert.throws(()=>validateNativeEvidence(e.summary,e.records,e.b));const f=evidence();f.records[role]=Buffer.concat([f.records[role],Buffer.from(' ')]);assert.throws(()=>validateNativeEvidence(f.summary,f.records,f.b));}});
 test('copied receipt for another candidate refuses even with valid hashes',()=>{const e=evidence(),b={...e.b,build_id:'f3a1de11-1811-4ef5-bf5c-586a70b7db9e'};assert.throws(()=>validateNativeEvidence(e.summary,e.records,b));});
 test('unsafe, duplicate and oversized record references refuse before reads',()=>{for(const alter of [s=>s.records.authority.path='../foreign',s=>s.records.authority.path=s.records.plan.path,s=>s.records.authority.size=33*1024*1024]){const e=evidence();alter(e.summary);assert.throws(()=>nativeRecordReferences(e.summary,e.b.version));}});

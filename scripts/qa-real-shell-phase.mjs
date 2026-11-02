@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
-import {hash,NATIVE_CASE,NATIVE_ROLES,normalOwned,validateFunctional,validateNativeEvidence} from './qa-phase-contract.mjs';
+import {hash,NATIVE_CASE,NATIVE_ROLES,normalOwned,readFunctionalMarker,validateNativeEvidence} from './qa-phase-contract.mjs';
 import {need,readPin,ordinary,within,validatePlan,verifyInputs,verifyRecovery,freshFixture,treeFiles,sameFileTree,nativeAdapters,ownLeafDelta,cleanupOwnLeaf} from '../tests/real-shell-update-support.mjs';
 const encode=value=>Buffer.from(JSON.stringify(value));
 async function freshWrite(file,bytes){await fs.writeFile(file,bytes,{flag:'wx'});return {path:file,sha256:hash(bytes),size:bytes.length};}
@@ -35,7 +35,7 @@ export async function runFixedPhase(planPath,planSha,deadline,adapters=null){
  const owned=await freshWrite(path.join(plan.evidence_root,'owned.json'),encode(result));
  await freshWrite(path.join(plan.evidence_root,'stdout.log'),Buffer.from(result.out||''));await freshWrite(path.join(plan.evidence_root,'stderr.log'),Buffer.from(result.err||''));
  normalOwned(result);remaining();
- const hits=[...result.out.matchAll(/^# BOOKS_PA1_FUNCTIONAL (.+)\r?$/gm)];need(hits.length===1,'Exactly one original PA-1 functional marker required');const functional=JSON.parse(hits[0][1]);validateFunctional(functional,plan.binding);
+ const functional=readFunctionalMarker(result.out,plan);
  await freshWrite(path.join(plan.evidence_root,'functional.json'),encode(functional));
  let cleanup;try{cleanup=await cleanupOwnLeaf({plan,authority,owned:result,before,adapter:native.registry,deadline});}
  catch(error){if(error.cleanup)await freshWrite(path.join(plan.evidence_root,'cleanup-failure.json'),encode(error.cleanup));throw error;}

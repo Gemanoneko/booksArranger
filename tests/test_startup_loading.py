@@ -306,5 +306,123 @@ class ConstructionTests(unittest.TestCase):
             merge.close()
 
 
+
+class ColdServePendingPageTests(unittest.TestCase):
+    """Real serve_owned/HTTP/desktop-ready with 669 private existing-style cleanup rows.
+
+    This is synthetic data, not Sergei's catalog. All source/output paths stay in
+    the fixture; external/background work is withheld while testing readiness.
+    """
+    def setUp(self):
+        from source_cleanup import setup
+        self.temp = tempfile.TemporaryDirectory(dir=AREA)
+        self.root = Path(self.temp.name)
+        self.roots = {name: str(self.root / name) for name in ('Audiobooks','Podcasts','Ebooks')}
+        for p in self.roots.values(): Path(p).mkdir()
+        self.database = self.root / 'catalog.sqlite3'
+        inventory = scanner.Inventory(self.database,self.roots)
+        seed = AudioJobs(self.database,None,lambda m:True,lambda r:True)
+        item = manifest();seed.enqueue(item)
+        with scanner.connect(self.database) as db:
+            setup(db);groups.sync(db,self.roots['Audiobooks'])
+            template=dict(db.execute('SELECT * FROM audio_jobs WHERE job_id=?',(item['job_id'],)).fetchone())
+            db.execute('DELETE FROM audio_jobs')
+            keys=list(template);sql='INSERT INTO audio_jobs('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')'
+            # Only the reported-size cold case needs 669 rows; failure/abort use the same path with three.
+            count=669 if self._testMethodName=='test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion' else 3
+            for n in range(count):
+                m=manifest();row=dict(template);row.update(job_id=m['job_id'],manifest=json.dumps(m),state='completed',stage='completed',output=json.dumps({'job_id':m['job_id'],'final_path':str(self.root/'Audiobooks'/f'{n}.m4b'),'sha256':'b'*64,'size':1,'validation':{'passed':True}}))
+                db.execute(sql,[row[k] for k in keys])
+                db.execute('INSERT INTO source_cleanup VALUES(?,?,?,?,?,?,?)',(str(uuid.uuid4()),m['job_id'],json.dumps({'job_id':m['job_id'],'manifest':{'sources':[],'root':str(self.root/'Audiobooks')},'output':json.loads(row['output'])}),'completed','',f'2026-11-02T00:00:{n:04d}',''))
+        seed.close();self.server=None;self.release=threading.Event();self.started=threading.Event();self.finished=threading.Event();self.errors=[];self.workers=0;self.background=[]
+
+    def tearDown(self):
+        self.release.set()
+        # Real status/page workers can outlive a bounded HTTP answer. Wait for
+        # these owned fixture reads before closing/removing the private catalog.
+        merge=getattr(self,'fixture_merge',None)
+        if merge is not None:
+            shared=[getattr(merge,'_status_shared',None),*merge.__dict__.get('_page_shared',{}).values()]
+            for snapshot in shared:
+                flight=getattr(snapshot,'_flight',None)
+                if flight is not None:self.assertTrue(flight['done'].wait(30),'fixture shared read did not finish')
+        if self.server and not self.finished.is_set():
+            self.server.stop_loading();self.server.shutdown()
+        if hasattr(self,'runner'):
+            self.runner.join(30);self.assertFalse(self.runner.is_alive(),'fixture serve_owned did not close')
+        self.temp.cleanup()
+
+    def start(self, failure=None):
+        from argparse import Namespace
+        from merge_service import MergeService,SharedSnapshot
+        real=web_server.BrowserServer
+        owner=self
+        def factory(inventory,cache,progress=None):
+            merge=MergeService(inventory,cache,progress=progress);self.fixture_merge=merge
+            original=merge.reviews.page
+            def page(*a,**kw):
+                owner.workers+=1;owner.started.set()
+                if not owner.release.wait(10):raise RuntimeError('fixture release not supplied')
+                if failure:raise RuntimeError(failure)
+                return original(*a,**kw)
+            merge.reviews.page=page
+            merge._page_shared={(100,0,'','converted',None):SharedSnapshot(wait=.05,keep_flight=True)}
+            merge.start_retention=lambda admission:owner.background.append('retention')
+            merge.start_published_check=lambda:owner.background.append('published')
+            return merge
+        class Server(real):
+            def __init__(self,*a,**kw):super().__init__(*a,merge_factory=factory,**kw)
+        def ready(server):
+            from desktop_backend import handler_class
+            self.server=server;server.RequestHandlerClass=handler_class(web_server.Handler,'fixture-desktop-token');server.desktop=DesktopControl(server)
+        def run():
+            try:
+                with patch.object(web_server,'BrowserServer',Server),patch.object(web_server.signal,'signal'):
+                    web_server.serve_owned(Namespace(database=str(self.database)),self.roots,0,ready)
+            except BaseException as error:self.errors.append(error)
+            finally:self.finished.set()
+        self.runner=threading.Thread(target=run,daemon=True);self.runner.start()
+        self.assertTrue(self.started.wait(60),'cold loader must reach actual shared initial page')
+
+    def call(self,route):
+        c=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=6)
+        c.request('GET',route,headers={'Host':f'127.0.0.1:{self.server.server_port}','X-Books-Token':self.server.token,'X-Books-Desktop':'fixture-desktop-token'})
+        r=c.getresponse();answer=json.loads(r.read());c.close();return r.status,answer
+
+    def test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion(self):
+        self.start();time.sleep(.15)  # beyond several shortened reader bounds, not an artificial thrown exception
+        self.assertEqual(self.errors,[])
+        self.assertEqual(self.server.loading.error,'','pending shared page is not a failed catalog')
+        self.assertFalse(self.finished.is_set())
+        self.assertFalse(self.server.loading.finished)
+        self.assertEqual((self.server.loading.done,self.server.loading.total),(669,669))
+        self.assertEqual(self.call('/api/health')[0],200)
+        code,state=self.call('/api/state?library=Audiobooks');self.assertEqual(code,200)
+        self.assertFalse(state['loading']['parts']['books'])
+        code,desktop=self.call('/api/desktop/status');self.assertEqual(code,200)
+        self.assertIsNone(desktop['busy']);self.assertFalse(desktop['loading']['parts']['books'])
+        self.assertEqual(self.workers,1);self.assertEqual(self.background,[])
+        self.release.set();self.server.loader.join(10)
+        self.assertTrue(self.server.loading.finished,self.server.loading.error)
+        self.assertEqual(self.workers,1,'retry must join the same expensive page read')
+        code,desktop=self.call('/api/desktop/status');self.assertEqual(code,200);self.assertIsInstance(desktop['loading']['took_ms'],int)
+        self.assertEqual(self.background,['retention','published'])
+        self.assertEqual(self.call('/api/inventory?library=Audiobooks&view=candidates&status=converted')[0],200)
+        self.assertEqual(self.errors,[])
+
+    def test_real_page_failure_remains_fatal_and_does_not_publish_ready(self):
+        self.start(failure='fixture real page read failed');self.release.set()
+        self.assertTrue(self.finished.wait(10))
+        self.assertEqual([str(e) for e in self.errors],['fixture real page read failed'])
+        self.assertIsInstance(self.errors[0],RuntimeError)
+        self.assertFalse(self.server.loading.finished);self.assertEqual(self.background,[])
+
+    def test_quit_during_pending_initial_page_interrupts_the_loader_without_starting_another_read(self):
+        self.start();time.sleep(.15)
+        self.assertEqual(self.server.loading.error,'')
+        self.server.stop_loading();self.release.set();self.server.loader.join(5)
+        self.assertFalse(self.server.loader.is_alive());self.assertFalse(self.server.loading.finished)
+        self.assertEqual(self.workers,1);self.assertEqual(self.background,[])
+
 if __name__ == '__main__':
     unittest.main()

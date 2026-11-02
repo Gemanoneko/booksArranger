@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('booksDesktop',Object.freeze({
  onStatus:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:status',(_event,value)=>fn(value));},
  // Startup (ruling 28): what only the shell knows for the load strip, and its Restart engine / Try again.
  startup:()=>ipcRenderer.invoke('books:startup'),
+ copyDiagnostics:(text)=>ipcRenderer.invoke('books:copy-diagnostics',text),
  onStartup:(fn)=>{if(typeof fn!=='function')return;ipcRenderer.on('books:startup',(_event,value)=>fn(value));},
  restartEngine:()=>ipcRenderer.invoke('books:restart-engine'),
  // Rulings 69 and 70: the Windows folder picker for Choose folder… (a path or null on Cancel; the engine validates it).

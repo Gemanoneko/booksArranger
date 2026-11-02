@@ -1,0 +1,215 @@
+{
+  "schema": "books-startup-clipboard-focused-v1",
+  "status": "FOCUSED_PASS_REAL_GUI_PENDING",
+  "source_base": "f6064c832ef3ff69d91d4ab94a2d7ff799b89a1d",
+  "changed_files": [
+    {
+      "path": "web_server.py",
+      "size": 110824,
+      "sha256": "620a0144ac3a2f6b49d2b0274bc5b7e3a52417e7c6b66a8d638666cec19dccb3"
+    },
+    {
+      "path": "desktop/main.js",
+      "size": 51407,
+      "sha256": "d185f9f020d353fa5fbeca6ab65dfe19b96cc67ce7e8afa9cc8ff98802b57036"
+    },
+    {
+      "path": "desktop/preload.js",
+      "size": 1766,
+      "sha256": "19da8d67c1e736c08e39d669107ee9925e1d5e4b12acde412a16b3b0686c3de1"
+    },
+    {
+      "path": "desktop/diagnostic-clipboard.js",
+      "size": 463,
+      "sha256": "ed0e4cf4b18156c2557200b548998413f2ef70923668314fbbf5d7a45e4a3b6f"
+    },
+    {
+      "path": "web/app.js",
+      "size": 512184,
+      "sha256": "a2161d3b5ad79c355c02d95122db6533879da6bf2a19840543ebad9ac05d895d"
+    },
+    {
+      "path": "web/index.html",
+      "size": 36188,
+      "sha256": "8a924761ce759786829968f58d1fb1f342fd142f1085d67f0f2b462a16ca26e4"
+    },
+    {
+      "path": "web/style.css",
+      "size": 29428,
+      "sha256": "9cb2ef76cd1d8df77cd867dcbdc2ea027c19e4bd0ccad13b5b643082372451b6"
+    },
+    {
+      "path": "tests/test_startup_loading.py",
+      "size": 24718,
+      "sha256": "86061d118d113b23d550278cf23148311b521f150d25b6352352545bd25da835"
+    },
+    {
+      "path": "tests/test_startup_frontend.js",
+      "size": 20949,
+      "sha256": "be7a0ddbe7c7837e9b328b2fb3e45bec60a1e75de0d8f9c5c0f3dc6b09a601e0"
+    },
+    {
+      "path": "tests/desktop-loading.test.mjs",
+      "size": 12225,
+      "sha256": "c4563581e88693822be8f76f849d6bb52ba1291a53390f64e82534dc9bdb8b53"
+    },
+    {
+      "path": "tests/main-startup.test.mjs",
+      "size": 25283,
+      "sha256": "3a14e34c6ab39999e7701d162d6d909ef7f7a957ea745b69eef147a8ad9a8d31"
+    }
+  ],
+  "before": {
+    "kind": "Actual user Technical details screenshots, not an agent BEFORE test run",
+    "loading_started": "2026-11-02T08:26:15.914Z",
+    "step": "books4/4",
+    "done": 669,
+    "total": 669,
+    "exit_code": 1,
+    "error": "RuntimeError: Status computation is still running",
+    "source_chain": [
+      "MergeService.cached_page -> SharedSnapshot.get reader bound4s -> StatusUnavailable",
+      "BrowserServer._load broad BaseException treats pending asfailed",
+      "serve_owned raises RuntimeError(server.loading.error)"
+    ]
+  },
+  "after": {
+    "cold_direct_ready": {
+      "cases": 3,
+      "pass": true,
+      "seconds": 18.815,
+      "callback_error": null,
+      "owned": {
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "native_retained": 4,
+        "complete_zero": true,
+        "incomplete_queries": 0
+      }
+    },
+    "existing_startup": {
+      "cases": 9,
+      "pass": true,
+      "seconds": 1.797,
+      "callback_error": null,
+      "owned": {
+        "code": 0,
+        "closed": true,
+        "forced": false,
+        "timedOut": false,
+        "native_retained": 4,
+        "complete_zero": true,
+        "incomplete_queries": 0
+      },
+      "original_callback": {
+        "error": null,
+        "stdout": "{\"code\":0,\"closed\":true,\"forced\":false,\"timedOut\":false,\"native\":{\"active\":0,\"assigned\":0,\"listed\":0,\"retained\":4,\"unsignaled\":0,\"complete\":true,\"zero\":true,\"sampling\":{\"queries\":151,\"incompleteQueries\":0,\"firstIncomplete\":null,\"lastIncomplete\":null}}}\n",
+        "stderr": "",
+        "ended": "2026-11-02T09:09:36.805Z"
+      }
+    },
+    "renderer_script": {
+      "pass": true,
+      "covers": [
+        "Stopped diagnostic text/DOM writes frozen across ticks",
+        "selection preserved",
+        "Copydetails uses desktop bridge",
+        "Retry changesgeneration and clearsoldtrace"
+      ]
+    },
+    "desktop_loading": {
+      "cases": 7,
+      "pass": true
+    },
+    "actual_main_module_bridge": {
+      "cases": 1,
+      "pass": true,
+      "electron": "mock Electron; real main handler andtrustedSender executed",
+      "generic_clipboard_permission": "stilldenied",
+      "OS_clipboard_written": false,
+      "result": {
+        "status": 0,
+        "stdout": "✔ diagnostic copy reaches the actual main handler only for the app while generic clipboard permission stays denied (60.3913ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 461.8168\n",
+        "stderr": ""
+      }
+    },
+    "syntax": {
+      "JavaScript_files": 4,
+      "pass": true,
+      "Python_AST": true
+    },
+    "cold_authenticated_http": {
+      "cases": 3,
+      "pass": true,
+      "seconds": 25.473,
+      "coverage": [
+        "Real serve_owned with actual authenticated desktop handler_class",
+        "669-row cold startup staysloading whileoneSharedSnapshot pageworker ispending",
+        "HTTPhealth/API/desktopstatus remainresponsive, thenactualready took_ms published",
+        "Realunderlyingpageerror remainsfatalRuntimeError",
+        "Quitinterruptspendingloaderwithoutduplicatepageworker"
+      ],
+      "original_callback": {
+        "error": null,
+        "stdout": "{\"code\":0,\"closed\":true,\"forced\":false,\"timedOut\":false,\"native\":{\"active\":0,\"assigned\":0,\"listed\":0,\"retained\":4,\"unsignaled\":0,\"complete\":true,\"zero\":true,\"sampling\":{\"queries\":1657,\"incompleteQueries\":0,\"firstIncomplete\":null,\"lastIncomplete\":null}}}\n",
+        "stderr": "",
+        "ended": "2026-11-02T09:17:48.878Z"
+      },
+      "owned": {
+        "code": 0,
+        "closed": true,
+        "outputComplete": true,
+        "forced": false,
+        "timedOut": false,
+        "reason": null,
+        "closureError": null,
+        "native": {
+          "active": 0,
+          "assigned": 0,
+          "listed": 0,
+          "retained": 4,
+          "unsignaled": 0,
+          "complete": true,
+          "zero": true,
+          "sampling": {
+            "queries": 1657,
+            "incompleteQueries": 0,
+            "firstIncomplete": null,
+            "lastIncomplete": null
+          }
+        }
+      },
+      "unittest_output": "test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion (test_startup_loading.ColdServePendingPageTests.test_cold_669_row_startup_keeps_one_pending_page_worker_and_publishes_ready_only_after_completion) ... ok\r\ntest_quit_during_pending_initial_page_interrupts_the_loader_without_starting_another_read (test_startup_loading.ColdServePendingPageTests.test_quit_during_pending_initial_page_interrupts_the_loader_without_starting_another_read) ... ok\r\ntest_real_page_failure_remains_fatal_and_does_not_publish_ready (test_startup_loading.ColdServePendingPageTests.test_real_page_failure_remains_fatal_and_does_not_publish_ready) ... Books Arranger could not load the catalog: fixture real page read failed\r\nok\r\n\r\n----------------------------------------------------------------------\r\nRan 3 tests in 25.473s\r\n\r\nOK\r\n"
+    }
+  },
+  "fixture": {
+    "provenance": "Synthetic private catalog; NOT a copy of usercatalog",
+    "populated_case": "669 completed audio_jobs/source_cleanup rows; real Inventory/MergeService/SharedSnapshot/serve_owned, private local roots only",
+    "negative_cases": "Three rows; same real first-page worker path",
+    "delay": "Event-gated original reviews.page with50ms SharedSnapshot readerwait; production4.0s unchanged",
+    "external_work": "Background external workers withheld; no actual audio orZ references",
+    "HTTP": "Loopback health/API and authenticated desktop status via actual handler_class",
+    "signal": "Only signal.signal mocked because serve_owned runs on fixture thread"
+  },
+  "remaining": [
+    "ActualElectron clipboardreadback andCtrl+C/selectability withuserfocusapproval whenready",
+    "No packagedbuild/fullentry/release claim"
+  ],
+  "scope_exclusions_preserved": [
+    "NoStoppedcommandgating/ruling35change",
+    "No persistentlogging/newpanels",
+    "No guard/version/build/Git/userapp changes"
+  ],
+  "raw_logs_active": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup",
+  "transport_failures": "Initial import/tooltimeout and fixture errors remain failures; none counted asapplication BEFORE repro",
+  "clipboard_bound": "65536 JavaScript UTF-16 code units; trusted app sender only; generic permissiondeny unchanged",
+  "cleanup": {
+    "removed_failed_synthetic_fixture_directories": [
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/startup-loading-tests/tmpqh7oxngw",
+      "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scratch/startup-loading-tests/tmp_t34h270"
+    ],
+    "active_evidence_only": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-startup"
+  }
+}

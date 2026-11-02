@@ -136,3 +136,15 @@ test('Cancel update: the line is written at the press, and the button stays with
  assert.equal(p.byId.shutdown.title, 'The update is being cancelled. Quit works when it finishes.');
  answered && answered(true);
 });
+
+// The real preload API reaches the bounded, trusted main-process route; no OS clipboard is written here.
+test('startup diagnostic copy uses the preload/main bridge and refuses foreign or oversized requests',async()=>{
+ const {createRequire}=await import('node:module');const require=createRequire(import.meta.url);
+ const {register}=require('../desktop/diagnostic-clipboard.js'),handlers=new Map(),writes=[];let trusted='app',api;
+ register({ipcMain:{handle:(topic,fn)=>handlers.set(topic,fn)},clipboard:{writeText:text=>writes.push(text)},sender:()=>trusted});
+ const ipcRenderer={invoke:async(topic,...args)=>handlers.get(topic)({},...args)};
+ vm.runInNewContext(fs.readFileSync(new URL('../desktop/preload.js',import.meta.url),'utf8'),{require:name=>{assert.equal(name,'electron');return {contextBridge:{exposeInMainWorld:(name,value)=>{assert.equal(name,'booksDesktop');api=value;}},ipcRenderer};}});
+ const text='Engine exit code: 1\nRuntimeError: Status computation is still running';assert.equal(await api.copyDiagnostics(text),true);assert.deepEqual(writes,[text]);
+ trusted='setup';await assert.rejects(api.copyDiagnostics(text),/unavailable/);trusted='app';
+ await assert.rejects(api.copyDiagnostics('x'.repeat(65537)),/too long/);await assert.rejects(api.copyDiagnostics({text}),/invalid/);assert.deepEqual(writes,[text]);
+});

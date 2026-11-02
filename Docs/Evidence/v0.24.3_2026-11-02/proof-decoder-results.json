@@ -1,0 +1,189 @@
+{
+  "schema": "books-targeted-proof-decoder-results-v1",
+  "scope": "TARGETED checks only; not a full QA entry or native application proof",
+  "target_version": "0.24.3",
+  "recorded_date": "2026-11-02",
+  "source_node_version": "v26.13.0",
+  "source_hashes": {
+    "scripts/qa-phase-contract.mjs": "6e647bf7486c127ab68367b61596e13bb1d7d94937ac6d8064820df82817a2ee",
+    "scripts/qa-real-shell-phase.mjs": "3d86c325c29962d7c6609ab43c771db6c3b53321a27d9df502346c5b08f6eb68",
+    "tests/real-shell-update-contract.test.mjs": "7b2cb32732f8ef1b3713054d6cef448902731432a88d906c2b50d194d9caaaa9"
+  },
+  "phase_contract_sha256": "6e647bf7486c127ab68367b61596e13bb1d7d94937ac6d8064820df82817a2ee",
+  "execution": {
+    "cwd": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger",
+    "node": "C:/Program Files/nodejs/node.exe",
+    "owner_module": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+    "koffi_root": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi",
+    "total_deadline_ms": 600000,
+    "original_callback": {
+      "done": true,
+      "error": null,
+      "stdout": "contracts: PASS\nsyntax-0: PASS\nsyntax-1: PASS\nsyntax-2: PASS\n",
+      "stderr": ""
+    },
+    "checks": [
+      {
+        "name": "contracts",
+        "args": [
+          "--test",
+          "--test-reporter=tap",
+          "tests/real-shell-update-contract.test.mjs",
+          "tests/release-contract.test.mjs",
+          "tests/release-flow.test.mjs"
+        ],
+        "outcome": "PASS",
+        "tests": 92,
+        "passed": 92,
+        "failed": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "original_receipt_sha256": "b5e7e7893646cbca3003cd1fd1c12b81826d6a08b18a5b399d994cc08a928556",
+        "captured_normal_owned_fields": {
+          "ok": true,
+          "code": 0,
+          "closed": true,
+          "outputComplete": true,
+          "forced": false,
+          "timedOut": false,
+          "native": {
+            "active": 0,
+            "assigned": 0,
+            "listed": 0,
+            "retained": 7,
+            "unsignaled": 0,
+            "complete": true,
+            "zero": true,
+            "sampling": {
+              "queries": 284,
+              "incompleteQueries": 0,
+              "firstIncomplete": null,
+              "lastIncomplete": null
+            }
+          }
+        }
+      },
+      {
+        "name": "syntax-0",
+        "args": [
+          "--check",
+          "scripts/qa-phase-contract.mjs"
+        ],
+        "outcome": "PASS",
+        "original_receipt_sha256": "d0db8fff73fa69ec86cb1222225e797d71627aa0ef1afde5621cf79027216ddf",
+        "captured_normal_owned_fields": {
+          "ok": true,
+          "code": 0,
+          "closed": true,
+          "outputComplete": true,
+          "forced": false,
+          "timedOut": false,
+          "native": {
+            "active": 0,
+            "assigned": 0,
+            "listed": 0,
+            "retained": 4,
+            "unsignaled": 0,
+            "complete": true,
+            "zero": true,
+            "sampling": {
+              "queries": 11,
+              "incompleteQueries": 0,
+              "firstIncomplete": null,
+              "lastIncomplete": null
+            }
+          }
+        }
+      },
+      {
+        "name": "syntax-1",
+        "args": [
+          "--check",
+          "scripts/qa-real-shell-phase.mjs"
+        ],
+        "outcome": "PASS",
+        "original_receipt_sha256": "2ddf843534b96b7830cf5b938d3f1b723df45258b9ad4c8054439f44c248e6a7",
+        "captured_normal_owned_fields": {
+          "ok": true,
+          "code": 0,
+          "closed": true,
+          "outputComplete": true,
+          "forced": false,
+          "timedOut": false,
+          "native": {
+            "active": 0,
+            "assigned": 0,
+            "listed": 0,
+            "retained": 4,
+            "unsignaled": 0,
+            "complete": true,
+            "zero": true,
+            "sampling": {
+              "queries": 12,
+              "incompleteQueries": 0,
+              "firstIncomplete": null,
+              "lastIncomplete": null
+            }
+          }
+        }
+      },
+      {
+        "name": "syntax-2",
+        "args": [
+          "--check",
+          "tests/real-shell-update-contract.test.mjs"
+        ],
+        "outcome": "PASS",
+        "original_receipt_sha256": "6fb059da2790197225b1879f2fa52ce375c9a5eee7b9f3ae3a13311ee92f1ff8",
+        "captured_normal_owned_fields": {
+          "ok": true,
+          "code": 0,
+          "closed": true,
+          "outputComplete": true,
+          "forced": false,
+          "timedOut": false,
+          "native": {
+            "active": 0,
+            "assigned": 0,
+            "listed": 0,
+            "retained": 4,
+            "unsignaled": 0,
+            "complete": true,
+            "zero": true,
+            "sampling": {
+              "queries": 12,
+              "incompleteQueries": 0,
+              "firstIncomplete": null,
+              "lastIncomplete": null
+            }
+          }
+        }
+      }
+    ]
+  },
+  "regression_evidence": {
+    "test": "installed Node TAP diagnostics decode only the exact planned paths and preserve raw evidence",
+    "method": "The actual installed node:test/reporters tap reporter rendered functional JSON as a diagnostic. JSON.parse of that marker reproduced doubled executable backslashes. The shared reader restored exact planned paths for slash and native fixture-root spellings; the complete 12-record evidence validator passed while raw stdout stayed unchanged.",
+    "negative_cases": [
+      "foreign executable and fixture paths",
+      "traversal and extra separators",
+      "triple or quadruple backslashes",
+      "mixed plain/TAP path spellings",
+      "old doubled structured executable despite coherent rehashed records",
+      "changed required functional facts or source binding",
+      "missing or duplicate functional markers"
+    ]
+  },
+  "evidence_retention": {
+    "raw_scratch_already_removed": true,
+    "standalone_raw_receipts_retained": false,
+    "removed_path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261102-proof-decoder",
+    "removed_file_count": 13,
+    "provenance": "Compact results transcribed from actual captured tool output and the retained in-session callback. Receipt SHA256 values identify the original now-removed receipt bytes; this JSON is not a replacement raw receipt. No checks were rerun to create this record."
+  },
+  "remaining_gates": [
+    "Code review of the changed source",
+    "Normal QA entry and fresh candidate-bound native application proof using the new phase-contract fingerprint"
+  ],
+  "unchanged_prior_proof": "The 0.24.2 native proof and frozen compatibility implementation were not modified or rebound."
+}

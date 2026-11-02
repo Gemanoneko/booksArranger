@@ -4,7 +4,7 @@
 // Close button: hide to the tray, work continues. Quit (tray): the book in progress
 // finishes, nothing new starts, the backend exits, then the shell exits.
 
-const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ipcMain, clipboard } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -734,6 +734,7 @@ ipcMain.handle('books:setup',event=>{if(trustedSender(event)!=='setup')throw new
 ipcMain.handle('books:browse',async event=>{if(trustedSender(event)!=='setup')throw new Error('Setup is unavailable');const result=await dialog.showOpenDialog(setupWindow,{title:'Choose data folder',properties:['openDirectory','createDirectory']});return result.canceled?null:result.filePaths[0];});
 // Rulings 69 and 70: Choose folder… on a book row, answered to the app window only (folder-picker.js).
 require('./folder-picker').register({ipcMain,dialog,sender:trustedSender,window:()=>state.win});
+require('./diagnostic-clipboard').register({ipcMain,clipboard,sender:trustedSender});
 ipcMain.handle('books:select',async(event,choice)=>{
   if(trustedSender(event)!=='setup'||state.backend)throw new Error('Catalog selection is unavailable');
   if(!choice||Object.keys(choice).sort().join(',')!=='folder,mode'||typeof choice.folder!=='string'||!path.isAbsolute(choice.folder)||!['existing','new'].includes(choice.mode))throw new Error('Choose an absolute data folder');

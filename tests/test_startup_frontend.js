@@ -14,7 +14,7 @@ function harness({protocol='http:',desktop=true}={}){
   function make(id='',tag='div'){
     let text='';const attributes=new Map(),classes=new Set();
     const element={id,tagName:tag.toUpperCase(),value:id==='library'?'Audiobooks':'',hidden:false,disabled:false,title:'',dataset:{},style:{},children:[],handlers:{},readOnly:false,
-      get textContent(){return text;},set textContent(value){text=String(value);},
+      get textContent(){return text;},set textContent(value){text=String(value);this.textWrites=(this.textWrites||0)+1;this.selection='';},
       addEventListener(type,fn){this.handlers[type]=fn;},
       setAttribute(name,value){attributes.set(name,String(value));},getAttribute(name){return attributes.has(name)?attributes.get(name):null;},
       hasAttribute(name){return attributes.has(name);},removeAttribute(name){attributes.delete(name);},
@@ -38,8 +38,8 @@ function harness({protocol='http:',desktop=true}={}){
   // M3 (Judy's implementation check): the book list's body is busy while the books part is missing; <body> never is,
   // so the live regions under it (#load-announce) are not held while loading.
   const body=make('body');node('inventory').setAttribute('aria-busy','true');
-  let answer=null,mode='answer',calls={state:0,inventory:0},startupListener=null,restarts=0;
-  const shell={startup:async()=>startupValue,onStartup:fn=>{startupListener=fn;},restartEngine:async()=>{restarts++;return true;}};
+  let answer=null,mode='answer',calls={state:0,inventory:0},startupListener=null,restarts=0,copies=[];
+  const shell={copyDiagnostics:async text=>{copies.push(text);return true;},startup:async()=>startupValue,onStartup:fn=>{startupListener=fn;},restartEngine:async()=>{restarts++;return true;}};
   let startupValue={phase:'launching',startedAt:clock-500,lastLoadMs:99000,exited:null,portPid:null};
   const response=(value,ok=true,status=200)=>({ok,status,json:async()=>value});
   class FakeDate extends Date{static now(){return clock;}}
@@ -61,7 +61,7 @@ function harness({protocol='http:',desktop=true}={}){
   return {node,body,context,calls,segments,press,
     get clock(){return clock;},advance(ms){clock+=ms;vm.runInContext('loadTick()',context);},jump(ms){clock+=ms;},
     set answer(value){answer=value;},set mode(value){mode=value;},
-    get restarts(){return restarts;},
+    get restarts(){return restarts;},get copies(){return copies;},
     startup(value){startupValue={...startupValue,...value};startupListener?.(startupValue);},
     poll:()=>vm.runInContext('poll()',context),run:code=>vm.runInContext(code,context)};
 }
@@ -185,6 +185,21 @@ const digitFree=(h,ids)=>{for(const id of ids)assert.doesNotMatch(h.node(id).tex
     const h=harness({desktop:false});await flush();
     const value=answerWith(loading({parts:ALL}));delete value.loading;h.answer=value;await h.poll();await flush();
     assert.equal(h.node('load-strip').hidden,true);assert.equal(h.node('start').getAttribute('aria-disabled'),null);
+  }
+  // Stopped diagnostics are copied through the native bridge, survive ticks/selection, and reset on Retry.
+  {
+    const h=harness();await flush();
+    h.answer=answerWith(loading({step:'books',n:4,done:669,total:669}));await h.poll();
+    h.startup({phase:'stopped',exited:{code:1,lastLines:'Status computation is still running'}});
+    const pre=h.node('load-technical'),text=pre.textContent,writes=pre.textWrites;pre.selection='selected diagnostic';
+    h.advance(5000);h.advance(1000);
+    assert.equal(pre.textContent,text,'stopped ages must not rewrite the diagnostic');
+    assert.equal(pre.textWrites,writes,'selection must survive a load-strip tick');assert.equal(pre.selection,'selected diagnostic');
+    await h.node('load-copy').handlers.click();assert.deepEqual(h.copies,[text]);assert.equal(h.node('load-copy-status').textContent,'Copied.');
+    await h.node('load-retry').handlers.click();assert.equal(h.restarts,1);
+    h.startup({phase:'launching',startedAt:h.clock+1,exited:null});
+    h.startup({phase:'stopped',exited:{code:2,lastLines:'new launch error'}});
+    assert.match(pre.textContent,/new launch error/);assert.doesNotMatch(pre.textContent,/Status computation is still running/);
   }
   console.log('PASS startup: first frame, states from silence, parts withheld, inert controls, Stopped, restart_safe, settle');
 })().catch(error=>{console.error(error);process.exitCode=1;});

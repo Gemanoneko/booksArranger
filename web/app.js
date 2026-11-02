@@ -221,6 +221,7 @@ const NOT_YET_BOOKS='Not yet: your books are still loading. This works as soon a
 const NOT_YET_LIBRARY='Not yet: Books Arranger is still loading. You can switch library when loading finishes.';
 const NOT_SAFE='Not safe right now: the engine is changing the catalog. Wait for it to finish.';
 let loadingActive=!!LS,loadTracker=LS?LS.createTracker(Date.now()):null,loadAnswer=null,shellStartup=null,loadVerdict='working',loadStep='',loadReadyMs=null;
+let stoppedTechnical=null;
 const notYetSentences=new Set([NOT_YET,NOT_YET_BOOKS,NOT_YET_LIBRARY,NOT_SAFE]);
 // A part of the engine's answer that has arrived (an engine without a loading object has them all).
 function partReady(name,answer=state){return !LS || (!!answer && LS.part(answer,name));}
@@ -232,6 +233,7 @@ function applyStartup(value){
   if(!LS || !value || typeof value!=='object')return;
   const fresh=!shellStartup || value.startedAt!==shellStartup.startedAt;
   const wasStopped=loadStopped();shellStartup=value;
+  if(fresh)stoppedTechnical=null;
   if(fresh && value.phase==='launching')loadTracker.restart(value.startedAt);
   else if(fresh)loadTracker.launchedAt=value.startedAt;
   if(!wasStopped && loadStopped() && loadingActive)announceLoad('Books Arranger stopped loading. Try again is available.');
@@ -284,7 +286,12 @@ function renderLoad(){
   $('load-restart').hidden=!(stuck && !stopped && shellApi);$('load-retry').hidden=!(stopped && shellApi);
   const unsafe=loading?.restart_safe===false;
   $('load-restart').setAttribute('aria-disabled',unsafe?'true':'false');$('load-restart').title=unsafe?NOT_SAFE:'Stop the engine and start it again. Loading starts over. Your files are not touched.';
-  if(actions)setText('load-technical',loadTechnical(verdict));
+  if(actions){
+    // A stopped engine cannot update its diagnostics. Keep the same text node
+    // while it is selected; ticking ages used to clear Ctrl+C's selection.
+    if(stopped && stoppedTechnical===null)stoppedTechnical=loadTechnical(verdict);
+    setText('load-technical',stopped?stoppedTechnical:loadTechnical(verdict));
+  }
   // Announcements: events only (a step starts, Stuck, moving again, Stopped); Waiting is not announced.
   const stepKey=`${step.n}/${step.of}/${step.id}`;
   if(stepKey!==loadStep && !stopped){if(loadStep)announceLoad(`Step ${step.n} of ${step.of}: ${step.words}.`);loadStep=stepKey;}
@@ -379,6 +386,12 @@ function refuseInert(event){
   event.preventDefault();event.stopImmediatePropagation();
   if(event.type!=='mousedown' || element.tagName==='SELECT')message(element.title);
 }
+async function copyDiagnosticText(text){
+  if(shellApi?.copyDiagnostics)return shellApi.copyDiagnostics(text);
+  const clipboard=globalThis.navigator?.clipboard;
+  if(!clipboard?.writeText)throw Error('no clipboard');
+  return clipboard.writeText(text);
+}
 async function restartFromStrip(button){
   if(button.getAttribute('aria-disabled')==='true'){message(button.title);return;}
   announceLoad('Restarting the engine.');
@@ -388,7 +401,7 @@ if(LS && $('load-strip')){
   $('load-restart').addEventListener('click',()=>restartFromStrip($('load-restart')));
   $('load-retry').addEventListener('click',()=>restartFromStrip($('load-retry')));
   $('load-copy').addEventListener('click',async()=>{
-    try{const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw Error('no clipboard');await clipboard.writeText($('load-technical').textContent || '');setText('load-copy-status','Copied.');}
+    try{await copyDiagnosticText($('load-technical').textContent || '');setText('load-copy-status','Copied.');}
     catch{setText('load-copy-status',"Couldn't copy. Select the text and press Ctrl+C.");}
   });
   for(const type of ['click','mousedown','keydown'])globalThis.document?.addEventListener?.(type,refuseInert,true);
@@ -4789,7 +4802,7 @@ $('attention-shortcut').addEventListener('click',()=>{
 });
 $('copy-technical').addEventListener('click',async()=>{
   const text=$('automatic-technical').textContent || '';
-  try{const clipboard=globalThis.navigator?.clipboard;if(!clipboard?.writeText)throw Error('no clipboard');await clipboard.writeText(text);setText('copy-technical-status','Copied.');}
+  try{await copyDiagnosticText(text);setText('copy-technical-status','Copied.');}
   catch(error){setText('copy-technical-status',"Couldn't copy. Select the text and press Ctrl+C.");}  // 0.22.0 review A1d
 });
 

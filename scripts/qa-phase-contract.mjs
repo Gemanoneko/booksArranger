@@ -1,5 +1,6 @@
 // Pure, fixed QA phase and evidence contracts. No process or registry operations.
 import {createHash} from 'node:crypto';
+import path from 'node:path';
 export const PA1_ENTRY='tests/real-shell-update.test.mjs';
 export const PA1_TITLE='PA-1: in the real shell, an installer that cannot start keeps the app running; the old engine starts again';
 export const ORIGINAL_NODE_ENTRIES=Object.freeze([
@@ -75,6 +76,20 @@ export function validateFunctional(value,expected){
  for(const k of ['downloadVerified','invalidInstallerRefused','oldEngineRecovered','shellStayedRunning','healthVersionMatched','closedByQuit','payloadUnchanged','endpointsOwned','noVisibleOwnWindow'])need(value[k]===true,'PA-1 functional proof missing: '+k);
  need(value.intrusion===null&&typeof value.fixture_root==='string'&&typeof value.exe==='string','PA-1 private invocation proof missing');return value;
 }
+// Node's TAP reporter doubles diagnostic backslashes after JSON serialization.
+// Decode only the plan's exact path spellings; never unescape arbitrary JSON or
+// normalize an observed path (which could hide traversal or extra separators).
+export function readFunctionalMarker(output,plan){
+ const markers=[...output.matchAll(/^# BOOKS_PA1_FUNCTIONAL (.+)\r?$/gm)];need(markers.length===1,'Exactly one original PA-1 functional marker required');
+ const value=JSON.parse(markers[0][1]),root=plan.fixture_root;
+ need(typeof root==='string'&&/^C:[\\/]/i.test(root)&&!/[\0\r\n]/.test(root)&&!/[. ]([\\/]|$)/.test(root)&&!root.slice(2).includes(':')&&!/[\\/]$/.test(root)&&root.replaceAll('\\','/')===path.win32.normalize(root).replaceAll('\\','/'),'Canonical planned fixture path required');
+ const exe=path.win32.join(root,'app','Books Arranger.exe'),slashExe=exe.replaceAll('\\','/'),doubled=text=>text.replaceAll('\\','\\\\');
+ const plain=value.fixture_root===root&&(value.exe===exe||value.exe===slashExe);
+ const tap=value.fixture_root===doubled(root)&&value.exe===doubled(exe);
+ need(plain||tap,'Functional paths differ from the exact planned fixture');
+ if(!plain){value.fixture_root=root;value.exe=exe;}
+ return validateFunctional(value,plan.binding);
+}
 export const NATIVE_ROLES=Object.freeze(['authority','plan','owned','controller_owned','callback','stdout','stderr','controller_stdout','controller_stderr','functional','postflight','cleanup']);
 export function nativeEvidencePath(version){requiresNativeQa(version);return 'Docs/BooksArranger_NativeQA_v'+version+'.json';}
 export function nativeEvidenceReportHash(text){const m=[...text.matchAll(/^Native QA evidence SHA256:\s*([a-f0-9]{64})\s*$/gm)];need(m.length===1,'Exact native QA evidence hash missing or ambiguous');return m[0][1];}
@@ -93,7 +108,7 @@ export function validateNativeEvidence(summary,records,expected){
  need(Buffer.from(records.controller_stdout).toString('utf8')===controller.out&&Buffer.from(records.controller_stderr).toString('utf8')===controller.err,'Original controller output differs');
  need(Buffer.from(records.stdout).toString('utf8')===owned.out&&Buffer.from(records.stderr).toString('utf8')===owned.err,'Original owned output differs');
  need(/^# tests 1\r?$/m.test(owned.out)&&/^# pass 1\r?$/m.test(owned.out)&&/^# fail 0\r?$/m.test(owned.out)&&/^# skipped 0\r?$/m.test(owned.out)&&/^# cancelled 0\r?$/m.test(owned.out),'Exact mandatory PA-1 execution missing');
- const markers=[...owned.out.matchAll(/^# BOOKS_PA1_FUNCTIONAL (.+)\r?$/gm)];need(markers.length===1&&same(JSON.parse(markers[0][1]),decoded.functional),'Original functional output missing or changed');validateFunctional(decoded.functional,expected);
+ need(same(readFunctionalMarker(owned.out,plan),decoded.functional),'Original functional output missing or changed');validateFunctional(decoded.functional,expected);
  const controllerMarkers=[...controller.out.matchAll(/^BOOKS_PA1_CONTROLLER (.+)\r?$/gm)];need(controllerMarkers.length===1,'Original controller marker missing');const control=JSON.parse(controllerMarkers[0][1]);need(control.schema==='books-pa1-controller-v1'&&control.plan_sha256===summary.records.plan.sha256&&control.owned_sha256===summary.records.owned.sha256&&control.cleanup_sha256===summary.records.cleanup.sha256&&control.postflight_sha256===summary.records.postflight.sha256,'Controller output does not bind native records');
  const post=decoded.postflight;sameBinding(post.binding,expected);need(post.schema==='books-native-postflight-v1'&&post.unchanged===true&&post.plan_sha256===summary.records.plan.sha256&&post.owned_sha256===summary.records.owned.sha256,'Native input/payload postflight missing');
  const cleanup=decoded.cleanup;sameBinding(cleanup.binding,expected);need(cleanup.schema==='books-own-tray-cleanup-v1'&&cleanup.authority_sha256===summary.records.authority.sha256&&cleanup.owned_sha256===summary.records.owned.sha256,'Cleanup authority/owner mismatch');

@@ -341,7 +341,18 @@ class BrowserServer(ThreadingHTTPServer):
             loading.checkpoint()
             pager = getattr(merge, 'cached_page', None)
             if callable(pager):
-                pager(100, 0, '', 'converted')
+                # Poll readers may time out while the one shared first-page read
+                # still runs. Pending work is not a failed catalog load.
+                while True:
+                    loading.checkpoint()
+                    try:
+                        pager(100, 0, '', 'converted')
+                        break
+                    except StatusUnavailable:
+                        # cached_page joins its existing single flight; do not
+                        # rebuild the service/status or start another reader.
+                        if loading.abort.wait(.1):
+                            loading.checkpoint()
             loading.ready('books')
             loading.checkpoint()
             # Background work (recovery retention, series and optional-field lookups, the published-book check) starts

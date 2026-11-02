@@ -34,7 +34,7 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
  fs.writeFileSync(path.join(resources, 'backend', 'web', 'index.html'), '<!doctype html><title>Books Arranger</title>');
  fs.copyFileSync(path.resolve(path.dirname(MAIN), '../web/load-state.js'), path.join(resources, 'backend', 'web', 'load-state.js'));
  const port = await freePort();
- const log = { windows: [], trays: [], errors: [], exits: [], spawns: [], sends: [] };
+ const log = { windows: [], trays: [], errors: [], exits: [], spawns: [], sends: [], clipboard: [] };
  const handlers = {}, appEvents = {};
  class BrowserWindow extends EventEmitter {
   constructor(options) {
@@ -59,8 +59,8 @@ async function boot({ setup = false, flags = ['--show-inactive'], lock = true, u
   // Electron's app.quit(): before-quit first; the quit goes ahead unless a handler prevented it.
   quit() { const event = { prevented: false, preventDefault() { this.prevented = true; } }; log.quits = (log.quits || 0) + 1; if (appEvents['before-quit']) appEvents['before-quit'](event); if (!event.prevented) log.exits.push(0); } };
  const electron = { app, BrowserWindow, Tray, Menu: { buildFromTemplate: (items) => items }, dialog: { showErrorBox: (...args) => log.errors.push(args), showMessageBox: async () => ({ response: 1 }) },
-  nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, session: { defaultSession: { setPermissionRequestHandler() {} } }, shell: { openExternal() {}, showItemInFolder() {} },
-  ipcMain: { handle: (name, fn) => { handlers[name] = fn; } } };
+  nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, session: { defaultSession: { setPermissionRequestHandler(fn) { log.permissionHandler=fn; } } }, shell: { openExternal() {}, showItemInFolder() {} },
+  clipboard: { writeText: text=>log.clipboard.push(text) }, ipcMain: { handle: (name, fn) => { handlers[name] = fn; } } };
  const updater = updaterLike ? updaterLike(app) : Object.assign(new EventEmitter(), { setFeedURL() {}, checkForUpdates: async () => ({}) });
  log.updater = updater;
  let pids = 7000;
@@ -343,4 +343,14 @@ test('m-12: --quit sent to the first-run form ends it after the second copy has 
   await until(() => t.log.exits.length, 3000, 'the exit');
   assert.deepEqual(t.log.exits, [0]);
  } finally { await t.close(); }
+});
+
+test('diagnostic copy reaches the actual main handler only for the app while generic clipboard permission stays denied',async()=>{
+ const t=await boot();try{
+  await until(()=>t.log.windows[0]?.loads.length,3000,'first app frame');
+  const text='Engine exit code: 1\nRuntimeError: Status computation is still running';
+  assert.equal(t.invoke('books:copy-diagnostics',text),true);assert.deepEqual(t.log.clipboard,[text]);
+  let allowed=null;t.log.permissionHandler({},'clipboard-sanitized-write',value=>allowed=value);assert.equal(allowed,false);
+  assert.throws(()=>t.handlers['books:copy-diagnostics']({sender:{getURL:()=>t.firstFrame}},text),/Unknown desktop control sender/);assert.deepEqual(t.log.clipboard,[text]);
+ }finally{await t.close();}
 });
