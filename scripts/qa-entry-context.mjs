@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Assembles one protocol-2 entry-check context for the qa-handoff entry check (Futaba's and Ender's identical receipt).
+// Assembles one protocol-3 entry-check context for the qa-handoff entry check (Futaba's and Ender's identical receipt).
 // Replaces scripts/qa-context-assembly.py and -v2.py (their roots were fixed to runs that no longer exist) and the 0.21.2
 // to 0.22.0 one-off copies (Docs/assemble-entry-0212.mjs), with Senua's v0.21.2 addendum fixed:
 //   E1  the wrapper that runs the check is generated into harness/ (the harness digest covers it) and sets the runtime
@@ -174,7 +174,7 @@ export async function assemble(options,{node=process.execPath,log=console.log,gi
     shell:await exe('shell','C:\\Windows\\System32\\cmd.exe'),npmShim:await exe('npmShim',path.join(NODE_DIR,'npm.cmd')),
     manifests,git:gitPin,koffiRoot:path.join(Q,'ownership','node_modules','koffi')};
   const tooling=[];for(const name of CORE)tooling.push({path:name,sha256:await fileSha(path.join(options.checker,name))});
-  const context={schema:2,deadlineMs:600000,ownership:'private-job-or-process-group',
+  const context={schema:3,deadlineMs:900000,ownership:'private-job-or-process-group',
     source:{repo:W,root:sourceRoot,head:HEAD,dirty:'N',manifest:sourceRef},
     harness:{root:harnessRoot,manifest:harnessRef},runtime,tooling:{files:tooling},
     execution:{runRootParent:Q,requiredFreePorts:[options.port],auditedNodes}};

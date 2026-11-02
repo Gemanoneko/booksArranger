@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": null,
+  "signal": null,
+  "error": null,
+  "out": "started",
+  "err": "",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": true,
+  "timedOut": true,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": false,
+  "reason": "Total deadline reserved for owned cleanup",
+  "closureError": null,
+  "pid": 56820,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 59,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 920.7250000000001,
+  "outputBytes": 7
+}

@@ -7,13 +7,13 @@ Reviewer: Senua (Code Reviewer)
 Date: 2026-11-02
 Tool: Books Arranger
 Release: v0.24.4
-Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..3c45da40c82043379351fa60aac4e000a02ca172
+Commit range: 304b20e58465ed4e9eedf72dcc2faa44d087515f..reviewed runner-budget working tree after 3c45da40c82043379351fa60aac4e000a02ca172
 Working-tree base: 163feb38f7828a8ee0fde01d897140e2323b31e9 (intervening changes are documentation)
 Scope: 5 product files and 3 focused test files, +278 / -31 lines
 Stand-down dimensions: none
 ```
 
-Source clearance certifies the original patch plus the public-capability correction below. The first artifact binding remains historical; the corrected actual source/build is bound separately below. Corrected final entry and independent behavior QA remain required.
+Source clearance certifies the original patch, public-capability correction and separately reviewed runner-budget repair. Both earlier artifact bindings remain historical and do not contain the runner repair. A new source/build binding, fresh final entry and independent behavior QA remain required.
 
 ## Summary
 
@@ -101,11 +101,11 @@ Portable correction evidence is `Docs/Evidence/v0.24.4_2026-11-02/public-capabil
 
 Source construction is clear for these frozen bytes. Historical build `46a8983e-8529-4efd-a91d-01b46d46fe3a` remains tied to its own failed acceptance and is not rebound to the corrected source.
 
-## Corrected final source and artifact binding
+## Historical corrected source and artifact binding — superseded by runner repair
 
-Release source commit: 3c45da40c82043379351fa60aac4e000a02ca172
+Historical corrected source commit: 3c45da40c82043379351fa60aac4e000a02ca172
 
-Release artifact manifest SHA256: 0c85b34b48ff0c81fbae5b0b40254b94e15252051e692f41494c46e84f97f78b
+Historical corrected artifact manifest SHA256: 0c85b34b48ff0c81fbae5b0b40254b94e15252051e692f41494c46e84f97f78b
 
 Candidate: `C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101`, clean at the exact source above.
 
@@ -121,6 +121,12 @@ Measured `dist/release-artifacts.json` binds corrected source above, version `0.
 
 Actual corrected runtime-pointer SHA256: `b8a79ed895a443d62a8236fc6fc9f1cf928844aa84322403dab63a18055910a8`. Ender reports corrected packaging passed in 131.404 seconds with normal owned closure (60 retained, zero remaining). Corrected full entry and both approved hidden checks remain pending; no pass for those gates is claimed by this mechanical binding. No tests, app runs or unrelated QA-document changes were made by this reviewer.
 
+## Shared runner budget repair
+
+Source construction for the eight-file shared/tool runner-budget repair is separately certified in [the shared runner review](../../../Team/Docs/BooksArranger_0244_SharedRunner_CodeReview_2026-11-02.md). It records the exact Studio and Books ranges/pins, approved finite profiles, retained ownership and source guards, and focused real-process evidence. No additional application behavior changes are introduced.
+
+That review is source-clear only: the failed full runs remain failures, and build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063` remains tied to source `3c45da40c82043379351fa60aac4e000a02ca172`. It is not rebound to the runner patch. Canonical current release source/artifact fields must be added only for the actual newly committed and built candidate. Full entry and both approved hidden checks remain pending.
+
 ## Verdict
 
 - Total open Critical: 0
@@ -129,4 +135,4 @@ Actual corrected runtime-pointer SHA256: `b8a79ed895a443d62a8236fc6fc9f1cf928844
 
 **Verdict:** RELEASE CLEAR
 
-Source and artifact construction are clear for corrected source `3c45da40c82043379351fa60aac4e000a02ca172` and build `3c395d29-d3fc-4ddd-ac3d-e708bfbb9063`. Final release requires completed corrected entry, the approved candidate-native checks and independent QA GO.
+Source construction is clear for the reviewed application corrections and separately pinned runner repair. Final release requires the new source/artifact binding, completed fresh-context entry, approved candidate-native checks and independent QA GO.

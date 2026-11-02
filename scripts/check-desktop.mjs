@@ -2,11 +2,13 @@
 // Canonical non-app Node graph with owned Python/codec CLI fixtures; PA-1 is a separate mandatory native phase.
 // No GUI launch, installer execution, live catalog or source-library access.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,GATE_TOTAL_SECONDS} from './python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,workerSecondsReport,workerDeadline,gateDeadline} from './python-check-batches.mjs';
 import {liveCatalogRefusal} from './gate-source-guard.mjs';
 import {trackGateScratch} from './gate-scratch.mjs';
 import {CANONICAL_NODE_ENTRIES,phaseAccounting} from './qa-phase-contract.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+// Process startup and preparation consume the same absolute envelope as side checks and workers.
+const gateStart=performance.timeOrigin,deadline=gateDeadline(gateStart,process.env.BOOKS_QA_CHECK_DEADLINE_MS);
 // A live checkout (data/ holds its catalog) is refused before anything is read, copied or written (2026-10-24).
 {const refusal=liveCatalogRefusal(root);if(refusal){fs.writeSync(2,refusal+'\n');process.exit(1);}}
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'scripts/qa-runtime.json'),'utf8'));
@@ -18,15 +20,12 @@ const python=fixture.python.path,sha=fixture.python.sha256;
 for(const [name,expected] of Object.entries(fixture.ffmpeg.files)){const file=path.join(fixture.ffmpeg.root,name),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size!==expected.size||createHash('sha256').update(fs.readFileSync(file)).digest('hex')!==expected.sha256)throw Error('Bundled QA media runtime differs');}
 if(createHash('sha256').update(fs.readFileSync(python)).digest('hex')!==sha)throw Error('QA Python runtime differs');
 const fixtureRootMap = {"test_automatic_processing.AREA":"scratch/a","test_local_identity.AREA":"scratch/a","test_local_identity_fixes.AREA":"scratch/a","test_split_books.AREA":"scratch/a","test_multisource.SCRATCH":"scratch/multisource","test_local_gate_consistency.ROOT":"scratch/local-gate","test_series_backfill.AREA":"scratch/s"};
-// 0.22.3: the gate's start is the process's; each Python worker's own deadline counts from its own start (workerDeadline),
-// and the side chain and every worker stop at the gate's total, inside the entry check's 600 s.
-const gateStart=performance.timeOrigin,deadline=gateStart+GATE_TOTAL_SECONDS*1000;
 // 2026-10-25 (the gate left 4 s of its 540 s deadline on a quiet machine): the syntax checks, the node cases and the page
 // scripts run in one chain beside the Python workers; they used to run before and after them, on the deadline's critical
 // path. Same checks, in the same order inside the chain, each bounded by the same deadline, and a failure still fails the
 // gate, but only after every Python worker and the chain have finished.
 const sideEnv={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:root,BOOKS_QA_FIXTURE_ROOT:path.join(root,'scratch','f'),PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
-function runAsync(exe,args){return new Promise(resolve=>{const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
+function runAsync(exe,args){return new Promise(resolve=>{if(deadline<=Date.now()){resolve({status:null,error:null,timedOut:true,stdout:'',stderr:''});return;}const out=[],err=[];let error=null,timedOut=false;const child=spawn(exe,args,{cwd:root,env:sideEnv,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=setTimeout(()=>{timedOut=true;child.kill();},Math.max(1,deadline-Date.now()));child.stdout.on('data',d=>out.push(d));child.stderr.on('data',d=>err.push(d));child.on('error',e=>{error=e.message;});child.on('close',status=>{clearTimeout(timer);resolve({status,error,timedOut,stdout:Buffer.concat(out).toString('utf8'),stderr:Buffer.concat(err).toString('utf8')});});});}
 const syntaxFiles=['desktop/main.js','desktop/preload.js','desktop/update-controller.js','desktop/engine-update.js','desktop/launch-options.js','desktop/status-flight.js','desktop/quit-watch.js','web/desktop-ui.js','desktop/startup.js','web/load-state.js','desktop/folder-picker.js'],nodeTests=[...CANONICAL_NODE_ENTRIES];
 const frontendScripts=fs.readdirSync(path.join(root,'tests')).filter(name=>/^test_.*\.js$/.test(name)).sort();
 function sideChecks(){return (async()=>{const log=[];let failure=null,nodeOutput='';
@@ -161,7 +160,8 @@ const workers=batches.map((batch,i)=>{
 let outputBytes=0,overflow=false;
 const copySeconds=Math.round((Date.now()-gateStart)/100)/10;console.log('Sources copied into the '+workers.length+' Python workers by '+copySeconds+' s');
 const results=await Promise.all(workers.map(worker=>new Promise(resolve=>{
- const started=performance.now(),limit=workerDeadline(gateStart,Date.now());
+ const started=performance.now(),limit=workerDeadline(gateStart,Date.now(),deadline);
+ if(limit.at<=Date.now()){resolve({status:null,error:null,timedOut:limit.kind,seconds:0,out:'',err:''});return;}
  const env={...process.env,PYTHONHOME:'',PYTHONPATH:'',NODE_OPTIONS:'',NODE_PATH:'',BOOKS_QA_RUN_ROOT:worker.directory,BOOKS_QA_FIXTURE_ROOT:path.join(worker.directory,'scratch','f'),BOOKS_TERMINAL_FIXTURE_ROOT:path.join(worker.directory,'scratch','terminal-chapters'),TEMP:worker.temp,TMP:worker.temp,PATH:fixture.ffmpeg.root+path.delimiter+(process.env.PATH||'')};
  for(const key of Object.keys(env))if(/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR)$/i.test(key))delete env[key];
  const out=[],err=[];let error=null,timedOut=false;

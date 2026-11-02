@@ -1,0 +1,276 @@
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-check.test.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/qa-entry-context.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/qa-entry-context.test.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/check-desktop.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/python-check-batches.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--check","C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/python-check-batches.test.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}
+TAP version 13
+# Subtest: startup injection keys are removed case-insensitively and ambient executable paths cannot survive
+ok 1 - startup injection keys are removed case-insensitively and ambient executable paths cannot survive
+  ---
+  duration_ms: 0.8122
+  type: 'test'
+  ...
+# Subtest: unsupported or unbounded runtime is refused before spawning
+ok 2 - unsupported or unbounded runtime is refused before spawning
+  ---
+  duration_ms: 0.3711
+  type: 'test'
+  ...
+# Subtest: CLI requires exact pinned identity and rejects timeout/schema workarounds
+ok 3 - CLI requires exact pinned identity and rejects timeout/schema workarounds
+  ---
+  duration_ms: 0.1898
+  type: 'test'
+  ...
+# Subtest: one total check budget is shared across aliases rather than renewed for every child
+ok 4 - one total check budget is shared across aliases rather than renewed for every child
+  ---
+  duration_ms: 0.2459
+  type: 'test'
+  ...
+# Subtest: missing process closure cannot turn a check into pass
+ok 5 - missing process closure cannot turn a check into pass
+  ---
+  duration_ms: 0.1317
+  type: 'test'
+  ...
+# Subtest: Windows ownership setup failure cannot release a check
+ok 6 - Windows ownership setup failure cannot release a check
+  ---
+  duration_ms: 2.1166
+  type: 'test'
+  ...
+# Subtest: budget policy accepts only exact legacy and extended context pairs
+ok 7 - budget policy accepts only exact legacy and extended context pairs
+  ---
+  duration_ms: 0.2721
+  type: 'test'
+  ...
+# Subtest: delayed pinned context selection retains the original entry start
+ok 8 - delayed pinned context selection retains the original entry start
+  ---
+  duration_ms: 5.7317
+  type: 'test'
+  ...
+# Subtest: extended budget reserves postflight and propagates one absolute owner work deadline
+ok 9 - extended budget reserves postflight and propagates one absolute owner work deadline
+  ---
+  duration_ms: 0.372
+  type: 'test'
+  ...
+# Subtest: extended budget real short child preserves original ownership and complete zero
+ok 10 - extended budget real short child preserves original ownership and complete zero
+  ---
+  duration_ms: 199.2237
+  type: 'test'
+  ...
+# Subtest: extended budget real short timeout remains a failure and closes its owned child
+ok 11 - extended budget real short timeout remains a failure and closes its owned child
+  ---
+  duration_ms: 921.522
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1246.5104
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--test","--test-reporter=tap","--test-name-pattern=budget|deadline|startup injection|unsupported or unbounded|CLI requires|missing process closure|Windows ownership setup failure|delayed pinned context","C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-check.test.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati","status":0}
+TAP version 13
+# Subtest: all short worker layouts retain the original fallback prerequisite
+ok 1 - all short worker layouts retain the original fallback prerequisite
+  ---
+  duration_ms: 0.9164
+  type: 'test'
+  ...
+# Subtest: fixed short fixture bounds leave the existing 240-character output guard intact
+ok 2 - fixed short fixture bounds leave the existing 240-character output guard intact
+  ---
+  duration_ms: 0.1055
+  type: 'test'
+  ...
+# Subtest: server conflicts remain serial and every declared pattern appears exactly once
+ok 3 - server conflicts remain serial and every declared pattern appears exactly once
+  ---
+  duration_ms: 0.2963
+  type: 'test'
+  ...
+# Subtest: measured heavy modules spread longest first; serial modules stay together; declared order is kept
+ok 4 - measured heavy modules spread longest first; serial modules stay together; declared order is kept
+  ---
+  duration_ms: 0.2725
+  type: 'test'
+  ...
+# Subtest: the real inventory projects every worker under the deadline from its measured seconds
+ok 5 - the real inventory projects every worker under the deadline from its measured seconds
+  ---
+  duration_ms: 1.307
+  type: 'test'
+  ...
+# Subtest: the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+ok 6 - the approved deadline rebalance keeps every production pattern and occurrence, with serial servers and fixed limits
+  ---
+  duration_ms: 1.2665
+  type: 'test'
+  ...
+# Subtest: the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+ok 7 - the gate prints every worker's real seconds beside its projection (Senua 0.22.0 early review, m5)
+  ---
+  duration_ms: 0.5964
+  type: 'test'
+  ...
+# Subtest: the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+ok 8 - the syntax checks, node cases and page scripts run beside the Python workers, not on their critical path
+  ---
+  duration_ms: 0.3833
+  type: 'test'
+  ...
+# Subtest: duplicate and malformed patterns cannot silently change discovery
+ok 9 - duplicate and malformed patterns cannot silently change discovery
+  ---
+  duration_ms: 0.1043
+  type: 'test'
+  ...
+# Subtest: actual complete occurrence count is summed without deduplicating loader IDs
+ok 10 - actual complete occurrence count is summed without deduplicating loader IDs
+  ---
+  duration_ms: 0.2176
+  type: 'test'
+  ...
+# Subtest: refuses omitted completion
+ok 11 - refuses omitted completion
+  ---
+  duration_ms: 0.1268
+  type: 'test'
+  ...
+# Subtest: refuses skipped case
+ok 12 - refuses skipped case
+  ---
+  duration_ms: 0.0922
+  type: 'test'
+  ...
+# Subtest: refuses failure
+ok 13 - refuses failure
+  ---
+  duration_ms: 0.0746
+  type: 'test'
+  ...
+# Subtest: refuses error
+ok 14 - refuses error
+  ---
+  duration_ms: 0.1539
+  type: 'test'
+  ...
+# Subtest: refuses missing ID
+ok 15 - refuses missing ID
+  ---
+  duration_ms: 0.0984
+  type: 'test'
+  ...
+# Subtest: refuses false success
+ok 16 - refuses false success
+  ---
+  duration_ms: 0.0781
+  type: 'test'
+  ...
+# Subtest: refuses wrong worker
+ok 17 - refuses wrong worker
+  ---
+  duration_ms: 0.0959
+  type: 'test'
+  ...
+# Subtest: refuses unknown pattern
+ok 18 - refuses unknown pattern
+  ---
+  duration_ms: 0.1212
+  type: 'test'
+  ...
+# Subtest: refuses missing worker
+ok 19 - refuses missing worker
+  ---
+  duration_ms: 0.3133
+  type: 'test'
+  ...
+# Subtest: gate deadline consumes startup and only tightens its fixed cap with the parent work deadline
+ok 20 - gate deadline consumes startup and only tightens its fixed cap with the parent work deadline
+  ---
+  duration_ms: 0.2237
+  type: 'test'
+  ...
+# Subtest: each worker keeps its own finite cap inside the original gate and parent deadline
+ok 21 - each worker keeps its own finite cap inside the original gate and parent deadline
+  ---
+  duration_ms: 0.4581
+  type: 'test'
+  ...
+# Subtest: a split module runs as two complementary halves of its classes (0.22.3)
+ok 22 - a split module runs as two complementary halves of its classes (0.22.3)
+  ---
+  duration_ms: 0.4047
+  type: 'test'
+  ...
+# Subtest: arguments: every path and the expected HEAD are required, absolute and exact (E5)
+ok 23 - arguments: every path and the expected HEAD are required, absolute and exact (E5)
+  ---
+  duration_ms: 0.7872
+  type: 'test'
+  ...
+# Subtest: git ignores the caller's GIT_* variables and takes no optional locks (E4)
+ok 24 - git ignores the caller's GIT_* variables and takes no optional locks (E4)
+  ---
+  duration_ms: 0.3515
+  type: 'test'
+  ...
+# Subtest: the assembler's Git command: -c core.fsmonitor=false -C <worktree>, no caller GIT_DIR, hidden window (E4)
+ok 25 - the assembler's Git command: -c core.fsmonitor=false -C <worktree>, no caller GIT_DIR, hidden window (E4)
+  ---
+  duration_ms: 0.458
+  type: 'test'
+  ...
+# Subtest: a good run pins the wrapper in the harness and the assembler in the graph (E1, E2)
+ok 26 - a good run pins the wrapper in the harness and the assembler in the graph (E1, E2)
+  ---
+  duration_ms: 130.1236
+  type: 'test'
+  ...
+# Subtest: refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a runtime that differs, a link
+ok 27 - refusals write nothing: an existing context, a dirty tree, a wrong HEAD, a runtime that differs, a link
+  ---
+  duration_ms: 110.6871
+  type: 'test'
+  ...
+# Subtest: assembler refuses a different committed phase contract before creating context
+ok 28 - assembler refuses a different committed phase contract before creating context
+  ---
+  duration_ms: 58.6821
+  type: 'test'
+  ...
+# Subtest: missing or mislocated metadata runtimes refuse before Git and before context writes
+ok 29 - missing or mislocated metadata runtimes refuse before Git and before context writes
+  ---
+  duration_ms: 327.6818
+  type: 'test'
+  ...
+# Subtest: Git and PowerShell whole-tree drift during metadata inspection refuses before context writes
+ok 30 - Git and PowerShell whole-tree drift during metadata inspection refuses before context writes
+  ---
+  duration_ms: 233.9888
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 991.6226
+BUDGET_TARGETED_COMMAND {"file":"C:/Program Files/nodejs/node.exe","args":["--test","--test-reporter=tap","tests/qa-entry-context.test.mjs","tests/python-check-batches.test.mjs"],"cwd":"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger","status":0}

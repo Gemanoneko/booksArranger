@@ -1,0 +1,198 @@
+{
+  "schema": "books-runner-budget-focused-v1",
+  "version": "0.24.4",
+  "plan": "Team/Docs/BooksArranger_0244_RunnerBudget_Plan_2026-11-02.md",
+  "plan_sha256": "258b13bd8f73d7bda0b401c5fb967ae18a27b42b6083653b35fcb3ce07085c95",
+  "status": "FOCUSED_PASS_NOT_FULL_ACCEPTANCE",
+  "authority": {
+    "reply": "Fix the shared runner",
+    "question_item_id": [
+      "request_user_input_async",
+      "call_0e25d76e71784bdcad0f3f09e44bdae3",
+      0
+    ]
+  },
+  "policy": {
+    "legacy": {
+      "schema": 2,
+      "deadlineMs": 600000,
+      "postflightReserveMs": 2000
+    },
+    "extended": {
+      "schema": 3,
+      "deadlineMs": 900000,
+      "postflightReserveMs": 30000
+    },
+    "max_owned_ms": 900000,
+    "worker_seconds": 660,
+    "gate_seconds": 810,
+    "canonical_deadline_environment": "BOOKS_QA_CHECK_DEADLINE_MS",
+    "transport_ms": 930000,
+    "transport_extra_is_receipt_collection_only": true,
+    "native_build_publication_work_ms": 600000
+  },
+  "tests": {
+    "shared_affected_selected": 11,
+    "tool_context_and_batch": 30,
+    "syntax_files": 8,
+    "all_passed": true,
+    "selection": "shared --test-name-pattern=budget|deadline|startup injection|unsupported or unbounded|CLI requires|missing process closure|Windows ownership setup failure|delayed pinned context; both complete tool contract files"
+  },
+  "execution": {
+    "callback_at": "2026-11-02T15:48:14.719Z",
+    "outer_owner": "byte-exact original600s helper45510f11a011b617b4831994bd40aa87763d4195cd06c97ee6489af45f91bce6",
+    "code": 0,
+    "elapsedMs": 3292.53,
+    "retained": 35,
+    "native_complete_zero": true,
+    "incomplete_queries": 0
+  },
+  "real_cases": {
+    "short_child_requested_budget_ms": 900000,
+    "short_child": {
+      "code": 0,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "elapsedMs": 198.43149999999997,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 12,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    },
+    "expected_short_timeout_requested_ms": 1200,
+    "expected_short_timeout": {
+      "code": null,
+      "closed": true,
+      "forced": true,
+      "timedOut": true,
+      "elapsedMs": 920.7250000000001,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 59,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    }
+  },
+  "coverage": [
+    "exact legacy/new pair admission and malformed/mixed rejection",
+    "original start retained after pinned context read; injected budget only shortens",
+    "30s postflight and existing owned drain subtraction",
+    "Windows case variants removed before trusted per-check deadline assignment",
+    "gate and worker/sidechain min parent/local; expired refusal",
+    "unchanged case partition/completion enforcement",
+    "real nested ownership normalzero and genuine expected timeout closedzero"
+  ],
+  "files": [
+    {
+      "repo": "studio",
+      "path": ".claude/skills/qa-handoff/scripts/bounded-check.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+      "size": 14108,
+      "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc"
+    },
+    {
+      "repo": "studio",
+      "path": ".claude/skills/qa-handoff/scripts/entry-main.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs",
+      "size": 22819,
+      "sha256": "d2b7ad6cef1ffd71e1990e811797c9a60b74a94efa3d65f5ff9bc6512db384bf"
+    },
+    {
+      "repo": "studio",
+      "path": ".claude/skills/qa-handoff/scripts/entry-check.test.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-check.test.mjs",
+      "size": 19953,
+      "sha256": "e722d5cf6cd2725744afae3ec42ee8f82e851d6beee266566fb4d459c26e1f9f"
+    },
+    {
+      "repo": "Books Arranger",
+      "path": "scripts/qa-entry-context.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/qa-entry-context.mjs",
+      "size": 16180,
+      "sha256": "0789498b4798c95410bd0b9020c5a0b359601ef0a9a68754274608a494cd498d"
+    },
+    {
+      "repo": "Books Arranger",
+      "path": "tests/qa-entry-context.test.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/qa-entry-context.test.mjs",
+      "size": 17681,
+      "sha256": "c680b4008950da18062803a4711445348091ba6db6a31c9642e7b43a2a447de8"
+    },
+    {
+      "repo": "Books Arranger",
+      "path": "scripts/check-desktop.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/check-desktop.mjs",
+      "size": 23986,
+      "sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322"
+    },
+    {
+      "repo": "Books Arranger",
+      "path": "scripts/python-check-batches.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/python-check-batches.mjs",
+      "size": 19153,
+      "sha256": "26fc5c97638a442d3fdc2d5126a835fbf1b1d3493a57e028c96d8c7e54e0f2e7"
+    },
+    {
+      "repo": "Books Arranger",
+      "path": "tests/python-check-batches.test.mjs",
+      "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/python-check-batches.test.mjs",
+      "size": 14365,
+      "sha256": "b03f2a333fdc172a3d4cd390de730927d51294d14777ca78711071586bd1d035"
+    }
+  ],
+  "raw": [
+    {
+      "file": "targeted-owned.json",
+      "size": 12569,
+      "sha256": "66acf07726d60713452f132c878313c298d862ac05aa9a94e4c5b7f9e1ec7bfe"
+    },
+    {
+      "file": "targeted-callback.json",
+      "size": 119,
+      "sha256": "281f007c25eda27d93dc52a4701511a5964f785d9f4fab641f58d5920c8a21c6"
+    },
+    {
+      "file": "targeted-stdout.log",
+      "size": 11440,
+      "sha256": "b0006aab3b6157a0a3e5a2a13bd45c1269b79a2209fadbf3b02c05ee1ae6d08e"
+    },
+    {
+      "file": "targeted-stderr.log",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "extended-owned.json",
+      "size": 705,
+      "sha256": "420a0e431e416ab1abf5b7b3386054cb0a229f23f8f15f8f33a92030bd0ffe85"
+    },
+    {
+      "file": "extended-timeout-owned.json",
+      "size": 738,
+      "sha256": "618f3988966c03fd55de8804912465f1719feb1933b4bb828ec64d660c2472f7"
+    }
+  ],
+  "limits": "Short controlled staging proves admission, finite propagation and real closure only; not a900-second endurance run, whole shared suite or final product acceptance. No full/build/desktop app launched. Both old fullFAILs and failed copy experiment remain unchanged. New helper must be reviewed/committed and used in fresh processes/contexts before any longer full."
+}

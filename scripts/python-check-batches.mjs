@@ -87,13 +87,24 @@ const GATE_PLACEMENT={
   'test_automatic_media.py':10,'test_m4b_dispatch.py':10,'test_zone_identifier.py':10,'test_reacquire_sources.py':10,'test_local_gate_consistency.py':10,'test_directory_flush.py':10,'test_relocation_progress.py':10,'test_migration_planning.py':10,'test_organization.py':10,'test_manifest_compatibility.py':10,'test_producer_recovery.py':10,'test_recovery_retention.py':10,'test_litres_research.py':10,'test_series_fallbacks.py':10,'test_openlibrary_index.py':10,'test_bulk_retry_receipts.py':10,'test_local_admission.py':10,'test_cleanup_scope.py':10,'test_identity_v5.py':10,
   'test_desktop_owner_recovery.py':11,'test_cleanup_resume.py':11,'test_output_migration.py':11,'test_manual_metadata.py':11,'test_series_backfill.py':11,'test_inventory.py':11,'test_iron_skazka.py':11,'test_folder_regroup.py':11,
   'test_m4b_preservation.py':12,'test_attention_audio_admission.py':12,'test_manual_research.py':12,'test_catalog_contention.py':12,'test_sorted_wiring.py':12,'test_attention_list.py':12,'test_split_books.py':12,'test_identity_0222.py':12,'test_original_title_wait.py':12,'test_live_cases_0222.py':12};
-// 0.22.3 (the 0.22.2 gates: workers at 81-88 % of the deadline, and one run lost two workers because copying the sources
-// took 170 s of it): every Python worker has its own 540 s, counted from its own start, so copies taking up to 40 s before
-// it leave its time whole; past that the gate total binds first (workerDeadline). The gate as a whole still ends inside the
-// entry check's 600 s: past 580 s from its start it stops itself and says which deadline ran out.
-export const PYTHON_WORKER_DEADLINE_SECONDS=540,GATE_TOTAL_SECONDS=580;
-export function workerDeadline(gateStartMs,workerStartMs){
-  const own=workerStartMs+PYTHON_WORKER_DEADLINE_SECONDS*1000,total=gateStartMs+GATE_TOTAL_SECONDS*1000;
+// 0.24.4: fixed local caps fit the protocol-3 entry envelope. Entry supplies its absolute owned-work
+// deadline after reserving postflight and drain; no child can restart or extend that clock.
+export const PYTHON_WORKER_DEADLINE_SECONDS=660,GATE_TOTAL_SECONDS=810;
+export function gateDeadline(gateStartMs,parentDeadline,nowMs=Date.now()){
+  if(!Number.isFinite(gateStartMs)||gateStartMs<0||!Number.isFinite(nowMs)||nowMs<0)throw Error('Invalid gate clock');
+  let total=gateStartMs+GATE_TOTAL_SECONDS*1000;
+  if(parentDeadline!==undefined){
+    if(typeof parentDeadline!=='string'||!/^[1-9]\d*$/.test(parentDeadline)||!Number.isSafeInteger(Number(parentDeadline)))throw Error('Invalid BOOKS_QA_CHECK_DEADLINE_MS');
+    const parent=Number(parentDeadline);
+    if(parent<=nowMs)throw Error('Expired BOOKS_QA_CHECK_DEADLINE_MS');
+    total=Math.min(total,parent);
+  }
+  if(total<=nowMs)throw Error('Gate deadline expired');
+  return total;
+}
+export function workerDeadline(gateStartMs,workerStartMs,gateLimitMs=gateStartMs+GATE_TOTAL_SECONDS*1000){
+  if([gateStartMs,workerStartMs,gateLimitMs].some(value=>!Number.isFinite(value)||value<0))throw Error('Invalid worker deadline');
+  const own=workerStartMs+PYTHON_WORKER_DEADLINE_SECONDS*1000,total=Math.min(gateStartMs+GATE_TOTAL_SECONDS*1000,gateLimitMs);
   return own<=total?{at:own,kind:'worker'}:{at:total,kind:'gate total'};
 }
 // What each worker is expected to take, from the weights above: the gate keeps every worker well under its deadline.

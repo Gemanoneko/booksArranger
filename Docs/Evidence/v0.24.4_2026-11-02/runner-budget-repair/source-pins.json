@@ -1,0 +1,58 @@
+[
+  {
+    "repo": "studio",
+    "path": ".claude/skills/qa-handoff/scripts/bounded-check.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+    "size": 14108,
+    "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc"
+  },
+  {
+    "repo": "studio",
+    "path": ".claude/skills/qa-handoff/scripts/entry-main.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-main.mjs",
+    "size": 22819,
+    "sha256": "d2b7ad6cef1ffd71e1990e811797c9a60b74a94efa3d65f5ff9bc6512db384bf"
+  },
+  {
+    "repo": "studio",
+    "path": ".claude/skills/qa-handoff/scripts/entry-check.test.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/entry-check.test.mjs",
+    "size": 19953,
+    "sha256": "e722d5cf6cd2725744afae3ec42ee8f82e851d6beee266566fb4d459c26e1f9f"
+  },
+  {
+    "repo": "Books Arranger",
+    "path": "scripts/qa-entry-context.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/qa-entry-context.mjs",
+    "size": 16180,
+    "sha256": "0789498b4798c95410bd0b9020c5a0b359601ef0a9a68754274608a494cd498d"
+  },
+  {
+    "repo": "Books Arranger",
+    "path": "tests/qa-entry-context.test.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/qa-entry-context.test.mjs",
+    "size": 17681,
+    "sha256": "c680b4008950da18062803a4711445348091ba6db6a31c9642e7b43a2a447de8"
+  },
+  {
+    "repo": "Books Arranger",
+    "path": "scripts/check-desktop.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/check-desktop.mjs",
+    "size": 23986,
+    "sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322"
+  },
+  {
+    "repo": "Books Arranger",
+    "path": "scripts/python-check-batches.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/scripts/python-check-batches.mjs",
+    "size": 19153,
+    "sha256": "26fc5c97638a442d3fdc2d5126a835fbf1b1d3493a57e028c96d8c7e54e0f2e7"
+  },
+  {
+    "repo": "Books Arranger",
+    "path": "tests/python-check-batches.test.mjs",
+    "absolute": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/python-check-batches.test.mjs",
+    "size": 14365,
+    "sha256": "b03f2a333fdc172a3d4cd390de730927d51294d14777ca78711071586bd1d035"
+  }
+]

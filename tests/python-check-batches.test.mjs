@@ -1,6 +1,6 @@
 import test from 'node:test';import {readFileSync} from 'node:fs';const require_fs=()=>({readFileSync});
 import assert from 'node:assert/strict';
-import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds,workerSecondsReport,workerDeadline,PYTHON_WORKER_DEADLINE_SECONDS,GATE_TOTAL_SECONDS} from '../scripts/python-check-batches.mjs';
+import {pythonBatches,validatePythonReports,pythonWorkerLayout,PYTHON_WORKERS,projectedSeconds,workerSecondsReport,workerDeadline,gateDeadline,PYTHON_WORKER_DEADLINE_SECONDS,GATE_TOTAL_SECONDS} from '../scripts/python-check-batches.mjs';
 const patterns=['test_desktop_host.py','test_alpha.py','test_beta.py','test_web.py','test_gamma.py','test_delta.py','test_epsilon.py','test_zeta.py','test_eta.py','test_theta.py','test_iota.py','test_kappa.py','test_lambda.py','test_mu.py'];
 const reports=()=>pythonBatches(patterns).map((p,batch)=>({batch,patterns:p,ids:p.map(x=>'case.'+x),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
 test('all short worker layouts retain the original fallback prerequisite',()=>{
@@ -54,15 +54,15 @@ test('the approved deadline rebalance keeps every production pattern and occurre
  const r=b.map((p,batch)=>({batch,patterns:p,ids:p.map(pattern=>'occurrence.'+pattern),discovered:p.length,completed:p.length,skipped:0,failures:0,errors:0,success:true}));
  assert.equal(validatePythonReports(real,b,r).count,real.length);
  const missing=structuredClone(r);missing[4].completed--;assert.throws(()=>validatePythonReports(real,b,missing));
- assert.equal(PYTHON_WORKER_DEADLINE_SECONDS,540);assert.equal(GATE_TOTAL_SECONDS,580);
- assert.deepEqual(workerDeadline(0,0),{at:540000,kind:'worker'});
+ assert.equal(PYTHON_WORKER_DEADLINE_SECONDS,660);assert.equal(GATE_TOTAL_SECONDS,810);
+ assert.deepEqual(workerDeadline(0,0),{at:660000,kind:'worker'});
 });
 test('the gate prints every worker\'s real seconds beside its projection (Senua 0.22.0 early review, m5)',async()=>{
  const b=pythonBatches(patterns),report=workerSecondsReport(b,[431.24,402.5,388,12.04,7,3.96,5,6.04,9,10,11,12,13]);
  assert.deepEqual(report.real,[431.2,402.5,388,12,7,4,5,6,9,10,11,12,13]);assert.deepEqual(report.projected,projectedSeconds(b));
- assert.equal(report.lines.length,PYTHON_WORKERS+1);assert.match(report.lines[0],/^Python worker 0: 431\.2 s real, \d+ s projected, 540 s deadline \(80 %\)$/);
- assert.equal(report.lines.at(-1),'Python workers: '+PYTHON_WORKERS+', each with 540 s from its own start; the slowest used 80 %');
- assert.equal(report.workers,PYTHON_WORKERS);assert.equal(report.deadline,540);
+ assert.equal(report.lines.length,PYTHON_WORKERS+1);assert.match(report.lines[0],/^Python worker 0: 431\.2 s real, \d+ s projected, 660 s deadline \(65 %\)$/);
+ assert.equal(report.lines.at(-1),'Python workers: '+PYTHON_WORKERS+', each with 660 s from its own start; the slowest used 65 %');
+ assert.equal(report.workers,PYTHON_WORKERS);assert.equal(report.deadline,660);
  assert.throws(()=>workerSecondsReport(b,[1,2,3,4,5,6,7]),/worker/);assert.throws(()=>workerSecondsReport(b,[...Array(PYTHON_WORKERS-1).fill(1),NaN]),/worker/);
  const fs=await import('node:fs');const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
  assert.match(source,/workerSecondsReport\(batches,results\.map\(r=>r\.seconds\)\)/,'the gate reports the measured times');
@@ -82,12 +82,32 @@ test('actual complete occurrence count is summed without deduplicating loader ID
 for(const [label,change] of [
  ['omitted completion',r=>r[0].completed--],['skipped case',r=>r[0].skipped=1],['failure',r=>r[0].failures=1],['error',r=>r[0].errors=1],['missing ID',r=>r[0].ids.pop()],['false success',r=>r[0].success=false],['wrong worker',r=>r[0].batch=1],['unknown pattern',r=>r[0].patterns=['test_extra.py']],['missing worker',r=>r.pop()]
 ])test('refuses '+label,()=>{const r=reports();change(r);assert.throws(()=>validatePythonReports(patterns,pythonBatches(patterns),r));});
-test('each worker\'s deadline counts from its own start, inside the gate\'s total (0.22.3)',async()=>{
- assert.equal(PYTHON_WORKER_DEADLINE_SECONDS,540);assert.ok(GATE_TOTAL_SECONDS<600,'inside the entry check\'s 600 s');
- assert.deepEqual(workerDeadline(0,36000),{at:576000,kind:'worker'},'a 36 s copy no longer eats the worker\'s time');
- assert.deepEqual(workerDeadline(0,170000),{at:GATE_TOTAL_SECONDS*1000,kind:'gate total'},'a 170 s copy ends at the gate\'s total');
+test('gate deadline consumes startup and only tightens its fixed cap with the parent work deadline',()=>{
+ const start=1700000000000,now=start+33000;
+ assert.equal(gateDeadline(start,undefined,now),start+810000,'startup does not restart the clock');
+ assert.equal(gateDeadline(start,String(start+900000),now),start+810000,'a later parent cannot enlarge the local cap');
+ assert.equal(gateDeadline(start,String(start+500000),now),start+500000,'a shorter parent bounds every child');
+ assert.equal(gateDeadline(start,String(now+1),now),now+1,'one remaining millisecond is not a fresh budget');
+ assert.throws(()=>gateDeadline(start,undefined,start+810000),/expired/);
+ assert.throws(()=>gateDeadline(start,String(start+900000),start+810000),/expired/,'a later parent cannot revive an exhausted local clock');
+ for(const value of ['',null,500000,'NaN','Infinity','1e12','1700000900000.5',' 1700000900000','1700000900000 ','+1700000900000','01700000900000','-1','9007199254740992'])
+  assert.throws(()=>gateDeadline(start,value,now),/Invalid BOOKS_QA_CHECK_DEADLINE_MS/,String(value));
+ for(const value of [String(now),String(now-1)])assert.throws(()=>gateDeadline(start,value,now),/Expired BOOKS_QA_CHECK_DEADLINE_MS/);
+ for(const value of [NaN,Infinity,-1]){assert.throws(()=>gateDeadline(value,undefined,now),/Invalid gate clock/);assert.throws(()=>gateDeadline(start,undefined,value),/Invalid gate clock/);}
+});
+test('each worker keeps its own finite cap inside the original gate and parent deadline',async()=>{
+ assert.equal(PYTHON_WORKER_DEADLINE_SECONDS,660);assert.equal(GATE_TOTAL_SECONDS,810);
+ assert.deepEqual(workerDeadline(0,36000),{at:696000,kind:'worker'},'a 36 s copy leaves the worker cap intact');
+ assert.deepEqual(workerDeadline(0,170000),{at:810000,kind:'gate total'},'longer copying consumes the original gate');
+ assert.deepEqual(workerDeadline(0,36000,500000),{at:500000,kind:'gate total'},'the same absolute parent limit reaches the worker');
+ assert.deepEqual(workerDeadline(0,36000,800000),{at:696000,kind:'worker'},'the own cap still binds first');
+ assert.deepEqual(workerDeadline(0,170000,900000),{at:810000,kind:'gate total'},'a supplied later limit cannot enlarge the gate');
+ assert.deepEqual(workerDeadline(0,500000,500000),{at:500000,kind:'gate total'},'an expired parent is not restarted');
+ for(const value of [NaN,Infinity,-1,'500000',null])assert.throws(()=>workerDeadline(0,36000,value),/Invalid worker deadline/);
  const fs=await import('node:fs');const source=fs.readFileSync(new URL('../scripts/check-desktop.mjs',import.meta.url),'utf8');
- assert.match(source,/limit=workerDeadline\(gateStart,Date\.now\(\)\)/,'each worker takes its own deadline when it starts');
+ assert.match(source,/deadline=gateDeadline\(gateStart,process\.env\.BOOKS_QA_CHECK_DEADLINE_MS\)/,'the gate consumes the entry deadline once');
+ assert.match(source,/limit=workerDeadline\(gateStart,Date\.now\(\),deadline\)/,'workers receive that same absolute gate deadline');
+ assert.match(source,/Math\.max\(1,deadline-Date\.now\(\)\)/,'the side chain uses the same absolute limit');
  assert.match(source,/Math\.max\(1,limit\.at-Date\.now\(\)\)/);assert.match(source,/python_workers:workerSeconds\.workers/,'the pass line names the worker count');
  assert.match(source,/throw Error\('Python worker deadline: '/,'a late worker is named with its deadline');
 });

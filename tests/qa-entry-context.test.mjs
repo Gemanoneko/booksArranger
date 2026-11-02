@@ -90,6 +90,7 @@ test('arguments: every path and the expected HEAD are required, absolute and exa
   assert.throws(()=>parseArgs(ok.map(v=>v==='a'.repeat(40)?'abc123':v)),/full expected commit/);
   assert.throws(()=>parseArgs(ok.map(v=>v==='C:\\r'?'relative':v)),/absolute/);
   assert.throws(()=>parseArgs([...ok,'--extra','x']),/Unknown/);
+  for(const flag of ['--schema','--deadline-ms','--timeout'])assert.throws(()=>parseArgs([...ok,flag,'900001']),/Unknown/);
 });
 
 test('git ignores the caller\'s GIT_* variables and takes no optional locks (E4)',()=>{
@@ -113,6 +114,7 @@ test('a good run pins the wrapper in the harness and the assembler in the graph 
   const f=await fixture(t);
   const result=await assemble(f.options,{node:f.node,git:f.git,...quiet});
   const C=path.join(f.run,'context'),context=JSON.parse(await fs.readFile(path.join(C,'context.json'),'utf8'));
+  assert.equal(context.schema,3);assert.equal(context.deadlineMs,900000);
   assert.equal(context.source.head,f.options.head);assert.equal(context.source.dirty,'N');
   assert.equal(result.context.sha256,sha(await fs.readFile(path.join(C,'context.json'))));
   assert.equal((await fs.readFile(path.join(C,'context.json.sha256'),'utf8')).trim(),result.context.sha256);
