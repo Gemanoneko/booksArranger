@@ -260,3 +260,89 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(self.worker.status('other')['state'],'waiting')
 
 if __name__=='__main__':unittest.main()
+
+class OutputIdentityRetryTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def fixture(self):
+        f=CleanupTest();f.setUp()
+        try:yield f
+        finally:f.tearDown()
+
+    def hold_at_second_output_check(self,f,legacy=False):
+        from native_io import kernel
+        real=f.worker._output_present;calls=[]
+        def fail(output,out,final):
+            calls.append(str(final))
+            if len(calls)==2:
+                kernel.CloseHandle(output.handle)
+                try:return real(output,out,final)
+                finally:output.handle=None
+            return real(output,out,final)
+        with patch.object(f.worker,'_output_present',side_effect=fail):f.worker.run_with_retry(f.id)
+        self.assertEqual(f.worker.status('test')['state'],'needs_attention');f.assert_all_kept()
+        if legacy:
+            with connect(f.db) as db:db.execute('UPDATE source_cleanup SET reason=? WHERE id=?',('Cannot refresh protected file identity',f.id));db.execute('DELETE FROM source_cleanup_holds WHERE cleanup_id=?',(f.id,))
+
+    def retry(self,f):
+        f.worker.resume([f.id],follow_audio=False,identity_retry=f.id);f.worker.thread.join(10)
+        self.assertFalse(f.worker.thread.is_alive(),'private retry reached its checkpoint')
+
+    def test_legacy_intent_retry_reopens_and_verifies_every_copy_before_first_delete(self):
+        with self.fixture() as f:
+            self.hold_at_second_output_check(f,legacy=True)
+            cap=f.worker.status('test')['identity_retry'];self.assertTrue(cap['allowed']);self.assertIsNone(cap['diagnostic']);self.assertEqual(cap['output_path'],f.job['output']['final_path'])
+            with connect(f.db) as db:states=[r[0] for r in db.execute('SELECT state FROM cleanup_members WHERE cleanup_id=?',(f.id,))]
+            self.assertEqual(sorted(states),['backup_verified','removal_intended'])
+            hashed=[];real_hash=VerifiedFile.sha256;real_dispose=VerifiedFile.dispose;disposed=[]
+            required={s['path'] for s in f.sources}|{str(p) for p in (f.base/'recovery'/f.id).glob('*.mp3')}|{f.job['output']['final_path']}
+            def hash_file(h):hashed.append(str(h.path));return real_hash(h)
+            def dispose(h):
+                self.assertTrue(required<=set(hashed),'all fresh byte proofs precede every new source disposal');disposed.append(str(h.path));return real_dispose(h)
+            with patch.object(VerifiedFile,'sha256',hash_file),patch.object(VerifiedFile,'dispose',dispose):self.retry(f)
+            self.assertEqual(set(disposed),{s['path'] for s in f.sources});self.assertEqual(f.worker.status('test')['state'],'completed');self.assertEqual(f.worker.status('test')['removed'],2)
+            self.assertIsNone(f.worker.status('test')['identity_retry'])
+            with connect(f.db) as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM source_cleanup').fetchone()[0],1)
+
+    def test_real_windows_error_is_preserved_and_other_refusal_does_not_inherit_retry(self):
+        with self.fixture() as f:
+            self.hold_at_second_output_check(f)
+            cap=f.worker.status('test')['identity_retry'];self.assertTrue(cap['allowed']);self.assertEqual(cap['diagnostic']['windows_error'],6);self.assertEqual(cap['diagnostic']['api'],'GetFileInformationByHandle');self.assertIn('Windows error 6',f.worker.status('test')['reason'])
+            self.assertEqual(cap['diagnostic']['path'],f.job['output']['final_path'])
+            f.worker.hold(f.id,BoundaryError('Original bytes differ from reviewed sources'))
+            self.assertIsNone(f.worker.identity_retry(f.id));f.assert_all_kept()
+
+    def test_changed_or_missing_output_refuses_before_any_new_deletion(self):
+        for missing in (False,True):
+            with self.subTest(missing=missing),self.fixture() as f:
+                self.hold_at_second_output_check(f,legacy=True);final=Path(f.job['output']['final_path'])
+                if missing:final.unlink()
+                else:final.write_bytes(b'changed output')
+                self.retry(f);f.assert_all_kept();self.assertEqual(f.worker.status('test')['state'],'needs_attention')
+
+    def test_changed_or_missing_recovery_and_changed_source_never_delete_another_file(self):
+        for changed in ('backup','missing_backup','source'):
+            with self.subTest(changed=changed),self.fixture() as f:
+                self.hold_at_second_output_check(f,legacy=True)
+                backup=next((f.base/'recovery'/f.id).glob('*.mp3'))
+                if changed=='missing_backup':backup.unlink()
+                elif changed=='backup':backup.write_bytes(b'changed backup')
+                else:Path(f.sources[0]['path']).write_bytes(b'changed original')
+                self.retry(f);f.assert_all_kept();self.assertEqual(f.worker.status('test')['state'],'needs_attention');self.assertIsNone(f.worker.identity_retry(f.id))
+
+    def test_missing_original_after_removal_intent_remains_unknown_not_adopted(self):
+        with self.fixture() as f:
+            self.hold_at_second_output_check(f,legacy=True);Path(f.sources[0]['path']).unlink()
+            self.retry(f);self.assertTrue(Path(f.sources[1]['path']).is_file());self.assertEqual(f.worker.status('test')['removed'],0);self.assertIn('unknown outcome',f.worker.status('test')['reason'])
+
+    def test_explicit_retry_is_single_owner_and_pause_keeps_the_checkpoint(self):
+        import threading
+        with self.fixture() as f:
+            self.hold_at_second_output_check(f,legacy=True);entered=threading.Event();release=threading.Event();real=f.worker._run
+            def waiting(*args):entered.set();release.wait(3);return real(*args)
+            with patch.object(f.worker,'_run',side_effect=waiting):
+                f.worker.resume([f.id],follow_audio=False,identity_retry=f.id);self.assertTrue(entered.wait(2));first=f.worker.thread
+                try:
+                    with self.assertRaisesRegex(ValueError,'no longer offers'):f.worker.resume([f.id],follow_audio=False,identity_retry=f.id)
+                    self.assertIs(f.worker.thread,first);f.worker.pause()
+                finally:release.set();first.join(5)
+            self.assertFalse(first.is_alive());f.assert_all_kept();self.assertEqual(f.worker.status('test')['state'],'paused')

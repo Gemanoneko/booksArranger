@@ -966,6 +966,29 @@ class MergeService:
         id=self.cleanup.enroll(job,binding,historical=historical)
         return {'cleanup_id':id,'status':self.cleanup.status(job_id)}
 
+    def retry_source_cleanup(self,library,identity,revision,job_id,cleanup_id):
+        generation=self._capture_start_generation()
+        return self._retry_source_cleanup(library,identity,revision,job_id,cleanup_id,generation)
+
+    @operation
+    def _retry_source_cleanup(self,library,identity,revision,job_id,cleanup_id,generation):
+        allow=lambda:self._start_allowed(generation)
+        if not allow() or self.draining:raise ValueError('Cleanup retry was superseded by Pause or closing')
+        if library!='Audiobooks':raise ValueError('Audiobook operations apply only to Audiobooks')
+        self._no_scan();self._reacquire_admission(identity=identity)
+        row=self.reviews._row(library,identity)
+        if row['revision']!=revision:raise ValueError('Candidate changed; refresh before Retry cleanup')
+        jobs=self.jobs._rows('SELECT * FROM audio_jobs WHERE job_id=?',(job_id,))
+        if not jobs or jobs[0]['state']!='completed' or json.loads(jobs[0]['manifest']).get('candidate_id')!=identity:raise ValueError('Completed audiobook identity changed')
+        records=self.cleanup._rows('SELECT * FROM source_cleanup WHERE id=? AND job_id=?',(cleanup_id,job_id))
+        if not records:raise ValueError('This enrolled cleanup no longer matches the book')
+        capability=self.cleanup.identity_retry(cleanup_id)
+        if capability and capability['running']:return {'accepted':True,'job_id':job_id,'cleanup_id':cleanup_id,'requeued':False}
+        if not capability or not capability['allowed']:raise ValueError('This hold does not offer Retry cleanup')
+        if self.jobs._thread and self.jobs._thread.is_alive() or self.cleanup.thread and self.cleanup.thread.is_alive():raise ValueError('Wait for existing audiobook work to become idle')
+        self.cleanup.resume([cleanup_id],follow_audio=False,admission_check=allow,admission_token=generation,identity_retry=cleanup_id)
+        return {'accepted':True,'job_id':job_id,'cleanup_id':cleanup_id,'requeued':False}
+
     def start_historical_cleanup(self,job_id):
         # Capture this human action before waiting for unrelated operation/enrollment work.
         generation=self._capture_start_generation()
@@ -1590,6 +1613,12 @@ class MergeService:
                     if item['producer_recovery']['can_retry']:item['retry']={'allowed':True,'reason':''};item['group']='retry'  # one predicate: an enabled Retry the bulk path accepts
         # A drive that comes back (cause 'unreachable', 0.22.1) is no catalog commit either: its Retry shows within WORKING_MAX_AGE.
         if job_ids is None:self._working_listed=any(isinstance(item.get('working'),dict) or item.get('cause')=='unreachable' for item in summary.values())
+        cleanup=getattr(self,'cleanup',None)
+        if cleanup is not None:
+            for row in cleanup._rows("SELECT c.id,c.job_id,c.reason FROM source_cleanup c JOIN audio_jobs j ON j.job_id=c.job_id WHERE j.state='completed' AND c.state IN ('needs_attention','checking','removing','pausing')"):
+                if job_ids is not None and row['job_id'] not in job_ids:continue
+                capability=cleanup.identity_retry(row['id'])
+                if capability:summary[row['job_id']]={'group':'audiobook','cause':'cleanup_identity','reason':row['reason'],'cleanup_identity':capability,'retry':{'allowed':False,'reason':'Use this book’s Retry cleanup control.'}}
         for job_id,item in self.kept_files(job_ids).items():
             if job_id not in summary:summary[job_id]=item if retry else {key:value for key,value in item.items() if key!='keep'}
         return summary

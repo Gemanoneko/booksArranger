@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.24.4] - 2026-11-02
+
+### Fixed
+
+- Retry held cleanup by reopening and verifying the protected output and recovery copies before resuming source removal.
+- Show the Windows error when protected file identity cannot be refreshed.
+
 ## [v0.24.3] - 2026-11-02
 
 ### Fixed

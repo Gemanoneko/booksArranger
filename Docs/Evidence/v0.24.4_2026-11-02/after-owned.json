@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "test_changed_or_missing_output_refuses_before_any_new_deletion (test_source_cleanup.OutputIdentityRetryTests.test_changed_or_missing_output_refuses_before_any_new_deletion) ... ok\r\ntest_changed_or_missing_recovery_and_changed_source_never_delete_another_file (test_source_cleanup.OutputIdentityRetryTests.test_changed_or_missing_recovery_and_changed_source_never_delete_another_file) ... ok\r\ntest_explicit_retry_is_single_owner_and_pause_keeps_the_checkpoint (test_source_cleanup.OutputIdentityRetryTests.test_explicit_retry_is_single_owner_and_pause_keeps_the_checkpoint) ... ok\r\ntest_legacy_intent_retry_reopens_and_verifies_every_copy_before_first_delete (test_source_cleanup.OutputIdentityRetryTests.test_legacy_intent_retry_reopens_and_verifies_every_copy_before_first_delete) ... ok\r\ntest_missing_original_after_removal_intent_remains_unknown_not_adopted (test_source_cleanup.OutputIdentityRetryTests.test_missing_original_after_removal_intent_remains_unknown_not_adopted) ... ok\r\ntest_real_windows_error_is_preserved_and_other_refusal_does_not_inherit_retry (test_source_cleanup.OutputIdentityRetryTests.test_real_windows_error_is_preserved_and_other_refusal_does_not_inherit_retry) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 6 tests in 2.353s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 106244,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 179,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 2831.0643,
+  "outputBytes": 1301
+}

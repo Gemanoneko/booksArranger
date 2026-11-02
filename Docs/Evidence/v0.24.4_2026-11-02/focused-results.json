@@ -1,0 +1,160 @@
+{
+  "schema": "books-cleanup-identity-retry-focused-v1",
+  "status": "FOCUSED_PASS_NOT_BUILD_OR_GUI_QA",
+  "source_base": "304b20e",
+  "UX_commit": "a60b560ec9b1216a1baff8feb716e61dcfe49aec",
+  "technical_plan_commit": "163feb38f7828a8ee0fde01d897140e2323b31e9",
+  "files": [
+    {
+      "path": "native_io.py",
+      "size": 41957,
+      "sha256": "ca2fa12c4352d55708dcc20a3ab911858045b81cbd1dab87f137225d3d426603"
+    },
+    {
+      "path": "source_cleanup.py",
+      "size": 48195,
+      "sha256": "3f4604dabb6d8d4f747cc8b3674867ee989d83437ae5250965096eb791ce9712"
+    },
+    {
+      "path": "merge_service.py",
+      "size": 420055,
+      "sha256": "c9625287ecfa81a5361883fa58e92d6fe89bdd3c52e3b70914bb6b5cfe5931f4"
+    },
+    {
+      "path": "web_server.py",
+      "size": 110797,
+      "sha256": "503be578a20f83fefb0879ea1ddbb9ea8ab5cf400400f7380f97c0b8d9883ca1"
+    },
+    {
+      "path": "web/app.js",
+      "size": 516379,
+      "sha256": "8cc976236d23102610f85c6d4d5a80abd1e4d749997e24485352641643b4e711"
+    },
+    {
+      "path": "tests/test_source_cleanup.py",
+      "size": 25884,
+      "sha256": "e957b76a394acd1a3de66d52d643b21841582992483772f0e3e5ffa729ae6cf8"
+    },
+    {
+      "path": "tests/test_cleanup_scope.py",
+      "size": 6191,
+      "sha256": "203b46dd2791b53010df9990a0ec8338319ba1de43a69b371b099c271bd9e8fb"
+    },
+    {
+      "path": "tests/test_cleanup_frontend.js",
+      "size": 9405,
+      "sha256": "67052d61e6ddc62610e3f477f50d4315e4c64951cfd5bfc18d941a1b3875e437"
+    }
+  ],
+  "before": {
+    "cases": 2,
+    "fixture": "Existing CleanupTest ordinaryown2sourcefiles/fakevalidatedoutput; realclosedOWNWindowsnativehandle. Notusercatalog/NAS.",
+    "actual_windows_error": 6,
+    "old_display": "Cannot refresh protected file identity",
+    "saved_member_states": [
+      "removal_intended",
+      "backup_verified"
+    ],
+    "removed": 0,
+    "global_resume_attempts": 0,
+    "existing_direct_fresh_reentry": "completed afterallproofs; missingUI/APIbeforepatch",
+    "normal_owned_retained": 4,
+    "elapsed_ms": 705.2216999999999
+  },
+  "after": {
+    "safety_cases": 6,
+    "service_API_case": 1,
+    "DOM": "Actualapp.js through existingDOM/transportfixture; legacy/Win6/technicalpath/pending/inert/queuedCancel/aria-describedby and no conversion-state mutation",
+    "checks": [
+      "freshoutput andeveryrecovery/sourcehash precedeeverynewdisposal",
+      "savedintent reconciled, sameenrollment/job; nofollow-audio",
+      "changed/missingoutput/recovery/source preserved/noadditionaldisposal",
+      "missingoriginalwithunprovedremovalintent remainsheld",
+      "realWindows6numeric/message/API/path recorded; otherproofholdlosesretrycap",
+      "singleowner andPausecheckpoint",
+      "exactcandidate/revision/job/cleanupadmission,wrongstate/scanrefused",
+      "strictAPIqueuepayload andactualexistingqueueddispatch",
+      "distinctcleanuprow/detailsaction; noRetryall/bulkexpansion"
+    ],
+    "normal_owned": {
+      "safety_retained": 4,
+      "service_DOM_retained": 8,
+      "final_DOM_retained": 4,
+      "forced": false,
+      "timedOut": false,
+      "final_complete_zero": true
+    }
+  },
+  "implementation_corrections": [
+    "SenuafoundcapabilitySELECTmissingintent; correctedrealquerybeforefinalfocusedtests.",
+    "APIfixturefirstomittedinventory.roots; DOMfixturethenlackedclassList; bothactualFAILrecordsretained, noappfailureclaim."
+  ],
+  "remaining": [
+    "Senuafinalsourceverdict",
+    "Futabafocusedadjudication/changedUIgeometrywhenappropriate",
+    "ONEfinalbuild/full/native onlyafterfinalsourcefreeze andrequiredusertraypermission; noneperformedhere"
+  ],
+  "limits": "NoZ/livecatalog/appcontrol/focus/install/tray/Git/version/build/reencode/identitybypass; no changedproof automaticallyretried.",
+  "records": [
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/before-owned.json",
+      "size": 1500,
+      "sha256": "b662af2627181b14fb3a0452799be9e56d9eef7b29c21be30393518a003e4fbf"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/before-callback.json",
+      "size": 333,
+      "sha256": "d1393feace46cd289b400e52b3126d772f72dcdfcdb01121654548ffb1ab52b1"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/after-owned.json",
+      "size": 2009,
+      "sha256": "3338da4a05af89a539bcb027f23efe042cc9d270f73fb8b5dd3549c671ab15bd"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/after-callback.json",
+      "size": 334,
+      "sha256": "5926e39cb325c95f915773ca66629e703ce6d2da9d448dd6543ee05cd7e5f7a8"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-owned.json",
+      "size": 2082,
+      "sha256": "76a2d79210af45801a3bd9066098a5d4a9df6b6618854de4a6a8947802cc9b41"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-callback.json",
+      "size": 321,
+      "sha256": "6b3f7200c92220fbe54a95e660029e8c9565047d976dcf2f35a837d40e4cf473"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-first-failure-owned.json",
+      "size": 3023,
+      "sha256": "3ec1e5fcc77cc5b39528e506d075e9579a999a5b03f8b94d422eabda49e27cde"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-first-failure-callback.json",
+      "size": 321,
+      "sha256": "dd485c337ec575278d1157fe51a4d321dc7817dca9867a20cae598c99206e849"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-second-failure-owned.json",
+      "size": 2580,
+      "sha256": "06dad4c77735926dbde4a58e04a7ba735a08a08d50d5ed6aeba1c13978866d02"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/api-dom-second-failure-callback.json",
+      "size": 321,
+      "sha256": "2c62aea04c3f58c00296d3cafffeaaacb26a88ba15dbe8a11a6ffef2d0cc8245"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/dom-final-owned.json",
+      "size": 1221,
+      "sha256": "9b591e036a8aabf7f6f1e4b75a61d22aac98daea86e5ad2e07f7a5a2a3bd4c6a"
+    },
+    {
+      "path": "Docs/Evidence/v0.24.4_2026-11-02/dom-final-callback.json",
+      "size": 70,
+      "sha256": "55308d65d8f36968e9ae36c7a3504b9fe9db5cce63822e4ebbaeff9675dce66c"
+    }
+  ]
+}

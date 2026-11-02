@@ -487,6 +487,8 @@ class BrowserServer(ThreadingHTTPServer):
                     # cause and folder (the queue adds the title); the raw error is on the move line, for Technical details.
                     return {'result': 'refused', 'cause': 'unfinished', 'code': 'unfinished', 'folder': move.get('folder') or '', 'move': move}
                 return {'result': 'done', 'answer': {'move': move}}
+            if action == 'cleanup' and args.get('identity_retry') is True:
+                return {'result':'done','answer':merge.retry_source_cleanup('Audiobooks',book,args['revision'],args['job_id'],args['cleanup_id'])}
             if action == 'cleanup':
                 return {'result': 'done', 'answer': merge.start_historical_cleanup(args['job_id'])}
             if action == 'restore':
@@ -588,7 +590,7 @@ class BrowserServer(ThreadingHTTPServer):
         return value
 
 # The presses that queue (0.22.1, Judy 1.1).
-QUEUED_ROUTES = frozenset({'/api/audiobook/retry', '/api/audiobook/repair', '/api/candidate/delete', '/api/candidate/delete-preview'})
+QUEUED_ROUTES = frozenset({'/api/audiobook/cleanup/retry','/api/audiobook/retry', '/api/audiobook/repair', '/api/candidate/delete', '/api/candidate/delete-preview'})
 # Ruling 35 (Sergei 2026-10-26): these presses queue too, Approve always (Handler.queue_press, Server.run_queued).
 QUEUE_PRESSES = {'/api/candidate/approve': 'approve', '/api/candidate/keep-separate': 'separate', '/api/candidate/scan-again': 'scan_again',
                  '/api/candidate/dismiss': 'dismiss', '/api/candidate/names-save': 'names', '/api/candidate/names-forget': 'names_forget',
@@ -847,6 +849,10 @@ class Handler(BaseHTTPRequestHandler):
         with Sergei's values kept in the queued action: queued when something is in the way (always, for Approve), else None
         (the caller runs it now). The same validation as the press itself; nothing of the engine is read, so it works while
         loading."""
+        if path=='/api/audiobook/cleanup/retry':
+            self.shape(data,{'library','id','revision','job_id','cleanup_id','queue'},{'title'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            return self.server.actions.enqueue('cleanup',id,self.queue_title(data),{'identity_retry':True,'revision':revision,'job_id':self.uuid_value(data['job_id']),'cleanup_id':self.uuid_value(data['cleanup_id'])},always=always)
         if path in ('/api/audiobook/retry','/api/audiobook/repair'):
             self.shape(data,{'library','id','revision','job_id','queue'},{'title'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
@@ -1017,6 +1023,14 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(ids,list) or len(ids)>1000:raise ValueError('Acknowledge takes a list of outcome ids')
             self.response(200,self.server.actions.acknowledge([self.uuid_value(value) for value in ids]));return
         reviews=self.server.merge.reviews
+        if path=='/api/audiobook/cleanup/retry':
+            self.shape(data,{'library','id','revision','job_id','cleanup_id'},{'queue','title'})
+            library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
+            job_id=self.uuid_value(data['job_id']);cleanup_id=self.uuid_value(data['cleanup_id'])
+            if self.queue_flag(data):
+                answer=self.server.actions.enqueue('cleanup',id,self.queue_title(data),{'identity_retry':True,'revision':revision,'job_id':job_id,'cleanup_id':cleanup_id})
+                if answer is not None:self.response(202,answer);return
+            self.response(202,self.server.merge.retry_source_cleanup(library,id,revision,job_id,cleanup_id));return
         if path=='/api/audiobook/retry':
             self.shape(data,{'library','id','revision','job_id'},{'queue','title'})
             library,id,revision=self.candidate_identity({key:data[key] for key in ('library','id','revision')})
@@ -1354,7 +1368,7 @@ class Handler(BaseHTTPRequestHandler):
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
             if path in READ_ONLY_POSTS and isinstance(data,dict) and data.get('queue') is not True:self.status_control=False  # ruling 75a: a read keeps it
-            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
+            merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',
                          '/api/audiobook/clear-working','/api/audiobook/prepare-recovery','/api/audiobook/confirm-convert','/api/candidate/metadata-choice',
                          '/api/candidate/approve','/api/candidate/approve-preview','/api/candidate/scan-again','/api/candidate/dismiss','/api/candidate/keep-separate',
@@ -1366,7 +1380,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.fail(409,'The local server is stopping or stopped. Start is unavailable.' if path=='/api/automatic/start' else 'Server is shutting down');return
                 pressed=data.get('queue') is True and path in QUEUE_PRESSES
                 if still_loading(self.server) and not (path=='/api/shutdown' and not data) and not (path in LOOKING and self.loaded('books')):
-                    if pressed or data.get('queue') is True and path in ('/api/audiobook/retry','/api/audiobook/repair','/api/candidate/delete'):
+                    if pressed or data.get('queue') is True and path in ('/api/audiobook/cleanup/retry','/api/audiobook/retry','/api/audiobook/repair','/api/candidate/delete'):
                         # Ruling 35: accepted while loading, his values kept; it runs when loading finishes.
                         self.response(202,self.queue_press(path,data,always=True));return
                     # Looking is free, changing waits (Judy 3.6): refused, never queued, with the page's own sentence.

@@ -10,6 +10,15 @@ from pathlib import Path
 
 class BoundaryError(ValueError):pass
 
+def identity_diagnostic(path,code,api):
+    return {'path':str(path),'windows_error':code,'windows_message':ctypes.FormatError(code).strip() if code else '', 'api':api}
+
+class ProtectedIdentityUnavailable(BoundaryError):
+    def __init__(self,path,code,api='GetFileInformationByHandle'):
+        self.diagnostic=identity_diagnostic(path,code,api)
+        super().__init__('Cannot refresh protected file identity'+(f' (Windows error {code}: {self.diagnostic["windows_message"]})' if code else ' (Windows error not recorded)'))
+
+
 class AncestorUnavailable(BoundaryError):
     """A folder on the way to the destination is not there and may not be created here: the drive or share is away,
     or the folder is gone. Still a BoundaryError (every caller refuses exactly as before); typed so a conversion that
@@ -295,11 +304,13 @@ class VerifiedFile:
         self.handle=kernel.CreateFileW(str(self.path),0x81|(0x10000 if self.delete else 0)|(0x40000000 if self.writable else 0),1,None,3,0x00200000,None)
         if self.handle==ctypes.c_void_p(-1).value:
             code=ctypes.get_last_error();self.handle=None
-            raise (FileInUse if code==SHARING_VIOLATION else BoundaryError)(f'Cannot protect exact file: {ctypes.WinError(code)}')
+            error=(FileInUse if code==SHARING_VIOLATION else BoundaryError)(f'Cannot protect exact file: {ctypes.WinError(code)}')
+            error.diagnostic=identity_diagnostic(self.path,code,'CreateFileW');raise error
         try:
             info=FileInfo()
-            if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(info)) or info.attributes&(0x400|0x10):
-                raise BoundaryError('Expected an ordinary non-reparse file')
+            if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(info)):
+                code=ctypes.get_last_error();raise ProtectedIdentityUnavailable(self.path,code)
+            if info.attributes&(0x400|0x10):raise BoundaryError('Expected an ordinary non-reparse file')
             self.info=info
             return self
         except BaseException:self.__exit__(None,None,None);raise
@@ -359,7 +370,8 @@ class VerifiedFile:
         self._seek(size);kernel.SetEndOfFile.argtypes=[wintypes.HANDLE];kernel.SetEndOfFile.restype=wintypes.BOOL
         if not kernel.SetEndOfFile(self.handle):raise BoundaryError('Cannot restore the original file length')
     def refresh(self):
-        if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):raise BoundaryError('Cannot refresh protected file identity')
+        if not kernel.GetFileInformationByHandle(self.handle,ctypes.byref(self.info)):
+            code=ctypes.get_last_error();raise ProtectedIdentityUnavailable(self.path,code)
         return self.facts()
     def flush(self):
         if not self.writable:raise BoundaryError('Recovery durability requires its owned write-capable handle')

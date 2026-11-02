@@ -1,0 +1,1 @@
+{"at":"2026-11-02T12:08:38.164Z","error":null,"stdout":"{\"code\":1,\"closed\":true,\"native\":{\"active\":0,\"assigned\":0,\"listed\":0,\"retained\":8,\"unsignaled\":0,\"complete\":true,\"zero\":true,\"sampling\":{\"queries\":50,\"incompleteQueries\":0,\"firstIncomplete\":null,\"lastIncomplete\":null}}}\n","stderr":""}

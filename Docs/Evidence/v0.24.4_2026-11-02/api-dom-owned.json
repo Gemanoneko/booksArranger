@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 0,
+  "signal": null,
+  "error": null,
+  "out": "PASS cleanup identity legacy/observed diagnostics, real controls/pending/queue/cancel and no conversion mutation\nPASS cleanup policy, historical retention, authoritative partial pause/failure/completion, output success, verified counters and stage-specific job controls\nPASS proposal drafts, provenance/source coverage, dirty revisions, include/order invalidation, page-only ready queue, and single-M4B guard\nPASS explicit inspector focus, same-record draft retention, opaque folder identity and adjacent failure without native launch\nFOCUSED_API_DOM [{\"file\":\"C:/Python314/python.exe\",\"args\":[\"-I\",\"-B\",\"-X\",\"utf8\",\"import sys,unittest;sys.path[:0]=[\\\"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger\\\",\\\"C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests\\\"];r=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName('test_cleanup_scope.IdentityCleanupScopeTests'));sys.exit(not r.wasSuccessful())\"],\"status\":0},{\"file\":\"C:/Program Files/nodejs/node.exe\",\"args\":[\"tests/test_cleanup_frontend.js\"],\"status\":0}]\n",
+  "err": "test_exact_scope_queue_shape_and_no_conversion_continuation (test_cleanup_scope.IdentityCleanupScopeTests.test_exact_scope_queue_shape_and_no_conversion_continuation) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 1 test in 0.026s\r\n\r\nOK\r\n",
+  "supervisorErr": "",
+  "ok": true,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 84376,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 8,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 53,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 848.4154,
+  "outputBytes": 1346
+}

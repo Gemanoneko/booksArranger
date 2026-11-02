@@ -24,6 +24,12 @@ from native_io import DirectoryBoundary, VerifiedFile, BoundaryError, ordinary, 
 
 # SQLite's fixed text for SQLITE_BUSY. Before v0.16.5 a cleanup that hit a busy catalog stored it as
 # its reason; startup turns exactly that legacy shape into a paused cleanup (CleanupJobs.__init__).
+LEGACY_IDENTITY_HOLD='Cannot refresh protected file identity'
+
+class OutputIdentityUnavailable(BoundaryError):
+    def __init__(self,error):
+        self.diagnostic=dict(error.diagnostic);super().__init__(str(error))
+
 LEGACY_BUSY='database is locked'
 # Seconds to wait before the second and third attempt of a cleanup run that hit a busy catalog.
 RETRY_WAITS=(5,15)
@@ -89,6 +95,7 @@ class CleanupJobs:
         self.output_location=output_location
         self.database=str(database);self.root=ordinary(recovery_root);self.guard=guard;self.review_boundary=review_boundary
         self.stop=threading.Event();self.thread=None;self.lock=threading.RLock();self.closed=False;self.current=None
+        self.phases={}
         self.checked={}  # cleanup id -> originals checked so far while its recovery copies are checked (in memory)
         self.after_drain=None;self.on_completed=None
         # Quit (a drain) does not set stop; the owner supplies it so Quit also cuts a retry wait short.
@@ -129,7 +136,7 @@ class CleanupJobs:
         """
         busy=catalog_busy(error)
         state,reason=('paused','') if busy else ('needs_attention',str(error) or type(error).__name__)
-        cause=busy_cause(error,attempt) if busy and record else None
+        cause=busy_cause(error,attempt) if busy and record else packed({'kind':'output_identity_unavailable','reason':reason,'diagnostic':error.diagnostic}) if isinstance(error,OutputIdentityUnavailable) else None
         def write(db):
             prior=db.execute('SELECT state,reason FROM source_cleanup WHERE id=?',(id,)).fetchone()
             if prior is None:return
@@ -238,6 +245,29 @@ class CleanupJobs:
             expected_chapters=planned_chapter_titles(manifest)  # ruling 19a: joined parts keep their own chapters
         else:expected_chapters=[c['title'] for c in manifest['source_chapters']] if 'source_chapters' in manifest else manifest.get('chapters',[])
         if [c.get('title') for c in v.get('chapters',[])]!=expected_chapters:raise ValueError('Validated chapter choice does not match this completed book')
+    def identity_retry(self,id):
+        rows=self._rows('SELECT state,reason,intent FROM source_cleanup WHERE id=?',(id,))
+        if not rows:return None
+        row=rows[0];diagnostic=None;eligible=row['reason']==LEGACY_IDENTITY_HOLD
+        if row['state']=='needs_attention' and not eligible:
+            for held in self._rows('SELECT cause FROM source_cleanup_holds WHERE cleanup_id=? ORDER BY at DESC LIMIT 1',(id,)):
+                try:value=json.loads(held['cause'])
+                except (ValueError,TypeError):continue
+                if value.get('kind')=='output_identity_unavailable' and value.get('reason')==row['reason'] and isinstance(value.get('diagnostic'),dict):diagnostic=value['diagnostic'];eligible=True
+        active=self.current==id and bool(self.thread and self.thread.is_alive())
+        if not eligible and not active:return None
+        return {'schema':'books-cleanup-identity-retry-v1','allowed':eligible and row['state']=='needs_attention' and not active,'cleanup_id':id,'diagnostic':diagnostic,'output_path':json.loads(row['intent'])['output']['final_path'],
+                'phase':self.phases.get(id) if active else None,'running':active}
+
+    @contextlib.contextmanager
+    def _open_output(self,path):
+        with contextlib.ExitStack() as stack:
+            try:output=stack.enter_context(VerifiedFile(path))
+            except BoundaryError as error:
+                if isinstance(getattr(error,'diagnostic',None),dict):raise OutputIdentityUnavailable(error) from error
+                raise
+            yield output
+
     def status(self,job_id=None):
         rows=self._rows('SELECT * FROM source_cleanup'+(' WHERE job_id=?' if job_id else '')+' ORDER BY created', (job_id,) if job_id else ())
         result=[]
@@ -266,9 +296,9 @@ class CleanupJobs:
                 'pausing':'Pausing source cleanup','paused':f'Source cleanup paused: {len(removed)} of {total} removed','completed':success,
                 'needs_attention':'Source cleanup needs attention: '+reason+'. Remaining originals and temporary files are preserved for recovery.'}
             result.append({'id':row['id'],'job_id':row['job_id'],'state':state,'status':texts[state],'removed':len(removed),'total':total,'remaining':total-len(removed),
-                'checked':self.checked.get(row['id'],0) if state=='checking' else None,
+                'checked':self.checked.get(row['id'],0) if state=='checking' else None,'updated':row['updated'],
                 'bytes_removed':sum(json.loads(m['facts'])['size'] for m in removed),'recovery_bytes':current_bytes,
-                'recovery_location':str(self.root/row['id']) if current_bytes else '', 'temporary_cleanup':temporary,
+                'recovery_location':str(self.root/row['id']) if current_bytes else '', 'temporary_cleanup':temporary,'identity_retry':self.identity_retry(row['id']),
                 'preserved_evidence_count':evidence_count,'restore_available':bool(members) and all(Path(m['backup']).is_file() for m in members),'reason':reason})
         provider=getattr(self,'recovery_status',None)
         if provider:
@@ -283,9 +313,11 @@ class CleanupJobs:
                     elif recovery['state']=='deleted':item['status']='Originals removed; recovery copies deleted'
                 item['recovery_bytes']=recovery['bytes'];item['recovery_location']=recovery['location'] if recovery['count'] else ''
         return result[0] if job_id and result else (None if job_id else result)
-    def resume(self,selected=None,follow_audio=True,admission_check=None,after_drain=None,admission_token=None):
+    def resume(self,selected=None,follow_audio=True,admission_check=None,after_drain=None,admission_token=None,identity_retry=None):
         with self.lock:
             if self.closed:raise ValueError('Cleanup worker is closing')
+            if identity_retry is not None:
+                if selected!=[identity_retry] or not (self.identity_retry(identity_retry) or {}).get('allowed'):raise ValueError('This cleanup no longer offers Retry cleanup')
             if admission_check is not None and admission_check() is not True:
                 from audio_jobs import StartRefused
                 raise StartRefused('stale','Cleanup startup was superseded by Pause or closing.')
@@ -302,7 +334,7 @@ class CleanupJobs:
             except BaseException:
                 self.stop.set();raise
             self._thread_admission_token=admission_token
-            self.thread=threading.Thread(target=self._work,args=(selected,follow_audio,after_drain),name='books-source-cleanup',daemon=False)
+            self.thread=threading.Thread(target=self._work,args=(selected,follow_audio,after_drain,identity_retry),name='books-source-cleanup',daemon=False)
             self.thread.start()
             return {'state':'started'}
 
@@ -315,12 +347,16 @@ class CleanupJobs:
             worker.join(30)
             if worker.is_alive():raise TimeoutError('Source cleanup is still reaching its safe file checkpoint')
 
-    def _work(self,selected=None,follow_audio=True,after_drain=None):
+    def _work(self,selected=None,follow_audio=True,after_drain=None,identity_retry=None):
         # Senua 0.21.3 F1: a cleanup refused only because this process had no valid output folder runs again here;
         # every check runs again before any copy or removal, so a setting that is still missing refuses again.
         from source_config import CONFIGURATION_REFUSALS
         retried=('Additional filesystem streams require review; original retained','Download marker native identity differs','Unknown download marker contents preserved')+CONFIGURATION_REFUSALS
-        for row in self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (%s)) ORDER BY created"%','.join('?'*len(retried)),retried):
+        rows=self._rows("SELECT * FROM source_cleanup WHERE state IN ('waiting','paused') OR (state='needs_attention' AND reason IN (%s)) ORDER BY created"%','.join('?'*len(retried)),retried)
+        if identity_retry is not None:
+            if selected!=[identity_retry] or not (self.identity_retry(identity_retry) or {}).get('allowed'):return
+            rows=self._rows('SELECT * FROM source_cleanup WHERE id=?',(identity_retry,))
+        for row in rows:
             if selected is not None and row['id'] not in selected:continue
             if self.stop.is_set():break
             self.current=row['id']
@@ -328,7 +364,7 @@ class CleanupJobs:
                 self.run_with_retry(row['id'])
                 if self.on_completed and self.status(row['job_id'])['state']=='completed':self.on_completed(row['job_id'])
             except Exception as error:self.hold(row['id'],error)
-            finally:self.current=None
+            finally:self.phases.pop(row['id'],None);self.current=None
         handoff=after_drain if after_drain is not None else self.after_drain
         if follow_audio and not self.stop.is_set() and handoff:handoff()
     @staticmethod
@@ -400,7 +436,8 @@ class CleanupJobs:
             rb=stack.enter_context(DirectoryBoundary(self.root.anchor,recovery,create=True))
             if rb.identities[:len(self.root_identity)]!=self.root_identity:raise BoundaryError('Recovery root identity changed')
             if [list(v) for v in self.root_identity]!=[list(v) for v in intent['recovery_identity']]:raise BoundaryError('Persisted recovery ancestry changed')
-            ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(VerifiedFile(final))
+            self.phases[id]='Checking audiobook';self._set(id,'checking')
+            ob=stack.enter_context(DirectoryBoundary(root,final.parent));output=stack.enter_context(self._open_output(final))
             if out.get('identity') is not None and output.facts()['identity']!=out['identity']:raise BoundaryError('Relocated output native identity changed; originals retained')
             if ob.identities!=[tuple(v) for v in out['parent_identity']] or output.facts()['size']!=out['size'] or output.sha256()!=out['sha256']:
                 raise BoundaryError('Validated output is changed or unavailable; originals retained')
@@ -410,7 +447,7 @@ class CleanupJobs:
                 if not self.guard(db,intent):raise BoundaryError('Completed book review changed')
             if out['validation'].get('publication_mode')=='in_place':return self._retire_moved(id,intent,manifest,out)
             self._sorted(final,BoundaryError)  # before any copy or marker change; again before each disposal below
-            self._set(id,'checking');held=[]
+            self._set(id,'checking');held=[];self.phases[id]='Checking original files'
             required=sum(s['size'] for s in manifest['sources'])
             if shutil.disk_usage(self.root).free<required+1024*1024:raise BoundaryError('Insufficient recovery space; originals retained')
             for index,source in enumerate(manifest['sources']):
@@ -441,6 +478,7 @@ class CleanupJobs:
                         db.execute('INSERT OR IGNORE INTO source_zone_marker_intents VALUES(?,?,?,?,?)',(id,str(path),receipt['marker_sha256'],packed(receipt),stamp()))
                     removed_marker['receipt']=receipt
                 remove_marker(path,validate_marker_base,persist_marker)
+                self.phases[id]='Checking original files'
                 original=stack.enter_context(VerifiedFile(path,delete=True))
                 facts=self._match(original,source,json.loads(member['facts']) if member else None,approved);single_stream(path)
                 if removed_marker:marked[str(path)]=(removed_marker['receipt'],facts,str(source_root))
@@ -452,6 +490,7 @@ class CleanupJobs:
                     with open(backup,'xb') as dest:
                         for block in original.chunks():dest.write(block)
                         dest.flush();os.fsync(dest.fileno())
+                self.phases[id]='Checking recovery copies'
                 backup_handle=stack.enter_context(VerifiedFile(backup,writable=True))
                 backup_handle.restore_metadata(facts['modified'],facts['attributes'])
                 backup_handle.flush() # Also required for reused backup_pending copies, after timestamp updates.
@@ -460,7 +499,7 @@ class CleanupJobs:
                 held.append((source,original,facts))
             # All recovery copies are durable and protected BEFORE the first dispose.
             self.checked.pop(id,None)
-            self._set(id,'removing')
+            self.phases[id]='Removing originals';self._set(id,'removing')
             for source,original,facts in held:
                 if self.stop.is_set():self._set(id,'paused');return
                 rb.revalidate();ob.revalidate()
@@ -489,7 +528,10 @@ class CleanupJobs:
     @staticmethod
     def _output_present(output,out,final):
         """Audit m1: the held handle blocks deletes over SMB, not on the NAS itself; re-read the output now."""
-        now=output.refresh()
+        try:now=output.refresh()
+        except BoundaryError as error:
+            if isinstance(getattr(error,'diagnostic',None),dict):raise OutputIdentityUnavailable(error) from error
+            raise
         if now['size']!=out['size'] or now['links']<1 or not os.path.lexists(final) or out.get('identity') is not None and now['identity']!=out['identity']:
             raise BoundaryError('Validated output changed or is gone before source removal; originals retained')
     def _retire_moved(self,id,intent,manifest,out):
