@@ -101,6 +101,26 @@ class QueuedPressTests(unittest.TestCase):
         values.update(args)
         return self.queue.enqueue('approve', self.book, 'Спящие красавицы', values)
 
+    def test_approval_ack_does_not_wait_for_global_control_lock(self):
+        handler = web_server.Handler.__new__(web_server.Handler)
+        handler.server = self.server
+        handler.trusted = lambda **_: True
+        handler.query = lambda: ('/api/candidate/approve', {})
+        handler.body = lambda: {'library':'Audiobooks','id':self.book,'revision':3,'queue':True,'title':'Chosen'}
+        sent = []
+        handler.response = lambda status, body: sent.append((status, body, handler.status_control))
+        self.server.jobs = True
+        worker = threading.Thread(target=handler.do_POST,daemon=True)
+        with self.server.control_lock:
+            worker.start()
+            worker.join(1)
+            acknowledged = not worker.is_alive()
+        worker.join(2)
+        self.assertTrue(acknowledged)
+        self.assertEqual(sent[0][0],202)
+        self.assertTrue(sent[0][1]['queued'])
+        self.assertFalse(sent[0][2], 'queue admission does not invalidate the catalog snapshot')
+
     def test_approve_is_always_queued_with_his_values_and_runs_at_once_when_nothing_is_in_the_way(self):
         self.server.merge.answers['approve'] = {'job_id': 'job-1', 'row': {}}
         answer = self.approve()

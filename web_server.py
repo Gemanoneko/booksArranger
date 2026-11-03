@@ -705,6 +705,10 @@ class Handler(BaseHTTPRequestHandler):
                 if query:
                     raise ValueError('Health takes no query parameters')
                 self.response(200,self.server.health())
+            elif path == '/api/queue/state':
+                if not self.trusted(token=True):return
+                if query:raise ValueError('Queue state takes no query parameters')
+                self.response(200,self.server.actions.view())
             elif path == '/':
                 if query:
                     raise ValueError('The application page takes no query parameters')
@@ -1367,6 +1371,11 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
+            if path=='/api/candidate/approve' and data.get('queue') is True:
+                # The queue checks shutdown under its own lock and revalidates before running.
+                # Admission does not read the catalog or invalidate its snapshots.
+                self.status_control=False
+                self.response(202,self.queue_press(path,data,always=True));return
             if path in READ_ONLY_POSTS and isinstance(data,dict) and data.get('queue') is not True:self.status_control=False  # ruling 75a: a read keeps it
             merge_routes={'/api/automatic/start','/api/automatic/stop','/api/automatic/draft','/api/inspect','/api/open-folder','/api/candidate/review','/api/candidate/routing-preview','/api/candidate/match','/api/candidate/covers','/api/candidate/tracks','/api/audiobook/create','/api/audiobook/replace','/api/audiobook/queue','/api/audiobook/pause','/api/audiobook/resume','/api/audiobook/cleanup/retry','/api/audiobook/cleanup','/api/audiobook/restore','/api/audiobook/recovery/delete','/api/audiobook/retry','/api/audiobook/repair','/api/audiobook/retry-all','/api/audiobook/keep',
                          '/api/audiobook/startover','/api/audiobook/release','/api/audiobook/release-selected','/api/automatic/cancel-start',

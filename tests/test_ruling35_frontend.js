@@ -65,7 +65,17 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   run('askDone.clear();askResults.clear();queueNotes.clear()');paint([scp,other,stopped]);
   const first=byText(trOf('cand-b'),'Approve').handlers.click({stopPropagation(){}});await tick();
   assert.equal(byText(trOf('cand-a'),'Approve').getAttribute('aria-disabled'),null,'the other row\'s Approve stays ready');
+  assert.equal(byText(trOf('cand-b'),'Submitting approval…').getAttribute('aria-disabled'),'true');
   release();await first;await tick();
+  run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[]});controls()');
+  answers['/api/candidate/approve']=()=>Promise.reject(Error('connection lost'));
+  answers['/api/queue/state']=()=>ok({queued_actions:[],queue_running:null,queue_outcomes:[]});
+  await byText(trOf('cand-b'),'Approve').handlers.click({stopPropagation(){}});await tick();
+  assert.equal(byText(trOf('cand-b'),'Checking approval…').getAttribute('aria-disabled'),'true');
+  assert.equal(byText(trOf('cand-a'),'Approve').getAttribute('aria-disabled'),null);
+  run('syncQueue({queued_actions:[{id:"q4",action:"approve",book_id:"cand-b",position:1}],queue_running:null,queue_outcomes:[]});controls()');
+  assert.equal(byText(trOf('cand-b'),'Queued').getAttribute('aria-disabled'),'true');
+  run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[]});controls()');
   // 3. A Start over pressed while another press of the page runs: held, with Cancel, run when the page is free.
   answers['/api/audiobook/startover']=data=>ok({outcome:'automatic',set_aside:true,job_id:data.job_id,row:null},202);
   run('busy=true;controls()');

@@ -2449,7 +2449,7 @@ def attach_shared_routing(result, peers=()):
 
     Peers must be caller-validated current research/approved results, with current
     source, saved-name and rule bindings. Stable series URLs establish membership;
-    their shared display name alone never does. Explicit 2026-11-01 decisions are
+    their shared display name alone never does. Explicit user decisions are
     scoped to exact works/authors and are attributed as user decisions.
     """
     import local_identity
@@ -2479,16 +2479,17 @@ def attach_shared_routing(result, peers=()):
                 raise RoutingEvidenceError('Series membership has conflicting author credits. Confirm this book in Edit names.')
             members[item['work_id']] = item
         series = {'id': sid, 'name': review['series'], 'basis': 'catalog', 'evidence': [sid], 'members': list(members.values())}
-    # The two books/credits were explicitly confirmed in the 2026-11-01 Omen request.
-    omen = (('1', 'The Omen', 'David Seltzer'), ('2', 'Damien', 'Joseph Howard'))
-    for number, title, author in omen:
+    # Exact Omen memberships confirmed on 2026-11-01 and 2026-11-02.
+    omen = local_identity.CONFIRMED_OMEN_WORKS
+    for number, title, author, _ in omen:
         if (local_identity.title_key(review.get('title', '')) == local_identity.title_key(title)
                 and len(member['authors']) == 1 and _exact_people(member['authors'][0], [author])
                 and review.get('number') == number and local_identity.title_key(review.get('series', '')) in {'omen', 'the omen'}):
-            others = [{'work_id': 'user:omen-' + position + '-2026-11-01', 'authors': [credit]}
-                      for position, _, credit in omen if position != number]
+            others = [{'work_id': 'user:omen-' + position + '-' + decided, 'authors': [credit]}
+                      for position, _, credit, decided in omen if position != number]
             series = {'id': 'user:omen-series-2026-11-01', 'name': review['series'], 'basis': 'user',
-                      'evidence': ['user:shared-series-decision-2026-11-01'], 'members': [member] + others}
+                      'evidence': ['user:shared-series-decision-2026-11-01', 'user:omen-memberships-2026-11-02'],
+                      'members': [member] + others}
             break
     names = (out.get('approval') or {}).get('names') or {}
     entered = set((facts.get('entered_names') or {}).get('fields') or [])

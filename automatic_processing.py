@@ -458,6 +458,10 @@ class AutomaticProcessing:
             self._changed()
             if kind not in CLEARS:return
     def stop(self,force=False,origin=None):
+        self.stop_work(force=force,origin=origin)
+        return self.status()
+
+    def stop_work(self,force=False,origin=None):
         """Stop, Quit (not forced) and the app's own safety stops (disk full, working-file hold: forced). Each also ends
         a pending start (O12): a start the app or Sergei has just stopped must never come back by itself. The rows and
         the notice then read as after Cancel automatic start (RefusedRetry follow-up 4, section 1.4)."""
@@ -472,9 +476,7 @@ class AutomaticProcessing:
                 generation=self._stop_generation;self._stop_origin=origin;self.stop_event.set();self.next_retry_at=None
         if cancelled:
             self._pending_wake.set();self._changed()
-        if not active:return self.status()
-        self._pause_stopped(generation)
-        return self.status()
+        if active:self._pause_stopped(generation)
     def _pause_stopped(self,generation):
         # Never hold self.lock while entering scanner/merge locks. Serialize the
         # durable origin and queue pause together; a later press is read when its
@@ -484,13 +486,17 @@ class AutomaticProcessing:
             origin=self._stop_origin
             with connect(self.database) as db:
                 pause=__import__('pause_state').read(db,'automatic')
-                if origin is not None:pause=__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
+                if origin is not None and (origin!='closing' or not pause):
+                    pause=__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
                 elif not pause:pause=__import__('pause_state').record(db,'automatic','interrupted','Automatic processing stopped before completing its work')
             self.inventory.stop()
-            if pause['origin']=='user':self.merge.pause()
+            if origin in ('closing','update'):
+                getattr(self.merge,'pause_work',self.merge.pause)(origin=origin)
+            elif pause['origin']=='user':self.merge.pause()
             else:self.merge.pause(origin=pause['origin'])
     def close(self,timeout=30):
-        self.closed=True;self.stop(force=True);thread=self.thread
+        self.closed=True;thread=self.thread
+        self.stop_work(force=bool(thread and thread.is_alive()))
         if thread and thread is not threading.current_thread():
             thread.join(timeout)
             if thread.is_alive():raise TimeoutError('Automatic processing still closing at safe checkpoint')

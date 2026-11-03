@@ -18,3 +18,11 @@ def read(db, scope):
 def clear(db, scope):
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pause_attribution'").fetchone():
         db.execute('DELETE FROM pause_attribution WHERE scope=?',(scope,))
+
+
+def record_shutdown(db, trigger):
+    """Last completed desktop shutdown, separate from the saved pause origin."""
+    if trigger not in ('quit','update','session_end','shell_pipe_closed'):
+        raise ValueError('Invalid desktop shutdown trigger')
+    db.execute('CREATE TABLE IF NOT EXISTS desktop_shutdown (id INTEGER PRIMARY KEY CHECK(id=1), trigger TEXT NOT NULL, at TEXT NOT NULL)')
+    db.execute('INSERT OR REPLACE INTO desktop_shutdown VALUES(1,?,?)',(trigger,datetime.datetime.now(datetime.timezone.utc).isoformat()))

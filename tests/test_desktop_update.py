@@ -343,6 +343,27 @@ class RealWorkerResumeTests(unittest.TestCase):
         close_scan(self.inventory)
         self.merge.close()
 
+    def test_engine_close_preserves_pause_and_records_distinct_trigger(self):
+        from automatic_processing import AutomaticProcessing
+        from pause_state import record, read
+        from scanner import connect
+        auto = AutomaticProcessing.__new__(AutomaticProcessing)
+        auto.database = self.inventory.database
+        auto.lock = threading.RLock(); auto.thread = None; auto.start_pending = None
+        auto._run_row = lambda: {'state':'Paused'}
+        with connect(auto.database) as db:
+            expected=record(db,'automatic','update','Saved update pause')
+            jobs_expected=record(db,'jobs','user','Already paused by user')
+        self.merge.jobs._stop.set()
+        self.merge.pause_work(origin='update')
+        auto.close()
+        value = control(self.server)
+        self.assertTrue(value._shutdown('shell_pipe_closed'))
+        with connect(auto.database) as db:
+            self.assertEqual(read(db,'automatic'),expected)
+            self.assertEqual(read(db,'jobs'),jobs_expected)
+            self.assertEqual(db.execute('SELECT trigger FROM desktop_shutdown').fetchone()[0],'shell_pipe_closed')
+
     def read(self, path, kind, stop):
         """The scan's tag reader: the first read takes LAG to reach its checkpoint once the scan is stopped."""
         self.reads.append(path)

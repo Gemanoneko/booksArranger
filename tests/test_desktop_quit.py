@@ -105,7 +105,7 @@ class ControlTests(unittest.TestCase):
         limit = time.monotonic() + 5
         while not server.merge.automatic.stop.called and time.monotonic() < limit:
             time.sleep(.02)  # 0.22.3: the stops run on the quit thread
-        server.merge.drain.assert_called_once_with(); server.inventory.stop.assert_called(); server.merge.automatic.stop.assert_called_once_with()
+        server.merge.drain.assert_called_once_with(); server.inventory.stop.assert_called(); server.merge.automatic.stop.assert_called_once_with(origin='closing')
         time.sleep(.8)
         server.finish_shutdown.assert_not_called()  # the book is still converting
         self.assertEqual(control.quit()['phase'], 'finishing')  # a second Quit is idempotent
@@ -119,7 +119,7 @@ class ControlTests(unittest.TestCase):
         # shell's 5 s request ran out and the accepted Quit read "Quit could not be confirmed ... Request timed out".
         server, jobs_thread = fake_server(converting=False)
         release = threading.Event()
-        server.merge.automatic.stop = Mock(side_effect=lambda: release.wait(10))
+        server.merge.automatic.stop = Mock(side_effect=lambda origin=None: release.wait(10))
         control = DesktopControl(server)
         started = time.monotonic()
         self.assertEqual(control.quit()['phase'], 'finishing')

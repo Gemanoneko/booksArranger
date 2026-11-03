@@ -1128,9 +1128,12 @@ class AudioJobs:
         return answer('started')
 
     def pause(self):
+        self.pause_work()
+        return self.status()
+
+    def pause_work(self):
         with self._lock:
             self._stop.set();self._verify_stop.set()
-        return self.status()
 
     def drain(self):
         """Let the current book (and its cleanup) finish, then stop before the next one."""

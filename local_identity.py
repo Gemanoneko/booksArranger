@@ -2035,6 +2035,26 @@ def confirmed_corbett(title, author):
     return None
 
 
+# Exact works/credits confirmed by Sergei: first two on 2026-11-01, next two
+# on 2026-11-02 (https://www.goodreads.com/series/111866-the-omen).
+# These memberships do not establish another same-named series or another writer.
+CONFIRMED_OMEN_WORKS = (
+    ('1', 'The Omen', 'David Seltzer', '2026-11-01'),
+    ('2', 'Damien', 'Joseph Howard', '2026-11-01'),
+    ('3', 'The Final Conflict', 'Gordon McGill', '2026-11-02'),
+    ('4', 'Armageddon 2000', 'Gordon McGill', '2026-11-02'),
+)
+
+
+def confirmed_omen(series, number, title, author):
+    """Exact user-confirmed membership; no surname/initial-only or narrator credit."""
+    if title_key(series) not in {'omen', 'the omen'}:
+        return False
+    return any(str(number) == position and title_key(title) == title_key(work)
+               and sorted(words(author)) == sorted(words(credit))
+               for position, work, credit, _ in CONFIRMED_OMEN_WORKS)
+
+
 def _confirmed_corbett_folder(author, series):
     return (sorted(words(author)) in [sorted(words(alias)) for alias in _CONFIRMED_MCCAMMON_AUTHORS]
             and title_key(series) in {title_key('Matthew Corbett'), title_key('Мэтью Корбетт')})
@@ -2788,6 +2808,7 @@ def identify(row, root='', siblings=None, readers=None, index=None, rules=None):
         if filed:
             found = dict(found, series=filed)
         unconfirmed = not (named or filed
+                           or confirmed_omen(found['series'], found['number'], found['title'], author['name'] if author else '')
                            or (fields['series']['state'] == 'green' and series_key(fields['series']['value']) == series_key(found['series'])))
         whole = fields['title']['value']
         if not named:
@@ -3102,7 +3123,9 @@ def _series_split(title, author=''):
             or found['number'] in _TITLE_NUMBERS or (author and compare_names(series, author)):
         return None, None
     parts = {'series': series, 'number': series_number(found['number']), 'title': rest}
-    if _unsure_series(series) or _unsure_title(rest):
+    # A title containing a year remains ambiguous except for the exact confirmed work.
+    confirmed = confirmed_omen(series, parts['number'], rest, author)
+    if _unsure_series(series) or (_unsure_title(rest) and not confirmed):
         return parts, 'ask'  # rulings 51 and 52 (m18)
     # m12: a one-digit position before ":" is a series book ("Гарри Поттер 1: Философский камень", "Dune 2: Dune
     # Messiah"); a padded number is a series' numbering («Перри Родан 001. Звездная пыль», «Конан 005 - Час дракона»).

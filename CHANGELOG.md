@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.24.5] - 2026-11-03
+
+### Fixed
+
+- Keep verified Omen series details and route confirmed shared-series books to the series folder.
+- Preserve the correct automatic-processing and pause state during queued actions and desktop lifecycle changes.
+
 ## [v0.24.4] - 2026-11-02
 
 ### Fixed

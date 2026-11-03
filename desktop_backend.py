@@ -163,7 +163,7 @@ class DesktopControl:
             if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
                 return {'phase': self.phase}
         if self._loading():
-            return self.stop_now()  # nothing runs but loading: Quit closes at once (Judy 3.2)
+            return self.stop_now('quit')  # nothing runs but loading: Quit closes at once (Judy 3.2)
         with self.lock:
             if self.phase not in ('running', 'blocked') or (self.thread and self.thread.is_alive()):
                 return {'phase': self.phase}
@@ -187,7 +187,7 @@ class DesktopControl:
         self.server.inventory.stop()
         automatic = self._automatic()
         if automatic is not None:
-            automatic.stop()
+            getattr(automatic,'stop_work',automatic.stop)(origin='closing')
 
     def _drop_queue(self):
         """Quit and Restart to update drop the queued Retry, Repair and Delete book presses (Sergei, Q1; Judy 1.8)."""
@@ -215,7 +215,7 @@ class DesktopControl:
             return  # Keep server, native catalog lease and ownership record alive.
         self._shutdown()
 
-    def _shutdown(self):
+    def _shutdown(self, trigger='quit'):
         try:
             self.server.finish_shutdown()
         except Exception as error:
@@ -225,6 +225,16 @@ class DesktopControl:
             return False  # A failed close is not authority to release ownership.
         with self.lock:
             self.phase = 'exiting'
+        database=getattr(self.server.inventory,'database',None)
+        if database is not None:
+            try:
+                import sqlite3
+                from contextlib import closing
+                from pause_state import record_shutdown
+                with closing(sqlite3.connect(database,timeout=1)) as db, db:
+                    record_shutdown(db,trigger)
+            except sqlite3.Error as error:
+                print(f'Cannot record shutdown trigger: {error}',file=sys.stderr)
         self._bound_exit()
         return True
 
@@ -259,7 +269,7 @@ class DesktopControl:
             self.server.inventory.stop()
             with self.server.control_condition:
                 self.server.closing = True
-            self.thread = threading.Thread(target=self._shutdown, name='books-desktop-update', daemon=True)
+            self.thread = threading.Thread(target=self._shutdown, args=('update',), name='books-desktop-update', daemon=True)
             self.thread.start()
             return self._update_answer()
         with self.server.control_condition:
@@ -278,18 +288,22 @@ class DesktopControl:
         automatic = self._automatic()
         jobs_thread = getattr(getattr(merge, 'jobs', None), '_thread', None)
         cleanup = getattr(merge, 'cleanup', None)
-        title = ''
-        try:
-            from scanner import connect
-            with connect(self.server.merge.inventory.database) as db:
-                row = db.execute("SELECT manifest FROM audio_jobs WHERE state='running' LIMIT 1").fetchone()
-            title = (json.loads(row[0]).get('metadata') or {}).get('title', '') if row else ''
-        except Exception:
-            title = ''
         return {'automatic': bool(automatic is not None and getattr(automatic, 'thread', None) and automatic.thread.is_alive()),
-                'converting': bool(jobs_thread and jobs_thread.is_alive()), 'title': str(title)[:200],
+                'converting': bool(jobs_thread and jobs_thread.is_alive()), 'title': '',
                 'cleanup': bool(cleanup is not None and (getattr(cleanup, 'current', None) or getattr(cleanup, 'thread', None) and cleanup.thread.is_alive())),
                 'scanning': bool(self.server.scan_active()), 'library': getattr(self.server, 'active_library', None)}
+
+    def _read_update_title(self, update):
+        # This optional label is read by the worker, never before the request acknowledgement.
+        from contextlib import closing
+        import sqlite3
+        try:
+            with closing(sqlite3.connect(self.server.inventory.database,timeout=1)) as db:
+                row=db.execute("SELECT manifest FROM audio_jobs WHERE state='running' LIMIT 1").fetchone()
+            title=(json.loads(row[0]).get('metadata') or {}).get('title','') if row else ''
+        except (AttributeError,sqlite3.Error,ValueError,TypeError):
+            return
+        with self.lock:update['before']['title']=str(title)[:200]
 
     def _update_answer(self):
         """The update part of desktop status (also the POST answers)."""
@@ -357,9 +371,11 @@ class DesktopControl:
         update = self.update
         merge = self.server.merge
         try:
+            hold = getattr(merge, '_update_hold', None)
+            if hold is not None:hold.set()  # stop admitting background recovery before requesting the drain
             automatic = self._automatic()
             if automatic is not None:
-                automatic.stop(origin='update')  # saves the research checkpoint; pauses the queue when a run is active
+                getattr(automatic,'stop_work',automatic.stop)(origin='update')
             self.server.inventory.stop()  # the scan stops at its checkpoint (Resume scanning continues it)
             # Futaba's 0.22.1 QA, m-1 (Judy 0.22.2 6.3): an approval checking its files holds the review and group locks
             # for the whole check, and the conversion's revision guard waits behind them, so a conversion beside an
@@ -367,14 +383,12 @@ class DesktopControl:
             # flight now stops at once, as for Quit: the book is not approved and Sergei presses Approve again.
             for press in list(getattr(merge, '__dict__', {}).get('_approve_stops', ())):
                 press.set()
-            merge.pause(origin='update')  # the book in progress stops at its next checkpoint and starts again later
-            hold = getattr(merge, '__dict__', {}).get('_update_hold')
-            if hold is not None:
-                hold.set()  # m-3: the background recovery pass stops at its next safe point
+            getattr(merge,'pause_work',merge.pause)(origin='update')  # stop at the next safe checkpoint
             for name in ('series_backfill', 'gap_fill'):
                 background = getattr(merge, '__dict__', {}).get(name)
                 if background is not None:
                     background.stop.set(); background.wake.set()
+            if update['before'].get('converting'):self._read_update_title(update)
             safe = update['started'] + self.UPDATE_SAFE
             last = safe + self.UPDATE_FORCE
             while True:
@@ -403,7 +417,7 @@ class DesktopControl:
                     self.phase = 'updating'
             if cancelled:
                 return self._resume_after_update('cancelled')
-            if not self._shutdown():
+            if not self._shutdown('update'):
                 # A close that failed before the engine ended undoes the update too (proposal 5B6): the app runs on.
                 return self._resume_after_update('blocked', self.error)
         except Exception as error:
@@ -422,9 +436,10 @@ class DesktopControl:
         if pending:
             pending.set()
         automatic = self._automatic()
-        if automatic is not None:
+        worker = getattr(automatic,'thread',None)
+        if worker is not None and worker.is_alive():
             try:
-                automatic.stop(force=True)
+                getattr(automatic,'stop_work',automatic.stop)(force=True,origin='update')
             except Exception:
                 pass
 
@@ -541,7 +556,7 @@ class DesktopControl:
         with self.lock:
             return self._update_answer()
 
-    def stop_now(self):
+    def stop_now(self, trigger='session_end'):
         """Immediate safe stop (Windows sign-out or shell loss): the book in progress restarts later."""
         with self.lock:
             if self.phase in ('stopping', 'exiting'):
@@ -550,7 +565,7 @@ class DesktopControl:
         self.server.inventory.stop()
         with self.server.control_condition:
             self.server.closing = True
-        threading.Thread(target=self._shutdown, name='books-desktop-stop', daemon=True).start()
+        threading.Thread(target=self._shutdown, args=(trigger,), name='books-desktop-stop', daemon=True).start()
         return {'phase': 'stopping'}
 
 
@@ -613,7 +628,7 @@ def watch_shell(control):
     except OSError:
         pass
     if control.phase in ('running', 'finishing', 'parking', 'pausing', 'forcing'):
-        control.stop_now()
+        control.stop_now('shell_pipe_closed')
 
 
 def _process_running(pid):

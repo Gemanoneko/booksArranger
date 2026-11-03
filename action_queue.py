@@ -312,10 +312,11 @@ class ActionQueue:
                 outcome = self._run(head)
             finally:
                 self._release()
+            blocker = self.blocker_after(head) if outcome is None else None
             with self.lock:
                 self.running = None
-                if outcome is None and not self.closed:
-                    head['blocker'] = self.blocker_after(head)
+                if outcome is None and not self.closed and not self.server.closing:
+                    head['blocker'] = blocker
                     self.items.insert(0, head)  # a blocker came back between the look and the run: it waits again
                 elif outcome is not None:
                     self.outcomes.append(outcome)

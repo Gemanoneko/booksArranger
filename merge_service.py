@@ -825,6 +825,11 @@ class MergeService:
 
     def pause(self,origin=None):
         if self.draining:return None
+        self.pause_work(origin)
+        return self.state()
+
+    def pause_work(self,origin=None):
+        if self.draining:return
         with _BULK_LOCK:
             self._start_generation=self.__dict__.get('_start_generation',0)+1
             self._pause_depth=self.__dict__.get('_pause_depth',0)+1
@@ -834,12 +839,16 @@ class MergeService:
             # Neither queue can clear stop after this Pause completes using an older generation.
             self._maintenance_paused=True
             if self.__dict__.get('_maintenance'):self._maintenance.update(state='stopping',cancel_requested=True)
-            self.cleanup.pause();self.jobs.pause()
+            previous_stop=getattr(self.jobs,'_stop',None)
+            already_paused=previous_stop is not None and previous_stop.is_set()
+            self.cleanup.pause();getattr(self.jobs,'pause_work',self.jobs.pause)()
             origin=origin or ('update' if self.__dict__.get('_update_hold') is not None and self._update_hold.is_set() else 'closing' if self.__dict__.get('_closing') else 'user')
-            with connect(self.inventory.database) as db:__import__('pause_state').record(db,'jobs',origin,'Audiobook jobs paused')
+            attribution=__import__('pause_state')
+            with connect(self.inventory.database) as db:
+                if origin not in ('update','closing') or not already_paused or not attribution.read(db,'jobs'):
+                    attribution.record(db,'jobs',origin,'Audiobook jobs paused')
         finally:
             with _BULK_LOCK:self._pause_depth-=1
-        return self.state()
 
     def drain(self):
         """Finish current work; invalidate every delayed start before shutdown waits."""
