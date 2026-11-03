@@ -1,0 +1,71 @@
+{
+  "status": "READY_NOT_LAUNCHED",
+  "runtime_files_verified": 47,
+  "ownership_files": 92,
+  "ownership_tree_sha256": "a1629fdbc1c73fac1fabd64db245bdd2a12dafe8b93891acce9647dc163f52ad",
+  "fixture_sha256": "e2deceb321010a2b3f7e813c3bfceccf2f4213ec7d83a17019c81f55f77047ed",
+  "graph_env_exact": true,
+  "prior_env_keys_exact": true,
+  "preflights": [
+    {
+      "name": "Koffi",
+      "result": "3.3.2"
+    },
+    {
+      "name": "Python",
+      "result": "Python 3.14.8"
+    },
+    {
+      "name": "FFmpeg",
+      "result": "ffmpeg version n8.1.3-9-g29e619e767-20260930 Copyright (c) 2000-2026 the FFmpeg developers"
+    },
+    {
+      "name": "FFprobe",
+      "result": "ffprobe version n8.1.3-9-g29e619e767-20260930 Copyright (c) 2007-2026 the FFmpeg developers"
+    },
+    {
+      "name": "npm",
+      "result": "11.20.0"
+    }
+  ],
+  "invocation": {
+    "file": "C:/Program Files/nodejs/node.exe",
+    "args": [
+      "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+      "--context",
+      "C:/Antigravity Projects/q/context/context.json",
+      "--context-sha",
+      "b79fc90b2e21a4a7e5d1a8d694ca152ecbe76896612d59134048d9257b40eb0f",
+      "--run-root",
+      "C:/Antigravity Projects/q"
+    ],
+    "options": {
+      "cwd": "C:/Antigravity Projects/Studio Illuminati",
+      "env": {
+        "SystemRoot": "C:\\Windows",
+        "WINDIR": "C:\\Windows",
+        "PATH": "C:/Program Files/nodejs;C:/Program Files/Git/cmd;C:/Windows/System32",
+        "TEMP": "C:/Antigravity Projects/q/t",
+        "TMP": "C:/Antigravity Projects/q/t",
+        "TMPDIR": "C:/Antigravity Projects/q/t",
+        "USERPROFILE": "C:/Antigravity Projects/q/profile",
+        "APPDATA": "C:/Antigravity Projects/q/profile/AppData/Roaming",
+        "LOCALAPPDATA": "C:/Antigravity Projects/q/profile/AppData/Local",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "NODE_OPTIONS": "",
+        "NODE_PATH": "",
+        "BOOKS_QA_RUNTIME_ROOT": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+        "BOOKS_MP3_REAL_FIXTURE": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture/fixture.mp3"
+      },
+      "windowsHide": true,
+      "timeout": 930000,
+      "maxBuffer": 67108864,
+      "encoding": "utf8"
+    },
+    "source_head": "7a50f5c50208d6967822dfa8fc296c0910e7a23f",
+    "build_id": "2c48e76e-0702-45e6-848b-811b7fb6bfa0",
+    "context_sha256": "b79fc90b2e21a4a7e5d1a8d694ca152ecbe76896612d59134048d9257b40eb0f",
+    "entry_deadline_ms": 900000,
+    "transport_eof_only_ms": 930000
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "started_at": "2026-11-03T18:45:18.094Z",
+  "finished_at": "2026-11-03T18:45:56.019Z",
+  "pid": 85108,
+  "error": {
+    "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha 692da4ef8b5d99171acea7a3ca5a6aadf6c53dd34932825c321428f6554528b0 --run-root C:/Antigravity Projects/q\nEntry checks failed; QA remains blocked\n",
+    "code": 1,
+    "signal": null,
+    "killed": false
+  },
+  "exit_code": 1
+}

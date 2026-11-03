@@ -1,0 +1,1150 @@
+{
+  "schema": "books-0245-omen-targeted-v1",
+  "python": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python.exe",
+  "node": "C:/Program Files/nodejs/node.exe",
+  "helper": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+  "koffi": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi",
+  "timeoutMs": 600000,
+  "files": [
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/Docs/BooksArranger_DiagnosisEvidence_2026-11-01.json",
+      "size": 215172,
+      "sha256": "eb175a5e294b66832cb99ecaa7bed73d4f5bf5cab3d63b7d2b68c653474d0732"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/action_queue.py",
+      "size": 21611,
+      "sha256": "68be2a52db4915a6b75b3fb66d8f8b0bb645baec821e3a8a16f642dfbe7dd66c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/admission_diagnostics.py",
+      "size": 1368,
+      "sha256": "ff3eb1fe76f9061bc870914d5db04a6cea7271f132a3f61bdc31cf1e7433c577"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/anthology_volumes.py",
+      "size": 3936,
+      "sha256": "a603ce441a19df84053f14e168a57cbbb52d429ab16bf3cb3ed1fd6b83b7732c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/app.py",
+      "size": 16777,
+      "sha256": "ea1bab470d5659f036449bf231c5c16a9b5f25ea8ce099cc00ff5260c8cef159"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/app_launcher.py",
+      "size": 15069,
+      "sha256": "9aeceddcfc51435bb3b7b431c8521ec1333f498b5d561097535a2edaaad00af7"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/audio_jobs.py",
+      "size": 95882,
+      "sha256": "f70da0c34f4f04c907b06f1771976c62b477bb6be27d3defd61166fe458e5301"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/audio_pipeline.py",
+      "size": 91379,
+      "sha256": "2650ea70ef839aad200bca5f4bd2f2d507a8046d7722d73f55cbbcbe4057985d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/author_rules.py",
+      "size": 34039,
+      "sha256": "c91f3dbe92021fee418f0fc2d4b4fa7dd78b071810342e49258a31e7c08b3085"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/automatic_processing.py",
+      "size": 67693,
+      "sha256": "3e8a1f33a62bd843babd229631eec2bc4e165795438b9cba635e2e5c87562090"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/book_delete.py",
+      "size": 54098,
+      "sha256": "c23b8a2f0307bcc4426f9fb63e7031f9574a735096144b746900669fd890c63f"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/book_move.py",
+      "size": 51076,
+      "sha256": "cfaa67188179b4b30072e084101363283572740f5659d32f8ddf567a13c7e25c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/book_restart.py",
+      "size": 16172,
+      "sha256": "4f0371686c3039de5f2b9cbcdf6fadc2a773ccec0feabd0db74cc1d82ce9ba13"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/catalog_contention.py",
+      "size": 6010,
+      "sha256": "86ec318eb149eb3e1014e8dd3adcec9fa47d4bf853d69a867819679d7c9e28b6"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/catalog_owner.py",
+      "size": 3138,
+      "sha256": "fa0504c5acae3c55e8a7e049d09df5ad5dd5400cc0367085b0341d4a9d534caa"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/chapter_plan.py",
+      "size": 3960,
+      "sha256": "c615e9fdeefb1f09cb86b1ee65265eee19ea5f32dafb79edd37fe33551399681"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/chapter_repair.py",
+      "size": 18788,
+      "sha256": "c44daf28cb255613c0a7cb8a86d652c804e85241df613248ad9056201f733f0f"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/cleanup_ownership.py",
+      "size": 3979,
+      "sha256": "30db5e3061736b2e21502753459000f5eb95153bd29cf6d75fb8236ff7dbe811"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/cleanup_published_working.py",
+      "size": 5544,
+      "sha256": "4d04bdc8e462d1f7ef0b371d391c411047d681180b29d31351644edcd436a667"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/cleanup_retry.py",
+      "size": 961,
+      "sha256": "6755f339aec3c7ad2088a3c9ab46a33201174fcd7d9cc696ca9f16615b6f6110"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/collection_identity.py",
+      "size": 9303,
+      "sha256": "df0f3561cd964a6e38e8eac1b47b71ad1061e3f55cfd717141ca3e9318341e98"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/conversion_progress.py",
+      "size": 7454,
+      "sha256": "d09dc4b143cb70905e54a2b66b55c38a69fdde3f84affabef0ce5f41059aaaab"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/critical_sections.py",
+      "size": 1303,
+      "sha256": "c78d86f3f8c99cd90d86ad8310533857975d841e46f60d69b41bdfcd00b51553"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/current_audiobook.py",
+      "size": 19048,
+      "sha256": "cf5cc3ea60d74b8e5b6029d6657c450c3b3190bd7b1477466b382bbe853affd2"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/desktop_backend.py",
+      "size": 40461,
+      "sha256": "bfd530e67d910c0bf46b40696ada8458fd62624e4ebfdc21b7857b9f9b37f40d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/desktop_catalog.py",
+      "size": 4172,
+      "sha256": "ee281df4829292c5c677b88dfebcd15ea038a827ca624b7f3c388dc130e8c77e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/desktop_host.py",
+      "size": 3956,
+      "sha256": "03ada4dde5cb82848791d2e06ab78aa04f65f96847e737fb27fb697d0445543e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/desktop_settings.py",
+      "size": 2609,
+      "sha256": "bfa1eb41d1733784f26980dcd0de7752e44db3120ce25a6547287dd1d823213e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/desktop_update_lease.py",
+      "size": 1212,
+      "sha256": "ca80c54048b2e45255410a2d6edb44ef9af6ac6e2d220dc755dbc9971a8f2e61"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/destination_admission.py",
+      "size": 3414,
+      "sha256": "3fadec53bd1fe5fdf5e8358b411709f523ee5185d70308cadc4c7d0a39cad9bc"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/destination_overrides.py",
+      "size": 18056,
+      "sha256": "ee51d9d4dd90da5583190de2f76521bd269179c90bb0dda1154f58f8158c8268"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/encoding_policy.py",
+      "size": 6285,
+      "sha256": "22bbcc20ccef690346c91544462bb4f284c36957de70f8113acbb28007fd410a"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/entered_names.py",
+      "size": 17534,
+      "sha256": "74bd37064cde2e5e18b44b7546c7e4168ea3128c07cc83b6bdb70d85f44b5e9c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/failed_m4b_retry.py",
+      "size": 4296,
+      "sha256": "24f45434afcbcd94d3bce691190c69949ce3b6863f680a8dd006527f36c02e3d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/folder_unit.py",
+      "size": 21238,
+      "sha256": "494887bdbb144a150f8379de8491e4039ab4778e45a88d1a36aaa45c9f3ab20b"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/gap_fill.py",
+      "size": 9286,
+      "sha256": "0f6354d45a2b80741dbd85df4f1c81b999dbbdb579b663d3a7d066ec03e64296"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/groups.py",
+      "size": 73757,
+      "sha256": "191e7a24346b48e206485d00801bc82cd42b44f54042a87127e5a64b262042a7"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/inplace_m4b.py",
+      "size": 35904,
+      "sha256": "e3f6e0bde01430811c8b39459decf44235c77be92dce57522a44224db2441e81"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/install_app_entries.py",
+      "size": 7392,
+      "sha256": "bad85a3e8705f87e9df121d05f842a6e164f34d921405be46a72b402ad699b8d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/litres_evidence.py",
+      "size": 4188,
+      "sha256": "592b99ec0bf459bc5b1e6a700cfdabd8456fa540efc6f431836392c8b53718bc"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/local_identity.py",
+      "size": 228881,
+      "sha256": "605e43d4d1d1e87aaf064910c8432cd604cd3bad4c8957418f5c84044e3ba9d3"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/m4b_preservation.py",
+      "size": 49087,
+      "sha256": "1d026e5fbb1fa9d8c51ad3c10c42742ac89aec0fb30f0e1637396fe2ecd97ffd"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/m4b_readmission.py",
+      "size": 9887,
+      "sha256": "ab2cf33cb6d119067d5ae1a02793a4219f764cb2f8697272d740497e4dc441e1"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/m4b_repair.py",
+      "size": 13778,
+      "sha256": "ee7b9f06a279f74327948ce41c359ef7aee5bff7b383afe92fa19e689507a9fd"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/manifest_compatibility.py",
+      "size": 1471,
+      "sha256": "66e4738c68b95eeca36a664714b21ed2168818b35d259a9f5e89335dc3a92435"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/manual_metadata.py",
+      "size": 7961,
+      "sha256": "0f436736632cefcafe2605acf0c5b05f4116f58694f924734d4cbc01a9c72619"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/merge_service.py",
+      "size": 420231,
+      "sha256": "59b40b617e915fad5dbbcd883bb8dab09e39b5ff6d1b9e226f16ddb6dea9b23f"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/metadata.py",
+      "size": 15705,
+      "sha256": "b5a5c9d9d20093cc9c70177eabc1d422cd00f5f9988c854605ecb3f0763d08d1"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/metadata_choices.py",
+      "size": 17235,
+      "sha256": "258bdd001035b4bbc4f0a57ebb989c354d7c8e96e6bcea7875195d9927cb0e6d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/metadata_sources.py",
+      "size": 14440,
+      "sha256": "e8af20b86e05e905445f8fa07058c81834146f94a72cee18fa9e27c76f29506e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/migration_operation.py",
+      "size": 22399,
+      "sha256": "d07c29fb8e878ca960702df328d050ff40b839e373f4f2d39af04e6edd2da8bf"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/migration_planning.py",
+      "size": 22681,
+      "sha256": "a0540f4f15c03777631c4dfe76a057140e078e8a5a9149bf7c37c08f10dec602"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/mp3_tag_repair.py",
+      "size": 6343,
+      "sha256": "83b883ecdfd829d21b7e06f8ad2254849e940b3c0ae9c3049f6b46ed32ca621d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/native_io.py",
+      "size": 41957,
+      "sha256": "ca2fa12c4352d55708dcc20a3ab911858045b81cbd1dab87f137225d3d426603"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/neutral_cover.py",
+      "size": 6147,
+      "sha256": "558600a279932f1b695bc5c509ce74084aad821bb2bb5f4ff569bbe22224ea9e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/openlibrary_index.py",
+      "size": 36152,
+      "sha256": "bea0dfc88bc802f5af0ca8ef33f196f97bd83605546e4835fde9fe63eda3f885"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/organization.py",
+      "size": 9779,
+      "sha256": "8904a370b29fa8cae6f2288852b6f8baffcfaba4a81fbea3048d2a78817db661"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/original_titles.py",
+      "size": 1852,
+      "sha256": "f8621d4b3ccbecf2ad5ec5b11cc175c5b690e120d325457a3445d67c2e0fc452"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/output_migration.py",
+      "size": 35553,
+      "sha256": "5177317b257a66a5535b5f9e5af6b2b007561e1cea502cbb7955512fc8b327f1"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/output_rename.py",
+      "size": 17730,
+      "sha256": "2181fbbe067acaf4457cb3f65f94047da70202c360da6b0007ea8692f823e67c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/part_sets.py",
+      "size": 16045,
+      "sha256": "4c1fe5fa7cded79f552ec905815e05336a72cede75198890423fc279d7a7c84a"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/pause_state.py",
+      "size": 1671,
+      "sha256": "0fe16fcd194b546ab4b96e0f7ee914b8551c654a73d48e66a12441be9efcc99d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/producer_recovery.py",
+      "size": 37957,
+      "sha256": "c642d3992ba819a6da86d3876ab39763afe59bf735708a460b6d632248ca7141"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/public_research.py",
+      "size": 201300,
+      "sha256": "b6fd01762037e6c6ee96f2583e82b96037edef9377a8f4008d8d2d1bb8daa88e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/public_work_identity.py",
+      "size": 8557,
+      "sha256": "a2ac95f9e2ee670d1025b94757382201bfaa8b5c0e2dfa967d2158cd7ab8176c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/publication_binding.py",
+      "size": 11164,
+      "sha256": "76712f6f912a2791065ecf3755c8f26dc35d98d4acc3c88ef4e1f1d7b913c2e4"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/publication_locations.py",
+      "size": 53725,
+      "sha256": "d26742dff81b19584cd86fccb9cff56f056180bd71e41d14aed327c25d750231"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/quicktime_chapters.py",
+      "size": 16507,
+      "sha256": "37d1a23d49844545f066e5e621461063c3d40aa3052c7a412fc8bdf4507b4c51"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/reacquire_sources.py",
+      "size": 20446,
+      "sha256": "b0f54631e9b552b3927237f819b4fa83c0362a7b6a379c883712ba0ec3eb642e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/recording_classification.py",
+      "size": 8193,
+      "sha256": "ce759ce700033a41d9c426859f11abdf2adbfe10e31edec791b712124ab9a567"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/recovery_retention.py",
+      "size": 14164,
+      "sha256": "8742899a0152f7460f23a27fc2efa77e8645ba8fcb60f1c93bd1a61c53d5e4c9"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/replacement_jobs.py",
+      "size": 20962,
+      "sha256": "bd136ddc9d1f3df281cb871599e5f2fb0a7cfe25e7b51d83c0660b9431e1328d"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/replacement_media.py",
+      "size": 23384,
+      "sha256": "e916cc81eea3c16f990332c17dcb8795cd2856a90eac8da8475b04f3e2593f99"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/replacement_retirement.py",
+      "size": 21947,
+      "sha256": "894674d09b7e62908973cf0692cf0290358a4bf12314a5a57891912f20f27790"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/retry_intent.py",
+      "size": 5302,
+      "sha256": "c97c7bd5e83c06158bdb96439553555572613abf6be5fb03dd57dc30799660e4"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/retry_refusal.py",
+      "size": 11631,
+      "sha256": "740fcfe19e07b2bd022df27ada6e29ab86d62cfe34353a86c7ae1d80509c0fb5"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/review_backend.py",
+      "size": 78072,
+      "sha256": "87111e995c101b3670ecceafd97f79f01f78ba8c008bff890bebac70574dace4"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/reviewed_routing.py",
+      "size": 1800,
+      "sha256": "9e564c6ccf195f4f29890fe21f759cefd0ec0972e8a3a2ab7d17f7bad2397e32"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/scanner.py",
+      "size": 58726,
+      "sha256": "d2b1b4ba122cd5bf6bef454057ba5abbcf92833dc9323b0bca670a236202be1e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/series_backfill.py",
+      "size": 42755,
+      "sha256": "041718dec0f56f074f4a0527adfcd7d85cc57cc799bc450352a3a1516770ff2c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/series_evidence.py",
+      "size": 8113,
+      "sha256": "5a97423670943f3398f1b9e012a948d235c4a98c6eb85a59ed24d0763f09b5fb"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/shared_routing.py",
+      "size": 8496,
+      "sha256": "6dc9a403a762528c796ac9a2f1737928f747f355a4763542d3eeeefd7edeb3c1"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/source_cleanup.py",
+      "size": 48842,
+      "sha256": "1fb4e55c199f44f61c1082c144cb2ce4f3dd3456b86cdaf5b09edb7f5d5d106c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/source_config.py",
+      "size": 5737,
+      "sha256": "d01ed1ad052c1517e4f6d4cd3f3cc581fda203c715d55a075b4b53dcd445ab81"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/source_identity.py",
+      "size": 20460,
+      "sha256": "4ae70bfd1c5178308d94a5a399cc31812978e56017b837193694df377babb7be"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/source_proofs.py",
+      "size": 2600,
+      "sha256": "b26aaf6e86d9322a837097a8a8c31b8ec042f21a1e7e5accba68812fb613fab4"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/split_books.py",
+      "size": 23460,
+      "sha256": "8d2bb95c108a5d155a29ec0385d5ccc539e0ab1ed1e3c82d607919af2fd21741"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/sqlite_retry.py",
+      "size": 1240,
+      "sha256": "b51a30c10bc1795916061defc665438fd61121239c1ca61dc781996d81853314"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/standing_metadata.py",
+      "size": 9165,
+      "sha256": "e35f836c3f200298bdeaa8df0842e6e721e997f8891411350c9f826c8fad8589"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/storage_cleanup.py",
+      "size": 78857,
+      "sha256": "f05518e67bec0194bf3313fe3684081f86db07b1c3179a05bcaa0c8dfe378974"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/tag_text.py",
+      "size": 3159,
+      "sha256": "ad13d665b8762b918ea8bce876b0521b79623375364d3c4526043c714bbb6ad0"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/tests/test_omen_0245.py",
+      "size": 11325,
+      "sha256": "f8fdab45100895a6aa18515e71bebaa3943b4c5889525f96fadf98b7a770bb14"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/tests/test_organization.py",
+      "size": 9586,
+      "sha256": "a7ea9b4e402377eb707d9b8fae386229bbaaafc104808c7bfef484baec7ae637"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/tests/test_series_identity_242.py",
+      "size": 19297,
+      "sha256": "117fbf375f67b3efc8a277c3ba6998a5b1e39d70ffc1c2363e32d0694c7aeb25"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/tests/test_shared_routing.py",
+      "size": 9111,
+      "sha256": "e417cec6c51d58b3c0800e590cc6061467c8a3067d4e9da4581ad226f466dfa8"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/todo_causes.py",
+      "size": 8708,
+      "sha256": "a0181f6b37c207f5766c1e208dcb8cd87bc42fa9f301062f08a7bcaf5dfa1d3e"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/track_order.py",
+      "size": 2512,
+      "sha256": "2ee28fe9596ddb08582176b4d2854100b4e60385ed804c7517cf5086217cd0e1"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/web_server.py",
+      "size": 111421,
+      "sha256": "7b6bdbf241a0eaa502352d802b8e5aa736d98123f38c4c16d7818387e5025ff3"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/working_lifecycle.py",
+      "size": 54981,
+      "sha256": "0726648852fdac8890d4d185dd19a2b5dc1db430582f694b84410e83d728a894"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/source/zone_identifier.py",
+      "size": 12683,
+      "sha256": "86c0b4175ec3c56c21fe04c7769a022a2c7b63f0103c93e4d4665f468cadca8c"
+    },
+    {
+      "path": "C:/Users/AnGeLZzZ/AppData/Local/Temp/codex-books-20261103-245/shared/omen/after/run.py",
+      "size": 1643,
+      "sha256": "f8f77b7db619b593baf7bb9b1cb94eaa549dc3e4b70f00cac4fd2404fdbe82ce"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/LICENSE.txt",
+      "size": 35407,
+      "sha256": "935cf13e19f8c31b497d20b05d73623431a226b230c3599bc30fa3348979bc68"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_asyncio.pyd",
+      "size": 78560,
+      "sha256": "58b3e50104db6bf9d76e3d8106f9f477d34109a887d547ee086b0289e6a4e224"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_bz2.pyd",
+      "size": 87776,
+      "sha256": "b02f580daa0b390b2228d2a8186ef119be658c89cc64d0bd909550786ed993f2"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_ctypes.pyd",
+      "size": 143072,
+      "sha256": "b96680c6bcad9e9403711ec0977866325e8e5aab93b56e83c3df6280ae72a82a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_decimal.pyd",
+      "size": 290016,
+      "sha256": "196c42414c16e804874988783b8a356bf1d012d32e99efbc6e360e94920c46ec"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_elementtree.pyd",
+      "size": 138976,
+      "sha256": "31aff8dca815a05904b5d3020fbdd5bdb596b6a07a36f31728996f28e06dab24"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_hashlib.pyd",
+      "size": 69344,
+      "sha256": "5dee7b9fff3e6d0abe20601b9e62f3a14cd048167ee0b80781131dc81dec9469"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_lzma.pyd",
+      "size": 160992,
+      "sha256": "9099ef451fe61d8feef9e02894902b88fdc8ee404e3f8b7412b150878c973803"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_multiprocessing.pyd",
+      "size": 38624,
+      "sha256": "18041441b3f558925f903bc7af644a4d84b1cd746a4998748b4fffd82e767a6b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_overlapped.pyd",
+      "size": 58080,
+      "sha256": "eca5d3df23b762c846801194b6c971aae4eb288e1fc2914752b3a6c2df5aebfb"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_queue.pyd",
+      "size": 36576,
+      "sha256": "1e2e1ede7eeaf30a80ece546420dec67a02716e25d3a7c638e4deb0c21e973a1"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_remote_debugging.pyd",
+      "size": 93408,
+      "sha256": "0497ee6846cd92419ada56c091ab675ab6896ad3bfdcf88eec4dcda2cdfd5a4d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_socket.pyd",
+      "size": 87776,
+      "sha256": "18a77c4e1f4a71ca60b9dbbba809e98cd324f3e1470d091689b87754a8c65588"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_sqlite3.pyd",
+      "size": 133344,
+      "sha256": "e69caeadb409777bce26f78622653558bbb86f08479b412399eaa0e6fd1e44f1"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_ssl.pyd",
+      "size": 192224,
+      "sha256": "49df86fe76ed8fd97bb11a485286b49f5f5ebe953383648976a39c9de6f0524d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_uuid.pyd",
+      "size": 28384,
+      "sha256": "7e2cdd954b44b1be1fac1c354f774dab5f5becfce59688e62338427b125c62bf"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_wmi.pyd",
+      "size": 40160,
+      "sha256": "5366924c1c96d9c9f82f95967fbf73244d4b4930f39103d7e7ba2b01046e0a46"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_zoneinfo.pyd",
+      "size": 51936,
+      "sha256": "cdf82faa904e557b847a0ac6e97b4274945615fdbd319a28bcaa1f70f740636f"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/_zstd.pyd",
+      "size": 503520,
+      "sha256": "526d977236cc63895902977f216bf3ca93a4233489240656b295eafb6f518d07"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/libcrypto-3.dll",
+      "size": 6021880,
+      "sha256": "75495fe0e079ab00d49be740d3c710a0b94e3f74f9648cb7cc9f768fc7f52319"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/libffi-8.dll",
+      "size": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/libssl-3.dll",
+      "size": 1308920,
+      "sha256": "8957182a9c385bfd9f3f790921de2ddc614cf91f99edbed4e9e5446a46504e32"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/libtommath.dll",
+      "size": 95456,
+      "sha256": "aaea8a20db7a7a96d4bef74ad724c4a02595a9c47659f6cbd6f145af0c97aa78"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/pyexpat.pyd",
+      "size": 201440,
+      "sha256": "36d775e2c2fa5bbda86ddc7c6ea632414df04f7a403b9e17587c99088d29cd7b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python.cat",
+      "size": 601161,
+      "sha256": "8d723cf908852e0ae02d6ad4451a0214ce7c7a09aa6d9a4a7fc48024583f8494"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python.exe",
+      "size": 106208,
+      "sha256": "434b361fe0c5960d404974feed493db47f2603a1ace2574312104fbed0182c6f"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python3.dll",
+      "size": 73952,
+      "sha256": "f9acdbcf3383a52353f8d7db3cbda3d3701b1cf7ac3053985fdac766c29e7808"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python314._pth",
+      "size": 80,
+      "sha256": "2ed7ccda80e9e28ab5877902a9a325586c8a7b7b3e6731d944565bee082e216c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python314.dll",
+      "size": 6792928,
+      "sha256": "854fe7549eb4b2ac478935a38ae2ca1b774c6fdc3d87f0263fbd697ff86d7149"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/python314.zip",
+      "size": 4152838,
+      "sha256": "dfa08b46ce09089b7e6bc139784d5609a07770bab66df8d37938ca9bd508e436"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/pythonw.exe",
+      "size": 104672,
+      "sha256": "4e24680bce514188c85ae91323691dcb0364990da0d6319558519e50cbb5a43c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/select.pyd",
+      "size": 33504,
+      "sha256": "a341519a00befc3b86dfddf5938915fed52ded1ad5aab518c57d0b3c8969e835"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/sqlite3.dll",
+      "size": 1584864,
+      "sha256": "5c47df970d2e8cc41239754ff167056fcecb1089f876736e51dab5d89f980300"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/unicodedata.pyd",
+      "size": 758496,
+      "sha256": "0527fee5192ab4567451d1296533600661571f6ebf9e8f4e0f60b63a4a4fd2e8"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/vcruntime140.dll",
+      "size": 178616,
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/vcruntime140_1.dll",
+      "size": 50112,
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "path": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101/build-cache/builds/ae7fb976-c0eb-43fa-9033-49d7d1f44359/runtime/python/winsound.pyd",
+      "size": 32992,
+      "sha256": "7681b4d88ac96763bb89f018d1c658feeca782d8bfc6d223b06d2ef125780579"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-check.mjs",
+      "size": 14108,
+      "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/bounded-child.mjs",
+      "size": 1258,
+      "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42"
+    },
+    {
+      "path": "C:/Program Files/nodejs/node.exe",
+      "size": 100097864,
+      "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/CHANGELOG.md",
+      "size": 33594,
+      "sha256": "fd904cd4f1693326035d246661df95349a9fc953138c1db8fab2409f2c5fa0be"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/LICENSE.txt",
+      "size": 1117,
+      "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/README.md",
+      "size": 2972,
+      "sha256": "4b629384f63225cad0265c5c148a3a88f466cd6b337ffeae6242fec5bfb17206"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/cnoke.cjs",
+      "size": 31081,
+      "sha256": "d5e4c3b53c1166265f3b7a386a0aec446bb99c41bf58c6c05643d1dcade12ffd"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/benchmarks.md",
+      "size": 5101,
+      "sha256": "22c01524839803c41120bb8c733580c8c8ed50fc8a91cd97135ee686f653bc49"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/callbacks.md",
+      "size": 7909,
+      "sha256": "f1e3f14a1d84a5b6d6d7d6d3015a9859043f4d3773b932d361bc49f08a240284"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/composites.md",
+      "size": 16117,
+      "sha256": "83d107330187f08088a7e2b1aa98f06585dcf2f0719aae66a47af6fb95edc40d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/contribute.md",
+      "size": 5744,
+      "sha256": "72cecf31345e1d4e46d564bc4aa5020c5a445968cc2a818b337bf3a1019a4cbe"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/index.md",
+      "size": 3044,
+      "sha256": "8a69e582805fff52da9a2149c635895ade22a494502de1770a412673431b71a9"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/load.md",
+      "size": 7526,
+      "sha256": "7b9d19a90f00c1cc47537ac65742e577fad22ec2fd18d400d4485fe4e00022c4"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/migration.md",
+      "size": 8909,
+      "sha256": "3826d5c78a612cd11d0319d7c4e0afebde3c5c67a7848fcb5016fc9c4ccd3333"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/misc.md",
+      "size": 3851,
+      "sha256": "5c67bde9825e97564ac961b27a45b16c2162924d734d868e4e8065c17c18c445"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/output.md",
+      "size": 9366,
+      "sha256": "78a692be2e23954ad024345806b2d4937a45113be6c48cfc2fdd53dc49c32580"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/pointers.md",
+      "size": 15051,
+      "sha256": "628890dec2cbe8304e006effaaead83e36d5e6b3695f3b7bf7e8add1d26f513c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/primitives.md",
+      "size": 7561,
+      "sha256": "3b4cab3721ecd6cad4ccc0ba251f9edae24e3b03bb94ac22234b5c8718a7f346"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/start.md",
+      "size": 3008,
+      "sha256": "95c57729bd5b4477e39a8950fd4f1e6c8121cf5fba58907d16f2c8d5bdf92b8d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/types.md",
+      "size": 2828,
+      "sha256": "d8a1acfcc5f416038f05b6f53a93445e80cba70755592d6ceaf5b9df9b3c5440"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/unions.md",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/doc/values.md",
+      "size": 6324,
+      "sha256": "f712dc80674c1711b76edc64b1a55c06e5003e17b542afe071bc20cdfed161ba"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/index.cjs",
+      "size": 50,
+      "sha256": "a200e15ec168d00cb3155794808a98243051c61dd7f6989c23c57ee220c918b9"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/index.d.ts",
+      "size": 12838,
+      "sha256": "b4f749b16500797d1f0e9ed0f04e08e1b162cfbaf48e3efbacee8f27182b4ad1"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/index.js",
+      "size": 85,
+      "sha256": "34508972d2e18b79fd4a289943568a68bbaf18badd2e82a25c8deb1af27f6225"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/indirect.cjs",
+      "size": 53,
+      "sha256": "f36c7fd3caa9c43da3db45e1ee272892087b4001b6f575fffb76dd80574829b1"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/indirect.js",
+      "size": 91,
+      "sha256": "5c5045c5b5ec2083535efdfdbd95f5212545ce29a4b7f33a683504a35e5b6a02"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/lib/native/base/base.cc",
+      "size": 321945,
+      "sha256": "2795688ac96eda5d8260cc823c3accc62201ba83e33bade2a8573295b87c277e"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/lib/native/base/base.hh",
+      "size": 176292,
+      "sha256": "1f22266da67ecdc7fe8479544c0bf85d4e106c932b986ab57e14479f0a439f8b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/lib/native/base/unicode.inc",
+      "size": 36653,
+      "sha256": "a337b5e53a6c72534fcf093c58d7fbf12f7b1075f068ea83a09c91e34373b5a4"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/package.json",
+      "size": 2304,
+      "sha256": "80d8fbff4730e3314f3036fefd5af0d89203ed8a01c61d134727f1d38a16d72b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/CMakeLists.txt",
+      "size": 9861,
+      "sha256": "50d397027621169f878f6edd1cb72195576c2c33e1769d5534de69f45000cc5e"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/index.cjs",
+      "size": 10999,
+      "sha256": "5e8bf2ce51906244b2b8e8c5c321afd79c2f8d65c9846a118f845db96dbb33d0"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/index.js",
+      "size": 9563,
+      "sha256": "025b00fbc7f952eef40c98e4778832108585260be3611d2175584eff93d5604b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/indirect.cjs",
+      "size": 10933,
+      "sha256": "ca74165a3a78b02cab86eda18147e073a43ca2f7123c5bc0aa575a34150b2377"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/indirect.js",
+      "size": 9507,
+      "sha256": "fda9ae20155cac5038d5d254670df48b40b9e828a4bd23a90934ebb2ba7a0947"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/arm32.cc",
+      "size": 11352,
+      "sha256": "ecaf681bc9555706c127a828572c5df1ac5afcd81a9c3bd8fe89df47ec87904a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/arm32_asm.S",
+      "size": 4319,
+      "sha256": "7d47bd0119a1433bfb328d54a5c03d96e4b08917cfc469db304e8a5c918ec3c5"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/arm64.cc",
+      "size": 13646,
+      "sha256": "0b5977e6e3b542a3e2e67495fa37762c5b801b44f3ac68af5519666ff3eb5cd0"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/arm64_asm.S",
+      "size": 5455,
+      "sha256": "bd2ccebb85c62abbf49a351f4b740a660eb2c8b2b1054fa7f9aafd9c0db92e61"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/arm64_asm.asm",
+      "size": 4489,
+      "sha256": "89c2d933d801b41cd5adde2bb0762d98a2bcd96d2e2dcc18f76650a3e0f8d5db"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/loong64.cc",
+      "size": 273,
+      "sha256": "dc53190f98c24d8f909358f23a20ce861d58124a232e87e8e2aeb3566ae02088"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/loong64_asm.S",
+      "size": 4644,
+      "sha256": "0276681d52b70fee199edd73964e7684260027605563ce51c8eb04a8c6400025"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/ppc64.cc",
+      "size": 8364,
+      "sha256": "e3490a81075dd9584a573ab19337129ddac09b8402132099c34972c2a55c8ad2"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/ppc64_asm.S",
+      "size": 5648,
+      "sha256": "b2d8d01143d980a4ab9ff513d22924e9d41553b1903067f78de0b9bb9bf31570"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/riscv64.cc",
+      "size": 12058,
+      "sha256": "8478c20d90d8abdc72e074f5e324324dbe0c012899b53f306b04f69f2745927a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/riscv64_asm.S",
+      "size": 4369,
+      "sha256": "9294984fca21eff02784afe02b59f31d7dcde9c3600b68db1674b7b65174c3d2"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x64sysv.cc",
+      "size": 13827,
+      "sha256": "5e9622e786ef89e800dde18dffcb886a76e1610a2ec5a266b3ca81707e284197"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x64sysv_asm.S",
+      "size": 5486,
+      "sha256": "4daa7ee2445cdd047d582af8c9079447c85b3d58db9806fb734eb6a2440ea411"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x64win.cc",
+      "size": 4873,
+      "sha256": "c49884b12188f63457ffde2c325c1a33f5ca324e732d031fd2faaa1601de3446"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x64win_asm.S",
+      "size": 3883,
+      "sha256": "cf309cb28046d9656e683deed3a4e9f5e44266f129593dd154d0c88f822854d3"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x64win_asm.asm",
+      "size": 4708,
+      "sha256": "2e3e8014820b352cb0eb775c03996edcd8438917b0ca43e975cda3d4f5bfc467"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x86.cc",
+      "size": 9090,
+      "sha256": "d00024375e2625b5d4820c2dfb41914f687b105809aeaf0660efc260e02293c8"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x86_asm.S",
+      "size": 4658,
+      "sha256": "d10bf04332429f032a59108c11c14087061c972231f39b7efccb35a16689f397"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/abi/x86_asm.asm",
+      "size": 3875,
+      "sha256": "e24a7ae3e2a95bef4bf6e695653bb6a6931c782f6045d3acfe5a1e6e18c8b8c5"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/call.cc",
+      "size": 72979,
+      "sha256": "36291f3dbbff70f79f9a3632e7c49899b16be925a501ab5020cf14eadc33fd82"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/call.hh",
+      "size": 6017,
+      "sha256": "4492aa7fb78c7d812fe8ad550bb21ab96e579d4de3c5f223444a73cad0963246"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/errno.inc",
+      "size": 8776,
+      "sha256": "f2fea4a329fbf7aa7e5a6c52daacc480d70d782344e37fd7e62019f6b914201a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/ffi.cc",
+      "size": 111566,
+      "sha256": "104544514d83d90f69d722572d450393223c30ba6747e0e0cd1229ad02d75b7b"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/ffi.hh",
+      "size": 9627,
+      "sha256": "954d54c134a5a5debe9127342e69683b3cef2e7c3be25e1c987b02479fbab74f"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/interp.cc",
+      "size": 55318,
+      "sha256": "809a3b7e401e0446fe205257721d35060b7427720240eb04aae5f7fdb6c0b073"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/interp.hh",
+      "size": 3290,
+      "sha256": "2e1002df27774b422b114ec120ef33d64993740b1c7288cbfc78f8073d6c5310"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/parser.cc",
+      "size": 6256,
+      "sha256": "a10d056248137353dbf407788907702a1b1238f5a09709216252ebb04207535d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/parser.hh",
+      "size": 1253,
+      "sha256": "cfd9e374884cdc0f60716de41bbe110d361bc10d0a8539942e37d34c86b525ae"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/primitives.inc",
+      "size": 857,
+      "sha256": "34f524982a6e921a63c6766619b337b6d15f0a5cdefbf252481dda4b4369afda"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/static.cjs",
+      "size": 3591,
+      "sha256": "522a9d98e271b565de4013910b8c81bb061a34d3460e43fd9a92daab8fbadddc"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/static.js",
+      "size": 3674,
+      "sha256": "a2a6ea215e4d5f26d039b48eee1e7c8ca037935c4fcba8d0ec2b6e680fa7a976"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/trampolines.cjs",
+      "size": 2033,
+      "sha256": "82895e2a78b911b297e7497d9d6033ab87a0afe64f4904615dacfa318d83adfa"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/type.cc",
+      "size": 26727,
+      "sha256": "e1da40d622cff921377f2a9161f65cb5151002bb71313077aa9c57631f7a5fa4"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/type.hh",
+      "size": 2499,
+      "sha256": "1959e022aa9ce03a8db2e02ccc16d11fab6590cd8e066b6dfb4fd28b4759520c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/util.cc",
+      "size": 32822,
+      "sha256": "327d535c6963cc9a68bc683b395cc96d73ca3b00a7bdbbe5ee6f715b21dd9419"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/util.hh",
+      "size": 12808,
+      "sha256": "2337c191d18c95f6bfe98db33b6ac8d6b04b4d0c41bb58abcf3bb0bf0695abad"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/uv.cc",
+      "size": 6743,
+      "sha256": "b07a6ca317b37135fd17a4a1170ac2aea69c94137dbe82ee34c8bf8a4e7e9e81"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/uv.def",
+      "size": 134,
+      "sha256": "4a40dc700dc66214fc1c464db8c4b78b82845e3b7b4e6103418ac519346ca4d2"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/uv.hh",
+      "size": 2652,
+      "sha256": "7c440bf33890aece980fc66882408ae8f864d391a9e3c77596f000ae84afcef5"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/win32.cc",
+      "size": 5890,
+      "sha256": "86e4aedf1c66b28225be9a0a6b709961555dc8e6c85809d9a1f20df46c405644"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/src/koffi/src/win32.hh",
+      "size": 3932,
+      "sha256": "46b0b57a2771e1f2647d49711ca249029dc93e92a17007302a78dd58fe3bd4f2"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-addon-api/LICENSE.md",
+      "size": 1150,
+      "sha256": "89024017b88a9f2b763f79b941a4f2db3b4428edfcacdc0b23866b2da633ad0c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-addon-api/README.md",
+      "size": 4994,
+      "sha256": "9c9fcf38e120933aac37fe2cbdcb85abb59ecb1a674abe944c9b627dff8539a6"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-addon-api/napi-inl.deprecated.h",
+      "size": 6323,
+      "sha256": "b66ed1e565e735bbfabcc2f72d466ab7c5414d3ef8851d1af440b81be7f2375c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-addon-api/napi-inl.h",
+      "size": 243618,
+      "sha256": "965fe706f18a2acd7fde0c7dfd1e450cf2d855d2cec03d9d75021c1226f10a72"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-addon-api/napi.h",
+      "size": 125640,
+      "sha256": "f213cbbe041af5f4b8021bd88dd000dc99d7dd7f2e06aac58a2ab8b407ff4a8a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/LICENSE",
+      "size": 1064,
+      "sha256": "a553508f516031c91f3af1148d44970cb81bbae6c4f091be6835d39cc252238c"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/README.md",
+      "size": 2741,
+      "sha256": "63a4e81d19f02b164d51c4721ff3e88c81d410640de7e1d3520a2c406f0a7d83"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/def/js_native_api.def",
+      "size": 2734,
+      "sha256": "77653a554fbb27f6c5666f4ba05f87d26f0de72bc3d0439961ac030030c2be66"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/def/node_api.def",
+      "size": 3550,
+      "sha256": "e0d5e3da0520a42e26b563f6321291081bd15bdd20821d46818e5f47900f77d6"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/include/js_native_api.h",
+      "size": 31081,
+      "sha256": "0953395662ea63697cd7a77a9320d94aa2829f9c9569abf3a74272b7a2923ce8"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/include/js_native_api_types.h",
+      "size": 6744,
+      "sha256": "21eebde05d2ee59d315ac27d4aa82434ca88508a0b2cf5819802a00ca523831d"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/include/node_api.h",
+      "size": 10370,
+      "sha256": "2d4560831e525b47b060ec8a0864ab73993df9e20215ce9f0fe7b24cd31af32a"
+    },
+    {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/QuickLaunch/node_modules/koffi/vendor/node-api-headers/include/node_api_types.h",
+      "size": 1930,
+      "sha256": "a25356630d3058f0a0c8937d9f297e9471e037fda58c2696d8a505c2bd99cb00"
+    }
+  ]
+}

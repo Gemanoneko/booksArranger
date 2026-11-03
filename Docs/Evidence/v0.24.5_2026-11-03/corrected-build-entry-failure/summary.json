@@ -1,0 +1,82 @@
+{
+  "status": "FAIL",
+  "source": "58ded88dab1e585feb5dbe47824b3808dcb38d8a",
+  "build": "e074bf71-d5f4-4d92-b636-581ee4348a71",
+  "artifact_manifest_sha256": "f04002f07d21691fcaeb50aca32ea4e850346c9ecc194c2308588f9ddaf0cc68",
+  "context_sha256": "aec48ae4d730327f0b5d4841ec799dfc6198c0b695abc6d3353410f23638e917",
+  "receipt": "Entry-check receipt v2: books-arranger v0.24.5 @ 58ded88dab1e585feb5dbe47824b3808dcb38d8a (dirty: N) [source:d2d586cb25bbbff3cacfe5e678541015adaf50990bc7191aecc489072cb3781b; harness:66666770becc3ccd2330e55f92cec8d39fe5b2333797c76329d0da0f65ee163c; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean (1 subfolder note)",
+  "python": {
+    "batches": 13,
+    "completed": 2344,
+    "failures": 2,
+    "errors": 2,
+    "skips": 0
+  },
+  "node_result": [
+    "# pass 242",
+    "# fail 0"
+  ],
+  "signatures": [
+    "ERROR: test_shutdown_is_protected_and_controlled (test_web.BrowserTests.test_shutdown_is_protected_and_controlled)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"shutil.py\", line 701, in _rmtree_unsafe\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-g7CBcw\\\\scratch\\\\0\\\\scratch\\\\web-2026-10-09\\\\tests\\\\tmp1h1lfe0y\\\\state\\\\inventory.sqlite3'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\scratch\\0\\tests\\test_web.py\", line 104, in tearDown\n    self.temp.cleanup()\n    ~~~~~~~~~~~~~~~~~^^\n  File \"tempfile.py\", line 976, in cleanup\n  File \"tempfile.py\", line 956, in _rmtree\n  File \"shutil.py\", line 852, in rmtree\n  File \"shutil.py\", line 705, in _rmtree_unsafe\n  File \"tempfile.py\", line 931, in onexc\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-g7CBcw\\\\scratch\\\\0\\\\scratch\\\\web-2026-10-09\\\\tests\\\\tmp1h1lfe0y\\\\state\\\\inventory.sqlite3'",
+    "FAIL: test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start (test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\scratch\\2\\tests\\test_set_release.py\", line 78, in test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start\n    self.start_and_wait()\n    ~~~~~~~~~~~~~~~~~~~^^\n  File \"C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\scratch\\2\\tests\\test_approve_as_is.py\", line 49, in start_and_wait\n    self.wait()\n    ~~~~~~~~~^^\n  File \"C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\scratch\\2\\tests\\test_approve_as_is.py\", line 43, in wait\n    if time.monotonic()>limit:self.fail('Private Approve job exceeded 60 s')\n                              ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Private Approve job exceeded 60 s\n\n----------------------------------------------------------------------\nRan 102 tests in 494.472s\n\nFAILED (failures=1)",
+    "ERROR: test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel (test_desktop_update.RealWorkerResumeTests.test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"shutil.py\", line 701, in _rmtree_unsafe\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-g7CBcw\\\\scratch\\\\8\\\\scratch\\\\desktop-update-tests\\\\tmpe8uo07i4\\\\catalog.sqlite3'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"tempfile.py\", line 976, in cleanup\n  File \"tempfile.py\", line 956, in _rmtree\n  File \"shutil.py\", line 852, in rmtree\n  File \"shutil.py\", line 705, in _rmtree_unsafe\n  File \"tempfile.py\", line 931, in onexc\nPermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\\\Antigravity Projects\\\\q\\\\entry-run-g7CBcw\\\\scratch\\\\8\\\\scratch\\\\desktop-update-tests\\\\tmpe8uo07i4\\\\catalog.sqlite3'\n\n======================================================================\nFAIL: test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel (test_desktop_update.RealWorkerResumeTests.test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel)",
+    "FAIL: test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel (test_desktop_update.RealWorkerResumeTests.test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\scratch\\8\\tests\\test_desktop_update.py\", line 405, in test_the_background_recovery_pass_stops_for_the_update_and_goes_on_after_cancel\n    self.assertEqual(value.status()['phase'], 'exiting')\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'updating' != 'exiting'\n- updating\n+ exiting\n\n\n----------------------------------------------------------------------\nRan 195 tests in 531.144s\n\nFAILED (failures=1, errors=1)\ntest_existing_unknown_nonempty_and_corrupt_are_preserved (test_desktop_catalog.CatalogSelectionTests.test_existing_unknown_nonempty_and_corrupt_are_preserved) ... ok\ntest_extra_stream_database_is_not_adopted (test_desktop_catalog.CatalogSelectionTests.test_extra_stream_database_is_not_adopted) ... ok\ntest_hardlinked_database_is_not_adopted (test_desktop_catalog.CatalogSelectionTests.test_hardlinked_database_is_not_adopted) ... ok"
+  ],
+  "frontend": [
+    "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ \"Approval not queued: The audio format needs a decision the app can't make yet. Select the row to read why.\"\n- \"The audio format needs a decision the app can't make yet. Select the row to read why.\"\n\n    at C:\\Antigravity Projects\\q\\entry-run-g7CBcw\\tests\\test_todo_holds_frontend.js:144:10 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: \"Approval not queued: The audio format needs a decision the app can't make yet. Select the row to read why.\",\n  expected: \"The audio format needs a decision the app can't make yet. Select the row to read why.\",\n  operator: 'strictEqual',\n  diff: 'simple'\n}\nPython worker 0: 428.2 s real, 217 s projected, 660 s deadline (65 %)\nPython worker 1: 449.5 s real, 285 s projected, 660 s deadline (68 %)\nPython worker 2: 495.8 s real, 238 s projected, 660 s deadline (75 %)\nPython worker 3: 507.2 s real, 238 s projected, 660 s deadline (77 %)"
+  ],
+  "owned": {
+    "code": 1,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10873,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 22219,
+        "incompleteQueries": 490,
+        "firstIncomplete": {
+          "assigned": 47,
+          "listed": 46,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 10,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "closed": true,
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true
+  },
+  "records": [
+    {
+      "file": "invocation.json",
+      "size": 1876,
+      "sha256": "018ae4afcd3738a444c832ca00708d0340d2c0fc2ae0e284b73272d6967a622e"
+    },
+    {
+      "file": "outer-result.json",
+      "size": 579,
+      "sha256": "3060d899373ccb0caf1b08c67610f26af9dee89a68766e84abe7864410389dce"
+    },
+    {
+      "file": "outer-stdout.log",
+      "size": 735471,
+      "sha256": "76568d761035184b90eb6fbd2892bddfc4ece54a390611b5451b935ea1e28f69"
+    },
+    {
+      "file": "outer-stderr.log",
+      "size": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    }
+  ]
+}

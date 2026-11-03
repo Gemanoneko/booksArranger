@@ -1,0 +1,136 @@
+{
+  "baseline_head": "cfb64d34e84ab579e2216ef93ef60de2a22f4b22",
+  "source": {
+    "local_identity.py": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/local_identity.py",
+      "size": 228881,
+      "sha256": "605e43d4d1d1e87aaf064910c8432cd604cd3bad4c8957418f5c84044e3ba9d3"
+    },
+    "public_research.py": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/public_research.py",
+      "size": 201300,
+      "sha256": "b6fd01762037e6c6ee96f2583e82b96037edef9377a8f4008d8d2d1bb8daa88e"
+    },
+    "tests/test_omen_0245.py": {
+      "path": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/tests/test_omen_0245.py",
+      "size": 11654,
+      "sha256": "7fdd063958bc1281c7cec5451b13dd3792d19876495e41ba994d4ef285c8fad0"
+    }
+  },
+  "passed": {
+    "loaded": 79,
+    "executed": 79,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "new_omen": 13
+  },
+  "baseline": {
+    "executed": 3,
+    "failures": 3,
+    "errors": 0,
+    "skipped": 0
+  },
+  "reports": [
+    {
+      "label": "import-guard-failure",
+      "owned_sha256": "a8f9da41c86cb46826dbcbf0d3dd9768575a9b6b15e923c120d0099daeccb9f2",
+      "pins_sha256": "4cba1fd89056b9e0101fa79a163011f4eb737e85230c0879d678eaab22c604bd",
+      "code": 1,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "elapsedMs": 559.0687,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 34,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    },
+    {
+      "label": "fixture-failure",
+      "owned_sha256": "6e27b375da276f37c7e2fb1c454956f8149a1e9907439e9a245cd1b2af426a8d",
+      "pins_sha256": "81ebd8d53bdf1bfedfdf3d0c12d66837562e2f0e428833e65d2cd80d38256215",
+      "code": 1,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "elapsedMs": 1299.0474,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 81,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    },
+    {
+      "label": "passing",
+      "owned_sha256": "808f11b3b259feab67905fdd46b1a061f79b9f5a9a493dbd43c5f9d553ce64eb",
+      "pins_sha256": "701711be678a7a616dddcc26823ddfc3ea579914e31e430a19d8746edb3cb6a5",
+      "code": 0,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "elapsedMs": 1171.478,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 73,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    },
+    {
+      "label": "baseline",
+      "owned_sha256": "619d8cb59cb1958ca08b0a3bb2ccf016255c2afbd90d92a019987ce902fcf941",
+      "pins_sha256": "e3504af71666d2a8f32a1e49b61bb32a47f9a9f022ed53d7d78d627fe9024ce8",
+      "code": 1,
+      "closed": true,
+      "forced": false,
+      "timedOut": false,
+      "elapsedMs": 849.6162999999999,
+      "native": {
+        "active": 0,
+        "assigned": 0,
+        "listed": 0,
+        "retained": 4,
+        "unsignaled": 0,
+        "complete": true,
+        "zero": true,
+        "sampling": {
+          "queries": 53,
+          "incompleteQueries": 0,
+          "firstIncomplete": null,
+          "lastIncomplete": null
+        }
+      }
+    }
+  ]
+}

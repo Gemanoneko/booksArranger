@@ -1,0 +1,56 @@
+{
+  "version": "0.24.5",
+  "source_head": "7a50f5c50208d6967822dfa8fc296c0910e7a23f",
+  "build_id": "2c48e76e-0702-45e6-848b-811b7fb6bfa0",
+  "producer_build_id": "8046b426-a820-4e2a-ae48-df89964fec60",
+  "artifact_manifest_sha256": "0a756135efa23925a17331d2162b23e9501e31f9efb7a51b8b92e1e7f8be14a8",
+  "runtime_pointer_sha256": "3b62061a387b77a53e4e40c13ba542a7fab067bdf7e431b4229d631c471c77ac",
+  "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+  "product_digest": "6bd021f0301c96683ea4472890609d3f642848905fafa1857124e50956cb35d3",
+  "artifacts": [
+    {
+      "path": "builds/2c48e76e-0702-45e6-848b-811b7fb6bfa0/Books-Arranger-Setup-0.24.5.exe",
+      "sha256": "ca2590fca124de2e82dc5c90baae6b12ebb8dd8a0d4bef56db43e96a81ea206e",
+      "size": 174677990
+    },
+    {
+      "path": "builds/2c48e76e-0702-45e6-848b-811b7fb6bfa0/Books-Arranger-Setup-0.24.5.exe.blockmap",
+      "sha256": "c2e9b8eabff6ceb94ac9c758d22031c2da35a4727086165ae0d9ffd867fccb63",
+      "size": 182010
+    },
+    {
+      "path": "builds/2c48e76e-0702-45e6-848b-811b7fb6bfa0/latest.yml",
+      "sha256": "0157bcd2a1aee7f6b479ac90cfa4d2301faf5f0e4a3aa35b82073fdb16bff575",
+      "size": 360
+    }
+  ],
+  "records": [
+    {
+      "name": "invocation.json",
+      "size": 300,
+      "sha256": "2e4ee75ad003087d5db8a12284e9832cc0eec3403263751ba6efe9971f71a29a"
+    },
+    {
+      "name": "callback.json",
+      "size": 131,
+      "sha256": "b4f7e3c67cd42a14cdeb824188d74a7a1abba6d2b7b9654cecd4170ae09ea809"
+    },
+    {
+      "name": "owned.json",
+      "size": 1636,
+      "sha256": "c87ae06bf4d5985d0ec0e6d9f745bdd04b0f4dec15548623a6f993ac82768e29"
+    },
+    {
+      "name": "native-operation-result.json",
+      "size": 516,
+      "sha256": "cee04cd25b688443b2e5573f08c5868c72df890fc3e59476ae6baf4c26f4de7d"
+    }
+  ],
+  "ownership": {
+    "code": 0,
+    "elapsed_ms": 102972.1491,
+    "normal_zero": true,
+    "retained": 60,
+    "incomplete_queries": 0
+  }
+}

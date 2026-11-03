@@ -1,0 +1,57 @@
+{
+  "version": "0.24.5",
+  "source_head": "58ded88dab1e585feb5dbe47824b3808dcb38d8a",
+  "build_id": "e074bf71-d5f4-4d92-b636-581ee4348a71",
+  "producer": "4be5d9f2-bec7-4af9-adb8-98cd4fc02bb2",
+  "artifact_manifest_sha256": "f04002f07d21691fcaeb50aca32ea4e850346c9ecc194c2308588f9ddaf0cc68",
+  "runtime_pointer_sha256": "d87388ef29bf3edf256f5b59b859ffe8d5e7b4c2da8b7caca63de26fec84781e",
+  "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+  "product_digest": "ef0de6c5109b9198ddcc5c23dfa467379953a720342757f7cf6f26c36c57925e",
+  "artifacts": [
+    {
+      "path": "builds/e074bf71-d5f4-4d92-b636-581ee4348a71/Books-Arranger-Setup-0.24.5.exe",
+      "sha256": "b64381da56c4cae390e53740bd8bbfe929215d557567fad2e7e5e532b1754b92",
+      "size": 174678058
+    },
+    {
+      "path": "builds/e074bf71-d5f4-4d92-b636-581ee4348a71/Books-Arranger-Setup-0.24.5.exe.blockmap",
+      "sha256": "c3040bc20504d340dcc6e763d2a6896689521ae60233dd5314611b86023f704d",
+      "size": 182115
+    },
+    {
+      "path": "builds/e074bf71-d5f4-4d92-b636-581ee4348a71/latest.yml",
+      "sha256": "fcb73699954a12017863805d4b02b11a914175c5bd71850c4067176d7140b78d",
+      "size": 360
+    }
+  ],
+  "callback": "2026-11-03T19:15:58.881Z",
+  "records": [
+    {
+      "name": "invocation.json",
+      "size": 300,
+      "sha256": "890aa53d3837003f3a15934f1a4d7feeff0fd2edeca4192c62f2f1696a3c68e1"
+    },
+    {
+      "name": "callback.json",
+      "size": 131,
+      "sha256": "bc0da7733b66bcc911af84f883b7e5a4b4875035b2cea0712b1bd3a022ca5520"
+    },
+    {
+      "name": "owned.json",
+      "size": 1636,
+      "sha256": "ff38dd16763fc02d611f5ee15fa9921ef32d3d5306279123976d750333965ee9"
+    },
+    {
+      "name": "native-operation-result.json",
+      "size": 518,
+      "sha256": "645e490f162aa05e737a60c883aba2ef9e40b242489e73e2b5931480625a9002"
+    }
+  ],
+  "ownership": {
+    "code": 0,
+    "elapsed_ms": 123027.0782,
+    "normal_zero": true,
+    "retained": 60,
+    "incomplete_queries": 0
+  }
+}

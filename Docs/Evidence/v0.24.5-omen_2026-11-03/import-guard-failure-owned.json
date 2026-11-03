@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "",
+  "err": "Traceback (most recent call last):\r\n  File \"C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261103-245\\shared\\omen\\after\\run.py\", line 23, in <module>\r\n    suite = unittest.defaultTestLoader.loadTestsFromNames(selectors)\r\n  File \"unittest\\loader.py\", line 214, in loadTestsFromNames\r\n  File \"unittest\\loader.py\", line 141, in loadTestsFromName\r\n  File \"C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261103-245\\shared\\omen\\after\\source\\tests\\test_series_identity_242.py\", line 7, in <module>\r\n    from unittest.mock import patch\r\n  File \"unittest\\mock.py\", line 27, in <module>\r\n  File \"asyncio\\__init__.py\", line 45, in <module>\r\n  File \"asyncio\\windows_events.py\", line 26, in <module>\r\n  File \"asyncio\\windows_utils.py\", line 133, in <module>\r\nTypeError: function() argument 'code' must be code, not str\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 83496,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 34,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 559.0687,
+  "outputBytes": 815
+}

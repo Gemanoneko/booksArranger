@@ -1,0 +1,19 @@
+{
+  "file": "C:/Program Files/nodejs/node.exe",
+  "args": [
+    "C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs",
+    "--context",
+    "C:/Antigravity Projects/q/context/context.json",
+    "--context-sha",
+    "692da4ef8b5d99171acea7a3ca5a6aadf6c53dd34932825c321428f6554528b0",
+    "--run-root",
+    "C:/Antigravity Projects/q"
+  ],
+  "cwd": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101",
+  "timeout": 930000,
+  "maxBuffer": 16777216,
+  "windowsHide": true,
+  "source": "7a50f5c50208d6967822dfa8fc296c0910e7a23f",
+  "build": "2c48e76e-0702-45e6-848b-811b7fb6bfa0",
+  "manifest_sha256": "0a756135efa23925a17331d2162b23e9501e31f9efb7a51b8b92e1e7f8be14a8"
+}

@@ -1,0 +1,50 @@
+{
+  "status": "FAIL_RUNNER_ENVIRONMENT_NO_TESTS",
+  "records": [
+    {
+      "file": "invocation.json",
+      "size": 779,
+      "sha256": "2d906f860df2fb4a43143e24294295d56725bba819cf13852d28f81c0301d584"
+    },
+    {
+      "file": "outer-result.json",
+      "size": 579,
+      "sha256": "dbce071d656d659b7c0f49f46a25b97f2c587d3e97fce53eacfb603557f4bc0e"
+    },
+    {
+      "file": "outer-stderr.log",
+      "size": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "file": "outer-stdout.log",
+      "size": 2247,
+      "sha256": "ed867dad0c66b67aecda9046594c7b3e28551a1ee49529ce03bb27798aaace01"
+    },
+    {
+      "file": "context.json",
+      "size": 4798,
+      "sha256": "b79fc90b2e21a4a7e5d1a8d694ca152ecbe76896612d59134048d9257b40eb0f"
+    },
+    {
+      "file": "graph.json",
+      "size": 3032,
+      "sha256": "966eaa1e25d00e4afe5449c9317705da03b38d1ad8d91eb0aac9d2f90f40f5ab"
+    },
+    {
+      "file": "run-entry.sh",
+      "size": 873,
+      "sha256": "3afbf995ca6aae2e39ccfea14bf0d627033dbd0a4cde8a7cdcf3f659a3a89f79"
+    },
+    {
+      "file": "runtime-ownership.json",
+      "size": 13523,
+      "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    },
+    {
+      "file": "runtime-bundled-media.json",
+      "size": 5823,
+      "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    }
+  ]
+}

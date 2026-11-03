@@ -1,0 +1,96 @@
+{
+  "status": "FAIL",
+  "source": "94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb",
+  "build": "c87f0090-7289-4c9b-8eed-eacc948b6d3e",
+  "artifact_manifest_sha256": "a8acd696647c4a231b5724d5237f2c02fab514bb5aa3e6fc7c9f7a8cea93d9d2",
+  "context_sha256": "0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da",
+  "callback": {
+    "started_at": "2026-11-03T19:33:19.566Z",
+    "finished_at": "2026-11-03T19:43:24.830Z",
+    "pid": 58940,
+    "error": {
+      "message": "Command failed: C:/Program Files/nodejs/node.exe C:/Antigravity Projects/Studio Illuminati/.claude/skills/qa-handoff/scripts/run_entry_checks.mjs --context C:/Antigravity Projects/q/context/context.json --context-sha 0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da --run-root C:/Antigravity Projects/q\nEntry checks failed; QA remains blocked\n",
+      "code": 1,
+      "signal": null,
+      "killed": false
+    },
+    "exit_code": 1
+  },
+  "elapsedMs": 605264,
+  "receipt": "Entry-check receipt v2: books-arranger v0.24.5 @ 94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb (dirty: N) [source:16de00ce0f5c64e88c2fe23790e75e047276183ce5c26e9d8957e4775b5470bc; harness:26083c79afadbb3ea094b139adc7c2e9959a0f32fae4fe1283859ad4f5dfb2d8; runtime:5d3562ed3a04005275ea9af81576a624a3b926445cc80236e9fedc95590a29e1; checker:4bae2cde4e4cdd2f22fb3060571730ec32fec1dd5403ea070086973b18b695e4] — pre-qa n/a, post-build n/a, check-electron n/a, check fail (owned check), test:smoke n/a; personal-folders clean (2 subfolder notes)",
+  "python": {
+    "batches": 13,
+    "completed": 2344,
+    "failures": 1,
+    "errors": 0,
+    "skips": 0
+  },
+  "node_result": [
+    "# pass 242",
+    "# fail 0"
+  ],
+  "failures": [
+    "FAIL: test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start (test_set_release.SetReleaseTests.test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"C:\\Antigravity Projects\\q\\entry-run-899i7i\\scratch\\2\\tests\\test_set_release.py\", line 78, in test_ruling_56_an_approve_leaves_unrelated_paused_jobs_pending_until_start\n    self.start_and_wait()\n    ~~~~~~~~~~~~~~~~~~~^^\n  File \"C:\\Antigravity Projects\\q\\entry-run-899i7i\\scratch\\2\\tests\\test_approve_as_is.py\", line 51, in start_and_wait\n    self.wait()\n    ~~~~~~~~~^^\n  File \"C:\\Antigravity Projects\\q\\entry-run-899i7i\\scratch\\2\\tests\\test_approve_as_is.py\", line 45, in wait\n    if time.monotonic()>limit:self.fail('Private Approve job exceeded 60 s')\n                              ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Private Approve job exceeded 60 s\n\n----------------------------------------------------------------------"
+  ],
+  "frontend": [],
+  "owned": {
+    "cwd": "C:\\Antigravity Projects\\q\\entry-run-899i7i",
+    "code": 1,
+    "closed": true,
+    "native": {
+      "active": 0,
+      "assigned": 0,
+      "listed": 0,
+      "retained": 10873,
+      "unsignaled": 0,
+      "complete": true,
+      "zero": true,
+      "sampling": {
+        "queries": 19992,
+        "incompleteQueries": 458,
+        "firstIncomplete": {
+          "assigned": 53,
+          "listed": 52,
+          "capacity": 8192,
+          "query_ok": true
+        },
+        "lastIncomplete": {
+          "assigned": 10,
+          "listed": 8,
+          "capacity": 8192,
+          "query_ok": true
+        }
+      }
+    },
+    "forced": false,
+    "timedOut": false,
+    "outputComplete": true
+  },
+  "records": [
+    {
+      "file": "invocation.json",
+      "size": 1876,
+      "sha256": "1cfb748926fa725b67a7f0e41bbd56b5339df7f3399df0c74a45bd019909e498"
+    },
+    {
+      "file": "outer-result.json",
+      "size": 579,
+      "sha256": "8d5020c386f9cc96ef62b33397ee09cd3fc9a1578da63ea16bdb8bb6a3da0ccc"
+    },
+    {
+      "file": "outer-stdout.log",
+      "size": 731208,
+      "sha256": "7a2cd484de47166d5a9b8ffb8dd9b1e37385662e2078df7ab602840a5405e711"
+    },
+    {
+      "file": "outer-stderr.log",
+      "size": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "file": "context.json",
+      "size": 4798,
+      "sha256": "0735a7214730ea5b4b9ca701bb18945de4ec4c97c60cdb1dfa08197194b396da"
+    }
+  ]
+}

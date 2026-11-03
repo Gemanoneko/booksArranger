@@ -1,0 +1,146 @@
+{
+ "schema": 3,
+ "deadlineMs": 900000,
+ "ownership": "private-job-or-process-group",
+ "source": {
+  "repo": "C:/Antigravity Projects/Worktrees/Books Arranger/books-0242-candidate-20261101",
+  "root": "C:\\Antigravity Projects\\q\\context\\source",
+  "head": "7a50f5c50208d6967822dfa8fc296c0910e7a23f",
+  "dirty": "N",
+  "manifest": {
+   "path": "C:\\Antigravity Projects\\q\\context\\source-manifest.json",
+   "sha256": "696c3a1896e0ffd29613b3e8e0ad85c7de45022ae8d1da2da63f03e0fc79c95e"
+  }
+ },
+ "harness": {
+  "root": "C:\\Antigravity Projects\\q\\context\\harness",
+  "manifest": {
+   "path": "C:\\Antigravity Projects\\q\\context\\harness-manifest.json",
+   "sha256": "cbbfd6b6dc94e151d53667bc0a237197ba7b8ef6027921874b4e932da424e157"
+  }
+ },
+ "runtime": {
+  "node": {
+   "name": "node",
+   "path": "C:\\Program Files\\nodejs\\node.exe",
+   "sha256": "14319838b3f355e0398c13569a90270bce4fc68f25189f58c59b03dadae0e6d5"
+  },
+  "npmCli": {
+   "name": "npmCli",
+   "path": "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+   "sha256": "3ce7cba6f5128dd5f54c98b6a5036b0f850496878cc2e21044b675fe3c594e3e"
+  },
+  "shell": {
+   "name": "shell",
+   "path": "C:\\Windows\\System32\\cmd.exe",
+   "sha256": "ccd79a7568ea9240ccd6fe124807b9d3e4dbc3a4cf92954299ac3029f4a91d02"
+  },
+  "npmShim": {
+   "name": "npmShim",
+   "path": "C:\\Program Files\\nodejs\\npm.cmd",
+   "sha256": "21b46c69ad6e2f231f02a9e120f4ba6c8e75fef5a45637103002eab99f888ab8"
+  },
+  "manifests": [
+   {
+    "name": "dependencies",
+    "root": "C:\\Antigravity Projects\\Worktrees\\Books Arranger\\books-0242-candidate-20261101\\node_modules",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-dependencies.json",
+     "sha256": "98d2a6951cfc2b0e2868e28569f7f0193cba2f115e229edff9b08f83cd80603a"
+    }
+   },
+   {
+    "name": "ownership",
+    "root": "C:\\Antigravity Projects\\q\\ownership",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-ownership.json",
+     "sha256": "122eca8f1ad057bd86867f8e302c60fcaa5b6dba5ff4e660cfd860cf40769617"
+    }
+   },
+   {
+    "name": "bundled-media",
+    "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-runtime",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-bundled-media.json",
+     "sha256": "1037621bc6cb259534efc38c0a4917556ff28dc233c1d1416f12de66a5ed8b31"
+    }
+   },
+   {
+    "name": "mp3-fixture",
+    "root": "C:/Antigravity Projects/Studio Illuminati/WIP/Books Arranger/build-cache/qa-fixtures/ba-mp3-fixture",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-mp3-fixture.json",
+     "sha256": "52e26c12f66067257afd51b841c2e44c7bc8a23a03684ec371936547da1317c8"
+    }
+   },
+   {
+    "name": "node-installation",
+    "root": "C:\\Program Files\\nodejs",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-node-installation.json",
+     "sha256": "9baa25ddc8f3d43d5f7ac8f765f52e6525b12904706f3c94cf7e7bf2b09395ca"
+    }
+   },
+   {
+    "name": "git",
+    "root": "C:\\Program Files\\Git",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-git.json",
+     "sha256": "fa8e59338bb6c16deabe7bf6d1fd278a5f8c3acf81db2519ec9fa93029f54606"
+    }
+   },
+   {
+    "name": "powershell",
+    "root": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+    "manifest": {
+     "path": "C:\\Antigravity Projects\\q\\context\\runtime-powershell.json",
+     "sha256": "60e3a83e8b0d7d193fe2f7be4d6f249147c3dddea7f603298c384399346ddaa3"
+    }
+   }
+  ],
+  "git": {
+   "name": "git",
+   "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+   "sha256": "20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c"
+  },
+  "koffiRoot": "C:\\Antigravity Projects\\q\\ownership\\node_modules\\koffi"
+ },
+ "tooling": {
+  "files": [
+   {
+    "path": "run_entry_checks.mjs",
+    "sha256": "226594d3b7d977c1396ed7580100f79b79cf219260ee954895b56f27a9846aba"
+   },
+   {
+    "path": "entry-main.mjs",
+    "sha256": "d2b7ad6cef1ffd71e1990e811797c9a60b74a94efa3d65f5ff9bc6512db384bf"
+   },
+   {
+    "path": "entry-identity.mjs",
+    "sha256": "b36b7b52f7c95868c79c494fbc629d5790886426669a8dbdda236248ba7e9856"
+   },
+   {
+    "path": "bounded-check.mjs",
+    "sha256": "89ecbd30698cae696ba52d677f31bfaa505c87227c22f85e0bb6a2103475fcbc"
+   },
+   {
+    "path": "bounded-child.mjs",
+    "sha256": "240a6a96a32f08989439387d5d6ab75d17e1bcf243863d31d2ff7287f68d1e42"
+   }
+  ]
+ },
+ "execution": {
+  "runRootParent": "C:/Antigravity Projects/q",
+  "requiredFreePorts": [
+   5212
+  ],
+  "auditedNodes": [
+   {
+    "path": "scripts/check-desktop.mjs",
+    "sha256": "8feb2faae2e2799439e8b6c31858199834bc311993bd1171b5a78e8f3fae2322",
+    "kind": "pure-node",
+    "command": "node scripts/check-desktop.mjs"
+   }
+  ]
+ }
+}

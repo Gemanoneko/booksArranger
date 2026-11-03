@@ -1,0 +1,35 @@
+{
+  "status": "FAIL_OWNERSHIP_PRECHECK_NO_TEST_WORKER",
+  "records": [
+    {
+      "file": "invocation.json",
+      "size": 740,
+      "sha256": "519976b9cb6261c37904ffc8cc70cca9fab2962361056f19615be1468da5ffb2"
+    },
+    {
+      "file": "outer-result.json",
+      "size": 579,
+      "sha256": "f40c9928c81ebd4d61f405965181cbb0275ecea30c848274588b12457c61fb72"
+    },
+    {
+      "file": "outer-stderr.log",
+      "size": 40,
+      "sha256": "f9898630c7cc10f73c736268909705f1072d172354f2207a1ff1ddcc30514a57"
+    },
+    {
+      "file": "outer-stdout.log",
+      "size": 1223,
+      "sha256": "2ed8fe0d5c59e3de7797d4d796fc7fba5ba9ac40c84d671b5b5fcac163bafc5e"
+    },
+    {
+      "file": "context.json",
+      "size": 4798,
+      "sha256": "692da4ef8b5d99171acea7a3ca5a6aadf6c53dd34932825c321428f6554528b0"
+    },
+    {
+      "file": "runtime-ownership.json",
+      "size": 12745,
+      "sha256": "a71196c1e4f15a1973e528d1ae5529f7b6b9f8eb79deba558231bef7c77d4507"
+    }
+  ]
+}

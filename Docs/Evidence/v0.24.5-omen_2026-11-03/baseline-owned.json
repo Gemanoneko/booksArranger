@@ -1,0 +1,37 @@
+{
+  "kind": "result",
+  "code": 1,
+  "signal": null,
+  "error": null,
+  "out": "{\"selectors\": [\"test_omen_0245.OmenApprovalTests.test_final_conflict_preview_and_approval_share_root_series\", \"test_omen_0245.OmenApprovalTests.test_armageddon_editor_defaults_extract_series_and_preserve_title_year\", \"test_omen_0245.OmenApprovalTests.test_armageddon_approval_uses_the_same_extracted_values_and_shared_folder\"], \"loaded\": 3, \"executed\": 3, \"skipped\": 0, \"failures\": 3, \"errors\": 0}\r\n",
+  "err": "test_final_conflict_preview_and_approval_share_root_series (test_omen_0245.OmenApprovalTests.test_final_conflict_preview_and_approval_share_root_series) ... FAIL\r\ntest_armageddon_editor_defaults_extract_series_and_preserve_title_year (test_omen_0245.OmenApprovalTests.test_armageddon_editor_defaults_extract_series_and_preserve_title_year) ... FAIL\r\ntest_armageddon_approval_uses_the_same_extracted_values_and_shared_folder (test_omen_0245.OmenApprovalTests.test_armageddon_approval_uses_the_same_extracted_values_and_shared_folder) ... FAIL\r\n\r\n======================================================================\r\nFAIL: test_final_conflict_preview_and_approval_share_root_series (test_omen_0245.OmenApprovalTests.test_final_conflict_preview_and_approval_share_root_series)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261103-245\\shared\\omen\\before\\source\\tests\\test_omen_0245.py\", line 69, in test_final_conflict_preview_and_approval_share_root_series\r\n    self.assertEqual(Path(self.planned(approved)['path']).parent, Path(self.sorted) / 'Omen')\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: Windo[85 chars]ore/fixtures/tmply9xp62r/Audiobooks Sorted/McGill Gordon/Omen') != Windo[85 chars]ore/fixtures/tmply9xp62r/Audiobooks Sorted/Omen')\r\n\r\n======================================================================\r\nFAIL: test_armageddon_editor_defaults_extract_series_and_preserve_title_year (test_omen_0245.OmenApprovalTests.test_armageddon_editor_defaults_extract_series_and_preserve_title_year)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261103-245\\shared\\omen\\before\\source\\tests\\test_omen_0245.py\", line 78, in test_armageddon_editor_defaults_extract_series_and_preserve_title_year\r\n    self.assertEqual({key: values[key] for key in ('title', 'series', 'number')},\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n                     {'title': 'Armageddon 2000', 'series': 'Omen', 'number': '4'})\r\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: {'title': 'Omen 4 - Armageddon 2000', 'series': '', 'number': ''} != {'title': 'Armageddon 2000', 'series': 'Omen', 'number': '4'}\r\n- {'number': '', 'series': '', 'title': 'Omen 4 - Armageddon 2000'}\r\n?                                        ---------\r\n\r\n+ {'number': '4', 'series': 'Omen', 'title': 'Armageddon 2000'}\r\n?             +              ++++\r\n\r\n\r\n======================================================================\r\nFAIL: test_armageddon_approval_uses_the_same_extracted_values_and_shared_folder (test_omen_0245.OmenApprovalTests.test_armageddon_approval_uses_the_same_extracted_values_and_shared_folder)\r\n----------------------------------------------------------------------\r\nTraceback (most recent call last):\r\n  File \"C:\\Users\\AnGeLZzZ\\AppData\\Local\\Temp\\codex-books-20261103-245\\shared\\omen\\before\\source\\tests\\test_omen_0245.py\", line 87, in test_armageddon_approval_uses_the_same_extracted_values_and_shared_folder\r\n    self.assertEqual({key: approved['review'][key] for key in ('title', 'series', 'number')},\r\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n                     {'title': 'Armageddon 2000', 'series': 'Omen', 'number': '4'})\r\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError: {'title': 'Omen 4 - Armageddon 2000', 'series': '', 'number': ''} != {'title': 'Armageddon 2000', 'series': 'Omen', 'number': '4'}\r\n- {'number': '', 'series': '', 'title': 'Omen 4 - Armageddon 2000'}\r\n?                                        ---------\r\n\r\n+ {'number': '4', 'series': 'Omen', 'title': 'Armageddon 2000'}\r\n?             +              ++++\r\n\r\n\r\n----------------------------------------------------------------------\r\nRan 3 tests in 0.267s\r\n\r\nFAILED (failures=3)\r\n",
+  "supervisorErr": "",
+  "ok": false,
+  "closed": true,
+  "forced": false,
+  "timedOut": false,
+  "overflow": false,
+  "truncated": false,
+  "outputComplete": true,
+  "reason": null,
+  "closureError": null,
+  "pid": 105568,
+  "ownership": "private-job",
+  "native": {
+    "active": 0,
+    "assigned": 0,
+    "listed": 0,
+    "retained": 4,
+    "unsignaled": 0,
+    "complete": true,
+    "zero": true,
+    "sampling": {
+      "queries": 53,
+      "incompleteQueries": 0,
+      "firstIncomplete": null,
+      "lastIncomplete": null
+    }
+  },
+  "elapsedMs": 849.6162999999999,
+  "outputBytes": 4547
+}

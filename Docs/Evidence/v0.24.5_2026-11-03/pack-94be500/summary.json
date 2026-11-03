@@ -1,0 +1,57 @@
+{
+  "version": "0.24.5",
+  "source_head": "94be5003b1e66cd4d7a4a50afe1ec2b930b1a6cb",
+  "build_id": "c87f0090-7289-4c9b-8eed-eacc948b6d3e",
+  "producer": "f32b3fce-812b-4e07-9e71-fb3a0c75ec98",
+  "artifact_manifest_sha256": "a8acd696647c4a231b5724d5237f2c02fab514bb5aa3e6fc7c9f7a8cea93d9d2",
+  "runtime_pointer_sha256": "71ddc7f94cf4ff2bdb18845c0d49a0904c4e11b28e38afe3b91679c408326d65",
+  "runtime_manifest_sha256": "f41e06413dee3dc1fdb2261c695baa38c8a846a02e408c690ee6d9ad08000b2e",
+  "product_digest": "6ca36cc45232a379b1342420fe42e726463baa9dfd82358dc3ebff14f7b7e2a0",
+  "artifacts": [
+    {
+      "path": "builds/c87f0090-7289-4c9b-8eed-eacc948b6d3e/Books-Arranger-Setup-0.24.5.exe",
+      "sha256": "d6aaea910c3e348bfabfe7e0eeceda1bdf5e1d7e339aa548217fb60026d17779",
+      "size": 174678220
+    },
+    {
+      "path": "builds/c87f0090-7289-4c9b-8eed-eacc948b6d3e/Books-Arranger-Setup-0.24.5.exe.blockmap",
+      "sha256": "9ce7bc3d9c16965b4aa4bd7eb58ce7dd2348332f8d4e005791705c0e65b10502",
+      "size": 182035
+    },
+    {
+      "path": "builds/c87f0090-7289-4c9b-8eed-eacc948b6d3e/latest.yml",
+      "sha256": "80f3ff4428e98e5f56dd04b8be66ebe6c383ff6c4e0bd81bbc14f7fda64001b8",
+      "size": 360
+    }
+  ],
+  "callback": "2026-11-03T19:32:42.106Z",
+  "records": [
+    {
+      "name": "invocation.json",
+      "size": 300,
+      "sha256": "477356117b6920eddb112cc3b9a17f48e1cb56be985bb5a5d569ddb9c6a4ac99"
+    },
+    {
+      "name": "callback.json",
+      "size": 131,
+      "sha256": "bc93b14e319aa4acb7eac38d6e4ddc448c06d3998acd1ceb3feec9f305413895"
+    },
+    {
+      "name": "owned.json",
+      "size": 1642,
+      "sha256": "5f1fba2de7ded9b57cbb6a2cc04c98178cdb5a736898aee0b7c4633bdd72dd99"
+    },
+    {
+      "name": "native-operation-result.json",
+      "size": 517,
+      "sha256": "8ef8d9b4a95896e7e01a6dd4290f1a92b774fd40ff3ec05310a9f1ad8d684369"
+    }
+  ],
+  "ownership": {
+    "code": 0,
+    "elapsed_ms": 88501.66649999999,
+    "normal_zero": true,
+    "retained": 60,
+    "incomplete_queries": 0
+  }
+}
