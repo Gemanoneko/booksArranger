@@ -486,7 +486,7 @@ class AutomaticProcessing:
             origin=self._stop_origin
             with connect(self.database) as db:
                 pause=__import__('pause_state').read(db,'automatic')
-                if origin is not None and (origin!='closing' or not pause):
+                if origin is not None and (origin!='closing' or not self.closed or not pause):
                     pause=__import__('pause_state').record(db,'automatic',origin,'Automatic processing stopped')
                 elif not pause:pause=__import__('pause_state').record(db,'automatic','interrupted','Automatic processing stopped before completing its work')
             self.inventory.stop()

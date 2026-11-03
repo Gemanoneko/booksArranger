@@ -216,6 +216,16 @@ class DesktopControl:
         self._shutdown()
 
     def _shutdown(self, trigger='quit'):
+        database=getattr(self.server.inventory,'database',None)
+        if database is not None and self.server.merge is not None:
+            try:
+                import sqlite3
+                from contextlib import closing
+                from pause_state import record_shutdown
+                with closing(sqlite3.connect(database,timeout=1)) as db, db:
+                    record_shutdown(db,trigger)
+            except sqlite3.Error as error:
+                print(f'Cannot record shutdown trigger: {error}',file=sys.stderr)
         try:
             self.server.finish_shutdown()
         except Exception as error:
@@ -225,16 +235,6 @@ class DesktopControl:
             return False  # A failed close is not authority to release ownership.
         with self.lock:
             self.phase = 'exiting'
-        database=getattr(self.server.inventory,'database',None)
-        if database is not None:
-            try:
-                import sqlite3
-                from contextlib import closing
-                from pause_state import record_shutdown
-                with closing(sqlite3.connect(database,timeout=1)) as db, db:
-                    record_shutdown(db,trigger)
-            except sqlite3.Error as error:
-                print(f'Cannot record shutdown trigger: {error}',file=sys.stderr)
         self._bound_exit()
         return True
 

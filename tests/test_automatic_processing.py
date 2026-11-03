@@ -830,10 +830,10 @@ class BetweenBooks:
         merge.storage_cleanup=SimpleNamespace(status=lambda:[],folder_status=lambda:[]);merge.working=SimpleNamespace(discharge_published=Mock())
         merge._prune_working=Mock();merge.enroll_cleanup=self.enroll;merge._prune_completed=self.pruned
         merge.progress_books=lambda *args:{'approved':0,'converted':0,'converted_ids':set()}
-        pause_jobs=self.queue.pause
+        pause_jobs=self.queue.pause_work
         def pause():
-            result=pause_jobs();self.wake.set();return result
-        self.queue.pause=pause;self.merge=merge
+            pause_jobs();self.wake.set()
+        self.queue.pause_work=pause;self.merge=merge
     def admit(self):
         for index,job_id in enumerate(self.jobs):
             state,stage=('completed','completed') if index==0 else ('pending','queued');created='2026-10-17T04:01:0'+str(index)

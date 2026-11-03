@@ -144,11 +144,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   previewAnswer=data=>({ok:true,status:200,json:async()=>({preview:{path:'Льюис\\'+data.title+'.m4b',absolute:'',taken:true}})});
   await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
   // «Спящие красавицы» (2026-10-26): the gate's own reason and next step, never the bare refusal.
-  assert.equal(statusCell(tr).children[0].textContent,'An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve.');assert.ok(statusCell(tr).children[0].classes.has('retry-refused'));
+  assert.equal(statusCell(tr).children[0].textContent,'Approval not queued: An audiobook with this name is already in Audiobooks Sorted. Change the title or author, then approve.');assert.ok(statusCell(tr).children[0].classes.has('retry-refused'));
   assert.match(goesTo(tr),/^Already there /);assert.equal(inputs(tr)[0].value,'Хроники Нарнии 2 (другое издание)');
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Candidate changed; reload evidence before reviewing',code:'changed',row:null})});previewAnswer=null;
   title.value='Хроники Нарнии 2 (третье)';title.handlers.input();await title.handlers.blur();await tick();
-  await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();assert.equal(statusCell(tr).children[0].textContent,'This book changed. Review its details and try again.');
+  await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();assert.equal(statusCell(tr).children[0].textContent,'Approval not queued: This book changed. Review its details and try again.');
   approveAnswer=null;
 
   // 5. Missing files: what is missing and where; Scan again, Convert what's there, Remove from list.
@@ -269,7 +269,7 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   paint([askRow('slow',{...noAuthor.ask})]);
   const heavy=buttonsOf(trOf('cand-slow'))[0],heavySent=posted('/api/candidate/approve').length;
   heavy.handlers.click({stopPropagation(){}});await new Promise(resolve=>setTimeout(resolve,5));
-  assert.equal(heavy.textContent,'Approving...');assert.equal(heavy.getAttribute('aria-disabled'),'true','pending until the answer: no second press');
+  assert.equal(heavy.textContent,'Submitting approval…');assert.equal(heavy.getAttribute('aria-disabled'),'true','pending until the answer: no second press');
   heavy.handlers.click({stopPropagation(){}});
   await new Promise(resolve=>setTimeout(resolve,120));
   assert.equal(posted('/api/candidate/approve').length-heavySent,1,'one request');

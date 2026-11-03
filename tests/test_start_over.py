@@ -714,18 +714,18 @@ class PendingStartStopTests(Base):
         control = DesktopControl(server)
         self.desktop_controls.append(control)
         stopped = threading.Event()
-        real_stop = self.s.automatic.stop
+        real_stop = self.s.automatic.stop_work
         def stop(*args, **kwargs):
             try:
                 return real_stop(*args, **kwargs)
             finally:
                 stopped.set()
-        with patch.object(self.s.automatic, 'stop', side_effect=stop):
+        with patch.object(self.s.automatic, 'stop_work', side_effect=stop):
             self.assertEqual(control.quit()['phase'], 'finishing')
             self.assertTrue(server.closing, 'the request immediately refuses further controls')
             # Quit's stops run on its owned thread (0.22.3); completion, not the
             # immediate request reply, is the boundary for the cancellation check.
-            self.assertTrue(stopped.wait(5), 'Quit must reach automatic.stop promptly')
+            self.assertTrue(stopped.wait(5), 'Quit must signal the automatic stop promptly')
             self.assertTrue(self.s.draining)
             self.assertIsNone(self.s.automatic.start_pending, 'Quit ends the pending start')
             self.assertTrue(self.notified.called, 'the next poll shows it')

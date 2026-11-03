@@ -21,7 +21,7 @@ def clear(db, scope):
 
 
 def record_shutdown(db, trigger):
-    """Last completed desktop shutdown, separate from the saved pause origin."""
+    """Last desktop shutdown attempt, separate from the saved pause origin."""
     if trigger not in ('quit','update','session_end','shell_pipe_closed'):
         raise ValueError('Invalid desktop shutdown trigger')
     db.execute('CREATE TABLE IF NOT EXISTS desktop_shutdown (id INTEGER PRIMARY KEY CHECK(id=1), trigger TEXT NOT NULL, at TEXT NOT NULL)')
