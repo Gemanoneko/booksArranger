@@ -100,11 +100,11 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   // The audio-format gate is named in the refusal line (B5.4).
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Audio format needs an encoding decision',code:'format',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,"The audio format needs a decision the app can't make yet. Select the row to read why.");
+  assert.equal(statusCell(tr).children[0].textContent,"Approval not queued: The audio format needs a decision the app can't make yet. Select the row to read why.");
   // N7: the destination moved since the row showed it (Senua m1): its own line, not "This book changed".
   approveAnswer=()=>({ok:false,status:409,json:async()=>({error:'Destination changed since it was shown: it is now X. Nothing was changed.',code:'moved',row:null})});
   tr=trOf('cand-o4');await buttonsOf(tr)[0].handlers.click({stopPropagation(){}});await tick();
-  assert.equal(statusCell(tr).children[0].textContent,'The destination changed. Check the Goes to line and try again.');approveAnswer=null;
+  assert.equal(statusCell(tr).children[0].textContent,'Approval not queued: The destination changed. Check the Goes to line and try again.');approveAnswer=null;
 
   // Files unclear: every cause, the "In" folder line and 3 names (files without the title first), mixed albums.
   const flagged=[{name:'Реклама.mp3',folder:'Z:\\Audiobooks\\Дюна',path:'x',flag:true}];

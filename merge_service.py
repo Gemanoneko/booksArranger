@@ -645,6 +645,7 @@ class MergeService:
         if no catalog commit and no control happened between them. None until a poll opens the monitor."""
         try:
             with _QUIET_LOCK:
+                if self.__dict__.get('_closing'):return None
                 monitor=self.__dict__.get('_monitor')
                 if monitor is None:
                     if not create:return None

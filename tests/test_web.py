@@ -433,9 +433,12 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.call('/api/shutdown',{},authorized=False)[0],403)
         self.assertTrue(self.thread.is_alive())
         self.assertEqual(self.call('/api/shutdown',{'unexpected':True})[0],400)
+        self.assertIsNotNone(self.server.merge._catalog_version(create=True))
         self.assertEqual(self.call('/api/shutdown',{})[0],200)
         self.thread.join(5)
         self.assertFalse(self.thread.is_alive())
+        self.assertIsNone(self.server.merge._catalog_version(create=True))
+        self.assertNotIn('_monitor',self.server.merge.__dict__)
 
     def test_anthology_author_roles_are_durable_and_audiobook_only(self):
         source=Path(self.roots['Audiobooks'])/'collection.mp3';source.write_bytes(b'fixture')

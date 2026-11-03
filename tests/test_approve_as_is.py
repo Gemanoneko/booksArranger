@@ -39,7 +39,9 @@ class ApproveFixture(unittest.TestCase):
 
     def wait(self):
         limit=time.monotonic()+60
-        while self.service.state()['state'] in ('Running','Pausing') or self.service.state().get('queued') or self.service.state().get('cleanup_active'):
+        while True:
+            status=self.service.state()
+            if status['state'] not in ('Running','Pausing') and not status.get('queued') and not status.get('cleanup_active'):return
             if time.monotonic()>limit:self.fail('Private Approve job exceeded 60 s')
             time.sleep(.05)
 
