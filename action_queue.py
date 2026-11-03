@@ -36,6 +36,8 @@ SERVER_RUN = ('approve', 'convert', 'separate', 'scan_again', 'dismiss', 'copy',
               'destination', 'move')
 KEEP = 24 * 3600     # an outcome nobody acknowledged is forgotten after a day
 POLL = 0.5           # how often a blocked head is looked at again
+APPROVAL_RECEIPT_LIMIT = 4096
+APPROVAL_LIFETIME_MS = 60000
 LIMIT = 1000         # queued actions; a press beyond it is refused, never dropped silently
 
 
@@ -62,6 +64,7 @@ class ActionQueue:
         self.items = []
         self.running = None
         self.outcomes = []
+        self.approval_receipts = {}
         self.thread = None
         self.closed = False
 
@@ -156,7 +159,7 @@ class ActionQueue:
         return self.items[0]['blocker'] if self.items else 'operation'
 
     # ------------------------------------------------------------------ presses
-    def enqueue(self, action, book_id, title, args, always=False):
+    def enqueue(self, action, book_id, title, args, always=False, receipt=None):
         """None when the queue is empty and nothing blocks the action: the caller runs it now, in its own request, as
         before. Otherwise the action is queued and the answer is {'queued': True, 'id', 'position', 'blocker'}. A second
         press of the same action for a book that already waits answers that action; another action for it is refused
@@ -167,8 +170,25 @@ class ActionQueue:
         with self.lock:
             if self.closed or self.server.closing:
                 raise ValueError('Server is shutting down')
+            if receipt is not None:
+                key, expires = receipt
+                now = self._receipt_clock(expires)
+                if expires <= now:raise ValueError('Approval submission expired. Try again.')
+                old = self.approval_receipts.get(key)
+                if old is not None:
+                    if old[:3] != (book_id, action, expires) or old[3] is None:
+                        raise ValueError('Approval submission was closed. Try again.')
+                    answer=self._approval_answer(old[3])
+                    if answer.get('unknown'):raise ValueError('That approval already reached the queue. Check the book before trying again.')
+                    return answer
+                self._receipt_room()
             same = next((item for item in self.items if item['book_id'] == book_id), None)
+            if action in ('approve','convert') and self.running is not None and self.running['book_id']==book_id:
+                same=self.running
             if same is not None and same['action'] == action:
+                if action in ('approve','convert') and same['args'] != args:
+                    raise ValueError('An approval with different choices is already queued or running for this book.')
+                if receipt is not None:self.approval_receipts[key]=(book_id,action,expires,same['id'])
                 return self._answer(same)
             if same is not None:
                 raise ValueError('This book already has a queued action. Cancel it first.')  # one per row (Judy 1.1)
@@ -178,13 +198,48 @@ class ActionQueue:
                 raise QueueFull('Too many queued actions. Wait for some to run.')
             item = {'id': str(uuid.uuid4()), 'action': action, 'book_id': book_id, 'title': title, 'args': copy.deepcopy(args),
                     'queued_at': time.time(), 'blocker': kind or self._head_kind()}
+            if receipt is not None:self.approval_receipts[key]=(book_id,action,expires,item['id'])
             self.items.append(item)
             self._start()
             self.changed.notify_all()
             return self._answer(item)
 
     def _answer(self, item):
+        if item is self.running:return {'queued':True,'id':item['id'],'running':True}
         return {'queued': True, 'id': item['id'], 'position': self.items.index(item) + 1, 'blocker': {'kind': item['blocker']}}
+
+    def _receipt_clock(self, expires):
+        now = int(time.time()*1000)
+        if type(expires) is not int or expires > now+APPROVAL_LIFETIME_MS:
+            raise ValueError('Invalid approval submission deadline')
+        self.approval_receipts = {key:value for key,value in self.approval_receipts.items() if value[2]+APPROVAL_LIFETIME_MS > now}
+        return now
+
+    def _receipt_room(self):
+        if len(self.approval_receipts)>=APPROVAL_RECEIPT_LIMIT:
+            raise QueueFull('Too many approval submissions. Wait and try again.')
+
+    def _approval_answer(self, identity):
+        if identity is None:return {'queued':False}
+        for item in self.items:
+            if item['id']==identity:return self._answer(item)
+        if self.running is not None and self.running['id']==identity:return self._answer(self.running)
+        outcome=next((item for item in self.outcomes if item['id']==identity),None)
+        if outcome is not None:return {'queued':True,'id':identity,'outcome':copy.deepcopy(outcome)}
+        return {'unknown':True}
+
+    def reconcile_approval(self, key, book_id, action, expires):
+        """Read the exact receipt, or close the still-live submission before it can arrive late."""
+        with self.lock:
+            now=self._receipt_clock(expires)
+            receipt=self.approval_receipts.get(key)
+            if receipt is not None:
+                if receipt[:3]!=(book_id,action,expires):raise ValueError('Approval receipt does not match')
+                return self._approval_answer(receipt[3])
+            if expires<=now:return {'unknown':True}
+            self._receipt_room()
+            self.approval_receipts[key]=(book_id,action,expires,None)
+            return {'queued':False}
 
     def cancel(self, identity):
         """{'cancelled': True}, or None when it is no longer waiting (it started, ended or never was): too late."""

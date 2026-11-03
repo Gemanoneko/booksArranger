@@ -199,10 +199,9 @@ async function request(route, data, timeoutMs=0, signal=null) {
   const kind=route.startsWith('/api/inventory')?'list':route.startsWith('/api/state')?'status':'other';
   const ticket=kind==='other'?++inflightSeq:null;if(ticket!==null)inflight.set(ticket,Date.now());
   if(kind==='status' && statusSilentSince===null)statusSilentSince=Date.now();
-  let response;
-  try{response = await fetch(route, options);if(kind==='status')statusSilentSince=null;}  // any reply is the app answering, an error status included
+  let response,result;
+  try{response = await fetch(route, options);if(kind==='status')statusSilentSince=null;result=await response.json();}  // any reply is the app answering, an error status included
   finally{if(timer)clearTimeout(timer);if(ticket!==null)inflight.delete(ticket);if(busyShown)renderBusy();}
-  const result = await response.json();
   if (!response.ok) {const error=new Error(result.error || `Local request failed (${response.status})`);error.httpStatus=response.status;error.automaticProcessing=result.automatic_processing;error.body=result;throw error;}
   return result;
 }
@@ -3017,9 +3016,9 @@ function updateAskButton(entry,button,kind){
   if(!button)return;const row=entry.row,mode=askMode(row,kind),done=askDone.get(row.id),queued=done==='approve' || done==='convert';
   const gone=mode==='done' && button!==entry.primary,hadFocus=gone && document.activeElement===button;button.hidden=gone;
   if(hadFocus)entry.primary?.focus?.({preventScroll:true});if(gone)return;
-  const label=mode==='done' && queued?'Queued':mode==='waiting'?'Queued':mode==='pending'?(askPendings.get(row.id)?.checking?'Checking approval…':queueRunning(row,ASK_QUEUE[kind])?'Checking book…':ASK_PENDING[kind][0]):askLabel(entry,kind);
+  const label=mode==='done' && queued?'Queued':mode==='waiting'?'Queued':mode==='pending'?(askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval unconfirmed':'Checking approval…'):queueRunning(row,ASK_QUEUE[kind])?'Checking book…':ASK_PENDING[kind][0]):askLabel(entry,kind);
   const sibling=queuedFor(row) || (queueState.running?.book_id===row.id?queueState.running:null),siblingTip=sibling?`${queueWord(sibling.action)} is queued for this book. Cancel it to use this.`:(ASK_PENDING[askPendings.get(row.id)?.kind]?.[1] || '');
-  const title={done:chosenCopy(row,ASK_DONE[done]?.[1] || ''),offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:askPendings.get(row.id)?.checking?'Checking whether the approval was queued…':ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
+  const title={done:chosenCopy(row,ASK_DONE[done]?.[1] || ''),offline:'Local server unavailable.',sibling:siblingTip,queued:QUEUE_SIBLING,waiting:queueHint(row) || '',inert:kind==='separate'?askPanelEdits(row):askInert(row),pending:askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval could not be confirmed. Check the book’s status after reconnecting.':'Checking whether the approval was queued…'):ASK_PENDING[kind]?.[1] || '',ready:askTip(entry,kind)}[mode];
   if(button.textContent!==label)button.textContent=label;if(button.title!==title)button.title=title;
   button.setAttribute('aria-label',label.replace(/\.\.\.$/,'')+': '+askName(row));
   // Pending and a not-yet-possible Approve keep keyboard focus: aria-disabled, never the disabled attribute.
@@ -3035,7 +3034,7 @@ function updateAskRow(entry){
   const text=askText(row),done=askDone.get(row.id),result=askResults.get(row.id),pending=askPendings.get(row.id)?.kind || null;
   let status=text.status,hint=text.hint,clause='',warn=false,lines=null;
   if(done){status=ASK_DONE[done]?.[0] || status;hint=chosenCopy(row,ASK_DONE[done]?.[1] || hint);}
-  else if(pending)hint=askPendings.get(row.id)?.checking?'Checking whether the approval was queued…':clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
+  else if(pending)hint=askPendings.get(row.id)?.checking?(askPendings.get(row.id).unconfirmed?'Approval could not be confirmed. Check the book’s status after reconnecting.':'Checking whether the approval was queued…'):clockNote(ASK_PENDING[pending][1],askPendings.get(row.id)?.at);
   else if(result){hint=result.text;warn=result.warn!==false;}
   else if(askChecked.has(row.id))clause=' Checked '+askChecked.get(row.id)+(holdKind(ask)?'. No change.':'. Not found.');
   else if(!pending){const later=queueNoteFor(row);if(later){hint=later.text;warn=later.warn;clause='';}}  // a queued delete's outcome (1.6)
@@ -4128,7 +4127,7 @@ const QUEUE_SIBLING='A delete is queued for this book. Cancel it to use this.';
 // Its mirror on Delete book (Judy's implementation check, N1): a queued Retry or Repair on the row.
 const QUEUE_SIBLING_RETRY='A retry is queued for this book. Cancel it to use this.',QUEUE_SIBLING_REPAIR='A repair is queued for this book. Cancel it to use this.';
 // The page's own "busy" before 0.22.1: one press at a time, plus the bulk runs. Other presses keep it (offer 1).
-function pressBusy(){return busy || recoverySubmitting || automaticRequest!==null || !!retryPending || bulkRunning() || releaseRun || askPendings.size>0 || askBulk;}
+function pressBusy(){return busy || recoverySubmitting || automaticRequest!==null || !!retryPending || bulkRunning() || releaseRun || [...askPendings.values()].some(press=>!press.unconfirmed) || askBulk;}
 // Ruling 35 (Sergei 2026-10-26): a press the page itself would have held back ("Another operation is in progress.") is
 // accepted and waits here, first in first out, then runs when the page is free, every check made again then (the press
 // runs as if pressed then). The row or button shows it queued, with Cancel. Kept in this page's memory, like a draft.
@@ -4213,16 +4212,19 @@ function syncQueue(answer){
   for(const id of [...queueLate.keys()])if(!queueState.queued.some(item=>item.id===id) && running?.id!==id)queueLate.delete(id);
   const outcomes=(Array.isArray(answer.queue_outcomes)?answer.queue_outcomes:[]).filter(item=>item && typeof item.id==='string' && typeof item.book_id==='string');
   const fresh=outcomes.filter(item=>!queueSeen.has(item.id));
-  for(const [id,press] of askPendings){
-    if(!press.checking)continue;
-    const matches=item=>item?.book_id===id && item.action===ASK_QUEUE[press.kind] && !press.prior.has(item.id);
-    if(queueState.queued.some(matches) || matches(running) || outcomes.some(matches))askPendings.delete(id);
-  }
   for(const outcome of fresh){queueSeen.add(outcome.id);applyQueueOutcome(outcome);}
   if(fresh.length)lastKey=null;
 }
 // The press was queued (202 queued): the row shows it at once, before the next poll.
 function queueAccepted(row,action,answer){
+  if(answer.outcome){
+    if(!queueSeen.has(answer.id)){queueSeen.add(answer.id);applyQueueOutcome(answer.outcome);}
+    return;
+  }
+  if(answer.running){
+    queueState={queued:queueState.queued.filter(item=>item.book_id!==row.id),running:{id:answer.id,action,book_id:row.id,title:queueTitle(row)}};
+    return;
+  }
   const item={id:answer.id,action,book_id:row.id,title:queueTitle(row),position:Number(answer.position) || queueState.queued.length+1,blocker:answer.blocker,...(action==='delete'?{n:answer.n}:{})};
   queueState={...queueState,queued:[...queueState.queued.filter(entry=>entry.id!==item.id && entry.book_id!==row.id),item].sort((a,b)=>(Number(a.position) || 0)-(Number(b.position) || 0))};
   queueAnnounce(`${queueWord(action)} queued: ${item.title}.`);
@@ -4726,6 +4728,22 @@ function askSettled(entry,kind,result,values){
   if(kind==='scan' && result?.found!==true){askChecked.set(id,askClock(new Date()));return;}
   askDone.set(id,kind==='scan'?'found':'removed');askNote(kind==='scan'?'Files found. The book is checked again.':'Removed 1 book from the list. No files were touched.');
 }
+const APPROVAL_ACK_MS=5000;
+async function reconcileApproval(row, press){
+  const id=row.id,action=ASK_QUEUE[press.kind];
+  if(press.receipt){
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const answer=await request('/api/queue/approval-reconcile',{id,action,...press.receipt},APPROVAL_ACK_MS);
+        if(answer?.queued===true){queueAccepted(row,action,answer);return;}
+        if(answer?.queued===false){askResults.set(id,{text:'Approval not queued. Your choices are still here. Try again.'});return;}
+        break;
+      }catch(error){if(error.httpStatus && error.httpStatus<500)break;}
+    }
+  }
+  // Neither a lost reply nor an unavailable server proves that the request did not run.
+  press.unconfirmed=true;
+}
 async function askPress(entry,kind){
   const row=entry.row,id=row.id,button=(entry.buttons || []).find(item=>item.kind===kind)?.button;
   if(!button || button.disabled || button.getAttribute?.('aria-disabled')==='true' || askDone.has(id))return;
@@ -4735,7 +4753,8 @@ async function askPress(entry,kind){
   // Futaba's 0.22.0 QA, m-11: a Delete book note (a partial delete) took the hint over, so a later Scan again showed no
   // result line. A new press on the row replaces it, as it does an earlier refusal.
   const approval=kind==='approve' || kind==='convert';
-  const press={id,kind,at:Date.now(),prior:new Set(queueSeen)};
+  const requestId=approval?globalThis.crypto?.randomUUID?.():null;
+  const press={id,kind,at:Date.now(),receipt:requestId?{request_id:requestId,request_expires:Date.now()+45000}:null};
   askPendings.set(id,press);askResults.delete(id);deleteNotes.delete(id);dropQueueNote(id);controls();
   try{
     let result;
@@ -4744,7 +4763,7 @@ async function askPress(entry,kind){
       // Ruling 35: always accepted and queued with his values; the row shows it running and its outcome.
       const shown=askDestination(row)?.path,names=namesFor(row);
       result=await request('/api/candidate/approve',{library:'Audiobooks',id,revision:row.revision,...seen(row),...values,...(kind==='convert'?{without_missing:true}:{}),...(shown?{path:shown}:{}),
-        ...(names?{names}:{}),queue:true,label:askName(row)},PRESS_TIMEOUT);
+        ...(names?{names}:{}),...press.receipt,queue:true,label:askName(row)},APPROVAL_ACK_MS);
     }else{
       const route=kind==='separate'?'/api/candidate/keep-separate':kind==='scan'?'/api/candidate/scan-again':'/api/candidate/dismiss';
       result=await request(route,{library:'Audiobooks',id,revision:row.revision,queue:true,title:askName(row)},kind==='scan'?120000:PRESS_TIMEOUT);
@@ -4754,15 +4773,14 @@ async function askPress(entry,kind){
   }catch(error){
     if(approval && (!error.httpStatus || error.httpStatus>=500)){
       press.checking=true;controls();
-      // A lost reply is ambiguous. Read the in-memory queue without asking the catalog to recompute.
-      request('/api/queue/state',undefined,PRESS_TIMEOUT).then(answer=>{syncQueue(answer);controls();}).catch(()=>{});
+      await reconcileApproval(row,press);
     }else askResults.set(id,{text:(approval?'Approval not queued: ':'')+askErrorText(error,kind,row),code:error.body?.code || ''});
     // A gate refused it (for example Name taken, or the destination moved): the row shows the current Goes to line, with
     // his typed values kept.
     if(['name_taken','changed','moved'].includes(error.body?.code)){askDraft(id).previewKey=null;askPreview(entry,0);}
     if(error.body?.code==='changed')lastKey=null;  // ruling 75a: the row on screen is old; the list is read again at once
     if(!error.httpStatus && !approval)refreshFailed(error);
-  }finally{if(!press.checking)askPendings.delete(id);}
+  }finally{if(!press.unconfirmed)askPendings.delete(id);}
   // Read before the buttons update: a focused button that becomes disabled drops focus to the page.
   const inRow=!!entry.cell.parentElement?.contains?.(document.activeElement);
   batchCounts();

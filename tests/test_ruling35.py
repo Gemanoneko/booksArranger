@@ -121,6 +121,44 @@ class QueuedPressTests(unittest.TestCase):
         self.assertTrue(sent[0][1]['queued'])
         self.assertFalse(sent[0][2], 'queue admission does not invalidate the catalog snapshot')
 
+    def test_running_approval_reuses_exact_receipt_and_does_not_queue_twice(self):
+        started, release = threading.Event(), threading.Event()
+        seen=[]
+        def approve(item):
+            seen.append(item['book_id']);started.set();release.wait(5)
+            return {'result':'done','answer':{'job_id':'fixture'}}
+        self.server.run_queued=approve
+        self.addCleanup(release.set)
+        expires=int(time.time()*1000)+45000
+        first=(str(uuid.uuid4()),expires)
+        second=(str(uuid.uuid4()),expires)
+        args={'revision':3,'title':'Chosen'}
+        accepted=self.queue.enqueue('approve',self.book,'Fixture',args,receipt=first)
+        self.assertTrue(started.wait(2))
+        replay=self.queue.enqueue('approve',self.book,'Fixture',args,receipt=second)
+        self.assertEqual(replay,{'queued':True,'id':accepted['id'],'running':True})
+        self.assertEqual(self.queue.reconcile_approval(second[0],self.book,'approve',expires),replay)
+        with self.assertRaisesRegex(ValueError,'different choices'):
+            self.queue.enqueue('approve',self.book,'Fixture',{'revision':4})
+        self.assertEqual(self.queue.view()['queued_actions'],[])
+        release.set();self.outcomes()
+        self.assertEqual(seen,[self.book])
+        self.assertEqual(self.queue.reconcile_approval(first[0],self.book,'approve',expires)['outcome']['result'],'done')
+
+    def test_reconcile_seals_unseen_approval_and_does_not_revive_a_dropped_one(self):
+        key=str(uuid.uuid4());expires=int(time.time()*1000)+45000
+        self.assertEqual(self.queue.reconcile_approval(key,self.book,'approve',expires),{'queued':False})
+        with self.assertRaisesRegex(ValueError,'submission was closed'):
+            self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
+        self.server.scanning=True
+        key=str(uuid.uuid4())
+        self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
+        self.queue.drop()
+        self.assertEqual(self.queue.reconcile_approval(key,self.book,'approve',expires),{'unknown':True})
+        with self.assertRaisesRegex(ValueError,'already reached'):
+            self.queue.enqueue('approve',self.book,'Fixture',{},receipt=(key,expires))
+        self.assertEqual(self.queue.view()['queued_actions'],[])
+
     def test_approve_is_always_queued_with_his_values_and_runs_at_once_when_nothing_is_in_the_way(self):
         self.server.merge.answers['approve'] = {'job_id': 'job-1', 'row': {}}
         answer = self.approve()

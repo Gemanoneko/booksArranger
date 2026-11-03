@@ -705,10 +705,6 @@ class Handler(BaseHTTPRequestHandler):
                 if query:
                     raise ValueError('Health takes no query parameters')
                 self.response(200,self.server.health())
-            elif path == '/api/queue/state':
-                if not self.trusted(token=True):return
-                if query:raise ValueError('Queue state takes no query parameters')
-                self.response(200,self.server.actions.view())
             elif path == '/':
                 if query:
                     raise ValueError('The application page takes no query parameters')
@@ -878,7 +874,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.server.actions.enqueue(action,'library:'+library,library,{'library':library},always=always)
         title=self.queue_title(data)
         if path=='/api/candidate/approve':
-            self.shape(data,{'library','id','revision','queue'},{'title','author','names','without_missing','choice','path','label','fingerprint'})
+            self.shape(data,{'library','id','revision','queue'},{'title','author','names','without_missing','choice','path','label','fingerprint','request_id','request_expires'})
             library,id,revision=self.candidate_identity(data)
             if type(data.get('without_missing',False)) is not bool: raise ValueError('Convert what\'s there must be an explicit boolean')
             if data.get('choice') not in (None,'same','different'): raise ValueError('Same author? takes same or different')
@@ -889,7 +885,8 @@ class Handler(BaseHTTPRequestHandler):
             if seen is not None:args['fingerprint']=seen
             label=data.get('label','')
             if not isinstance(label,str) or len(label)>500:raise ValueError('Title exceeds its allowed bound')
-            return self.server.actions.enqueue('convert' if data.get('without_missing') else 'approve',id,label or args['title'] or '',args,always=always)
+            receipt=(self.uuid_value(data.get('request_id')),data.get('request_expires')) if 'request_id' in data or 'request_expires' in data else None
+            return self.server.actions.enqueue('convert' if data.get('without_missing') else 'approve',id,label or args['title'] or '',args,always=always,**({'receipt':receipt} if receipt else {}))
         if path in ('/api/candidate/keep-separate','/api/candidate/scan-again','/api/candidate/dismiss'):
             self.shape(data,{'library','id','revision','queue'},{'title'})
             library,id,revision=self.candidate_identity(data)
@@ -1371,6 +1368,12 @@ class Handler(BaseHTTPRequestHandler):
             path,query=self.query()
             if query: raise ValueError('Control requests do not accept query parameters')
             data=self.body()
+            if path=='/api/queue/approval-reconcile':
+                self.status_control=False
+                self.shape(data,{'id','action','request_id','request_expires'})
+                if data['action'] not in ('approve','convert'):raise ValueError('Invalid approval action')
+                answer=self.server.actions.reconcile_approval(self.uuid_value(data['request_id']),self.uuid_value(data['id']),data['action'],data['request_expires'])
+                self.response(200,answer);return
             if path=='/api/candidate/approve' and data.get('queue') is True:
                 # The queue checks shutdown under its own lock and revalidates before running.
                 # Admission does not read the catalog or invalidate its snapshots.

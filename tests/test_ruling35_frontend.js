@@ -69,11 +69,14 @@ function paint(list){context.fixture=list;run('rows=fixture.map(row=>({...row}))
   release();await first;await tick();
   run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[]});controls()');
   answers['/api/candidate/approve']=()=>Promise.reject(Error('connection lost'));
-  answers['/api/queue/state']=()=>ok({queued_actions:[],queue_running:null,queue_outcomes:[]});
-  await byText(trOf('cand-b'),'Approve').handlers.click({stopPropagation(){}});await tick();
+  context.crypto={randomUUID:()=> 'aa0b52ad-1adc-4347-8d4e-5305ad333c72'};
+  let reconciled;answers['/api/queue/approval-reconcile']=()=>new Promise(resolve=>{reconciled=resolve;});
+  const lost=byText(trOf('cand-b'),'Approve').handlers.click({stopPropagation(){}});await tick();
   assert.equal(byText(trOf('cand-b'),'Checking approval…').getAttribute('aria-disabled'),'true');
   assert.equal(byText(trOf('cand-a'),'Approve').getAttribute('aria-disabled'),null);
-  run('syncQueue({queued_actions:[{id:"q4",action:"approve",book_id:"cand-b",position:1}],queue_running:null,queue_outcomes:[]});controls()');
+  const original=sent('/api/candidate/approve').at(-1);
+  assert.deepEqual(sent('/api/queue/approval-reconcile').at(-1),{id:'cand-b',action:'approve',request_id:original.request_id,request_expires:original.request_expires});
+  reconciled(ok({queued:true,id:'q4',position:1}));await lost;await tick();
   assert.equal(byText(trOf('cand-b'),'Queued').getAttribute('aria-disabled'),'true');
   run('syncQueue({queued_actions:[],queue_running:null,queue_outcomes:[]});controls()');
   // 3. A Start over pressed while another press of the page runs: held, with Cancel, run when the page is free.
